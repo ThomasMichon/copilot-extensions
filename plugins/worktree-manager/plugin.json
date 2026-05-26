@@ -1,0 +1,14 @@
+{
+  "name": "worktree-manager",
+  "description": "Worktree isolation system and service lifecycle standards for monorepos using worktree-manager",
+  "version": "1.0.0",
+  "author": {
+    "name": "Thomas Michon"
+  },
+  "homepage": "https://github.com/ThomasMichon/copilot-extensions",
+  "repository": "https://github.com/ThomasMichon/copilot-extensions",
+  "license": "MIT",
+  "keywords": ["worktree", "monorepo", "service-lifecycle", "deployment", "git"],
+  "skills": ["skills/"],
+  "hooks": "hooks.json"
+}
