@@ -1,6 +1,6 @@
 {
   "name": "worktree-manager",
-  "description": "Worktree isolation system and service lifecycle standards for monorepos using worktree-manager",
+  "description": "Worktree isolation system for concurrent Copilot CLI sessions — init, adopt repos, manage lifecycle, finalize, and deploy services",
   "version": "1.0.0",
   "author": {
     "name": "Thomas Michon"
