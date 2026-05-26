@@ -38,7 +38,7 @@ $ErrorActionPreference = 'Stop'
 
 # -- Load shared utilities ------------------------------------------------
 
-. (Join-Path $PSScriptRoot '..\..\services\service-utils.ps1' | Resolve-Path)
+. (Join-Path $PSScriptRoot 'service-utils.ps1')
 
 # -- Metadata -------------------------------------------------------------
 
@@ -50,11 +50,37 @@ $BinDir          = Join-Path $InstallDir 'bin'
 $WorktreesDir    = Join-Path $ProjectDir 'worktrees'
 $LocalBin        = Join-Path $env:USERPROFILE '.local\bin'
 $ScriptDir       = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoDir         = (Resolve-Path (Join-Path $ScriptDir '..\..'))
+$PluginDir       = (Resolve-Path (Join-Path $ScriptDir '..'))
 $ServiceYamlPath = Join-Path $ScriptDir 'service.yaml'
 
-$DeploySourcePaths = @('services/worktree-manager/')
-$InstallerRelPath  = 'services/worktree-manager/install.ps1'
+# RepoDir: the aperture-labs repo checkout. Try to detect from existing
+# config, then fall back to common locations, then CWD.
+$RepoDir = $null
+$configPath_ = Join-Path $ProjectDir 'config.yaml'
+if (Test-Path $configPath_) {
+    try {
+        $cfgLines = Get-Content $configPath_ -Raw
+        if ($cfgLines -match 'anchor:\s*(.+)') {
+            $candidate = $Matches[1].Trim()
+            if (Test-Path $candidate) { $RepoDir = $candidate }
+        }
+    } catch { }
+}
+if (-not $RepoDir) {
+    foreach ($candidate in @(
+        (Join-Path (Split-Path $env:USERPROFILE) 'Src\aperture-labs'),
+        (Join-Path $env:USERPROFILE 'Src\aperture-labs'),
+        'D:\Src\aperture-labs'
+    )) {
+        if (Test-Path (Join-Path $candidate '.git')) { $RepoDir = $candidate; break }
+    }
+}
+if (-not $RepoDir -and (Test-Path (Join-Path (Get-Location) '.git'))) {
+    $RepoDir = (Get-Location).Path
+}
+
+$DeploySourcePaths = @('plugins/worktree-manager/')
+$InstallerRelPath  = 'plugins/worktree-manager/scripts/install.ps1'
 
 
 # Python runtime paths (shared across projects)
@@ -96,7 +122,7 @@ function Test-ScriptSyntax {
 
 function Deploy-Package {
     <# Copy the worktree_manager Python package to ~/.worktree-manager/lib/. #>
-    $src = Join-Path $ScriptDir 'src\worktree_manager'
+    $src = Join-Path $PluginDir 'src\worktree_manager'
     $dst = Join-Path $LibDir 'worktree_manager'
 
     if (-not (Test-Path $src)) {
@@ -168,7 +194,7 @@ function Deploy-Wrappers {
     Ensure-InstallDir $BinDir
 
     foreach ($wrapper in @('launch-session.cmd', 'launch-session.ps1')) {
-        $src = Join-Path $ScriptDir "bin\$wrapper"
+        $src = Join-Path $PluginDir "bin\$wrapper"
         $dst = Join-Path $BinDir $wrapper
         if (-not (Test-Path $src)) {
             Write-ServiceErr "Wrapper source not found: $src"
@@ -205,6 +231,11 @@ function Deploy-Config {
         return $false
     }
 
+    if (-not $RepoDir) {
+        Write-ServiceSkipped "Config generation skipped (no repo detected — set CWD to the repo or create config.yaml manually)"
+        return $false
+    }
+
     $srcRoot = Split-Path -Parent $RepoDir
     $worktreeRoot = Join-Path (Join-Path $srcRoot '.worktrees') $ProjectName
 
@@ -230,7 +261,7 @@ repos:
 
 function Deploy-PsmuxConfig {
     <# Deploy psmux.conf to ~/.psmux.conf with drift detection. #>
-    $src = Join-Path $ScriptDir 'terminal\psmux.conf'
+    $src = Join-Path $PluginDir 'terminal\psmux.conf'
     $dst = Join-Path $env:USERPROFILE '.psmux.conf'
 
     if (-not (Test-Path $src)) {
@@ -257,6 +288,7 @@ function Deploy-PsmuxConfig {
 }
 
 function Deploy-Icon {
+    if (-not $RepoDir) { return }
     foreach ($icon in @('aperture-science.ico', 'aperture-science-wsl.ico')) {
         $iconSrc = Join-Path $RepoDir "home-assistant\media\$icon"
         $iconDst = Join-Path $InstallDir $icon
@@ -447,7 +479,7 @@ function Deploy-Shortcuts {
 
     # Deploy tool binstubs
     foreach ($stub in @('cleanup-worktrees.cmd', 'mark-worktree-complete.cmd', 'worktree-manager.cmd')) {
-        $src = Join-Path $ScriptDir "bin\$stub"
+        $src = Join-Path $PluginDir "bin\$stub"
         $dst = Join-Path $LocalBin $stub
         if (Test-Path $src) {
             Copy-Item $src $dst -Force
@@ -458,9 +490,10 @@ function Deploy-Shortcuts {
 
 function Deploy-CopilotPlugin {
     <# Install the worktree-manager Copilot CLI plugin if copilot is available. #>
-    $pluginDir = Join-Path $ScriptDir 'copilot-plugin'
-    if (-not (Test-Path (Join-Path $pluginDir 'plugin.json'))) {
-        Write-ServiceWarn "Copilot plugin not found at $pluginDir"
+    # In the plugin layout, plugin.json is at the plugin root
+    $pluginJsonPath = Join-Path $PluginDir 'plugin.json'
+    if (-not (Test-Path $pluginJsonPath)) {
+        Write-ServiceWarn "Copilot plugin.json not found at $pluginJsonPath"
         return
     }
 
@@ -472,11 +505,10 @@ function Deploy-CopilotPlugin {
     # Check if already installed and current
     $installed = copilot plugin list 2>$null
     if ($installed -match 'worktree-manager') {
-        # Re-install to pick up updates
-        copilot plugin install $pluginDir 2>$null | Out-Null
+        copilot plugin install $PluginDir 2>$null | Out-Null
         Write-ServiceOk "Copilot plugin updated"
     } else {
-        copilot plugin install $pluginDir 2>$null | Out-Null
+        copilot plugin install $PluginDir 2>$null | Out-Null
         Write-ServiceChanged "Copilot plugin installed (worktree-manager)"
     }
 }
@@ -508,6 +540,7 @@ function Ensure-CopilotExperimental {
 
 function Deploy-GitHooksPath {
     <# Ensure core.hooksPath points to tools/hooks in the anchor repo. #>
+    if (-not $RepoDir) { return }
     $current = git --no-pager -C $RepoDir config --local core.hooksPath 2>$null
     if ($current -eq 'tools/hooks') {
         Write-ServiceOk "Git hooksPath = tools/hooks"
@@ -558,7 +591,11 @@ switch ($Action) {
 
         $machine = Resolve-Machine
         Write-Host "  Machine: $machine"
-        Write-Host "  Repo:    $RepoDir"
+        if ($RepoDir) {
+            Write-Host "  Repo:    $RepoDir"
+        } else {
+            Write-Host "  Repo:    (not detected — repo-dependent features will be skipped)"
+        }
 
         # Prereq checks
         $missingPrereqs = @()
@@ -592,22 +629,26 @@ switch ($Action) {
         if (-not (Deploy-Venv)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
         Deploy-Binstub
-        Deploy-Icon
+        if ($RepoDir) { Deploy-Icon }
         Deploy-Shortcuts -Machine $machine
         Deploy-PsmuxConfig
-        Deploy-GitHooksPath
+        if ($RepoDir) { Deploy-GitHooksPath }
         Deploy-CopilotPlugin
         Ensure-CopilotExperimental
         Assert-PathIncludes $LocalBin
 
         # Deploy machine.instructions.md + AGENTS.md from machines.yaml
-        try {
-            $env:PYTHONUTF8 = '1'
-            $env:PYTHONPATH = $LibDir
-            $env:WORKTREE_PROJECT = $ProjectName
-            & $VenvPython -m worktree_manager deploy-instructions --machine $machine 2>&1 | ForEach-Object { Write-Host "  $_" }
-        } catch {
-            Write-ServiceWarn "Instruction file deployment skipped: $_"
+        if ($RepoDir) {
+            try {
+                $env:PYTHONUTF8 = '1'
+                $env:PYTHONPATH = $LibDir
+                $env:WORKTREE_PROJECT = $ProjectName
+                & $VenvPython -m worktree_manager deploy-instructions --machine $machine 2>&1 | ForEach-Object { Write-Host "  $_" }
+            } catch {
+                Write-ServiceWarn "Instruction file deployment skipped: $_"
+            }
+        } else {
+            Write-ServiceSkipped "Instruction deployment skipped (no repo detected)"
         }
 
         Write-DeployManifest -InstallDir $InstallDir -ServiceName 'worktree-sessions' `
@@ -748,13 +789,17 @@ switch ($Action) {
         Assert-PathIncludes $LocalBin
 
         # Git hooks
-        $hooksPath = git --no-pager -C $RepoDir config --local core.hooksPath 2>$null
+        if ($RepoDir) {
+            $hooksPath = git --no-pager -C $RepoDir config --local core.hooksPath 2>$null
         if ($hooksPath -eq 'tools/hooks') {
             Write-ServiceOk "Git hooksPath = tools/hooks"
         } elseif ($hooksPath) {
             Write-ServiceWarn "Git hooksPath = $hooksPath (expected tools/hooks)"
         } else {
             Write-ServiceErr "Git core.hooksPath not set - run 'update' to configure"
+        }
+        } else {
+            Write-ServiceSkipped "Git hooks check skipped (no repo detected)"
         }
 
         # Windows Terminal fragment
@@ -819,7 +864,7 @@ switch ($Action) {
         if (-not (Deploy-Venv)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
         Deploy-Binstub
-        Deploy-Icon
+        if ($RepoDir) { Deploy-Icon }
         # Detect machine for terminal profile generation
         $updateMachine = Resolve-Machine
         $configPath = Join-Path $ProjectDir 'config.yaml'
@@ -832,18 +877,22 @@ switch ($Action) {
         }
         Deploy-Shortcuts -Machine $updateMachine
         Deploy-PsmuxConfig
-        Deploy-GitHooksPath
+        if ($RepoDir) { Deploy-GitHooksPath }
         Deploy-CopilotPlugin
         Ensure-CopilotExperimental
 
         # Deploy machine.instructions.md + AGENTS.md from machines.yaml
-        try {
-            $env:PYTHONUTF8 = '1'
-            $env:PYTHONPATH = $LibDir
-            $env:WORKTREE_PROJECT = $ProjectName
-            & $VenvPython -m worktree_manager deploy-instructions --machine $updateMachine 2>&1 | ForEach-Object { Write-Host "  $_" }
-        } catch {
-            Write-ServiceWarn "Instruction file deployment skipped: $_"
+        if ($RepoDir) {
+            try {
+                $env:PYTHONUTF8 = '1'
+                $env:PYTHONPATH = $LibDir
+                $env:WORKTREE_PROJECT = $ProjectName
+                & $VenvPython -m worktree_manager deploy-instructions --machine $updateMachine 2>&1 | ForEach-Object { Write-Host "  $_" }
+            } catch {
+                Write-ServiceWarn "Instruction file deployment skipped: $_"
+            }
+        } else {
+            Write-ServiceSkipped "Instruction deployment skipped (no repo detected)"
         }
 
         Write-DeployManifest -InstallDir $InstallDir -ServiceName 'worktree-sessions' `

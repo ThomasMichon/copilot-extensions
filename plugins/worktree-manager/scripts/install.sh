@@ -23,7 +23,25 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Auto-detect REPO_DIR from existing config, common locations, or CWD
+REPO_DIR=""
+_config_file="$HOME/.aperture-labs/config.yaml"
+if [[ -f "$_config_file" ]]; then
+    _anchor=$(grep 'anchor:' "$_config_file" 2>/dev/null | head -1 | sed 's/.*anchor:\s*//')
+    if [[ -d "$_anchor/.git" ]]; then
+        REPO_DIR="$_anchor"
+    fi
+fi
+if [[ -z "$REPO_DIR" ]]; then
+    for _candidate in "$HOME/Src/aperture-labs" "/opt/aperture-labs"; do
+        if [[ -d "$_candidate/.git" ]]; then
+            REPO_DIR="$_candidate"
+            break
+        fi
+    done
+fi
 
 # Ensure ~/.local/bin is on PATH (uv, pip-installed tools live here;
 # non-interactive SSH sessions often miss it)
@@ -60,8 +78,8 @@ WORKTREES_DIR="$PROJECT_DIR/worktrees"
 LOCAL_BIN="$HOME/.local/bin"
 SERVICE_YAML="$SCRIPT_DIR/service.yaml"
 
-DEPLOY_SOURCE_PATHS=("services/worktree-manager/")
-INSTALLER_REL_PATH="services/worktree-manager/install.sh"
+DEPLOY_SOURCE_PATHS=("plugins/worktree-manager/")
+INSTALLER_REL_PATH="plugins/worktree-manager/scripts/install.sh"
 
 # Legacy scripts (pre-Python) — for cleanup during migration
 LEGACY_SCRIPTS=(
@@ -120,7 +138,7 @@ detect_platform() {
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 deploy_package() {
-    local src="$SCRIPT_DIR/src/worktree_manager"
+    local src="$PLUGIN_DIR/src/worktree_manager"
     local dst="$LIB_DIR/worktree_manager"
 
     if [[ ! -d "$src" ]]; then
@@ -158,7 +176,7 @@ deploy_venv() {
 
 deploy_wrappers() {
     mkdir -p "$BIN_DIR"
-    local src="$SCRIPT_DIR/bin/launch-session.sh"
+    local src="$PLUGIN_DIR/bin/launch-session.sh"
     if [[ ! -f "$src" ]]; then
         err "Wrapper source not found: $src"
         return 1
@@ -202,7 +220,7 @@ BINSTUB
 
     # Tool binstubs (parity with Windows .cmd stubs)
     for stub in cleanup-worktrees mark-worktree-complete worktree-manager; do
-        local stub_src="$SCRIPT_DIR/bin/$stub"
+        local stub_src="$PLUGIN_DIR/bin/$stub"
         if [[ -f "$stub_src" ]]; then
             tmp="$(mktemp "$LOCAL_BIN/$stub.XXXXXX")"
             cp "$stub_src" "$tmp"
@@ -220,6 +238,11 @@ deploy_config() {
 
     if [[ -f "$config_path" ]] && ! $FORCE; then
         skipped "Config exists at $config_path (use --force to overwrite)"
+        return 1
+    fi
+
+    if [[ -z "$REPO_DIR" ]]; then
+        skipped "Config generation skipped (no repo detected — create config.yaml manually)"
         return 1
     fi
 
@@ -258,8 +281,14 @@ write_deploy_manifest() {
 
     local commit branch dirty git_available dirty_files
     git_available=true
-    commit="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null)" || git_available=false
-    branch="$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)" || true
+    if [[ -n "$REPO_DIR" ]]; then
+        commit="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null)" || git_available=false
+        branch="$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)" || true
+    else
+        git_available=false
+        commit=""
+        branch=""
+    fi
 
     dirty=false
     dirty_files="[]"
@@ -314,7 +343,7 @@ show_deploy_status() {
     # Staleness check
     local deployed_commit
     deployed_commit="$(python3 -c "import json; m=json.load(open('$manifest_path')); print(m.get('commit','') or '')")"
-    if [[ -n "$deployed_commit" ]]; then
+    if [[ -n "$deployed_commit" && -n "$REPO_DIR" ]]; then
         local stale_count
         stale_count="$(git -C "$REPO_DIR" log --oneline "$deployed_commit..HEAD" -- "${DEPLOY_SOURCE_PATHS[@]}" 2>/dev/null | wc -l)" || stale_count=0
         if [[ "$stale_count" -eq 0 ]]; then
@@ -328,8 +357,8 @@ show_deploy_status() {
 deploy_tabby_profile() {
     local platform="$1"
     local machine="${2:-}"
-    local tabby_template="$SCRIPT_DIR/terminal/tabby-aperture-labs.yaml"
-    local machines_yaml="$REPO_DIR/machines.yaml"
+    local tabby_template="$PLUGIN_DIR/terminal/tabby-aperture-labs.yaml"
+    local machines_yaml="${REPO_DIR:+$REPO_DIR/machines.yaml}"
     local tabby_config="$HOME/.config/tabby/config.yaml"
 
     # Skip on WSL — Tabby is a native Linux desktop app
@@ -621,6 +650,7 @@ else:
 }
 
 deploy_git_hooks_path() {
+    if [[ -z "$REPO_DIR" ]]; then return; fi
     local current
     current="$(git -C "$REPO_DIR" config --local core.hooksPath 2>/dev/null)" || true
     if [[ "$current" == "tools/hooks" ]]; then
@@ -637,7 +667,7 @@ deploy_git_hooks_path() {
 }
 
 deploy_tmux_config() {
-    local src="$SCRIPT_DIR/terminal/tmux.conf"
+    local src="$PLUGIN_DIR/terminal/tmux.conf"
     local dst="$HOME/.tmux.conf"
 
     if [[ ! -f "$src" ]]; then
@@ -658,9 +688,9 @@ deploy_tmux_config() {
 }
 
 deploy_copilot_plugin() {
-    local plugin_dir="$SCRIPT_DIR/copilot-plugin"
-    if [[ ! -f "$plugin_dir/plugin.json" ]]; then
-        echo "  ⚠ Copilot plugin not found at $plugin_dir" >&2
+    # In the plugin layout, plugin.json is at the plugin root
+    if [[ ! -f "$PLUGIN_DIR/plugin.json" ]]; then
+        echo "  ⚠ Copilot plugin.json not found at $PLUGIN_DIR" >&2
         return
     fi
 
@@ -670,10 +700,10 @@ deploy_copilot_plugin() {
     fi
 
     if copilot plugin list 2>/dev/null | grep -q 'worktree-manager'; then
-        copilot plugin install "$plugin_dir" >/dev/null 2>&1 || true
+        copilot plugin install "$PLUGIN_DIR" >/dev/null 2>&1 || true
         ok "Copilot plugin updated"
     else
-        copilot plugin install "$plugin_dir" >/dev/null 2>&1 || true
+        copilot plugin install "$PLUGIN_DIR" >/dev/null 2>&1 || true
         changed "Copilot plugin installed (worktree-manager)"
     fi
 }
@@ -732,7 +762,11 @@ case "$ACTION" in
         platform="$(detect_platform)"
         echo "  Machine:  $machine"
         echo "  Platform: $platform"
-        echo "  Repo:     $REPO_DIR"
+        if [[ -n "$REPO_DIR" ]]; then
+            echo "  Repo:     $REPO_DIR"
+        else
+            echo "  Repo:     (not detected — repo-dependent features will be skipped)"
+        fi
 
         # Prereq checks
         missing_prereqs=()
@@ -759,9 +793,13 @@ case "$ACTION" in
         assert_path
 
         # Deploy machine.instructions.md + AGENTS.md from machines.yaml
-        WORKTREE_PROJECT="$PROJECT_NAME" PYTHONUTF8=1 \
-            "$VENV_PYTHON" -m worktree_manager deploy-instructions --machine "$machine" 2>&1 \
-            | sed 's/^/  /' || warn "Instruction file deployment skipped"
+        if [[ -n "$REPO_DIR" ]]; then
+            WORKTREE_PROJECT="$PROJECT_NAME" PYTHONUTF8=1 \
+                "$VENV_PYTHON" -m worktree_manager deploy-instructions --machine "$machine" 2>&1 \
+                | sed 's/^/  /' || warn "Instruction file deployment skipped"
+        else
+            skipped "Instruction deployment skipped (no repo detected)"
+        fi
 
         write_deploy_manifest
 
@@ -912,13 +950,17 @@ p.write_text(json.dumps(m, indent=2))
         assert_path
 
         # Git hooks
-        hooks_path="$(git -C "$REPO_DIR" config --local core.hooksPath 2>/dev/null)" || true
-        if [[ "$hooks_path" == "tools/hooks" ]]; then
-            ok "Git hooksPath = tools/hooks"
-        elif [[ -n "$hooks_path" ]]; then
-            echo "  ⚠ Git hooksPath = $hooks_path (expected tools/hooks)"
+        if [[ -n "$REPO_DIR" ]]; then
+            hooks_path="$(git -C "$REPO_DIR" config --local core.hooksPath 2>/dev/null)" || true
+            if [[ "$hooks_path" == "tools/hooks" ]]; then
+                ok "Git hooksPath = tools/hooks"
+            elif [[ -n "$hooks_path" ]]; then
+                echo "  ⚠ Git hooksPath = $hooks_path (expected tools/hooks)"
+            else
+                err "Git core.hooksPath not set — run 'update' to configure"
+            fi
         else
-            err "Git core.hooksPath not set — run 'update' to configure"
+            skipped "Git hooks check skipped (no repo detected)"
         fi
 
         # Active sessions
@@ -969,10 +1011,14 @@ p.write_text(json.dumps(m, indent=2))
         ensure_copilot_experimental
 
         # Deploy machine.instructions.md + AGENTS.md from machines.yaml
-        update_machine="$(resolve_machine)"
-        WORKTREE_PROJECT="$PROJECT_NAME" PYTHONUTF8=1 \
-            "$VENV_PYTHON" -m worktree_manager deploy-instructions --machine "$update_machine" 2>&1 \
-            | sed 's/^/  /' || warn "Instruction file deployment skipped"
+        if [[ -n "$REPO_DIR" ]]; then
+            update_machine="$(resolve_machine)"
+            WORKTREE_PROJECT="$PROJECT_NAME" PYTHONUTF8=1 \
+                "$VENV_PYTHON" -m worktree_manager deploy-instructions --machine "$update_machine" 2>&1 \
+                | sed 's/^/  /' || warn "Instruction file deployment skipped"
+        else
+            skipped "Instruction deployment skipped (no repo detected)"
+        fi
 
         write_deploy_manifest
 
