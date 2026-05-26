@@ -1,0 +1,19 @@
+{
+  "name": "copilot-extensions",
+  "owner": {
+    "name": "Thomas Michon",
+    "email": "thomas@thomasmichon.com"
+  },
+  "metadata": {
+    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, and developer workflow automation",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "worktree-manager",
+      "description": "Worktree isolation system for concurrent Copilot CLI sessions — lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
+      "version": "1.0.0",
+      "source": "plugins/worktree-manager"
+    }
+  ]
+}

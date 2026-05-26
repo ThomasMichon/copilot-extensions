@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "worktree-manager"
+version = "1.0.0"
+description = "Worktree isolation system for concurrent Copilot CLI sessions"
+readme = "../../README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+worktree-manager = "worktree_manager.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
