@@ -83,6 +83,46 @@ if [[ "${WORKTREE_RECOVERY:-${APERTURE_RECOVERY:-}}" == "1" ]] && [[ ! -x "$PYTH
     exit 1
 fi
 
+# ── Plugin auto-update ─────────────────────────────────────────────────────
+# If installed from the copilot-extensions plugin, check for updates and
+# re-install the package when the plugin source changes.
+
+_NO_UPDATE="${WORKTREE_NO_UPDATE:-${APERTURE_NO_UPDATE:-}}"
+if [[ "$_NO_UPDATE" != "1" ]]; then
+    _PLUGIN_DIR="$HOME/.copilot/installed-plugins/copilot-extensions/worktree-manager"
+    if [[ -d "$_PLUGIN_DIR" ]]; then
+        setup_log INFO 'Plugin auto-update: checking for updates'
+        _PYPROJECT="$_PLUGIN_DIR/pyproject.toml"
+        _OLD_HASH=""
+        if [[ -f "$_PYPROJECT" ]]; then
+            _OLD_HASH=$(sha256sum "$_PYPROJECT" 2>/dev/null | cut -d' ' -f1) || true
+        fi
+
+        # Try to update the plugin from the marketplace
+        if command -v copilot &>/dev/null; then
+            _UPDATE_OUT=$(copilot plugin update worktree-manager 2>&1) || true
+            setup_log INFO "Plugin update result: $_UPDATE_OUT"
+        fi
+
+        # If pyproject.toml changed, re-install the package into the venv
+        _NEW_HASH=""
+        if [[ -f "$_PYPROJECT" ]]; then
+            _NEW_HASH=$(sha256sum "$_PYPROJECT" 2>/dev/null | cut -d' ' -f1) || true
+        fi
+        if [[ -n "$_NEW_HASH" && "$_NEW_HASH" != "$_OLD_HASH" ]]; then
+            setup_log INFO 'Plugin source changed — re-installing package'
+            _PIP="$RUNTIME_DIR/.venv/bin/pip"
+            if [[ -x "$_PIP" ]]; then
+                if "$_PIP" install --quiet --upgrade "$_PLUGIN_DIR" 2>/dev/null; then
+                    setup_log INFO 'Package re-installed successfully'
+                else
+                    setup_log WARN 'Package re-install failed — proceeding with existing version'
+                fi
+            fi
+        fi
+    fi
+fi
+
 # ── Pre-launch self-update (two-pass) ─────────────────────────────────────
 # Checks bootstrap service staleness and runs updates if needed.
 # Controlled by WORKTREE_NO_UPDATE env var (set by cmd_launch in Python).

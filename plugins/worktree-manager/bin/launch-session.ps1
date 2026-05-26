@@ -127,11 +127,50 @@ $VenvPython = Join-Path $RuntimeDir '.venv\Scripts\python.exe'
 $env:PYTHONPATH = Join-Path $RuntimeDir 'lib'
 $env:PYTHONHOME = $null
 
+# ── Plugin auto-update ────────────────────────────────────────────────────
+# If installed from the copilot-extensions plugin, check for updates and
+# re-install the package when the plugin source changes.
+
+$noUpdate = ($env:WORKTREE_NO_UPDATE -eq '1') -or ($env:APERTURE_NO_UPDATE -eq '1')
+if (-not $noUpdate) {
+    $pluginDir = Join-Path $env:USERPROFILE '.copilot\installed-plugins\copilot-extensions\worktree-manager'
+    if (Test-Path $pluginDir) {
+        Write-SetupLog 'Plugin auto-update: checking for updates'
+        # Snapshot the current plugin state to detect changes
+        $pyprojectFile = Join-Path $pluginDir 'pyproject.toml'
+        $oldHash = if (Test-Path $pyprojectFile) {
+            (Get-FileHash $pyprojectFile -Algorithm SHA256).Hash
+        } else { '' }
+
+        # Try to update the plugin from the marketplace
+        if (Get-Command copilot -ErrorAction SilentlyContinue) {
+            $updateOutput = copilot plugin update worktree-manager 2>&1
+            Write-SetupLog "Plugin update result: $updateOutput"
+        }
+
+        # If pyproject.toml changed, re-install the package into the venv
+        $newHash = if (Test-Path $pyprojectFile) {
+            (Get-FileHash $pyprojectFile -Algorithm SHA256).Hash
+        } else { '' }
+        if ($newHash -ne $oldHash -and $newHash -ne '') {
+            Write-SetupLog 'Plugin source changed — re-installing package'
+            $pipExe = Join-Path $RuntimeDir '.venv\Scripts\pip.exe'
+            if (Test-Path $pipExe) {
+                & $pipExe install --quiet --upgrade $pluginDir 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-SetupLog 'Package re-installed successfully'
+                } else {
+                    Write-SetupLog 'Package re-install failed — proceeding with existing version' 'WARN'
+                }
+            }
+        }
+    }
+}
+
 # ── Pre-launch self-update (two-pass) ────────────────────────────────────
 # Checks bootstrap service staleness and runs updates if needed.
 # Mirrors the equivalent block in launch-session.sh.
 
-$noUpdate = ($env:WORKTREE_NO_UPDATE -eq '1') -or ($env:APERTURE_NO_UPDATE -eq '1')
 if (-not $noUpdate) {
     Write-SetupLog 'Running pre-launch staleness check'
     $preJson = & $VenvPython -m worktree_manager pre-launch 2>$null
