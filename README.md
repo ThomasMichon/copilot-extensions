@@ -7,7 +7,7 @@ plugin marketplace for developer workflow automation.
 
 | Plugin | Description |
 |--------|-------------|
-| [worktree-manager](plugins/worktree-manager/) | Worktree isolation system for concurrent Copilot CLI sessions |
+| [agent-worktrees](plugins/agent-worktrees/) | Worktree isolation system for concurrent Copilot CLI sessions |
 
 ## Installation
 
@@ -16,43 +16,43 @@ plugin marketplace for developer workflow automation.
 copilot plugin marketplace add ThomasMichon/copilot-extensions
 
 # Install a plugin
-copilot plugin install worktree-manager@copilot-extensions
+copilot plugin install agent-worktrees@copilot-extensions
 ```
 
 Or install directly without registering the marketplace:
 
 ```bash
-copilot plugin install ThomasMichon/copilot-extensions:plugins/worktree-manager
+copilot plugin install ThomasMichon/copilot-extensions:plugins/agent-worktrees
 ```
 
 ## What You Get
 
-After installing the `worktree-manager` plugin:
+After installing the `agent-worktrees` plugin:
 
 - **Skills loaded automatically** — `worktree` (lifecycle, finalization,
   cleanup) and `service-lifecycle` (deployment patterns) are available in
   all Copilot CLI sessions
 - **Bootstrap check** — a lightweight session-start hook checks whether the
   runtime is installed and prints a hint if not
-- **Setup skill** — ask Copilot to "set up worktree-manager" to bootstrap
+- **Setup skill** — ask Copilot to "set up agent-worktrees" to bootstrap
   the Python runtime (venv + binstubs)
 
 ### Runtime Bootstrap
 
-The plugin ships the Python source for the worktree-manager CLI. After
+The plugin ships the Python source for the agent-worktrees CLI. After
 plugin installation, bootstrap the runtime:
 
-1. Ask Copilot: *"set up worktree-manager"* (invokes the `worktree-setup`
+1. Ask Copilot: *"set up agent-worktrees"* (invokes the `worktree-setup`
    skill)
 2. Or follow the manual steps in the
-   [setup skill](plugins/worktree-manager/skills/worktree-setup/SKILL.md)
+   [setup skill](plugins/agent-worktrees/skills/worktree-setup/SKILL.md)
 
 ### Project Registration
 
 Once the runtime is installed, register a project:
 
 ```bash
-worktree-manager install --machine <machine-name>
+agent-worktrees install --machine <machine-name>
 ```
 
 This creates per-project config at `~/.{project}/` and a binstub for

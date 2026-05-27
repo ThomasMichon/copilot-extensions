@@ -1,0 +1,14 @@
+{
+  "name": "agent-worktrees",
+  "description": "Worktree isolation system for concurrent Copilot CLI sessions — init, adopt repos, manage lifecycle, finalize, and deploy services",
+  "version": "1.0.0",
+  "author": {
+    "name": "Thomas Michon"
+  },
+  "homepage": "https://github.com/ThomasMichon/copilot-extensions",
+  "repository": "https://github.com/ThomasMichon/copilot-extensions",
+  "license": "MIT",
+  "keywords": ["worktree", "monorepo", "service-lifecycle", "deployment", "git"],
+  "skills": ["skills/"],
+  "hooks": "hooks.json"
+}
