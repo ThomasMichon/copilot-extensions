@@ -130,6 +130,27 @@ ok "Dependencies: pyyaml"
 PKG_DST="$LIB_DIR/agent_worktrees"
 rm -rf "$PKG_DST"
 cp -r "$PKG_SRC_DIR" "$PKG_DST"
+
+# Stamp build info so --version reflects this deployment
+_repo_root="$(cd "$PLUGIN_DIR/../.." && pwd)"
+_commit="$(git -C "$_repo_root" rev-parse HEAD 2>/dev/null || echo unknown)"
+_branch="$(git -C "$_repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+_ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+_src_norm="$(echo "$PLUGIN_DIR" | tr '\\' '/')"
+cat > "$PKG_DST/_build_info.py" <<PYEOF
+"""Build provenance -- auto-generated at deploy time. Do not edit."""
+
+from __future__ import annotations
+
+BUILD_INFO: dict[str, str] = {
+    "version": "1.0.0",
+    "commit": "$_commit",
+    "branch": "$_branch",
+    "build_timestamp": "$_ts",
+    "source": "$_src_norm",
+}
+PYEOF
+
 ok "Package deployed to $PKG_DST"
 
 # ── 5. Deploy wrappers & bootstrap scripts ────────────────────────────

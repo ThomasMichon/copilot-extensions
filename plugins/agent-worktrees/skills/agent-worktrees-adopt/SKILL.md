@@ -161,8 +161,12 @@ mkdir -p ~/.{repo-name}/worktrees
 
 ```
 {repo-name}          # should launch the worktree picker
+agent-worktrees --version   # confirm deployed version
 agent-worktrees status   # should show the adopted repo
 ```
+
+Report the `--version` output to the user after adoption so they can
+confirm the deployed version matches expectations.
 
 ## Terminal Integration (Optional)
 

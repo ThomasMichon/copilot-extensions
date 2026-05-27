@@ -49,6 +49,28 @@ try {
     New-Item -ItemType Directory -Path $LibDir -Force | Out-Null
     Copy-Item $PkgSrc $PkgDst -Recurse
 
+    # Stamp build info so --version reflects the update
+    $buildInfoPath = Join-Path $PkgDst '_build_info.py'
+    $ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $branch = ''
+    try { $branch = (git -C $pluginDir rev-parse --abbrev-ref HEAD 2>$null) } catch { }
+    if (-not $branch) { $branch = 'unknown' }
+    $buildContent = @"
+`"`"`"Build provenance -- auto-generated at deploy time. Do not edit.`"`"`"
+
+from __future__ import annotations
+
+BUILD_INFO: dict[str, str] = {
+    "version": "1.0.0",
+    "commit": "$currentCommit",
+    "branch": "$branch",
+    "build_timestamp": "$ts",
+    "source": "$($pluginDir -replace '\\', '/')",
+}
+"@
+    $utf8NoBomBi = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($buildInfoPath, $buildContent, $utf8NoBomBi)
+
     $m.commit = $currentCommit
     $m.deployed_at = (Get-Date -Format 'o')
     # Add or update dirty flag (PS5-safe: use Add-Member for new properties)

@@ -1899,6 +1899,41 @@ def cmd_install(args: argparse.Namespace) -> int:
     return 0
 
 
+def _refresh_terminal_profiles() -> None:
+    """Re-run the install.ps1 terminal-profile generator if available.
+
+    After adopting a new project, the WT fragment needs to be regenerated
+    to include the new project's profile.  Delegates to the PowerShell
+    installer's Deploy-Shortcuts function via a lightweight wrapper call.
+    """
+    install_dir = cfg.install_dir()
+    manifest_path = install_dir / "deploy-manifest.json"
+    if not manifest_path.exists():
+        return
+
+    try:
+        m = json.loads(manifest_path.read_text())
+        plugin_source = m.get("plugin_source")
+        if not plugin_source or not Path(plugin_source).exists():
+            return
+
+        install_script = Path(plugin_source) / "scripts" / "install.ps1"
+        if not install_script.exists():
+            return
+
+        # The install script's "update" action regenerates terminal profiles
+        # Use a targeted powershell invocation that just refreshes shortcuts
+        machine = m.get("environment", "").rsplit("-", 1)[0] or "unknown"
+
+        subprocess.run(
+            ["pwsh", "-NoProfile", "-File", str(install_script), "update"],
+            capture_output=True, text=True, timeout=30,
+        )
+        output.ok("Windows Terminal profiles refreshed")
+    except Exception:
+        output.warn("Could not refresh Windows Terminal profiles")
+
+
 def cmd_register(args: argparse.Namespace) -> int:
     """Register a project with the worktree manager (create config + binstub)."""
     project = args.project_name
@@ -1971,6 +2006,10 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Generate binstub
     if not inst.deploy_binstubs(repo_dir, project=project):
         return 1
+
+    # Refresh Windows Terminal profiles if installed via install.ps1
+    if plat == "windows":
+        _refresh_terminal_profiles()
 
     output.ok(f"Project '{project}' registered")
     print(f"  Config:  {config_path}")
@@ -2826,7 +2865,7 @@ repos:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-worktrees",
-        description="Worktree session manager",
+        description="Worktree session manager (use --version for build info)",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -3055,6 +3094,31 @@ def main(argv: list[str] | None = None) -> int:
     # No args → default launch
     if not args_list:
         return cmd_launch([])
+
+    # --version / -V → print version + build info
+    if args_list[0] in ("--version", "-V"):
+        try:
+            from ._build_info import BUILD_INFO
+        except ImportError:
+            BUILD_INFO = {"version": "?.?.?", "commit": "unknown",
+                          "build_timestamp": "unknown"}
+        v = BUILD_INFO.get("version", "?.?.?")
+        c = BUILD_INFO.get("commit", "unknown")[:10]
+        ts = BUILD_INFO.get("build_timestamp", "unknown")
+        br = BUILD_INFO.get("branch", "unknown")
+        print(f"agent-worktrees {v}  commit {c}  branch {br}  built {ts}")
+        # Also show deploy manifest if available
+        manifest_path = cfg.install_dir() / "deploy-manifest.json"
+        if manifest_path.exists():
+            try:
+                m = json.loads(manifest_path.read_text())
+                dep_at = m.get("deployed_at", "?")
+                dirty = " (DIRTY)" if m.get("dirty") else ""
+                src = m.get("plugin_source", "?")
+                print(f"deployed {dep_at}{dirty}  source {src}")
+            except Exception:
+                pass
+        return 0
 
     # --help / -h → show argparse help (not launch fallthrough)
     if args_list[0] in ("--help", "-h"):

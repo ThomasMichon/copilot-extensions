@@ -137,6 +137,35 @@ function Deploy-Package {
 
     New-Item -ItemType Directory -Path (Split-Path $dst) -Force | Out-Null
     Copy-Item $src $dst -Recurse
+
+    # Stamp build info so --version reflects this deployment
+    $buildInfoPath = Join-Path $dst '_build_info.py'
+    $ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $commit = ''
+    $branch = ''
+    try {
+        $commit = (git -C (Split-Path $PluginDir -Parent | Split-Path -Parent) rev-parse HEAD 2>$null)
+        $branch = (git -C (Split-Path $PluginDir -Parent | Split-Path -Parent) rev-parse --abbrev-ref HEAD 2>$null)
+    } catch { }
+    if (-not $commit) { $commit = 'unknown' }
+    if (-not $branch) { $branch = 'unknown' }
+    $srcNorm = ($PluginDir -replace '\\', '/')
+    $buildContent = @"
+`"`"`"Build provenance -- auto-generated at deploy time. Do not edit.`"`"`"
+
+from __future__ import annotations
+
+BUILD_INFO: dict[str, str] = {
+    "version": "1.0.0",
+    "commit": "$commit",
+    "branch": "$branch",
+    "build_timestamp": "$ts",
+    "source": "$srcNorm",
+}
+"@
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($buildInfoPath, $buildContent, $utf8NoBom)
+
     Write-ServiceOk "Package deployed to $dst"
     return $true
 }
@@ -335,6 +364,45 @@ function Build-TerminalFragment {
             hidden          = $false
         }
     )
+
+    # Discover additional adopted projects and generate profiles for each
+    $knownProjects = @('aperture-labs')  # already has hardcoded profiles above
+    Get-ChildItem -Path $env:USERPROFILE -Directory -Filter '.*' -ErrorAction SilentlyContinue | ForEach-Object {
+        $cfgPath = Join-Path $_.FullName 'config.yaml'
+        if (-not (Test-Path $cfgPath)) { return }
+        $projName = $_.Name.TrimStart('.')
+        if ($projName -in $knownProjects) { return }
+        # Validate: must have repos: key and a matching binstub
+        $binstub = Join-Path $LocalBin "$projName.cmd"
+        if (-not (Test-Path $binstub)) { return }
+        $cfgRaw = Get-Content $cfgPath -Raw -ErrorAction SilentlyContinue
+        if (-not $cfgRaw -or $cfgRaw -notmatch 'repos:') { return }
+
+        # Generate stable GUID from project name
+        $guidBytes = [System.Text.Encoding]::UTF8.GetBytes("agent-worktrees-local:$projName")
+        $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($guidBytes)
+        $guid = [guid]::new(
+            [BitConverter]::ToInt32($hash, 0),
+            [BitConverter]::ToInt16($hash, 4),
+            [BitConverter]::ToInt16($hash, 6),
+            $hash[8], $hash[9], $hash[10], $hash[11],
+            $hash[12], $hash[13], $hash[14], $hash[15]
+        )
+
+        # Title-case the project name for display
+        $displayName = ($projName -replace '-', ' ') -replace '(^| )(.)', { $_.Value.ToUpper() }
+
+        $profiles += @{
+            guid            = "{$guid}"
+            name            = $displayName
+            commandline     = "cmd /c `"%USERPROFILE%\.local\bin\$projName.cmd`""
+            icon            = "%USERPROFILE%\.agent-worktrees\aperture-science.ico"
+            startingDirectory = "%USERPROFILE%"
+            colorScheme     = 'Aperture Science'
+            hidden          = $false
+        }
+        $knownProjects += $projName
+    }
 
     # Load machines.yaml for remote SSH profiles
     $machinesYaml = Join-Path $RepoDir 'machines.yaml'

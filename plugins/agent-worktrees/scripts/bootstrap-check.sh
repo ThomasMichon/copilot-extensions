@@ -42,6 +42,24 @@ rm -rf "$PKG_DST"
 mkdir -p "$LIB_DIR"
 cp -r "$PKG_SRC" "$PKG_DST"
 
+# Stamp build info so --version reflects the update
+_branch="$(git -C "$plugin_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+_ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+_src="$(echo "$plugin_dir" | tr '\\' '/')"
+cat > "$PKG_DST/_build_info.py" <<PYEOF
+"""Build provenance -- auto-generated at deploy time. Do not edit."""
+
+from __future__ import annotations
+
+BUILD_INFO: dict[str, str] = {
+    "version": "1.0.0",
+    "commit": "$current_commit",
+    "branch": "$_branch",
+    "build_timestamp": "$_ts",
+    "source": "$_src",
+}
+PYEOF
+
 python3 -c "
 import json, sys
 from datetime import datetime, timezone
