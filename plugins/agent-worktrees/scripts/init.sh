@@ -236,11 +236,37 @@ else
     exit 1
 fi
 
-# Check PATH
+# Check PATH and add ~/.local/bin if missing
 if echo "$PATH" | tr ':' '\n' | grep -qx "$LOCAL_BIN"; then
     ok "PATH: $LOCAL_BIN is on PATH"
 else
-    echo "  [WARN] $LOCAL_BIN is not on PATH — add it to use agent-worktrees globally"
+    # Add to current session
+    export PATH="$LOCAL_BIN:$PATH"
+    ok "PATH: Added $LOCAL_BIN to current session"
+
+    # Persist in shell profile
+    shell_profile=""
+    if [[ -f "$HOME/.bashrc" ]]; then
+        shell_profile="$HOME/.bashrc"
+    elif [[ -f "$HOME/.profile" ]]; then
+        shell_profile="$HOME/.profile"
+    elif [[ -f "$HOME/.zshrc" ]]; then
+        shell_profile="$HOME/.zshrc"
+    fi
+
+    if [[ -n "$shell_profile" ]]; then
+        # Only add if not already present
+        if ! grep -q "\.local/bin" "$shell_profile" 2>/dev/null; then
+            echo '' >> "$shell_profile"
+            echo '# Added by agent-worktrees init' >> "$shell_profile"
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_profile"
+            ok "PATH: Added to $shell_profile (persistent)"
+        else
+            ok "PATH: Already in $shell_profile"
+        fi
+    else
+        echo "  [WARN] No shell profile found — add 'export PATH=\"\$HOME/.local/bin:\$PATH\"' manually"
+    fi
 fi
 
 echo ''

@@ -92,6 +92,32 @@ the version.
 
 If `agent-worktrees` is not found, ensure `~/.local/bin` is on PATH.
 
+**Important:** The init script adds `~/.local/bin` to the user's
+persistent PATH and to the process environment, but the **calling
+shell** (the Copilot CLI session that invoked init) does not inherit
+that change. After running init, if you need to call `agent-worktrees`
+in the same session, resolve the binstub manually:
+
+```powershell
+# Windows — update current session PATH
+$env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
+```
+
+```bash
+# Linux/macOS — update current session PATH
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Alternatively, invoke the binstub by its full path:
+
+```powershell
+& "$env:USERPROFILE\.local\bin\agent-worktrees.cmd" --version
+```
+
+```bash
+~/.local/bin/agent-worktrees --version
+```
+
 ## Update Flow
 
 The plugin contributes a `sessionStart` hook that auto-detects when the
