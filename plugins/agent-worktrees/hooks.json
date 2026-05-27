@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "powershell": "if (-not (Get-Command agent-worktrees -ErrorAction SilentlyContinue)) { Write-Host ''; Write-Host '[agent-worktrees] Runtime not installed.' -ForegroundColor Yellow; Write-Host '  Ask Copilot to ''set up agent-worktrees'' to bootstrap the runtime.' -ForegroundColor DarkGray; Write-Host '' }",
+        "bash": "if ! command -v agent-worktrees &>/dev/null; then echo ''; echo -e '\\033[33m[agent-worktrees] Runtime not installed.\\033[0m'; echo -e '\\033[90m  Ask Copilot to set up agent-worktrees to bootstrap the runtime.\\033[0m'; echo ''; fi",
+        "timeoutSec": 5
+      }
+    ]
+  }
+}
