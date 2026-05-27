@@ -368,7 +368,7 @@ if ($importCheck -eq 'OK') {
     exit 1
 }
 
-# Check PATH
+# Check PATH and add ~/.local/bin if missing
 $pathDirs = $env:PATH -split [System.IO.Path]::PathSeparator
 $localBinNorm = $LocalBin.TrimEnd('\', '/')
 $onPath = $false
@@ -381,7 +381,24 @@ foreach ($dir in $pathDirs) {
 if ($onPath) {
     Write-Ok "PATH: $LocalBin is on PATH"
 } else {
-    Write-Host "  [WARN] $LocalBin is not on PATH -- add it to use agent-worktrees globally" -ForegroundColor Yellow
+    # Add to persistent user PATH (registry)
+    $userPath = [System.Environment]::GetEnvironmentVariable('PATH', 'User')
+    $userDirs = if ($userPath) { $userPath -split ';' } else { @() }
+    $alreadyPersisted = $false
+    foreach ($dir in $userDirs) {
+        if ($dir.TrimEnd('\', '/') -eq $localBinNorm) {
+            $alreadyPersisted = $true
+            break
+        }
+    }
+    if (-not $alreadyPersisted) {
+        $newUserPath = if ($userPath) { "$LocalBin;$userPath" } else { $LocalBin }
+        [System.Environment]::SetEnvironmentVariable('PATH', $newUserPath, 'User')
+        Write-Ok "PATH: Added $LocalBin to user PATH (persistent)"
+    }
+    # Also update current session so binstubs work immediately
+    $env:PATH = "$LocalBin;$env:PATH"
+    Write-Ok "PATH: Added $LocalBin to current session PATH"
 }
 
 Write-Host ''

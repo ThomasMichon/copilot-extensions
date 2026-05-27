@@ -159,6 +159,15 @@ mkdir -p ~/.{repo-name}/worktrees
 
 ### 9. Verify
 
+After adoption, the project binstub is at `~/.local/bin/{repo-name}[.cmd]`.
+If `~/.local/bin` was just added to PATH by a prior init step in this same
+session, the current shell may not see it yet. Resolve by either:
+
+- Updating PATH in the current session:
+  `$env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"` (Windows) or
+  `export PATH="$HOME/.local/bin:$PATH"` (Linux)
+- Invoking the binstub by full path for verification
+
 ```
 {repo-name}          # should launch the worktree picker
 agent-worktrees --version   # confirm deployed version
