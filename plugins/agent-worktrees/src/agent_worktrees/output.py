@@ -8,6 +8,26 @@ import sys
 from typing import Iterator
 
 
+def ensure_utf8_stdio() -> None:
+    """Reconfigure stdout/stderr to UTF-8 if the console uses a lossy codec.
+
+    Windows consoles default to cp1252 which cannot encode the Unicode
+    glyphs used by the status helpers below (checkmarks, arrows, box
+    drawing).  Calling this early in main() avoids UnicodeEncodeError
+    regardless of how the process was launched.
+    """
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None:
+            continue
+        enc = getattr(stream, "encoding", "utf-8") or "utf-8"
+        if enc.lower().replace("-", "") not in ("utf8", "utf_8"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
 def _supports_color() -> bool:
     """Check if the terminal supports ANSI colors."""
     if os.environ.get("NO_COLOR"):
