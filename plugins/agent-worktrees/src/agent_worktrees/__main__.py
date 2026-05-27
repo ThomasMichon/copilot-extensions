@@ -3080,6 +3080,7 @@ COMMAND_MAP = {
 
 
 def main(argv: list[str] | None = None) -> int:
+    output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
 
     # ── Raw pre-dispatch ──────────────────────────────────────────────

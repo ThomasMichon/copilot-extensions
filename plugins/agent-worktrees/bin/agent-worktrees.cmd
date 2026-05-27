@@ -17,5 +17,6 @@ if exist "%NEW_RUNTIME%\.venv\Scripts\python.exe" (
     exit /b 1
 )
 
+set "PYTHONUTF8=1"
 "%PYTHON%" -m agent_worktrees %*
 exit /b %ERRORLEVEL%
