@@ -522,6 +522,73 @@ function Build-TerminalFragment {
     return ($fragment | ConvertTo-Json -Depth 5)
 }
 
+function Clean-TerminalSettingsJson {
+    <# Remove stale manually-added Aperture profiles/schemes from WT settings.json.
+       Fragment-sourced entries (source=ApertureLabs) are left alone -- those are
+       WT's own override tracking and will be recreated if removed. #>
+    $settingsPath = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json'
+    if (-not (Test-Path $settingsPath)) { return }
+
+    try {
+        $raw = Get-Content $settingsPath -Raw -ErrorAction Stop
+        $json = $raw | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        Write-ServiceWarn "Could not parse WT settings.json for cleanup: $_"
+        return
+    }
+
+    $changed = $false
+
+    # Collect GUIDs from the current fragment so we know what's ours
+    $fragmentPath = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs\aperture-labs.json'
+    $fragmentGuids = @()
+    if (Test-Path $fragmentPath) {
+        try {
+            $frag = Get-Content $fragmentPath -Raw | ConvertFrom-Json
+            $fragmentGuids = @($frag.profiles | ForEach-Object { $_.guid })
+        } catch { }
+    }
+    # Always include the well-known static GUIDs
+    $knownGuids = @('{e8ba8d13-cc41-5a92-b5dd-5e4a5418e9a0}', '{fd1e4088-c416-5daa-b87c-a6546fa1cc25}')
+    $allGuids = @($knownGuids + $fragmentGuids) | Sort-Object -Unique
+
+    # Remove non-source profile entries that match our GUIDs or Aperture naming
+    if ($json.profiles -and $json.profiles.list) {
+        $before = $json.profiles.list.Count
+        $json.profiles.list = @($json.profiles.list | Where-Object {
+            if ($_.PSObject.Properties['source']) { return $true }  # keep all source-tagged entries
+            $isOurs = ($_.PSObject.Properties['guid'] -and $_.guid -in $allGuids) -or
+                      ($_.PSObject.Properties['name'] -and $_.name -match 'Aperture.*Labs') -or
+                      ($_.PSObject.Properties['commandline'] -and $_.commandline -match 'aperture-labs')
+            return -not $isOurs
+        })
+        $removed = $before - $json.profiles.list.Count
+        if ($removed -gt 0) {
+            $changed = $true
+            Write-ServiceChanged "Removed $removed stale Aperture profile(s) from WT settings.json"
+        }
+    }
+
+    # Remove manually-added Aperture Science color schemes (fragment provides these)
+    if ($json.schemes) {
+        $beforeSchemes = $json.schemes.Count
+        $json.schemes = @($json.schemes | Where-Object { $_.name -ne 'Aperture Science' })
+        $removedSchemes = $beforeSchemes - $json.schemes.Count
+        if ($removedSchemes -gt 0) {
+            $changed = $true
+            Write-ServiceChanged "Removed $removedSchemes stale 'Aperture Science' color scheme(s) from WT settings.json"
+        }
+    }
+
+    if ($changed) {
+        # Backup before writing
+        $backup = "$settingsPath.aperture-backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        Copy-Item $settingsPath $backup -Force
+        $json | ConvertTo-Json -Depth 20 | Set-Content $settingsPath -Encoding UTF8
+        Write-ServiceOk "WT settings.json cleaned (backup: $backup)"
+    }
+}
+
 function Deploy-Shortcuts {
     <# Deploy Windows Terminal fragment (with remote SSH profiles) and create .lnk shortcuts. #>
     param([string]$Machine)
@@ -716,6 +783,7 @@ switch ($Action) {
         Deploy-Binstub
         if ($RepoDir) { Deploy-Icon }
         Deploy-Shortcuts -Machine $machine
+        Clean-TerminalSettingsJson
         Deploy-PsmuxConfig
         if ($RepoDir) { Deploy-GitHooksPath }
         Deploy-CopilotPlugin
@@ -891,9 +959,29 @@ switch ($Action) {
         # Windows Terminal fragment
         $fragmentPath = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs\aperture-labs.json'
         if (Test-Path $fragmentPath) {
-            Write-ServiceOk "Windows Terminal profiles installed"
+            Write-ServiceOk "Windows Terminal fragment installed"
         } else {
             Write-ServiceErr "Windows Terminal fragment missing"
+        }
+
+        # Check for stale settings.json entries
+        $wtSettingsPath = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json'
+        if (Test-Path $wtSettingsPath) {
+            try {
+                $wtJson = Get-Content $wtSettingsPath -Raw | ConvertFrom-Json
+                $stale = @($wtJson.profiles.list | Where-Object {
+                    -not $_.PSObject.Properties['source'] -and (
+                        ($_.PSObject.Properties['name'] -and $_.name -match 'Aperture.*Labs') -or
+                        ($_.PSObject.Properties['commandline'] -and $_.commandline -match 'aperture-labs')
+                    )
+                })
+                $staleSchemes = @($wtJson.schemes | Where-Object { $_.name -eq 'Aperture Science' })
+                if ($stale.Count -gt 0 -or $staleSchemes.Count -gt 0) {
+                    Write-ServiceWarn "WT settings.json has $($stale.Count) stale profile(s) + $($staleSchemes.Count) stale scheme(s) - run 'update' to clean"
+                } else {
+                    Write-ServiceOk "WT settings.json clean (no stale Aperture entries)"
+                }
+            } catch { }
         }
 
         # psmux config
@@ -962,6 +1050,7 @@ switch ($Action) {
             } catch { }
         }
         Deploy-Shortcuts -Machine $updateMachine
+        Clean-TerminalSettingsJson
         Deploy-PsmuxConfig
         if ($RepoDir) { Deploy-GitHooksPath }
         Deploy-CopilotPlugin
