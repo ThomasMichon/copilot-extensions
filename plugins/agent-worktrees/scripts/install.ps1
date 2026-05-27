@@ -150,13 +150,19 @@ function Deploy-Package {
     if (-not $commit) { $commit = 'unknown' }
     if (-not $branch) { $branch = 'unknown' }
     $srcNorm = ($PluginDir -replace '\\', '/')
+    $ver = '0.0.0'
+    $pyproj = Join-Path $PluginDir 'pyproject.toml'
+    if (Test-Path $pyproj) {
+        $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
+        if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*','$1') }
+    }
     $buildContent = @"
 `"`"`"Build provenance -- auto-generated at deploy time. Do not edit.`"`"`"
 
 from __future__ import annotations
 
 BUILD_INFO: dict[str, str] = {
-    "version": "1.0.0",
+    "version": "$ver",
     "commit": "$commit",
     "branch": "$branch",
     "build_timestamp": "$ts",

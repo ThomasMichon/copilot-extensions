@@ -162,13 +162,15 @@ deploy_package() {
     _branch="$(git -C "$_repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
     _ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     _src_norm="$(echo "$PLUGIN_DIR" | tr '\\' '/')"
+    local _ver
+    _ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
     cat > "$dst/_build_info.py" <<PYEOF
 """Build provenance -- auto-generated at deploy time. Do not edit."""
 
 from __future__ import annotations
 
 BUILD_INFO: dict[str, str] = {
-    "version": "1.0.0",
+    "version": "$_ver",
     "commit": "$_commit",
     "branch": "$_branch",
     "build_timestamp": "$_ts",
