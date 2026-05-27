@@ -190,7 +190,7 @@ prompt = .venv
 }
 
 function Deploy-Wrappers {
-    <# Copy the static launch wrappers to ~/.agent-worktrees/bin/. #>
+    <# Copy the static launch wrappers and bootstrap scripts to ~/.agent-worktrees/bin/. #>
     Ensure-InstallDir $BinDir
 
     foreach ($wrapper in @('launch-session.cmd', 'launch-session.ps1')) {
@@ -203,6 +203,17 @@ function Deploy-Wrappers {
         Copy-Item $src $dst -Force
         Write-ServiceOk "Wrapper: $wrapper"
     }
+
+    # Deploy bootstrap-check scripts (called by sessionStart hook)
+    foreach ($script in @('bootstrap-check.ps1', 'bootstrap-check.sh')) {
+        $src = Join-Path $ScriptDir $script
+        $dst = Join-Path $BinDir $script
+        if (Test-Path $src) {
+            Copy-Item $src $dst -Force
+            Write-ServiceOk "Bootstrap: $script"
+        }
+    }
+
     return $true
 }
 
@@ -654,10 +665,11 @@ switch ($Action) {
         Write-DeployManifest -InstallDir $InstallDir -ServiceName 'worktree-sessions' `
             -SourcePaths $DeploySourcePaths -InstallerPath $InstallerRelPath
 
-        # Add runtime field to manifest
+        # Add runtime + plugin_source fields to manifest
         $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
         $m = Get-Content $manifestPath -Raw | ConvertFrom-Json
         $m | Add-Member -NotePropertyName 'runtime' -NotePropertyValue 'python' -Force
+        $m | Add-Member -NotePropertyName 'plugin_source' -NotePropertyValue $PluginDir.ToString() -Force
         $m | ConvertTo-Json -Depth 4 | Set-Content $manifestPath -Encoding UTF8
 
         Write-Host ""
@@ -898,10 +910,11 @@ switch ($Action) {
         Write-DeployManifest -InstallDir $InstallDir -ServiceName 'worktree-sessions' `
             -SourcePaths $DeploySourcePaths -InstallerPath $InstallerRelPath
 
-        # Add runtime field to manifest
+        # Add runtime + plugin_source fields to manifest
         $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
         $m = Get-Content $manifestPath -Raw | ConvertFrom-Json
         $m | Add-Member -NotePropertyName 'runtime' -NotePropertyValue 'python' -Force
+        $m | Add-Member -NotePropertyName 'plugin_source' -NotePropertyValue $PluginDir.ToString() -Force
         $m | ConvertTo-Json -Depth 4 | Set-Content $manifestPath -Encoding UTF8
 
         Write-ServiceOk "Update complete"

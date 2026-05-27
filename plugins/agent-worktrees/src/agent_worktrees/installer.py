@@ -213,6 +213,8 @@ def upgrade_venv_deps() -> bool:
 def deploy_wrappers(repo_dir: str | Path) -> bool:
     """Copy the platform-appropriate launch wrapper to install_dir/bin/.
 
+    Also deploys the bootstrap-check scripts used by the sessionStart hook.
+
     Returns True on success.
     """
     bd = bin_dir()
@@ -222,6 +224,8 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     if not assets.exists():
         output.err(f"Wrapper assets not found at {assets}")
         return False
+
+    scripts = Path(repo_dir) / "plugins" / "agent-worktrees" / "scripts"
 
     if platform.system() == "Windows":
         for name in ("launch-session.cmd", "launch-session.ps1"):
@@ -239,6 +243,15 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
         shutil.copy2(src, bd / "launch-session.sh")
         (bd / "launch-session.sh").chmod(0o755)
         output.ok(f"Wrapper: {bd / 'launch-session.sh'}")
+
+    # Deploy bootstrap-check scripts (called by sessionStart hook)
+    for name in ("bootstrap-check.ps1", "bootstrap-check.sh"):
+        src = scripts / name
+        if src.exists():
+            shutil.copy2(src, bd / name)
+            if platform.system() != "Windows" and name.endswith(".sh"):
+                (bd / name).chmod(0o755)
+            output.ok(f"Bootstrap: {bd / name}")
 
     return True
 
@@ -355,6 +368,9 @@ def write_deploy_manifest(repo_dir: str | Path, machine: str) -> None:
     plat = cfg.detect_platform()
     env_id = f"{machine}-{plat}"
 
+    # Resolve the plugin root directory
+    plugin_source = str(find_package_source(repo_dir).parent.parent)
+
     manifest = {
         "schema_version": 1,
         "service": "agent-worktrees",
@@ -369,6 +385,7 @@ def write_deploy_manifest(repo_dir: str | Path, machine: str) -> None:
         "source_paths": ["plugins/agent-worktrees/"],
         "installer_path": "plugins/agent-worktrees/scripts/install.ps1",
         "runtime": "python",
+        "plugin_source": plugin_source,
     }
 
     manifest_path.write_text(json.dumps(manifest, indent=2))
