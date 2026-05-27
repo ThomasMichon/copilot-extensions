@@ -189,6 +189,18 @@ deploy_wrappers() {
     chmod +x "$tmp"
     mv -f "$tmp" "$BIN_DIR/launch-session.sh"
     ok "Wrapper: launch-session.sh"
+
+    # Deploy bootstrap-check scripts (called by sessionStart hook)
+    for script in bootstrap-check.ps1 bootstrap-check.sh; do
+        local script_src="$SCRIPT_DIR/$script"
+        if [[ -f "$script_src" ]]; then
+            tmp="$(mktemp "$BIN_DIR/$script.XXXXXX")"
+            cp "$script_src" "$tmp"
+            chmod +x "$tmp"
+            mv -f "$tmp" "$BIN_DIR/$script"
+            ok "Bootstrap: $script"
+        fi
+    done
 }
 
 remove_legacy_scripts() {
