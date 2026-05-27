@@ -36,7 +36,7 @@ if [[ ! -d "$PKG_SRC_DIR" ]]; then
     exit 1
 fi
 
-# Find Python
+# Find Python -- install if missing
 PYTHON_CMD=""
 for candidate in python3 python; do
     if command -v "$candidate" &>/dev/null; then
@@ -45,11 +45,28 @@ for candidate in python3 python; do
     fi
 done
 if [[ -z "$PYTHON_CMD" ]]; then
-    fail "Python not found on PATH (need 3.10+)"
-    exit 1
+    step "Python not found -- attempting install..."
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get update -qq && sudo apt-get install -y -qq python3 python3-venv 2>/dev/null
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y -q python3 2>/dev/null
+    elif command -v brew &>/dev/null; then
+        brew install python3 2>/dev/null
+    fi
+    for candidate in python3 python; do
+        if command -v "$candidate" &>/dev/null; then
+            PYTHON_CMD="$candidate"
+            break
+        fi
+    done
+    if [[ -z "$PYTHON_CMD" ]]; then
+        fail "Python not found on PATH (need 3.10+)"
+        echo "  Install with: apt install python3, dnf install python3, or brew install python3"
+        exit 1
+    fi
 fi
 
-py_ver="$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+py_ver="$($PYTHON_CMD -c 'import sys; print("{}.{}".format(sys.version_info.major, sys.version_info.minor))')"
 ok "Python: $PYTHON_CMD ($py_ver)"
 
 git_ver="$(git --version 2>/dev/null || true)"
@@ -58,6 +75,18 @@ if [[ -z "$git_ver" ]]; then
     exit 1
 fi
 ok "Git: $git_ver"
+
+# Check for uv -- install if missing
+if ! command -v uv &>/dev/null; then
+    step "uv not found -- installing..."
+    if command -v curl &>/dev/null; then
+        curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null | sh 2>/dev/null
+        export PATH="$HOME/.local/bin:$PATH"
+        if command -v uv &>/dev/null; then
+            ok "uv installed"
+        fi
+    fi
+fi
 
 # ── 1. Create directories ─────────────────────────────────────────────
 
@@ -134,6 +163,23 @@ exec "$HOME/.agent-worktrees/.venv/bin/python" -m agent_worktrees "$@"
 STUB
 chmod +x "$stub_path"
 ok "Binstub: $stub_path"
+
+# -- 6b. Install terminal multiplexer (optional) ----------------------
+
+if ! command -v tmux &>/dev/null; then
+    step "tmux not found -- attempting install..."
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get install -y -qq tmux 2>/dev/null && ok "tmux installed" || step "tmux install failed -- install manually: apt install tmux"
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y -q tmux 2>/dev/null && ok "tmux installed" || step "tmux install failed -- install manually: dnf install tmux"
+    elif command -v brew &>/dev/null; then
+        brew install tmux 2>/dev/null && ok "tmux installed" || step "tmux install failed -- install manually: brew install tmux"
+    else
+        step "tmux not found -- install with your package manager for session persistence"
+    fi
+else
+    ok "tmux: already installed"
+fi
 
 # ── 7. Write deploy manifest ──────────────────────────────────────────
 

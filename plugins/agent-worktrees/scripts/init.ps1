@@ -69,26 +69,63 @@ if (-not (Test-Path $PkgSrcDir)) {
     exit 1
 }
 
+# Check for winget (Windows package installer)
+$hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
+
 # Find a Python interpreter (skip Windows Store aliases that aren't real)
 $pythonCmd = $null
 foreach ($candidate in @('python', 'python3', 'py')) {
     $found = Get-Command $candidate -ErrorAction SilentlyContinue
     if ($found) {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
         try {
             $testOut = & $found.Source --version 2>&1
             if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') {
                 $pythonCmd = $found.Source
-                break
             }
         } catch { }
+        $ErrorActionPreference = $prevEAP
+        if ($pythonCmd) { break }
     }
 }
 if (-not $pythonCmd) {
-    Write-Fail 'Python not found on PATH (need 3.10+)'
-    exit 1
+    if ($hasWinget) {
+        Write-Step 'Python not found -- installing via winget...'
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & winget install --id Python.Python.3.13 --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+        $ErrorActionPreference = $prevEAP
+        # Refresh PATH to pick up newly installed Python
+        $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('PATH', 'User')
+        foreach ($candidate in @('python', 'python3', 'py')) {
+            $found = Get-Command $candidate -ErrorAction SilentlyContinue
+            if ($found) {
+                $prevEAP = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                try {
+                    $testOut = & $found.Source --version 2>&1
+                    if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') {
+                        $pythonCmd = $found.Source
+                    }
+                } catch { }
+                $ErrorActionPreference = $prevEAP
+                if ($pythonCmd) { break }
+            }
+        }
+    }
+    if (-not $pythonCmd) {
+        Write-Fail 'Python not found on PATH (need 3.10+)'
+        Write-Host '  Install Python from https://python.org or via winget:' -ForegroundColor DarkGray
+        Write-Host '    winget install Python.Python.3.13' -ForegroundColor DarkGray
+        exit 1
+    }
 }
 
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 $pyVer = & $pythonCmd -c "import sys; print('{0}.{1}'.format(sys.version_info.major, sys.version_info.minor))" 2>$null
+$ErrorActionPreference = $prevEAP
 Write-Ok "Python: $pythonCmd ($pyVer)"
 
 $gitVer = git --version 2>$null
@@ -97,6 +134,21 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 Write-Ok "Git: $gitVer"
+
+# Check for uv (fast Python package manager) -- install if missing
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    if ($hasWinget) {
+        Write-Step 'uv not found -- installing via winget...'
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & winget install --id astral-sh.uv --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+        $ErrorActionPreference = $prevEAP
+        $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('PATH', 'User')
+        if (Get-Command uv -ErrorAction SilentlyContinue) {
+            Write-Ok 'uv installed'
+        }
+    }
+}
 
 # -- 1. Create directories ---------------------------------------------
 
@@ -202,6 +254,38 @@ if ($env:OS -eq 'Windows_NT') {
     [System.IO.File]::WriteAllText($stubPath, $stubContent)
     & chmod +x $stubPath 2>$null
     Write-Ok "Binstub: $stubPath"
+}
+
+# -- 6b. Install terminal multiplexer (optional) ----------------------
+
+if ($env:OS -eq 'Windows_NT') {
+    # psmux -- PowerShell-native terminal multiplexer for session persistence
+    if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) {
+        if ($hasWinget) {
+            Write-Step 'psmux not found -- installing via winget...'
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            & winget install --id marlocarlo.psmux --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+            $ErrorActionPreference = $prevEAP
+            $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('PATH', 'User')
+            if (Get-Command psmux -ErrorAction SilentlyContinue) {
+                Write-Ok 'psmux installed (terminal multiplexer)'
+            } else {
+                Write-Step 'psmux install may need a shell restart to take effect'
+            }
+        } else {
+            Write-Step 'psmux not found -- install manually: winget install marlocarlo.psmux'
+        }
+    } else {
+        Write-Ok 'psmux: already installed'
+    }
+} else {
+    # tmux -- standard terminal multiplexer for Linux session persistence
+    if (-not (Get-Command tmux -ErrorAction SilentlyContinue)) {
+        Write-Step 'tmux not found -- install with your package manager (apt install tmux, etc.)'
+    } else {
+        Write-Ok 'tmux: already installed'
+    }
 }
 
 # -- 7. Write deploy manifest ------------------------------------------
