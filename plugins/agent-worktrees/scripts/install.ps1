@@ -478,7 +478,7 @@ function Deploy-Shortcuts {
     [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
 
     # Deploy tool binstubs
-    foreach ($stub in @('cleanup-worktrees.cmd', 'mark-worktree-complete.cmd', 'agent-worktrees.cmd')) {
+    foreach ($stub in @('agent-worktrees.cmd')) {
         $src = Join-Path $PluginDir "bin\$stub"
         $dst = Join-Path $LocalBin $stub
         if (Test-Path $src) {
@@ -572,7 +572,7 @@ function Assert-PathIncludes {
 }
 
 function Remove-Binstub {
-    foreach ($stub in @("$ProjectName.cmd", 'cleanup-worktrees.cmd', 'mark-worktree-complete.cmd', 'mark-session-complete.cmd', 'agent-worktrees.cmd')) {
+    foreach ($stub in @("$ProjectName.cmd", 'mark-session-complete.cmd', 'agent-worktrees.cmd')) {
         $path = Join-Path $LocalBin $stub
         if (Test-Path $path) {
             Remove-Item $path -Force

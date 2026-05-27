@@ -219,7 +219,7 @@ BINSTUB
     ok "Binstub: $LOCAL_BIN/$PROJECT_NAME"
 
     # Tool binstubs (parity with Windows .cmd stubs)
-    for stub in cleanup-worktrees mark-worktree-complete agent-worktrees; do
+    for stub in agent-worktrees; do
         local stub_src="$PLUGIN_DIR/bin/$stub"
         if [[ -f "$stub_src" ]]; then
             tmp="$(mktemp "$LOCAL_BIN/$stub.XXXXXX")"
@@ -835,7 +835,7 @@ p.write_text(json.dumps(m, indent=2))
         fi
 
         # Remove tool binstubs
-        for stub in cleanup-worktrees mark-worktree-complete mark-session-complete agent-worktrees; do
+        for stub in mark-session-complete agent-worktrees; do
             local stub_path="$LOCAL_BIN/$stub"
             if [[ -f "$stub_path" ]]; then
                 rm -f "$stub_path"
@@ -922,7 +922,7 @@ p.write_text(json.dumps(m, indent=2))
         fi
 
         # Tool binstubs
-        for stub in cleanup-worktrees mark-worktree-complete agent-worktrees; do
+        for stub in agent-worktrees; do
             if [[ -f "$LOCAL_BIN/$stub" ]]; then
                 ok "Binstub installed at $LOCAL_BIN/$stub"
             else

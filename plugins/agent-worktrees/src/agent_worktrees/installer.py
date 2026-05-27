@@ -267,27 +267,6 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
             dst.write_text(binstub_content)
             output.ok(f"Binstub: {dst}")
 
-            # Generate cleanup and mark-complete binstubs
-            for tool_cmd in ("cleanup", "mark-complete"):
-                tool_content = (
-                    "@echo off\r\n"
-                    "setlocal\r\n"
-                    'set "PYTHONUTF8=1"\r\n'
-                    'if not defined WORKTREE_PROJECT (\r\n'
-                    '    echo ERROR: WORKTREE_PROJECT is not set. '
-                    'Use the project launcher binstub instead. >&2\r\n'
-                    '    exit /b 1\r\n'
-                    ')\r\n'
-                    f'set "PYTHON=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe"\r\n'
-                    f'set "PYTHONPATH=%USERPROFILE%\\.agent-worktrees\\lib"\r\n'
-                    f'"%PYTHON%" -m agent_worktrees {tool_cmd} %*\r\n'
-                    "exit /b %ERRORLEVEL%\r\n"
-                )
-                tool_name = "cleanup-worktrees" if tool_cmd == "cleanup" else "mark-worktree-complete"
-                dst = lb / f"{tool_name}.cmd"
-                dst.write_text(tool_content)
-                output.ok(f"Binstub: {dst}")
-
             # Unified agent-worktrees command (project-agnostic)
             wm_content = (
                 "@echo off\r\n"
@@ -315,25 +294,6 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
         dst.write_text(binstub_content)
         dst.chmod(0o755)
         output.ok(f"Binstub: {dst}")
-
-        for tool_cmd, tool_name in [("cleanup", "cleanup-worktrees"), ("mark-complete", "mark-worktree-complete")]:
-            tool_content = (
-                "#!/usr/bin/env bash\n"
-                "set -euo pipefail\n"
-                'if [[ -z "${WORKTREE_PROJECT:-}" ]]; then\n'
-                '    echo "ERROR: WORKTREE_PROJECT is not set. '
-                'Use the project launcher binstub instead." >&2\n'
-                '    exit 1\n'
-                'fi\n'
-                f'PYTHON="$HOME/.agent-worktrees/.venv/bin/python"\n'
-                f'export PYTHONPATH="$HOME/.agent-worktrees/lib"\n'
-                'unset PYTHONHOME\n'
-                f'exec "$PYTHON" -m agent_worktrees {tool_cmd} "$@"\n'
-            )
-            dst = lb / tool_name
-            dst.write_text(tool_content)
-            dst.chmod(0o755)
-            output.ok(f"Binstub: {dst}")
 
         # Unified agent-worktrees command (project-agnostic)
         wm_content = (
