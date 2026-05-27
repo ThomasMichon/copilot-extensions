@@ -1,6 +1,7 @@
-# Bootstrap hook — runs on session start via hooks.json
+# Bootstrap hook -- runs on session start via hooks.json
 # Auto-updates the agent-worktrees runtime payload when stale.
 # If not installed, prints a hint (full install requires interactive setup).
+# Compatible with PowerShell 5.1+ and pwsh 7+.
 
 $ErrorActionPreference = 'SilentlyContinue'
 
@@ -31,14 +32,16 @@ try {
     if (-not (Test-Path $PkgSrc)) { exit 0 }
 
     $deployedCommit = $m.commit
-    $repoRoot = (Resolve-Path (Join-Path $pluginDir '..')).Path
-    $currentCommit = (git -C $repoRoot rev-parse HEAD 2>$null)
+    $currentCommit = $null
+    try {
+        $currentCommit = (git -C $pluginDir rev-parse HEAD 2>$null)
+    } catch { }
 
     if (-not $deployedCommit -or -not $currentCommit -or $deployedCommit -eq $currentCommit) {
         exit 0
     }
 
-    # Stale — re-deploy package
+    # Stale -- re-deploy package
     Write-Host '[agent-worktrees] Updating runtime payload...' -ForegroundColor DarkGray
     if (Test-Path $PkgDst) {
         Remove-Item $PkgDst -Recurse -Force
@@ -48,8 +51,15 @@ try {
 
     $m.commit = $currentCommit
     $m.deployed_at = (Get-Date -Format 'o')
-    $m.dirty = $false
-    $m | ConvertTo-Json -Depth 4 | Set-Content $Manifest -Encoding UTF8
+    # Add or update dirty flag (PS5-safe: use Add-Member for new properties)
+    if ($m.PSObject.Properties['dirty']) {
+        $m.dirty = $false
+    } else {
+        $m | Add-Member -NotePropertyName 'dirty' -NotePropertyValue $false -Force
+    }
+    $manifestJson = $m | ConvertTo-Json -Depth 4
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Manifest, $manifestJson, $utf8NoBom)
 
     Write-Host '[agent-worktrees] Runtime updated.' -ForegroundColor DarkGray
 } catch { }
