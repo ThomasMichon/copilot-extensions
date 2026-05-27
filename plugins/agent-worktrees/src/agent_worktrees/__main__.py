@@ -121,22 +121,34 @@ def cmd_launch(argv: list[str]) -> int:
         else:
             passthrough.append(arg)
 
-    # Resolve launch-session.sh path from installed location
+    # Resolve launch script path from installed location
     inst_dir = cfg.install_dir()
-    launch_script = inst_dir / "bin" / "launch-session.sh"
+    plat = cfg.detect_platform()
+
+    if plat == "windows":
+        launch_script = inst_dir / "bin" / "launch-session.cmd"
+    else:
+        launch_script = inst_dir / "bin" / "launch-session.sh"
 
     # Fall back to legacy location
     if not launch_script.exists():
-        legacy = Path.home() / f".{cfg.project_name()}" / "bin" / "launch-session.sh"
+        legacy_name = "launch-session.sh"
+        legacy = Path.home() / f".{cfg.project_name()}" / "bin" / legacy_name
         if legacy.exists():
             launch_script = legacy
 
     if not launch_script.exists():
-        output.err(f"launch-session.sh not found at {launch_script}")
+        output.err(f"{launch_script.name} not found at {launch_script}")
         output.err("Run 'agent-worktrees install' first.")
         return 1
 
-    os.execvp("bash", ["bash", str(launch_script), *passthrough])
+    if plat == "windows":
+        # On Windows, use cmd.exe to run the .cmd launcher
+        sys.exit(subprocess.call(
+            ["cmd.exe", "/c", str(launch_script), *passthrough],
+        ))
+    else:
+        os.execvp("bash", ["bash", str(launch_script), *passthrough])
     return 1  # unreachable — os.execvp replaces process
 
 
@@ -3043,6 +3055,12 @@ def main(argv: list[str] | None = None) -> int:
     # No args → default launch
     if not args_list:
         return cmd_launch([])
+
+    # --help / -h → show argparse help (not launch fallthrough)
+    if args_list[0] in ("--help", "-h"):
+        parser = build_parser()
+        parser.print_help()
+        return 0
 
     # Services uses manual dispatch for passthrough support —
     # argparse can't handle "unknown subcommand = service name".
