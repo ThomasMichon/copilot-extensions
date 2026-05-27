@@ -318,6 +318,17 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
                 (bd / name).chmod(0o755)
             output.ok(f"Bootstrap: {bd / name}")
 
+    # Deploy default setup scripts (used when repos lack their own)
+    sd = install_dir() / "scripts"
+    sd.mkdir(parents=True, exist_ok=True)
+    for name in ("default-setup.ps1", "default-setup.sh"):
+        src = scripts / name
+        if src.exists():
+            shutil.copy2(src, sd / name)
+            if platform.system() != "Windows" and name.endswith(".sh"):
+                (sd / name).chmod(0o755)
+            output.ok(f"Default setup: {sd / name}")
+
     return True
 
 

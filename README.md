@@ -37,6 +37,10 @@ After installing the `agent-worktrees` plugin:
 - **Setup skill** — ask Copilot to "set up agent-worktrees" to bootstrap
   the Python runtime (venv + binstubs)
 
+See the [Getting Started guide](plugins/agent-worktrees/docs/getting-started.md)
+for anchor repo recommendations, setup script guidance, and the full
+session lifecycle.
+
 ### Runtime Bootstrap
 
 The plugin ships the Python source for the agent-worktrees CLI. After
