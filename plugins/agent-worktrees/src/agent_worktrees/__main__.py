@@ -2790,6 +2790,10 @@ def _find_repo_dir() -> Path | None:
       2. WORKTREE_REPO env var (falls back to APERTURE_REPO for compat)
       3. cwd git root (via git rev-parse)
       4. Config anchor (last resort — may be stale)
+
+    All paths are resolved through :func:`git_ops.resolve_to_anchor` so
+    that running from inside a git worktree returns the main checkout,
+    not the ephemeral worktree path.
     """
 
     # 1. Running script location — walk up from __file__ to find .git
@@ -2797,7 +2801,7 @@ def _find_repo_dir() -> Path | None:
     candidate = here
     for _ in range(8):  # limit traversal depth
         if (candidate / ".git").exists() or (candidate / ".git").is_file():
-            return candidate
+            return git_ops.resolve_to_anchor(candidate)
         parent = candidate.parent
         if parent == candidate:
             break
@@ -2808,7 +2812,7 @@ def _find_repo_dir() -> Path | None:
     if env_repo:
         env_path = Path(env_repo)
         if env_path.is_dir():
-            return env_path
+            return git_ops.resolve_to_anchor(env_path)
 
     # 3. git rev-parse to find repo root of cwd
     try:
@@ -2817,7 +2821,7 @@ def _find_repo_dir() -> Path | None:
             capture_output=True, text=True, timeout=5,
         )
         if r.returncode == 0:
-            return Path(r.stdout.strip())
+            return git_ops.resolve_to_anchor(Path(r.stdout.strip()))
     except Exception:
         pass
 

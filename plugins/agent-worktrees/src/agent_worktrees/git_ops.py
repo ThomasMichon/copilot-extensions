@@ -32,6 +32,36 @@ def is_cwd_inside(worktree_path: str) -> bool:
     return cwd == wt or cwd.startswith(wt + os.sep)
 
 
+def resolve_to_anchor(repo_path: Path) -> Path:
+    """Resolve a git worktree path back to its anchor (main checkout).
+
+    If *repo_path* is already the anchor (has a ``.git`` directory), it is
+    returned unchanged.  If it is a worktree (has a ``.git`` file),
+    ``git rev-parse --git-common-dir`` is used to find the shared ``.git``
+    directory whose parent is the anchor repo root.
+    """
+    git_path = repo_path / ".git"
+    if git_path.is_dir():
+        return repo_path  # already the anchor
+    if git_path.is_file():
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(repo_path), "rev-parse", "--git-common-dir"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.returncode == 0:
+                common = Path(r.stdout.strip())
+                if not common.is_absolute():
+                    common = (repo_path / common).resolve()
+                # common is the shared .git dir; its parent is the anchor
+                anchor = common.parent
+                if (anchor / ".git").is_dir():
+                    return anchor
+        except Exception:
+            pass
+    return repo_path
+
+
 class GitError(Exception):
     """A git command failed."""
 
