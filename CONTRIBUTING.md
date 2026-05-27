@@ -32,7 +32,14 @@ Do **not** bump minor or major versions unless explicitly instructed.
 ### Where the version lives
 
 - `plugins/agent-worktrees/pyproject.toml` — the `version` field under
-  `[project]`
+  `[project]` (used by the Python package at runtime)
+- `plugins/agent-worktrees/plugin.json` — the `version` field (used by
+  `copilot plugin update` to detect new versions)
+
+**Both files must be bumped together.** The CLI reads `plugin.json` to
+decide whether an update is available; if it's stale, `copilot plugin
+update` will report "already at latest" even when `pyproject.toml` has
+been bumped.
 
 ### When to bump
 
@@ -50,10 +57,11 @@ independently.
 ### Push flow
 
 1. Make changes in `plugins/agent-worktrees/`
-2. Bump the version in `pyproject.toml` (patch + `-devN`)
+2. Bump the version in **both** `pyproject.toml` and `plugin.json`
+   (patch + `-devN`)
 3. Commit with a descriptive message
 4. Push to `main` on GitHub: `git push origin main`
-5. Machines pick up the update via `copilot plugin install` or manual
+5. Machines pick up the update via `copilot plugin update` or manual
    `git pull`
 
 ### Keeping worktree-manager in sync
