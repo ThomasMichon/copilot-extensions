@@ -32,9 +32,7 @@ adopted projects use.
 
 ~/.local/bin/
 ├── agent-worktrees.cmd    (Windows)
-├── agent-worktrees        (Linux/macOS)
-├── cleanup-worktrees[.cmd]
-└── mark-worktree-complete[.cmd]
+└── agent-worktrees        (Linux/macOS)
 ```
 
 ## Prerequisites
@@ -122,10 +120,6 @@ Create thin wrappers in `~/.local/bin/` so `agent-worktrees` is on PATH:
 #!/usr/bin/env bash
 exec "$HOME/.agent-worktrees/.venv/bin/python" -m agent_worktrees "$@"
 ```
-
-Also create `cleanup-worktrees` and `mark-worktree-complete` binstubs
-that delegate to `agent-worktrees cleanup` and
-`agent-worktrees mark-complete` respectively.
 
 ### 6. Copy terminal multiplexer config
 
