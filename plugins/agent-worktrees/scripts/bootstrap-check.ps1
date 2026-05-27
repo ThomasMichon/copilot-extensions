@@ -55,13 +55,19 @@ try {
     $branch = ''
     try { $branch = (git -C $pluginDir rev-parse --abbrev-ref HEAD 2>$null) } catch { }
     if (-not $branch) { $branch = 'unknown' }
+    $ver = '0.0.0'
+    $pyproj = Join-Path $pluginDir 'pyproject.toml'
+    if (Test-Path $pyproj) {
+        $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
+        if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*','$1') }
+    }
     $buildContent = @"
 `"`"`"Build provenance -- auto-generated at deploy time. Do not edit.`"`"`"
 
 from __future__ import annotations
 
 BUILD_INFO: dict[str, str] = {
-    "version": "1.0.0",
+    "version": "$ver",
     "commit": "$currentCommit",
     "branch": "$branch",
     "build_timestamp": "$ts",

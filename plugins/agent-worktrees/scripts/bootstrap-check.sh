@@ -46,13 +46,14 @@ cp -r "$PKG_SRC" "$PKG_DST"
 _branch="$(git -C "$plugin_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
 _ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 _src="$(echo "$plugin_dir" | tr '\\' '/')"
+_ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$plugin_dir/pyproject.toml" 2>/dev/null || echo 0.0.0)"
 cat > "$PKG_DST/_build_info.py" <<PYEOF
 """Build provenance -- auto-generated at deploy time. Do not edit."""
 
 from __future__ import annotations
 
 BUILD_INFO: dict[str, str] = {
-    "version": "1.0.0",
+    "version": "$_ver",
     "commit": "$current_commit",
     "branch": "$_branch",
     "build_timestamp": "$_ts",
