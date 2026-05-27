@@ -110,6 +110,7 @@ def deploy_package(repo_dir: str | Path) -> bool:
 
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src, dst)
+    stamp_build_info(dst, repo_dir)
     output.ok(f"Package deployed to {dst}")
     return True
 
@@ -208,6 +209,70 @@ def upgrade_venv_deps() -> bool:
     except subprocess.CalledProcessError as e:
         output.err(f"Failed to upgrade venv deps: {e.stderr}")
         return False
+
+
+def stamp_build_info(
+    package_dir: Path,
+    repo_dir: str | Path | None = None,
+) -> None:
+    """Overwrite _build_info.py in the deployed package with provenance.
+
+    Called after every package copy — from ``deploy_package()``, bootstrap
+    auto-update, and the native install scripts.
+    """
+    version = "1.0.0"
+    commit = "unknown"
+    branch = "unknown"
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    source = str(repo_dir) if repo_dir else "unknown"
+
+    if repo_dir:
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(repo_dir), "rev-parse", "HEAD"],
+                capture_output=True, text=True,
+            )
+            if r.returncode == 0:
+                commit = r.stdout.strip()
+        except Exception:
+            pass
+
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(repo_dir), "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True, text=True,
+            )
+            if r.returncode == 0:
+                branch = r.stdout.strip()
+        except Exception:
+            pass
+
+        # Try reading version from pyproject.toml
+        pyproject = Path(repo_dir) / "plugins" / "agent-worktrees" / "pyproject.toml"
+        if pyproject.exists():
+            try:
+                for line in pyproject.read_text().splitlines():
+                    if line.strip().startswith("version"):
+                        version = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        break
+            except Exception:
+                pass
+
+    info_path = package_dir / "_build_info.py"
+    content = (
+        '"""Build provenance -- auto-generated at deploy time. Do not edit."""\n'
+        "\n"
+        "from __future__ import annotations\n"
+        "\n"
+        "BUILD_INFO: dict[str, str] = {\n"
+        f'    "version": "{version}",\n'
+        f'    "commit": "{commit}",\n'
+        f'    "branch": "{branch}",\n'
+        f'    "build_timestamp": "{ts}",\n'
+        f'    "source": "{source.replace(chr(92), "/")}",\n'
+        "}\n"
+    )
+    info_path.write_text(content, encoding="utf-8")
 
 
 def deploy_wrappers(repo_dir: str | Path) -> bool:
@@ -395,6 +460,17 @@ def write_deploy_manifest(repo_dir: str | Path, machine: str) -> None:
 def show_install_status() -> None:
     """Show the current installation status."""
     output.header("Agent Worktrees Status")
+
+    # Version / build info
+    try:
+        from ._build_info import BUILD_INFO
+        v = BUILD_INFO.get("version", "?.?.?")
+        c = BUILD_INFO.get("commit", "unknown")[:10]
+        ts = BUILD_INFO.get("build_timestamp", "unknown")
+        br = BUILD_INFO.get("branch", "unknown")
+        output.ok(f"Version {v}  commit {c}  branch {br}  built {ts}")
+    except ImportError:
+        output.warn("Build info not available (dev mode)")
 
     base = install_dir()
     project = cfg.project_name()

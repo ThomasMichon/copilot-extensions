@@ -213,6 +213,36 @@ if (Test-Path $PkgDst) {
     Remove-Item $PkgDst -Recurse -Force
 }
 Copy-Item $PkgSrcDir $PkgDst -Recurse
+
+# Stamp build info so --version reflects this deployment
+$buildInfoPath = Join-Path $PkgDst '_build_info.py'
+$ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+$commit = ''
+$branch = ''
+try {
+    $repoRoot = Split-Path (Split-Path $PluginDir)
+    $commit = (git -C $repoRoot rev-parse HEAD 2>$null)
+    $branch = (git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null)
+} catch { }
+if (-not $commit) { $commit = 'unknown' }
+if (-not $branch) { $branch = 'unknown' }
+$srcNorm = ($PluginDir -replace '\\', '/')
+$biContent = @"
+`"`"`"Build provenance -- auto-generated at deploy time. Do not edit.`"`"`"
+
+from __future__ import annotations
+
+BUILD_INFO: dict[str, str] = {
+    "version": "1.0.0",
+    "commit": "$commit",
+    "branch": "$branch",
+    "build_timestamp": "$ts",
+    "source": "$srcNorm",
+}
+"@
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($buildInfoPath, $biContent, $utf8NoBom)
+
 Write-Ok "Package deployed to $PkgDst"
 
 # -- 5. Deploy wrappers & bootstrap scripts ----------------------------

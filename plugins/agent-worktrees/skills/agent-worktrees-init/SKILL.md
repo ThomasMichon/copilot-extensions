@@ -81,8 +81,14 @@ verification.
 ### Step 3 — Verify
 
 ```
+agent-worktrees --version
 agent-worktrees --help
 ```
+
+The `--version` output shows the deployed commit hash and build timestamp,
+which helps identify whether the deployed runtime has the latest fixes.
+Report this output to the user after installation so they can confirm
+the version.
 
 If `agent-worktrees` is not found, ensure `~/.local/bin` is on PATH.
 
