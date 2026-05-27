@@ -30,8 +30,7 @@ PKG_SRC="$plugin_dir/src/agent_worktrees"
 if [[ ! -d "$PKG_SRC" ]]; then exit 0; fi
 
 deployed_commit="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('commit',''))" "$MANIFEST" 2>/dev/null || true)"
-repo_root="$(cd "$plugin_dir/.." && pwd)"
-current_commit="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || true)"
+current_commit="$(git -C "$plugin_dir" rev-parse HEAD 2>/dev/null || true)"
 
 if [[ -z "$deployed_commit" || -z "$current_commit" || "$deployed_commit" == "$current_commit" ]]; then
     exit 0

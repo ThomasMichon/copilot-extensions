@@ -18,17 +18,20 @@ Install the agent-worktrees runtime from this plugin's bundled source.
 Run this **once per machine** — it creates the shared runtime that all
 adopted projects use.
 
+The init script is idempotent — safe to re-run for repairs or upgrades.
+
 ## What It Creates
 
 ```
 ~/.agent-worktrees/
-├── .venv/              ← Python venv with pyyaml
+├── .venv/                ← Python venv with pyyaml
 ├── lib/
-│   └── agent_worktrees/  ← Python package
-└── bin/
-    ├── launch-session.ps1
-    ├── launch-session.sh
-    └── launch-session.cmd
+│   └── agent_worktrees/  ← Python package (file copy from plugin source)
+├── bin/
+│   ├── launch-session.ps1 / .sh / .cmd
+│   ├── bootstrap-check.ps1  ← session-start auto-update hook
+│   └── bootstrap-check.sh
+└── deploy-manifest.json
 
 ~/.local/bin/
 ├── agent-worktrees.cmd    (Windows)
@@ -39,95 +42,43 @@ adopted projects use.
 
 - Python 3.10+ on PATH
 - Git 2.15+ (worktree support)
-- PowerShell 7+ (Windows) or bash (Linux)
 
-## Installation Steps
+## How to Run
 
-### 1. Locate plugin source
+### Step 1 — Locate the plugin directory
 
-The plugin bundles the full Python package and shell wrappers. Find the
-plugin install directory:
+The init script lives inside the installed plugin. Discover the plugin
+install location:
 
 ```powershell
-# Windows — find the plugin's installed location
-$pluginDir = Get-ChildItem -Recurse -Path "$env:USERPROFILE\.copilot\installed-plugins" -Filter "pyproject.toml" |
-    Where-Object { $_.FullName -like "*agent-worktrees*" } |
+# Windows (PowerShell 5+ or pwsh)
+$pluginDir = Get-ChildItem -Recurse -Path "$env:USERPROFILE\.copilot\installed-plugins" -Filter "plugin.json" |
+    Where-Object { (Get-Content $_.FullName -Raw) -match '"agent-worktrees"' } |
     Select-Object -First 1 -ExpandProperty DirectoryName
 ```
 
 ```bash
 # Linux/macOS
-plugin_dir=$(find ~/.copilot/installed-plugins -path "*/agent-worktrees/pyproject.toml" -exec dirname {} \; | head -1)
+plugin_dir=$(find ~/.copilot/installed-plugins -name plugin.json -exec grep -l agent-worktrees {} \; | head -1 | xargs dirname)
 ```
 
-### 2. Create runtime directory
+### Step 2 — Run init
 
 ```powershell
-# Windows
-$installDir = Join-Path $env:USERPROFILE ".agent-worktrees"
-New-Item -ItemType Directory -Path $installDir -Force
-New-Item -ItemType Directory -Path "$installDir\lib" -Force
-New-Item -ItemType Directory -Path "$installDir\bin" -Force
+# Windows — works with both powershell.exe (5.1) and pwsh (7+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "$pluginDir\scripts\init.ps1"
 ```
 
 ```bash
-# Linux
-install_dir="$HOME/.agent-worktrees"
-mkdir -p "$install_dir"/{lib,bin}
+# Linux/macOS
+bash "$plugin_dir/scripts/init.sh"
 ```
 
-### 3. Create venv and install package
+The script handles everything: venv creation (prefers `uv`, falls back
+to `python -m venv`), package deployment, binstub generation, and
+verification.
 
-```powershell
-# Windows
-python -m venv "$installDir\.venv"
-& "$installDir\.venv\Scripts\pip" install --quiet "$pluginDir"
-```
-
-```bash
-# Linux
-python3 -m venv "$install_dir/.venv"
-"$install_dir/.venv/bin/pip" install --quiet "$plugin_dir"
-```
-
-### 4. Copy shell wrappers
-
-Copy from the plugin's `bin/` directory to `~/.agent-worktrees/bin/`:
-
-```powershell
-# Windows
-Copy-Item "$pluginDir\bin\launch-session.*" "$installDir\bin\" -Force
-```
-
-```bash
-# Linux
-cp "$plugin_dir"/bin/launch-session.* "$install_dir/bin/"
-chmod +x "$install_dir"/bin/*.sh
-```
-
-### 5. Deploy binstubs
-
-Create thin wrappers in `~/.local/bin/` so `agent-worktrees` is on PATH:
-
-**Windows (`agent-worktrees.cmd`):**
-```bat
-@echo off
-"%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe" -m agent_worktrees %*
-```
-
-**Linux (`agent-worktrees`):**
-```bash
-#!/usr/bin/env bash
-exec "$HOME/.agent-worktrees/.venv/bin/python" -m agent_worktrees "$@"
-```
-
-### 6. Copy terminal multiplexer config
-
-```powershell
-Copy-Item "$pluginDir\terminal\psmux.conf" "$env:USERPROFILE\.psmux.conf" -Force
-```
-
-### 7. Verify
+### Step 3 — Verify
 
 ```
 agent-worktrees --help
@@ -137,14 +88,18 @@ If `agent-worktrees` is not found, ensure `~/.local/bin` is on PATH.
 
 ## Update Flow
 
-When the plugin is updated (`copilot plugin update agent-worktrees`),
-re-run init to pick up new source:
+The plugin contributes a `sessionStart` hook that auto-detects when the
+deployed runtime is stale (commit mismatch) and re-deploys the package
+automatically. Manual updates are rarely needed.
 
-```powershell
-& "$env:USERPROFILE\.agent-worktrees\.venv\Scripts\pip" install --upgrade "$pluginDir"
-```
+To force a manual re-deploy, re-run the init script.
 
 ## Next Step
 
-After init completes, `cd` into a repo and run the `agent-worktrees-adopt`
-skill to register it as a managed project.
+After init completes, `cd` into a repo and run:
+
+```
+agent-worktrees register <project-name> --repo-dir <path>
+```
+
+Or ask Copilot to adopt a repo with the `agent-worktrees-adopt` skill.

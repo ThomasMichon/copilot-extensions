@@ -1,0 +1,276 @@
+<#
+.SYNOPSIS
+    Bootstrap the agent-worktrees runtime. PS5+ compatible.
+
+.DESCRIPTION
+    Creates the shared runtime at ~/.agent-worktrees/ -- venv, Python
+    package (file copy), shell wrappers, bootstrap scripts, and the
+    agent-worktrees binstub.
+
+    Run once per machine. Idempotent -- safe to re-run for repairs or
+    upgrades. Does NOT create per-project config or binstubs; use
+    "agent-worktrees register" or the adopt skill for that.
+
+    This script has no dependencies on service-utils.ps1 and works
+    under both PowerShell 5.1 (powershell.exe) and PowerShell 7+ (pwsh).
+
+.PARAMETER InstallDir
+    Override the runtime install directory (default: ~/.agent-worktrees).
+
+.PARAMETER Force
+    Re-create the venv even if it already exists.
+#>
+[CmdletBinding()]
+param(
+    [string]$InstallDir,
+    [switch]$Force
+)
+
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+
+# -- Output helpers (PS5-safe) ------------------------------------------
+
+function Write-Ok      { param([string]$Msg) Write-Host "  [OK]   $Msg" -ForegroundColor Green }
+function Write-Skip    { param([string]$Msg) Write-Host "  [SKIP] $Msg" -ForegroundColor Cyan }
+function Write-Fail    { param([string]$Msg) Write-Host "  [FAIL] $Msg" -ForegroundColor Red }
+function Write-Step    { param([string]$Msg) Write-Host "  ...    $Msg" -ForegroundColor DarkGray }
+
+# -- Paths --------------------------------------------------------------
+
+$PluginDir  = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$ScriptDir  = $PSScriptRoot
+$BinSrcDir  = Join-Path $PluginDir 'bin'
+$PkgSrcDir  = Join-Path $PluginDir 'src\agent_worktrees'
+
+if (-not $InstallDir) {
+    $InstallDir = Join-Path $env:USERPROFILE '.agent-worktrees'
+}
+$LibDir     = Join-Path $InstallDir 'lib'
+$BinDir     = Join-Path $InstallDir 'bin'
+$VenvDir    = Join-Path $InstallDir '.venv'
+$LocalBin   = Join-Path $env:USERPROFILE '.local\bin'
+
+if ($env:OS -eq 'Windows_NT') {
+    $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+} else {
+    $VenvPython = Join-Path $VenvDir 'bin/python'
+}
+
+# -- Preflight checks --------------------------------------------------
+
+Write-Host ''
+Write-Host '=== agent-worktrees init ===' -ForegroundColor Cyan
+Write-Host ''
+
+if (-not (Test-Path $PkgSrcDir)) {
+    Write-Fail "Package source not found at $PkgSrcDir"
+    Write-Host "  Are you running this from the correct plugin directory?"
+    exit 1
+}
+
+# Find a Python interpreter (skip Windows Store aliases that aren't real)
+$pythonCmd = $null
+foreach ($candidate in @('python', 'python3', 'py')) {
+    $found = Get-Command $candidate -ErrorAction SilentlyContinue
+    if ($found) {
+        try {
+            $testOut = & $found.Source --version 2>&1
+            if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') {
+                $pythonCmd = $found.Source
+                break
+            }
+        } catch { }
+    }
+}
+if (-not $pythonCmd) {
+    Write-Fail 'Python not found on PATH (need 3.10+)'
+    exit 1
+}
+
+$pyVer = & $pythonCmd -c "import sys; print('{0}.{1}'.format(sys.version_info.major, sys.version_info.minor))" 2>$null
+Write-Ok "Python: $pythonCmd ($pyVer)"
+
+$gitVer = git --version 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail 'git not found on PATH'
+    exit 1
+}
+Write-Ok "Git: $gitVer"
+
+# -- 1. Create directories ---------------------------------------------
+
+foreach ($dir in @($InstallDir, $LibDir, $BinDir, $LocalBin)) {
+    if (-not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+}
+Write-Ok "Directories: $InstallDir"
+
+# -- 2. Create venv ----------------------------------------------------
+
+if ($Force -or -not (Test-Path $VenvPython)) {
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+    if ($uvCmd) {
+        Write-Step 'Creating venv via uv...'
+        $uvArgs = @('venv', $VenvDir, '--allow-existing')
+        & uv @uvArgs 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Step 'uv venv failed -- falling back to python -m venv'
+            & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
+        }
+    } else {
+        Write-Step 'Creating venv via python -m venv...'
+        & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
+    }
+    $ErrorActionPreference = $prevEAP
+
+    if (-not (Test-Path $VenvPython)) {
+        Write-Fail "Venv creation failed -- $VenvPython not found"
+        exit 1
+    }
+    Write-Ok 'Venv created'
+} else {
+    Write-Skip 'Venv already exists'
+}
+
+# -- 3. Install dependencies into venv ---------------------------------
+
+$uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+if ($uvCmd) {
+    & uv pip install --python $VenvPython pyyaml 2>&1 | Out-Null
+} else {
+    & $VenvPython -m pip install --quiet pyyaml 2>&1 | Out-Null
+}
+$depResult = $LASTEXITCODE
+$ErrorActionPreference = $prevEAP
+if ($depResult -ne 0) {
+    Write-Fail 'Failed to install pyyaml'
+    exit 1
+}
+Write-Ok 'Dependencies: pyyaml'
+
+# -- 4. Deploy package (file copy to lib/) -----------------------------
+
+$PkgDst = Join-Path $LibDir 'agent_worktrees'
+if (Test-Path $PkgDst) {
+    Remove-Item $PkgDst -Recurse -Force
+}
+Copy-Item $PkgSrcDir $PkgDst -Recurse
+Write-Ok "Package deployed to $PkgDst"
+
+# -- 5. Deploy wrappers & bootstrap scripts ----------------------------
+
+if ($env:OS -eq 'Windows_NT') {
+    $wrappers = @('launch-session.cmd', 'launch-session.ps1')
+} else {
+    $wrappers = @('launch-session.sh')
+}
+
+foreach ($name in $wrappers) {
+    $src = Join-Path $BinSrcDir $name
+    if (Test-Path $src) {
+        Copy-Item $src (Join-Path $BinDir $name) -Force
+        Write-Ok "Wrapper: $name"
+    } else {
+        Write-Fail "Wrapper not found: $src"
+    }
+}
+
+foreach ($name in @('bootstrap-check.ps1', 'bootstrap-check.sh')) {
+    $src = Join-Path $ScriptDir $name
+    if (Test-Path $src) {
+        Copy-Item $src (Join-Path $BinDir $name) -Force
+        Write-Ok "Bootstrap: $name"
+    }
+}
+
+# -- 6. Deploy binstub -------------------------------------------------
+
+if ($env:OS -eq 'Windows_NT') {
+    $stubPath = Join-Path $LocalBin 'agent-worktrees.cmd'
+    $stubContent = "@echo off`r`n`"%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe`" -m agent_worktrees %*"
+    [System.IO.File]::WriteAllText($stubPath, $stubContent)
+    Write-Ok "Binstub: $stubPath"
+} else {
+    $stubPath = Join-Path $LocalBin 'agent-worktrees'
+    $stubContent = "#!/usr/bin/env bash`nexec `"`$HOME/.agent-worktrees/.venv/bin/python`" -m agent_worktrees `"`$@`""
+    [System.IO.File]::WriteAllText($stubPath, $stubContent)
+    & chmod +x $stubPath 2>$null
+    Write-Ok "Binstub: $stubPath"
+}
+
+# -- 7. Write deploy manifest ------------------------------------------
+
+$manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
+
+$repoRoot = $null
+try {
+    $repoRoot = (git -C $PluginDir rev-parse --show-toplevel 2>$null)
+} catch { }
+
+$commit = $null
+if ($repoRoot) {
+    try { $commit = (git -C $repoRoot rev-parse HEAD 2>$null) } catch { }
+}
+
+# Build manifest as hashtable, convert to JSON (PS5-safe)
+$manifest = @{
+    service       = 'agent-worktrees'
+    commit        = $(if ($commit) { $commit } else { 'unknown' })
+    deployed_at   = (Get-Date -Format 'o')
+    runtime       = 'python'
+    plugin_source = $PluginDir
+    install_dir   = $InstallDir
+}
+
+$manifestJson = $manifest | ConvertTo-Json -Depth 4
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($manifestPath, $manifestJson, $utf8NoBom)
+Write-Ok "Manifest: $manifestPath"
+
+# -- 8. Verify ---------------------------------------------------------
+
+Write-Host ''
+$env:PYTHONPATH = $LibDir
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$importCheck = & $VenvPython -c "import agent_worktrees; print('OK')" 2>$null
+$ErrorActionPreference = $prevEAP
+if ($importCheck -eq 'OK') {
+    Write-Ok 'Verification: module imports successfully'
+} else {
+    Write-Fail 'Verification: module import failed'
+    exit 1
+}
+
+# Check PATH
+$pathDirs = $env:PATH -split [System.IO.Path]::PathSeparator
+$localBinNorm = $LocalBin.TrimEnd('\', '/')
+$onPath = $false
+foreach ($dir in $pathDirs) {
+    if ($dir.TrimEnd('\', '/') -eq $localBinNorm) {
+        $onPath = $true
+        break
+    }
+}
+if ($onPath) {
+    Write-Ok "PATH: $LocalBin is on PATH"
+} else {
+    Write-Host "  [WARN] $LocalBin is not on PATH -- add it to use agent-worktrees globally" -ForegroundColor Yellow
+}
+
+Write-Host ''
+Write-Host '=== Init complete ===' -ForegroundColor Green
+Write-Host ''
+Write-Host "  Runtime:  $InstallDir" -ForegroundColor DarkGray
+Write-Host "  Binstub:  agent-worktrees" -ForegroundColor DarkGray
+Write-Host ''
+Write-Host '  Next: cd into a repo and run: agent-worktrees register <project-name>' -ForegroundColor DarkGray
+Write-Host '  Or ask Copilot to adopt a repo with the agent-worktrees-adopt skill.' -ForegroundColor DarkGray
+Write-Host ''
+exit 0
