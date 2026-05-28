@@ -84,41 +84,105 @@ if [[ "${WORKTREE_RECOVERY:-${APERTURE_RECOVERY:-}}" == "1" ]] && [[ ! -x "$PYTH
 fi
 
 # ── Plugin auto-update ─────────────────────────────────────────────────────
-# If installed from the copilot-extensions plugin, check for updates and
-# re-install the package when the plugin source changes.
+# If installed from the copilot-extensions marketplace plugin, check for
+# updates.  When the plugin source changes: run the full installer (which
+# deploys package, launch scripts, binstubs, terminal configs), then
+# re-exec into the newly deployed launch-session so the rest of the boot
+# uses updated code.
+#
+# Guard: WORKTREE_NO_UPDATE=1 skips this block entirely (set by --no-update
+# and by the re-exec below to prevent infinite loops).
 
 _NO_UPDATE="${WORKTREE_NO_UPDATE:-${APERTURE_NO_UPDATE:-}}"
 if [[ "$_NO_UPDATE" != "1" ]]; then
-    _PLUGIN_DIR="$HOME/.copilot/installed-plugins/copilot-extensions/agent-worktrees"
-    if [[ -d "$_PLUGIN_DIR" ]]; then
-        setup_log INFO 'Plugin auto-update: checking for updates'
-        _PYPROJECT="$_PLUGIN_DIR/pyproject.toml"
-        _OLD_HASH=""
-        if [[ -f "$_PYPROJECT" ]]; then
-            _OLD_HASH=$(sha256sum "$_PYPROJECT" 2>/dev/null | cut -d' ' -f1) || true
-        fi
+    # Discover the active plugin directory (marketplace or _direct layout)
+    _PLUGIN_DIR=""
+    _PLUGIN_LAYOUT=""
+    _MKT_DIR="$HOME/.copilot/installed-plugins/copilot-extensions/agent-worktrees"
+    _DIRECT_ROOT="$HOME/.copilot/installed-plugins/_direct"
 
-        # Try to update the plugin from the marketplace
-        if command -v copilot &>/dev/null; then
-            _UPDATE_OUT=$(copilot plugin update agent-worktrees 2>&1) || true
-            setup_log INFO "Plugin update result: $_UPDATE_OUT"
-        fi
-
-        # If pyproject.toml changed, re-install the package into the venv
-        _NEW_HASH=""
-        if [[ -f "$_PYPROJECT" ]]; then
-            _NEW_HASH=$(sha256sum "$_PYPROJECT" 2>/dev/null | cut -d' ' -f1) || true
-        fi
-        if [[ -n "$_NEW_HASH" && "$_NEW_HASH" != "$_OLD_HASH" ]]; then
-            setup_log INFO 'Plugin source changed — re-installing package'
-            _PIP="$RUNTIME_DIR/.venv/bin/pip"
-            if [[ -x "$_PIP" ]]; then
-                if "$_PIP" install --quiet --upgrade "$_PLUGIN_DIR" 2>/dev/null; then
-                    setup_log INFO 'Package re-installed successfully'
-                else
-                    setup_log WARN 'Package re-install failed — proceeding with existing version'
+    if [[ -d "$_MKT_DIR" ]]; then
+        _PLUGIN_DIR="$_MKT_DIR"
+        _PLUGIN_LAYOUT="marketplace"
+    elif [[ -d "$_DIRECT_ROOT" ]]; then
+        for _dir in "$_DIRECT_ROOT"/*/; do
+            _manifest="${_dir}plugin.json"
+            if [[ -f "$_manifest" ]]; then
+                _name=$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$_manifest" 2>/dev/null \
+                       | head -1 | sed 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+                if [[ "$_name" == "agent-worktrees" ]]; then
+                    _PLUGIN_DIR="${_dir%/}"
+                    _PLUGIN_LAYOUT="direct"
+                    break
                 fi
             fi
+        done
+    fi
+
+    if [[ -n "$_PLUGIN_DIR" ]]; then
+        setup_log INFO "Plugin auto-update: layout=$_PLUGIN_LAYOUT dir=$_PLUGIN_DIR"
+
+        # Snapshot key plugin files to detect changes after update
+        _HASH_FILES="pyproject.toml plugin.json bin/launch-session.ps1 bin/launch-session.sh scripts/install.ps1 scripts/install.sh"
+        _OLD_FP=""
+        for _f in $_HASH_FILES; do
+            _fp="$_PLUGIN_DIR/$_f"
+            if [[ -f "$_fp" ]]; then
+                _OLD_FP+=$(sha256sum "$_fp" 2>/dev/null | cut -d' ' -f1)
+            fi
+        done
+
+        # Try to update the plugin from the marketplace
+        if [[ "$_PLUGIN_LAYOUT" == "marketplace" ]]; then
+            if command -v copilot &>/dev/null; then
+                setup_log INFO 'Running: copilot plugin update agent-worktrees@copilot-extensions'
+                _UPDATE_OUT=$(copilot plugin update agent-worktrees@copilot-extensions 2>&1) || true
+                setup_log INFO "Plugin update result: $_UPDATE_OUT"
+            fi
+        else
+            setup_log INFO 'Direct-install layout -- skipping marketplace update'
+        fi
+
+        # Check if any tracked files changed
+        _NEW_FP=""
+        for _f in $_HASH_FILES; do
+            _fp="$_PLUGIN_DIR/$_f"
+            if [[ -f "$_fp" ]]; then
+                _NEW_FP+=$(sha256sum "$_fp" 2>/dev/null | cut -d' ' -f1)
+            fi
+        done
+
+        if [[ -n "$_NEW_FP" && "$_NEW_FP" != "$_OLD_FP" ]]; then
+            setup_log INFO 'Plugin source changed -- running full installer update'
+
+            _PLUGIN_INSTALLER="$_PLUGIN_DIR/scripts/install.sh"
+            if [[ -f "$_PLUGIN_INSTALLER" ]]; then
+                _INST_ARGS=(update)
+                if [[ -n "${WORKTREE_PROJECT:-}" ]]; then
+                    _INST_ARGS+=(--project-name "$WORKTREE_PROJECT")
+                fi
+
+                if bash "$_PLUGIN_INSTALLER" "${_INST_ARGS[@]}" 2>&1 | while IFS= read -r _line; do
+                    setup_log INFO "installer: $_line"
+                done; then
+                    setup_log INFO 'Installer update succeeded -- re-execing into new launch-session'
+
+                    _NEW_LAUNCHER="$HOME/.agent-worktrees/bin/launch-session.sh"
+                    if [[ -x "$_NEW_LAUNCHER" ]]; then
+                        export WORKTREE_NO_UPDATE=1
+                        export APERTURE_NO_UPDATE=1
+                        exec "$_NEW_LAUNCHER" "$@"
+                    else
+                        setup_log WARN 'Updated but deployed launcher missing; continuing current process'
+                    fi
+                else
+                    setup_log WARN "Installer update failed (exit $?) -- continuing with existing version"
+                fi
+            else
+                setup_log WARN "Plugin installer not found at $_PLUGIN_INSTALLER -- skipping"
+            fi
+        else
+            setup_log INFO 'Plugin source unchanged -- no update needed'
         fi
     fi
 fi

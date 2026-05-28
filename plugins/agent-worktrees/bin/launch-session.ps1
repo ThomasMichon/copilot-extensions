@@ -128,41 +128,112 @@ $env:PYTHONPATH = Join-Path $RuntimeDir 'lib'
 $env:PYTHONHOME = $null
 
 # ── Plugin auto-update ────────────────────────────────────────────────────
-# If installed from the copilot-extensions plugin, check for updates and
-# re-install the package when the plugin source changes.
+# If installed from the copilot-extensions marketplace plugin, check for
+# updates.  When the plugin source changes: run the full installer (which
+# deploys package, launch scripts, binstubs, terminal configs), then
+# re-exec into the newly deployed launch-session so the rest of the boot
+# uses updated code.
+#
+# Guard: WORKTREE_NO_UPDATE=1 skips this block entirely (set by --no-update
+# and by the re-exec below to prevent infinite loops).
 
 $noUpdate = ($env:WORKTREE_NO_UPDATE -eq '1') -or ($env:APERTURE_NO_UPDATE -eq '1')
 if (-not $noUpdate) {
-    $pluginDir = Join-Path $env:USERPROFILE '.copilot\installed-plugins\copilot-extensions\agent-worktrees'
-    if (Test-Path $pluginDir) {
-        Write-SetupLog 'Plugin auto-update: checking for updates'
-        # Snapshot the current plugin state to detect changes
-        $pyprojectFile = Join-Path $pluginDir 'pyproject.toml'
-        $oldHash = if (Test-Path $pyprojectFile) {
-            (Get-FileHash $pyprojectFile -Algorithm SHA256).Hash
-        } else { '' }
+    # Discover the active plugin directory (marketplace or _direct layout)
+    $pluginDir = $null
+    $pluginLayout = $null
+    $marketplaceDir = Join-Path $env:USERPROFILE '.copilot\installed-plugins\copilot-extensions\agent-worktrees'
+    $directPlugins = Join-Path $env:USERPROFILE '.copilot\installed-plugins\_direct'
 
-        # Try to update the plugin from the marketplace
-        if (Get-Command copilot -ErrorAction SilentlyContinue) {
-            $updateOutput = copilot plugin update agent-worktrees 2>&1
-            Write-SetupLog "Plugin update result: $updateOutput"
+    if (Test-Path $marketplaceDir) {
+        $pluginDir = $marketplaceDir
+        $pluginLayout = 'marketplace'
+    } elseif (Test-Path $directPlugins) {
+        # Scan _direct layout for agent-worktrees plugin
+        foreach ($dir in Get-ChildItem -Directory $directPlugins -ErrorAction SilentlyContinue) {
+            $manifest = Join-Path $dir.FullName 'plugin.json'
+            if (Test-Path $manifest) {
+                try {
+                    $pj = Get-Content $manifest -Raw | ConvertFrom-Json
+                    if ($pj.name -eq 'agent-worktrees') {
+                        $pluginDir = $dir.FullName
+                        $pluginLayout = 'direct'
+                        break
+                    }
+                } catch {}
+            }
+        }
+    }
+
+    if ($pluginDir) {
+        Write-SetupLog "Plugin auto-update: layout=$pluginLayout dir=$pluginDir"
+
+        # Snapshot key plugin files to detect changes after update
+        $hashFiles = @('pyproject.toml', 'plugin.json',
+                       'bin\launch-session.ps1', 'bin\launch-session.sh',
+                       'scripts\install.ps1', 'scripts\install.sh')
+        $oldFingerprint = ''
+        foreach ($f in $hashFiles) {
+            $fp = Join-Path $pluginDir $f
+            if (Test-Path $fp) {
+                $oldFingerprint += (Get-FileHash $fp -Algorithm SHA256).Hash
+            }
         }
 
-        # If pyproject.toml changed, re-install the package into the venv
-        $newHash = if (Test-Path $pyprojectFile) {
-            (Get-FileHash $pyprojectFile -Algorithm SHA256).Hash
-        } else { '' }
-        if ($newHash -ne $oldHash -and $newHash -ne '') {
-            Write-SetupLog 'Plugin source changed — re-installing package'
-            $pipExe = Join-Path $RuntimeDir '.venv\Scripts\pip.exe'
-            if (Test-Path $pipExe) {
-                & $pipExe install --quiet --upgrade $pluginDir 2>&1 | Out-Null
-                if ($LASTEXITCODE -eq 0) {
-                    Write-SetupLog 'Package re-installed successfully'
-                } else {
-                    Write-SetupLog 'Package re-install failed — proceeding with existing version' 'WARN'
-                }
+        # Try to update the plugin from the marketplace
+        if ($pluginLayout -eq 'marketplace') {
+            if (Get-Command copilot -ErrorAction SilentlyContinue) {
+                Write-SetupLog 'Running: copilot plugin update agent-worktrees@copilot-extensions'
+                $updateOutput = copilot plugin update agent-worktrees@copilot-extensions 2>&1
+                Write-SetupLog "Plugin update result: $updateOutput"
             }
+        } else {
+            Write-SetupLog 'Direct-install layout — skipping marketplace update'
+        }
+
+        # Check if any tracked files changed
+        $newFingerprint = ''
+        foreach ($f in $hashFiles) {
+            $fp = Join-Path $pluginDir $f
+            if (Test-Path $fp) {
+                $newFingerprint += (Get-FileHash $fp -Algorithm SHA256).Hash
+            }
+        }
+
+        if ($newFingerprint -ne $oldFingerprint -and $newFingerprint -ne '') {
+            Write-SetupLog 'Plugin source changed — running full installer update'
+
+            $pluginInstaller = Join-Path $pluginDir 'scripts\install.ps1'
+            if (Test-Path $pluginInstaller) {
+                $installerArgs = @('update')
+                if ($env:WORKTREE_PROJECT) {
+                    $installerArgs += @('-ProjectName', $env:WORKTREE_PROJECT)
+                }
+
+                & pwsh.exe -NoProfile -File $pluginInstaller @installerArgs 2>&1 |
+                    ForEach-Object { Write-SetupLog "installer: $_" }
+
+                if ($LASTEXITCODE -eq 0) {
+                    Write-SetupLog 'Installer update succeeded — re-execing into new launch-session'
+
+                    # Re-exec into the newly deployed launch-session
+                    $newLauncher = Join-Path $env:USERPROFILE '.agent-worktrees\bin\launch-session.ps1'
+                    if (Test-Path $newLauncher) {
+                        $env:WORKTREE_NO_UPDATE = '1'
+                        $env:APERTURE_NO_UPDATE = '1'
+                        & pwsh.exe -NoProfile -File $newLauncher @CopilotArgs
+                        exit $LASTEXITCODE
+                    } else {
+                        Write-SetupLog 'Updated but deployed launcher missing; continuing current process' 'WARN'
+                    }
+                } else {
+                    Write-SetupLog "Installer update failed (exit $LASTEXITCODE) — continuing with existing version" 'WARN'
+                }
+            } else {
+                Write-SetupLog "Plugin installer not found at $pluginInstaller — skipping" 'WARN'
+            }
+        } else {
+            Write-SetupLog 'Plugin source unchanged — no update needed'
         }
     }
 }
