@@ -11,10 +11,12 @@
 #
 # Usage:
 #   bash plugins/agent-worktrees/scripts/install.sh install
+#   bash plugins/agent-worktrees/scripts/install.sh install --project-name my-repo
 #   bash plugins/agent-worktrees/scripts/install.sh status
 #   bash plugins/agent-worktrees/scripts/install.sh update
 #
 # Options:
+#   --project-name N Project name (auto-detected if omitted)
 #   --force          Overwrite config without drift confirmation
 #   --remove-config  On uninstall: also delete config and session metadata
 #   --machine NAME   Machine name (auto-detected if omitted)
@@ -24,24 +26,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-# Auto-detect REPO_DIR from existing config, common locations, or CWD
-REPO_DIR=""
-_config_file="$HOME/.aperture-labs/config.yaml"
-if [[ -f "$_config_file" ]]; then
-    _anchor=$(grep 'anchor:' "$_config_file" 2>/dev/null | head -1 | sed 's/.*anchor:\s*//')
-    if [[ -d "$_anchor/.git" ]]; then
-        REPO_DIR="$_anchor"
-    fi
-fi
-if [[ -z "$REPO_DIR" ]]; then
-    for _candidate in "$HOME/Src/aperture-labs" "/opt/aperture-labs"; do
-        if [[ -d "$_candidate/.git" ]]; then
-            REPO_DIR="$_candidate"
-            break
-        fi
-    done
-fi
 
 # Ensure ~/.local/bin is on PATH (uv, pip-installed tools live here;
 # non-interactive SSH sessions often miss it)
@@ -57,20 +41,73 @@ shift || true
 FORCE=false
 REMOVE_CONFIG=false
 MACHINE=""
+PROJECT_NAME_ARG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force)         FORCE=true; shift ;;
         --remove-config) REMOVE_CONFIG=true; shift ;;
         --machine)       MACHINE="$2"; shift 2 ;;
+        --project-name)  PROJECT_NAME_ARG="$2"; shift 2 ;;
         *)               echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
 
+# ── Infer project name ──────────────────────────────────────────────────
+# Priority: --project-name arg > WORKTREE_PROJECT env > existing config > CWD repo
+
+PROJECT_NAME=""
+
+if [[ -n "$PROJECT_NAME_ARG" ]]; then
+    PROJECT_NAME="$PROJECT_NAME_ARG"
+elif [[ -n "${WORKTREE_PROJECT:-}" ]]; then
+    PROJECT_NAME="$WORKTREE_PROJECT"
+else
+    # Try to infer from CWD basename matching an existing config dir
+    _cwd_name="$(basename "$PWD")"
+    if [[ -f "$HOME/.$_cwd_name/config.yaml" ]]; then
+        PROJECT_NAME="$_cwd_name"
+    fi
+fi
+if [[ -z "$PROJECT_NAME" ]]; then
+    # Final fallback: detect from CWD being a git repo
+    _git_root="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ -n "$_git_root" ]]; then
+        PROJECT_NAME="$(basename "$_git_root")"
+    fi
+fi
+if [[ -z "$PROJECT_NAME" ]]; then
+    echo "ERROR: Cannot determine project name." >&2
+    echo "  Provide --project-name, set WORKTREE_PROJECT, or run from within a repo." >&2
+    exit 1
+fi
+
+# Validate project name (safe for dotdirs, binstubs, YAML keys)
+if [[ ! "$PROJECT_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "ERROR: Invalid project name '$PROJECT_NAME' — must match [A-Za-z0-9._-]+" >&2
+    exit 1
+fi
+
+# ── Detect REPO_DIR from project config, then CWD ───────────────────────
+
+REPO_DIR=""
+_config_file="$HOME/.$PROJECT_NAME/config.yaml"
+if [[ -f "$_config_file" ]]; then
+    _anchor=$(grep 'anchor:' "$_config_file" 2>/dev/null | head -1 | sed 's/.*anchor:\s*//')
+    if [[ -n "$_anchor" ]] && git -C "$_anchor" rev-parse --show-toplevel >/dev/null 2>&1; then
+        REPO_DIR="$_anchor"
+    fi
+fi
+if [[ -z "$REPO_DIR" ]]; then
+    _git_root="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ -n "$_git_root" ]]; then
+        REPO_DIR="$_git_root"
+    fi
+fi
+
 # ── Metadata ─────────────────────────────────────────────────────────────
 
 SERVICE_NAME="Worktree Session Manager"
-PROJECT_NAME="aperture-labs"
 INSTALL_DIR="$HOME/.agent-worktrees"
 PROJECT_DIR="$HOME/.$PROJECT_NAME"
 BIN_DIR="$INSTALL_DIR/bin"
@@ -133,6 +170,72 @@ detect_platform() {
     else
         echo "linux"
     fi
+}
+
+# ── Projects registry ────────────────────────────────────────────────────
+
+PROJECTS_YAML="$INSTALL_DIR/projects.yaml"
+
+register_project() {
+    # Add or update this project in the projects registry.
+    # Must be called after deploy_venv (requires Python + pyyaml).
+    if [[ ! -x "$VENV_PYTHON" ]]; then
+        skipped "Projects registry: venv not ready"
+        return
+    fi
+
+    local default_branch="master"
+    local cfg_path="$PROJECT_DIR/config.yaml"
+    if [[ -f "$cfg_path" ]]; then
+        local _db
+        _db=$(grep 'default_branch:' "$cfg_path" 2>/dev/null | head -1 | sed 's/.*default_branch:\s*//')
+        if [[ -n "$_db" ]]; then
+            default_branch="$_db"
+        fi
+    fi
+
+    local machines_yaml=""
+    if [[ -n "$REPO_DIR" && -f "$REPO_DIR/machines.yaml" ]]; then
+        machines_yaml="$REPO_DIR/machines.yaml"
+    fi
+
+    "$VENV_PYTHON" -c "
+import yaml, sys, os
+from pathlib import Path
+from datetime import datetime, timezone
+
+projects_path = Path(sys.argv[1])
+project_name = sys.argv[2]
+anchor = sys.argv[3]
+machines_yaml = sys.argv[4]
+default_branch = sys.argv[5]
+config_dir = sys.argv[6]
+
+# Read existing registry
+if projects_path.exists():
+    try:
+        data = yaml.safe_load(projects_path.read_text()) or {}
+    except yaml.YAMLError:
+        data = {}
+else:
+    data = {}
+
+projects = data.setdefault('projects', {})
+projects[project_name] = {
+    'anchor': anchor or None,
+    'machines_yaml': machines_yaml or None,
+    'registered_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+    'default_branch': default_branch,
+    'config_dir': config_dir,
+}
+
+# Write back
+projects_path.parent.mkdir(parents=True, exist_ok=True)
+header = '# ~/.agent-worktrees/projects.yaml\n# Registry of adopted repos for terminal profile generation.\n\n'
+projects_path.write_text(header + yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True))
+" "$PROJECTS_YAML" "$PROJECT_NAME" "${REPO_DIR:-}" "${machines_yaml:-}" "$default_branch" "~/.$PROJECT_NAME"
+
+    ok "Project '$PROJECT_NAME' registered in projects.yaml"
 }
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -428,6 +531,7 @@ template_path = sys.argv[1]
 config_path = sys.argv[2]
 machines_path = sys.argv[3]
 self_machine = sys.argv[4] if len(sys.argv) > 4 else ''
+project_name = sys.argv[5] if len(sys.argv) > 5 else 'aperture-labs'
 
 template = yaml.safe_load(Path(template_path).read_text())
 local_profile = template['profile']
@@ -458,7 +562,7 @@ def upsert_profile(prof):
         return True
     return False
 
-# Local Aperture Labs profile (insert at front)
+# Local project profile (insert at front)
 existing_idx = next((i for i, p in enumerate(profiles) if p.get('id') == local_profile['id']), None)
 if existing_idx is not None:
     if profiles[existing_idx] != local_profile:
@@ -510,14 +614,16 @@ if Path(machines_path).exists():
             if upsert_profile(ssh_profile):
                 changed = True
 
-            # Aperture Labs launcher profile — SSH + run binstub
-            binstub = 'aperture-labs.cmd' if shell == 'pwsh' else 'aperture-labs'
-            al_id = f'aperture-labs:{key}-{env_name}'
-            al_label = display_name if env_label == 'Linux' else f'{display_name} {env_label}'
-            al_profile = {
-                'id': al_id,
+            # Project launcher profile — SSH + run binstub
+            binstub = f'{project_name}.cmd' if shell == 'pwsh' else project_name
+            launcher_id = f'{project_name}:{key}-{env_name}'
+            launcher_label = display_name if env_label == 'Linux' else f'{display_name} {env_label}'
+            # Title-case the project name for display
+            display_project = project_name.replace('-', ' ').title()
+            launcher_profile = {
+                'id': launcher_id,
                 'type': 'local',
-                'name': f'Aperture Labs ({al_label})',
+                'name': f'{display_project} ({launcher_label})',
                 'icon': 'fa-flask',
                 'color': '#F6A821',
                 'isBuiltin': False,
@@ -528,7 +634,7 @@ if Path(machines_path).exists():
                     'env': {},
                 },
             }
-            if upsert_profile(al_profile):
+            if upsert_profile(launcher_profile):
                 changed = True
 
 # Set global color scheme to Aperture Science
@@ -543,7 +649,7 @@ if changed:
     print('changed')
 else:
     print('ok')
-" "$tabby_template" "$tabby_config" "$machines_yaml" "$machine"
+" "$tabby_template" "$tabby_config" "$machines_yaml" "$machine" "$PROJECT_NAME"
 
     local result=$?
     if [[ $result -ne 0 ]]; then
@@ -557,10 +663,13 @@ else:
 import sys, yaml
 from pathlib import Path
 
+project_name = sys.argv[2]
+local_id = f'local:{project_name}'
+
 config = yaml.safe_load(Path(sys.argv[1]).read_text()) or {}
 profiles = config.get('profiles', [])
 ids = {p.get('id', '') for p in profiles}
-has_local = 'local:aperture-labs' in ids
+has_local = local_id in ids
 has_ssh = any(pid.startswith('ssh:') for pid in ids)
 scheme_name = config.get('terminal', {}).get('colorScheme', {}).get('name', '')
 if has_local and scheme_name == 'Aperture Science':
@@ -570,14 +679,17 @@ if has_local and scheme_name == 'Aperture Science':
         print('ok_local_only')
 else:
     print('err')
-" "$tabby_config")
+" "$tabby_config" "$PROJECT_NAME")
+
+    local display_project
+    display_project="$(echo "$PROJECT_NAME" | tr '-' ' ' | sed 's/\b\(.\)/\u\1/g')"
 
     case "$status" in
         ok_with_ssh)
-            ok "Tabby profile: Aperture Labs + remote SSH profiles"
+            ok "Tabby profile: $display_project + remote SSH profiles"
             ;;
         ok_local_only)
-            ok "Tabby profile: Aperture Labs (no remote SSH profiles generated)"
+            ok "Tabby profile: $display_project (no remote SSH profiles generated)"
             ;;
         *)
             err "Tabby profile merge verification failed"
@@ -597,16 +709,19 @@ import sys, yaml
 from pathlib import Path
 
 config_path = sys.argv[1]
+project_name = sys.argv[2]
 config = yaml.safe_load(Path(config_path).read_text()) or {}
 
 profiles = config.get('profiles', [])
 original_len = len(profiles)
-# Remove local profile, SSH profiles, and Aperture Labs launcher profiles
+local_id = f'local:{project_name}'
+launcher_prefix = f'{project_name}:'
+# Remove local profile, SSH profiles, and project launcher profiles
 config['profiles'] = [
     p for p in profiles
-    if p.get('id') not in ('local:aperture-labs',)
+    if p.get('id') != local_id
     and not (p.get('id', '').startswith('ssh:'))
-    and not (p.get('id', '').startswith('aperture-labs:'))
+    and not (p.get('id', '').startswith(launcher_prefix))
 ]
 
 if len(config['profiles']) < original_len:
@@ -614,12 +729,12 @@ if len(config['profiles']) < original_len:
     print('removed')
 else:
     print('absent')
-" "$tabby_config"
+" "$tabby_config" "$PROJECT_NAME"
 
     local result
     result=$?
     if [[ $result -eq 0 ]]; then
-        changed "Removed Tabby Aperture Labs profiles (local + SSH)"
+        changed "Removed Tabby $PROJECT_NAME profiles (local + SSH)"
     fi
 }
 
@@ -636,14 +751,18 @@ check_tabby_profile() {
 import sys, yaml
 from pathlib import Path
 
+project_name = sys.argv[2]
+local_id = f'local:{project_name}'
+launcher_prefix = f'{project_name}:'
+
 config = yaml.safe_load(Path(sys.argv[1]).read_text()) or {}
 profiles = config.get('profiles', [])
 ids = {p.get('id', '') for p in profiles}
-has_local = 'local:aperture-labs' in ids
+has_local = local_id in ids
 has_ssh = any(pid.startswith('ssh:') for pid in ids)
-has_launchers = any(pid.startswith('aperture-labs:') for pid in ids)
+has_launchers = any(pid.startswith(launcher_prefix) for pid in ids)
 ssh_count = sum(1 for pid in ids if pid.startswith('ssh:'))
-launcher_count = sum(1 for pid in ids if pid.startswith('aperture-labs:'))
+launcher_count = sum(1 for pid in ids if pid.startswith(launcher_prefix))
 scheme_name = config.get('terminal', {}).get('colorScheme', {}).get('name', '')
 
 if has_local and scheme_name == 'Aperture Science':
@@ -657,28 +776,31 @@ elif has_local:
     print('profile_only')
 else:
     print('missing')
-" "$tabby_config" 2>/dev/null)
+" "$tabby_config" "$PROJECT_NAME" 2>/dev/null)
+
+    local display_project
+    display_project="$(echo "$PROJECT_NAME" | tr '-' ' ' | sed 's/\b\(.\)/\u\1/g')"
 
     case "$status" in
         ok:*)
             local ssh_n launcher_n
             ssh_n="$(echo "$status" | cut -d: -f2)"
             launcher_n="$(echo "$status" | cut -d: -f3)"
-            ok "Tabby: Aperture Labs + ${ssh_n} SSH + ${launcher_n} launcher profiles"
+            ok "Tabby: $display_project + ${ssh_n} SSH + ${launcher_n} launcher profiles"
             ;;
         ssh_only:*)
             local ssh_n
             ssh_n="$(echo "$status" | cut -d: -f2)"
-            changed "Tabby: Aperture Labs + ${ssh_n} SSH profiles (no launchers)"
+            changed "Tabby: $display_project + ${ssh_n} SSH profiles (no launchers)"
             ;;
         local_only)
-            changed "Tabby: Aperture Labs local only (no remote SSH profiles)"
+            changed "Tabby: $display_project local only (no remote SSH profiles)"
             ;;
         profile_only)
-            changed "Tabby: Aperture Labs present, but color scheme differs"
+            changed "Tabby: $display_project present, but color scheme differs"
             ;;
         missing)
-            err "Tabby profile: Aperture Labs not found"
+            err "Tabby profile: $display_project not found"
             ;;
         *)
             skipped "Tabby: could not check profile"
@@ -797,6 +919,7 @@ case "$ACTION" in
 
         machine="$(resolve_machine)"
         platform="$(detect_platform)"
+        echo "  Project:  $PROJECT_NAME"
         echo "  Machine:  $machine"
         echo "  Platform: $platform"
         if [[ -n "$REPO_DIR" ]]; then
@@ -827,6 +950,7 @@ case "$ACTION" in
         deploy_git_hooks_path
         deploy_copilot_plugin
         ensure_copilot_experimental
+        register_project
         assert_path
 
         # Deploy machine.instructions.md + AGENTS.md from machines.yaml
@@ -1046,6 +1170,7 @@ p.write_text(json.dumps(m, indent=2))
         deploy_git_hooks_path
         deploy_copilot_plugin
         ensure_copilot_experimental
+        register_project
 
         # Deploy machine.instructions.md + AGENTS.md from machines.yaml
         if [[ -n "$REPO_DIR" ]]; then
@@ -1073,7 +1198,7 @@ p.write_text(json.dumps(m, indent=2))
         ;;
 
     *)
-        echo "Usage: $0 {install|uninstall|start|stop|status|update-config|update} [--force] [--remove-config] [--machine NAME]" >&2
+        echo "Usage: $0 {install|uninstall|start|stop|status|update-config|update} [--project-name NAME] [--force] [--remove-config] [--machine NAME]" >&2
         exit 1
         ;;
 esac
