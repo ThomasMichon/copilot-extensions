@@ -1,0 +1,40 @@
+# Aperture Labs terminal profile for Tabby.
+# Merged into ~/.config/tabby/config.yaml by install.sh on Linux.
+# The installer also generates SSH profiles from machines.yaml.
+
+profile:
+  id: "local:aperture-labs"
+  type: local
+  name: Aperture Labs
+  icon: fa-flask
+  color: "#F6A821"
+  isBuiltin: false
+  options:
+    command: "aperture-labs"
+    args: []
+    cwd: ""
+    env: {}
+
+colorScheme:
+  name: Aperture Science
+  foreground: "#E8DFD0"
+  background: "#0C0C0C"
+  cursor: "#F6A821"
+  selection: "#3A3A5C"
+  colors:
+    - "#0C0C0C"
+    - "#E24C3E"
+    - "#6EA667"
+    - "#F6A821"
+    - "#3B8EEA"
+    - "#9B6BC4"
+    - "#4EC9B0"
+    - "#D4D4D4"
+    - "#3A3A3A"
+    - "#F44747"
+    - "#B5CEA8"
+    - "#FFD700"
+    - "#6CB6FF"
+    - "#D4BFFF"
+    - "#7EECD8"
+    - "#F0F0F0"
