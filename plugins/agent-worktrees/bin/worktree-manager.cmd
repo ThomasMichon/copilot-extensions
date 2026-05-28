@@ -7,7 +7,7 @@ if not defined WORKTREE_PROJECT (
 )
 
 rem Resolve runtime
-set "NEW_RUNTIME=%USERPROFILE%\.agent-worktrees"
+set "NEW_RUNTIME=%USERPROFILE%\.worktree-manager"
 
 if exist "%NEW_RUNTIME%\.venv\Scripts\python.exe" (
     set "PYTHON=%NEW_RUNTIME%\.venv\Scripts\python.exe"
@@ -18,5 +18,5 @@ if exist "%NEW_RUNTIME%\.venv\Scripts\python.exe" (
 )
 
 set "PYTHONUTF8=1"
-"%PYTHON%" -m agent_worktrees %*
+"%PYTHON%" -m worktree_manager %*
 exit /b %ERRORLEVEL%
