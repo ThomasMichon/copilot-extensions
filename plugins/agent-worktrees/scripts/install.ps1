@@ -709,11 +709,21 @@ function Clean-TerminalSettingsJson {
     $knownGuids = @('{e8ba8d13-cc41-5a92-b5dd-5e4a5418e9a0}', '{fd1e4088-c416-5daa-b87c-a6546fa1cc25}')
     $allGuids = @($knownGuids + $fragmentGuids) | Sort-Object -Unique
 
-    # Remove non-source profile entries that match our GUIDs or Aperture naming
+    # Remove stale profile entries that match our GUIDs or Aperture naming
     if ($json.profiles -and $json.profiles.list) {
         $before = $json.profiles.list.Count
+        # Check if legacy ApertureLabs fragment dir still exists
+        $legacyFragExists = Test-Path (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs')
         $json.profiles.list = @($json.profiles.list | Where-Object {
-            if ($_.PSObject.Properties['source']) { return $true }  # keep all source-tagged entries
+            if ($_.PSObject.Properties['source']) {
+                # Remove dead ApertureLabs-source entries (fragment deleted during migration)
+                # Only remove when the legacy fragment dir is gone AND GUID matches ours
+                if ($_.source -eq 'ApertureLabs' -and -not $legacyFragExists) {
+                    $isLegacyOurs = ($_.PSObject.Properties['guid'] -and $_.guid -in $allGuids)
+                    return -not $isLegacyOurs
+                }
+                return $true
+            }
             $isOurs = ($_.PSObject.Properties['guid'] -and $_.guid -in $allGuids) -or
                       ($_.PSObject.Properties['name'] -and $_.name -match 'Aperture.*Labs') -or
                       ($_.PSObject.Properties['commandline'] -and $_.commandline -match 'aperture-labs')
