@@ -3131,18 +3131,21 @@ def _print_boot_provenance() -> None:
     # 3. Plugin hook wired
     hook_found = False
     plugins_root = home / ".copilot" / "installed-plugins"
-    for hooks_json in plugins_root.rglob("hooks.json"):
-        try:
-            data = json.loads(hooks_json.read_text())
-            hooks = data.get("hooks", {})
-            for hook_list in hooks.values():
-                for hook in hook_list:
-                    cmd = hook.get("powershell", "") + hook.get("bash", "")
-                    if "bootstrap-check" in cmd:
-                        hook_found = True
-                        break
-        except Exception:
-            pass
+    if plugins_root.is_dir():
+        for hooks_json in plugins_root.rglob("hooks.json"):
+            try:
+                data = json.loads(hooks_json.read_text(encoding="utf-8"))
+                hooks = data.get("hooks", {})
+                for hook_list in hooks.values():
+                    if not isinstance(hook_list, list):
+                        continue
+                    for hook in hook_list:
+                        cmd = (hook.get("powershell") or "") + (hook.get("bash") or "")
+                        if "bootstrap-check" in cmd:
+                            hook_found = True
+                            break
+            except Exception:
+                pass
     checks.append(("session-hook", hook_found,
                     "bootstrap-check wired in sessionStart" if hook_found
                     else "sessionStart hook NOT FOUND"))
@@ -3172,10 +3175,10 @@ def _print_boot_provenance() -> None:
     if manifest_path.is_file():
         try:
             m = json.loads(manifest_path.read_text())
-            m_commit = m.get("commit", "")[:10]
+            m_commit = (m.get("commit") or "")[:10]
             try:
                 from ._build_info import BUILD_INFO
-                b_commit = BUILD_INFO.get("commit", "")[:10]
+                b_commit = (BUILD_INFO.get("commit") or "")[:10]
             except ImportError:
                 b_commit = ""
             if m_commit and b_commit and m_commit == b_commit:
