@@ -35,6 +35,7 @@ function Write-ServiceStatus {
 function Write-ServiceOk      { param([string]$Msg) Write-ServiceStatus '✓' 'Green'  $Msg }
 function Write-ServiceChanged { param([string]$Msg) Write-ServiceStatus '→' 'Yellow' $Msg }
 function Write-ServiceSkipped { param([string]$Msg) Write-ServiceStatus '○' 'Cyan'   $Msg }
+function Write-ServiceWarn    { param([string]$Msg) Write-ServiceStatus '!' 'Yellow' $Msg }
 function Write-ServiceErr     { param([string]$Msg) Write-ServiceStatus '✗' 'Red'    $Msg }
 
 function Write-ServiceHeader {
