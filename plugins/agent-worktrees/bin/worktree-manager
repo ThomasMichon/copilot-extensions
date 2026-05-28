@@ -7,13 +7,14 @@ if [[ -z "${WORKTREE_PROJECT:-}" ]]; then
 fi
 
 # Dual-layout: prefer new runtime, fall back to legacy
-if [[ -x "$HOME/.agent-worktrees/.venv/bin/python" ]]; then
-    PYTHON="$HOME/.agent-worktrees/.venv/bin/python"
-    export PYTHONPATH="$HOME/.agent-worktrees/lib"
+if [[ -x "$HOME/.worktree-manager/.venv/bin/python" ]]; then
+    PYTHON="$HOME/.worktree-manager/.venv/bin/python"
+    export PYTHONPATH="$HOME/.worktree-manager/lib"
 else
     echo "ERROR: Venv not found. Run the installer first." >&2
     exit 1
 fi
 
 unset PYTHONHOME
-exec "$PYTHON" -m agent_worktrees "$@"
+export PYTHONUTF8=1
+exec "$PYTHON" -m worktree_manager "$@"
