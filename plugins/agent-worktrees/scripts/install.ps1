@@ -7,15 +7,20 @@
     start, stop, status, update-config, update.
 
     Shared runtime (venv, package, wrappers) lives at ~/.agent-worktrees/.
-    Per-project config and state lives at ~/.{project}/ (default: ~/.aperture-labs/).
+    Per-project config and state lives at ~/.{project}/.
     Binstubs go to ~/.local/bin/.
 
     Run from the repo root:
       pwsh -File plugins\agent-worktrees\scripts\install.ps1 install
+      pwsh -File plugins\agent-worktrees\scripts\install.ps1 install -ProjectName my-repo
       pwsh -File plugins\agent-worktrees\scripts\install.ps1 status
 
 .PARAMETER Action
     Lifecycle action to perform.
+
+.PARAMETER ProjectName
+    Project name (e.g. 'aperture-labs'). Defaults to: WORKTREE_PROJECT env var,
+    then inferred from existing config, then basename of CWD repo.
 
 .PARAMETER RemoveConfig
     On uninstall: also delete project config and worktree session metadata.
@@ -28,6 +33,8 @@ param(
     [Parameter(Position = 0)]
     [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update-config', 'update')]
     [string]$Action = 'status',
+
+    [string]$ProjectName,
 
     [switch]$RemoveConfig,
     [switch]$Force
@@ -43,19 +50,42 @@ $ErrorActionPreference = 'Stop'
 # -- Metadata -------------------------------------------------------------
 
 $ServiceName     = 'Worktree Manager'
-$ProjectName     = 'aperture-labs'
 $InstallDir      = Join-Path $env:USERPROFILE '.agent-worktrees'
-$ProjectDir      = Join-Path $env:USERPROFILE ".$ProjectName"
 $BinDir          = Join-Path $InstallDir 'bin'
-$WorktreesDir    = Join-Path $ProjectDir 'worktrees'
 $LocalBin        = Join-Path $env:USERPROFILE '.local\bin'
 $ScriptDir       = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginDir       = (Resolve-Path (Join-Path $ScriptDir '..'))
 $ServiceYamlPath = Join-Path $ScriptDir 'service.yaml'
 
-# RepoDir: the aperture-labs repo checkout. Try to detect from existing
-# config, then fall back to common locations, then CWD.
+# RepoDir: detect from existing config, then CWD.
 $RepoDir = $null
+
+# Infer project name: explicit parameter > env var > existing config > basename of CWD repo
+if (-not $ProjectName) { $ProjectName = $env:WORKTREE_PROJECT }
+if (-not $ProjectName) {
+    # Try to infer from existing config directories (find any .{name}/config.yaml)
+    if ((Get-Location).Path -match '[\\/]([^\\/]+)$') {
+        $cwdName = $Matches[1]
+        $candidateConf = Join-Path $env:USERPROFILE ".$cwdName\config.yaml"
+        if (Test-Path $candidateConf) { $ProjectName = $cwdName }
+    }
+}
+if (-not $ProjectName) {
+    # Final fallback: try to detect from CWD being a git repo
+    if (Test-Path (Join-Path (Get-Location) '.git')) {
+        $ProjectName = Split-Path (Get-Location) -Leaf
+    }
+}
+if (-not $ProjectName) {
+    Write-Host "ERROR: Cannot determine project name." -ForegroundColor Red
+    Write-Host "  Provide -ProjectName, set WORKTREE_PROJECT, or run from within a repo." -ForegroundColor Red
+    exit 1
+}
+
+$ProjectDir      = Join-Path $env:USERPROFILE ".$ProjectName"
+$WorktreesDir    = Join-Path $ProjectDir 'worktrees'
+
+# Detect repo dir from existing project config, then CWD
 $configPath_ = Join-Path $ProjectDir 'config.yaml'
 if (Test-Path $configPath_) {
     try {
@@ -65,15 +95,6 @@ if (Test-Path $configPath_) {
             if (Test-Path $candidate) { $RepoDir = $candidate }
         }
     } catch { }
-}
-if (-not $RepoDir) {
-    foreach ($candidate in @(
-        (Join-Path (Split-Path $env:USERPROFILE) 'Src\aperture-labs'),
-        (Join-Path $env:USERPROFILE 'Src\aperture-labs'),
-        'D:\Src\aperture-labs'
-    )) {
-        if (Test-Path (Join-Path $candidate '.git')) { $RepoDir = $candidate; break }
-    }
 }
 if (-not $RepoDir -and (Test-Path (Join-Path (Get-Location) '.git'))) {
     $RepoDir = (Get-Location).Path
@@ -87,6 +108,114 @@ $InstallerRelPath  = 'plugins/agent-worktrees/scripts/install.ps1'
 $LibDir   = Join-Path $InstallDir 'lib'
 $VenvDir  = Join-Path $InstallDir '.venv'
 $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+
+# -- Projects registry ----------------------------------------------------
+
+$ProjectsYamlPath = Join-Path $InstallDir 'projects.yaml'
+
+function Read-ProjectsRegistry {
+    <# Read projects.yaml and return hashtable. Returns empty projects hash if file missing. #>
+    if (-not (Test-Path $ProjectsYamlPath)) {
+        return @{ projects = @{} }
+    }
+    if (-not (Test-Path $VenvPython)) {
+        # Can't parse YAML without Python — return empty
+        return @{ projects = @{} }
+    }
+    try {
+        $raw = & $VenvPython -c "import yaml, json, sys; data = yaml.safe_load(open(sys.argv[1], encoding='utf-8')); print(json.dumps(data))" $ProjectsYamlPath 2>$null
+        $parsed = $raw | ConvertFrom-Json
+        if (-not $parsed.projects) { $parsed | Add-Member -NotePropertyName 'projects' -NotePropertyValue @{} -Force }
+        return $parsed
+    } catch {
+        return @{ projects = @{} }
+    }
+}
+
+function Write-ProjectsRegistry {
+    <# Write the projects registry back to projects.yaml. #>
+    param([object]$Registry)
+    if (-not (Test-Path $VenvPython)) { return }
+    Ensure-InstallDir (Split-Path $ProjectsYamlPath)
+
+    # Build YAML content manually (simple structure, avoid Python dependency for writing)
+    $lines = @("# ~/.agent-worktrees/projects.yaml", "# Registry of adopted repos for terminal profile generation.", "", "projects:")
+    $projects = $Registry.projects
+    if ($projects -is [PSCustomObject]) {
+        foreach ($prop in $projects.PSObject.Properties) {
+            $name = $prop.Name
+            $entry = $prop.Value
+            $lines += "  ${name}:"
+            foreach ($field in $entry.PSObject.Properties) {
+                $val = $field.Value
+                if ($null -eq $val) { $val = 'null' }
+                elseif ($val -is [string]) { $val = "`"$val`"" }
+                $lines += "    $($field.Name): $val"
+            }
+        }
+    } elseif ($projects -is [hashtable]) {
+        foreach ($name in ($projects.Keys | Sort-Object)) {
+            $entry = $projects[$name]
+            $lines += "  ${name}:"
+            if ($entry -is [hashtable]) {
+                foreach ($field in ($entry.Keys | Sort-Object)) {
+                    $val = $entry[$field]
+                    if ($null -eq $val) { $val = 'null' }
+                    elseif ($val -is [string]) { $val = "`"$val`"" }
+                    $lines += "    ${field}: $val"
+                }
+            } elseif ($entry -is [PSCustomObject]) {
+                foreach ($field in $entry.PSObject.Properties) {
+                    $val = $field.Value
+                    if ($null -eq $val) { $val = 'null' }
+                    elseif ($val -is [string]) { $val = "`"$val`"" }
+                    $lines += "    $($field.Name): $val"
+                }
+            }
+        }
+    }
+    $content = ($lines -join "`n") + "`n"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($ProjectsYamlPath, $content, $utf8NoBom)
+}
+
+function Register-ProjectEntry {
+    <# Add or update this project in the projects registry. #>
+    $registry = Read-ProjectsRegistry
+
+    $entry = @{
+        config_dir     = "~/.${ProjectName}"
+        anchor         = if ($RepoDir) { $RepoDir } else { '' }
+        machines_yaml  = if ($RepoDir -and (Test-Path (Join-Path $RepoDir 'machines.yaml'))) { (Join-Path $RepoDir 'machines.yaml') } else { $null }
+        default_branch = 'master'
+        registered_at  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    }
+
+    # Try to read default_branch from existing config
+    $cfgPath = Join-Path $ProjectDir 'config.yaml'
+    if (Test-Path $cfgPath) {
+        $cfgRaw = Get-Content $cfgPath -Raw
+        if ($cfgRaw -match 'default_branch:\s*(\S+)') {
+            $entry['default_branch'] = $Matches[1]
+        }
+    }
+
+    # Upsert into registry
+    if ($registry.projects -is [PSCustomObject]) {
+        # Convert to hashtable for mutation
+        $ht = @{}
+        foreach ($p in $registry.projects.PSObject.Properties) { $ht[$p.Name] = $p.Value }
+        $ht[$ProjectName] = [PSCustomObject]$entry
+        $registry = @{ projects = $ht }
+    } elseif ($registry.projects -is [hashtable]) {
+        $registry.projects[$ProjectName] = [PSCustomObject]$entry
+    } else {
+        $registry = @{ projects = @{ $ProjectName = [PSCustomObject]$entry } }
+    }
+
+    Write-ProjectsRegistry $registry
+    Write-ServiceOk "Project '$ProjectName' registered in projects.yaml"
+}
 
 # -- Machine detection ----------------------------------------------------
 
@@ -346,147 +475,160 @@ function Deploy-Icon {
 }
 
 function Build-TerminalFragment {
-    <# Generate a Windows Terminal fragment JSON with local + remote SSH profiles. #>
+    <# Generate a Windows Terminal fragment JSON with local + remote SSH profiles
+       for ALL registered projects in projects.yaml. #>
     param([string]$Machine)
 
-    # Start with the local profiles (always present on Windows machines)
-    $profiles = @(
-        @{
-            guid            = '{e8ba8d13-cc41-5a92-b5dd-5e4a5418e9a0}'
-            name            = 'Aperture Labs'
-            commandline     = "cmd /c `"%USERPROFILE%\.local\bin\aperture-labs.cmd`""
-            icon            = "%USERPROFILE%\.aperture-labs\aperture-science.ico"
-            startingDirectory = "%USERPROFILE%"
-            colorScheme     = 'Aperture Science'
-            hidden          = $false
-        },
-        @{
-            guid            = '{fd1e4088-c416-5daa-b87c-a6546fa1cc25}'
-            name            = 'Aperture Labs (WSL)'
-            commandline     = "wsl.exe bash -lc aperture-labs"
-            icon            = "%USERPROFILE%\.aperture-labs\aperture-science-wsl.ico"
-            startingDirectory = "%USERPROFILE%"
-            colorScheme     = 'Aperture Science'
-            hidden          = $false
-        }
-    )
+    $profiles = @()
 
-    # Discover additional adopted projects and generate profiles for each
-    $knownProjects = @('aperture-labs')  # already has hardcoded profiles above
-    Get-ChildItem -Path $env:USERPROFILE -Directory -Filter '.*' -ErrorAction SilentlyContinue | ForEach-Object {
-        $cfgPath = Join-Path $_.FullName 'config.yaml'
-        if (-not (Test-Path $cfgPath)) { return }
-        $projName = $_.Name.TrimStart('.')
-        if ($projName -in $knownProjects) { return }
-        # Validate: must have repos: key and a matching binstub
-        $binstub = Join-Path $LocalBin "$projName.cmd"
-        if (-not (Test-Path $binstub)) { return }
-        $cfgRaw = Get-Content $cfgPath -Raw -ErrorAction SilentlyContinue
-        if (-not $cfgRaw -or $cfgRaw -notmatch 'repos:') { return }
-
-        # Generate stable GUID from project name
-        $guidBytes = [System.Text.Encoding]::UTF8.GetBytes("agent-worktrees-local:$projName")
-        $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($guidBytes)
-        $guid = [guid]::new(
+    # Helper: generate stable GUID from a seed string
+    function New-StableGuid {
+        param([string]$Seed)
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Seed)
+        $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+        return [guid]::new(
             [BitConverter]::ToInt32($hash, 0),
             [BitConverter]::ToInt16($hash, 4),
             [BitConverter]::ToInt16($hash, 6),
             $hash[8], $hash[9], $hash[10], $hash[11],
             $hash[12], $hash[13], $hash[14], $hash[15]
         )
-
-        # Title-case the project name for display
-        $displayName = ($projName -replace '-', ' ') -replace '(^| )(.)', { $_.Value.ToUpper() }
-
-        $profiles += @{
-            guid            = "{$guid}"
-            name            = $displayName
-            commandline     = "cmd /c `"%USERPROFILE%\.local\bin\$projName.cmd`""
-            icon            = "%USERPROFILE%\.agent-worktrees\aperture-science.ico"
-            startingDirectory = "%USERPROFILE%"
-            colorScheme     = 'Aperture Science'
-            hidden          = $false
-        }
-        $knownProjects += $projName
     }
 
-    # Load machines.yaml for remote SSH profiles
-    $machinesYaml = Join-Path $RepoDir 'machines.yaml'
-    if (Test-Path $machinesYaml) {
-        try {
-            $raw = & $VenvPython -c "import yaml, json, sys; data = yaml.safe_load(open(sys.argv[1], encoding='utf-8')); print(json.dumps(data))" $machinesYaml 2>$null
-            $machinesData = $raw | ConvertFrom-Json
-            if ($machinesData.machines) {
-                foreach ($prop in $machinesData.machines.PSObject.Properties) {
-                    $key = $prop.Name
-                    $entry = $prop.Value
-                    if ($key -eq $Machine) { continue }  # skip self
-                    if (-not $entry.ssh -or -not $entry.ssh.ready) { continue }
+    # Helper: title-case a slug ("aperture-labs" → "Aperture Labs")
+    function Get-DisplayName {
+        param([string]$Slug)
+        return ($Slug -replace '-', ' ') -replace '(^| )(.)', { $_.Value.ToUpper() }
+    }
 
-                    foreach ($env in $entry.ssh.environments) {
-                        $alias = $env.alias
-                        $envLabel = switch ($env.name) {
-                            'windows' { 'Windows' }
-                            'wsl'     { 'WSL' }
-                            'linux'   { 'Linux' }
-                            default   { $env.name }
-                        }
-                        $profileName = "$($entry.display_name) ($envLabel)"
+    # Collect projects: start with current project, then add from registry
+    $projectList = @()
+    $registry = Read-ProjectsRegistry
 
-                        $cmdline = "ssh $alias"
+    # Ensure current project is always included (even if not yet in registry)
+    $currentEntry = @{
+        name          = $ProjectName
+        anchor        = $RepoDir
+        machines_yaml = if ($RepoDir -and (Test-Path (Join-Path $RepoDir 'machines.yaml'))) { Join-Path $RepoDir 'machines.yaml' } else { $null }
+    }
+    $projectList += [PSCustomObject]$currentEntry
 
-                        # Stable GUID seed: machine key + env name (not alias)
-                        $guidBytes = [System.Text.Encoding]::UTF8.GetBytes("aperture-labs-ssh-$key-$($env.name)")
-                        $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($guidBytes)
-                        $guid = [guid]::new(
-                            [BitConverter]::ToInt32($hash, 0),
-                            [BitConverter]::ToInt16($hash, 4),
-                            [BitConverter]::ToInt16($hash, 6),
-                            $hash[8], $hash[9], $hash[10], $hash[11],
-                            $hash[12], $hash[13], $hash[14], $hash[15]
-                        )
+    # Add other registered projects
+    $registeredNames = @($ProjectName)
+    if ($registry.projects) {
+        $projObj = $registry.projects
+        $propList = if ($projObj -is [PSCustomObject]) { $projObj.PSObject.Properties } else { @() }
+        foreach ($prop in $propList) {
+            if ($prop.Name -in $registeredNames) { continue }
+            $registeredNames += $prop.Name
+            $e = $prop.Value
+            $anchor = if ($e.PSObject.Properties['anchor']) { $e.anchor } else { $null }
+            $my = if ($e.PSObject.Properties['machines_yaml']) { $e.machines_yaml } else { $null }
+            $projectList += [PSCustomObject]@{
+                name          = $prop.Name
+                anchor        = $anchor
+                machines_yaml = $my
+            }
+        }
+    }
 
-                        $profiles += @{
-                            guid            = "{$guid}"
-                            name            = $profileName
-                            commandline     = $cmdline
-                            icon            = "%USERPROFILE%\.aperture-labs\aperture-science.ico"
-                            startingDirectory = "%USERPROFILE%"
-                            colorScheme     = 'Aperture Science'
-                            hidden          = $false
-                        }
+    # Generate profiles for each project
+    foreach ($proj in $projectList) {
+        $pName = $proj.name
+        $pDisplay = Get-DisplayName $pName
+        $pAnchor = $proj.anchor
+        $pMachinesYaml = $proj.machines_yaml
 
-                        # "Aperture Labs (Machine + Env)" profile - SSH + launch binstub
-                        $binstubCmd = if ($env.shell -eq 'pwsh') { 'aperture-labs.cmd' } else { 'aperture-labs' }
-                        $alCmdline = "ssh -t $alias $binstubCmd"
-                        $alLabel = if ($envLabel -eq 'Linux') { $entry.display_name } else { "$($entry.display_name) $envLabel" }
-                        $alProfileName = "Aperture Labs ($alLabel)"
+        # Icon: prefer project-specific, fall back to agent-worktrees default
+        $iconPath = "%USERPROFILE%\.${pName}\aperture-science.ico"
+        if (-not (Test-Path (Join-Path $env:USERPROFILE ".$pName\aperture-science.ico"))) {
+            $iconPath = "%USERPROFILE%\.agent-worktrees\aperture-science.ico"
+        }
+        $wslIconPath = "%USERPROFILE%\.${pName}\aperture-science-wsl.ico"
+        if (-not (Test-Path (Join-Path $env:USERPROFILE ".$pName\aperture-science-wsl.ico"))) {
+            $wslIconPath = $iconPath
+        }
 
-                        # Stable GUID seed: machine key + env name (not alias)
-                        $alGuidBytes = [System.Text.Encoding]::UTF8.GetBytes("aperture-labs-launch-$key-$($env.name)")
-                        $alHash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($alGuidBytes)
-                        $alGuid = [guid]::new(
-                            [BitConverter]::ToInt32($alHash, 0),
-                            [BitConverter]::ToInt16($alHash, 4),
-                            [BitConverter]::ToInt16($alHash, 6),
-                            $alHash[8], $alHash[9], $alHash[10], $alHash[11],
-                            $alHash[12], $alHash[13], $alHash[14], $alHash[15]
-                        )
+        # Local Windows profile
+        $guid = New-StableGuid "${pName}-local-windows"
+        $profiles += @{
+            guid              = "{$guid}"
+            name              = $pDisplay
+            commandline       = "cmd /c `"%USERPROFILE%\.local\bin\${pName}.cmd`""
+            icon              = $iconPath
+            startingDirectory = "%USERPROFILE%"
+            colorScheme       = 'Aperture Science'
+            hidden            = $false
+        }
 
-                        $profiles += @{
-                            guid            = "{$alGuid}"
-                            name            = $alProfileName
-                            commandline     = $alCmdline
-                            icon            = "%USERPROFILE%\.aperture-labs\aperture-science.ico"
-                            startingDirectory = "%USERPROFILE%"
-                            colorScheme     = 'Aperture Science'
-                            hidden          = $false
+        # Local WSL profile
+        $guid = New-StableGuid "${pName}-local-wsl"
+        $profiles += @{
+            guid              = "{$guid}"
+            name              = "$pDisplay (WSL)"
+            commandline       = "wsl.exe bash -lc $pName"
+            icon              = $wslIconPath
+            startingDirectory = "%USERPROFILE%"
+            colorScheme       = 'Aperture Science'
+            hidden            = $false
+        }
+
+        # SSH profiles from this project's machines.yaml
+        if ($pMachinesYaml -and (Test-Path $pMachinesYaml)) {
+            try {
+                $raw = & $VenvPython -c "import yaml, json, sys; data = yaml.safe_load(open(sys.argv[1], encoding='utf-8')); print(json.dumps(data))" $pMachinesYaml 2>$null
+                $machinesData = $raw | ConvertFrom-Json
+                if ($machinesData.machines) {
+                    foreach ($mProp in $machinesData.machines.PSObject.Properties) {
+                        $key = $mProp.Name
+                        $mEntry = $mProp.Value
+                        if ($key -eq $Machine) { continue }  # skip self
+                        if (-not $mEntry.ssh -or -not $mEntry.ssh.ready) { continue }
+
+                        foreach ($sshEnv in $mEntry.ssh.environments) {
+                            $alias = $sshEnv.alias
+                            $envLabel = switch ($sshEnv.name) {
+                                'windows' { 'Windows' }
+                                'wsl'     { 'WSL' }
+                                'linux'   { 'Linux' }
+                                default   { $sshEnv.name }
+                            }
+
+                            # Plain SSH profile
+                            $sshGuid = New-StableGuid "${pName}-ssh-${key}-$($sshEnv.name)"
+                            $profileName = "$($mEntry.display_name) ($envLabel)"
+                            $profiles += @{
+                                guid              = "{$sshGuid}"
+                                name              = $profileName
+                                commandline       = "ssh $alias"
+                                icon              = $iconPath
+                                startingDirectory = "%USERPROFILE%"
+                                colorScheme       = 'Aperture Science'
+                                hidden            = $false
+                            }
+
+                            # Launch-via-SSH profile
+                            $binstubCmd = if ($sshEnv.shell -eq 'pwsh') { "${pName}.cmd" } else { $pName }
+                            $launchCmdline = "ssh -t $alias $binstubCmd"
+                            $launchLabel = if ($envLabel -eq 'Linux') { $mEntry.display_name } else { "$($mEntry.display_name) $envLabel" }
+                            $launchProfileName = "$pDisplay ($launchLabel)"
+
+                            $launchGuid = New-StableGuid "${pName}-launch-${key}-$($sshEnv.name)"
+                            $profiles += @{
+                                guid              = "{$launchGuid}"
+                                name              = $launchProfileName
+                                commandline       = $launchCmdline
+                                icon              = $iconPath
+                                startingDirectory = "%USERPROFILE%"
+                                colorScheme       = 'Aperture Science'
+                                hidden            = $false
+                            }
                         }
                     }
                 }
+            } catch {
+                Write-ServiceWarn "Could not parse machines.yaml for '$pName' terminal profiles: $_"
             }
-        } catch {
-            Write-ServiceWarn "Could not parse machines.yaml for terminal profiles: $_"
         }
     }
 
@@ -540,15 +682,19 @@ function Clean-TerminalSettingsJson {
     $changed = $false
 
     # Collect GUIDs from the current fragment so we know what's ours
-    $fragmentPath = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs\aperture-labs.json'
+    $fragmentPath = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\AgentWorktrees\agent-worktrees.json'
+    # Also check legacy location
+    $legacyFragPath = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs\aperture-labs.json'
     $fragmentGuids = @()
-    if (Test-Path $fragmentPath) {
-        try {
-            $frag = Get-Content $fragmentPath -Raw | ConvertFrom-Json
-            $fragmentGuids = @($frag.profiles | ForEach-Object { $_.guid })
-        } catch { }
+    foreach ($fp in @($fragmentPath, $legacyFragPath)) {
+        if (Test-Path $fp) {
+            try {
+                $frag = Get-Content $fp -Raw | ConvertFrom-Json
+                $fragmentGuids += @($frag.profiles | ForEach-Object { $_.guid })
+            } catch { }
+        }
     }
-    # Always include the well-known static GUIDs
+    # Always include the well-known legacy static GUIDs
     $knownGuids = @('{e8ba8d13-cc41-5a92-b5dd-5e4a5418e9a0}', '{fd1e4088-c416-5daa-b87c-a6546fa1cc25}')
     $allGuids = @($knownGuids + $fragmentGuids) | Sort-Object -Unique
 
@@ -593,39 +739,62 @@ function Deploy-Shortcuts {
     <# Deploy Windows Terminal fragment (with remote SSH profiles) and create .lnk shortcuts. #>
     param([string]$Machine)
 
-    # Deploy WT fragment - profiles appear in Terminal dropdown automatically
-    $fragmentDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs'
+    # Deploy WT fragment - use a shared fragment directory for all projects
+    $fragmentDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\AgentWorktrees'
     if (-not (Test-Path $fragmentDir)) {
         New-Item -ItemType Directory -Path $fragmentDir -Force | Out-Null
     }
 
-    # Generate the fragment dynamically from machines.yaml + static local profiles
-    $fragmentDst = Join-Path $fragmentDir 'aperture-labs.json'
+    # Also remove old ApertureLabs-specific fragment dir if present (migrated to shared)
+    $oldFragmentDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs'
+    if (Test-Path $oldFragmentDir) {
+        Remove-Item $oldFragmentDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-ServiceChanged "Migrated from ApertureLabs to AgentWorktrees fragment dir"
+    }
+
+    # Generate the fragment dynamically from projects.yaml + machines.yaml
+    $fragmentDst = Join-Path $fragmentDir 'agent-worktrees.json'
     $fragment = Build-TerminalFragment -Machine $Machine
     $fragment | Set-Content $fragmentDst -Encoding UTF8
-    Write-ServiceOk "Windows Terminal profiles deployed (fragment with remote SSH profiles)"
+    Write-ServiceOk "Windows Terminal profiles deployed (fragment with all registered projects)"
 
-    # Create .lnk shortcuts that launch the WT profiles (pinnable, proper taskbar grouping)
+    # Create .lnk shortcuts for each registered project
     $shell = New-Object -ComObject WScript.Shell
     $wtExe = "$env:LOCALAPPDATA\Microsoft\WindowsApps\wt.exe"
 
-    $lnkPath = Join-Path $LocalBin 'Aperture Labs.lnk'
-    $lnk = $shell.CreateShortcut($lnkPath)
-    $lnk.TargetPath = $wtExe
-    $lnk.Arguments = '-p "Aperture Labs"'
-    $lnk.WorkingDirectory = "%USERPROFILE%"
-    $lnk.Description = "Aperture Labs - Worktree Session Manager"
-    $lnk.IconLocation = "$InstallDir\aperture-science.ico, 0"
-    $lnk.Save()
+    $registry = Read-ProjectsRegistry
+    $allProjects = @($ProjectName)
+    if ($registry.projects -is [PSCustomObject]) {
+        foreach ($p in $registry.projects.PSObject.Properties) {
+            if ($p.Name -notin $allProjects) { $allProjects += $p.Name }
+        }
+    } elseif ($registry.projects -is [hashtable]) {
+        foreach ($p in $registry.projects.Keys) {
+            if ($p -notin $allProjects) { $allProjects += $p }
+        }
+    }
 
-    $lnkPath = Join-Path $LocalBin 'Aperture Labs (WSL).lnk'
-    $lnk = $shell.CreateShortcut($lnkPath)
-    $lnk.TargetPath = $wtExe
-    $lnk.Arguments = '-p "Aperture Labs (WSL)"'
-    $lnk.WorkingDirectory = "%USERPROFILE%"
-    $lnk.Description = "Aperture Labs - Worktree Session Manager (WSL)"
-    $lnk.IconLocation = "$InstallDir\aperture-science-wsl.ico, 0"
-    $lnk.Save()
+    foreach ($proj in $allProjects) {
+        $displayName = ($proj -replace '-', ' ') -replace '(^| )(.)', { $_.Value.ToUpper() }
+
+        $lnkPath = Join-Path $LocalBin "$displayName.lnk"
+        $lnk = $shell.CreateShortcut($lnkPath)
+        $lnk.TargetPath = $wtExe
+        $lnk.Arguments = "-p `"$displayName`""
+        $lnk.WorkingDirectory = "%USERPROFILE%"
+        $lnk.Description = "$displayName - Worktree Session Manager"
+        $lnk.IconLocation = "$InstallDir\aperture-science.ico, 0"
+        $lnk.Save()
+
+        $lnkPath = Join-Path $LocalBin "$displayName (WSL).lnk"
+        $lnk = $shell.CreateShortcut($lnkPath)
+        $lnk.TargetPath = $wtExe
+        $lnk.Arguments = "-p `"$displayName (WSL)`""
+        $lnk.WorkingDirectory = "%USERPROFILE%"
+        $lnk.Description = "$displayName - Worktree Session Manager (WSL)"
+        $lnk.IconLocation = "$InstallDir\aperture-science-wsl.ico, 0"
+        $lnk.Save()
+    }
 
     [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
 
@@ -781,6 +950,7 @@ switch ($Action) {
         if (-not (Deploy-Venv)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
         Deploy-Binstub
+        Register-ProjectEntry
         if ($RepoDir) { Deploy-Icon }
         Deploy-Shortcuts -Machine $machine
         Clean-TerminalSettingsJson
@@ -819,7 +989,7 @@ switch ($Action) {
         Write-Host "  Runtime dir: $InstallDir"
         Write-Host "  Project dir: $ProjectDir"
         Write-Host "  Runtime:     Python ($VenvPython)"
-        Write-Host "  Usage:       aperture-labs"
+        Write-Host "  Usage:       $ProjectName"
     }
 
     'uninstall' {
@@ -827,11 +997,15 @@ switch ($Action) {
 
         Remove-Binstub
 
-        # Remove Windows Terminal fragment
-        $fragmentDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs'
-        if (Test-Path $fragmentDir) {
-            Remove-Item $fragmentDir -Recurse -Force
-            Write-ServiceChanged "Removed Windows Terminal profiles (fragment)"
+        # Remove Windows Terminal fragment (both old and new locations)
+        foreach ($dir in @(
+            (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\AgentWorktrees'),
+            (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs')
+        )) {
+            if (Test-Path $dir) {
+                Remove-Item $dir -Recurse -Force
+                Write-ServiceChanged "Removed Windows Terminal fragment: $dir"
+            }
         }
 
         # Remove psmux config
@@ -841,8 +1015,9 @@ switch ($Action) {
             Write-ServiceChanged "Removed psmux config ($psmuxConf)"
         }
 
-        # Remove shortcuts
-        foreach ($lnk in @('Aperture Labs.lnk', 'Aperture Labs (WSL).lnk')) {
+        # Remove shortcuts (project-specific + legacy)
+        $displayName = ($ProjectName -replace '-', ' ') -replace '(^| )(.)', { $_.Value.ToUpper() }
+        foreach ($lnk in @("$displayName.lnk", "$displayName (WSL).lnk", 'Aperture Labs.lnk', 'Aperture Labs (WSL).lnk')) {
             $lnkPath = Join-Path $LocalBin $lnk
             if (Test-Path $lnkPath) { Remove-Item $lnkPath -Force }
         }
@@ -888,7 +1063,7 @@ switch ($Action) {
 
     'start' {
         Write-ServiceHeader "Starting $ServiceName"
-        Write-ServiceSkipped "Not a daemon - invoke with: aperture-labs"
+        Write-ServiceSkipped "Not a daemon - invoke with: $ProjectName"
     }
 
     'stop' {
@@ -957,7 +1132,7 @@ switch ($Action) {
         }
 
         # Windows Terminal fragment
-        $fragmentPath = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs\aperture-labs.json'
+        $fragmentPath = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\AgentWorktrees\agent-worktrees.json'
         if (Test-Path $fragmentPath) {
             Write-ServiceOk "Windows Terminal fragment installed"
         } else {
@@ -1038,6 +1213,7 @@ switch ($Action) {
         if (-not (Deploy-Venv)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
         Deploy-Binstub
+        Register-ProjectEntry
         if ($RepoDir) { Deploy-Icon }
         # Detect machine for terminal profile generation
         $updateMachine = Resolve-Machine

@@ -580,3 +580,83 @@ def show_install_status() -> None:
         output.warn("AGENTS.md deployed but machine.instructions.md missing (run update)")
     else:
         output.err("instruction files missing (run install or update)")
+
+
+# ── Projects registry ───────────────────────────────────────────────────
+
+
+def projects_yaml_path() -> Path:
+    """Path to the projects registry at ~/.agent-worktrees/projects.yaml."""
+    return install_dir() / "projects.yaml"
+
+
+def read_projects_registry() -> dict:
+    """Read projects.yaml and return a dict with a 'projects' key.
+
+    Returns ``{"projects": {}}`` if file is missing or unparseable.
+    """
+    path = projects_yaml_path()
+    if not path.exists():
+        return {"projects": {}}
+    try:
+        import yaml
+
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {"projects": {}}
+        if "projects" not in data or not isinstance(data["projects"], dict):
+            data["projects"] = {}
+        return data
+    except Exception:
+        return {"projects": {}}
+
+
+def write_projects_registry(registry: dict) -> None:
+    """Write the projects registry back to projects.yaml."""
+    path = projects_yaml_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    lines = [
+        "# ~/.agent-worktrees/projects.yaml",
+        "# Registry of adopted repos for terminal profile generation.",
+        "",
+        "projects:",
+    ]
+    projects = registry.get("projects", {})
+    for name in sorted(projects.keys()):
+        entry = projects[name]
+        lines.append(f"  {name}:")
+        if isinstance(entry, dict):
+            for k, v in sorted(entry.items()):
+                if v is None:
+                    lines.append(f"    {k}: null")
+                else:
+                    lines.append(f'    {k}: "{v}"')
+        lines.append("")
+
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def register_project(
+    project: str,
+    repo_dir: Path | str | None = None,
+    default_branch: str = "master",
+) -> None:
+    """Add or update a project entry in projects.yaml."""
+    registry = read_projects_registry()
+
+    repo_path = Path(repo_dir) if repo_dir else None
+    machines_yaml: str | None = None
+    if repo_path and (repo_path / "machines.yaml").exists():
+        machines_yaml = str(repo_path / "machines.yaml")
+
+    registry["projects"][project] = {
+        "config_dir": f"~/.{project}",
+        "anchor": str(repo_path) if repo_path else "",
+        "machines_yaml": machines_yaml,
+        "default_branch": default_branch,
+        "registered_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+    write_projects_registry(registry)
+    output.ok(f"Project '{project}' registered in projects.yaml")
