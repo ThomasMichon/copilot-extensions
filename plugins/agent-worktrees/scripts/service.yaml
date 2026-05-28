@@ -1,8 +1,8 @@
-name: worktree-manager
+name: agent-worktrees
 display_name: Worktree Session Manager
 description: >
   Git worktree-per-session infrastructure for concurrent Copilot CLI sessions.
-  Runtime at ~/.worktree-manager/, per-project config at ~/.aperture-labs/.
+  Runtime at ~/.agent-worktrees/, per-project config at ~/.aperture-labs/.
 
 # Not a daemon — invoked on demand via CLI. Deployed and updated through the
 # standard installer lifecycle like any other service.
@@ -14,11 +14,11 @@ platform: windows
 machines:
   - lambda-core
   - borealis
-  - wheatley
   - tmichon-book2
+  - wheatley
 
 runtime:
-  install_dir: "${HOME}/.worktree-manager"
+  install_dir: "${HOME}/.agent-worktrees"
   config_dir: "${HOME}/.aperture-labs"
   config_file: config.yaml
 
@@ -33,32 +33,38 @@ deployments:
   lambda-core-windows:
     type: full
     platform: windows
-    install_dir: "${HOME}/.worktree-manager"
+    install_dir: "${HOME}/.agent-worktrees"
 
   lambda-core-wsl:
     type: full
     platform: linux
-    install_dir: "${HOME}/.worktree-manager"
+    install_dir: "${HOME}/.agent-worktrees"
 
   borealis-windows:
     type: full
     platform: windows
-    install_dir: "${HOME}/.worktree-manager"
+    install_dir: "${HOME}/.agent-worktrees"
 
   borealis-wsl:
     type: full
     platform: linux
-    install_dir: "${HOME}/.worktree-manager"
+    install_dir: "${HOME}/.agent-worktrees"
 
   tmichon-book2-windows:
     type: full
     platform: windows
-    install_dir: "${HOME}/.worktree-manager"
+    install_dir: "${HOME}/.agent-worktrees"
+    notes: "Guest machine — mostly on Work network, VPN for local access"
+
+  tmichon-book2-wsl:
+    type: full
+    platform: linux
+    install_dir: "${HOME}/.agent-worktrees"
 
   wheatley:
     type: full
     platform: linux
-    install_dir: "${HOME}/.worktree-manager"
+    install_dir: "${HOME}/.agent-worktrees"
 
 data:
   config:

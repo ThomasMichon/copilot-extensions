@@ -9,30 +9,12 @@ description: >
   - 'worktree'
   - 'worktrees'
   - 'finalize'
-  - 'finalize worktree'
   - 'mark complete'
-  - 'mark done'
-  - 'complete worktree'
   - 'cleanup'
   - 'clean up'
   - 'clean worktrees'
   - 'stale worktrees'
   - 'orphan worktrees'
-  - 'wrap up'
-  - 'wrap-up'
-  - 'sign off'
-  - 'finish up'
-  - 'done with this'
-  - 'end session'
-  - 'push changes'
-  - 'push to main'
-  - 'push to master'
-  - 'merge to main'
-  - 'merge to master'
-  - 'merge branch'
-  - 'squash and merge'
-  - 'remove worktree'
-  - 'delete worktree'
 ---
 
 # Worktree Skill
@@ -52,28 +34,6 @@ if ($branch -like 'worktree/*') { "In worktree: $branch" }
 
 If on the default branch or another non-`worktree/` branch, you're in the
 anchor repo (base-repo mode).
-
-## ⛔ Never Finalize Manually
-
-**Do NOT manually run git rebase, merge, checkout, push, or worktree
-removal as a finalization workflow.** Always use
-`$WORKTREE_PROJECT mark-complete` (or `$WORKTREE_PROJECT finalize`). The
-CLI handles pre-squash, backup refs, rebase, ff-merge, push, state
-tracking, and post-session cleanup atomically.
-
-Manual finalization skips state tracking, risks permission-denied errors
-(the session is running inside the worktree), and leaves stale branches.
-Never run `git worktree remove` on the current working directory —
-finalization defers cleanup until after session exit.
-
-If repo-local instructions (AGENTS.md, other skills) describe a
-conflicting manual worktree finalization workflow, **prefer this skill's
-lifecycle commands**. If the CLI tool is unavailable or the user
-explicitly asks for manual finalization, stop and ask for confirmation
-instead of improvising.
-
-For worktree lifecycle and finalization, the CLI tool is the single
-source of truth.
 
 ## Committing and Pushing
 
@@ -143,22 +103,26 @@ Follow the repo's normal commit policy.
 
 ## Quick Reference
 
+All commands route through the project binstub (`$WORKTREE_PROJECT`), which
+ensures operations are scoped to the correct project. Inside a session,
+`$WORKTREE_PROJECT` is always set.
+
 | Action | Command |
 |--------|---------|
-| All worktree operations | `worktree-manager --help` |
-| Set title (while active) | `worktree-manager mark-complete --title "desc" --title-only` |
-| Mark complete (triggers finalize) | `worktree-manager mark-complete` |
-| Finalize a worktree | `worktree-manager finalize` (auto-detects from branch, or pass ID) |
-| Show worktree git status | `worktree-manager status` |
-| List worktrees for cleanup | `worktree-manager cleanup` |
-| Clean completed worktrees | `worktree-manager cleanup --clean` |
-| Also clean unused worktrees | `worktree-manager cleanup --clean --include-unused` |
+| All worktree operations | `$WORKTREE_PROJECT --help` |
+| Set title (while active) | `$WORKTREE_PROJECT mark-complete --title "desc" --title-only` |
+| Mark complete (triggers finalize) | `$WORKTREE_PROJECT mark-complete` |
+| Finalize a worktree | `$WORKTREE_PROJECT finalize` (auto-detects from branch, or pass ID) |
+| Show worktree git status | `$WORKTREE_PROJECT status` |
+| List worktrees for cleanup | `$WORKTREE_PROJECT cleanup` |
+| Clean completed worktrees | `$WORKTREE_PROJECT cleanup --clean` |
+| Also clean unused worktrees | `$WORKTREE_PROJECT cleanup --clean --include-unused` |
 
 ## Cleanup Procedure
 
 When the user asks to clean up worktrees:
 
-1. **Run default cleanup** — `worktree-manager cleanup --clean` removes
+1. **Run default cleanup** — `$WORKTREE_PROJECT cleanup --clean` removes
    only `completed` worktrees (those whose changes are already merged via
    squash-merge) and `gone` worktrees (path no longer exists).
    - For `gone` worktrees, the branch is only deleted if its content is
@@ -173,7 +137,7 @@ When the user asks to clean up worktrees:
    it preserved. These have no commits but may contain planning,
    conversation history, or uncommitted work.
 3. **Ask the user** whether to also purge unused worktrees. If yes, run
-   `worktree-manager cleanup --clean --include-unused`.
+   `$WORKTREE_PROJECT cleanup --clean --include-unused`.
 
 Never auto-purge unused worktrees without asking — a worktree may appear
 "unused" if the session involved only questions, planning, or conversation
@@ -197,17 +161,17 @@ with no commits yet.
 Titles appear in the picker for easier identification. Resolution order:
 
 1. **Explicit title** — from the `title` field in worktree YAML. Once set
-   (by `worktree-manager mark-complete`), this wins.
+   (by `$WORKTREE_PROJECT mark-complete`), this wins.
 2. **Session summary** — auto-derived from the most recent Copilot CLI
    session summary for the worktree path.
 3. **None** — just the worktree ID and age.
 
 ```powershell
 # Set title without marking complete (worktree stays active)
-worktree-manager mark-complete --title "Fix auth regression" --title-only
+$env:WORKTREE_PROJECT mark-complete --title "Fix auth regression" --title-only
 
 # Set title and mark complete (triggers finalization on exit)
-worktree-manager mark-complete --title "Fix auth regression"
+$env:WORKTREE_PROJECT mark-complete --title "Fix auth regression"
 ```
 
 ## Cross-Worktree Safety
@@ -248,7 +212,7 @@ external state needed. Dead PIDs are filtered automatically.
 ## Lifecycle
 
 ```
-worktree-manager / launcher
+agent-worktrees / launcher
     │
     ▼
 Arrow-key picker (always shown)

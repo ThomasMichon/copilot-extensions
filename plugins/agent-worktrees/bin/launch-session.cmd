@@ -3,8 +3,8 @@ setlocal
 
 set "PYTHONHOME="
 
-rem Dual-layout resolution: prefer ~/.worktree-manager/, fall back to legacy
-set "NEW_RUNTIME=%USERPROFILE%\.worktree-manager"
+rem Dual-layout resolution: prefer ~/.agent-worktrees/, fall back to legacy
+set "NEW_RUNTIME=%USERPROFILE%\.agent-worktrees"
 set "LEGACY_RUNTIME=%USERPROFILE%\.aperture-labs"
 
 if exist "%NEW_RUNTIME%\.venv\Scripts\python.exe" (

@@ -3,13 +3,13 @@
     Worktree session launcher — resolves via Python, executes in the shell.
 
 .DESCRIPTION
-    Calls worktree_manager resolve to get a JSON launch plan, then executes
+    Calls agent_worktrees resolve to get a JSON launch plan, then executes
     the plan natively. Python exits before Copilot starts, freeing the venv.
 
-    After Copilot exits, calls worktree_manager post-exit for finalization.
+    After Copilot exits, calls agent_worktrees post-exit for finalization.
 
     Uses $WORKTREE_PROJECT to determine the active project.
-    Runtime lives at ~/.worktree-manager/; project config at ~/.{project}/.
+    Runtime lives at ~/.agent-worktrees/; project config at ~/.{project}/.
 #>
 [CmdletBinding()]
 param(
@@ -107,8 +107,8 @@ if ($RecoveryMode) {
     exit $LASTEXITCODE
 }
 
-# Dual-layout resolution: prefer ~/.worktree-manager/, fall back to legacy ~/.aperture-labs/
-$NewRuntime = Join-Path $env:USERPROFILE '.worktree-manager'
+# Dual-layout resolution: prefer ~/.agent-worktrees/, fall back to legacy ~/.aperture-labs/
+$NewRuntime = Join-Path $env:USERPROFILE '.agent-worktrees'
 $LegacyRuntime = Join-Path $env:USERPROFILE '.aperture-labs'
 
 if (Test-Path (Join-Path $NewRuntime '.venv\Scripts\python.exe')) {
@@ -119,7 +119,7 @@ if (Test-Path (Join-Path $NewRuntime '.venv\Scripts\python.exe')) {
     Write-SetupLog "Venv resolved (legacy): $LegacyRuntime"
 } else {
     Write-SetupLog 'Venv not found — aborting' 'ERROR'
-    Write-Error "Venv not found. Run the installer: pwsh -File services\worktree-manager\install.ps1 install"
+    Write-Error "Venv not found. Run the installer: pwsh -File plugins\agent-worktrees\scripts\install.ps1 install"
     exit 1
 }
 
@@ -127,14 +127,53 @@ $VenvPython = Join-Path $RuntimeDir '.venv\Scripts\python.exe'
 $env:PYTHONPATH = Join-Path $RuntimeDir 'lib'
 $env:PYTHONHOME = $null
 
+# ── Plugin auto-update ────────────────────────────────────────────────────
+# If installed from the copilot-extensions plugin, check for updates and
+# re-install the package when the plugin source changes.
+
+$noUpdate = ($env:WORKTREE_NO_UPDATE -eq '1') -or ($env:APERTURE_NO_UPDATE -eq '1')
+if (-not $noUpdate) {
+    $pluginDir = Join-Path $env:USERPROFILE '.copilot\installed-plugins\copilot-extensions\agent-worktrees'
+    if (Test-Path $pluginDir) {
+        Write-SetupLog 'Plugin auto-update: checking for updates'
+        # Snapshot the current plugin state to detect changes
+        $pyprojectFile = Join-Path $pluginDir 'pyproject.toml'
+        $oldHash = if (Test-Path $pyprojectFile) {
+            (Get-FileHash $pyprojectFile -Algorithm SHA256).Hash
+        } else { '' }
+
+        # Try to update the plugin from the marketplace
+        if (Get-Command copilot -ErrorAction SilentlyContinue) {
+            $updateOutput = copilot plugin update agent-worktrees 2>&1
+            Write-SetupLog "Plugin update result: $updateOutput"
+        }
+
+        # If pyproject.toml changed, re-install the package into the venv
+        $newHash = if (Test-Path $pyprojectFile) {
+            (Get-FileHash $pyprojectFile -Algorithm SHA256).Hash
+        } else { '' }
+        if ($newHash -ne $oldHash -and $newHash -ne '') {
+            Write-SetupLog 'Plugin source changed — re-installing package'
+            $pipExe = Join-Path $RuntimeDir '.venv\Scripts\pip.exe'
+            if (Test-Path $pipExe) {
+                & $pipExe install --quiet --upgrade $pluginDir 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-SetupLog 'Package re-installed successfully'
+                } else {
+                    Write-SetupLog 'Package re-install failed — proceeding with existing version' 'WARN'
+                }
+            }
+        }
+    }
+}
+
 # ── Pre-launch self-update (two-pass) ────────────────────────────────────
 # Checks bootstrap service staleness and runs updates if needed.
 # Mirrors the equivalent block in launch-session.sh.
 
-$noUpdate = ($env:WORKTREE_NO_UPDATE -eq '1') -or ($env:APERTURE_NO_UPDATE -eq '1')
 if (-not $noUpdate) {
     Write-SetupLog 'Running pre-launch staleness check'
-    $preJson = & $VenvPython -m worktree_manager pre-launch 2>$null
+    $preJson = & $VenvPython -m agent_worktrees pre-launch 2>$null
     if ($LASTEXITCODE -eq 0 -and $preJson) {
         $prePlan = ($preJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
         if (-not $prePlan) {
@@ -158,7 +197,7 @@ if (-not $noUpdate) {
 
             # Re-check (one retry max)
             Write-SetupLog 'Re-checking staleness after update'
-            $preJson = & $VenvPython -m worktree_manager pre-launch 2>$null
+            $preJson = & $VenvPython -m agent_worktrees pre-launch 2>$null
             if ($LASTEXITCODE -eq 0 -and $preJson) {
                 $prePlan = ($preJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
                 if ($prePlan -and $prePlan.action -eq 'self-update') {
@@ -174,11 +213,11 @@ if (-not $noUpdate) {
 }
 
 # ── Direct-dispatch commands (bypass resolve/picker) ─────────────────────
-# Subcommands that worktree_manager's main() handles directly — these
+# Subcommands that agent_worktrees's main() handles directly — these
 # must NOT fall through to the resolve→picker flow.  Keep in sync with
-# COMMAND_MAP in __main__.py, plus "services" and "worktree-manager".
+# COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
 $DirectCommands = @(
-    'services', 'worktree-manager',
+    'services', 'agent-worktrees',
     'resolve', 'post-exit', 'finalize', 'mark-complete', 'status',
     'list', 'create', 'cleanup', 'validate', 'install', 'register',
     'uninstall', 'update', 'install-status', 'deploy-instructions',
@@ -186,7 +225,7 @@ $DirectCommands = @(
 )
 if ($CopilotArgs.Count -gt 0 -and $CopilotArgs[0] -in $DirectCommands) {
     Write-SetupLog "Direct dispatch: $($CopilotArgs[0]) (bypassing resolve)"
-    & $VenvPython -m worktree_manager @CopilotArgs
+    & $VenvPython -m agent_worktrees @CopilotArgs
     exit $LASTEXITCODE
 }
 
@@ -194,13 +233,13 @@ if ($CopilotArgs.Count -gt 0 -and $CopilotArgs[0] -in $DirectCommands) {
 # Python resolve writes JSON to stdout and UI (picker) to stderr.
 # Capture stdout only; stderr flows naturally to the terminal.
 
-$resolveArgs = @('-m', 'worktree_manager', 'resolve') + $CopilotArgs
-Write-SetupLog "Calling worktree_manager resolve"
+$resolveArgs = @('-m', 'agent_worktrees', 'resolve') + $CopilotArgs
+Write-SetupLog "Calling agent_worktrees resolve"
 
 $jsonOutput = & $VenvPython @resolveArgs
 
 if ($LASTEXITCODE -ne 0) {
-    Write-SetupLog "worktree_manager resolve failed (exit $LASTEXITCODE)" 'ERROR'
+    Write-SetupLog "agent_worktrees resolve failed (exit $LASTEXITCODE)" 'ERROR'
     exit $LASTEXITCODE
 }
 
@@ -342,7 +381,7 @@ if (-not $noMux -and $psmuxCmd) {
         if ($LASTEXITCODE -ne 0) {
             # Check for handoff-driven relaunch before post-exit
             if ($plan.worktree_id) {
-                $handoffJson = & $VenvPython -m worktree_manager handoff consume $plan.worktree_id 2>$null
+                $handoffJson = & $VenvPython -m agent_worktrees handoff consume $plan.worktree_id 2>$null
                 if ($LASTEXITCODE -eq 0 -and $handoffJson) {
                     $handoff = ($handoffJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
                     if ($handoff -and $handoff.prompt_path -and (Test-Path $handoff.prompt_path)) {
@@ -363,9 +402,9 @@ if (-not $noMux -and $psmuxCmd) {
             # Post-exit finalization (runs after both original and relaunched sessions)
             $null = & psmux has-session -t $sessName 2>&1
             if ($LASTEXITCODE -ne 0 -and $plan.post_exit -and $plan.worktree_id) {
-                & $VenvPython -m worktree_manager post-exit $plan.worktree_id
+                & $VenvPython -m agent_worktrees post-exit $plan.worktree_id
                 if ($LASTEXITCODE -ne 0) {
-                    Write-Warning "Post-exit finalization failed (exit code $LASTEXITCODE). Run 'worktree-manager finalize' to retry."
+                    Write-Warning "Post-exit finalization failed (exit code $LASTEXITCODE). Run 'agent-worktrees finalize' to retry."
                 }
             }
         }
@@ -388,7 +427,7 @@ $copilotExit = $LASTEXITCODE
 # wrote the prompt path into the worktree YAML. Consume it and relaunch.
 
 if ($plan.worktree_id) {
-    $handoffJson = & $VenvPython -m worktree_manager handoff consume $plan.worktree_id 2>$null
+    $handoffJson = & $VenvPython -m agent_worktrees handoff consume $plan.worktree_id 2>$null
     if ($LASTEXITCODE -eq 0 -and $handoffJson) {
         $handoff = ($handoffJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
         if ($handoff -and $handoff.prompt_path -and (Test-Path $handoff.prompt_path)) {
@@ -408,9 +447,9 @@ if ($plan.worktree_id) {
 # ── Post-exit finalization ───────────────────────────────────────────────
 
 if ($plan.post_exit -and $plan.worktree_id) {
-    & $VenvPython -m worktree_manager post-exit $plan.worktree_id
+    & $VenvPython -m agent_worktrees post-exit $plan.worktree_id
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Post-exit finalization failed (exit code $LASTEXITCODE). Run 'worktree-manager finalize' to retry."
+        Write-Warning "Post-exit finalization failed (exit code $LASTEXITCODE). Run 'agent-worktrees finalize' to retry."
     }
 }
 

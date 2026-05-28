@@ -5,16 +5,18 @@
 # Manages the worktree session infrastructure lifecycle: install, uninstall,
 # start, stop, status, update-config, update.
 #
-# Deploys launcher and finalizer scripts to ~/.worktree-manager/bin/ and creates
+# Deploys launcher and finalizer scripts to ~/.agent-worktrees/bin/ and creates
 # the project binstub in ~/.local/bin/.
-# Shared runtime at ~/.worktree-manager/; project config at ~/.{project}/.
+# Shared runtime at ~/.agent-worktrees/; project config at ~/.{project}/.
 #
 # Usage:
-#   bash services/worktree-manager/install.sh install
-#   bash services/worktree-manager/install.sh status
-#   bash services/worktree-manager/install.sh update
+#   bash plugins/agent-worktrees/scripts/install.sh install
+#   bash plugins/agent-worktrees/scripts/install.sh install --project-name my-repo
+#   bash plugins/agent-worktrees/scripts/install.sh status
+#   bash plugins/agent-worktrees/scripts/install.sh update
 #
 # Options:
+#   --project-name N Project name (auto-detected if omitted)
 #   --force          Overwrite config without drift confirmation
 #   --remove-config  On uninstall: also delete config and session metadata
 #   --machine NAME   Machine name (auto-detected if omitted)
@@ -23,7 +25,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Ensure ~/.local/bin is on PATH (uv, pip-installed tools live here;
 # non-interactive SSH sessions often miss it)
@@ -39,29 +41,82 @@ shift || true
 FORCE=false
 REMOVE_CONFIG=false
 MACHINE=""
+PROJECT_NAME_ARG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force)         FORCE=true; shift ;;
         --remove-config) REMOVE_CONFIG=true; shift ;;
         --machine)       MACHINE="$2"; shift 2 ;;
+        --project-name)  PROJECT_NAME_ARG="$2"; shift 2 ;;
         *)               echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
 
+# ── Infer project name ──────────────────────────────────────────────────
+# Priority: --project-name arg > WORKTREE_PROJECT env > existing config > CWD repo
+
+PROJECT_NAME=""
+
+if [[ -n "$PROJECT_NAME_ARG" ]]; then
+    PROJECT_NAME="$PROJECT_NAME_ARG"
+elif [[ -n "${WORKTREE_PROJECT:-}" ]]; then
+    PROJECT_NAME="$WORKTREE_PROJECT"
+else
+    # Try to infer from CWD basename matching an existing config dir
+    _cwd_name="$(basename "$PWD")"
+    if [[ -f "$HOME/.$_cwd_name/config.yaml" ]]; then
+        PROJECT_NAME="$_cwd_name"
+    fi
+fi
+if [[ -z "$PROJECT_NAME" ]]; then
+    # Final fallback: detect from CWD being a git repo
+    _git_root="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ -n "$_git_root" ]]; then
+        PROJECT_NAME="$(basename "$_git_root")"
+    fi
+fi
+if [[ -z "$PROJECT_NAME" ]]; then
+    echo "ERROR: Cannot determine project name." >&2
+    echo "  Provide --project-name, set WORKTREE_PROJECT, or run from within a repo." >&2
+    exit 1
+fi
+
+# Validate project name (safe for dotdirs, binstubs, YAML keys)
+if [[ ! "$PROJECT_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "ERROR: Invalid project name '$PROJECT_NAME' — must match [A-Za-z0-9._-]+" >&2
+    exit 1
+fi
+
+# ── Detect REPO_DIR from project config, then CWD ───────────────────────
+
+REPO_DIR=""
+_config_file="$HOME/.$PROJECT_NAME/config.yaml"
+if [[ -f "$_config_file" ]]; then
+    _anchor=$(grep 'anchor:' "$_config_file" 2>/dev/null | head -1 | sed 's/.*anchor:\s*//')
+    if [[ -n "$_anchor" ]] && git -C "$_anchor" rev-parse --show-toplevel >/dev/null 2>&1; then
+        REPO_DIR="$_anchor"
+    fi
+fi
+if [[ -z "$REPO_DIR" ]]; then
+    _git_root="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ -n "$_git_root" ]]; then
+        REPO_DIR="$_git_root"
+    fi
+fi
+
 # ── Metadata ─────────────────────────────────────────────────────────────
 
 SERVICE_NAME="Worktree Session Manager"
-PROJECT_NAME="aperture-labs"
-INSTALL_DIR="$HOME/.worktree-manager"
+INSTALL_DIR="$HOME/.agent-worktrees"
 PROJECT_DIR="$HOME/.$PROJECT_NAME"
 BIN_DIR="$INSTALL_DIR/bin"
 WORKTREES_DIR="$PROJECT_DIR/worktrees"
 LOCAL_BIN="$HOME/.local/bin"
 SERVICE_YAML="$SCRIPT_DIR/service.yaml"
 
-DEPLOY_SOURCE_PATHS=("services/worktree-manager/")
-INSTALLER_REL_PATH="services/worktree-manager/install.sh"
+DEPLOY_SOURCE_PATHS=("plugins/agent-worktrees/")
+INSTALLER_REL_PATH="plugins/agent-worktrees/scripts/install.sh"
 
 # Legacy scripts (pre-Python) — for cleanup during migration
 LEGACY_SCRIPTS=(
@@ -117,11 +172,77 @@ detect_platform() {
     fi
 }
 
+# ── Projects registry ────────────────────────────────────────────────────
+
+PROJECTS_YAML="$INSTALL_DIR/projects.yaml"
+
+register_project() {
+    # Add or update this project in the projects registry.
+    # Must be called after deploy_venv (requires Python + pyyaml).
+    if [[ ! -x "$VENV_PYTHON" ]]; then
+        skipped "Projects registry: venv not ready"
+        return
+    fi
+
+    local default_branch="master"
+    local cfg_path="$PROJECT_DIR/config.yaml"
+    if [[ -f "$cfg_path" ]]; then
+        local _db
+        _db=$(grep 'default_branch:' "$cfg_path" 2>/dev/null | head -1 | sed 's/.*default_branch:\s*//')
+        if [[ -n "$_db" ]]; then
+            default_branch="$_db"
+        fi
+    fi
+
+    local machines_yaml=""
+    if [[ -n "$REPO_DIR" && -f "$REPO_DIR/machines.yaml" ]]; then
+        machines_yaml="$REPO_DIR/machines.yaml"
+    fi
+
+    "$VENV_PYTHON" -c "
+import yaml, sys, os
+from pathlib import Path
+from datetime import datetime, timezone
+
+projects_path = Path(sys.argv[1])
+project_name = sys.argv[2]
+anchor = sys.argv[3]
+machines_yaml = sys.argv[4]
+default_branch = sys.argv[5]
+config_dir = sys.argv[6]
+
+# Read existing registry
+if projects_path.exists():
+    try:
+        data = yaml.safe_load(projects_path.read_text()) or {}
+    except yaml.YAMLError:
+        data = {}
+else:
+    data = {}
+
+projects = data.setdefault('projects', {})
+projects[project_name] = {
+    'anchor': anchor or None,
+    'machines_yaml': machines_yaml or None,
+    'registered_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+    'default_branch': default_branch,
+    'config_dir': config_dir,
+}
+
+# Write back
+projects_path.parent.mkdir(parents=True, exist_ok=True)
+header = '# ~/.agent-worktrees/projects.yaml\n# Registry of adopted repos for terminal profile generation.\n\n'
+projects_path.write_text(header + yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True))
+" "$PROJECTS_YAML" "$PROJECT_NAME" "${REPO_DIR:-}" "${machines_yaml:-}" "$default_branch" "~/.$PROJECT_NAME"
+
+    ok "Project '$PROJECT_NAME' registered in projects.yaml"
+}
+
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 deploy_package() {
-    local src="$SCRIPT_DIR/src/worktree_manager"
-    local dst="$LIB_DIR/worktree_manager"
+    local src="$PLUGIN_DIR/src/agent_worktrees"
+    local dst="$LIB_DIR/agent_worktrees"
 
     if [[ ! -d "$src" ]]; then
         err "Package source not found: $src"
@@ -135,6 +256,31 @@ deploy_package() {
 
     mkdir -p "$LIB_DIR"
     cp -r "$src" "$dst"
+
+    # Stamp build info so --version reflects this deployment
+    local _repo_root
+    _repo_root="$(cd "$PLUGIN_DIR/../.." && pwd)"
+    local _commit _branch _ts _src_norm
+    _commit="$(git -C "$_repo_root" rev-parse HEAD 2>/dev/null || echo unknown)"
+    _branch="$(git -C "$_repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+    _ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    _src_norm="$(echo "$PLUGIN_DIR" | tr '\\' '/')"
+    local _ver
+    _ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+    cat > "$dst/_build_info.py" <<PYEOF
+"""Build provenance -- auto-generated at deploy time. Do not edit."""
+
+from __future__ import annotations
+
+BUILD_INFO: dict[str, str] = {
+    "version": "$_ver",
+    "commit": "$_commit",
+    "branch": "$_branch",
+    "build_timestamp": "$_ts",
+    "source": "$_src_norm",
+}
+PYEOF
+
     ok "Package deployed to $dst"
 }
 
@@ -158,7 +304,7 @@ deploy_venv() {
 
 deploy_wrappers() {
     mkdir -p "$BIN_DIR"
-    local src="$SCRIPT_DIR/bin/launch-session.sh"
+    local src="$PLUGIN_DIR/bin/launch-session.sh"
     if [[ ! -f "$src" ]]; then
         err "Wrapper source not found: $src"
         return 1
@@ -171,6 +317,18 @@ deploy_wrappers() {
     chmod +x "$tmp"
     mv -f "$tmp" "$BIN_DIR/launch-session.sh"
     ok "Wrapper: launch-session.sh"
+
+    # Deploy bootstrap-check scripts (called by sessionStart hook)
+    for script in bootstrap-check.ps1 bootstrap-check.sh; do
+        local script_src="$SCRIPT_DIR/$script"
+        if [[ -f "$script_src" ]]; then
+            tmp="$(mktemp "$BIN_DIR/$script.XXXXXX")"
+            cp "$script_src" "$tmp"
+            chmod +x "$tmp"
+            mv -f "$tmp" "$BIN_DIR/$script"
+            ok "Bootstrap: $script"
+        fi
+    done
 }
 
 remove_legacy_scripts() {
@@ -188,21 +346,32 @@ remove_legacy_scripts() {
 
 deploy_binstub() {
     mkdir -p "$LOCAL_BIN"
-    # Generate project-specific binstub inline (no static file dependency)
+    # Generate project-specific binstub that routes through the Python CLI.
+    # The CLI dispatches: no args → launch session, known subcommand → handler.
+    # Falls back to launch-session.sh if venv is missing (recovery path).
     local tmp
     tmp="$(mktemp "$LOCAL_BIN/$PROJECT_NAME.XXXXXX")"
-    cat > "$tmp" <<BINSTUB
+    cat > "$tmp" <<'BINSTUB_HEAD'
 #!/usr/bin/env bash
+BINSTUB_HEAD
+    cat >> "$tmp" <<BINSTUB_BODY
 export WORKTREE_PROJECT="$PROJECT_NAME"
-exec "\$HOME/.worktree-manager/bin/launch-session.sh" "\$@"
-BINSTUB
+_PY="\$HOME/.agent-worktrees/.venv/bin/python"
+if [[ -x "\$_PY" ]]; then
+    export PYTHONPATH="\$HOME/.agent-worktrees/lib"
+    export PYTHONUTF8=1
+    exec "\$_PY" -m agent_worktrees "\$@"
+fi
+# Fallback: launch session directly (venv missing / recovery)
+exec "\$HOME/.agent-worktrees/bin/launch-session.sh" "\$@"
+BINSTUB_BODY
     chmod +x "$tmp"
     mv -f "$tmp" "$LOCAL_BIN/$PROJECT_NAME"
     ok "Binstub: $LOCAL_BIN/$PROJECT_NAME"
 
     # Tool binstubs (parity with Windows .cmd stubs)
-    for stub in worktree-manager; do
-        local stub_src="$SCRIPT_DIR/bin/$stub"
+    for stub in agent-worktrees; do
+        local stub_src="$PLUGIN_DIR/bin/$stub"
         if [[ -f "$stub_src" ]]; then
             tmp="$(mktemp "$LOCAL_BIN/$stub.XXXXXX")"
             cp "$stub_src" "$tmp"
@@ -220,6 +389,11 @@ deploy_config() {
 
     if [[ -f "$config_path" ]] && ! $FORCE; then
         skipped "Config exists at $config_path (use --force to overwrite)"
+        return 1
+    fi
+
+    if [[ -z "$REPO_DIR" ]]; then
+        skipped "Config generation skipped (no repo detected — create config.yaml manually)"
         return 1
     fi
 
@@ -258,8 +432,14 @@ write_deploy_manifest() {
 
     local commit branch dirty git_available dirty_files
     git_available=true
-    commit="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null)" || git_available=false
-    branch="$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)" || true
+    if [[ -n "$REPO_DIR" ]]; then
+        commit="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null)" || git_available=false
+        branch="$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)" || true
+    else
+        git_available=false
+        commit=""
+        branch=""
+    fi
 
     dirty=false
     dirty_files="[]"
@@ -314,7 +494,7 @@ show_deploy_status() {
     # Staleness check
     local deployed_commit
     deployed_commit="$(python3 -c "import json; m=json.load(open('$manifest_path')); print(m.get('commit','') or '')")"
-    if [[ -n "$deployed_commit" ]]; then
+    if [[ -n "$deployed_commit" && -n "$REPO_DIR" ]]; then
         local stale_count
         stale_count="$(git -C "$REPO_DIR" log --oneline "$deployed_commit..HEAD" -- "${DEPLOY_SOURCE_PATHS[@]}" 2>/dev/null | wc -l)" || stale_count=0
         if [[ "$stale_count" -eq 0 ]]; then
@@ -328,8 +508,8 @@ show_deploy_status() {
 deploy_tabby_profile() {
     local platform="$1"
     local machine="${2:-}"
-    local tabby_template="$SCRIPT_DIR/terminal/tabby-aperture-labs.yaml"
-    local machines_yaml="$REPO_DIR/machines.yaml"
+    local tabby_template="$PLUGIN_DIR/terminal/tabby-aperture-labs.yaml"
+    local machines_yaml="${REPO_DIR:+$REPO_DIR/machines.yaml}"
     local tabby_config="$HOME/.config/tabby/config.yaml"
 
     # Skip on WSL — Tabby is a native Linux desktop app
@@ -362,6 +542,7 @@ template_path = sys.argv[1]
 config_path = sys.argv[2]
 machines_path = sys.argv[3]
 self_machine = sys.argv[4] if len(sys.argv) > 4 else ''
+project_name = sys.argv[5] if len(sys.argv) > 5 else 'aperture-labs'
 
 template = yaml.safe_load(Path(template_path).read_text())
 local_profile = template['profile']
@@ -392,7 +573,7 @@ def upsert_profile(prof):
         return True
     return False
 
-# Local Aperture Labs profile (insert at front)
+# Local project profile (insert at front)
 existing_idx = next((i for i, p in enumerate(profiles) if p.get('id') == local_profile['id']), None)
 if existing_idx is not None:
     if profiles[existing_idx] != local_profile:
@@ -444,14 +625,16 @@ if Path(machines_path).exists():
             if upsert_profile(ssh_profile):
                 changed = True
 
-            # Aperture Labs launcher profile — SSH + run binstub
-            binstub = 'aperture-labs.cmd' if shell == 'pwsh' else 'aperture-labs'
-            al_id = f'aperture-labs:{key}-{env_name}'
-            al_label = display_name if env_label == 'Linux' else f'{display_name} {env_label}'
-            al_profile = {
-                'id': al_id,
+            # Project launcher profile — SSH + run binstub
+            binstub = f'{project_name}.cmd' if shell == 'pwsh' else project_name
+            launcher_id = f'{project_name}:{key}-{env_name}'
+            launcher_label = display_name if env_label == 'Linux' else f'{display_name} {env_label}'
+            # Title-case the project name for display
+            display_project = project_name.replace('-', ' ').title()
+            launcher_profile = {
+                'id': launcher_id,
                 'type': 'local',
-                'name': f'Aperture Labs ({al_label})',
+                'name': f'{display_project} ({launcher_label})',
                 'icon': 'fa-flask',
                 'color': '#F6A821',
                 'isBuiltin': False,
@@ -462,7 +645,7 @@ if Path(machines_path).exists():
                     'env': {},
                 },
             }
-            if upsert_profile(al_profile):
+            if upsert_profile(launcher_profile):
                 changed = True
 
 # Set global color scheme to Aperture Science
@@ -477,7 +660,7 @@ if changed:
     print('changed')
 else:
     print('ok')
-" "$tabby_template" "$tabby_config" "$machines_yaml" "$machine"
+" "$tabby_template" "$tabby_config" "$machines_yaml" "$machine" "$PROJECT_NAME"
 
     local result=$?
     if [[ $result -ne 0 ]]; then
@@ -491,10 +674,13 @@ else:
 import sys, yaml
 from pathlib import Path
 
+project_name = sys.argv[2]
+local_id = f'local:{project_name}'
+
 config = yaml.safe_load(Path(sys.argv[1]).read_text()) or {}
 profiles = config.get('profiles', [])
 ids = {p.get('id', '') for p in profiles}
-has_local = 'local:aperture-labs' in ids
+has_local = local_id in ids
 has_ssh = any(pid.startswith('ssh:') for pid in ids)
 scheme_name = config.get('terminal', {}).get('colorScheme', {}).get('name', '')
 if has_local and scheme_name == 'Aperture Science':
@@ -504,14 +690,17 @@ if has_local and scheme_name == 'Aperture Science':
         print('ok_local_only')
 else:
     print('err')
-" "$tabby_config")
+" "$tabby_config" "$PROJECT_NAME")
+
+    local display_project
+    display_project="$(echo "$PROJECT_NAME" | tr '-' ' ' | sed 's/\b\(.\)/\u\1/g')"
 
     case "$status" in
         ok_with_ssh)
-            ok "Tabby profile: Aperture Labs + remote SSH profiles"
+            ok "Tabby profile: $display_project + remote SSH profiles"
             ;;
         ok_local_only)
-            ok "Tabby profile: Aperture Labs (no remote SSH profiles generated)"
+            ok "Tabby profile: $display_project (no remote SSH profiles generated)"
             ;;
         *)
             err "Tabby profile merge verification failed"
@@ -531,16 +720,19 @@ import sys, yaml
 from pathlib import Path
 
 config_path = sys.argv[1]
+project_name = sys.argv[2]
 config = yaml.safe_load(Path(config_path).read_text()) or {}
 
 profiles = config.get('profiles', [])
 original_len = len(profiles)
-# Remove local profile, SSH profiles, and Aperture Labs launcher profiles
+local_id = f'local:{project_name}'
+launcher_prefix = f'{project_name}:'
+# Remove local profile, SSH profiles, and project launcher profiles
 config['profiles'] = [
     p for p in profiles
-    if p.get('id') not in ('local:aperture-labs',)
+    if p.get('id') != local_id
     and not (p.get('id', '').startswith('ssh:'))
-    and not (p.get('id', '').startswith('aperture-labs:'))
+    and not (p.get('id', '').startswith(launcher_prefix))
 ]
 
 if len(config['profiles']) < original_len:
@@ -548,12 +740,12 @@ if len(config['profiles']) < original_len:
     print('removed')
 else:
     print('absent')
-" "$tabby_config"
+" "$tabby_config" "$PROJECT_NAME"
 
     local result
     result=$?
     if [[ $result -eq 0 ]]; then
-        changed "Removed Tabby Aperture Labs profiles (local + SSH)"
+        changed "Removed Tabby $PROJECT_NAME profiles (local + SSH)"
     fi
 }
 
@@ -570,14 +762,18 @@ check_tabby_profile() {
 import sys, yaml
 from pathlib import Path
 
+project_name = sys.argv[2]
+local_id = f'local:{project_name}'
+launcher_prefix = f'{project_name}:'
+
 config = yaml.safe_load(Path(sys.argv[1]).read_text()) or {}
 profiles = config.get('profiles', [])
 ids = {p.get('id', '') for p in profiles}
-has_local = 'local:aperture-labs' in ids
+has_local = local_id in ids
 has_ssh = any(pid.startswith('ssh:') for pid in ids)
-has_launchers = any(pid.startswith('aperture-labs:') for pid in ids)
+has_launchers = any(pid.startswith(launcher_prefix) for pid in ids)
 ssh_count = sum(1 for pid in ids if pid.startswith('ssh:'))
-launcher_count = sum(1 for pid in ids if pid.startswith('aperture-labs:'))
+launcher_count = sum(1 for pid in ids if pid.startswith(launcher_prefix))
 scheme_name = config.get('terminal', {}).get('colorScheme', {}).get('name', '')
 
 if has_local and scheme_name == 'Aperture Science':
@@ -591,28 +787,31 @@ elif has_local:
     print('profile_only')
 else:
     print('missing')
-" "$tabby_config" 2>/dev/null)
+" "$tabby_config" "$PROJECT_NAME" 2>/dev/null)
+
+    local display_project
+    display_project="$(echo "$PROJECT_NAME" | tr '-' ' ' | sed 's/\b\(.\)/\u\1/g')"
 
     case "$status" in
         ok:*)
             local ssh_n launcher_n
             ssh_n="$(echo "$status" | cut -d: -f2)"
             launcher_n="$(echo "$status" | cut -d: -f3)"
-            ok "Tabby: Aperture Labs + ${ssh_n} SSH + ${launcher_n} launcher profiles"
+            ok "Tabby: $display_project + ${ssh_n} SSH + ${launcher_n} launcher profiles"
             ;;
         ssh_only:*)
             local ssh_n
             ssh_n="$(echo "$status" | cut -d: -f2)"
-            changed "Tabby: Aperture Labs + ${ssh_n} SSH profiles (no launchers)"
+            changed "Tabby: $display_project + ${ssh_n} SSH profiles (no launchers)"
             ;;
         local_only)
-            changed "Tabby: Aperture Labs local only (no remote SSH profiles)"
+            changed "Tabby: $display_project local only (no remote SSH profiles)"
             ;;
         profile_only)
-            changed "Tabby: Aperture Labs present, but color scheme differs"
+            changed "Tabby: $display_project present, but color scheme differs"
             ;;
         missing)
-            err "Tabby profile: Aperture Labs not found"
+            err "Tabby profile: $display_project not found"
             ;;
         *)
             skipped "Tabby: could not check profile"
@@ -621,6 +820,7 @@ else:
 }
 
 deploy_git_hooks_path() {
+    if [[ -z "$REPO_DIR" ]]; then return; fi
     local current
     current="$(git -C "$REPO_DIR" config --local core.hooksPath 2>/dev/null)" || true
     if [[ "$current" == "tools/hooks" ]]; then
@@ -637,7 +837,7 @@ deploy_git_hooks_path() {
 }
 
 deploy_tmux_config() {
-    local src="$SCRIPT_DIR/terminal/tmux.conf"
+    local src="$PLUGIN_DIR/terminal/tmux.conf"
     local dst="$HOME/.tmux.conf"
 
     if [[ ! -f "$src" ]]; then
@@ -657,18 +857,24 @@ deploy_tmux_config() {
     changed "tmux config deployed to $dst"
 }
 
-remove_legacy_copilot_plugin() {
-    # Remove the legacy worktree-manager Copilot CLI plugin.
-    # Skills are now provided by the agent-worktrees plugin; keeping
-    # this installed causes duplicate skill collisions.
-    command -v copilot >/dev/null 2>&1 || return 0
+deploy_copilot_plugin() {
+    # In the plugin layout, plugin.json is at the plugin root
+    if [[ ! -f "$PLUGIN_DIR/plugin.json" ]]; then
+        echo "  ⚠ Copilot plugin.json not found at $PLUGIN_DIR" >&2
+        return
+    fi
 
-    if copilot plugin list 2>/dev/null | grep -q 'worktree-manager'; then
-        local plugin_path="$HOME/.copilot/installed-plugins/_direct/copilot-plugin"
-        if [[ -d "$plugin_path" ]]; then
-            rm -rf "$plugin_path"
-            changed "Removed legacy copilot-plugin (skills now in agent-worktrees)"
-        fi
+    if ! command -v copilot >/dev/null 2>&1; then
+        echo "  ⚠ Copilot CLI not found — skipping plugin install" >&2
+        return
+    fi
+
+    if copilot plugin list 2>/dev/null | grep -q 'agent-worktrees'; then
+        copilot plugin install "$PLUGIN_DIR" >/dev/null 2>&1 || true
+        ok "Copilot plugin updated"
+    else
+        copilot plugin install "$PLUGIN_DIR" >/dev/null 2>&1 || true
+        changed "Copilot plugin installed (agent-worktrees)"
     fi
 }
 
@@ -724,9 +930,14 @@ case "$ACTION" in
 
         machine="$(resolve_machine)"
         platform="$(detect_platform)"
+        echo "  Project:  $PROJECT_NAME"
         echo "  Machine:  $machine"
         echo "  Platform: $platform"
-        echo "  Repo:     $REPO_DIR"
+        if [[ -n "$REPO_DIR" ]]; then
+            echo "  Repo:     $REPO_DIR"
+        else
+            echo "  Repo:     (not detected — repo-dependent features will be skipped)"
+        fi
 
         # Prereq checks
         missing_prereqs=()
@@ -748,14 +959,19 @@ case "$ACTION" in
         deploy_tabby_profile "$platform" "$machine"
         deploy_tmux_config
         deploy_git_hooks_path
-        remove_legacy_copilot_plugin
+        deploy_copilot_plugin
         ensure_copilot_experimental
+        register_project
         assert_path
 
         # Deploy machine.instructions.md + AGENTS.md from machines.yaml
-        WORKTREE_PROJECT="$PROJECT_NAME" PYTHONUTF8=1 \
-            "$VENV_PYTHON" -m worktree_manager deploy-instructions --machine "$machine" 2>&1 \
-            | sed 's/^/  /' || warn "Instruction file deployment skipped"
+        if [[ -n "$REPO_DIR" ]]; then
+            WORKTREE_PROJECT="$PROJECT_NAME" PYTHONUTF8=1 \
+                "$VENV_PYTHON" -m agent_worktrees deploy-instructions --machine "$machine" 2>&1 \
+                | sed 's/^/  /' || warn "Instruction file deployment skipped"
+        else
+            skipped "Instruction deployment skipped (no repo detected)"
+        fi
 
         write_deploy_manifest
 
@@ -791,7 +1007,7 @@ p.write_text(json.dumps(m, indent=2))
         fi
 
         # Remove tool binstubs
-        for stub in mark-session-complete worktree-manager cleanup-worktrees mark-worktree-complete; do
+        for stub in mark-session-complete agent-worktrees; do
             local stub_path="$LOCAL_BIN/$stub"
             if [[ -f "$stub_path" ]]; then
                 rm -f "$stub_path"
@@ -857,10 +1073,10 @@ p.write_text(json.dumps(m, indent=2))
         fi
 
         # Package
-        if [[ -d "$LIB_DIR/worktree_manager" ]]; then
-            ok "Package deployed: $LIB_DIR/worktree_manager"
+        if [[ -d "$LIB_DIR/agent_worktrees" ]]; then
+            ok "Package deployed: $LIB_DIR/agent_worktrees"
         else
-            err "Package missing: $LIB_DIR/worktree_manager"
+            err "Package missing: $LIB_DIR/agent_worktrees"
         fi
 
         # Wrapper
@@ -878,7 +1094,7 @@ p.write_text(json.dumps(m, indent=2))
         fi
 
         # Tool binstubs
-        for stub in worktree-manager; do
+        for stub in agent-worktrees; do
             if [[ -f "$LOCAL_BIN/$stub" ]]; then
                 ok "Binstub installed at $LOCAL_BIN/$stub"
             else
@@ -906,13 +1122,17 @@ p.write_text(json.dumps(m, indent=2))
         assert_path
 
         # Git hooks
-        hooks_path="$(git -C "$REPO_DIR" config --local core.hooksPath 2>/dev/null)" || true
-        if [[ "$hooks_path" == "tools/hooks" ]]; then
-            ok "Git hooksPath = tools/hooks"
-        elif [[ -n "$hooks_path" ]]; then
-            echo "  ⚠ Git hooksPath = $hooks_path (expected tools/hooks)"
+        if [[ -n "$REPO_DIR" ]]; then
+            hooks_path="$(git -C "$REPO_DIR" config --local core.hooksPath 2>/dev/null)" || true
+            if [[ "$hooks_path" == "tools/hooks" ]]; then
+                ok "Git hooksPath = tools/hooks"
+            elif [[ -n "$hooks_path" ]]; then
+                echo "  ⚠ Git hooksPath = $hooks_path (expected tools/hooks)"
+            else
+                err "Git core.hooksPath not set — run 'update' to configure"
+            fi
         else
-            err "Git core.hooksPath not set — run 'update' to configure"
+            skipped "Git hooks check skipped (no repo detected)"
         fi
 
         # Active sessions
@@ -959,14 +1179,19 @@ p.write_text(json.dumps(m, indent=2))
         deploy_tabby_profile "$(detect_platform)" "$(resolve_machine)"
         deploy_tmux_config
         deploy_git_hooks_path
-        remove_legacy_copilot_plugin
+        deploy_copilot_plugin
         ensure_copilot_experimental
+        register_project
 
         # Deploy machine.instructions.md + AGENTS.md from machines.yaml
-        update_machine="$(resolve_machine)"
-        WORKTREE_PROJECT="$PROJECT_NAME" PYTHONUTF8=1 \
-            "$VENV_PYTHON" -m worktree_manager deploy-instructions --machine "$update_machine" 2>&1 \
-            | sed 's/^/  /' || warn "Instruction file deployment skipped"
+        if [[ -n "$REPO_DIR" ]]; then
+            update_machine="$(resolve_machine)"
+            WORKTREE_PROJECT="$PROJECT_NAME" PYTHONUTF8=1 \
+                "$VENV_PYTHON" -m agent_worktrees deploy-instructions --machine "$update_machine" 2>&1 \
+                | sed 's/^/  /' || warn "Instruction file deployment skipped"
+        else
+            skipped "Instruction deployment skipped (no repo detected)"
+        fi
 
         write_deploy_manifest
 
@@ -984,7 +1209,7 @@ p.write_text(json.dumps(m, indent=2))
         ;;
 
     *)
-        echo "Usage: $0 {install|uninstall|start|stop|status|update-config|update} [--force] [--remove-config] [--machine NAME]" >&2
+        echo "Usage: $0 {install|uninstall|start|stop|status|update-config|update} [--project-name NAME] [--force] [--remove-config] [--machine NAME]" >&2
         exit 1
         ;;
 esac
