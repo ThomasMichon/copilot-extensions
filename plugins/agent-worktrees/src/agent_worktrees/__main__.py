@@ -3093,6 +3093,115 @@ COMMAND_MAP = {
 }
 
 
+def _print_boot_provenance() -> None:
+    """Print extended boot provenance checks for migration verification."""
+    home = Path.home()
+    install = cfg.install_dir()
+    checks: list[tuple[str, bool, str]] = []
+
+    # 1. Runtime package identity
+    pkg_dir = install / "lib" / "agent_worktrees"
+    has_new = pkg_dir.is_dir()
+    checks.append(("runtime", has_new,
+                    f"agent_worktrees at {pkg_dir}" if has_new
+                    else "agent_worktrees package NOT FOUND"))
+
+    # 2. Old worktree_manager remnants
+    old_pkg = install / "lib" / "worktree_manager"
+    old_venv = install / ".venv"
+    if platform.system() == "Windows":
+        old_venv_pkg = old_venv / "Lib" / "site-packages" / "worktree_manager"
+    else:
+        # Find the python version dir dynamically
+        old_venv_pkg = None
+        sp = old_venv / "lib"
+        if sp.is_dir():
+            for child in sp.iterdir():
+                cand = child / "site-packages" / "worktree_manager"
+                if cand.is_dir():
+                    old_venv_pkg = cand
+                    break
+        if old_venv_pkg is None:
+            old_venv_pkg = old_venv / "lib" / "python3" / "site-packages" / "worktree_manager"
+    has_old = old_pkg.is_dir() or old_venv_pkg.is_dir()
+    checks.append(("no-legacy-pkg", not has_old,
+                    "no worktree_manager remnants" if not has_old
+                    else f"OLD package found: {old_pkg if old_pkg.is_dir() else old_venv_pkg}"))
+
+    # 3. Plugin hook wired
+    hook_found = False
+    plugins_root = home / ".copilot" / "installed-plugins"
+    for hooks_json in plugins_root.rglob("hooks.json"):
+        try:
+            data = json.loads(hooks_json.read_text())
+            hooks = data.get("hooks", {})
+            for hook_list in hooks.values():
+                for hook in hook_list:
+                    cmd = hook.get("powershell", "") + hook.get("bash", "")
+                    if "bootstrap-check" in cmd:
+                        hook_found = True
+                        break
+        except Exception:
+            pass
+    checks.append(("session-hook", hook_found,
+                    "bootstrap-check wired in sessionStart" if hook_found
+                    else "sessionStart hook NOT FOUND"))
+
+    # 4. Binstub resolution
+    binstub_ok = False
+    binstub_detail = "not found"
+    if platform.system() == "Windows":
+        binstub = home / ".local" / "bin" / "aperture-labs.cmd"
+    else:
+        binstub = home / ".local" / "bin" / "aperture-labs"
+    if binstub.is_file():
+        content = binstub.read_text(errors="replace")
+        if "agent_worktrees" in content or "agent-worktrees" in content:
+            binstub_ok = True
+            binstub_detail = f"routes through agent-worktrees ({binstub})"
+        elif "worktree_manager" in content:
+            binstub_detail = f"STILL routes through worktree_manager ({binstub})"
+        else:
+            binstub_detail = f"unknown routing ({binstub})"
+    checks.append(("binstub", binstub_ok, binstub_detail))
+
+    # 5. Deploy manifest consistency
+    manifest_path = install / "deploy-manifest.json"
+    manifest_ok = False
+    manifest_detail = "not found"
+    if manifest_path.is_file():
+        try:
+            m = json.loads(manifest_path.read_text())
+            m_commit = m.get("commit", "")[:10]
+            try:
+                from ._build_info import BUILD_INFO
+                b_commit = BUILD_INFO.get("commit", "")[:10]
+            except ImportError:
+                b_commit = ""
+            if m_commit and b_commit and m_commit == b_commit:
+                manifest_ok = True
+                manifest_detail = f"manifest commit {m_commit} matches build info"
+            elif m_commit and b_commit:
+                manifest_detail = f"MISMATCH: manifest={m_commit} build={b_commit}"
+            else:
+                manifest_ok = True
+                manifest_detail = f"commit {m_commit or '?'}"
+        except Exception as exc:
+            manifest_detail = f"parse error: {exc}"
+    checks.append(("manifest", manifest_ok, manifest_detail))
+
+    # Print results
+    print("")
+    all_ok = True
+    for name, ok, detail in checks:
+        status = "[OK]" if ok else "[FAIL]"
+        if not ok:
+            all_ok = False
+        print(f"  {status:6s} {name}: {detail}")
+    print("")
+    print(f"  {'PASS' if all_ok else 'FAIL'}: boot provenance {'verified' if all_ok else 'has issues'}")
+
+
 def main(argv: list[str] | None = None) -> int:
     output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
@@ -3110,7 +3219,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args_list:
         return cmd_launch([])
 
-    # --version / -V → print version + build info
+    # --version / -V → print version + build info + boot provenance
     if args_list[0] in ("--version", "-V"):
         try:
             from ._build_info import BUILD_INFO
@@ -3133,6 +3242,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"deployed {dep_at}{dirty}  source {src}")
             except Exception:
                 pass
+
+        # --version --source: extended boot provenance checks
+        if len(args_list) > 1 and args_list[1] in ("--source", "--check"):
+            _print_boot_provenance()
+
         return 0
 
     # --help / -h → show argparse help (not launch fallthrough)
