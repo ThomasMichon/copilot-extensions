@@ -382,13 +382,24 @@ function Deploy-Wrappers {
 }
 
 function Deploy-Binstub {
-    <# Generate the project-specific binstub in ~/.local/bin/. #>
+    <# Generate the project-specific binstub in ~/.local/bin/.
+       Routes through the Python CLI for subcommand dispatch.
+       Falls back to launch-session.cmd if the venv is missing. #>
     Ensure-InstallDir $LocalBin
 
     $content = @"
 @echo off
 set "WORKTREE_PROJECT=$ProjectName"
+set "_PY=%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe"
+if exist "%_PY%" (
+    set "PYTHONPATH=%USERPROFILE%\.agent-worktrees\lib"
+    set "PYTHONUTF8=1"
+    "%_PY%" -m agent_worktrees %*
+    exit /b %ERRORLEVEL%
+)
+rem Fallback: launch session directly (venv missing / recovery)
 "%USERPROFILE%\.agent-worktrees\bin\launch-session.cmd" %*
+exit /b %ERRORLEVEL%
 "@
     $dst = Join-Path $LocalBin "$ProjectName.cmd"
     Set-Content -Path $dst -Value $content -NoNewline

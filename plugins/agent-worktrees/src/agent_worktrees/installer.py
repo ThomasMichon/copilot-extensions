@@ -335,8 +335,9 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
 def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
     """Generate project-specific binstubs in ~/.local/bin/.
 
-    Creates a thin binstub that sets ``WORKTREE_PROJECT`` and
-    delegates to the shared launcher.
+    Creates a thin binstub that sets ``WORKTREE_PROJECT`` and routes
+    through the Python CLI for subcommand dispatch. Falls back to the
+    shell launcher if the venv is missing (recovery path).
 
     Returns True on success.
     """
@@ -350,7 +351,15 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
                 "@echo off\r\n"
                 'set "PYTHONUTF8=1"\r\n'
                 f'set "WORKTREE_PROJECT={project}"\r\n'
-                f'"%USERPROFILE%\\.agent-worktrees\\bin\\launch-session.cmd" %*\r\n'
+                'set "_PY=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe"\r\n'
+                'if exist "%_PY%" (\r\n'
+                '    set "PYTHONPATH=%USERPROFILE%\\.agent-worktrees\\lib"\r\n'
+                '    "%_PY%" -m agent_worktrees %*\r\n'
+                '    exit /b %ERRORLEVEL%\r\n'
+                ')\r\n'
+                'rem Fallback: launch session directly (venv missing / recovery)\r\n'
+                '"%USERPROFILE%\\.agent-worktrees\\bin\\launch-session.cmd" %*\r\n'
+                'exit /b %ERRORLEVEL%\r\n'
             )
             dst = lb / f"{project}.cmd"
             dst.write_text(binstub_content)
@@ -377,7 +386,14 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
         binstub_content = (
             "#!/usr/bin/env bash\n"
             f'export WORKTREE_PROJECT="{project}"\n'
-            f'exec "$HOME/.agent-worktrees/bin/launch-session.sh" "$@"\n'
+            '_PY="$HOME/.agent-worktrees/.venv/bin/python"\n'
+            'if [[ -x "$_PY" ]]; then\n'
+            '    export PYTHONPATH="$HOME/.agent-worktrees/lib"\n'
+            '    export PYTHONUTF8=1\n'
+            '    exec "$_PY" -m agent_worktrees "$@"\n'
+            'fi\n'
+            '# Fallback: launch session directly (venv missing / recovery)\n'
+            'exec "$HOME/.agent-worktrees/bin/launch-session.sh" "$@"\n'
         )
         dst = lb / project
         dst.write_text(binstub_content)

@@ -346,14 +346,25 @@ remove_legacy_scripts() {
 
 deploy_binstub() {
     mkdir -p "$LOCAL_BIN"
-    # Generate project-specific binstub inline (no static file dependency)
+    # Generate project-specific binstub that routes through the Python CLI.
+    # The CLI dispatches: no args → launch session, known subcommand → handler.
+    # Falls back to launch-session.sh if venv is missing (recovery path).
     local tmp
     tmp="$(mktemp "$LOCAL_BIN/$PROJECT_NAME.XXXXXX")"
-    cat > "$tmp" <<BINSTUB
+    cat > "$tmp" <<'BINSTUB_HEAD'
 #!/usr/bin/env bash
+BINSTUB_HEAD
+    cat >> "$tmp" <<BINSTUB_BODY
 export WORKTREE_PROJECT="$PROJECT_NAME"
+_PY="\$HOME/.agent-worktrees/.venv/bin/python"
+if [[ -x "\$_PY" ]]; then
+    export PYTHONPATH="\$HOME/.agent-worktrees/lib"
+    export PYTHONUTF8=1
+    exec "\$_PY" -m agent_worktrees "\$@"
+fi
+# Fallback: launch session directly (venv missing / recovery)
 exec "\$HOME/.agent-worktrees/bin/launch-session.sh" "\$@"
-BINSTUB
+BINSTUB_BODY
     chmod +x "$tmp"
     mv -f "$tmp" "$LOCAL_BIN/$PROJECT_NAME"
     ok "Binstub: $LOCAL_BIN/$PROJECT_NAME"
