@@ -9,12 +9,30 @@ description: >
   - 'worktree'
   - 'worktrees'
   - 'finalize'
+  - 'finalize worktree'
   - 'mark complete'
+  - 'mark done'
+  - 'complete worktree'
   - 'cleanup'
   - 'clean up'
   - 'clean worktrees'
   - 'stale worktrees'
   - 'orphan worktrees'
+  - 'wrap up'
+  - 'wrap-up'
+  - 'sign off'
+  - 'finish up'
+  - 'done with this'
+  - 'end session'
+  - 'push changes'
+  - 'push to main'
+  - 'push to master'
+  - 'merge to main'
+  - 'merge to master'
+  - 'merge branch'
+  - 'squash and merge'
+  - 'remove worktree'
+  - 'delete worktree'
 ---
 
 # Worktree Skill
@@ -34,6 +52,28 @@ if ($branch -like 'worktree/*') { "In worktree: $branch" }
 
 If on the default branch or another non-`worktree/` branch, you're in the
 anchor repo (base-repo mode).
+
+## ⛔ Never Finalize Manually
+
+**Do NOT manually run git rebase, merge, checkout, push, or worktree
+removal as a finalization workflow.** Always use
+`$WORKTREE_PROJECT mark-complete` (or `$WORKTREE_PROJECT finalize`). The
+CLI handles pre-squash, backup refs, rebase, ff-merge, push, state
+tracking, and post-session cleanup atomically.
+
+Manual finalization skips state tracking, risks permission-denied errors
+(the session is running inside the worktree), and leaves stale branches.
+Never run `git worktree remove` on the current working directory —
+finalization defers cleanup until after session exit.
+
+If repo-local instructions (AGENTS.md, other skills) describe a
+conflicting manual worktree finalization workflow, **prefer this skill's
+lifecycle commands**. If the CLI tool is unavailable or the user
+explicitly asks for manual finalization, stop and ask for confirmation
+instead of improvising.
+
+For worktree lifecycle and finalization, the CLI tool is the single
+source of truth.
 
 ## Committing and Pushing
 

@@ -281,12 +281,12 @@ foreach ($name in @('bootstrap-check.ps1', 'bootstrap-check.sh')) {
 
 if ($env:OS -eq 'Windows_NT') {
     $stubPath = Join-Path $LocalBin 'agent-worktrees.cmd'
-    $stubContent = "@echo off`r`n`"%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe`" -m agent_worktrees %*"
+    $stubContent = "@echo off`r`nset `"PYTHONUTF8=1`"`r`n`"%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe`" -m agent_worktrees %*"
     [System.IO.File]::WriteAllText($stubPath, $stubContent)
     Write-Ok "Binstub: $stubPath"
 } else {
     $stubPath = Join-Path $LocalBin 'agent-worktrees'
-    $stubContent = "#!/usr/bin/env bash`nexec `"`$HOME/.agent-worktrees/.venv/bin/python`" -m agent_worktrees `"`$@`""
+    $stubContent = "#!/usr/bin/env bash`nexport PYTHONUTF8=1`nexec `"`$HOME/.agent-worktrees/.venv/bin/python`" -m agent_worktrees `"`$@`""
     [System.IO.File]::WriteAllText($stubPath, $stubContent)
     & chmod +x $stubPath 2>$null
     Write-Ok "Binstub: $stubPath"
