@@ -16,4 +16,5 @@ else
 fi
 
 unset PYTHONHOME
+export PYTHONUTF8=1
 exec "$PYTHON" -m agent_worktrees "$@"

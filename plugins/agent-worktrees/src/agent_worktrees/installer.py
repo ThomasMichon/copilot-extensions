@@ -374,6 +374,7 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
                 'Use the project launcher binstub instead. >&2\r\n'
                 '    exit /b 1\r\n'
                 ')\r\n'
+                'set "PYTHONUTF8=1"\r\n'
                 'set "PYTHON=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe"\r\n'
                 'set "PYTHONPATH=%USERPROFILE%\\.agent-worktrees\\lib"\r\n'
                 '"%PYTHON%" -m agent_worktrees %*\r\n'
@@ -412,6 +413,7 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
             f'PYTHON="$HOME/.agent-worktrees/.venv/bin/python"\n'
             f'export PYTHONPATH="$HOME/.agent-worktrees/lib"\n'
             'unset PYTHONHOME\n'
+            'export PYTHONUTF8=1\n'
             'exec "$PYTHON" -m agent_worktrees "$@"\n'
         )
         dst = lb / "agent-worktrees"
