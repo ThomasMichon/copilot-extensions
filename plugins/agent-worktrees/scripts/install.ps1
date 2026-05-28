@@ -149,7 +149,7 @@ function Write-ProjectsRegistry {
             foreach ($field in $entry.PSObject.Properties) {
                 $val = $field.Value
                 if ($null -eq $val) { $val = 'null' }
-                elseif ($val -is [string]) { $val = "`"$val`"" }
+                elseif ($val -is [string]) { $val = "`"$($val -replace '\\', '\\')`"" }
                 $lines += "    $($field.Name): $val"
             }
         }
@@ -161,14 +161,14 @@ function Write-ProjectsRegistry {
                 foreach ($field in ($entry.Keys | Sort-Object)) {
                     $val = $entry[$field]
                     if ($null -eq $val) { $val = 'null' }
-                    elseif ($val -is [string]) { $val = "`"$val`"" }
+                    elseif ($val -is [string]) { $val = "`"$($val -replace '\\', '\\')`"" }
                     $lines += "    ${field}: $val"
                 }
             } elseif ($entry -is [PSCustomObject]) {
                 foreach ($field in $entry.PSObject.Properties) {
                     $val = $field.Value
                     if ($null -eq $val) { $val = 'null' }
-                    elseif ($val -is [string]) { $val = "`"$val`"" }
+                    elseif ($val -is [string]) { $val = "`"$($val -replace '\\', '\\')`"" }
                     $lines += "    $($field.Name): $val"
                 }
             }
