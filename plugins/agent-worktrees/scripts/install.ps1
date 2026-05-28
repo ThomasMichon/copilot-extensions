@@ -831,27 +831,62 @@ function Deploy-Shortcuts {
 }
 
 function Deploy-CopilotPlugin {
-    <# Install the agent-worktrees Copilot CLI plugin if copilot is available. #>
-    # In the plugin layout, plugin.json is at the plugin root
-    $pluginJsonPath = Join-Path $PluginDir 'plugin.json'
-    if (-not (Test-Path $pluginJsonPath)) {
-        Write-ServiceWarn "Copilot plugin.json not found at $pluginJsonPath"
-        return
-    }
+    <# Install agent-worktrees from the copilot-extensions marketplace.
+       Ensures the marketplace is registered, installs or updates the plugin,
+       then removes any stale _direct install. #>
 
     if (-not (Get-Command copilot -ErrorAction SilentlyContinue)) {
-        Write-ServiceWarn "Copilot CLI not found — skipping plugin install"
+        Write-ServiceWarn "Copilot CLI not found - skipping plugin install"
         return
     }
 
-    # Check if already installed and current
-    $installed = copilot plugin list 2>$null
-    if ($installed -match 'agent-worktrees') {
-        copilot plugin install $PluginDir 2>$null | Out-Null
-        Write-ServiceOk "Copilot plugin updated"
+    # 1. Register marketplace if not present
+    $marketplaces = copilot plugin marketplace list 2>$null
+    if ($marketplaces -notmatch 'copilot-extensions') {
+        $addOut = copilot plugin marketplace add ThomasMichon/copilot-extensions 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-ServiceWarn "Failed to register marketplace: $addOut"
+            return
+        }
+        Write-ServiceChanged "Registered copilot-extensions marketplace"
+    }
+
+    # 2. Parse current plugin state
+    $pluginList = copilot plugin list 2>$null
+    $hasMarketplace = $false
+    $hasDirect = $false
+    foreach ($line in $pluginList) {
+        if ($line -match 'agent-worktrees@copilot-extensions') {
+            $hasMarketplace = $true
+        } elseif ($line -match 'agent-worktrees' -and $line -notmatch '@') {
+            $hasDirect = $true
+        }
+    }
+
+    # 3. Install or update marketplace plugin
+    if ($hasMarketplace) {
+        $out = copilot plugin update agent-worktrees@copilot-extensions 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-ServiceWarn "Plugin update failed: $out"
+        } else {
+            Write-ServiceOk "Copilot plugin updated (marketplace)"
+        }
     } else {
-        copilot plugin install $PluginDir 2>$null | Out-Null
-        Write-ServiceChanged "Copilot plugin installed (agent-worktrees)"
+        $out = copilot plugin install agent-worktrees@copilot-extensions 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-ServiceWarn "Plugin install failed: $out"
+            return
+        }
+        Write-ServiceChanged "Copilot plugin installed (agent-worktrees@copilot-extensions)"
+    }
+
+    # 4. Remove stale _direct install if marketplace is now present
+    if ($hasDirect) {
+        $verify = copilot plugin list 2>$null
+        if ($verify -match 'agent-worktrees@copilot-extensions') {
+            copilot plugin uninstall agent-worktrees 2>$null | Out-Null
+            Write-ServiceChanged "Removed stale _direct plugin install"
+        }
     }
 }
 

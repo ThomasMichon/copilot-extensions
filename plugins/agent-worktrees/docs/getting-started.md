@@ -32,7 +32,11 @@ is merged and cleaned up automatically.
 ### 1. Install the plugin
 
 ```bash
-copilot plugin install ThomasMichon/copilot-extensions:plugins/agent-worktrees
+# Register the marketplace (one-time)
+copilot plugin marketplace add ThomasMichon/copilot-extensions
+
+# Install from marketplace
+copilot plugin install agent-worktrees@copilot-extensions
 ```
 
 ### 2. Bootstrap the runtime

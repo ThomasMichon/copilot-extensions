@@ -859,23 +859,56 @@ deploy_tmux_config() {
 }
 
 deploy_copilot_plugin() {
-    # In the plugin layout, plugin.json is at the plugin root
-    if [[ ! -f "$PLUGIN_DIR/plugin.json" ]]; then
-        echo "  ⚠ Copilot plugin.json not found at $PLUGIN_DIR" >&2
-        return
-    fi
+    # Install agent-worktrees from the copilot-extensions marketplace.
+    # Ensures the marketplace is registered, installs or updates the plugin,
+    # then removes any stale _direct install.
 
     if ! command -v copilot >/dev/null 2>&1; then
-        echo "  ⚠ Copilot CLI not found — skipping plugin install" >&2
+        warn "Copilot CLI not found - skipping plugin install"
         return
     fi
 
-    if copilot plugin list 2>/dev/null | grep -q 'agent-worktrees'; then
-        copilot plugin install "$PLUGIN_DIR" >/dev/null 2>&1 || true
-        ok "Copilot plugin updated"
+    # 1. Register marketplace if not present
+    if ! copilot plugin marketplace list 2>/dev/null | grep -q 'copilot-extensions'; then
+        local add_out
+        add_out=$(copilot plugin marketplace add ThomasMichon/copilot-extensions 2>&1) || {
+            warn "Failed to register marketplace: $add_out"
+            return
+        }
+        changed "Registered copilot-extensions marketplace"
+    fi
+
+    # 2. Parse current plugin state
+    local plugin_list has_marketplace=false has_direct=false
+    plugin_list=$(copilot plugin list 2>/dev/null)
+    if echo "$plugin_list" | grep -q 'agent-worktrees@copilot-extensions'; then
+        has_marketplace=true
+    fi
+    if echo "$plugin_list" | grep 'agent-worktrees' | grep -qv '@'; then
+        has_direct=true
+    fi
+
+    # 3. Install or update marketplace plugin
+    local out
+    if $has_marketplace; then
+        out=$(copilot plugin update agent-worktrees@copilot-extensions 2>&1) || {
+            warn "Plugin update failed: $out"
+        }
+        ok "Copilot plugin updated (marketplace)"
     else
-        copilot plugin install "$PLUGIN_DIR" >/dev/null 2>&1 || true
-        changed "Copilot plugin installed (agent-worktrees)"
+        out=$(copilot plugin install agent-worktrees@copilot-extensions 2>&1) || {
+            warn "Plugin install failed: $out"
+            return
+        }
+        changed "Copilot plugin installed (agent-worktrees@copilot-extensions)"
+    fi
+
+    # 4. Remove stale _direct install if marketplace is now present
+    if $has_direct; then
+        if copilot plugin list 2>/dev/null | grep -q 'agent-worktrees@copilot-extensions'; then
+            copilot plugin uninstall agent-worktrees >/dev/null 2>&1 || true
+            changed "Removed stale _direct plugin install"
+        fi
     fi
 }
 
