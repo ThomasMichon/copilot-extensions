@@ -137,6 +137,7 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 ok()      { echo "  ✓ $*"; }
 changed() { echo "  → $*"; }
 skipped() { echo "  ○ $*"; }
+warn()    { echo "  ! $*"; }
 err()     { echo "  ✗ $*"; }
 header()  { echo ""; echo "═══ $* $(printf '═%.0s' $(seq 1 $((56 - ${#1}))))"; }
 
