@@ -649,7 +649,9 @@ def write_projects_registry(registry: dict) -> None:
                 if v is None:
                     lines.append(f"    {k}: null")
                 else:
-                    lines.append(f'    {k}: "{v}"')
+                    # Escape backslashes for valid double-quoted YAML
+                    escaped = str(v).replace("\\", "\\\\")
+                    lines.append(f'    {k}: "{escaped}"')
         lines.append("")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
