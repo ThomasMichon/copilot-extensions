@@ -1874,6 +1874,9 @@ def cmd_install(args: argparse.Namespace) -> int:
     if not inst.deploy_binstubs(repo_dir, project=project):
         return 1
 
+    # Update projects registry
+    inst.register_project(project, repo_dir=repo_dir)
+
     # Run post-install hook (project-specific, e.g. icon deployment)
     try:
         config = cfg.load_config(config_path)
@@ -2010,6 +2013,9 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Generate binstub
     if not inst.deploy_binstubs(repo_dir, project=project):
         return 1
+
+    # Update projects registry
+    inst.register_project(project, repo_dir=repo_dir, default_branch=default_branch)
 
     # Refresh Windows Terminal profiles if installed via install.ps1
     if plat == "windows":
