@@ -31,8 +31,8 @@ ls -t "$_SETUP_LOG_DIR"/setup-*.log 2>/dev/null | tail -n +11 | xargs rm -f 2>/d
 
 setup_log INFO 'launch-session.sh starting'
 
-# Dual-layout resolution: prefer ~/.worktree-manager/, fall back to legacy
-NEW_RUNTIME="$HOME/.worktree-manager"
+# Dual-layout resolution: prefer ~/.agent-worktrees/, fall back to legacy
+NEW_RUNTIME="$HOME/.agent-worktrees"
 LEGACY_RUNTIME="$HOME/.aperture-labs"
 
 if [[ -x "$NEW_RUNTIME/.venv/bin/python" ]]; then
@@ -83,6 +83,46 @@ if [[ "${WORKTREE_RECOVERY:-${APERTURE_RECOVERY:-}}" == "1" ]] && [[ ! -x "$PYTH
     exit 1
 fi
 
+# ── Plugin auto-update ─────────────────────────────────────────────────────
+# If installed from the copilot-extensions plugin, check for updates and
+# re-install the package when the plugin source changes.
+
+_NO_UPDATE="${WORKTREE_NO_UPDATE:-${APERTURE_NO_UPDATE:-}}"
+if [[ "$_NO_UPDATE" != "1" ]]; then
+    _PLUGIN_DIR="$HOME/.copilot/installed-plugins/copilot-extensions/agent-worktrees"
+    if [[ -d "$_PLUGIN_DIR" ]]; then
+        setup_log INFO 'Plugin auto-update: checking for updates'
+        _PYPROJECT="$_PLUGIN_DIR/pyproject.toml"
+        _OLD_HASH=""
+        if [[ -f "$_PYPROJECT" ]]; then
+            _OLD_HASH=$(sha256sum "$_PYPROJECT" 2>/dev/null | cut -d' ' -f1) || true
+        fi
+
+        # Try to update the plugin from the marketplace
+        if command -v copilot &>/dev/null; then
+            _UPDATE_OUT=$(copilot plugin update agent-worktrees 2>&1) || true
+            setup_log INFO "Plugin update result: $_UPDATE_OUT"
+        fi
+
+        # If pyproject.toml changed, re-install the package into the venv
+        _NEW_HASH=""
+        if [[ -f "$_PYPROJECT" ]]; then
+            _NEW_HASH=$(sha256sum "$_PYPROJECT" 2>/dev/null | cut -d' ' -f1) || true
+        fi
+        if [[ -n "$_NEW_HASH" && "$_NEW_HASH" != "$_OLD_HASH" ]]; then
+            setup_log INFO 'Plugin source changed — re-installing package'
+            _PIP="$RUNTIME_DIR/.venv/bin/pip"
+            if [[ -x "$_PIP" ]]; then
+                if "$_PIP" install --quiet --upgrade "$_PLUGIN_DIR" 2>/dev/null; then
+                    setup_log INFO 'Package re-installed successfully'
+                else
+                    setup_log WARN 'Package re-install failed — proceeding with existing version'
+                fi
+            fi
+        fi
+    fi
+fi
+
 # ── Pre-launch self-update (two-pass) ─────────────────────────────────────
 # Checks bootstrap service staleness and runs updates if needed.
 # Controlled by WORKTREE_NO_UPDATE env var (set by cmd_launch in Python).
@@ -90,7 +130,7 @@ fi
 _NO_UPDATE="${WORKTREE_NO_UPDATE:-${APERTURE_NO_UPDATE:-}}"
 if [[ "$_NO_UPDATE" != "1" ]]; then
     setup_log INFO 'Running pre-launch staleness check'
-    PRE_JSON=$("$PYTHON" -m worktree_manager pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue","reason":"error"}'
+    PRE_JSON=$("$PYTHON" -m agent_worktrees pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue","reason":"error"}'
     PRE_ACTION=$(echo "$PRE_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) || PRE_ACTION="continue"
 
     if [[ "$PRE_ACTION" == "self-update" ]]; then
@@ -120,7 +160,7 @@ for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
 
         # Re-check after update (one retry max)
         setup_log INFO 'Re-checking staleness after update'
-        PRE_JSON=$("$PYTHON" -m worktree_manager pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue"}'
+        PRE_JSON=$("$PYTHON" -m agent_worktrees pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue"}'
         PRE_ACTION=$(echo "$PRE_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) || PRE_ACTION="continue"
 
         if [[ "$PRE_ACTION" == "self-update" ]]; then
@@ -133,26 +173,26 @@ else
 fi
 
 # ── Direct-dispatch commands (bypass resolve/picker) ─────────────────────
-# Subcommands that worktree_manager's main() handles directly — these
+# Subcommands that agent_worktrees's main() handles directly — these
 # must NOT fall through to the resolve→picker flow.  Keep in sync with
-# COMMAND_MAP in __main__.py, plus "services" and "worktree-manager".
-_DIRECT_COMMANDS="services worktree-manager resolve post-exit finalize mark-complete status list create cleanup validate install register uninstall update install-status deploy-instructions get pre-launch dev handoff"
+# COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
+_DIRECT_COMMANDS="services agent-worktrees resolve post-exit finalize mark-complete status list create cleanup validate install register uninstall update install-status deploy-instructions get pre-launch dev handoff"
 if [[ $# -gt 0 ]]; then
     for _dc in $_DIRECT_COMMANDS; do
         if [[ "$1" == "$_dc" ]]; then
             setup_log INFO "Direct dispatch: $1 (bypassing resolve)"
-            exec "$PYTHON" -m worktree_manager "$@"
+            exec "$PYTHON" -m agent_worktrees "$@"
         fi
     done
 fi
 
 # ── Resolve launch plan via Python ────────────────────────────────────────
 
-setup_log INFO 'Calling worktree_manager resolve'
-JSON=$("$PYTHON" -m worktree_manager resolve "$@")
+setup_log INFO 'Calling agent_worktrees resolve'
+JSON=$("$PYTHON" -m agent_worktrees resolve "$@")
 RC=$?
 if [[ $RC -ne 0 ]]; then
-    setup_log ERROR "worktree_manager resolve failed (exit $RC)"
+    setup_log ERROR "agent_worktrees resolve failed (exit $RC)"
     exit $RC
 fi
 
@@ -287,7 +327,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
                 set -e
 
                 if [[ "$POST_EXIT" == "1" && -n "$WORKTREE_ID" ]]; then
-                    "$PYTHON" -m worktree_manager post-exit "$WORKTREE_ID" 2>/dev/null || true
+                    "$PYTHON" -m agent_worktrees post-exit "$WORKTREE_ID" 2>/dev/null || true
                 fi
                 exit 1
             fi
@@ -305,7 +345,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             if ! tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
                 # Check for handoff-driven relaunch before post-exit
                 if [[ -n "$WORKTREE_ID" ]]; then
-                    HANDOFF_JSON=$("$PYTHON" -m worktree_manager handoff consume "$WORKTREE_ID" 2>/dev/null) || true
+                    HANDOFF_JSON=$("$PYTHON" -m agent_worktrees handoff consume "$WORKTREE_ID" 2>/dev/null) || true
                     if [[ -n "$HANDOFF_JSON" ]]; then
                         HANDOFF_PATH=$(echo "$HANDOFF_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('prompt_path',''))" 2>/dev/null) || HANDOFF_PATH=""
                         if [[ -n "$HANDOFF_PATH" && -f "$HANDOFF_PATH" ]]; then
@@ -349,8 +389,8 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
                 # Post-exit finalization (after both original and relaunched sessions)
                 if ! tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
                     if [[ "$POST_EXIT" == "1" && -n "$WORKTREE_ID" ]]; then
-                        "$PYTHON" -m worktree_manager post-exit "$WORKTREE_ID" || \
-                            echo "WARNING: Post-exit finalization failed. Run 'worktree-manager finalize' to retry." >&2
+                        "$PYTHON" -m agent_worktrees post-exit "$WORKTREE_ID" || \
+                            echo "WARNING: Post-exit finalization failed. Run 'agent-worktrees finalize' to retry." >&2
                     fi
                 fi
             fi
@@ -373,7 +413,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
 
     # Check for handoff-driven relaunch (max once per launcher invocation)
     if [[ -n "$WORKTREE_ID" ]]; then
-        HANDOFF_JSON=$("$PYTHON" -m worktree_manager handoff consume "$WORKTREE_ID" 2>/dev/null) || true
+        HANDOFF_JSON=$("$PYTHON" -m agent_worktrees handoff consume "$WORKTREE_ID" 2>/dev/null) || true
         if [[ -n "$HANDOFF_JSON" ]]; then
             HANDOFF_PATH=$(echo "$HANDOFF_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('prompt_path',''))" 2>/dev/null) || HANDOFF_PATH=""
             if [[ -n "$HANDOFF_PATH" && -f "$HANDOFF_PATH" ]]; then
@@ -392,8 +432,8 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
 
     # Post-exit finalization
     if [[ "$POST_EXIT" == "1" && -n "$WORKTREE_ID" ]]; then
-        "$PYTHON" -m worktree_manager post-exit "$WORKTREE_ID" || \
-            echo "WARNING: Post-exit finalization failed. Run 'worktree-manager finalize' to retry." >&2
+        "$PYTHON" -m agent_worktrees post-exit "$WORKTREE_ID" || \
+            echo "WARNING: Post-exit finalization failed. Run 'agent-worktrees finalize' to retry." >&2
     fi
 
     exit $COPILOT_EXIT

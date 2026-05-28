@@ -152,7 +152,7 @@ function Invoke-SelfElevated {
         The elevated child gets its own console window where interactive prompts
         (Read-Host, etc.) work normally. Output is tee'd to a temp file so the
         non-elevated parent can replay it for callers that capture stdout
-        (e.g., worktree-manager services update).
+        (e.g., agent-worktrees services update).
 
         Status and other read-only actions should NOT call this — keep them
         non-elevated so automated checks (session boot, pre-launch) don't
@@ -356,7 +356,7 @@ function Invoke-ServiceConfig {
     if ($Force)       { $args_ += '--force' }
 
     # Clear uv/venv env vars so the system Python uses its own stdlib,
-    # not the worktree-manager's 3.11 paths (causes SRE module mismatch).
+    # not the agent-worktrees's 3.11 paths (causes SRE module mismatch).
     $savedHome = $env:PYTHONHOME
     $savedPath = $env:PYTHONPATH
     $savedUvHome = $env:UV_INTERNAL__PYTHONHOME
