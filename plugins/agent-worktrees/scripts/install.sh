@@ -54,7 +54,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Infer project name ──────────────────────────────────────────────────
-# Priority: --project-name arg > WORKTREE_PROJECT env > existing config > CWD repo
+# Priority: --project-name arg > WORKTREE_PROJECT env > existing config
+# CWD is NOT auto-adopted -- pass --project-name to adopt explicitly.
 
 PROJECT_NAME=""
 
@@ -69,33 +70,27 @@ else
         PROJECT_NAME="$_cwd_name"
     fi
 fi
-if [[ -z "$PROJECT_NAME" ]]; then
-    # Final fallback: detect from CWD being a git repo
-    _git_root="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
-    if [[ -n "$_git_root" ]]; then
-        PROJECT_NAME="$(basename "$_git_root")"
+# Don't auto-adopt CWD repo -- runtime installs fine without a project.
+HAS_PROJECT=false
+if [[ -n "$PROJECT_NAME" ]]; then
+    HAS_PROJECT=true
+    # Validate project name (safe for dotdirs, binstubs, YAML keys)
+    if [[ ! "$PROJECT_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        echo "ERROR: Invalid project name '$PROJECT_NAME' -- must match [A-Za-z0-9._-]+" >&2
+        exit 1
     fi
-fi
-if [[ -z "$PROJECT_NAME" ]]; then
-    echo "ERROR: Cannot determine project name." >&2
-    echo "  Provide --project-name, set WORKTREE_PROJECT, or run from within a repo." >&2
-    exit 1
-fi
-
-# Validate project name (safe for dotdirs, binstubs, YAML keys)
-if [[ ! "$PROJECT_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
-    echo "ERROR: Invalid project name '$PROJECT_NAME' — must match [A-Za-z0-9._-]+" >&2
-    exit 1
 fi
 
 # ── Detect REPO_DIR from project config, then CWD ───────────────────────
 
 REPO_DIR=""
-_config_file="$HOME/.$PROJECT_NAME/config.yaml"
-if [[ -f "$_config_file" ]]; then
-    _anchor=$(grep 'anchor:' "$_config_file" 2>/dev/null | head -1 | sed 's/.*anchor:\s*//')
-    if [[ -n "$_anchor" ]] && git -C "$_anchor" rev-parse --show-toplevel >/dev/null 2>&1; then
-        REPO_DIR="$_anchor"
+if $HAS_PROJECT; then
+    _config_file="$HOME/.$PROJECT_NAME/config.yaml"
+    if [[ -f "$_config_file" ]]; then
+        _anchor=$(grep 'anchor:' "$_config_file" 2>/dev/null | head -1 | sed 's/.*anchor:\s*//')
+        if [[ -n "$_anchor" ]] && git -C "$_anchor" rev-parse --show-toplevel >/dev/null 2>&1; then
+            REPO_DIR="$_anchor"
+        fi
     fi
 fi
 if [[ -z "$REPO_DIR" ]]; then
@@ -109,11 +104,17 @@ fi
 
 SERVICE_NAME="Worktree Session Manager"
 INSTALL_DIR="$HOME/.agent-worktrees"
-PROJECT_DIR="$HOME/.$PROJECT_NAME"
 BIN_DIR="$INSTALL_DIR/bin"
-WORKTREES_DIR="$PROJECT_DIR/worktrees"
 LOCAL_BIN="$HOME/.local/bin"
 SERVICE_YAML="$SCRIPT_DIR/service.yaml"
+
+if $HAS_PROJECT; then
+    PROJECT_DIR="$HOME/.$PROJECT_NAME"
+    WORKTREES_DIR="$PROJECT_DIR/worktrees"
+else
+    PROJECT_DIR=""
+    WORKTREES_DIR=""
+fi
 
 DEPLOY_SOURCE_PATHS=("plugins/agent-worktrees/")
 INSTALLER_REL_PATH="plugins/agent-worktrees/scripts/install.sh"
@@ -960,13 +961,15 @@ case "$ACTION" in
 
         machine="$(resolve_machine)"
         platform="$(detect_platform)"
-        echo "  Project:  $PROJECT_NAME"
         echo "  Machine:  $machine"
         echo "  Platform: $platform"
-        if [[ -n "$REPO_DIR" ]]; then
-            echo "  Repo:     $REPO_DIR"
+        if $HAS_PROJECT; then
+            echo "  Project:  $PROJECT_NAME"
+            if [[ -n "$REPO_DIR" ]]; then
+                echo "  Repo:     $REPO_DIR"
+            fi
         else
-            echo "  Repo:     (not detected — repo-dependent features will be skipped)"
+            echo "  Project:  (none - runtime only; pass --project-name to adopt a repo)"
         fi
 
         # Prereq checks
@@ -978,29 +981,35 @@ case "$ACTION" in
             exit 1
         fi
 
-        mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$PROJECT_DIR" "$WORKTREES_DIR" "$LOCAL_BIN"
+        # Create directories (runtime always; project only if adopting)
+        mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$LOCAL_BIN"
+        if $HAS_PROJECT; then
+            mkdir -p "$PROJECT_DIR" "$WORKTREES_DIR"
+        fi
 
-        deploy_config "$machine" "$platform" || true
+        # -- Shared runtime --
         deploy_package || exit 1
         deploy_venv || exit 1
         deploy_wrappers || exit 1
-        deploy_binstub
         remove_legacy_scripts
-        deploy_tabby_profile "$platform" "$machine"
-        deploy_tmux_config
-        deploy_git_hooks_path
         deploy_copilot_plugin
         ensure_copilot_experimental
-        register_project
         assert_path
 
-        # Deploy machine.instructions.md + AGENTS.md from machines.yaml
-        if [[ -n "$REPO_DIR" ]]; then
-            WORKTREE_PROJECT="$PROJECT_NAME" PYTHONUTF8=1 \
-                "$VENV_PYTHON" -m agent_worktrees deploy-instructions --machine "$machine" 2>&1 \
-                | sed 's/^/  /' || warn "Instruction file deployment skipped"
-        else
-            skipped "Instruction deployment skipped (no repo detected)"
+        # -- Project-specific (only when adopting) --
+        if $HAS_PROJECT; then
+            deploy_config "$machine" "$platform" || true
+            deploy_binstub
+            register_project
+            deploy_tabby_profile "$platform" "$machine"
+            deploy_tmux_config
+            deploy_git_hooks_path
+
+            if [[ -n "$REPO_DIR" ]]; then
+                WORKTREE_PROJECT="$PROJECT_NAME" PYTHONUTF8=1 \
+                    "$VENV_PYTHON" -m agent_worktrees deploy-instructions --machine "$machine" 2>&1 \
+                    | sed 's/^/  /' || warn "Instruction file deployment skipped"
+            fi
         fi
 
         write_deploy_manifest
@@ -1018,22 +1027,28 @@ p.write_text(json.dumps(m, indent=2))
         echo ""
         ok "Installation complete"
         echo "  Runtime dir: $INSTALL_DIR"
-        echo "  Project dir: $PROJECT_DIR"
+        if $HAS_PROJECT; then
+            echo "  Project dir: $PROJECT_DIR"
+            echo "  Usage:       $PROJECT_NAME"
+        fi
         echo "  Runtime:     Python ($VENV_PYTHON)"
-        echo "  Usage:       $PROJECT_NAME"
         ;;
 
     uninstall)
         header "Uninstalling $SERVICE_NAME"
 
-        # Remove Tabby profile (before venv removal — needs Python)
-        remove_tabby_profile
+        # Remove Tabby profile (before venv removal -- needs Python)
+        if $HAS_PROJECT; then
+            remove_tabby_profile
+        fi
 
-        # Remove binstub
-        local_binstub="$LOCAL_BIN/$PROJECT_NAME"
-        if [[ -f "$local_binstub" ]]; then
-            rm -f "$local_binstub"
-            changed "Removed binstub: $local_binstub"
+        # Remove project binstub
+        if $HAS_PROJECT; then
+            local_binstub="$LOCAL_BIN/$PROJECT_NAME"
+            if [[ -f "$local_binstub" ]]; then
+                rm -f "$local_binstub"
+                changed "Removed binstub: $local_binstub"
+            fi
         fi
 
         # Remove tool binstubs
@@ -1069,13 +1084,17 @@ p.write_text(json.dumps(m, indent=2))
         fi
 
         if $REMOVE_CONFIG; then
-            rm -rf "$PROJECT_DIR"
-            changed "Removed project dir $PROJECT_DIR (config + session metadata)"
+            if $HAS_PROJECT; then
+                rm -rf "$PROJECT_DIR"
+                changed "Removed project dir $PROJECT_DIR (config + session metadata)"
+            fi
             rm -rf "$INSTALL_DIR"
             changed "Removed runtime dir $INSTALL_DIR"
         else
             rm -f "$INSTALL_DIR/deploy-manifest.json"
-            skipped "Config and session metadata preserved at $PROJECT_DIR"
+            if $HAS_PROJECT; then
+                skipped "Config and session metadata preserved at $PROJECT_DIR"
+            fi
             echo "    Use --remove-config to delete everything"
         fi
 
@@ -1084,7 +1103,7 @@ p.write_text(json.dumps(m, indent=2))
 
     start)
         header "Starting $SERVICE_NAME"
-        skipped "Not a daemon — invoke with: $PROJECT_NAME"
+        skipped "Not a daemon -- invoke with: agent-worktrees"
         ;;
 
     stop)
@@ -1116,13 +1135,6 @@ p.write_text(json.dumps(m, indent=2))
             err "launch-session.sh missing"
         fi
 
-        # Binstub
-        if [[ -f "$LOCAL_BIN/$PROJECT_NAME" ]]; then
-            ok "Binstub installed at $LOCAL_BIN/$PROJECT_NAME"
-        else
-            err "Binstub missing at $LOCAL_BIN/$PROJECT_NAME"
-        fi
-
         # Tool binstubs
         for stub in agent-worktrees; do
             if [[ -f "$LOCAL_BIN/$stub" ]]; then
@@ -1132,44 +1144,55 @@ p.write_text(json.dumps(m, indent=2))
             fi
         done
 
-        # Config (project dir)
-        if [[ -f "$PROJECT_DIR/config.yaml" ]]; then
-            ok "Config at $PROJECT_DIR/config.yaml"
-        else
-            err "Config missing at $PROJECT_DIR/config.yaml"
-        fi
+        if $HAS_PROJECT; then
+            # Project binstub
+            if [[ -f "$LOCAL_BIN/$PROJECT_NAME" ]]; then
+                ok "Binstub installed at $LOCAL_BIN/$PROJECT_NAME"
+            else
+                err "Binstub missing at $LOCAL_BIN/$PROJECT_NAME"
+            fi
 
-        # Tabby terminal profile
-        check_tabby_profile
+            # Config (project dir)
+            if [[ -f "$PROJECT_DIR/config.yaml" ]]; then
+                ok "Config at $PROJECT_DIR/config.yaml"
+            else
+                err "Config missing at $PROJECT_DIR/config.yaml"
+            fi
+
+            # Tabby terminal profile
+            check_tabby_profile
+
+            # Active sessions
+            if [[ -d "$WORKTREES_DIR" ]]; then
+                total=$(find "$WORKTREES_DIR" -name '*.yaml' 2>/dev/null | wc -l)
+                active=$(grep -l 'status: active' "$WORKTREES_DIR"/*.yaml 2>/dev/null | wc -l)
+                ok "$active active session(s), $total total"
+            fi
+        else
+            skipped "Project status skipped (no project specified)"
+        fi
 
         # tmux config
         if [[ -f "$HOME/.tmux.conf" ]]; then
             ok "tmux config at ~/.tmux.conf"
         else
-            echo "  ⚠ tmux config missing — run 'update' to deploy" >&2
+            echo "  ! tmux config missing -- run 'update' to deploy" >&2
         fi
 
         assert_path
 
         # Git hooks
-        if [[ -n "$REPO_DIR" ]]; then
+        if [[ -n "$REPO_DIR" ]] && $HAS_PROJECT; then
             hooks_path="$(git -C "$REPO_DIR" config --local core.hooksPath 2>/dev/null)" || true
             if [[ "$hooks_path" == "tools/hooks" ]]; then
                 ok "Git hooksPath = tools/hooks"
             elif [[ -n "$hooks_path" ]]; then
-                echo "  ⚠ Git hooksPath = $hooks_path (expected tools/hooks)"
+                echo "  ! Git hooksPath = $hooks_path (expected tools/hooks)"
             else
-                err "Git core.hooksPath not set — run 'update' to configure"
+                err "Git core.hooksPath not set -- run 'update' to configure"
             fi
         else
             skipped "Git hooks check skipped (no repo detected)"
-        fi
-
-        # Active sessions
-        if [[ -d "$WORKTREES_DIR" ]]; then
-            total=$(find "$WORKTREES_DIR" -name '*.yaml' 2>/dev/null | wc -l)
-            active=$(grep -l 'status: active' "$WORKTREES_DIR"/*.yaml 2>/dev/null | wc -l)
-            ok "$active active session(s), $total total"
         fi
 
         show_deploy_status
@@ -1178,8 +1201,13 @@ p.write_text(json.dumps(m, indent=2))
     update-config)
         header "Updating $SERVICE_NAME Config"
 
+        if ! $HAS_PROJECT; then
+            err "No project specified -- pass --project-name"
+            exit 1
+        fi
+
         if [[ ! -f "$PROJECT_DIR/config.yaml" ]]; then
-            err "Config not found — run 'install' first"
+            err "Config not found -- run 'install' first"
             exit 1
         fi
 
@@ -1188,7 +1216,7 @@ p.write_text(json.dumps(m, indent=2))
             platform="$(detect_platform)"
             deploy_config "$machine" "$platform"
         else
-            skipped "Config is machine-generated — use --force to regenerate"
+            skipped "Config is machine-generated -- use --force to regenerate"
             echo "    Current: $PROJECT_DIR/config.yaml"
         fi
         ;;
@@ -1197,30 +1225,32 @@ p.write_text(json.dumps(m, indent=2))
         header "Updating $SERVICE_NAME"
 
         if [[ ! -d "$BIN_DIR" ]]; then
-            err "Not installed — run 'install' first"
+            err "Not installed -- run 'install' first"
             exit 1
         fi
 
+        # -- Shared runtime --
         deploy_package || exit 1
         deploy_venv || exit 1
         deploy_wrappers || exit 1
-        deploy_binstub
         remove_legacy_scripts
-        deploy_tabby_profile "$(detect_platform)" "$(resolve_machine)"
-        deploy_tmux_config
-        deploy_git_hooks_path
         deploy_copilot_plugin
         ensure_copilot_experimental
-        register_project
 
-        # Deploy machine.instructions.md + AGENTS.md from machines.yaml
-        if [[ -n "$REPO_DIR" ]]; then
-            update_machine="$(resolve_machine)"
-            WORKTREE_PROJECT="$PROJECT_NAME" PYTHONUTF8=1 \
-                "$VENV_PYTHON" -m agent_worktrees deploy-instructions --machine "$update_machine" 2>&1 \
-                | sed 's/^/  /' || warn "Instruction file deployment skipped"
-        else
-            skipped "Instruction deployment skipped (no repo detected)"
+        # -- Project-specific (only when a project is known) --
+        if $HAS_PROJECT; then
+            deploy_binstub
+            register_project
+            deploy_tabby_profile "$(detect_platform)" "$(resolve_machine)"
+            deploy_tmux_config
+            deploy_git_hooks_path
+
+            if [[ -n "$REPO_DIR" ]]; then
+                update_machine="$(resolve_machine)"
+                WORKTREE_PROJECT="$PROJECT_NAME" PYTHONUTF8=1 \
+                    "$VENV_PYTHON" -m agent_worktrees deploy-instructions --machine "$update_machine" 2>&1 \
+                    | sed 's/^/  /' || warn "Instruction file deployment skipped"
+            fi
         fi
 
         write_deploy_manifest

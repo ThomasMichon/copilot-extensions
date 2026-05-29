@@ -70,34 +70,31 @@ if (-not $ProjectName) {
         if (Test-Path $candidateConf) { $ProjectName = $cwdName }
     }
 }
-if (-not $ProjectName) {
-    # Final fallback: try to detect from CWD being a git repo
-    if (Test-Path (Join-Path (Get-Location) '.git')) {
-        $ProjectName = Split-Path (Get-Location) -Leaf
+# Don't auto-adopt the CWD repo -- project association is explicit.
+# Runtime installs fine without a project name.
+$HasProject = [bool]$ProjectName
+
+if ($HasProject) {
+    $ProjectDir      = Join-Path $env:USERPROFILE ".$ProjectName"
+    $WorktreesDir    = Join-Path $ProjectDir 'worktrees'
+
+    # Detect repo dir from existing project config, then CWD
+    $configPath_ = Join-Path $ProjectDir 'config.yaml'
+    if (Test-Path $configPath_) {
+        try {
+            $cfgLines = Get-Content $configPath_ -Raw
+            if ($cfgLines -match 'anchor:\s*(.+)') {
+                $candidate = $Matches[1].Trim()
+                if (Test-Path $candidate) { $RepoDir = $candidate }
+            }
+        } catch { }
     }
-}
-if (-not $ProjectName) {
-    Write-Host "ERROR: Cannot determine project name." -ForegroundColor Red
-    Write-Host "  Provide -ProjectName, set WORKTREE_PROJECT, or run from within a repo." -ForegroundColor Red
-    exit 1
-}
-
-$ProjectDir      = Join-Path $env:USERPROFILE ".$ProjectName"
-$WorktreesDir    = Join-Path $ProjectDir 'worktrees'
-
-# Detect repo dir from existing project config, then CWD
-$configPath_ = Join-Path $ProjectDir 'config.yaml'
-if (Test-Path $configPath_) {
-    try {
-        $cfgLines = Get-Content $configPath_ -Raw
-        if ($cfgLines -match 'anchor:\s*(.+)') {
-            $candidate = $Matches[1].Trim()
-            if (Test-Path $candidate) { $RepoDir = $candidate }
-        }
-    } catch { }
-}
-if (-not $RepoDir -and (Test-Path (Join-Path (Get-Location) '.git'))) {
-    $RepoDir = (Get-Location).Path
+    if (-not $RepoDir -and (Test-Path (Join-Path (Get-Location) '.git'))) {
+        $RepoDir = (Get-Location).Path
+    }
+} else {
+    $ProjectDir   = $null
+    $WorktreesDir = $null
 }
 
 $DeploySourcePaths = @('plugins/agent-worktrees/')
@@ -966,10 +963,11 @@ switch ($Action) {
 
         $machine = Resolve-Machine
         Write-Host "  Machine: $machine"
-        if ($RepoDir) {
-            Write-Host "  Repo:    $RepoDir"
+        if ($HasProject) {
+            Write-Host "  Project: $ProjectName"
+            if ($RepoDir) { Write-Host "  Repo:    $RepoDir" }
         } else {
-            Write-Host "  Repo:    (not detected — repo-dependent features will be skipped)"
+            Write-Host "  Project: (none - runtime only; pass -ProjectName to adopt a repo)"
         }
 
         # Prereq checks
@@ -994,38 +992,43 @@ switch ($Action) {
             Write-ServiceOk "psmux available"
         }
 
-        # Create directory structure
-        foreach ($dir in @($InstallDir, $BinDir, $ProjectDir, $WorktreesDir, $LocalBin)) {
+        # Create directory structure (runtime dirs always; project dirs only if adopting)
+        $runtimeDirs = @($InstallDir, $BinDir, $LocalBin)
+        if ($HasProject) { $runtimeDirs += @($ProjectDir, $WorktreesDir) }
+        foreach ($dir in $runtimeDirs) {
             Ensure-InstallDir $dir
         }
 
-        Deploy-Config -Machine $machine | Out-Null
+        # -- Shared runtime --
         if (-not (Deploy-Package)) { exit 1 }
         if (-not (Deploy-Venv)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
-        Deploy-Binstub
-        Register-ProjectEntry
-        if ($RepoDir) { Deploy-Icon }
-        Deploy-Shortcuts -Machine $machine
-        Clean-TerminalSettingsJson
-        Deploy-PsmuxConfig
-        if ($RepoDir) { Deploy-GitHooksPath }
         Deploy-CopilotPlugin
         Ensure-CopilotExperimental
         Assert-PathIncludes $LocalBin
 
-        # Deploy machine.instructions.md + AGENTS.md from machines.yaml
-        if ($RepoDir) {
-            try {
-                $env:PYTHONUTF8 = '1'
-                $env:PYTHONPATH = $LibDir
-                $env:WORKTREE_PROJECT = $ProjectName
-                & $VenvPython -m agent_worktrees deploy-instructions --machine $machine 2>&1 | ForEach-Object { Write-Host "  $_" }
-            } catch {
-                Write-ServiceWarn "Instruction file deployment skipped: $_"
+        # -- Project-specific (only when adopting) --
+        if ($HasProject) {
+            Deploy-Config -Machine $machine | Out-Null
+            Deploy-Binstub
+            Register-ProjectEntry
+            if ($RepoDir) { Deploy-Icon }
+            Deploy-Shortcuts -Machine $machine
+            Clean-TerminalSettingsJson
+            Deploy-PsmuxConfig
+            if ($RepoDir) { Deploy-GitHooksPath }
+
+            # Deploy machine.instructions.md + AGENTS.md from machines.yaml
+            if ($RepoDir) {
+                try {
+                    $env:PYTHONUTF8 = '1'
+                    $env:PYTHONPATH = $LibDir
+                    $env:WORKTREE_PROJECT = $ProjectName
+                    & $VenvPython -m agent_worktrees deploy-instructions --machine $machine 2>&1 | ForEach-Object { Write-Host "  $_" }
+                } catch {
+                    Write-ServiceWarn "Instruction file deployment skipped: $_"
+                }
             }
-        } else {
-            Write-ServiceSkipped "Instruction deployment skipped (no repo detected)"
         }
 
         Write-DeployManifest -InstallDir $InstallDir -ServiceName 'worktree-sessions' `
@@ -1041,9 +1044,11 @@ switch ($Action) {
         Write-Host ""
         Write-ServiceOk "Installation complete"
         Write-Host "  Runtime dir: $InstallDir"
-        Write-Host "  Project dir: $ProjectDir"
+        if ($HasProject) {
+            Write-Host "  Project dir: $ProjectDir"
+            Write-Host "  Usage:       $ProjectName"
+        }
         Write-Host "  Runtime:     Python ($VenvPython)"
-        Write-Host "  Usage:       $ProjectName"
     }
 
     'uninstall' {
@@ -1261,41 +1266,43 @@ switch ($Action) {
             exit 1
         }
 
+        # -- Shared runtime --
         if (-not (Deploy-Package)) { exit 1 }
         if (-not (Deploy-Venv)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
-        Deploy-Binstub
-        Register-ProjectEntry
-        if ($RepoDir) { Deploy-Icon }
-        # Detect machine for terminal profile generation
-        $updateMachine = Resolve-Machine
-        $configPath = Join-Path $ProjectDir 'config.yaml'
-        if (Test-Path $configPath) {
-            try {
-                $cfgRaw = & $VenvPython -c "import yaml, json, sys; data = yaml.safe_load(open(sys.argv[1], encoding='utf-8')); print(json.dumps(data))" $configPath 2>$null
-                $cfgObj = $cfgRaw | ConvertFrom-Json
-                if ($cfgObj.machine) { $updateMachine = $cfgObj.machine }
-            } catch { }
-        }
-        Deploy-Shortcuts -Machine $updateMachine
-        Clean-TerminalSettingsJson
-        Deploy-PsmuxConfig
-        if ($RepoDir) { Deploy-GitHooksPath }
         Deploy-CopilotPlugin
         Ensure-CopilotExperimental
 
-        # Deploy machine.instructions.md + AGENTS.md from machines.yaml
-        if ($RepoDir) {
-            try {
-                $env:PYTHONUTF8 = '1'
-                $env:PYTHONPATH = $LibDir
-                $env:WORKTREE_PROJECT = $ProjectName
-                & $VenvPython -m agent_worktrees deploy-instructions --machine $updateMachine 2>&1 | ForEach-Object { Write-Host "  $_" }
-            } catch {
-                Write-ServiceWarn "Instruction file deployment skipped: $_"
+        # -- Project-specific (only when a project is known) --
+        if ($HasProject) {
+            Deploy-Binstub
+            Register-ProjectEntry
+            if ($RepoDir) { Deploy-Icon }
+            $updateMachine = Resolve-Machine
+            $configPath = Join-Path $ProjectDir 'config.yaml'
+            if (Test-Path $configPath) {
+                try {
+                    $cfgRaw = & $VenvPython -c "import yaml, json, sys; data = yaml.safe_load(open(sys.argv[1], encoding='utf-8')); print(json.dumps(data))" $configPath 2>$null
+                    $cfgObj = $cfgRaw | ConvertFrom-Json
+                    if ($cfgObj.machine) { $updateMachine = $cfgObj.machine }
+                } catch { }
             }
-        } else {
-            Write-ServiceSkipped "Instruction deployment skipped (no repo detected)"
+            Deploy-Shortcuts -Machine $updateMachine
+            Clean-TerminalSettingsJson
+            Deploy-PsmuxConfig
+            if ($RepoDir) { Deploy-GitHooksPath }
+
+            # Deploy machine.instructions.md + AGENTS.md from machines.yaml
+            if ($RepoDir) {
+                try {
+                    $env:PYTHONUTF8 = '1'
+                    $env:PYTHONPATH = $LibDir
+                    $env:WORKTREE_PROJECT = $ProjectName
+                    & $VenvPython -m agent_worktrees deploy-instructions --machine $updateMachine 2>&1 | ForEach-Object { Write-Host "  $_" }
+                } catch {
+                    Write-ServiceWarn "Instruction file deployment skipped: $_"
+                }
+            }
         }
 
         Write-DeployManifest -InstallDir $InstallDir -ServiceName 'worktree-sessions' `
