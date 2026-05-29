@@ -194,27 +194,34 @@ Ask the user whether to deploy terminal profiles if found.
 
 ### WSL Terminal Profiles
 
-The `(WSL)` Windows Terminal profile is only created when the project has
-been adopted or bootstrapped in WSL.  The `wsl` field in `projects.yaml`
-controls this:
-
-```yaml
-wsl:
-  state: adopted    # or "bootstrap"
-  distro: Ubuntu    # optional; targets a specific distro
-  path: ~/src/...   # repo location inside WSL
-```
+The `(WSL)` Windows Terminal profile is automatically created by the
+installer when it detects that a WSL binstub exists at
+`~/.local/bin/{project}` inside WSL.  No registry state is needed — the
+installer probes WSL directly.
 
 When adopting on Windows:
-- If WSL is available, a **bootstrap binstub** is deployed to WSL's
-  `~/.local/bin/{project}`.  On first launch it interactively clones the
-  repo and runs `install.sh`.
-- Use the `agent-worktrees-wsl-provision` skill for guided full
-  provisioning.
+- If WSL is available, prompt the user whether to deploy a **thin
+  binstub** to WSL's `~/.local/bin/{project}`.
+- If the user agrees, check the repos registry (`agent-worktrees repos
+  srcroot`) for a WSL source root.  If none is configured, ask the user
+  to choose a default repo-source location in WSL before proceeding.
+- Deploy the thin binstub via:
+  ```powershell
+  wsl.exe -d {distro} -- bash -c 'mkdir -p "$HOME/.local/bin"'
+  # then write the binstub (use base64 to avoid quoting issues)
+  ```
+- The binstub is a simple launcher that prints setup instructions if
+  agent-worktrees is not yet installed in WSL.
+
+**Full WSL setup** is done from within WSL itself:
+1. Install the copilot-extensions plugin in WSL (requires Copilot CLI)
+2. Run the agent-worktrees installer:
+   `agent-worktrees install --project-name {project}`
+3. Run adoption from WSL
 
 When adopting inside WSL:
-- The `wsl.state` is set to `adopted` automatically.
-- The Windows-side installer picks this up on the next `update` and
+- The `wsl.distro` metadata is recorded in `projects.yaml` automatically.
+- The Windows-side installer detects the binstub on the next `update` and
   generates the `(WSL)` terminal profile.
 
 ## Multiple Repos
