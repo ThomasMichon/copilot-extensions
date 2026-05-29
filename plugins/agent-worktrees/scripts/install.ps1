@@ -940,14 +940,15 @@ echo "Bootstrap complete. Run '$ProjectName' again to start a session."
         # Ensure ~/.local/bin exists in WSL
         & wsl.exe -d $distro -- bash -c "mkdir -p `$HOME/.local/bin" 2>$null
 
-        # Write the bootstrap script and strip Windows CR characters.
-        # PowerShell here-strings and wsl.exe argument passing both inject
-        # CRLF line endings; we pipe through tr to ensure pure LF output.
+        # Write the bootstrap script via base64 to avoid quoting issues.
+        # Heredoc delimiters lose their single-quote protection when passed
+        # through wsl.exe argument processing, causing bash to expand $VAR
+        # references during file creation.  Base64 encoding sidesteps all
+        # shell quoting and expansion problems.
+        $cleanScript = $bootstrapScript -replace "`r", ""
+        $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($cleanScript))
         $wslBinPath = "`$HOME/.local/bin/$ProjectName"
-        & wsl.exe -d $distro -- bash -c "tr -d '\r' > $wslBinPath << 'BOOTSTRAP_EOF'
-$bootstrapScript
-BOOTSTRAP_EOF
-chmod +x $wslBinPath"
+        & wsl.exe -d $distro -- bash -c "echo $b64 | base64 -d > $wslBinPath && chmod +x $wslBinPath"
 
         if ($LASTEXITCODE -eq 0) {
             Write-ServiceOk "WSL bootstrap stub deployed to ~/.local/bin/$ProjectName ($distro)"
