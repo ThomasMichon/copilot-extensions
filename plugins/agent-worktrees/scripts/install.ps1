@@ -1095,12 +1095,24 @@ function Deploy-Shortcuts {
 function Deploy-CopilotPlugin {
     <# Install agent-worktrees from the copilot-extensions marketplace.
        Ensures the marketplace is registered, installs or updates the plugin,
-       then removes any stale _direct install. #>
+       then removes any stale _direct install.
+
+       When the installer itself is running from the installed-plugins
+       directory (i.e. invoked by cmd_update after it already ran
+       'copilot plugin update'), skip the update call to avoid EBUSY
+       errors from trying to replace files in our own working directory. #>
 
     if (-not (Get-Command copilot -ErrorAction SilentlyContinue)) {
         Write-ServiceWarn "Copilot CLI not found - skipping plugin install"
         return
     }
+
+    # Detect if we are running from the installed plugin directory.
+    # When cmd_update invokes us, it sets cwd to the plugin dir and
+    # has already done the plugin update — re-running it would EBUSY
+    # on Windows because copilot CLI tries to rmdir our own cwd.
+    $installedPluginsDir = Join-Path $env:USERPROFILE '.copilot\installed-plugins'
+    $runningFromInstalled = $PluginDir.Path -like "$installedPluginsDir*"
 
     # 1. Register marketplace if not present
     $marketplaces = (copilot plugin marketplace list 2>$null) -join "`n"
@@ -1126,7 +1138,9 @@ function Deploy-CopilotPlugin {
     }
 
     # 3. Install or update marketplace plugin
-    if ($hasMarketplace) {
+    if ($runningFromInstalled) {
+        Write-ServiceOk "Copilot plugin updated (marketplace)"
+    } elseif ($hasMarketplace) {
         $out = copilot plugin update agent-worktrees@copilot-extensions 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-ServiceWarn "Plugin update failed: $out"

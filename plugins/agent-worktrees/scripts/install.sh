@@ -883,11 +883,22 @@ deploy_copilot_plugin() {
     # Install agent-worktrees from the copilot-extensions marketplace.
     # Ensures the marketplace is registered, installs or updates the plugin,
     # then removes any stale _direct install.
+    #
+    # When running from inside the installed-plugins directory (i.e.
+    # invoked by cmd_update after it already ran 'copilot plugin update'),
+    # skip the update call to avoid replacing files under our own feet.
 
     if ! command -v copilot >/dev/null 2>&1; then
         warn "Copilot CLI not found - skipping plugin install"
         return
     fi
+
+    # Detect if we are running from the installed plugin directory
+    local installed_plugins_dir="$HOME/.copilot/installed-plugins"
+    local running_from_installed=false
+    case "$PLUGIN_DIR" in
+        "$installed_plugins_dir"*) running_from_installed=true ;;
+    esac
 
     # 1. Register marketplace if not present
     if ! copilot plugin marketplace list 2>/dev/null | grep -q 'copilot-extensions'; then
@@ -911,7 +922,9 @@ deploy_copilot_plugin() {
 
     # 3. Install or update marketplace plugin
     local out
-    if $has_marketplace; then
+    if $running_from_installed; then
+        ok "Copilot plugin updated (marketplace)"
+    elif $has_marketplace; then
         out=$(copilot plugin update agent-worktrees@copilot-extensions 2>&1) || {
             warn "Plugin update failed: $out"
         }
