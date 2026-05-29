@@ -2046,7 +2046,13 @@ def cmd_register(args: argparse.Namespace) -> int:
                 capture_output=True, text=True, timeout=5,
             )
             if r.returncode == 0 and r.stdout.strip():
-                repo_dir = Path(r.stdout.strip()).resolve()
+                # Normalize through resolve_to_anchor so that running from
+                # inside a linked worktree resolves back to the main checkout,
+                # matching _find_repo_dir()'s behavior. Without this, registering
+                # from an active worktree would anchor to the ephemeral path.
+                repo_dir = git_ops.resolve_to_anchor(
+                    Path(r.stdout.strip()).resolve()
+                )
         except Exception:
             pass
         if not repo_dir:
@@ -2072,19 +2078,33 @@ def cmd_register(args: argparse.Namespace) -> int:
         except Exception:
             pass
     if not default_branch:
-        # origin/HEAD unset — fall back to the currently checked-out branch
-        # before assuming "master" (most repos now default to "main").
-        try:
-            r = subprocess.run(
-                ["git", "-C", str(repo_dir), "symbolic-ref", "--short", "HEAD"],
-                capture_output=True, text=True, timeout=5,
-            )
-            if r.returncode == 0 and r.stdout.strip():
-                default_branch = r.stdout.strip()
-        except Exception:
-            pass
+        # origin/HEAD unset — do NOT fall back to the current branch, which is
+        # often a feature branch in worktree workflows and would silently record
+        # the wrong default. Probe for a conventional default branch instead.
+        for candidate in ("master", "main"):
+            try:
+                r = subprocess.run(
+                    ["git", "-C", str(repo_dir), "rev-parse", "--verify",
+                     f"refs/heads/{candidate}"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if r.returncode == 0:
+                    default_branch = candidate
+                    break
+            except Exception:
+                pass
     if not default_branch:
-        default_branch = "master"
+        # No conventional default found — ask explicitly rather than guessing.
+        output.warn(
+            "Could not detect default branch "
+            "(no origin/HEAD, no master or main branch)"
+        )
+        branch_input = input("  Default branch name: ").strip()
+        if branch_input:
+            default_branch = branch_input
+        else:
+            default_branch = "master"
+            output.warn(f"Assuming default branch: {default_branch}")
 
     print(f"  Repo:     {repo_dir}")
     print(f"  Branch:   {default_branch}")

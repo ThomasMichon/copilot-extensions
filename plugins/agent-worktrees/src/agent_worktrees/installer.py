@@ -386,17 +386,15 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
             dst.chmod(0o755)
         output.ok(f"Binstub: {dst}")
 
-    # Unified agent-worktrees command (project-agnostic; requires
-    # WORKTREE_PROJECT to be set in the environment by the caller).
+    # Unified agent-worktrees command (project-agnostic; routes straight to
+    # the Python CLI). It must NOT require WORKTREE_PROJECT — global
+    # subcommands like `register <project>`, `update`, and `--version` run
+    # without a project context. The project-specific launchers above are the
+    # gating mechanism that sets WORKTREE_PROJECT; this stub stays unconditional
+    # and matches the binstub written by init.sh.
     if is_windows:
         wm_content = (
             "@echo off\r\n"
-            "setlocal\r\n"
-            'if not defined WORKTREE_PROJECT (\r\n'
-            '    echo ERROR: WORKTREE_PROJECT is not set. '
-            'Use the project launcher binstub instead. >&2\r\n'
-            '    exit /b 1\r\n'
-            ')\r\n'
             'set "PYTHONUTF8=1"\r\n'
             'set "PYTHON=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe"\r\n'
             'set "PYTHONPATH=%USERPROFILE%\\.agent-worktrees\\lib"\r\n'
@@ -409,17 +407,10 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
     else:
         wm_content = (
             "#!/usr/bin/env bash\n"
-            "set -euo pipefail\n"
-            'if [[ -z "${WORKTREE_PROJECT:-}" ]]; then\n'
-            '    echo "ERROR: WORKTREE_PROJECT is not set. '
-            'Use the project launcher binstub instead." >&2\n'
-            '    exit 1\n'
-            'fi\n'
-            'PYTHON="$HOME/.agent-worktrees/.venv/bin/python"\n'
+            "export PYTHONUTF8=1\n"
             'export PYTHONPATH="$HOME/.agent-worktrees/lib${PYTHONPATH:+:$PYTHONPATH}"\n'
             'unset PYTHONHOME\n'
-            'export PYTHONUTF8=1\n'
-            'exec "$PYTHON" -m agent_worktrees "$@"\n'
+            'exec "$HOME/.agent-worktrees/.venv/bin/python" -m agent_worktrees "$@"\n'
         )
         dst = lb / "agent-worktrees"
         dst.write_text(wm_content)
