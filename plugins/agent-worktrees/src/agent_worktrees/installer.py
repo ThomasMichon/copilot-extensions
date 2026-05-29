@@ -587,17 +587,36 @@ def show_install_status() -> None:
         active = sum(1 for y in yamls if "status: active" in y.read_text())
         output.ok(f"{active} active worktree(s), {len(yamls)} total")
 
-    # Copilot instructions — check deployed artifacts exist
+    # Copilot instructions -- context-aware check
     instr_path = proj_dir / ".github" / "instructions" / "machine.instructions.md"
     agents_path = proj_dir / "AGENTS.md"
-    if instr_path.exists() and agents_path.exists():
-        output.ok("machine.instructions.md + AGENTS.md deployed")
-    elif instr_path.exists():
-        output.ok("machine.instructions.md deployed (AGENTS.md missing)")
-    elif agents_path.exists():
-        output.warn("AGENTS.md deployed but machine.instructions.md missing (run update)")
+    # Check if machines.yaml is configured for this project
+    _has_machines_yaml = False
+    try:
+        _reg = read_projects_registry()
+        _proj_entry = _reg.get("projects", {}).get(project, {})
+        _my = _proj_entry.get("machines_yaml")
+        if _my and Path(_my).exists():
+            _has_machines_yaml = True
+    except Exception:
+        pass
+
+    if _has_machines_yaml:
+        # machines.yaml exists -- instruction files should be deployed
+        if instr_path.exists() and agents_path.exists():
+            output.ok("machine.instructions.md + AGENTS.md deployed")
+        elif instr_path.exists():
+            output.ok("machine.instructions.md deployed (AGENTS.md missing)")
+        elif agents_path.exists():
+            output.warn("AGENTS.md deployed but machine.instructions.md missing (run update)")
+        else:
+            output.err("instruction files missing (run install or update)")
     else:
-        output.err("instruction files missing (run install or update)")
+        # No machines.yaml -- instruction files are optional
+        if instr_path.exists() or agents_path.exists():
+            output.ok("machine instruction files present")
+        else:
+            output.skipped("machine instructions not configured (no machines.yaml)")
 
 
 # ── Projects registry ───────────────────────────────────────────────────
@@ -629,6 +648,16 @@ def read_projects_registry() -> dict:
         return {"projects": {}}
 
 
+def _format_yaml_value(v: object) -> str:
+    """Format a scalar value for hand-written YAML."""
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    escaped = str(v).replace("\\", "\\\\")
+    return f'"{escaped}"'
+
+
 def write_projects_registry(registry: dict) -> None:
     """Write the projects registry back to projects.yaml."""
     path = projects_yaml_path()
@@ -646,12 +675,13 @@ def write_projects_registry(registry: dict) -> None:
         lines.append(f"  {name}:")
         if isinstance(entry, dict):
             for k, v in sorted(entry.items()):
-                if v is None:
-                    lines.append(f"    {k}: null")
+                if isinstance(v, dict):
+                    # Nested dict (e.g. wsl: {state: ..., distro: ...})
+                    lines.append(f"    {k}:")
+                    for nk, nv in sorted(v.items()):
+                        lines.append(f"      {nk}: {_format_yaml_value(nv)}")
                 else:
-                    # Escape backslashes for valid double-quoted YAML
-                    escaped = str(v).replace("\\", "\\\\")
-                    lines.append(f'    {k}: "{escaped}"')
+                    lines.append(f"    {k}: {_format_yaml_value(v)}")
         lines.append("")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -661,8 +691,24 @@ def register_project(
     project: str,
     repo_dir: Path | str | None = None,
     default_branch: str = "master",
+    *,
+    wsl_state: str | None = None,
+    wsl_distro: str | None = None,
+    wsl_path: str | None = None,
 ) -> None:
-    """Add or update a project entry in projects.yaml."""
+    """Add or update a project entry in projects.yaml.
+
+    Parameters
+    ----------
+    wsl_state
+        WSL adoption state: ``"adopted"`` (full install exists in WSL),
+        ``"bootstrap"`` (bootstrap stub deployed), or *None* (no WSL).
+    wsl_distro
+        WSL distribution name (e.g. ``"Ubuntu"``).  Stored so terminal
+        profiles can target a specific distro with ``wsl.exe -d``.
+    wsl_path
+        Path to the repo anchor inside WSL (e.g. ``~/src/aperture-labs``).
+    """
     registry = read_projects_registry()
 
     repo_path = Path(repo_dir) if repo_dir else None
@@ -670,13 +716,31 @@ def register_project(
     if repo_path and (repo_path / "machines.yaml").exists():
         machines_yaml = str(repo_path / "machines.yaml")
 
-    registry["projects"][project] = {
+    entry: dict = {
         "config_dir": f"~/.{project}",
         "anchor": str(repo_path) if repo_path else "",
         "machines_yaml": machines_yaml,
         "default_branch": default_branch,
         "registered_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+
+    # Preserve existing WSL state when re-registering from Windows
+    existing = registry["projects"].get(project, {})
+    existing_wsl = existing.get("wsl") if isinstance(existing, dict) else None
+
+    # Build WSL metadata block
+    if wsl_state:
+        wsl_info: dict = {"state": wsl_state}
+        if wsl_distro:
+            wsl_info["distro"] = wsl_distro
+        if wsl_path:
+            wsl_info["path"] = wsl_path
+        entry["wsl"] = wsl_info
+    elif existing_wsl and isinstance(existing_wsl, dict):
+        # Preserve previously recorded WSL state
+        entry["wsl"] = existing_wsl
+
+    registry["projects"][project] = entry
 
     write_projects_registry(registry)
     output.ok(f"Project '{project}' registered in projects.yaml")

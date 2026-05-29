@@ -49,7 +49,7 @@ default_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|
 If `default_branch` detection fails, check for `master` or `main` branches
 and ask the user which is the default.
 
-### 2. Sweep for machines.yaml
+### 2. Sweep for machines.yaml (optional)
 
 Look for a machine registry at conventional locations:
 
@@ -59,15 +59,19 @@ Look for a machine registry at conventional locations:
 {repo_root}/.github/machines.yaml
 ```
 
+This file is **optional**. Most repos will not have one. It is an advanced
+feature for repos that manage multi-machine deployments or need machine-
+specific custom instructions.
+
 If found, parse it and present the machine list. Ask the user:
 - **Which machine is this?** (match by hostname prefix if possible,
   otherwise present a picker)
 - The selected machine determines the `machine:` and `platform:` fields
-  in config.yaml
+  in config.yaml, and deploys `machine.instructions.md` for Copilot
 
-If no machines.yaml exists, ask the user for:
-- A machine name (default: hostname)
-- The platform (auto-detect from OS)
+If no machines.yaml exists, auto-detect:
+- Machine name from hostname (lowercase)
+- Platform from OS detection
 
 ### 3. Sweep for services
 
