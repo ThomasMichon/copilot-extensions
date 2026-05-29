@@ -192,6 +192,31 @@ If the repo contains terminal profile templates:
 
 Ask the user whether to deploy terminal profiles if found.
 
+### WSL Terminal Profiles
+
+The `(WSL)` Windows Terminal profile is only created when the project has
+been adopted or bootstrapped in WSL.  The `wsl` field in `projects.yaml`
+controls this:
+
+```yaml
+wsl:
+  state: adopted    # or "bootstrap"
+  distro: Ubuntu    # optional; targets a specific distro
+  path: ~/src/...   # repo location inside WSL
+```
+
+When adopting on Windows:
+- If WSL is available, a **bootstrap binstub** is deployed to WSL's
+  `~/.local/bin/{project}`.  On first launch it interactively clones the
+  repo and runs `install.sh`.
+- Use the `agent-worktrees-wsl-provision` skill for guided full
+  provisioning.
+
+When adopting inside WSL:
+- The `wsl.state` is set to `adopted` automatically.
+- The Windows-side installer picks this up on the next `update` and
+  generates the `(WSL)` terminal profile.
+
 ## Multiple Repos
 
 Each repo gets its own `~/.{repo-name}/` directory and binstub. The

@@ -197,6 +197,10 @@ register_project() {
         machines_yaml="$REPO_DIR/machines.yaml"
     fi
 
+    local platform
+    platform="$(detect_platform)"
+    local wsl_distro="${WSL_DISTRO_NAME:-}"
+
     "$VENV_PYTHON" -c "
 import yaml, sys, os
 from pathlib import Path
@@ -208,6 +212,8 @@ anchor = sys.argv[3]
 machines_yaml = sys.argv[4]
 default_branch = sys.argv[5]
 config_dir = sys.argv[6]
+platform = sys.argv[7]
+wsl_distro = sys.argv[8]
 
 # Read existing registry
 if projects_path.exists():
@@ -219,7 +225,11 @@ else:
     data = {}
 
 projects = data.setdefault('projects', {})
-projects[project_name] = {
+
+# Preserve existing entry fields we don't want to clobber
+existing = projects.get(project_name, {})
+
+entry = {
     'anchor': anchor or None,
     'machines_yaml': machines_yaml or None,
     'registered_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
@@ -227,11 +237,25 @@ projects[project_name] = {
     'config_dir': config_dir,
 }
 
+# Set WSL state when running inside WSL
+if platform in ('wsl', 'linux'):
+    wsl_info = {'state': 'adopted'}
+    if wsl_distro:
+        wsl_info['distro'] = wsl_distro
+    if anchor:
+        wsl_info['path'] = anchor
+    entry['wsl'] = wsl_info
+elif isinstance(existing.get('wsl'), dict):
+    # Preserve existing WSL state when re-registering from native Linux
+    entry['wsl'] = existing['wsl']
+
+projects[project_name] = entry
+
 # Write back
 projects_path.parent.mkdir(parents=True, exist_ok=True)
 header = '# ~/.agent-worktrees/projects.yaml\n# Registry of adopted repos for terminal profile generation.\n\n'
 projects_path.write_text(header + yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True))
-" "$PROJECTS_YAML" "$PROJECT_NAME" "${REPO_DIR:-}" "${machines_yaml:-}" "$default_branch" "~/.$PROJECT_NAME"
+" "$PROJECTS_YAML" "$PROJECT_NAME" "${REPO_DIR:-}" "${machines_yaml:-}" "$default_branch" "~/.$PROJECT_NAME" "$platform" "$wsl_distro"
 
     ok "Project '$PROJECT_NAME' registered in projects.yaml"
 }
