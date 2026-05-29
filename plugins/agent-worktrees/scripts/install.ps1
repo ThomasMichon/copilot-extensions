@@ -129,6 +129,38 @@ function Read-ProjectsRegistry {
     }
 }
 
+function Format-YamlValue {
+    <# Format a scalar value for YAML output. #>
+    param([object]$Val)
+    if ($null -eq $Val) { return 'null' }
+    if ($Val -is [bool]) { return if ($Val) { 'true' } else { 'false' } }
+    if ($Val -is [string]) { return "`"$($Val -replace '\\', '\\')`"" }
+    return "$Val"
+}
+
+function Write-YamlFields {
+    <# Write fields of a dict/PSCustomObject at a given indent depth. #>
+    param([object]$Entry, [int]$Indent = 4)
+    $pad = ' ' * $Indent
+    $fields = if ($Entry -is [hashtable]) {
+        $Entry.GetEnumerator() | Sort-Object Name | ForEach-Object { [PSCustomObject]@{ Name = $_.Key; Value = $_.Value } }
+    } elseif ($Entry -is [PSCustomObject]) {
+        $Entry.PSObject.Properties
+    } else { @() }
+
+    $result = @()
+    foreach ($field in $fields) {
+        $val = $field.Value
+        if ($val -is [hashtable] -or $val -is [PSCustomObject]) {
+            $result += "${pad}$($field.Name):"
+            $result += Write-YamlFields -Entry $val -Indent ($Indent + 2)
+        } else {
+            $result += "${pad}$($field.Name): $(Format-YamlValue $val)"
+        }
+    }
+    return $result
+}
+
 function Write-ProjectsRegistry {
     <# Write the projects registry back to projects.yaml. #>
     param([object]$Registry)
@@ -140,35 +172,13 @@ function Write-ProjectsRegistry {
     $projects = $Registry.projects
     if ($projects -is [PSCustomObject]) {
         foreach ($prop in $projects.PSObject.Properties) {
-            $name = $prop.Name
-            $entry = $prop.Value
-            $lines += "  ${name}:"
-            foreach ($field in $entry.PSObject.Properties) {
-                $val = $field.Value
-                if ($null -eq $val) { $val = 'null' }
-                elseif ($val -is [string]) { $val = "`"$($val -replace '\\', '\\')`"" }
-                $lines += "    $($field.Name): $val"
-            }
+            $lines += "  $($prop.Name):"
+            $lines += Write-YamlFields -Entry $prop.Value -Indent 4
         }
     } elseif ($projects -is [hashtable]) {
         foreach ($name in ($projects.Keys | Sort-Object)) {
-            $entry = $projects[$name]
             $lines += "  ${name}:"
-            if ($entry -is [hashtable]) {
-                foreach ($field in ($entry.Keys | Sort-Object)) {
-                    $val = $entry[$field]
-                    if ($null -eq $val) { $val = 'null' }
-                    elseif ($val -is [string]) { $val = "`"$($val -replace '\\', '\\')`"" }
-                    $lines += "    ${field}: $val"
-                }
-            } elseif ($entry -is [PSCustomObject]) {
-                foreach ($field in $entry.PSObject.Properties) {
-                    $val = $field.Value
-                    if ($null -eq $val) { $val = 'null' }
-                    elseif ($val -is [string]) { $val = "`"$($val -replace '\\', '\\')`"" }
-                    $lines += "    $($field.Name): $val"
-                }
-            }
+            $lines += Write-YamlFields -Entry $projects[$name] -Indent 4
         }
     }
     $content = ($lines -join "`n") + "`n"
@@ -177,7 +187,8 @@ function Write-ProjectsRegistry {
 }
 
 function Register-ProjectEntry {
-    <# Add or update this project in the projects registry. #>
+    <# Add or update this project in the projects registry.
+       Preserves existing WSL state when re-registering from Windows. #>
     $registry = Read-ProjectsRegistry
 
     $entry = @{
@@ -195,6 +206,23 @@ function Register-ProjectEntry {
         if ($cfgRaw -match 'default_branch:\s*(\S+)') {
             $entry['default_branch'] = $Matches[1]
         }
+    }
+
+    # Preserve existing WSL state from previous registration
+    $existingWsl = $null
+    if ($registry.projects -is [PSCustomObject] -and $registry.projects.PSObject.Properties[$ProjectName]) {
+        $existing = $registry.projects.$ProjectName
+        if ($existing.PSObject.Properties['wsl'] -and $existing.wsl) {
+            $existingWsl = $existing.wsl
+        }
+    } elseif ($registry.projects -is [hashtable] -and $registry.projects.ContainsKey($ProjectName)) {
+        $existing = $registry.projects[$ProjectName]
+        if ($existing -is [PSCustomObject] -and $existing.PSObject.Properties['wsl'] -and $existing.wsl) {
+            $existingWsl = $existing.wsl
+        }
+    }
+    if ($existingWsl) {
+        $entry['wsl'] = $existingWsl
     }
 
     # Upsert into registry
@@ -513,11 +541,38 @@ function Build-TerminalFragment {
     $projectList = @()
     $registry = Read-ProjectsRegistry
 
+    # Helper: extract WSL info from a registry entry
+    function Get-WslInfo {
+        param([object]$Entry)
+        $wsl = $null
+        if ($Entry -is [PSCustomObject] -and $Entry.PSObject.Properties['wsl']) {
+            $wsl = $Entry.wsl
+        } elseif ($Entry -is [hashtable] -and $Entry.ContainsKey('wsl')) {
+            $wsl = $Entry['wsl']
+        }
+        if (-not $wsl) { return $null }
+        $state = $null; $distro = $null
+        if ($wsl -is [PSCustomObject]) {
+            if ($wsl.PSObject.Properties['state']) { $state = $wsl.state }
+            if ($wsl.PSObject.Properties['distro']) { $distro = $wsl.distro }
+        } elseif ($wsl -is [hashtable]) {
+            $state = $wsl['state']; $distro = $wsl['distro']
+        }
+        return @{ state = $state; distro = $distro }
+    }
+
     # Ensure current project is always included (even if not yet in registry)
+    $currentRegEntry = $null
+    if ($registry.projects -is [PSCustomObject] -and $registry.projects.PSObject.Properties[$ProjectName]) {
+        $currentRegEntry = $registry.projects.$ProjectName
+    } elseif ($registry.projects -is [hashtable] -and $registry.projects.ContainsKey($ProjectName)) {
+        $currentRegEntry = $registry.projects[$ProjectName]
+    }
     $currentEntry = @{
         name          = $ProjectName
         anchor        = $RepoDir
         machines_yaml = if ($RepoDir -and (Test-Path (Join-Path $RepoDir 'machines.yaml'))) { Join-Path $RepoDir 'machines.yaml' } else { $null }
+        wsl_info      = if ($currentRegEntry) { Get-WslInfo $currentRegEntry } else { $null }
     }
     $projectList += [PSCustomObject]$currentEntry
 
@@ -536,6 +591,7 @@ function Build-TerminalFragment {
                 name          = $prop.Name
                 anchor        = $anchor
                 machines_yaml = $my
+                wsl_info      = Get-WslInfo $e
             }
         }
     }
@@ -546,15 +602,12 @@ function Build-TerminalFragment {
         $pDisplay = Get-DisplayName $pName
         $pAnchor = $proj.anchor
         $pMachinesYaml = $proj.machines_yaml
+        $pWslInfo = $proj.wsl_info
 
         # Icon: prefer project-specific, fall back to agent-worktrees default
         $iconPath = "%USERPROFILE%\.${pName}\aperture-science.ico"
         if (-not (Test-Path (Join-Path $env:USERPROFILE ".$pName\aperture-science.ico"))) {
             $iconPath = "%USERPROFILE%\.agent-worktrees\aperture-science.ico"
-        }
-        $wslIconPath = "%USERPROFILE%\.${pName}\aperture-science-wsl.ico"
-        if (-not (Test-Path (Join-Path $env:USERPROFILE ".$pName\aperture-science-wsl.ico"))) {
-            $wslIconPath = $iconPath
         }
 
         # Local Windows profile
@@ -569,17 +622,21 @@ function Build-TerminalFragment {
             hidden            = $false
         }
 
-        # Local WSL profile
-        $guid = New-StableGuid "${pName}-local-wsl"
-        $profiles += @{
-            guid              = "{$guid}"
-            name              = "$pDisplay (WSL)"
-            commandline       = "wsl.exe bash -lc $pName"
-            icon              = $wslIconPath
-            startingDirectory = "%USERPROFILE%"
-            colorScheme       = 'Aperture Science'
-            hidden            = $false
-        }
+        # Local WSL profile — only when WSL state is "adopted" or "bootstrap"
+        $wslState = if ($pWslInfo) { $pWslInfo['state'] } else { $null }
+        if ($wslState -in @('adopted', 'bootstrap')) {
+            $wslIconPath = "%USERPROFILE%\.${pName}\aperture-science-wsl.ico"
+            if (-not (Test-Path (Join-Path $env:USERPROFILE ".$pName\aperture-science-wsl.ico"))) {
+                $wslIconPath = $iconPath
+            }
+            $wslDistro = if ($pWslInfo) { $pWslInfo['distro'] } else { $null }
+            # Use distro-specific invocation when known
+            $wslCmd = if ($wslDistro) {
+                "wsl.exe -d $wslDistro -- bash -lc $pName"
+            } else {
+                "wsl.exe bash -lc $pName"
+            }
+            $wslLabel = if ($wslDistro) { "$pDisplay (WSL: $wslDistro)" } else { "$pDisplay (WSL)" }
 
         # SSH profiles from this project's machines.yaml
         if ($pMachinesYaml -and (Test-Path $pMachinesYaml)) {
