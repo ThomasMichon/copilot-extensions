@@ -1773,20 +1773,24 @@ _INSTRUCTION_MARKER = "<!-- managed by agent-worktrees -->"
 
 def _deploy_copilot_instructions(
     proj_dir: Path, entry: cfg.MachineEntry,
+    registry: dict[str, cfg.MachineEntry] | None = None,
+    project: str = "",
 ) -> None:
-    """Write or update machine instruction files from the registry.
+    """Write or update machine and SSH instruction files from the registry.
 
     Deploys into the COPILOT_CUSTOM_INSTRUCTIONS_DIRS directory:
 
-    - ``.github/instructions/machine.instructions.md`` — the filename
-      pattern Copilot CLI auto-discovers from custom instruction
-      directories (``<dir>/.github/instructions/**/*.instructions.md``).
-    - ``AGENTS.md`` — discovered as a nested AGENTS.md in custom dirs.
+    - ``.github/instructions/machine.instructions.md`` — machine identity,
+      project name, and binstub info.
+    - ``.github/instructions/ssh.instructions.md`` — SSH aliases and
+      remote access patterns for the machine mesh.
+    - ``AGENTS.md`` — discovered as a nested AGENTS.md in custom dirs
+      (machine identity content, same as machine.instructions.md).
 
-    Both files have identical content, tagged with an ownership marker
-    so stale files can be identified and cleaned up.
+    All files are tagged with an ownership marker so stale files can be
+    identified and cleaned up.
     """
-    raw = cfg.render_copilot_instructions(entry)
+    raw = cfg.render_copilot_instructions(entry, project=project)
     content = f"{_INSTRUCTION_MARKER}\n{raw}"
 
     # Primary: .github/instructions/*.instructions.md (auto-injected)
@@ -1797,7 +1801,7 @@ def _deploy_copilot_instructions(
         output.skipped("machine.instructions.md already in sync")
     else:
         instr_path.write_text(content)
-        output.changed(f"machine.instructions.md → {instr_path}")
+        output.changed(f"machine.instructions.md -> {instr_path}")
 
     # Fallback: AGENTS.md (nested discovery)
     agents_path = proj_dir / "AGENTS.md"
@@ -1805,7 +1809,30 @@ def _deploy_copilot_instructions(
         output.skipped("AGENTS.md already in sync")
     else:
         agents_path.write_text(content)
-        output.changed(f"AGENTS.md → {agents_path}")
+        output.changed(f"AGENTS.md -> {agents_path}")
+
+    # SSH instructions: deploy if registry available, clean up if not
+    ssh_instr_path = instr_dir / "ssh.instructions.md"
+    if registry and project:
+        ssh_raw = cfg.render_ssh_instructions(
+            registry, entry.key, project,
+        )
+        if ssh_raw:
+            ssh_content = f"{_INSTRUCTION_MARKER}\n{ssh_raw}"
+            if ssh_instr_path.exists() and ssh_instr_path.read_text() == ssh_content:
+                output.skipped("ssh.instructions.md already in sync")
+            else:
+                ssh_instr_path.write_text(ssh_content)
+                output.changed(f"ssh.instructions.md -> {ssh_instr_path}")
+        elif ssh_instr_path.exists():
+            # No reachable machines -- clean up stale file
+            try:
+                text = ssh_instr_path.read_text()
+                if _INSTRUCTION_MARKER in text:
+                    ssh_instr_path.unlink()
+                    output.changed("removed ssh.instructions.md (no reachable machines)")
+            except OSError:
+                pass
 
     # Clean up legacy files from previous deploy strategies
     for legacy_name in ("copilot-instructions.md",):
@@ -1823,6 +1850,7 @@ def _cleanup_stale_instructions(proj_dir: Path) -> None:
     """
     candidates = [
         proj_dir / ".github" / "instructions" / "machine.instructions.md",
+        proj_dir / ".github" / "instructions" / "ssh.instructions.md",
         proj_dir / "AGENTS.md",
     ]
     for path in candidates:
@@ -1887,7 +1915,15 @@ def cmd_install(args: argparse.Namespace) -> int:
 
     # Deploy copilot-instructions.md from machine registry (if available)
     if machine_entry is not None:
-        _deploy_copilot_instructions(proj_dir, machine_entry)
+        # Load full registry for SSH instructions
+        try:
+            registry = cfg.load_machines_yaml(repo_dir)
+        except (FileNotFoundError, ValueError):
+            registry = None
+        _deploy_copilot_instructions(
+            proj_dir, machine_entry,
+            registry=registry, project=project,
+        )
     else:
         _cleanup_stale_instructions(proj_dir)
 
@@ -2041,7 +2077,14 @@ def cmd_register(args: argparse.Namespace) -> int:
 
     # Deploy copilot-instructions.md from machine registry
     if machine_entry is not None:
-        _deploy_copilot_instructions(proj_dir, machine_entry)
+        try:
+            registry = cfg.load_machines_yaml(repo_dir)
+        except (FileNotFoundError, ValueError):
+            registry = None
+        _deploy_copilot_instructions(
+            proj_dir, machine_entry,
+            registry=registry, project=project,
+        )
     else:
         _cleanup_stale_instructions(proj_dir)
 
@@ -2230,7 +2273,7 @@ def _find_installed_plugin_dir() -> Path | None:
 
 
 def cmd_deploy_instructions(args: argparse.Namespace) -> int:
-    """Deploy machine.instructions.md + AGENTS.md from machines.yaml."""
+    """Deploy machine + SSH instruction files from machines.yaml."""
     project = cfg.project_name()
     repo_dir = _find_repo_dir()
     if not repo_dir:
@@ -2261,7 +2304,10 @@ def cmd_deploy_instructions(args: argparse.Namespace) -> int:
 
     proj_dir = cfg.project_dir(project)
     proj_dir.mkdir(parents=True, exist_ok=True)
-    _deploy_copilot_instructions(proj_dir, registry[machine])
+    _deploy_copilot_instructions(
+        proj_dir, registry[machine],
+        registry=registry, project=project,
+    )
     return 0
 
 
