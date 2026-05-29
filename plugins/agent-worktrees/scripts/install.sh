@@ -149,7 +149,6 @@ resolve_machine() {
         return
     fi
     local hn
-    local hn
     hn="$(hostname | tr '[:upper:]' '[:lower:]')"
     case "$hn" in
         wheatley)       echo "wheatley" ;;
@@ -157,11 +156,8 @@ resolve_machine() {
         lambda-core)    echo "lambda-core" ;;
         borealis)       echo "borealis" ;;
         tmichon-book2)  echo "tmichon-book2" ;;
-        *)
-            echo "Cannot auto-detect machine from hostname '$hn'." >&2
-            read -r -p "Enter machine name: " MACHINE
-            echo "$MACHINE"
-            ;;
+        # Unknown machine -- use lowercase hostname
+        *)              echo "$hn" ;;
     esac
 }
 

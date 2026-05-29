@@ -230,8 +230,8 @@ function Resolve-Machine {
     if ($HostnameMap.ContainsKey($hostname)) {
         return $HostnameMap[$hostname]
     }
-    $name = Read-Host "Cannot auto-detect machine from hostname '$hostname'. Enter machine name"
-    return $name
+    # Unknown machine -- use lowercase hostname as machine name
+    return $hostname.ToLower()
 }
 
 # -- Helpers --------------------------------------------------------------
@@ -964,8 +964,6 @@ switch ($Action) {
     'install' {
         Write-ServiceHeader "Installing $ServiceName"
 
-        if (-not (Assert-DeploymentTarget $ServiceYamlPath)) { exit 1 }
-
         $machine = Resolve-Machine
         Write-Host "  Machine: $machine"
         if ($RepoDir) {
@@ -1257,8 +1255,6 @@ switch ($Action) {
 
     'update' {
         Write-ServiceHeader "Updating $ServiceName"
-
-        if (-not (Assert-DeploymentTarget $ServiceYamlPath)) { exit 1 }
 
         if (-not (Test-Path $BinDir)) {
             Write-ServiceErr "Not installed - run 'install' first"
