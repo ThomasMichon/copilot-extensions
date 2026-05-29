@@ -940,12 +940,14 @@ echo "Bootstrap complete. Run '$ProjectName' again to start a session."
         # Ensure ~/.local/bin exists in WSL
         & wsl.exe -d $distro -- bash -c "mkdir -p `$HOME/.local/bin" 2>$null
 
-        # Write the bootstrap script
-        $escapedScript = $bootstrapScript -replace "'", "'\\''"
-        & wsl.exe -d $distro -- bash -c "cat > `$HOME/.local/bin/$ProjectName << 'BOOTSTRAP_EOF'
+        # Write the bootstrap script and strip Windows CR characters.
+        # PowerShell here-strings and wsl.exe argument passing both inject
+        # CRLF line endings; we pipe through tr to ensure pure LF output.
+        $wslBinPath = "`$HOME/.local/bin/$ProjectName"
+        & wsl.exe -d $distro -- bash -c "tr -d '\r' > $wslBinPath << 'BOOTSTRAP_EOF'
 $bootstrapScript
 BOOTSTRAP_EOF
-chmod +x `$HOME/.local/bin/$ProjectName"
+chmod +x $wslBinPath"
 
         if ($LASTEXITCODE -eq 0) {
             Write-ServiceOk "WSL bootstrap stub deployed to ~/.local/bin/$ProjectName ($distro)"
