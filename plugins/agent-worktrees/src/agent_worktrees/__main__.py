@@ -2127,74 +2127,106 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
 
 
 def cmd_update(args: argparse.Namespace) -> int:
-    project = cfg.project_name()
+    """Update agent-worktrees via the Copilot CLI plugin system.
+
+    1. Run ``copilot plugin update`` to fetch the latest plugin version.
+    2. Locate the installed plugin directory.
+    3. Run the platform-specific installer from the freshly updated plugin.
+    """
     output.header("Updating Agent Worktrees")
 
-    repo_dir = _find_repo_dir()
-    if not repo_dir:
-        output.err("Cannot determine repo root.")
-        return 1
+    if getattr(args, "recreate_venv", False):
+        output.warn("--recreate-venv is not supported by the plugin-based "
+                     "update flow; use 'agent-worktrees install' instead")
 
-    if not inst.lib_dir().exists():
-        output.err("Not installed — run 'install' first")
-        return 1
-
-    # Use machine from installed config (not re-detecting)
+    # Step 1 — update the Copilot CLI plugin (pulls latest from marketplace)
+    plugin_ref = "agent-worktrees@copilot-extensions"
+    output.info(f"Updating plugin: {plugin_ref}")
+    plugin_update_ok = False
     try:
-        config = cfg.load_config()
-        machine = config.machine
-    except Exception:
-        machine = cfg.detect_machine(repo_dir)
-
-    if not inst.deploy_package(repo_dir):
-        return 1
-
-    # Venv handling: health-check first, only rebuild when necessary.
-    # Running from the managed venv locks python.exe on Windows, so
-    # full recreation would fail.  Prefer upgrading deps in-place.
-    recreate_venv = getattr(args, "recreate_venv", False)
-    if recreate_venv:
-        if inst.is_running_from_managed_venv():
-            output.err("Cannot recreate venv while running from it.")
-            output.err("Run from system Python or another venv.")
-            return 1
-        if not inst.create_venv():
-            return 1
-    elif not inst.check_venv_health():
-        # Venv is broken — try upgrading deps first
-        output.warn("Venv health check failed — attempting repair")
-        if not inst.upgrade_venv_deps():
-            if inst.is_running_from_managed_venv():
-                output.err("Venv is unhealthy but cannot recreate while running from it.")
-                output.err("Run: python -m agent_worktrees update --recreate-venv")
-                output.err("(using system Python, not the managed venv)")
-                return 1
-            if not inst.create_venv():
-                return 1
-    else:
-        inst.upgrade_venv_deps()
-
-    if not inst.deploy_wrappers(repo_dir):
-        return 1
-
-    if not inst.deploy_binstubs(repo_dir, project=project):
-        return 1
-
-    # Refresh copilot-instructions.md from machine registry
-    proj_dir = cfg.project_dir(project)
-    try:
-        registry = cfg.load_machines_yaml(repo_dir)
-        if machine in registry:
-            _deploy_copilot_instructions(proj_dir, registry[machine])
+        r = subprocess.run(
+            ["copilot", "plugin", "update", plugin_ref],
+            capture_output=True, text=True, timeout=120,
+        )
+        if r.returncode == 0:
+            for line in r.stdout.strip().splitlines():
+                output.ok(line)
+            plugin_update_ok = True
+        else:
+            detail = "\n".join(
+                x for x in [r.stdout.strip(), r.stderr.strip()] if x
+            )
+            output.warn(f"Plugin update returned non-zero:\n{detail}")
     except FileNotFoundError:
-        _cleanup_stale_instructions(proj_dir)
-    except ValueError:
-        pass  # malformed machines.yaml -- don't crash update
+        output.warn("'copilot' CLI not found -- skipping plugin update")
+    except subprocess.TimeoutExpired:
+        output.warn("Plugin update timed out -- continuing with installed version")
 
-    inst.write_deploy_manifest(repo_dir, machine)
+    # Step 2 — find the installed plugin directory
+    plugin_dir = _find_installed_plugin_dir()
+    if not plugin_dir:
+        output.err("Cannot find installed plugin directory")
+        output.err("Expected at ~/.copilot/installed-plugins/copilot-extensions/"
+                    "agent-worktrees/")
+        return 1
 
-    output.ok(f"Update complete (source: {repo_dir})")
-    return 0
+    output.info(f"Plugin source: {plugin_dir}")
+
+    # Step 3 — run the platform-specific installer from the plugin dir
+    plat = cfg.detect_platform()
+    if plat == "windows":
+        installer = plugin_dir / "scripts" / "install.ps1"
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            output.err("PowerShell not found")
+            return 1
+        argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-File", str(installer), "update"]
+    else:
+        installer = plugin_dir / "scripts" / "install.sh"
+        argv = ["bash", str(installer), "update"]
+
+    if not installer.exists():
+        output.err(f"Installer not found: {installer}")
+        return 1
+
+    result = subprocess.run(argv, cwd=plugin_dir, timeout=300)
+    return result.returncode
+
+
+def _find_installed_plugin_dir() -> Path | None:
+    """Locate the agent-worktrees plugin in the Copilot CLI install tree.
+
+    Checks the standard marketplace layout first, then the legacy
+    ``_direct`` layout, and finally scans all subdirectories for a
+    matching ``plugin.json``.
+    """
+    plugins_root = Path.home() / ".copilot" / "installed-plugins"
+
+    # Primary: marketplace layout
+    candidate = plugins_root / "copilot-extensions" / "agent-worktrees"
+    if candidate.is_dir() and (candidate / "plugin.json").exists():
+        return candidate
+
+    # Legacy _direct layout (older Copilot CLI versions)
+    direct = plugins_root / "_direct"
+    if direct.is_dir():
+        for d in direct.iterdir():
+            if d.is_dir() and "agent-worktrees" in d.name:
+                if (d / "plugin.json").exists():
+                    return d
+
+    # Fallback: scan everything
+    if plugins_root.is_dir():
+        for pj in plugins_root.rglob("plugin.json"):
+            try:
+                data = json.loads(pj.read_text(encoding="utf-8"))
+                if data.get("name") == "agent-worktrees":
+                    return pj.parent
+            except Exception:
+                continue
+
+    return None
 
 
 def cmd_deploy_instructions(args: argparse.Namespace) -> int:
