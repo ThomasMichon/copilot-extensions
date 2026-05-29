@@ -638,6 +638,18 @@ function Build-TerminalFragment {
             }
             $wslLabel = if ($wslDistro) { "$pDisplay (WSL: $wslDistro)" } else { "$pDisplay (WSL)" }
 
+            $guid = New-StableGuid "${pName}-local-wsl"
+            $profiles += @{
+                guid              = "{$guid}"
+                name              = $wslLabel
+                commandline       = $wslCmd
+                icon              = $wslIconPath
+                startingDirectory = "%USERPROFILE%"
+                colorScheme       = 'Aperture Science'
+                hidden            = $false
+            }
+        }
+
         # SSH profiles from this project's machines.yaml
         if ($pMachinesYaml -and (Test-Path $pMachinesYaml)) {
             try {
@@ -810,6 +822,180 @@ function Clean-TerminalSettingsJson {
     }
 }
 
+function Deploy-WslBootstrapStub {
+    <# Deploy a bootstrap binstub into WSL that will clone the repo and run
+       install.sh on first launch.  Returns $true if deployed, $false if WSL
+       is unavailable or deployment was skipped. #>
+
+    # Check WSL availability
+    try {
+        $wslStatus = & wsl.exe --status 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-ServiceWarn "WSL not available - skipping bootstrap stub"
+            return $false
+        }
+    } catch {
+        Write-ServiceWarn "WSL not available - skipping bootstrap stub"
+        return $false
+    }
+
+    # Detect default distro
+    $distro = ''
+    try {
+        $distroLine = & wsl.exe -l -q 2>&1 | Where-Object { $_ -match '\S' } | Select-Object -First 1
+        # wsl -l -q output may contain null bytes (UTF-16)
+        $distro = ($distroLine -replace "`0", '').Trim()
+    } catch {}
+    if (-not $distro) {
+        Write-ServiceWarn "No WSL distro found - skipping bootstrap stub"
+        return $false
+    }
+
+    # Determine remote URL for cloning
+    $remoteUrl = ''
+    if ($RepoDir -and (Test-Path (Join-Path $RepoDir '.git'))) {
+        try {
+            $remoteUrl = (git -C $RepoDir remote get-url origin 2>$null)
+        } catch {}
+    }
+    if (-not $remoteUrl) {
+        Write-ServiceWarn "No remote URL found - skipping WSL bootstrap stub"
+        return $false
+    }
+
+    $wslTargetPath = "`$HOME/src/$ProjectName"
+    $pluginSubpath = "plugins/agent-worktrees"
+
+    # Generate the bootstrap script
+    $bootstrapScript = @"
+#!/usr/bin/env bash
+# Bootstrap binstub for $ProjectName - deployed by agent-worktrees
+# On first run: clones the repo and installs agent-worktrees in WSL.
+# On subsequent runs: launches normally via the Python CLI.
+set -euo pipefail
+
+PROJECT_NAME="$ProjectName"
+REPO_PATH="$wslTargetPath"
+REMOTE_URL="$remoteUrl"
+PLUGIN_PATH="$pluginSubpath"
+
+# If already fully installed, launch normally
+_PY="`$HOME/.agent-worktrees/.venv/bin/python"
+if [[ -x "`$_PY" ]] && [[ -d "`$HOME/.`$PROJECT_NAME" ]]; then
+    export WORKTREE_PROJECT="`$PROJECT_NAME"
+    export PYTHONPATH="`$HOME/.agent-worktrees/lib"
+    export PYTHONUTF8=1
+    exec "`$_PY" -m agent_worktrees "`$@"
+fi
+
+# First-run bootstrap
+echo ""
+echo "=== Agent Worktrees - WSL Bootstrap ==="
+echo ""
+echo "This will set up `$PROJECT_NAME in WSL (`$HOSTNAME):"
+echo "  1. Clone `$REMOTE_URL"
+echo "     to `$REPO_PATH"
+echo "  2. Run the agent-worktrees installer"
+echo ""
+printf "Proceed? [y/N] "
+read -r answer
+if [[ "`$answer" != "y" && "`$answer" != "Y" ]]; then
+    echo "Aborted."
+    exit 0
+fi
+
+# Ensure git is available
+if ! command -v git &>/dev/null; then
+    echo "ERROR: git is not installed in WSL. Install it first:"
+    echo "  sudo apt-get update && sudo apt-get install -y git"
+    exit 1
+fi
+
+# Clone if needed
+if [[ ! -d "`$REPO_PATH/.git" ]]; then
+    echo "Cloning `$REMOTE_URL ..."
+    mkdir -p "`$(dirname "`$REPO_PATH")"
+    git clone "`$REMOTE_URL" "`$REPO_PATH"
+else
+    echo "Repo already exists at `$REPO_PATH"
+fi
+
+# Run installer
+echo "Running agent-worktrees installer..."
+cd "`$REPO_PATH"
+if [[ -f "`$PLUGIN_PATH/scripts/install.sh" ]]; then
+    bash "`$PLUGIN_PATH/scripts/install.sh" install --project-name "`$PROJECT_NAME"
+else
+    echo "ERROR: install.sh not found at `$PLUGIN_PATH/scripts/install.sh"
+    echo "You may need to run the installer manually."
+    exit 1
+fi
+
+echo ""
+echo "Bootstrap complete. Run '$ProjectName' again to start a session."
+"@
+
+    # Deploy to WSL via wsl.exe
+    try {
+        # Ensure ~/.local/bin exists in WSL
+        & wsl.exe -d $distro -- bash -c "mkdir -p `$HOME/.local/bin" 2>$null
+
+        # Write the bootstrap script
+        $escapedScript = $bootstrapScript -replace "'", "'\\''"
+        & wsl.exe -d $distro -- bash -c "cat > `$HOME/.local/bin/$ProjectName << 'BOOTSTRAP_EOF'
+$bootstrapScript
+BOOTSTRAP_EOF
+chmod +x `$HOME/.local/bin/$ProjectName"
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-ServiceOk "WSL bootstrap stub deployed to ~/.local/bin/$ProjectName ($distro)"
+
+            # Update the projects registry with WSL bootstrap state
+            $registry = Read-ProjectsRegistry
+            $projEntry = $null
+            if ($registry.projects -is [PSCustomObject] -and $registry.projects.PSObject.Properties[$ProjectName]) {
+                $projEntry = $registry.projects.$ProjectName
+            } elseif ($registry.projects -is [hashtable] -and $registry.projects.ContainsKey($ProjectName)) {
+                $projEntry = $registry.projects[$ProjectName]
+            }
+
+            if ($projEntry) {
+                $wslBlock = @{
+                    state  = 'bootstrap'
+                    distro = $distro
+                    path   = $wslTargetPath
+                }
+                if ($projEntry -is [PSCustomObject]) {
+                    if ($projEntry.PSObject.Properties['wsl']) {
+                        # Don't downgrade from "adopted" to "bootstrap"
+                        $existState = $projEntry.wsl
+                        if ($existState -is [PSCustomObject] -and $existState.PSObject.Properties['state'] -and $existState.state -eq 'adopted') {
+                            return $true
+                        }
+                    }
+                    $projEntry | Add-Member -NotePropertyName 'wsl' -NotePropertyValue ([PSCustomObject]$wslBlock) -Force
+                } elseif ($projEntry -is [hashtable]) {
+                    $existState = $projEntry['wsl']
+                    if ($existState -is [hashtable] -and $existState['state'] -eq 'adopted') {
+                        return $true
+                    }
+                    $projEntry['wsl'] = [PSCustomObject]$wslBlock
+                }
+                Write-ProjectsRegistry $registry
+                Write-ServiceOk "WSL state set to 'bootstrap' (distro: $distro)"
+            }
+
+            return $true
+        } else {
+            Write-ServiceWarn "Failed to deploy WSL bootstrap stub"
+            return $false
+        }
+    } catch {
+        Write-ServiceWarn "Failed to deploy WSL bootstrap stub: $_"
+        return $false
+    }
+}
+
 function Deploy-Shortcuts {
     <# Deploy Windows Terminal fragment (with remote SSH profiles) and create .lnk shortcuts. #>
     param([string]$Machine)
@@ -861,14 +1047,33 @@ function Deploy-Shortcuts {
         $lnk.IconLocation = "$InstallDir\aperture-science.ico, 0"
         $lnk.Save()
 
-        $lnkPath = Join-Path $LocalBin "$displayName (WSL).lnk"
-        $lnk = $shell.CreateShortcut($lnkPath)
-        $lnk.TargetPath = $wtExe
-        $lnk.Arguments = "-p `"$displayName (WSL)`""
-        $lnk.WorkingDirectory = "%USERPROFILE%"
-        $lnk.Description = "$displayName - Worktree Session Manager (WSL)"
-        $lnk.IconLocation = "$InstallDir\aperture-science-wsl.ico, 0"
-        $lnk.Save()
+        # WSL shortcut — only when project has WSL state (adopted or bootstrap)
+        $projWslInfo = $null
+        if ($registry.projects -is [PSCustomObject] -and $registry.projects.PSObject.Properties[$proj]) {
+            $projEntry = $registry.projects.$proj
+            if ($projEntry.PSObject.Properties['wsl'] -and $projEntry.wsl) {
+                $wslObj = $projEntry.wsl
+                $wslSt = if ($wslObj -is [PSCustomObject] -and $wslObj.PSObject.Properties['state']) { $wslObj.state } else { $null }
+                if ($wslSt -in @('adopted', 'bootstrap')) { $projWslInfo = $wslObj }
+            }
+        }
+        if ($projWslInfo) {
+            $wslDistro = if ($projWslInfo -is [PSCustomObject] -and $projWslInfo.PSObject.Properties['distro']) { $projWslInfo.distro } else { $null }
+            $wslLabel = if ($wslDistro) { "$displayName (WSL: $wslDistro)" } else { "$displayName (WSL)" }
+            $lnkPath = Join-Path $LocalBin "$wslLabel.lnk"
+            $lnk = $shell.CreateShortcut($lnkPath)
+            $lnk.TargetPath = $wtExe
+            $lnk.Arguments = "-p `"$wslLabel`""
+            $lnk.WorkingDirectory = "%USERPROFILE%"
+            $lnk.Description = "$displayName - Worktree Session Manager (WSL)"
+            $lnk.IconLocation = "$InstallDir\aperture-science-wsl.ico, 0"
+            $lnk.Save()
+        } else {
+            # Remove stale WSL shortcut if it exists from a previous install
+            foreach ($pattern in @("$displayName (WSL).lnk", "$displayName (WSL: *).lnk")) {
+                Get-ChildItem -Path $LocalBin -Filter $pattern -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
 
     [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
@@ -1069,6 +1274,18 @@ switch ($Action) {
             Deploy-Config -Machine $machine | Out-Null
             Deploy-Binstub
             Register-ProjectEntry
+            # Deploy WSL bootstrap stub if WSL is available and not already adopted
+            $registryCheck = Read-ProjectsRegistry
+            $hasWslAdopted = $false
+            if ($registryCheck.projects -is [PSCustomObject] -and $registryCheck.projects.PSObject.Properties[$ProjectName]) {
+                $pe = $registryCheck.projects.$ProjectName
+                if ($pe.PSObject.Properties['wsl'] -and $pe.wsl -is [PSCustomObject] -and $pe.wsl.PSObject.Properties['state'] -and $pe.wsl.state -eq 'adopted') {
+                    $hasWslAdopted = $true
+                }
+            }
+            if (-not $hasWslAdopted) {
+                Deploy-WslBootstrapStub | Out-Null
+            }
             if ($RepoDir) { Deploy-Icon }
             Deploy-Shortcuts -Machine $machine
             Clean-TerminalSettingsJson
@@ -1137,6 +1354,8 @@ switch ($Action) {
             $lnkPath = Join-Path $LocalBin $lnk
             if (Test-Path $lnkPath) { Remove-Item $lnkPath -Force }
         }
+        # Also remove distro-specific WSL shortcuts (e.g. "Aperture Labs (WSL: Ubuntu).lnk")
+        Get-ChildItem -Path $LocalBin -Filter "$displayName (WSL: *).lnk" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
         Write-ServiceChanged "Removed shortcuts"
 
         # Remove Python runtime (venv + package)
@@ -1334,6 +1553,18 @@ switch ($Action) {
         if ($HasProject) {
             Deploy-Binstub
             Register-ProjectEntry
+            # Deploy WSL bootstrap stub on update if not already adopted
+            $registryCheck = Read-ProjectsRegistry
+            $hasWslAdopted = $false
+            if ($registryCheck.projects -is [PSCustomObject] -and $registryCheck.projects.PSObject.Properties[$ProjectName]) {
+                $pe = $registryCheck.projects.$ProjectName
+                if ($pe.PSObject.Properties['wsl'] -and $pe.wsl -is [PSCustomObject] -and $pe.wsl.PSObject.Properties['state'] -and $pe.wsl.state -eq 'adopted') {
+                    $hasWslAdopted = $true
+                }
+            }
+            if (-not $hasWslAdopted) {
+                Deploy-WslBootstrapStub | Out-Null
+            }
             if ($RepoDir) { Deploy-Icon }
             $updateMachine = Resolve-Machine
             $configPath = Join-Path $ProjectDir 'config.yaml'
