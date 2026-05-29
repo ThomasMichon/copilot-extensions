@@ -25,6 +25,9 @@ Usage (direct):
     agent-worktrees services list [--json]
     agent-worktrees services status [--json]
     agent-worktrees services check-stale <install_dir> <repo_dir>
+    agent-worktrees repos list [--type project|repo] [--json]
+    agent-worktrees repos find <name>
+    agent-worktrees repos srcroot [--set PATH] [--platform P]
     agent-worktrees pre-launch
 
 JSON mode (--json):
@@ -2763,6 +2766,178 @@ def _cmd_services_batch(action: str, flags: list[str]) -> int:
 # ═══════════════════════════════════════════════════════════════════════════
 # pre-launch — two-pass declarative self-update protocol
 # ═══════════════════════════════════════════════════════════════════════════
+# Repos registry
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _repos_usage() -> None:
+    """Print repos subcommand usage."""
+    project = cfg.project_name()
+    print(f"Usage: {project} repos <command>")
+    print()
+    print("Commands:")
+    print("  list [--type project|repo]          List known repositories")
+    print("  find <name>                         Resolve a repo to its local path")
+    print("  add <name> <path> [--type T]        Register a repo at a known path")
+    print("     [--remote URL]")
+    print("  remove <name>                       Remove a repo from the registry")
+    print("  clone <remote> [--name N]           Clone a repo to srcroot and register")
+    print("     [--target PATH]")
+    print("  srcroot [--set PATH]                Show or set the source root")
+    print("     [--platform windows|wsl|linux]")
+    print()
+    print("Examples:")
+    print(f"  {project} repos list")
+    print(f"  {project} repos find dotfiles")
+    print(f"  {project} repos add my-lib D:\\Src\\my-lib --type repo")
+    print(f"  {project} repos clone https://github.com/user/repo.git")
+    print(f"  {project} repos srcroot --set D:\\Src")
+
+
+def cmd_repos_dispatch(argv: list[str]) -> int:
+    """Route repos subcommands."""
+    from . import repos
+
+    if not argv or argv[0] in ("--help", "-h"):
+        _repos_usage()
+        return 0 if argv else 1
+
+    sub = argv[0]
+    rest = argv[1:]
+
+    if sub == "list":
+        type_filter = None
+        if "--type" in rest:
+            idx = rest.index("--type")
+            if idx + 1 < len(rest):
+                type_filter = rest[idx + 1]
+        json_out = "--json" in rest
+        entries = repos.list_repos(type_filter=type_filter)
+        if json_out:
+            _json_output({
+                "repos": [
+                    {
+                        "name": e.name,
+                        "type": e.type,
+                        "remote": e.remote,
+                        "paths": e.paths,
+                    }
+                    for e in entries
+                ],
+            })
+        elif not entries:
+            print("No repos registered.")
+            print("Add one with: repos add <name> <path>")
+        else:
+            plat = repos._current_platform()
+            output.header("Repos Registry")
+            for e in entries:
+                tag = f"[{e.type}]"
+                local = e.local_path(plat) or "(no local path)"
+                print(f"  {e.name:<25} {tag:<12} {local}")
+                if e.remote:
+                    print(f"  {'':25} {'':12} {e.remote}")
+        return 0
+
+    if sub == "find":
+        if not rest:
+            output.err("Usage: repos find <name>")
+            return 1
+        name = rest[0]
+        json_out = "--json" in rest
+        path = repos.resolve_path(name)
+        if path:
+            if json_out:
+                _json_output({"name": name, "path": path})
+            else:
+                print(path)
+            return 0
+        else:
+            entry = repos.find_repo(name)
+            if entry and entry.remote:
+                msg = f"Repo '{name}' has no local path. Clone with: repos clone {entry.remote}"
+            else:
+                msg = f"Repo '{name}' not found in registry"
+            if json_out:
+                return _json_error(msg)
+            output.err(msg)
+            return 1
+
+    if sub == "add":
+        if len(rest) < 2:
+            output.err("Usage: repos add <name> <path> [--type T] [--remote URL]")
+            return 1
+        name, path = rest[0], rest[1]
+        rtype = "repo"
+        remote = ""
+        if "--type" in rest:
+            idx = rest.index("--type")
+            if idx + 1 < len(rest):
+                rtype = rest[idx + 1]
+        if "--remote" in rest:
+            idx = rest.index("--remote")
+            if idx + 1 < len(rest):
+                remote = rest[idx + 1]
+        repos.add_repo(name, path, type=rtype, remote=remote)
+        return 0
+
+    if sub == "remove":
+        if not rest:
+            output.err("Usage: repos remove <name>")
+            return 1
+        if repos.remove_repo(rest[0]):
+            return 0
+        output.err(f"Repo '{rest[0]}' not found in registry")
+        return 1
+
+    if sub == "clone":
+        if not rest:
+            output.err("Usage: repos clone <remote> [--name N] [--target PATH]")
+            return 1
+        remote = rest[0]
+        name = None
+        target = None
+        if "--name" in rest:
+            idx = rest.index("--name")
+            if idx + 1 < len(rest):
+                name = rest[idx + 1]
+        if "--target" in rest:
+            idx = rest.index("--target")
+            if idx + 1 < len(rest):
+                target = rest[idx + 1]
+        entry = repos.clone_repo(remote, name=name, target=target)
+        return 0 if entry else 1
+
+    if sub == "srcroot":
+        plat_arg = None
+        if "--platform" in rest:
+            idx = rest.index("--platform")
+            if idx + 1 < len(rest):
+                plat_arg = rest[idx + 1]
+        if "--set" in rest:
+            idx = rest.index("--set")
+            if idx + 1 < len(rest):
+                repos.set_srcroot(rest[idx + 1], plat=plat_arg)
+                return 0
+            output.err("--set requires a path")
+            return 1
+        # Show current srcroot
+        registry = repos.read_registry()
+        if registry.srcroot:
+            for p, v in sorted(registry.srcroot.items()):
+                marker = " ←" if p == (plat_arg or repos._current_platform()) else ""
+                print(f"  {p}: {v}{marker}")
+        else:
+            print("No source roots configured.")
+            print("Set one with: repos srcroot --set <path>")
+        return 0
+
+    output.err(f"Unknown repos subcommand: {sub}")
+    _repos_usage()
+    return 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 
 # Bootstrap services that must be current before launching a session.
 _BOOTSTRAP_SERVICES = ("agent-worktrees", "vault")
@@ -3118,6 +3293,9 @@ def build_parser() -> argparse.ArgumentParser:
     # Stub entry for --help visibility only
     sub.add_parser("services", help="Service discovery and management (run 'services' for usage)")
 
+    # repos — dispatched pre-argparse (see cmd_repos_dispatch)
+    sub.add_parser("repos", help="Repos registry and source roots (run 'repos' for usage)")
+
     # pre-launch (two-pass self-update protocol)
     sub.add_parser("pre-launch", help="Check bootstrap staleness (JSON output)")
 
@@ -3394,6 +3572,14 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] == "services":
         try:
             return cmd_services_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # Repos uses manual dispatch for subcommand flexibility.
+    if args_list[0] == "repos":
+        try:
+            return cmd_repos_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130

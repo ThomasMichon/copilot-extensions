@@ -7,7 +7,7 @@ plugin marketplace for developer workflow automation.
 
 | Plugin | Version | Description |
 |--------|---------|-------------|
-| [agent-worktrees](plugins/agent-worktrees/) | 1.3.1 | Worktree isolation system for concurrent Copilot CLI sessions |
+| [agent-worktrees](plugins/agent-worktrees/) | 1.4.0 | Worktree isolation system for concurrent Copilot CLI sessions |
 
 ---
 
@@ -33,9 +33,10 @@ actually manages worktrees, services, and session lifecycle).
 Plugin layer (Copilot CLI)              Runtime layer (Python CLI)
   plugin.json                             ~/.agent-worktrees/
   hooks.json  -- sessionStart hook          .venv/           Python venv (shared)
-  skills/     -- 6 skills loaded              lib/agent_worktrees/  Python package
+  skills/     -- 7 skills loaded              lib/agent_worktrees/  Python package
                  into every session           bin/             launch-session.*, bootstrap-check.*
                                               projects.yaml    registry of adopted repos
+                                              repos.yaml       repos registry + source roots
 
                                             ~/.{project}/      per-project config + state
                                               config.yaml      repos, machine, launch commands
@@ -308,6 +309,7 @@ and project setup.
 | `agent-worktrees-init` | Bootstrap the shared runtime on a new machine |
 | `agent-worktrees-adopt` | Adopt a repo -- create per-project config and binstubs |
 | `agent-worktrees-wsl-provision` | Provision the current project in WSL from a Windows host |
+| `agent-worktrees-repos` | Repos registry -- catalog of known repos, source roots, path resolution |
 | `create-setup-script` | Generate repo-specific session setup scripts |
 
 ### Hooks
@@ -327,6 +329,8 @@ and project setup.
 The Windows installer also generates a **Windows Terminal fragment** at
 `%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments\AgentWorktrees\`
 with profiles for each registered project (local + remote SSH machines).
+WSL profiles are included automatically when the installer detects a
+binstub at `~/.local/bin/{project}` inside WSL.
 
 ---
 
@@ -395,6 +399,7 @@ After full installation and project registration:
     launch-session.{ps1,cmd,sh}     #     Session launcher
     bootstrap-check.{ps1,sh}        #     Session-start health check
   projects.yaml                     #   Registry of adopted projects
+  repos.yaml                        #   Repos catalog + source roots
   deploy-manifest.json              #   Provenance (commit, timestamp)
   aperture-science.ico              #   Icon for terminal profiles
 
@@ -461,11 +466,12 @@ agent-worktrees <subcommand> [options]
 | `deploy-instructions` | Deploy `machine.instructions.md` from `machines.yaml` |
 | `get` | Query config values (e.g., `agent-worktrees get repo-dir`) |
 
-### Services & Validation
+### Services, Repos & Validation
 
 | Subcommand | Description |
 |------------|-------------|
 | `services` | Service discovery, staleness checks, passthrough to service installers |
+| `repos` | Repos registry -- list, find, add, clone, srcroot management |
 | `validate` | Validate core infrastructure files |
 | `pre-launch` | Check bootstrap staleness (JSON output, used by launch wrappers) |
 
