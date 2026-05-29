@@ -435,7 +435,20 @@ if (-not $noMux -and $psmuxCmd) {
     # Pass the command directly to new-session so the psmux session
     # (and its single pane) exits when the process finishes — no
     # lingering shell, matching the Linux tmux behavior.
-    & psmux new-session -d -s $sessName -c $plan.work_dir @envFlags @cmd
+    #
+    # Clear nesting vars so psmux doesn't kill the detached session.
+    # The new session is independent — it shouldn't inherit the parent's
+    # nesting state even though we're creating it from inside a psmux pane.
+    $savedPsmuxSession = $env:PSMUX_SESSION; $env:PSMUX_SESSION = $null
+    $savedTmux = $env:TMUX; $env:TMUX = $null
+    $savedTmuxPane = $env:TMUX_PANE; $env:TMUX_PANE = $null
+    try {
+        & psmux new-session -d -s $sessName -c $plan.work_dir @envFlags @cmd
+    } finally {
+        $env:PSMUX_SESSION = $savedPsmuxSession
+        $env:TMUX = $savedTmux
+        $env:TMUX_PANE = $savedTmuxPane
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Failed to create psmux session. Falling back to direct launch."
     } else {
@@ -461,7 +474,16 @@ if (-not $noMux -and $psmuxCmd) {
                         Write-Host 'Handoff detected — relaunching with continuation prompt...'
                         Write-Host ''
                         $handoffPrompt = "Continuing from a previous session in this worktree. A handoff was prepared - read it for full context: cat `"$($handoff.prompt_path)`""
-                        & psmux new-session -d -s $sessName -c $plan.work_dir @envFlags @cmd '-i' $handoffPrompt
+                        $savedPsmuxSession = $env:PSMUX_SESSION; $env:PSMUX_SESSION = $null
+                        $savedTmux = $env:TMUX; $env:TMUX = $null
+                        $savedTmuxPane = $env:TMUX_PANE; $env:TMUX_PANE = $null
+                        try {
+                            & psmux new-session -d -s $sessName -c $plan.work_dir @envFlags @cmd '-i' $handoffPrompt
+                        } finally {
+                            $env:PSMUX_SESSION = $savedPsmuxSession
+                            $env:TMUX = $savedTmux
+                            $env:TMUX_PANE = $savedTmuxPane
+                        }
                         if ($LASTEXITCODE -eq 0) {
                             Reset-SshConptyViewport
                             & psmux attach-session -t $sessName
