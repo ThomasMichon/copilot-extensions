@@ -67,15 +67,50 @@ not from the aperture-labs monorepo. The aperture-labs repo contains a
 parallel `worktree-manager` service that shares code but deploys
 independently.
 
-### Push flow
+### The Deployment Pipeline
 
-1. Make changes in `plugins/agent-worktrees/`
-2. Bump the version in **both** `pyproject.toml` and `plugin.json`
-   (patch + `-devN`)
-3. Commit with a descriptive message
-4. Push to `main` on GitHub: `git push origin main`
-5. Machines pick up the update via `copilot plugin update` or manual
-   `git pull`
+Changes follow this exact sequence — no shortcuts:
+
+1. **Commit** changes in `plugins/agent-worktrees/`
+2. **Bump the version** in all three files (see "Where the version lives")
+3. **Push** to `main` on GitHub: `git push origin main`
+4. **Update on each machine** via `aperture-labs update` or
+   `agent-worktrees update` (over SSH for remote machines)
+
+The update command runs `copilot plugin update` to pull the latest
+plugin from the marketplace, then executes the platform-specific
+installer which deploys the package, regenerates `_build_info.py`
+with the real commit hash, and refreshes instruction files.
+
+### What NOT to Do
+
+**Never copy source files directly into the deployed runtime directory
+(`~/.agent-worktrees/lib/`).** This bypasses:
+
+- Version tracking (`_build_info.py` won't reflect the real version)
+- The installer's own setup steps (venv sync, wrapper generation,
+  instruction file deployment, post-install hooks)
+- Other machines — they won't get the update
+- Rollback safety — there's no commit to revert to
+
+If you need to test a change locally before pushing, use the installer
+from the local checkout:
+
+```powershell
+# Windows — from the copilot-extensions checkout
+cd plugins\agent-worktrees
+.\scripts\install.ps1 update
+```
+
+```bash
+# Linux/WSL — from the copilot-extensions checkout
+cd plugins/agent-worktrees
+./scripts/install.sh update
+```
+
+This runs the real installer against the local source, so the full
+pipeline executes (build info, venv, wrappers, instructions) — just
+from a local commit instead of a pushed one.
 
 ### Keeping worktree-manager in sync
 
