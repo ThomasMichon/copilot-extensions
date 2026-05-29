@@ -2,6 +2,14 @@
 
 ## Release & Versioning
 
+### Marketplace architecture
+
+This repo is a **Copilot CLI plugin marketplace** — a GitHub-hosted
+registry of plugins that machines install via `copilot plugin marketplace
+add ThomasMichon/copilot-extensions`. The marketplace catalog lives at
+`.github/plugin/marketplace.json` and lists every plugin with its current
+version. The Copilot CLI reads this file to determine available updates.
+
 ### Version scheme
 
 Agent Worktrees follows [PEP 440](https://peps.python.org/pep-0440/)
@@ -11,11 +19,11 @@ compatible versioning:
 MAJOR.MINOR.PATCH[-devN]
 ```
 
-- **Patch** bumps (`1.0.1 → 1.0.2`) — bug fixes, small improvements,
+- **Patch** bumps (`1.0.1 -> 1.0.2`) — bug fixes, small improvements,
   new skills/docs that don't change runtime behavior.
-- **Minor** bumps (`1.0.x → 1.1.0`) — new features, behavioral changes,
+- **Minor** bumps (`1.0.x -> 1.1.0`) — new features, behavioral changes,
   new CLI subcommands. **Only when the maintainer decides.**
-- **Major** bumps (`1.x → 2.0`) — breaking changes. **Only when the
+- **Major** bumps (`1.x -> 2.0`) — breaking changes. **Only when the
   maintainer decides.**
 
 ### Default: bump patch with `-devN`
@@ -24,22 +32,27 @@ When committing changes that warrant a version bump, use the **patch**
 level with a `-devN` suffix:
 
 ```
-1.0.1 → 1.0.2-dev1 → 1.0.2-dev2 → … → 1.0.2 (release)
+1.0.1 -> 1.0.2-dev1 -> 1.0.2-dev2 -> ... -> 1.0.2 (release)
 ```
 
 Do **not** bump minor or major versions unless explicitly instructed.
 
-### Where the version lives
+### Where the version lives (ALL THREE must be bumped together)
 
-- `plugins/agent-worktrees/pyproject.toml` — the `version` field under
-  `[project]` (used by the Python package at runtime)
-- `plugins/agent-worktrees/plugin.json` — the `version` field (used by
-  `copilot plugin update` to detect new versions)
+| File | Field | Purpose |
+|------|-------|---------|
+| `plugins/agent-worktrees/plugin.json` | `version` | Copilot CLI reads this to detect updates via `copilot plugin update` |
+| `plugins/agent-worktrees/pyproject.toml` | `version` under `[project]` | Python package version at runtime; shown in `--version` output |
+| `.github/plugin/marketplace.json` | `metadata.version` AND `plugins[0].version` | Marketplace catalog; Copilot CLI reads this from GitHub to check for updates |
 
-**Both files must be bumped together.** The CLI reads `plugin.json` to
-decide whether an update is available; if it's stale, `copilot plugin
-update` will report "already at latest" even when `pyproject.toml` has
-been bumped.
+**All three files must be bumped together in the same commit.** If any
+file is out of sync:
+
+- Stale `plugin.json` — `copilot plugin update` reports "already at
+  latest" even when new code is available.
+- Stale `marketplace.json` — the marketplace registry shows the old
+  version; machines checking for updates won't see the new version.
+- Stale `pyproject.toml` — runtime `--version` output is wrong.
 
 ### When to bump
 
