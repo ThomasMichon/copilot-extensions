@@ -100,6 +100,7 @@ class SSHEnvironment:
 
     name: str
     alias: str
+    shell: str = ""
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,7 @@ class MachineEntry:
     hostname_prefixes: list[str] = field(default_factory=list)
     role: str = ""
     ssh_environments: list[SSHEnvironment] = field(default_factory=list)
+    ssh_ready: bool = False
 
 
 def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
@@ -140,6 +142,7 @@ def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
             if isinstance(env, dict) and "name" in env and "alias" in env:
                 ssh_envs.append(SSHEnvironment(
                     name=env["name"], alias=env["alias"],
+                    shell=env.get("shell", ""),
                 ))
         entries[key] = MachineEntry(
             key=key,
@@ -148,6 +151,7 @@ def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
             hostname_prefixes=data.get("hostname_prefixes", [key]),
             role=data.get("role", ""),
             ssh_environments=ssh_envs,
+            ssh_ready=bool(ssh_block.get("ready", False)),
         )
     return entries
 
@@ -185,12 +189,15 @@ def detect_machine(repo_dir: str | Path | None = None) -> str:
     return hostname
 
 
-def render_copilot_instructions(entry: MachineEntry) -> str:
-    """Render the content of ``AGENTS.md`` for a machine.
+def render_copilot_instructions(
+    entry: MachineEntry, project: str = "",
+) -> str:
+    """Render the content of ``machine.instructions.md`` for a machine.
 
     Detects the current platform and includes it along with the
     deployment environment (SSH alias) so agents know their exact
-    identity for service deployments.
+    identity for service deployments.  When *project* is provided,
+    includes project and binstub metadata.
     """
     plat = detect_platform()
 
@@ -211,6 +218,86 @@ def render_copilot_instructions(entry: MachineEntry) -> str:
         lines.append(f"Deployment environment: {deploy_env}")
     if entry.role:
         lines.append(f"Role: {entry.role}")
+    if project:
+        lines.append(f"Project: {project}")
+        lines.append(f"Binstub: {project}")
+    return "\n".join(lines) + "\n"
+
+
+def render_ssh_instructions(
+    registry: dict[str, MachineEntry],
+    current_machine: str,
+    project: str,
+) -> str:
+    """Render ``ssh.instructions.md`` content from the machine registry.
+
+    Lists all SSH-reachable machines (``ssh_ready`` is True) with their
+    aliases and shell types.  The current machine's current-platform
+    alias is excluded, but sibling environments on the same host are
+    kept (e.g., from Windows you still see the WSL alias).
+    """
+    plat = detect_platform()
+
+    # Determine the alias to exclude (current platform on current machine)
+    exclude_alias = ""
+    current_entry = registry.get(current_machine)
+    if current_entry:
+        for ssh_env in current_entry.ssh_environments:
+            if ssh_env.name == plat:
+                exclude_alias = ssh_env.alias
+                break
+
+    # Build rows: (display_name, alias, env_name, shell, role)
+    rows: list[tuple[str, str, str, str, str]] = []
+    for _key, entry in registry.items():
+        if not entry.ssh_ready:
+            continue
+        for ssh_env in entry.ssh_environments:
+            if ssh_env.alias == exclude_alias:
+                continue
+            rows.append((
+                entry.display_name,
+                ssh_env.alias,
+                ssh_env.name,
+                ssh_env.shell or "sh",
+                entry.role,
+            ))
+
+    if not rows:
+        return ""
+
+    lines = [
+        "# SSH - Remote Machine Access",
+        "",
+        "This project is deployed across multiple machines. Use SSH aliases",
+        "to run commands on remote machines. Prefer aliases over raw IPs.",
+        "",
+        "## Available Machines",
+        "",
+        "| Machine | Alias | Env | Shell | Role |",
+        "|---------|-------|-----|-------|------|",
+    ]
+    for display, alias, env_name, shell, role in rows:
+        lines.append(f"| {display} | `{alias}` | {env_name} | {shell} | {role} |")
+
+    lines.extend([
+        "",
+        "## Running Commands Remotely",
+        "",
+        "```",
+        "ssh <alias> \"<command>\"",
+        "```",
+        "",
+        f"To launch the project binstub on a remote machine:",
+        "",
+        "```",
+        f"ssh <alias> \"{project}\"",
+        "```",
+        "",
+        "Match command syntax to the remote shell shown in the table.",
+        "For transport details, tunnels, or deployment workflows, follow",
+        "this repository's SSH/deployment skills or docs if present.",
+    ])
     return "\n".join(lines) + "\n"
 
 
