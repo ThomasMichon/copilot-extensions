@@ -2034,7 +2034,23 @@ def cmd_register(args: argparse.Namespace) -> int:
             output.err(f"Not a git repository: {repo_dir}")
             return 1
     else:
-        repo_dir = _find_repo_dir()
+        # For `register`, the current directory is authoritative — resolve the
+        # git root of cwd first. _find_repo_dir() walks up from the installed
+        # module location (~/.agent-worktrees/...) before checking cwd, which
+        # can resolve to an unrelated repo (e.g. when $HOME itself is a git
+        # repo, as with dotfiles-in-$HOME setups).
+        repo_dir = None
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(Path.cwd()), "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                repo_dir = Path(r.stdout.strip()).resolve()
+        except Exception:
+            pass
+        if not repo_dir:
+            repo_dir = _find_repo_dir()
         if not repo_dir:
             repo_dir = Path.cwd()
             output.warn(f"Using current directory as repo root: {repo_dir}")
@@ -2053,6 +2069,18 @@ def cmd_register(args: argparse.Namespace) -> int:
             )
             if r.returncode == 0:
                 default_branch = r.stdout.strip().split("/")[-1]
+        except Exception:
+            pass
+    if not default_branch:
+        # origin/HEAD unset — fall back to the currently checked-out branch
+        # before assuming "master" (most repos now default to "main").
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(repo_dir), "symbolic-ref", "--short", "HEAD"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                default_branch = r.stdout.strip()
         except Exception:
             pass
     if not default_branch:
