@@ -246,6 +246,12 @@ def find_latest_session_id(worktree_path: str) -> str | None:
         if norm_cwd != norm_wt and not norm_cwd.startswith(norm_wt + os.sep):
             continue
 
+        # A session directory with only workspace.yaml but no conversation
+        # data (session.db or events.jsonl) is a stale stub that Copilot
+        # CLI will reject with "No session matched".  Skip it.
+        if not (entry / "session.db").exists() and not (entry / "events.jsonl").exists():
+            continue
+
         updated_at = str(ws_data.get("updated_at", ""))
         if updated_at > best_ts:
             best_ts = updated_at
