@@ -213,13 +213,13 @@ def _emit_plan(plan: dict) -> None:
     """Write the JSON launch plan to the real stdout (not the swapped one).
 
     For exec/wsl actions, injects COPILOT_CUSTOM_INSTRUCTIONS_DIRS pointing
-    to the install dir so machine+repo-specific instructions are loaded
+    to the project dir so machine+repo-specific instructions are loaded
     without polluting other repos on the same machine.
     """
     if plan.get("action") in ("exec", "wsl"):
         env = plan.setdefault("env", {})
         env.setdefault(
-            "COPILOT_CUSTOM_INSTRUCTIONS_DIRS", str(cfg.install_dir())
+            "COPILOT_CUSTOM_INSTRUCTIONS_DIRS", str(cfg.project_dir())
         )
     sys.__stdout__.write(json.dumps(plan) + "\n")
     sys.__stdout__.flush()
@@ -1767,6 +1767,10 @@ def _validate_machine_registry(
     return registry[machine]
 
 
+# Ownership marker embedded in generated instruction files
+_INSTRUCTION_MARKER = "<!-- managed by agent-worktrees -->"
+
+
 def _deploy_copilot_instructions(
     proj_dir: Path, entry: cfg.MachineEntry,
 ) -> None:
@@ -1779,9 +1783,11 @@ def _deploy_copilot_instructions(
       directories (``<dir>/.github/instructions/**/*.instructions.md``).
     - ``AGENTS.md`` — discovered as a nested AGENTS.md in custom dirs.
 
-    Both files have identical content.
+    Both files have identical content, tagged with an ownership marker
+    so stale files can be identified and cleaned up.
     """
-    content = cfg.render_copilot_instructions(entry)
+    raw = cfg.render_copilot_instructions(entry)
+    content = f"{_INSTRUCTION_MARKER}\n{raw}"
 
     # Primary: .github/instructions/*.instructions.md (auto-injected)
     instr_dir = proj_dir / ".github" / "instructions"
@@ -1809,6 +1815,27 @@ def _deploy_copilot_instructions(
             output.changed(f"removed legacy {legacy_name}")
 
 
+def _cleanup_stale_instructions(proj_dir: Path) -> None:
+    """Remove generated instruction files when machines.yaml is absent.
+
+    Only removes files that contain the agent-worktrees ownership marker,
+    so user-created instruction files are preserved.
+    """
+    candidates = [
+        proj_dir / ".github" / "instructions" / "machine.instructions.md",
+        proj_dir / "AGENTS.md",
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                content = path.read_text()
+                if _INSTRUCTION_MARKER in content:
+                    path.unlink()
+                    output.changed(f"removed stale {path.name} (no machines.yaml)")
+            except OSError:
+                pass
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     """Deploy the worktree manager shared runtime + register current project."""
     project = cfg.project_name()
@@ -1833,10 +1860,13 @@ def cmd_install(args: argparse.Namespace) -> int:
     print(f"  Project:  {project}")
     print(f"  Repo:     {repo_dir}")
 
-    # Validate machine is registered
-    machine_entry = _validate_machine_registry(repo_dir, machine)
-    if machine_entry is None:
-        return 1
+    # Machine registry is optional -- repos without machines.yaml still work
+    machine_entry: cfg.MachineEntry | None = None
+    machines_yaml = repo_dir / "machines.yaml"
+    if machines_yaml.exists():
+        machine_entry = _validate_machine_registry(repo_dir, machine)
+        if machine_entry is None:
+            return 1
 
     # Create shared runtime directories
     runtime_dir = cfg._home() / ".agent-worktrees"
@@ -1855,8 +1885,11 @@ def cmd_install(args: argparse.Namespace) -> int:
     else:
         output.skipped(f"Config exists at {config_path} (use --force to overwrite)")
 
-    # Deploy copilot-instructions.md from machine registry
-    _deploy_copilot_instructions(proj_dir, machine_entry)
+    # Deploy copilot-instructions.md from machine registry (if available)
+    if machine_entry is not None:
+        _deploy_copilot_instructions(proj_dir, machine_entry)
+    else:
+        _cleanup_stale_instructions(proj_dir)
 
     # Deploy Python package (shared runtime)
     if not inst.deploy_package(repo_dir):
@@ -2009,13 +2042,29 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Deploy copilot-instructions.md from machine registry
     if machine_entry is not None:
         _deploy_copilot_instructions(proj_dir, machine_entry)
+    else:
+        _cleanup_stale_instructions(proj_dir)
 
     # Generate binstub
     if not inst.deploy_binstubs(repo_dir, project=project):
         return 1
 
-    # Update projects registry
-    inst.register_project(project, repo_dir=repo_dir, default_branch=default_branch)
+    # Update projects registry — include WSL state if running inside WSL
+    wsl_state: str | None = None
+    wsl_distro: str | None = None
+    wsl_path: str | None = None
+    if plat in ("wsl", "linux"):
+        wsl_state = "adopted"
+        wsl_distro = os.environ.get("WSL_DISTRO_NAME")
+        wsl_path = str(repo_dir)
+    inst.register_project(
+        project,
+        repo_dir=repo_dir,
+        default_branch=default_branch,
+        wsl_state=wsl_state,
+        wsl_distro=wsl_distro,
+        wsl_path=wsl_path,
+    )
 
     # Refresh Windows Terminal profiles if installed via install.ps1
     if plat == "windows":
@@ -2132,12 +2181,15 @@ def cmd_update(args: argparse.Namespace) -> int:
         return 1
 
     # Refresh copilot-instructions.md from machine registry
+    proj_dir = cfg.project_dir(project)
     try:
         registry = cfg.load_machines_yaml(repo_dir)
         if machine in registry:
-            _deploy_copilot_instructions(cfg.project_dir(project), registry[machine])
-    except (FileNotFoundError, ValueError):
-        pass  # machines.yaml may not exist for all projects
+            _deploy_copilot_instructions(proj_dir, registry[machine])
+    except FileNotFoundError:
+        _cleanup_stale_instructions(proj_dir)
+    except ValueError:
+        pass  # malformed machines.yaml -- don't crash update
 
     inst.write_deploy_manifest(repo_dir, machine)
 
@@ -2163,7 +2215,11 @@ def cmd_deploy_instructions(args: argparse.Namespace) -> int:
 
     try:
         registry = cfg.load_machines_yaml(repo_dir)
-    except (FileNotFoundError, ValueError) as exc:
+    except FileNotFoundError:
+        output.skipped("No machines.yaml found (optional)")
+        _cleanup_stale_instructions(cfg.project_dir(project))
+        return 0
+    except ValueError as exc:
         output.err(f"Cannot load machines.yaml: {exc}")
         return 1
 
