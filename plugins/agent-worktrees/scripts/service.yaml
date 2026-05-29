@@ -2,81 +2,35 @@ name: agent-worktrees
 display_name: Worktree Session Manager
 description: >
   Git worktree-per-session infrastructure for concurrent Copilot CLI sessions.
-  Runtime at ~/.agent-worktrees/, per-project config at ~/.aperture-labs/.
+  Runtime at ~/.agent-worktrees/, per-project config at ~/.{project}/.
 
-# Not a daemon — invoked on demand via CLI. Deployed and updated through the
-# standard installer lifecycle like any other service.
+# Not a daemon -- invoked on demand via CLI. Deployed and updated through the
+# standard installer lifecycle. Runs on any machine with Python 3.10+ and Git.
 type: installed-service
 level: user
 
-# Legacy fields — kept for backward compat; deployments: is authoritative
-platform: windows
-machines:
-  - lambda-core
-  - borealis
-  - tmichon-book2
-  - wheatley
-
 runtime:
   install_dir: "${HOME}/.agent-worktrees"
-  config_dir: "${HOME}/.aperture-labs"
+  config_dir: "${HOME}/.${WORKTREE_PROJECT}"
   config_file: config.yaml
 
 prereqs:
   - name: git
     notes: "Git with worktree support (2.15+)"
-  - name: pwsh
-    type: external
-    notes: "PowerShell 7+ (Windows launcher)"
-
-deployments:
-  lambda-core-windows:
-    type: full
-    platform: windows
-    install_dir: "${HOME}/.agent-worktrees"
-
-  lambda-core-wsl:
-    type: full
-    platform: linux
-    install_dir: "${HOME}/.agent-worktrees"
-
-  borealis-windows:
-    type: full
-    platform: windows
-    install_dir: "${HOME}/.agent-worktrees"
-
-  borealis-wsl:
-    type: full
-    platform: linux
-    install_dir: "${HOME}/.agent-worktrees"
-
-  tmichon-book2-windows:
-    type: full
-    platform: windows
-    install_dir: "${HOME}/.agent-worktrees"
-    notes: "Guest machine — mostly on Work network, VPN for local access"
-
-  tmichon-book2-wsl:
-    type: full
-    platform: linux
-    install_dir: "${HOME}/.agent-worktrees"
-
-  wheatley:
-    type: full
-    platform: linux
-    install_dir: "${HOME}/.agent-worktrees"
+  - name: python3
+    notes: "Python 3.10+"
 
 data:
   config:
     - path: config.yaml
       description: Per-project worktree manager config
       recovery: Re-rendered by installer/update-config
-      notes: Deployed to ~/.aperture-labs/config.yaml
+      notes: Deployed to ~/.{project}/config.yaml
   internal:
     - path: worktrees/
       description: Per-worktree YAML tracking records (state, branch, timestamps)
       recovery: Rebuilt from git worktree list + session-state scan
-      notes: Stored in ~/.aperture-labs/worktrees/ (outside install_dir)
+      notes: Stored in ~/.{project}/worktrees/ (outside install_dir)
 
 maturity: stable
 

@@ -57,7 +57,7 @@ anchor repo (base-repo mode).
 
 **Do NOT manually run git rebase, merge, checkout, push, or worktree
 removal as a finalization workflow.** Always use
-`$WORKTREE_PROJECT mark-complete` (or `$WORKTREE_PROJECT finalize`). The
+`agent-worktrees mark-complete` (or `agent-worktrees finalize`). The
 CLI handles pre-squash, backup refs, rebase, ff-merge, push, state
 tracking, and post-session cleanup atomically.
 
@@ -143,26 +143,26 @@ Follow the repo's normal commit policy.
 
 ## Quick Reference
 
-All commands route through the project binstub (`$WORKTREE_PROJECT`), which
-ensures operations are scoped to the correct project. Inside a session,
-`$WORKTREE_PROJECT` is always set.
+All commands route through `agent-worktrees`, which resolves the project
+from the `WORKTREE_PROJECT` environment variable (always set inside a
+session).
 
 | Action | Command |
 |--------|---------|
-| All worktree operations | `$WORKTREE_PROJECT --help` |
-| Set title (while active) | `$WORKTREE_PROJECT mark-complete --title "desc" --title-only` |
-| Mark complete (triggers finalize) | `$WORKTREE_PROJECT mark-complete` |
-| Finalize a worktree | `$WORKTREE_PROJECT finalize` (auto-detects from branch, or pass ID) |
-| Show worktree git status | `$WORKTREE_PROJECT status` |
-| List worktrees for cleanup | `$WORKTREE_PROJECT cleanup` |
-| Clean completed worktrees | `$WORKTREE_PROJECT cleanup --clean` |
-| Also clean unused worktrees | `$WORKTREE_PROJECT cleanup --clean --include-unused` |
+| All worktree operations | `agent-worktrees --help` |
+| Set title (while active) | `agent-worktrees mark-complete --title "desc" --title-only` |
+| Mark complete (triggers finalize) | `agent-worktrees mark-complete` |
+| Finalize a worktree | `agent-worktrees finalize` (auto-detects from branch, or pass ID) |
+| Show worktree git status | `agent-worktrees status` |
+| List worktrees for cleanup | `agent-worktrees cleanup` |
+| Clean completed worktrees | `agent-worktrees cleanup --clean` |
+| Also clean unused worktrees | `agent-worktrees cleanup --clean --include-unused` |
 
 ## Cleanup Procedure
 
 When the user asks to clean up worktrees:
 
-1. **Run default cleanup** — `$WORKTREE_PROJECT cleanup --clean` removes
+1. **Run default cleanup** — `agent-worktrees cleanup --clean` removes
    only `completed` worktrees (those whose changes are already merged via
    squash-merge) and `gone` worktrees (path no longer exists).
    - For `gone` worktrees, the branch is only deleted if its content is
@@ -177,7 +177,7 @@ When the user asks to clean up worktrees:
    it preserved. These have no commits but may contain planning,
    conversation history, or uncommitted work.
 3. **Ask the user** whether to also purge unused worktrees. If yes, run
-   `$WORKTREE_PROJECT cleanup --clean --include-unused`.
+   `agent-worktrees cleanup --clean --include-unused`.
 
 Never auto-purge unused worktrees without asking — a worktree may appear
 "unused" if the session involved only questions, planning, or conversation
@@ -201,17 +201,17 @@ with no commits yet.
 Titles appear in the picker for easier identification. Resolution order:
 
 1. **Explicit title** — from the `title` field in worktree YAML. Once set
-   (by `$WORKTREE_PROJECT mark-complete`), this wins.
+   (by `agent-worktrees mark-complete`), this wins.
 2. **Session summary** — auto-derived from the most recent Copilot CLI
    session summary for the worktree path.
 3. **None** — just the worktree ID and age.
 
 ```powershell
 # Set title without marking complete (worktree stays active)
-$env:WORKTREE_PROJECT mark-complete --title "Fix auth regression" --title-only
+agent-worktrees mark-complete --title "Fix auth regression" --title-only
 
 # Set title and mark complete (triggers finalization on exit)
-$env:WORKTREE_PROJECT mark-complete --title "Fix auth regression"
+agent-worktrees mark-complete --title "Fix auth regression"
 ```
 
 ## Cross-Worktree Safety
