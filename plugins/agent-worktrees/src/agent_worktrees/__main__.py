@@ -1773,17 +1773,14 @@ _INSTRUCTION_MARKER = "<!-- managed by agent-worktrees -->"
 
 def _deploy_copilot_instructions(
     proj_dir: Path, entry: cfg.MachineEntry,
-    registry: dict[str, cfg.MachineEntry] | None = None,
     project: str = "",
 ) -> None:
-    """Write or update machine and SSH instruction files from the registry.
+    """Write or update machine instruction files from the registry.
 
     Deploys into the COPILOT_CUSTOM_INSTRUCTIONS_DIRS directory:
 
     - ``.github/instructions/machine.instructions.md`` — machine identity,
       project name, and binstub info.
-    - ``.github/instructions/ssh.instructions.md`` — SSH aliases and
-      remote access patterns for the machine mesh.
     - ``AGENTS.md`` — discovered as a nested AGENTS.md in custom dirs
       (machine identity content, same as machine.instructions.md).
 
@@ -1811,28 +1808,16 @@ def _deploy_copilot_instructions(
         agents_path.write_text(content)
         output.changed(f"AGENTS.md -> {agents_path}")
 
-    # SSH instructions: deploy if registry available, clean up if not
+    # Clean up stale ssh.instructions.md from previous versions
     ssh_instr_path = instr_dir / "ssh.instructions.md"
-    if registry and project:
-        ssh_raw = cfg.render_ssh_instructions(
-            registry, entry.key, project,
-        )
-        if ssh_raw:
-            ssh_content = f"{_INSTRUCTION_MARKER}\n{ssh_raw}"
-            if ssh_instr_path.exists() and ssh_instr_path.read_text() == ssh_content:
-                output.skipped("ssh.instructions.md already in sync")
-            else:
-                ssh_instr_path.write_text(ssh_content)
-                output.changed(f"ssh.instructions.md -> {ssh_instr_path}")
-        elif ssh_instr_path.exists():
-            # No reachable machines -- clean up stale file
-            try:
-                text = ssh_instr_path.read_text()
-                if _INSTRUCTION_MARKER in text:
-                    ssh_instr_path.unlink()
-                    output.changed("removed ssh.instructions.md (no reachable machines)")
-            except OSError:
-                pass
+    if ssh_instr_path.exists():
+        try:
+            text = ssh_instr_path.read_text()
+            if _INSTRUCTION_MARKER in text:
+                ssh_instr_path.unlink()
+                output.changed("removed stale ssh.instructions.md (now a skill)")
+        except OSError:
+            pass
 
     # Clean up legacy files from previous deploy strategies
     for legacy_name in ("copilot-instructions.md",):
@@ -1915,15 +1900,7 @@ def cmd_install(args: argparse.Namespace) -> int:
 
     # Deploy copilot-instructions.md from machine registry (if available)
     if machine_entry is not None:
-        # Load full registry for SSH instructions
-        try:
-            registry = cfg.load_machines_yaml(repo_dir)
-        except (FileNotFoundError, ValueError):
-            registry = None
-        _deploy_copilot_instructions(
-            proj_dir, machine_entry,
-            registry=registry, project=project,
-        )
+        _deploy_copilot_instructions(proj_dir, machine_entry, project=project)
     else:
         _cleanup_stale_instructions(proj_dir)
 
@@ -2077,14 +2054,7 @@ def cmd_register(args: argparse.Namespace) -> int:
 
     # Deploy copilot-instructions.md from machine registry
     if machine_entry is not None:
-        try:
-            registry = cfg.load_machines_yaml(repo_dir)
-        except (FileNotFoundError, ValueError):
-            registry = None
-        _deploy_copilot_instructions(
-            proj_dir, machine_entry,
-            registry=registry, project=project,
-        )
+        _deploy_copilot_instructions(proj_dir, machine_entry, project=project)
     else:
         _cleanup_stale_instructions(proj_dir)
 
@@ -2305,8 +2275,7 @@ def cmd_deploy_instructions(args: argparse.Namespace) -> int:
     proj_dir = cfg.project_dir(project)
     proj_dir.mkdir(parents=True, exist_ok=True)
     _deploy_copilot_instructions(
-        proj_dir, registry[machine],
-        registry=registry, project=project,
+        proj_dir, registry[machine], project=project,
     )
     return 0
 

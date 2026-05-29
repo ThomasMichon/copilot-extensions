@@ -589,7 +589,6 @@ def show_install_status() -> None:
 
     # Copilot instructions -- context-aware check
     instr_path = proj_dir / ".github" / "instructions" / "machine.instructions.md"
-    ssh_instr_path = proj_dir / ".github" / "instructions" / "ssh.instructions.md"
     agents_path = proj_dir / "AGENTS.md"
     # Check if machines.yaml is configured for this project
     _has_machines_yaml = False
@@ -604,19 +603,8 @@ def show_install_status() -> None:
 
     if _has_machines_yaml:
         # machines.yaml exists -- instruction files should be deployed
-        parts = []
-        if instr_path.exists():
-            parts.append("machine")
-        if ssh_instr_path.exists():
-            parts.append("ssh")
-        if agents_path.exists():
-            parts.append("AGENTS.md")
-
         if instr_path.exists() and agents_path.exists():
-            label = " + ".join(f"{p}.instructions.md" for p in parts if p != "AGENTS.md")
-            if agents_path.exists():
-                label += " + AGENTS.md"
-            output.ok(f"{label} deployed")
+            output.ok("machine.instructions.md + AGENTS.md deployed")
         elif instr_path.exists():
             output.ok("machine.instructions.md deployed (AGENTS.md missing)")
         elif agents_path.exists():
