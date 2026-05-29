@@ -510,6 +510,34 @@ function Deploy-Icon {
     Write-ServiceOk "Icons deployed"
 }
 
+# Helper: check if a WSL binstub actually exists on disk
+function Test-WslBinstubExists {
+    param(
+        [string]$Name,
+        [string]$Distro
+    )
+    try {
+        if ($Distro) {
+            & wsl.exe -d $Distro -- bash -c 'test -x "$HOME/.local/bin/$1"' _ $Name 2>$null
+        } else {
+            & wsl.exe -- bash -c 'test -x "$HOME/.local/bin/$1"' _ $Name 2>$null
+        }
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
+}
+
+# Helper: detect the default WSL distro name
+function Get-WslDefaultDistro {
+    try {
+        $line = & wsl.exe -l -q 2>&1 | Where-Object { $_ -match '\S' } | Select-Object -First 1
+        $name = ($line -replace "`0", '').Trim()
+        if ($name) { return $name }
+    } catch {}
+    return $null
+}
+
 function Build-TerminalFragment {
     <# Generate a Windows Terminal fragment JSON with local + remote SSH profiles
        for ALL registered projects in projects.yaml. #>
@@ -559,34 +587,6 @@ function Build-TerminalFragment {
             $state = $wsl['state']; $distro = $wsl['distro']
         }
         return @{ state = $state; distro = $distro }
-    }
-
-    # Helper: check if a WSL binstub actually exists on disk
-    function Test-WslBinstubExists {
-        param(
-            [string]$Name,
-            [string]$Distro
-        )
-        try {
-            if ($Distro) {
-                & wsl.exe -d $Distro -- bash -c 'test -x "$HOME/.local/bin/$1"' _ $Name 2>$null
-            } else {
-                & wsl.exe -- bash -c 'test -x "$HOME/.local/bin/$1"' _ $Name 2>$null
-            }
-            return ($LASTEXITCODE -eq 0)
-        } catch {
-            return $false
-        }
-    }
-
-    # Helper: detect the default WSL distro name
-    function Get-WslDefaultDistro {
-        try {
-            $line = & wsl.exe -l -q 2>&1 | Where-Object { $_ -match '\S' } | Select-Object -First 1
-            $name = ($line -replace "`0", '').Trim()
-            if ($name) { return $name }
-        } catch {}
-        return $null
     }
 
     # Ensure current project is always included (even if not yet in registry)
