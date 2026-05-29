@@ -841,7 +841,7 @@ function Deploy-CopilotPlugin {
     }
 
     # 1. Register marketplace if not present
-    $marketplaces = copilot plugin marketplace list 2>$null
+    $marketplaces = (copilot plugin marketplace list 2>$null) -join "`n"
     if ($marketplaces -notmatch 'copilot-extensions') {
         $addOut = copilot plugin marketplace add ThomasMichon/copilot-extensions 2>&1
         if ($LASTEXITCODE -ne 0) {
@@ -882,7 +882,7 @@ function Deploy-CopilotPlugin {
 
     # 4. Remove stale _direct install if marketplace is now present
     if ($hasDirect) {
-        $verify = copilot plugin list 2>$null
+        $verify = (copilot plugin list 2>$null) -join "`n"
         if ($verify -match 'agent-worktrees@copilot-extensions') {
             copilot plugin uninstall agent-worktrees 2>$null | Out-Null
             Write-ServiceChanged "Removed stale _direct plugin install"
