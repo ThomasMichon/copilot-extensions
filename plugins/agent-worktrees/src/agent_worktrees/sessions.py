@@ -23,7 +23,13 @@ class SessionContext:
     """normalized_path → list of session_ids with live Copilot processes"""
 
     latest_summary: dict[str, str] = field(default_factory=dict)
-    """normalized_path → most recent session summary text"""
+    """normalized_path → best available session display text (summary or name)"""
+
+    session_count: dict[str, int] = field(default_factory=dict)
+    """normalized_path → total number of Copilot sessions found"""
+
+    turn_count: dict[str, int] = field(default_factory=dict)
+    """normalized_path → total user-message turns across all sessions"""
 
 
 def _normalize_path(p: str) -> str:
@@ -140,17 +146,42 @@ def scan_sessions(worktree_paths: list[str]) -> SessionContext:
         if matched_path is None:
             continue
 
-        # Track latest usable summary
+        # Count sessions per worktree
+        ctx.session_count[matched_path] = ctx.session_count.get(matched_path, 0) + 1
+
+        # Count user turns from events.jsonl (cheap string match, no JSON parse)
+        events_file = entry / "events.jsonl"
+        if events_file.exists():
+            try:
+                with open(events_file, encoding="utf-8", errors="replace") as ef:
+                    turns = sum(1 for line in ef if '"user.message"' in line)
+                if turns > 0:
+                    ctx.turn_count[matched_path] = (
+                        ctx.turn_count.get(matched_path, 0) + turns
+                    )
+            except OSError:
+                pass
+
+        # Track best available display text per path by updated_at.
+        # Prefer summary (richer) over name (short title), but pick
+        # the newest session's best text overall.
+        _placeholder = ("", "|-", "|", ">-", ">", "null", "Untitled")
+        display_text = ""
         summary = ws_data.get("summary", "")
-        if isinstance(summary, str) and summary not in ("", "|-", "|", ">-", ">"):
-            summary = summary.strip()
-            if summary:
-                updated_at = ws_data.get("updated_at", "")
-                if not latest_ts.get(matched_path) or updated_at > latest_ts[matched_path]:
-                    latest_ts[matched_path] = updated_at
-                    if len(summary) > 60:
-                        summary = summary[:57] + "..."
-                    ctx.latest_summary[matched_path] = summary
+        if isinstance(summary, str) and summary.strip() and summary not in _placeholder:
+            display_text = summary.strip()
+        if not display_text:
+            name = ws_data.get("name", "")
+            if isinstance(name, str) and name.strip() and name not in _placeholder:
+                display_text = name.strip()
+
+        if display_text:
+            updated_at = ws_data.get("updated_at", "")
+            if not latest_ts.get(matched_path) or updated_at > latest_ts[matched_path]:
+                latest_ts[matched_path] = updated_at
+                if len(display_text) > 60:
+                    display_text = display_text[:57] + "..."
+                ctx.latest_summary[matched_path] = display_text
 
         # Check for live lock files
         live_found = False

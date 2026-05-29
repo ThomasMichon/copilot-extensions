@@ -618,6 +618,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             def _wt_subtitle(rec: tracking.WorktreeRecord, info: git_ops.WorktreeStateInfo) -> str | None:
                 """Resolve the best available title for a worktree."""
                 norm = _normalize_path(rec.worktree_path)
+                turns = session_ctx.turn_count.get(norm, 0)
+                turn_tag = f" ({turns} turn{'s' if turns != 1 else ''})" if turns > 0 else ""
+
                 title = ""
                 if rec.title and rec.title != "null":
                     title = rec.title
@@ -625,10 +628,16 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                     title = session_ctx.latest_summary[norm]
                 elif info.title:
                     title = info.title
-                if not title:
-                    return None
-                # Sanitize to single line
-                return " ".join(title.split())
+                if title:
+                    return " ".join(title.split()) + turn_tag
+                # Last resort: show session count so the worktree isn't blank
+                count = session_ctx.session_count.get(norm, 0)
+                if count > 0:
+                    parts = [f"{count} session{'s' if count != 1 else ''}"]
+                    if turns > 0:
+                        parts.append(f"{turns} turn{'s' if turns != 1 else ''}")
+                    return f"({', '.join(parts)})"
+                return None
 
             for rec, info in active_wts:
                 menu_items.append(MenuItem(
@@ -897,7 +906,12 @@ def _system_status(config: cfg.Config) -> int | None:
         state_str = info.state.value
 
         label = f"{icon} …{short_id}  {state_str:<10} {age}"
-        title = rec.title if (rec.title and rec.title != "null") else (info.title or None)
+        norm = _normalize_path(rec.worktree_path)
+        title = rec.title if (rec.title and rec.title != "null") else None
+        if not title and norm in session_ctx.latest_summary:
+            title = session_ctx.latest_summary[norm]
+        if not title and info.title:
+            title = info.title
         subtitle = " ".join(title.split()) if title else None
 
         status_items.append(MenuItem(
@@ -1396,7 +1410,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     # Scan for live sessions to feed into classification
     all_paths = [r.worktree_path for r in records]
-    sessions.scan_sessions(all_paths)  # populates session cache
+    session_ctx = sessions.scan_sessions(all_paths)
     active_paths = _build_active_paths(records)
 
     results: list[dict] = []
@@ -1411,7 +1425,12 @@ def cmd_status(args: argparse.Namespace) -> int:
         # Add display helpers for table output
         short_id = rec.worktree_id[-4:] if len(rec.worktree_id) > 4 else rec.worktree_id
         result_entry["short_id"] = short_id
-        display_title = rec.title if (rec.title and rec.title != "null") else (info.title or "(none)")
+        display_title = rec.title if (rec.title and rec.title != "null") else None
+        if not display_title:
+            norm = _normalize_path(rec.worktree_path)
+            display_title = session_ctx.latest_summary.get(norm)
+        if not display_title:
+            display_title = info.title or "(none)"
         result_entry["title"] = display_title
         results.append(result_entry)
 
@@ -1477,12 +1496,21 @@ def cmd_list(args: argparse.Namespace) -> int:
         print("No tracked worktrees.")
         return 0
 
+    # Light session scan for display text (names/summaries)
+    all_paths = [r.worktree_path for r in records if r.worktree_path]
+    session_ctx = sessions.scan_sessions(all_paths)
+
     print()
     print(f"{'ID':<42} {'Status':<12} {'Platform':<8} Title")
     print(f"{'─'*41:<42} {'─'*11:<12} {'─'*7:<8} {'─'*30}")
     for rec in records:
         short_id = rec.worktree_id[-12:] if len(rec.worktree_id) > 12 else rec.worktree_id
-        title = rec.title or "(none)"
+        title = rec.title if (rec.title and rec.title != "null") else None
+        if not title:
+            norm = _normalize_path(rec.worktree_path)
+            title = session_ctx.latest_summary.get(norm)
+        if not title:
+            title = "(none)"
         print(f"{short_id:<42} {rec.status:<12} {rec.platform:<8} {title}")
 
     print(f"\n{len(records)} worktree(s).")
