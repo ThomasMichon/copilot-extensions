@@ -1791,8 +1791,7 @@ def _validate_machine_registry(
         output.info(f"    {machine}:")
         output.info(f"      display_name: {machine.title()}")
         output.info(f'      environment: "<OS and version>"')
-        output.info(f"      hostname_prefixes:")
-        output.info(f"        - {machine}")
+        output.info(f'      # alias: "<real-hostname>"  # only if hostname differs from key')
         return None
 
     return registry[machine]

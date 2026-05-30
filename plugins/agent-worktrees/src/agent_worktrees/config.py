@@ -110,7 +110,7 @@ class MachineEntry:
     key: str
     display_name: str
     environment: str
-    hostname_prefixes: list[str] = field(default_factory=list)
+    alias: str = ""
     role: str = ""
     ssh_environments: list[SSHEnvironment] = field(default_factory=list)
     ssh_ready: bool = False
@@ -148,7 +148,7 @@ def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
             key=key,
             display_name=data.get("display_name", key),
             environment=data.get("environment", ""),
-            hostname_prefixes=data.get("hostname_prefixes", [key]),
+            alias=data.get("alias", ""),
             role=data.get("role", ""),
             ssh_environments=ssh_envs,
             ssh_ready=bool(ssh_block.get("ready", False)),
@@ -156,33 +156,25 @@ def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
     return entries
 
 
-def _build_hostname_map(
-    entries: dict[str, MachineEntry],
-) -> dict[str, str]:
-    """Build prefix → machine-key map from registry entries."""
-    mapping: dict[str, str] = {}
-    for key, entry in entries.items():
-        for prefix in entry.hostname_prefixes:
-            mapping[prefix.lower()] = key
-    return mapping
-
-
 def detect_machine(repo_dir: str | Path | None = None) -> str:
     """Auto-detect machine name from hostname.
 
-    If *repo_dir* is provided, reads ``machines.yaml`` for hostname
-    prefix mappings.  Returns the raw hostname if no registry is
-    available.
+    If *repo_dir* is provided, reads ``machines.yaml`` and matches
+    the hostname against machine keys and aliases (exact match).
+    Returns the raw hostname if no registry is available.
     """
     hostname = socket.gethostname().lower()
 
     if repo_dir is not None:
         try:
             entries = load_machines_yaml(repo_dir)
-            hostname_map = _build_hostname_map(entries)
-            for prefix, machine in hostname_map.items():
-                if hostname.startswith(prefix) or hostname == prefix.upper():
-                    return machine
+            # Exact match on key first, then alias
+            for key, entry in entries.items():
+                if hostname == key:
+                    return key
+            for key, entry in entries.items():
+                if entry.alias and hostname == entry.alias.lower():
+                    return key
         except (FileNotFoundError, ValueError):
             pass  # no registry — fall through to raw hostname
 
@@ -210,7 +202,7 @@ def render_copilot_instructions(
 
     lines = [
         f"Machine: {entry.display_name}",
-        f"Hostname: {entry.hostname_prefixes[0] if entry.hostname_prefixes else entry.key}",
+        f"Hostname: {entry.key}",
         f"Environment: {entry.environment}",
         f"Platform: {plat}",
     ]
