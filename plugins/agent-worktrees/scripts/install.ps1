@@ -663,7 +663,7 @@ function Build-TerminalFragment {
             } else {
                 "wsl.exe bash -lc $pName"
             }
-            $wslLabel = if ($wslDistro) { "$pDisplay (WSL: $wslDistro)" } else { "$pDisplay (WSL)" }
+            $wslLabel = "$pDisplay (WSL)"
 
             $guid = New-StableGuid "${pName}-local-wsl"
             $profiles += @{
@@ -700,7 +700,7 @@ function Build-TerminalFragment {
 
                             # Plain SSH profile
                             $sshGuid = New-StableGuid "${pName}-ssh-${key}-$($sshEnv.name)"
-                            $profileName = "$($mEntry.display_name) ($envLabel)"
+                            $profileName = if ($envLabel -eq 'WSL') { "$($mEntry.display_name) (WSL)" } else { $mEntry.display_name }
                             $profiles += @{
                                 guid              = "{$sshGuid}"
                                 name              = $profileName
@@ -714,7 +714,7 @@ function Build-TerminalFragment {
                             # Launch-via-SSH profile
                             $binstubCmd = if ($sshEnv.shell -eq 'pwsh') { "${pName}.cmd" } else { $pName }
                             $launchCmdline = "ssh -t $alias $binstubCmd"
-                            $launchLabel = if ($envLabel -eq 'Linux') { $mEntry.display_name } else { "$($mEntry.display_name) $envLabel" }
+                            $launchLabel = if ($envLabel -eq 'WSL') { "$($mEntry.display_name) WSL" } else { $mEntry.display_name }
                             $launchProfileName = "$pDisplay ($launchLabel)"
 
                             $launchGuid = New-StableGuid "${pName}-launch-${key}-$($sshEnv.name)"
@@ -997,7 +997,7 @@ function Deploy-Shortcuts {
         }
         $shortcutWslDistro = if ($projWslInfo -is [PSCustomObject] -and $projWslInfo.PSObject.Properties['distro']) { $projWslInfo.distro } else { $null }
         if (Test-WslBinstubExists -Name $proj -Distro $shortcutWslDistro) {
-            $wslLabel = if ($shortcutWslDistro) { "$displayName (WSL: $shortcutWslDistro)" } else { "$displayName (WSL)" }
+            $wslLabel = "$displayName (WSL)"
             $lnkPath = Join-Path $LocalBin "$wslLabel.lnk"
             $lnk = $shell.CreateShortcut($lnkPath)
             $lnk.TargetPath = $wtExe
