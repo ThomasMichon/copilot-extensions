@@ -1772,8 +1772,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
 def _validate_machine_registry(
     repo_dir: Path, machine: str,
 ) -> cfg.MachineEntry | None:
-    """Look up *machine* in machines.yaml.  Returns the entry or prints
-    an error and returns None."""
+    """Look up *machine* in machines.yaml by key or alias.  Returns the
+    entry or prints an error and returns None."""
     try:
         registry = cfg.load_machines_yaml(repo_dir)
     except FileNotFoundError:
@@ -1784,17 +1784,18 @@ def _validate_machine_registry(
         output.err(str(exc))
         return None
 
-    if machine not in registry:
+    entry = cfg.find_machine_entry(registry, machine)
+    if entry is None:
         output.err(f"Machine '{machine}' not found in machines.yaml")
         output.info("Add an entry for this machine and retry:")
         output.info(f"  machines:")
         output.info(f"    {machine}:")
         output.info(f"      display_name: {machine.title()}")
         output.info(f'      environment: "<OS and version>"')
-        output.info(f'      # alias: "<real-hostname>"  # only if hostname differs from key')
+        output.info(f'      # alias: "<facility-name>"  # colloquial name if different from hostname')
         return None
 
-    return registry[machine]
+    return entry
 
 
 # Ownership marker embedded in generated instruction files
