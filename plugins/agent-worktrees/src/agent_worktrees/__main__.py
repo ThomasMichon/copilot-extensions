@@ -2034,7 +2034,29 @@ def cmd_register(args: argparse.Namespace) -> int:
             output.err(f"Not a git repository: {repo_dir}")
             return 1
     else:
-        repo_dir = _find_repo_dir()
+        # For `register`, the current directory is authoritative — resolve the
+        # git root of cwd first. _find_repo_dir() walks up from the installed
+        # module location (~/.agent-worktrees/...) before checking cwd, which
+        # can resolve to an unrelated repo (e.g. when $HOME itself is a git
+        # repo, as with dotfiles-in-$HOME setups).
+        repo_dir = None
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(Path.cwd()), "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                # Normalize through resolve_to_anchor so that running from
+                # inside a linked worktree resolves back to the main checkout,
+                # matching _find_repo_dir()'s behavior. Without this, registering
+                # from an active worktree would anchor to the ephemeral path.
+                repo_dir = git_ops.resolve_to_anchor(
+                    Path(r.stdout.strip()).resolve()
+                )
+        except Exception:
+            pass
+        if not repo_dir:
+            repo_dir = _find_repo_dir()
         if not repo_dir:
             repo_dir = Path.cwd()
             output.warn(f"Using current directory as repo root: {repo_dir}")
@@ -2056,7 +2078,33 @@ def cmd_register(args: argparse.Namespace) -> int:
         except Exception:
             pass
     if not default_branch:
-        default_branch = "master"
+        # origin/HEAD unset — do NOT fall back to the current branch, which is
+        # often a feature branch in worktree workflows and would silently record
+        # the wrong default. Probe for a conventional default branch instead.
+        for candidate in ("master", "main"):
+            try:
+                r = subprocess.run(
+                    ["git", "-C", str(repo_dir), "rev-parse", "--verify",
+                     f"refs/heads/{candidate}"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if r.returncode == 0:
+                    default_branch = candidate
+                    break
+            except Exception:
+                pass
+    if not default_branch:
+        # No conventional default found — ask explicitly rather than guessing.
+        output.warn(
+            "Could not detect default branch "
+            "(no origin/HEAD, no master or main branch)"
+        )
+        branch_input = input("  Default branch name: ").strip()
+        if branch_input:
+            default_branch = branch_input
+        else:
+            default_branch = "master"
+            output.warn(f"Assuming default branch: {default_branch}")
 
     print(f"  Repo:     {repo_dir}")
     print(f"  Branch:   {default_branch}")

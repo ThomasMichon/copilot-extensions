@@ -344,9 +344,14 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
     lb = local_bin()
     lb.mkdir(parents=True, exist_ok=True)
 
+    is_windows = platform.system() == "Windows"
+
+    # Project-specific launcher (sets WORKTREE_PROJECT, routes to the CLI).
+    # Generated for every supported platform — previously this only had a
+    # Windows code path, so on macOS/Linux `register` silently created no
+    # launcher at all.
     if project:
-        # Generate project-specific binstub
-        if platform.system() == "Windows":
+        if is_windows:
             binstub_content = (
                 "@echo off\r\n"
                 'set "PYTHONUTF8=1"\r\n'
@@ -362,59 +367,50 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
                 'exit /b %ERRORLEVEL%\r\n'
             )
             dst = lb / f"{project}.cmd"
-            dst.write_text(binstub_content)
-            output.ok(f"Binstub: {dst}")
-
-            # Unified agent-worktrees command (project-agnostic)
-            wm_content = (
-                "@echo off\r\n"
-                "setlocal\r\n"
-                'if not defined WORKTREE_PROJECT (\r\n'
-                '    echo ERROR: WORKTREE_PROJECT is not set. '
-                'Use the project launcher binstub instead. >&2\r\n'
-                '    exit /b 1\r\n'
-                ')\r\n'
-                'set "PYTHONUTF8=1"\r\n'
-                'set "PYTHON=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe"\r\n'
-                'set "PYTHONPATH=%USERPROFILE%\\.agent-worktrees\\lib"\r\n'
-                '"%PYTHON%" -m agent_worktrees %*\r\n'
-                "exit /b %ERRORLEVEL%\r\n"
+        else:
+            binstub_content = (
+                "#!/usr/bin/env bash\n"
+                "export PYTHONUTF8=1\n"
+                f'export WORKTREE_PROJECT="{project}"\n'
+                '_PY="$HOME/.agent-worktrees/.venv/bin/python"\n'
+                'if [[ -x "$_PY" ]]; then\n'
+                '    export PYTHONPATH="$HOME/.agent-worktrees/lib${PYTHONPATH:+:$PYTHONPATH}"\n'
+                '    exec "$_PY" -m agent_worktrees "$@"\n'
+                'fi\n'
+                '# Fallback: launch session directly (venv missing / recovery)\n'
+                'exec "$HOME/.agent-worktrees/bin/launch-session.sh" "$@"\n'
             )
-            dst = lb / "agent-worktrees.cmd"
-            dst.write_text(wm_content)
-            output.ok(f"Binstub: {dst}")
-    else:
-        binstub_content = (
-            "#!/usr/bin/env bash\n"
-            f'export WORKTREE_PROJECT="{project}"\n'
-            '_PY="$HOME/.agent-worktrees/.venv/bin/python"\n'
-            'if [[ -x "$_PY" ]]; then\n'
-            '    export PYTHONPATH="$HOME/.agent-worktrees/lib"\n'
-            '    export PYTHONUTF8=1\n'
-            '    exec "$_PY" -m agent_worktrees "$@"\n'
-            'fi\n'
-            '# Fallback: launch session directly (venv missing / recovery)\n'
-            'exec "$HOME/.agent-worktrees/bin/launch-session.sh" "$@"\n'
-        )
-        dst = lb / project
+            dst = lb / project
         dst.write_text(binstub_content)
-        dst.chmod(0o755)
+        if not is_windows:
+            dst.chmod(0o755)
         output.ok(f"Binstub: {dst}")
 
-        # Unified agent-worktrees command (project-agnostic)
+    # Unified agent-worktrees command (project-agnostic; routes straight to
+    # the Python CLI). It must NOT require WORKTREE_PROJECT — global
+    # subcommands like `register <project>`, `update`, and `--version` run
+    # without a project context. The project-specific launchers above are the
+    # gating mechanism that sets WORKTREE_PROJECT; this stub stays unconditional
+    # and matches the binstub written by init.sh.
+    if is_windows:
+        wm_content = (
+            "@echo off\r\n"
+            'set "PYTHONUTF8=1"\r\n'
+            'set "PYTHON=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe"\r\n'
+            'set "PYTHONPATH=%USERPROFILE%\\.agent-worktrees\\lib"\r\n'
+            '"%PYTHON%" -m agent_worktrees %*\r\n'
+            "exit /b %ERRORLEVEL%\r\n"
+        )
+        dst = lb / "agent-worktrees.cmd"
+        dst.write_text(wm_content)
+        output.ok(f"Binstub: {dst}")
+    else:
         wm_content = (
             "#!/usr/bin/env bash\n"
-            "set -euo pipefail\n"
-            'if [[ -z "${WORKTREE_PROJECT:-}" ]]; then\n'
-            '    echo "ERROR: WORKTREE_PROJECT is not set. '
-            'Use the project launcher binstub instead." >&2\n'
-            '    exit 1\n'
-            'fi\n'
-            f'PYTHON="$HOME/.agent-worktrees/.venv/bin/python"\n'
-            f'export PYTHONPATH="$HOME/.agent-worktrees/lib"\n'
+            "export PYTHONUTF8=1\n"
+            'export PYTHONPATH="$HOME/.agent-worktrees/lib${PYTHONPATH:+:$PYTHONPATH}"\n'
             'unset PYTHONHOME\n'
-            'export PYTHONUTF8=1\n'
-            'exec "$PYTHON" -m agent_worktrees "$@"\n'
+            'exec "$HOME/.agent-worktrees/.venv/bin/python" -m agent_worktrees "$@"\n'
         )
         dst = lb / "agent-worktrees"
         dst.write_text(wm_content)
