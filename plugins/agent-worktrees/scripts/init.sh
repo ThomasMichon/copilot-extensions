@@ -182,6 +182,7 @@ stub_path="$LOCAL_BIN/agent-worktrees"
 cat > "$stub_path" << 'STUB'
 #!/usr/bin/env bash
 export PYTHONUTF8=1
+export PYTHONPATH="$HOME/.agent-worktrees/lib${PYTHONPATH:+:$PYTHONPATH}"
 exec "$HOME/.agent-worktrees/.venv/bin/python" -m agent_worktrees "$@"
 STUB
 chmod +x "$stub_path"
