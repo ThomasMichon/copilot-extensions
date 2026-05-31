@@ -4,10 +4,12 @@ Persistent inter-agent communication service for Copilot CLI. One instance
 per machine, serving all Copilot CLI sessions with session management,
 SSE event streaming, and agent subprocess spawning.
 
+Supports **Windows**, **Linux**, and **WSL**. macOS support is planned.
+
 ## Quick Start
 
 ```bash
-# Install
+# Install (from the copilot-extensions checkout)
 pip install -e plugins/agent-bridge
 
 # Start the service
@@ -16,6 +18,17 @@ agent-bridge start
 # Check status
 agent-bridge status
 ```
+
+On facility machines, use the aperture-labs service framework instead:
+
+```bash
+aperture-labs services agent-bridge install   # first time
+aperture-labs services agent-bridge update    # code + config refresh
+aperture-labs services agent-bridge start     # start the service
+```
+
+This works on both Windows (PowerShell) and Linux/WSL (bash) -- the
+framework dispatches to `install.ps1` or `install.sh` based on platform.
 
 ## What It Does
 
@@ -55,6 +68,8 @@ GET    /health                           # Service health check
 
 ## Configuration
 
+Config lives at `~/.agent-bridge/config.yaml` on all platforms.
+
 ```yaml
 # ~/.agent-bridge/config.yaml
 port: 9280
@@ -64,7 +79,8 @@ log_level: info
 
 topologies:
   my-project:
-    machines_yaml: /path/to/machines.yaml
+    machines_yaml: /path/to/machines.yaml       # Linux/WSL
+    # machines_yaml: C:/Data/Src/project/machines.yaml  # Windows
     agents_config: /path/to/agents.json
 ```
 
@@ -90,10 +106,47 @@ Copilot CLI sessions (multiple)
 +--------------------------------------------+
 ```
 
+## Deployment
+
+### Standalone (Development)
+
+The plugin includes platform-specific installers for standalone use:
+
+```powershell
+# Windows
+pwsh -File plugins\agent-bridge\scripts\install.ps1 install
+pwsh -File plugins\agent-bridge\scripts\install.ps1 status
+```
+
+```bash
+# Linux / WSL
+bash plugins/agent-bridge/scripts/install.sh install
+bash plugins/agent-bridge/scripts/install.sh status
+```
+
+### Facility Service (Production)
+
+On facility machines, agent-bridge deploys via the aperture-labs service
+framework which handles config layering, deploy manifests, and service
+registration (systemd on Linux, scheduled task on Windows):
+
+```bash
+aperture-labs services agent-bridge install   # first time
+aperture-labs services agent-bridge update    # code + config refresh
+```
+
+### Platform Details
+
+| Platform | Service manager | Install location | Auto-start |
+|----------|----------------|-----------------|------------|
+| Linux/WSL | systemd | `/opt/agent-bridge/` | systemd unit (enabled) |
+| Windows | Scheduled task | `~/.agent-bridge/` | At-logon task |
+| macOS | -- | Planned | -- |
+
 ## Phases
 
-- **Phase 1** (current): Service scaffold, local sessions, SQLite, SSE
-- **Phase 2**: SSH transport, machine topology, connection pooling
+- **Phase 1** (complete): Service scaffold, local sessions, SQLite, SSE
+- **Phase 2** (complete): SSH transport, machine topology, connection pooling
 - **Phase 3**: CLI tools, Copilot CLI integration, MCP shim
 - **Phase 4**: Consumer migration (upstream agents, agent-worktrees)
 

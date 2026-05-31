@@ -8,6 +8,7 @@ plugin marketplace for developer workflow automation.
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | [agent-worktrees](plugins/agent-worktrees/) | 1.4.0 | Worktree isolation system for concurrent Copilot CLI sessions |
+| [agent-bridge](plugins/agent-bridge/) | 0.1.0 | Persistent inter-agent communication service (sessions, events, SSH transport) |
 
 ---
 
@@ -66,6 +67,9 @@ provides the `agent-worktrees` CLI and per-project binstubs.
 |----------|-----------|---------------------|
 | Windows (PowerShell) | `install.ps1` | Windows Terminal fragments, psmux |
 | Linux / WSL (bash) | `install.sh` | tmux, Tabby profiles |
+| macOS (bash) | Planned | -- |
+
+Both plugins support Windows and Linux/WSL. macOS support is planned.
 
 ---
 

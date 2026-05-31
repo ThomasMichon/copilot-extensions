@@ -39,11 +39,24 @@ Do **not** bump minor or major versions unless explicitly instructed.
 
 ### Where the version lives (ALL THREE must be bumped together)
 
+Each plugin has its own version triplet. Bump only the files for the
+plugin you changed:
+
+**agent-worktrees:**
+
 | File | Field | Purpose |
 |------|-------|---------|
 | `plugins/agent-worktrees/plugin.json` | `version` | Copilot CLI reads this to detect updates via `copilot plugin update` |
 | `plugins/agent-worktrees/pyproject.toml` | `version` under `[project]` | Python package version at runtime; shown in `--version` output |
 | `.github/plugin/marketplace.json` | `metadata.version` AND `plugins[0].version` | Marketplace catalog; Copilot CLI reads this from GitHub to check for updates |
+
+**agent-bridge:**
+
+| File | Field | Purpose |
+|------|-------|---------|
+| `plugins/agent-bridge/plugin.json` | `version` | Plugin version for marketplace detection |
+| `plugins/agent-bridge/pyproject.toml` | `version` under `[project]` | Python package version; shown in `agent-bridge version` output |
+| `.github/plugin/marketplace.json` | `plugins[1].version` | Marketplace catalog entry for agent-bridge |
 
 **All three files must be bumped together in the same commit.** If any
 file is out of sync:
@@ -111,6 +124,43 @@ cd plugins/agent-worktrees
 This runs the real installer against the local source, so the full
 pipeline executes (build info, venv, wrappers, instructions) — just
 from a local commit instead of a pushed one.
+
+## Deploying Agent Bridge
+
+Agent Bridge is a persistent HTTP service (not a per-session plugin).
+It deploys via the **aperture-labs service framework**, not the Copilot
+CLI marketplace update flow.
+
+### The Deployment Pipeline
+
+1. **Commit** changes in `plugins/agent-bridge/`
+2. **Bump the version** in all three files (see "Where the version lives")
+3. **Push** to `main` on GitHub: `git push origin main`
+4. **Update on each machine** via `aperture-labs services agent-bridge update`
+
+The aperture-labs installer resolves the local checkout via `~/.git-repos`,
+installs agent-bridge into a venv, deploys layered config, and restarts
+the service.
+
+### Platform-Specific Deployment
+
+| Platform | Installer | Service manager | Install location |
+|----------|-----------|----------------|-----------------|
+| Linux/WSL | `install.sh` | systemd | `/opt/agent-bridge/` |
+| Windows | `install.ps1` | Scheduled task + PID file | `~/.agent-bridge/` |
+| macOS | Planned | -- | -- |
+
+### Local Testing
+
+```powershell
+# Windows
+pwsh -File plugins\agent-bridge\scripts\install.ps1 install
+```
+
+```bash
+# Linux/WSL
+bash plugins/agent-bridge/scripts/install.sh install
+```
 
 ### Keeping worktree-manager in sync
 
