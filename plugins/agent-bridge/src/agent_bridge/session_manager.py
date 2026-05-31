@@ -1,23 +1,25 @@
 """Session manager -- lifecycle, persistence, and event routing.
 
-Manages all active sessions. Each session wraps one agent subprocess
-and an EventLog for SSE streaming. State is persisted to SQLite so
-sessions survive service restarts.
+Manages all active sessions. Each session wraps one ACP client (which
+owns the subprocess) and an EventLog for SSE streaming. State is
+persisted to SQLite so sessions survive service restarts.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import time
 import uuid
 from typing import Any
 
+from .acp_client import AcpClient
 from .db import Database
 from .events import EventLog
 from .models import SessionStatus
-from .transport import AgentProcess, SpawnTarget, spawn_local
+from .transport import SpawnTarget, spawn_local
 
 log = logging.getLogger("agent-bridge")
 
@@ -51,17 +53,19 @@ class Session:
         self.name = name
         self.agent_name = agent_name
         self.target = target
-        self.process: AgentProcess | None = None
+        self.client: AcpClient | None = None
         self.status = SessionStatus.CREATED
         self.turn_count = 0
         self.created_at = time.time()
         self.updated_at = self.created_at
         self.event_log: EventLog | None = None
+        self.acp_session_id: str | None = None
+        self._prompt_task: asyncio.Task | None = None
 
     @property
     def pid(self) -> int | None:
-        if self.process and self.process.alive:
-            return self.process.pid
+        if self.client and self.client.is_running:
+            return self.client.pid
         return None
 
     def touch(self) -> None:
@@ -134,13 +138,23 @@ class SessionManager:
         target: SpawnTarget,
         agent_name: str | None = None,
     ) -> Session:
-        """Create and start a new agent session."""
+        """Create and start a new agent session.
+
+        Spawns a copilot --acp --stdio subprocess, initializes the ACP
+        protocol, and creates a new ACP session. The session is ready
+        to receive prompts when this returns.
+        """
         session_id = str(uuid.uuid4())[:12]
         name = _generate_name()
         now = time.time()
 
         session = Session(session_id, name, target, agent_name)
         session.event_log = EventLog(db=self._db, session_id=session_id)
+
+        # Wire ACP events into the session's event log
+        def on_acp_event(event_type: str, data: dict[str, Any]) -> None:
+            if session.event_log:
+                session.event_log.append(event_type, data)
 
         # Persist to DB
         self._db.create_session(
@@ -156,19 +170,30 @@ class SessionManager:
         session.status = SessionStatus.STARTING
         self._sessions[session_id] = session
 
-        # Spawn the agent process
         try:
-            session.process = await spawn_local(target)
+            # Spawn the subprocess
+            agent_proc = await spawn_local(target)
+
+            # Initialize ACP protocol on the subprocess
+            client = AcpClient(on_event=on_acp_event)
+            await client.start(agent_proc.proc)
+
+            # Create ACP session
+            acp_sid = await client.new_session(cwd=target.cwd)
+
+            session.client = client
+            session.acp_session_id = acp_sid
             session.status = SessionStatus.IDLE
             self._db.update_session_status(
                 session_id, SessionStatus.IDLE.value, time.time(), pid=session.pid
             )
             session.event_log.append("session_state_changed", {
                 "status": SessionStatus.IDLE.value,
+                "acp_session_id": acp_sid,
             })
             log.info(
-                "Session %s (%s) started, pid=%s",
-                session_id, name, session.pid,
+                "Session %s (%s) started, pid=%s, acp=%s",
+                session_id, name, session.pid, acp_sid,
             )
         except Exception as exc:
             session.status = SessionStatus.FAILED
@@ -182,7 +207,13 @@ class SessionManager:
         return session
 
     async def submit_prompt(self, session_id: str, prompt: str) -> int:
-        """Submit a prompt to a session, returning the turn index."""
+        """Submit a prompt to a session, returning the turn index.
+
+        The prompt is sent to the ACP subprocess. Streaming events
+        (agent_message, tool_call_start, etc.) flow to the EventLog in
+        real time. The prompt runs as a background task so the HTTP
+        request can return immediately -- callers consume output via SSE.
+        """
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
@@ -190,66 +221,113 @@ class SessionManager:
             raise ValueError(
                 f"Session {session_id} is {session.status.value}, not idle"
             )
-        if not session.process or not session.process.alive:
+        if not session.client or not session.client.is_running:
             raise RuntimeError(f"Session {session_id} has no running process")
 
         turn_index = session.turn_count
         session.turn_count += 1
         now = time.time()
 
-        # Persist turn
+        # Persist turn skeleton
         self._db.create_turn(session_id, turn_index, prompt, now)
 
         # Update status
         session.status = SessionStatus.RUNNING
         self._db.update_session_status(session_id, SessionStatus.RUNNING.value, now)
 
-        session.event_log.append("session_state_changed", {
-            "status": SessionStatus.RUNNING.value,
-            "turn_index": turn_index,
-        })
+        if session.event_log:
+            session.event_log.append("session_state_changed", {
+                "status": SessionStatus.RUNNING.value,
+                "turn_index": turn_index,
+            })
 
-        # TODO: Actually send the prompt via ACP protocol to the subprocess.
-        # Phase 1 scaffolds the lifecycle; ACP protocol integration is next.
-        session.event_log.append("turn_complete", {
-            "turn_index": turn_index,
-            "note": "ACP protocol integration pending",
-        })
-
-        session.status = SessionStatus.IDLE
-        self._db.update_session_status(session_id, SessionStatus.IDLE.value, time.time())
+        # Run the prompt as a background task
+        session._prompt_task = asyncio.create_task(
+            self._run_prompt(session, turn_index, prompt)
+        )
 
         session.touch()
         return turn_index
 
+    async def _run_prompt(
+        self, session: Session, turn_index: int, prompt: str
+    ) -> None:
+        """Background task: send prompt via ACP and persist the result."""
+        try:
+            result = await session.client.send_prompt(prompt)
+
+            # Persist completed turn
+            self._db.update_turn(
+                session.session_id,
+                turn_index,
+                response_text=result.get("response_text", ""),
+                thought_text=result.get("thought_text", ""),
+                stop_reason=result.get("stop_reason"),
+                tool_calls_json=json.dumps(result.get("tool_calls", [])),
+                completed_at=time.time(),
+            )
+
+            session.status = SessionStatus.IDLE
+            self._db.update_session_status(
+                session.session_id, SessionStatus.IDLE.value, time.time()
+            )
+
+        except Exception as exc:
+            log.error(
+                "Prompt failed for session %s turn %d: %s",
+                session.session_id, turn_index, exc,
+            )
+            self._db.update_turn(
+                session.session_id,
+                turn_index,
+                stop_reason=f"error: {exc}",
+                completed_at=time.time(),
+            )
+            session.status = SessionStatus.IDLE
+            self._db.update_session_status(
+                session.session_id, SessionStatus.IDLE.value, time.time()
+            )
+
+        session.touch()
+
     async def stop_session(self, session_id: str) -> None:
-        """Stop a session -- kill process, preserve state for resume."""
+        """Stop a session -- shut down ACP client, preserve state for resume."""
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
-        if session.process:
-            await session.process.kill()
-            session.process = None
+        # Cancel in-flight prompt if any
+        if session._prompt_task and not session._prompt_task.done():
+            if session.client:
+                await session.client.cancel_prompt()
+            session._prompt_task.cancel()
+
+        if session.client:
+            await session.client.shutdown()
+            session.client = None
 
         session.status = SessionStatus.STOPPED
         now = time.time()
         self._db.update_session_status(session_id, SessionStatus.STOPPED.value, now)
-        session.event_log.append("session_state_changed", {
-            "status": SessionStatus.STOPPED.value,
-        })
+        if session.event_log:
+            session.event_log.append("session_state_changed", {
+                "status": SessionStatus.STOPPED.value,
+            })
         session.touch()
         log.info("Session %s (%s) stopped", session_id, session.name)
 
     async def end_session(self, session_id: str) -> None:
-        """End a session -- stop process and clean up all state."""
+        """End a session -- shut down client and clean up all state."""
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
-        if session.process:
-            await session.process.kill()
-            session.process = None
+        if session._prompt_task and not session._prompt_task.done():
+            session._prompt_task.cancel()
+
+        if session.client:
+            await session.client.shutdown()
+            session.client = None
 
         session.status = SessionStatus.ENDED
         self._db.delete_session(session_id)

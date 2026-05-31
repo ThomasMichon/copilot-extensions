@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown: stop all active sessions gracefully
     for session in mgr.list_sessions():
-        if session.process and session.process.alive:
+        if session.client and session.client.is_running:
             log.info("Stopping session %s on shutdown", session.session_id)
             await mgr.stop_session(session.session_id)
 
