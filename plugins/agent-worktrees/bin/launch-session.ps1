@@ -107,18 +107,13 @@ if ($RecoveryMode) {
     exit $LASTEXITCODE
 }
 
-# Dual-layout resolution: prefer ~/.agent-worktrees/, fall back to legacy ~/.aperture-labs/
-$NewRuntime = Join-Path $env:USERPROFILE '.agent-worktrees'
-$LegacyRuntime = Join-Path $env:USERPROFILE '.aperture-labs'
+# Runtime resolution
+$RuntimeDir = Join-Path $env:USERPROFILE '.agent-worktrees'
 
-if (Test-Path (Join-Path $NewRuntime '.venv\Scripts\python.exe')) {
-    $RuntimeDir = $NewRuntime
-    Write-SetupLog "Venv resolved: $NewRuntime"
-} elseif (Test-Path (Join-Path $LegacyRuntime '.venv\Scripts\python.exe')) {
-    $RuntimeDir = $LegacyRuntime
-    Write-SetupLog "Venv resolved (legacy): $LegacyRuntime"
+if (Test-Path (Join-Path $RuntimeDir '.venv\Scripts\python.exe')) {
+    Write-SetupLog "Venv resolved: $RuntimeDir"
 } else {
-    Write-SetupLog 'Venv not found — aborting' 'ERROR'
+    Write-SetupLog 'Venv not found - aborting' 'ERROR'
     Write-Error "Venv not found. Run the installer: pwsh -File plugins\agent-worktrees\scripts\install.ps1 install"
     exit 1
 }
