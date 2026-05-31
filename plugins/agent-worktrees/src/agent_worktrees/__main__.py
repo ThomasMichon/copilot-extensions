@@ -428,22 +428,20 @@ def _build_launch_cmd(
         }
         cmd = [arg.format(**variables) for arg in template]
     else:
-        # Legacy fallback — repo-specific setup script, then default
+        # Legacy fallback — repo-specific setup script, then default.
+        # Always resolve from the anchor repo so that worktrees pinned
+        # to an older commit still pick up the latest setup script
+        # (the anchor is fetched before every launch).
+        anchor = repo.anchor
         if platform.system() == "Windows":
-            if recovery:
-                setup_path = str(Path(repo.anchor) / "tools" / "setup" / "setup.ps1")
-            else:
-                setup_path = str(Path(work_dir) / "tools" / "setup" / "setup.ps1")
+            setup_path = str(Path(anchor) / "tools" / "setup" / "setup.ps1")
             if not Path(setup_path).is_file():
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.ps1")
             cmd = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", setup_path, "-Machine", config.machine]
             if recovery:
                 cmd.append("-Recovery")
         else:
-            if recovery:
-                setup_path = str(Path(repo.anchor) / "tools" / "setup" / "setup.sh")
-            else:
-                setup_path = str(Path(work_dir) / "tools" / "setup" / "setup.sh")
+            setup_path = str(Path(anchor) / "tools" / "setup" / "setup.sh")
             if not Path(setup_path).is_file():
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.sh")
             cmd = ["bash", setup_path, "--machine", config.machine]
