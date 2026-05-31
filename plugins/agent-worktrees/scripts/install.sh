@@ -151,15 +151,9 @@ resolve_machine() {
     fi
     local hn
     hn="$(hostname | tr '[:upper:]' '[:lower:]')"
-    case "$hn" in
-        wheatley)       echo "wheatley" ;;
-        homeassistant)  echo "home-assistant" ;;
-        lambda-core)    echo "lambda-core" ;;
-        borealis)       echo "borealis" ;;
-        tmichon-book2)  echo "tmichon-book2" ;;
-        # Unknown machine -- use lowercase hostname
-        *)              echo "$hn" ;;
-    esac
+    # Use lowercase hostname as-is. If hostname differs from the desired
+    # machine key, set MACHINE explicitly before running the installer.
+    echo "$hn"
 }
 
 detect_platform() {
@@ -530,7 +524,7 @@ show_deploy_status() {
 deploy_tabby_profile() {
     local platform="$1"
     local machine="${2:-}"
-    local tabby_template="$PLUGIN_DIR/terminal/tabby-aperture-labs.yaml"
+    local tabby_template="$PLUGIN_DIR/terminal/tabby-template.yaml"
     local machines_yaml="${REPO_DIR:+$REPO_DIR/machines.yaml}"
     local tabby_config="$HOME/.config/tabby/config.yaml"
 
@@ -564,11 +558,23 @@ template_path = sys.argv[1]
 config_path = sys.argv[2]
 machines_path = sys.argv[3]
 self_machine = sys.argv[4] if len(sys.argv) > 4 else ''
-project_name = sys.argv[5] if len(sys.argv) > 5 else 'aperture-labs'
+project_name = sys.argv[5] if len(sys.argv) > 5 else 'my-project'
 
 template = yaml.safe_load(Path(template_path).read_text())
 local_profile = template['profile']
 scheme = template['colorScheme']
+
+# Substitute project placeholders in the local profile
+display_name = ' '.join(w.capitalize() for w in project_name.split('-'))
+def _sub(obj):
+    if isinstance(obj, str):
+        return obj.replace('__PROJECT__', project_name).replace('__PROJECT_TITLE__', display_name)
+    if isinstance(obj, dict):
+        return {k: _sub(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sub(v) for v in obj]
+    return obj
+local_profile = _sub(local_profile)
 
 # Load existing config or create minimal structure
 if Path(config_path).exists():

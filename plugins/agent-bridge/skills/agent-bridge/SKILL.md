@@ -3,14 +3,14 @@ name: agent-bridge
 description: >
   Agent-bridge control plane -- manage inter-agent sessions, send prompts
   to remote agents, and check session status via CLI commands.
-  Trigger phrases include: - 'agent-bridge' - 'remote agent' - 'send to agent' - 'agent session' - 'bridge session' - 'talk to wheatley' - 'talk to borealis' - 'inter-agent' - 'cross-machine agent'
+  Trigger phrases include: - 'agent-bridge' - 'remote agent' - 'send to agent' - 'agent session' - 'bridge session' - 'inter-agent' - 'cross-machine agent'
 ---
 
 # Agent-Bridge Control Plane
 
-Agent-bridge is the facility's inter-agent communication service. It
-manages persistent sessions with agents running on any facility machine
-(Lambda-Core, Borealis, Wheatley, etc.) via SSH transport.
+Agent-bridge is the inter-agent communication service. It manages
+persistent sessions with agents running on any configured machine
+via SSH transport.
 
 ## Service Architecture
 
@@ -105,7 +105,7 @@ agent-bridge version
 
 ```bash
 # Run as an ACP agent on stdio (for chat UIs / upstream ACP clients)
-agent-bridge agent --agent lambda-core-wsl
+agent-bridge agent --agent my-agent
 ```
 
 Presents agent-bridge as an ACP-compatible agent. Upstream ACP clients
@@ -117,18 +117,18 @@ agent. Used by chat interfaces that speak ACP natively.
 ### Quick Remote Agent Interaction
 
 ```bash
-# Ask wheatley-wsl to check something
-agent-bridge send wheatley-wsl "Check disk space on /data"
+# Ask a remote agent to check something
+agent-bridge send server-wsl "Check disk space on /data"
 
-# Ask lambda-core-wsl to run a command
-agent-bridge send lambda-core-wsl "Run the test suite for agent-bridge"
+# Ask another agent to run a command
+agent-bridge send workstation-wsl "Run the test suite"
 ```
 
 ### Multi-Turn Conversation
 
 ```bash
 # Start a session
-agent-bridge send borealis-wsl "Set up a new project" --no-wait
+agent-bridge send dev-wsl "Set up a new project" --no-wait
 
 # Check sessions to get the ID
 agent-bridge sessions --status running
@@ -152,14 +152,10 @@ agent-bridge sessions --json
 
 ## Agent Names
 
-Agent names come from `acp-agents.json` in the aperture-labs repo. Common
-agents:
+Agent names come from `acp-agents.json` in your project repo. Use
+`agent-bridge agents` to list available agents.
 
-| Agent | Machine | Description |
-|-------|---------|-------------|
-| `lambda-core-wsl` | Lambda-Core (WSL) | AI workloads, compilation |
-| `wheatley-wsl` | Wheatley (WSL) | NAS, services, monitoring |
-| `borealis-wsl` | Borealis (WSL) | Windows workstation tasks |
+Run `agent-bridge agents` to see the full list for your deployment.
 
 ## Troubleshooting
 

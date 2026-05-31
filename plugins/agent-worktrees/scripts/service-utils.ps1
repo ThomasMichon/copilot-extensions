@@ -312,7 +312,7 @@ function Invoke-ServiceConfig {
     .PARAMETER ServiceDir
         Path to the service directory (contains config/ subdirectory).
     .PARAMETER Machine
-        Machine name (e.g., lambda-core, borealis).
+        Machine name (e.g., myhost, workstation).
     .PARAMETER RuntimePath
         Path to the runtime config file (required for drift/deploy/pull).
     .PARAMETER Force
@@ -446,20 +446,14 @@ function Get-CurrentEnvironment {
     .SYNOPSIS
         Detect the current deployment environment identifier.
     .DESCRIPTION
-        Returns a string like "lambda-core-windows", "borealis-wsl", or
-        "wheatley" based on hostname and WSL detection.
+        Returns a string like "myhost-windows", "myhost-wsl", or
+        "myhost" based on hostname and platform detection.
     #>
     $hostname = ($env:COMPUTERNAME ?? (hostname)).ToLower()
 
-    # Normalize known hostnames
-    $machine = switch -Regex ($hostname) {
-        'lambda.?core' { 'lambda-core' }
-        'borealis'     { 'borealis' }
-        'tmichon.?book2' { 'tmichon-book2' }
-        'wheatley'     { 'wheatley' }
-        'home.?ass'    { 'home-assistant' }
-        default        { $hostname }
-    }
+    # Use lowercase hostname as-is. Override $machine below if
+    # hostname normalization is needed for specific environments.
+    $machine = $hostname
 
     # WSL detection
     if ($env:WSL_DISTRO_NAME) {

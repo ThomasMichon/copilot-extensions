@@ -30,21 +30,21 @@ class TestSpawnTargetSerialization:
         target = SpawnTarget(
             type="ssh",
             cwd="/home/user/src",
-            host="wheatley",
-            user="cjohnson",
+            host="server-a",
+            user="deploy",
             copilot_path="/usr/local/bin/copilot",
             copilot_args=["--extensions-dir", "/opt/ext"],
             env={"MY_VAR": "hello"},
-            project="aperture-labs",
+            project="my-project",
         )
         restored = SpawnTarget.from_json(target.to_json())
         assert restored.type == "ssh"
-        assert restored.host == "wheatley"
-        assert restored.user == "cjohnson"
+        assert restored.host == "server-a"
+        assert restored.user == "deploy"
         assert restored.copilot_path == "/usr/local/bin/copilot"
         assert restored.copilot_args == ["--extensions-dir", "/opt/ext"]
         assert restored.env == {"MY_VAR": "hello"}
-        assert restored.project == "aperture-labs"
+        assert restored.project == "my-project"
 
     def test_to_json_produces_valid_json(self):
         target = SpawnTarget(type="ssh", host="test", cwd=".")
@@ -60,9 +60,9 @@ class TestSpawnSsh:
         """Verify SSH command includes all hardening flags."""
         target = SpawnTarget(
             type="ssh",
-            cwd="/home/cjohnson/src",
-            host="wheatley",
-            user="cjohnson",
+            cwd="/home/deploy/src",
+            host="server-a",
+            user="deploy",
         )
 
         mock_proc = MagicMock()
@@ -85,7 +85,7 @@ class TestSpawnSsh:
             assert "BatchMode=yes" in " ".join(args)
             assert "ConnectTimeout=15" in " ".join(args)
             assert "ServerAliveInterval=30" in " ".join(args)
-            assert "cjohnson@wheatley" in args
+            assert "deploy@server-a" in args
 
             # Verify remote command includes cd and exec
             remote_cmd = args[-1]
@@ -170,8 +170,8 @@ class TestSpawnSsh:
     async def test_ssh_with_project_uses_binstub(self):
         """SSH with project should use the binstub instead of copilot."""
         target = SpawnTarget(
-            type="ssh", cwd="/home/user/src", host="wheatley", user="cjohnson",
-            project="aperture-labs",
+            type="ssh", cwd="/home/user/src", host="server-a", user="deploy",
+            project="my-project",
             copilot_args=["--allow-all"],
         )
 
@@ -186,7 +186,7 @@ class TestSpawnSsh:
             await spawn_ssh(target)
 
             remote_cmd = mock_asyncio.create_subprocess_exec.call_args[0][-1]
-            assert "aperture-labs" in remote_cmd
+            assert "my-project" in remote_cmd
             assert "--base" in remote_cmd
             assert "--no-mux" in remote_cmd
             assert "--acp" in remote_cmd
@@ -199,7 +199,7 @@ class TestSpawnSsh:
     async def test_ssh_without_project_uses_direct_copilot(self):
         """SSH without project should use cd + copilot (legacy behavior)."""
         target = SpawnTarget(
-            type="ssh", cwd="/home/user/src", host="wheatley",
+            type="ssh", cwd="/home/user/src", host="server-a",
         )
 
         mock_proc = MagicMock()
@@ -225,7 +225,7 @@ class TestSpawnLocal:
         """Local spawn with project should use the binstub."""
         target = SpawnTarget(
             type="local", cwd="/tmp/test",
-            project="aperture-labs",
+            project="my-project",
             copilot_args=["--allow-all"],
         )
 
@@ -241,7 +241,7 @@ class TestSpawnLocal:
 
             call_args = mock_asyncio.create_subprocess_exec.call_args
             args = call_args[0]
-            assert args[0] == "aperture-labs"
+            assert args[0] == "my-project"
             assert "--base" in args
             assert "--no-mux" in args
             assert "--acp" in args

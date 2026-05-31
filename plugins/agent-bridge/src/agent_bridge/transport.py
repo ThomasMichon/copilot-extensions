@@ -79,7 +79,7 @@ async def spawn_local(target: SpawnTarget) -> AgentProcess:
     """Spawn a Copilot ACP agent as a local subprocess.
 
     When a ``project`` is configured, launches via the project binstub
-    (e.g. ``aperture-labs --base --no-mux -- --acp --stdio``).  The
+    (e.g. ``my-project --base --no-mux -- --acp --stdio``).  The
     binstub resolves the setup script, loads vault credentials, and execs
     copilot.  This keeps secrets in the subprocess environment without
     transmitting them through the bridge.

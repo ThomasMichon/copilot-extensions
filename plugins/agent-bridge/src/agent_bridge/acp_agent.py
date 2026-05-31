@@ -7,7 +7,7 @@ and streams session updates back to the upstream client.
 
 Usage::
 
-    agent-bridge agent --agent lambda-core-wsl
+    agent-bridge agent --agent my-agent
 
 This spawns agent-bridge in ACP agent mode on stdio. The upstream client
 connects via ``copilot --acp --stdio`` or equivalent.

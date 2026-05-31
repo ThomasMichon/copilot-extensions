@@ -2469,7 +2469,7 @@ def cmd_install_status(args: argparse.Namespace) -> int:
 
 
 def _resolve_environment(config: cfg.Config) -> str:
-    """Build the environment key from config (e.g. ``lambda-core-wsl``)."""
+    """Build the environment key from config (e.g. ``myhost-wsl``)."""
     plat = config.platform
     if plat in ("wsl", "windows"):
         return f"{config.machine}-{plat}"
@@ -3570,10 +3570,11 @@ def _print_boot_provenance() -> None:
     # 4. Binstub resolution
     binstub_ok = False
     binstub_detail = "not found"
+    project = cfg.project_name()
     if platform.system() == "Windows":
-        binstub = home / ".local" / "bin" / "aperture-labs.cmd"
+        binstub = home / ".local" / "bin" / f"{project}.cmd"
     else:
-        binstub = home / ".local" / "bin" / "aperture-labs"
+        binstub = home / ".local" / "bin" / project
     if binstub.is_file():
         content = binstub.read_text(errors="replace")
         if "agent_worktrees" in content or "agent-worktrees" in content:

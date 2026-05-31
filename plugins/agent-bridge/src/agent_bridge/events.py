@@ -5,7 +5,7 @@ auto-incrementing integer IDs. The SSE endpoint uses ``get_events(after=N)``
 to enable reconnect-safe streaming -- the client sends the last seen ID
 and gets only newer events.
 
-Adapted from neuron-forge's EventLog, simplified for agent-bridge.
+SSE event log for agent-bridge sessions.
 """
 
 from __future__ import annotations

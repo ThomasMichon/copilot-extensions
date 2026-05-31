@@ -324,7 +324,7 @@ and project setup.
 |------|----------|-------------|
 | `psmux.conf` | Windows | psmux multiplexer config with opt-in prefix interception |
 | `tmux.conf` | Linux/WSL | tmux config with the same opt-in philosophy |
-| `tabby-aperture-labs.yaml` | Linux | Tabby terminal profile template, merged by the Linux installer |
+| `tabby-template.yaml` | Linux | Tabby terminal profile template, merged by the Linux installer |
 
 The Windows installer also generates a **Windows Terminal fragment** at
 `%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments\AgentWorktrees\`

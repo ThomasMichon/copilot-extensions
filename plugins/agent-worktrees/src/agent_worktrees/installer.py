@@ -703,7 +703,7 @@ def register_project(
         WSL distribution name (e.g. ``"Ubuntu"``).  Stored so terminal
         profiles can target a specific distro with ``wsl.exe -d``.
     wsl_path
-        Path to the repo anchor inside WSL (e.g. ``~/src/aperture-labs``).
+        Path to the repo anchor inside WSL (e.g. ``~/src/my-project``).
     """
     registry = read_projects_registry()
 

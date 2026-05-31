@@ -19,7 +19,7 @@
     Lifecycle action to perform.
 
 .PARAMETER ProjectName
-    Project name (e.g. 'aperture-labs'). Defaults to: WORKTREE_PROJECT env var,
+    Project name (e.g. 'my-project'). Defaults to: WORKTREE_PROJECT env var,
     then inferred from existing config, then basename of CWD repo.
 
 .PARAMETER RemoveConfig
@@ -245,9 +245,8 @@ function Register-ProjectEntry {
 # -- Machine detection ----------------------------------------------------
 
 $HostnameMap = @{
-    'BOREALIS'      = 'borealis'
-    'LAMBDA-CORE'   = 'lambda-core'
-    'TMICHON-BOOK2' = 'tmichon-book2'
+    # Add entries here if COMPUTERNAME differs from desired machine name.
+    # If empty, the lowercase hostname is used as-is.
 }
 
 function Resolve-Machine {
@@ -559,7 +558,7 @@ function Build-TerminalFragment {
         )
     }
 
-    # Helper: title-case a slug ("aperture-labs" → "Aperture Labs")
+    # Helper: title-case a slug ("my-project" -> "My Project")
     function Get-DisplayName {
         param([string]$Slug)
         return ($Slug -replace '-', ' ') -replace '(^| )(.)', { $_.Value.ToUpper() }
