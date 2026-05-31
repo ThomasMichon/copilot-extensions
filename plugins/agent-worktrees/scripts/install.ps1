@@ -793,19 +793,20 @@ function Sync-TerminalState {
         try {
             $state = Get-Content $statePath -Raw | ConvertFrom-Json
             if ($state.generatedProfiles) {
-                $before = $state.generatedProfiles.Count
+                $genProfiles = @($state.generatedProfiles)
+                $before = $genProfiles.Count
 
                 # GUIDs to remove: stale (old but not new) + newly added (new but not old).
                 # Unchanged GUIDs (in both) stay, preserving any user profile customizations.
                 $staleGuids = @($OldFragmentGuids | Where-Object { $_ -notin $NewFragmentGuids })
                 $newlyAdded = @($NewFragmentGuids | Where-Object { $_ -notin $OldFragmentGuids })
-                $removeSet  = @($staleGuids + $newlyAdded) | Sort-Object -Unique
+                $removeSet  = @(@($staleGuids) + @($newlyAdded) | Sort-Object -Unique)
 
                 if ($removeSet.Count -gt 0) {
-                    $state.generatedProfiles = @($state.generatedProfiles | Where-Object {
+                    $state.generatedProfiles = @($genProfiles | Where-Object {
                         $_.ToLower() -notin $removeSet
                     })
-                    $after = $state.generatedProfiles.Count
+                    $after = @($state.generatedProfiles).Count
                     if ($after -ne $before) {
                         $state | ConvertTo-Json -Depth 10 | Set-Content $statePath -Encoding UTF8
                         Write-ServiceChanged "Cleaned $($before - $after) GUID(s) from WT state.json generatedProfiles"
