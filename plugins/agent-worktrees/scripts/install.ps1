@@ -768,10 +768,71 @@ function Build-TerminalFragment {
     return ($fragment | ConvertTo-Json -Depth 5)
 }
 
+function Sync-TerminalState {
+    <# Synchronize WT settings.json and state.json after a fragment regeneration.
+
+       When the fragment changes, two WT state files need cleanup:
+
+       1. settings.json -- cached fragment-sourced profiles with stale GUIDs
+          must be removed so they don't persist as ghost entries.
+
+       2. state.json -- the generatedProfiles array tracks every profile GUID
+          WT has ever seen from fragments.  If a GUID is in generatedProfiles
+          but absent from both the fragment and settings.json, WT interprets
+          this as "user intentionally deleted this profile" and hides it.
+          We must remove stale GUIDs and newly-added GUIDs from this list so
+          WT rediscovers them fresh on next launch. #>
+    param(
+        [string[]]$OldFragmentGuids = @(),
+        [string[]]$NewFragmentGuids = @()
+    )
+
+    # --- state.json: generatedProfiles ---
+    $statePath = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\state.json'
+    if (Test-Path $statePath) {
+        try {
+            $state = Get-Content $statePath -Raw | ConvertFrom-Json
+            if ($state.generatedProfiles) {
+                $before = $state.generatedProfiles.Count
+
+                # GUIDs to remove: stale (old but not new) + newly added (new but not old).
+                # Unchanged GUIDs (in both) stay, preserving any user profile customizations.
+                $staleGuids = @($OldFragmentGuids | Where-Object { $_ -notin $NewFragmentGuids })
+                $newlyAdded = @($NewFragmentGuids | Where-Object { $_ -notin $OldFragmentGuids })
+                $removeSet  = @($staleGuids + $newlyAdded) | Sort-Object -Unique
+
+                if ($removeSet.Count -gt 0) {
+                    $state.generatedProfiles = @($state.generatedProfiles | Where-Object {
+                        $_.ToLower() -notin $removeSet
+                    })
+                    $after = $state.generatedProfiles.Count
+                    if ($after -ne $before) {
+                        $state | ConvertTo-Json -Depth 10 | Set-Content $statePath -Encoding UTF8
+                        Write-ServiceChanged "Cleaned $($before - $after) GUID(s) from WT state.json generatedProfiles"
+                    }
+                }
+            }
+        } catch {
+            Write-ServiceWarn "Could not update WT state.json: $_"
+        }
+    }
+
+    # --- settings.json: stale cached profiles ---
+    Clean-TerminalSettingsJson -NewFragmentGuids $NewFragmentGuids
+}
+
 function Clean-TerminalSettingsJson {
-    <# Remove stale manually-added Aperture profiles/schemes from WT settings.json.
-       Fragment-sourced entries (source=ApertureLabs) are left alone -- those are
-       WT's own override tracking and will be recreated if removed. #>
+    <# Remove stale profiles and schemes from WT settings.json.
+
+       Handles three categories:
+       1. AgentWorktrees-sourced profiles whose GUID is not in the current
+          fragment (stale from previous installs or unregistered projects).
+       2. Legacy ApertureLabs-sourced profiles (fragment dir migrated away).
+       3. Manually-added profiles matching Aperture naming/GUIDs. #>
+    param(
+        [string[]]$NewFragmentGuids = @()
+    )
+
     $settingsPath = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json'
     if (-not (Test-Path $settingsPath)) { return }
 
@@ -783,49 +844,54 @@ function Clean-TerminalSettingsJson {
         return
     }
 
-    $changed = $false
-
-    # Collect GUIDs from the current fragment so we know what's ours
-    $fragmentPath = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\AgentWorktrees\agent-worktrees.json'
-    # Also check legacy location
-    $legacyFragPath = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs\aperture-labs.json'
-    $fragmentGuids = @()
-    foreach ($fp in @($fragmentPath, $legacyFragPath)) {
-        if (Test-Path $fp) {
+    # If no GUIDs were passed, read them from the fragment on disk
+    if ($NewFragmentGuids.Count -eq 0) {
+        $fragmentPath = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\AgentWorktrees\agent-worktrees.json'
+        if (Test-Path $fragmentPath) {
             try {
-                $frag = Get-Content $fp -Raw | ConvertFrom-Json
-                $fragmentGuids += @($frag.profiles | ForEach-Object { $_.guid })
+                $frag = Get-Content $fragmentPath -Raw | ConvertFrom-Json
+                $NewFragmentGuids = @($frag.profiles | ForEach-Object { $_.guid.ToLower() })
             } catch { }
         }
     }
-    # Always include the well-known legacy static GUIDs
-    $knownGuids = @('{e8ba8d13-cc41-5a92-b5dd-5e4a5418e9a0}', '{fd1e4088-c416-5daa-b87c-a6546fa1cc25}')
-    $allGuids = @($knownGuids + $fragmentGuids) | Sort-Object -Unique
 
-    # Remove stale profile entries that match our GUIDs or Aperture naming
+    # Well-known legacy static GUIDs (pre-fragment era)
+    $knownGuids = @('{e8ba8d13-cc41-5a92-b5dd-5e4a5418e9a0}', '{fd1e4088-c416-5daa-b87c-a6546fa1cc25}')
+    $legacyFragExists = Test-Path (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs')
+
+    $changed = $false
+
     if ($json.profiles -and $json.profiles.list) {
         $before = $json.profiles.list.Count
-        # Check if legacy ApertureLabs fragment dir still exists
-        $legacyFragExists = Test-Path (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs')
         $json.profiles.list = @($json.profiles.list | Where-Object {
-            if ($_.PSObject.Properties['source']) {
-                # Remove dead ApertureLabs-source entries (fragment deleted during migration)
-                # Only remove when the legacy fragment dir is gone AND GUID matches ours
-                if ($_.source -eq 'ApertureLabs' -and -not $legacyFragExists) {
-                    $isLegacyOurs = ($_.PSObject.Properties['guid'] -and $_.guid -in $allGuids)
-                    return -not $isLegacyOurs
-                }
-                return $true
+            if (-not $_.PSObject.Properties['source']) {
+                # Manually-added (no source) -- remove if it matches our GUIDs or naming
+                $isOurs = ($_.PSObject.Properties['guid'] -and $_.guid.ToLower() -in $NewFragmentGuids) -or
+                          ($_.PSObject.Properties['guid'] -and $_.guid.ToLower() -in $knownGuids) -or
+                          ($_.PSObject.Properties['name'] -and $_.name -match 'Aperture.*Labs') -or
+                          ($_.PSObject.Properties['commandline'] -and $_.commandline -match 'aperture-labs')
+                return -not $isOurs
             }
-            $isOurs = ($_.PSObject.Properties['guid'] -and $_.guid -in $allGuids) -or
-                      ($_.PSObject.Properties['name'] -and $_.name -match 'Aperture.*Labs') -or
-                      ($_.PSObject.Properties['commandline'] -and $_.commandline -match 'aperture-labs')
-            return -not $isOurs
+
+            # AgentWorktrees-sourced: remove if GUID is not in the current fragment
+            if ($_.source -eq 'AgentWorktrees') {
+                if ($_.PSObject.Properties['guid']) {
+                    return ($_.guid.ToLower() -in $NewFragmentGuids)
+                }
+                return $false  # no GUID = orphan, remove
+            }
+
+            # Legacy ApertureLabs-sourced: remove when the legacy dir is gone
+            if ($_.source -eq 'ApertureLabs' -and -not $legacyFragExists) {
+                return $false
+            }
+
+            return $true
         })
         $removed = $before - $json.profiles.list.Count
         if ($removed -gt 0) {
             $changed = $true
-            Write-ServiceChanged "Removed $removed stale Aperture profile(s) from WT settings.json"
+            Write-ServiceChanged "Removed $removed stale profile(s) from WT settings.json"
         }
     }
 
@@ -841,7 +907,6 @@ function Clean-TerminalSettingsJson {
     }
 
     if ($changed) {
-        # Backup before writing
         $backup = "$settingsPath.aperture-backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
         Copy-Item $settingsPath $backup -Force
         $json | ConvertTo-Json -Depth 20 | Set-Content $settingsPath -Encoding UTF8
@@ -937,7 +1002,8 @@ fi
 }
 
 function Deploy-Shortcuts {
-    <# Deploy Windows Terminal fragment (with remote SSH profiles) and create .lnk shortcuts. #>
+    <# Deploy Windows Terminal fragment (with remote SSH profiles) and create .lnk shortcuts.
+       Handles WT state cleanup so new/changed profiles appear correctly on next WT launch. #>
     param([string]$Machine)
 
     # Deploy WT fragment - use a shared fragment directory for all projects
@@ -946,16 +1012,37 @@ function Deploy-Shortcuts {
         New-Item -ItemType Directory -Path $fragmentDir -Force | Out-Null
     }
 
-    # Also remove old ApertureLabs-specific fragment dir if present (migrated to shared)
+    # Collect GUIDs from existing fragments BEFORE any deletions or overwrites.
+    # We need these to compute stale GUIDs for state cleanup later.
+    $oldFragGuids = @()
+    $fragmentDst = Join-Path $fragmentDir 'agent-worktrees.json'
     $oldFragmentDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs'
+    foreach ($fp in @($fragmentDst, (Join-Path $oldFragmentDir 'aperture-labs.json'))) {
+        if (Test-Path $fp) {
+            try {
+                $oldFrag = Get-Content $fp -Raw | ConvertFrom-Json
+                $oldFragGuids += @($oldFrag.profiles | ForEach-Object { $_.guid.ToLower() })
+            } catch { }
+        }
+    }
+    $oldFragGuids = @($oldFragGuids | Sort-Object -Unique)
+
+    # Remove old ApertureLabs-specific fragment dir if present (migrated to shared)
     if (Test-Path $oldFragmentDir) {
         Remove-Item $oldFragmentDir -Recurse -Force -ErrorAction SilentlyContinue
         Write-ServiceChanged "Migrated from ApertureLabs to AgentWorktrees fragment dir"
     }
 
     # Generate the fragment dynamically from projects.yaml + machines.yaml
-    $fragmentDst = Join-Path $fragmentDir 'agent-worktrees.json'
     $fragment = Build-TerminalFragment -Machine $Machine
+    $newFragObj = $fragment | ConvertFrom-Json
+    $newFragGuids = @($newFragObj.profiles | ForEach-Object { $_.guid.ToLower() })
+
+    # Clean WT state BEFORE writing the new fragment to avoid a race where
+    # WT reads the new fragment while stale GUIDs are still in state.json.
+    Sync-TerminalState -OldFragmentGuids $oldFragGuids -NewFragmentGuids $newFragGuids
+
+    # Write the new fragment
     $fragment | Set-Content $fragmentDst -Encoding UTF8
     Write-ServiceOk "Windows Terminal profiles deployed (fragment with all registered projects)"
 
@@ -1228,7 +1315,6 @@ switch ($Action) {
             Register-ProjectEntry
             if ($RepoDir) { Deploy-Icon }
             Deploy-Shortcuts -Machine $machine
-            Clean-TerminalSettingsJson
             Deploy-PsmuxConfig
             if ($RepoDir) { Deploy-GitHooksPath }
 
@@ -1504,7 +1590,6 @@ switch ($Action) {
                 } catch { }
             }
             Deploy-Shortcuts -Machine $updateMachine
-            Clean-TerminalSettingsJson
             Deploy-PsmuxConfig
             if ($RepoDir) { Deploy-GitHooksPath }
 
