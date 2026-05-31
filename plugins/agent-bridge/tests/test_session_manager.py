@@ -29,8 +29,8 @@ def _mock_agent_proc():
 
 @pytest.fixture
 def _patch_spawn():
-    """Patch spawn_local to return a mock AgentProcess."""
-    with patch("agent_bridge.session_manager.spawn_local") as mock_spawn:
+    """Patch spawn to return a mock AgentProcess."""
+    with patch("agent_bridge.session_manager.spawn") as mock_spawn:
         mock_spawn.return_value = _mock_agent_proc()
         yield mock_spawn
 

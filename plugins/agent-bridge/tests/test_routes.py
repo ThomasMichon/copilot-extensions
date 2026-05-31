@@ -77,7 +77,7 @@ class TestSessionRoutes:
         resp = client.get("/api/v1/sessions/nonexistent")
         assert resp.status_code == 404
 
-    @patch("agent_bridge.session_manager.spawn_local")
+    @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session(self, mock_acp_cls, mock_spawn, client) -> None:
         # Set up mocks

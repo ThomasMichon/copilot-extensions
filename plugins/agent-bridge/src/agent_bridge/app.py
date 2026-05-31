@@ -8,18 +8,20 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from .agent_registry import AgentResolver, load_agent_registry
 from .auth import BearerAuthMiddleware
 from .config import load_config, load_or_create_auth_token
 from .db import Database
 from .routes import agents, health, sessions
 from .session_manager import SessionManager
+from .topology import load_machines_yaml
 
 log = logging.getLogger("agent-bridge")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan -- initialize DB and session manager on startup."""
+    """Application lifespan -- initialize DB, topology, and session manager."""
     cfg = app.state.config
 
     db_path = Path(cfg.db_path).expanduser()
@@ -28,6 +30,28 @@ async def lifespan(app: FastAPI):
 
     mgr = SessionManager(db)
     app.state.session_manager = mgr
+
+    # Load topology profiles and build resolver
+    all_machines = {}
+    all_agents = {}
+    for profile_name, profile in cfg.topologies.items():
+        if profile.machines_yaml:
+            machines = load_machines_yaml(profile.machines_yaml)
+            all_machines.update(machines)
+        if profile.agents_config:
+            agents_cfg = load_agent_registry(profile.agents_config)
+            all_agents.update(agents_cfg)
+
+    if all_machines or all_agents:
+        resolver = AgentResolver(all_agents, all_machines)
+        app.state.resolver = resolver
+        log.info(
+            "Loaded topology: %d machines, %d agents",
+            len(all_machines), len(all_agents),
+        )
+    else:
+        app.state.resolver = None
+        log.info("No topology profiles configured")
 
     log.info(
         "agent-bridge started (port=%s, db=%s, sessions=%d)",

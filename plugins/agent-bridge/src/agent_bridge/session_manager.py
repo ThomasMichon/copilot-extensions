@@ -19,7 +19,7 @@ from .acp_client import AcpClient
 from .db import Database
 from .events import EventLog
 from .models import SessionStatus
-from .transport import SpawnTarget, spawn_local
+from .transport import SpawnTarget, spawn
 
 log = logging.getLogger("agent-bridge")
 
@@ -101,10 +101,14 @@ class SessionManager:
                 self._db.delete_session(sid)
                 continue
 
-            target = SpawnTarget(
-                type=row.get("target_type", "local"),
-                cwd=row.get("target_dir", "."),
-            )
+            target_json = row.get("target_json")
+            if target_json:
+                target = SpawnTarget.from_json(target_json)
+            else:
+                target = SpawnTarget(
+                    type=row.get("target_type", "local"),
+                    cwd=row.get("target_dir", "."),
+                )
 
             session = Session(
                 session_id=sid,
@@ -177,14 +181,15 @@ class SessionManager:
             target_type=target.type,
             status=SessionStatus.STARTING.value,
             now=now,
+            target_json=target.to_json(),
         )
 
         session.status = SessionStatus.STARTING
         self._sessions[session_id] = session
 
         try:
-            # Spawn the subprocess
-            agent_proc = await spawn_local(target)
+            # Spawn the subprocess (local or SSH)
+            agent_proc = await spawn(target)
 
             # Initialize ACP protocol on the subprocess
             client = AcpClient(on_event=on_acp_event)
@@ -250,7 +255,7 @@ class SessionManager:
 
             client: AcpClient | None = None
             try:
-                agent_proc = await spawn_local(session.target)
+                agent_proc = await spawn(session.target)
                 client = AcpClient(on_event=on_acp_event)
                 await client.start(agent_proc.proc)
                 await client.load_session(
