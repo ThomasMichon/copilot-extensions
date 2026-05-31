@@ -152,14 +152,23 @@ class AcpClient:
         self,
         *,
         on_event: Callable[[str, dict[str, Any]], None] | None = None,
+        on_permission: (
+            Callable[
+                [str, list[Any], Any],
+                Any,  # Awaitable[RequestPermissionResponse]
+            ]
+            | None
+        ) = None,
     ) -> None:
         self._on_event = on_event
+        self._on_permission = on_permission
 
         self._process: asyncio.subprocess.Process | None = None
         self._connection: ClientSideConnection | None = None
         self._acp_session_id: str | None = None
 
-        # Auto-approve all permission requests (agent-bridge default)
+        # Auto-approve all permission requests (agent-bridge default).
+        # Ignored when on_permission is set.
         self.auto_approve = True
 
         # Streaming output buffers for the current turn
@@ -390,6 +399,15 @@ class AcpClient:
             for o in options
         ]
         title = getattr(tool_call, "title", None) or "Unknown tool call"
+
+        # Delegate to external callback if set (e.g., upstream ACP forwarding)
+        if self._on_permission:
+            session_id = self._acp_session_id or ""
+            self._emit("permission_forwarding", {
+                "title": title,
+                "options": option_dicts,
+            })
+            return await self._on_permission(session_id, options, tool_call)
 
         if self.auto_approve:
             allow_option = next(
