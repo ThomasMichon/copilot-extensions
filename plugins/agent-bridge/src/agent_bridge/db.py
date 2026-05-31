@@ -142,9 +142,16 @@ class Database:
             )
         else:
             self.execute_write(
-                "UPDATE sessions SET status=?, updated_at=? WHERE id=?",
+                "UPDATE sessions SET status=?, pid=NULL, updated_at=? WHERE id=?",
                 (status, now, session_id),
             )
+
+    def update_session_acp_id(self, session_id: str, acp_session_id: str) -> None:
+        """Persist the ACP session ID for resume support."""
+        self.execute_write(
+            "UPDATE sessions SET acp_session_id=? WHERE id=?",
+            (acp_session_id, session_id),
+        )
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         rows = self.execute_read("SELECT * FROM sessions WHERE id=?", (session_id,))
