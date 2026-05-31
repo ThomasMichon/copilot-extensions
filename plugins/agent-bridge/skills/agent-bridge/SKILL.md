@@ -1,0 +1,175 @@
+---
+name: agent-bridge
+description: >
+  Agent-bridge control plane -- manage inter-agent sessions, send prompts
+  to remote agents, and check session status via CLI commands.
+  Trigger phrases include: - 'agent-bridge' - 'remote agent' - 'send to agent' - 'agent session' - 'bridge session' - 'talk to wheatley' - 'talk to borealis' - 'inter-agent' - 'cross-machine agent'
+---
+
+# Agent-Bridge Control Plane
+
+Agent-bridge is the facility's inter-agent communication service. It
+manages persistent sessions with agents running on any facility machine
+(Lambda-Core, Borealis, Wheatley, etc.) via SSH transport.
+
+## Service Architecture
+
+Each machine runs its own agent-bridge instance (port 9280). The topology
+is a mesh -- each instance manages outbound connections to other machines
+via SSH. Sessions are persistent (SQLite-backed) and survive service
+restarts.
+
+**Code lives in:** `~/src/copilot-extensions/plugins/agent-bridge/`
+(external repo, tracked in `external-repos.yaml`)
+
+**Config lives at:** `~/.agent-bridge/config.yaml` (topology profiles
+pointing to this repo's `machines.yaml` and `acp-agents.json`)
+
+## CLI Commands
+
+All commands connect to the local agent-bridge HTTP API. The service must
+be running (`agent-bridge start`) for client commands to work.
+
+### List Available Agents
+
+```bash
+agent-bridge agents
+agent-bridge agents --json
+```
+
+Shows all registered agents from the topology config (name, type, host,
+spawnable status).
+
+### List Machines
+
+```bash
+agent-bridge machines
+agent-bridge machines --json
+```
+
+Shows all machines in the topology with SSH readiness and environment
+details.
+
+### Send a Prompt to an Agent
+
+```bash
+# Start a new session and send a prompt (streams response)
+agent-bridge send <agent-name> "your prompt here"
+
+# Send to an existing session
+agent-bridge send <session-id> "follow-up prompt"
+
+# Fire-and-forget (don't wait for response)
+agent-bridge send <agent-name> "do this" --no-wait
+```
+
+The `send` command auto-detects whether the target is an agent name (starts
+a new session) or a session ID (sends to existing session). Output streams
+in real-time: response text, thought blocks, and tool call summaries.
+
+### Session Management
+
+```bash
+# List all sessions
+agent-bridge sessions
+agent-bridge sessions --status idle
+
+# Wait for a running session's current turn
+agent-bridge wait <session-id>
+
+# Stop a session (preserves state for resume)
+agent-bridge stop <session-id>
+
+# Resume a stopped session
+agent-bridge resume <session-id>
+
+# End a session (full cleanup)
+agent-bridge end <session-id>
+```
+
+### Service Control
+
+```bash
+# Start the service
+agent-bridge start
+agent-bridge start --port 9280 --bind 127.0.0.1
+
+# Check service health
+agent-bridge status
+
+# Print version
+agent-bridge version
+```
+
+### ACP Agent Mode
+
+```bash
+# Run as an ACP agent on stdio (for chat UIs / upstream ACP clients)
+agent-bridge agent --agent lambda-core-wsl
+```
+
+Presents agent-bridge as an ACP-compatible agent. Upstream ACP clients
+connect via stdio and the bridge routes prompts to the named downstream
+agent. Used by chat interfaces that speak ACP natively.
+
+## Common Patterns
+
+### Quick Remote Agent Interaction
+
+```bash
+# Ask wheatley-wsl to check something
+agent-bridge send wheatley-wsl "Check disk space on /data"
+
+# Ask lambda-core-wsl to run a command
+agent-bridge send lambda-core-wsl "Run the test suite for agent-bridge"
+```
+
+### Multi-Turn Conversation
+
+```bash
+# Start a session
+agent-bridge send borealis-wsl "Set up a new project" --no-wait
+
+# Check sessions to get the ID
+agent-bridge sessions --status running
+
+# Send follow-up
+agent-bridge send <session-id> "Now add the test framework"
+
+# When done
+agent-bridge end <session-id>
+```
+
+### Checking What's Running
+
+```bash
+# See all active sessions
+agent-bridge sessions
+
+# Get JSON for programmatic use
+agent-bridge sessions --json
+```
+
+## Agent Names
+
+Agent names come from `acp-agents.json` in the aperture-labs repo. Common
+agents:
+
+| Agent | Machine | Description |
+|-------|---------|-------------|
+| `lambda-core-wsl` | Lambda-Core (WSL) | AI workloads, compilation |
+| `wheatley-wsl` | Wheatley (WSL) | NAS, services, monitoring |
+| `borealis-wsl` | Borealis (WSL) | Windows workstation tasks |
+
+## Troubleshooting
+
+- **"agent-bridge is not responding"** -- service isn't running. Start it
+  with `agent-bridge start`.
+- **"Agent not found"** -- check `agent-bridge agents` for available names.
+  The topology config may not include the agent you're looking for.
+- **Session stuck in RUNNING** -- the downstream agent may be waiting for
+  permission or processing a long tool call. Check with
+  `agent-bridge wait <session-id>` or `agent-bridge stop <session-id>`.
+- **SSH connection failures** -- verify SSH aliases work:
+  `ssh <machine-alias> echo ok`. Check `agent-bridge machines` for
+  SSH readiness status.
