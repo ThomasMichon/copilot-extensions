@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-worktrees"
-version = "1.4.1-dev9"
+version = "1.4.1-dev10"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "../../README.md"
 license = "MIT"
