@@ -334,15 +334,15 @@ deploy_wrappers() {
     mv -f "$tmp" "$BIN_DIR/launch-session.sh"
     ok "Wrapper: launch-session.sh"
 
-    # Deploy bootstrap-check scripts (called by sessionStart hook)
-    for script in bootstrap-check.ps1 bootstrap-check.sh; do
+    # Deploy sessionStart hook scripts (bootstrap-check + project-hooks)
+    for script in bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh; do
         local script_src="$SCRIPT_DIR/$script"
         if [[ -f "$script_src" ]]; then
             tmp="$(mktemp "$BIN_DIR/$script.XXXXXX")"
             cp "$script_src" "$tmp"
             chmod +x "$tmp"
             mv -f "$tmp" "$BIN_DIR/$script"
-            ok "Bootstrap: $script"
+            ok "Hook: $script"
         fi
     done
 }
