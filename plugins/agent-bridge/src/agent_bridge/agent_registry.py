@@ -33,6 +33,7 @@ class AgentConfig:
     description: str | None = None
     display_name: str | None = None
     env: dict[str, str] = field(default_factory=dict)
+    project: str | None = None  # agent-worktrees project (binstub name)
 
 
 def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
@@ -51,6 +52,7 @@ def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
             description=config.get("description"),
             display_name=config.get("display_name"),
             env={str(k): str(v) for k, v in config.get("env", {}).items()},
+            project=config.get("project"),
         )
     return registry
 
@@ -121,6 +123,7 @@ class AgentResolver:
                 copilot_path=config.copilot_path,
                 copilot_args=config.copilot_args,
                 env=config.env,
+                project=config.project,
             )
 
         # SSH agent -- resolve machine and environment
@@ -159,6 +162,7 @@ class AgentResolver:
             copilot_path=config.copilot_path,
             copilot_args=config.copilot_args,
             env=config.env,
+            project=config.project,
         )
 
     def list_agents(self) -> list[dict[str, Any]]:

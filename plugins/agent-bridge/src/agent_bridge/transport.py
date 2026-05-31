@@ -24,6 +24,7 @@ class SpawnTarget:
     copilot_path: str | None = None
     copilot_args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
+    project: str | None = None  # agent-worktrees project (binstub name)
 
     def to_json(self) -> str:
         """Serialize for DB persistence."""
@@ -77,15 +78,30 @@ class AgentProcess:
 async def spawn_local(target: SpawnTarget) -> AgentProcess:
     """Spawn a Copilot ACP agent as a local subprocess.
 
-    Runs: copilot --acp --stdio [extra_args...] in the target directory.
-    """
-    copilot = target.copilot_path or _find_copilot()
-    args = [copilot, "--acp", "--stdio"] + target.copilot_args
+    When a ``project`` is configured, launches via the project binstub
+    (e.g. ``aperture-labs --base --no-mux -- --acp --stdio``).  The
+    binstub resolves the setup script, loads vault credentials, and execs
+    copilot.  This keeps secrets in the subprocess environment without
+    transmitting them through the bridge.
 
+    Without ``project``, runs copilot directly (legacy behavior).
+    """
     env = os.environ.copy()
     env.update(target.env)
 
-    log.info("Spawning local agent: %s (cwd=%s)", " ".join(args), target.cwd)
+    if target.project:
+        args = [
+            target.project, "--base", "--no-mux", "--no-update",
+            "--", "--acp", "--stdio",
+        ] + target.copilot_args
+        log.info(
+            "Spawning local agent via binstub: %s (cwd=%s)",
+            " ".join(args), target.cwd,
+        )
+    else:
+        copilot = target.copilot_path or _find_copilot()
+        args = [copilot, "--acp", "--stdio"] + target.copilot_args
+        log.info("Spawning local agent: %s (cwd=%s)", " ".join(args), target.cwd)
 
     proc = await asyncio.create_subprocess_exec(
         *args,
@@ -119,15 +135,27 @@ async def spawn_ssh(target: SpawnTarget) -> AgentProcess:
     ssh_target = f"{target.user}@{target.host}" if target.user else target.host
 
     # Build the remote POSIX command
-    parts = [f"cd {shlex.quote(target.cwd)}"]
-    if target.env:
-        for k, v in target.env.items():
-            parts.append(f"export {k}={shlex.quote(v)}")
-    copilot_cmd = f"exec {shlex.quote(copilot)} --acp --stdio"
-    if target.copilot_args:
-        copilot_cmd += " " + " ".join(shlex.quote(a) for a in target.copilot_args)
-    parts.append(copilot_cmd)
-    remote_cmd = " && ".join(parts)
+    if target.project:
+        # Use the project binstub which handles setup scripts, vault
+        # credentials, and copilot resolution.  Secrets stay on the remote
+        # machine -- they never traverse the SSH channel back to the bridge.
+        binstub_args = [
+            target.project, "--base", "--no-mux", "--no-update",
+            "--", "--acp", "--stdio",
+        ]
+        if target.copilot_args:
+            binstub_args.extend(target.copilot_args)
+        remote_cmd = " ".join(shlex.quote(a) for a in binstub_args)
+    else:
+        parts = [f"cd {shlex.quote(target.cwd)}"]
+        if target.env:
+            for k, v in target.env.items():
+                parts.append(f"export {k}={shlex.quote(v)}")
+        copilot_cmd = f"exec {shlex.quote(copilot)} --acp --stdio"
+        if target.copilot_args:
+            copilot_cmd += " " + " ".join(shlex.quote(a) for a in target.copilot_args)
+        parts.append(copilot_cmd)
+        remote_cmd = " && ".join(parts)
 
     ssh_args = [
         "ssh",

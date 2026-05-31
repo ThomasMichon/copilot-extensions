@@ -468,8 +468,14 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
     With ``--json``, skips the interactive picker and resolves a specific
     worktree by ID (``--worktree-id``).  ``--json`` implies ``--no-mux``.
+
+    With ``--base``, resolves for the anchor repo directly (no picker, no
+    worktree).  Used by agent-bridge to launch ACP agents with credentials.
+    ``--base`` implies ``--no-mux`` and ``--no-resume``.
     """
     use_json = getattr(args, "json", False)
+    use_base = getattr(args, "base", False)
+
     if use_json:
         args.no_mux = True
         # Validate required args before any I/O
@@ -477,7 +483,32 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         if not wt_id:
             return _json_error("--worktree-id is required with --json")
 
+    if use_base:
+        args.no_mux = True
+        args.no_resume = True
+
     with output.stdout_to_stderr():
+        if use_base:
+            try:
+                config = cfg.load_config()
+            except Exception as e:
+                return _json_error(str(e))
+
+            repo = config.default_repo
+            work_dir = repo.anchor
+            launch_cmd = _build_launch_cmd(config, args, work_dir)
+            env = _build_env(None)
+
+            _emit_plan({
+                "action": "exec",
+                "work_dir": work_dir,
+                "cmd": launch_cmd,
+                "env": env,
+                "post_exit": False,
+                "no_mux": True,
+            })
+            return 0
+
         if use_json:
             try:
                 config = cfg.load_config()
@@ -3272,6 +3303,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Non-interactive JSON mode (requires --worktree-id)")
     p.add_argument("--worktree-id", default=None,
                    help="Worktree ID to resolve (required with --json)")
+    p.add_argument("--base", action="store_true",
+                   help="Resolve for the anchor repo (no picker, no worktree)")
     p.add_argument("--profile", help="Copilot backend profile name (skips Tab toggle)")
     p.add_argument("copilot_args", nargs="*", default=[])
 

@@ -24,6 +24,7 @@ SAMPLE_AGENTS = {
     "local-agent": {
         "cwd": "/home/tmichon/src/project",
         "description": "Local test agent",
+        "project": "aperture-labs",
     },
     "wheatley-agent": {
         "host": "wheatley",
@@ -31,6 +32,7 @@ SAMPLE_AGENTS = {
         "description": "Agent on Wheatley",
         "copilot_args": ["--extensions-dir", "/opt/copilot/ext"],
         "env": {"MY_VAR": "hello"},
+        "project": "aperture-labs",
     },
     "lambda-agent": {
         "host": "lambda-core",
@@ -104,6 +106,7 @@ class TestParseAgentRegistry:
         assert agent.host is None
         assert agent.cwd == "/home/tmichon/src/project"
         assert agent.managed is False
+        assert agent.project == "aperture-labs"
 
     def test_ssh_agent_fields(self):
         registry = parse_agent_registry(SAMPLE_AGENTS)
@@ -111,6 +114,7 @@ class TestParseAgentRegistry:
         assert agent.host == "wheatley"
         assert agent.copilot_args == ["--extensions-dir", "/opt/copilot/ext"]
         assert agent.env == {"MY_VAR": "hello"}
+        assert agent.project == "aperture-labs"
 
     def test_managed_agent(self):
         registry = parse_agent_registry(SAMPLE_AGENTS)
@@ -133,6 +137,7 @@ class TestAgentResolver:
         assert target.type == "local"
         assert target.cwd == "/home/tmichon/src/project"
         assert target.host is None
+        assert target.project == "aperture-labs"
 
     def test_resolve_ssh_agent(self):
         target = self.resolver.resolve("wheatley-agent")
@@ -141,6 +146,7 @@ class TestAgentResolver:
         assert target.user == "cjohnson"
         assert target.cwd == "/home/cjohnson/src/project"
         assert target.env == {"MY_VAR": "hello"}
+        assert target.project == "aperture-labs"
 
     def test_resolve_ssh_agent_explicit_environment(self):
         target = self.resolver.resolve("lambda-agent")
