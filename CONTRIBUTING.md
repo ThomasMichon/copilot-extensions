@@ -63,7 +63,7 @@ file is out of sync:
 ## Deploying Agent Worktrees
 
 Agent Worktrees is deployed from the `copilot-extensions` GitHub repo,
-not from the aperture-labs monorepo. The aperture-labs repo contains a
+not from your project monorepo. Your project repo may contain a
 parallel `worktree-manager` service that shares code but deploys
 independently.
 
@@ -74,8 +74,8 @@ Changes follow this exact sequence — no shortcuts:
 1. **Commit** changes in `plugins/agent-worktrees/`
 2. **Bump the version** in all three files (see "Where the version lives")
 3. **Push** to `main` on GitHub: `git push origin main`
-4. **Update on each machine** via `aperture-labs update` or
-   `agent-worktrees update` (over SSH for remote machines)
+4. **Update on each machine** via `agent-worktrees update`
+   (over SSH for remote machines)
 
 The update command runs `copilot plugin update` to pull the latest
 plugin from the marketplace, then executes the platform-specific
@@ -117,9 +117,9 @@ from a local commit instead of a pushed one.
 When fixing bugs or adding features that apply to both codebases:
 
 1. Apply the fix in **both** `copilot-extensions` (agent-worktrees) and
-   `aperture-labs` (worktree-manager)
+   your project repo (worktree-manager)
 2. Push copilot-extensions to GitHub
-3. Push aperture-labs to origin (Gitea)
+3. Push your project repo to its origin
 
 The two codebases are forked — they share structure and much of the code,
 but are not automatically synchronized.

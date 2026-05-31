@@ -95,7 +95,7 @@ Copilot CLI sessions (multiple)
 - **Phase 1** (current): Service scaffold, local sessions, SQLite, SSE
 - **Phase 2**: SSH transport, machine topology, connection pooling
 - **Phase 3**: CLI tools, Copilot CLI integration, MCP shim
-- **Phase 4**: Consumer migration (neuron-forge, agent-worktrees)
+- **Phase 4**: Consumer migration (upstream agents, agent-worktrees)
 
 ## License
 

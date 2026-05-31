@@ -107,13 +107,13 @@ def _machine_from_environment(
 ) -> str | None:
     """Derive the machine key from an environment string.
 
-    Tries exact match first (e.g. ``wheatley``), then checks if the
-    environment starts with a known machine key (e.g. ``lambda-core-wsl``
-    → ``lambda-core``).  Returns None if no match.
+    Tries exact match first (e.g. ``myhost``), then checks if the
+    environment starts with a known machine key (e.g. ``myhost-wsl``
+    -> ``myhost``).  Returns None if no match.
     """
     if environment in machine_keys:
         return environment
-    # Longest prefix wins (so "tmichon-book2" beats "tmichon")
+    # Longest prefix wins (so "my-host-2" beats "my-host")
     candidates = [k for k in machine_keys if environment.startswith(k + "-")]
     if candidates:
         return max(candidates, key=len)
@@ -229,7 +229,7 @@ def discover_services(
 
     Args:
         repo_dir: Absolute path to the repo root.
-        environment: Deployment environment key (e.g. ``lambda-core-wsl``).
+        environment: Deployment environment key (e.g. ``myhost-wsl``).
         service_paths: Glob patterns for service discovery.  If None,
             uses the default patterns plus machine-scoped path.
 

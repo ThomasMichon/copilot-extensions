@@ -13,7 +13,6 @@ import os
 import platform
 import re
 import socket
-import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -80,17 +79,6 @@ class Config:
             f"No repo '{self.repo_name}' in config and multiple repos defined. "
             f"Available: {', '.join(self.repos)}"
         )
-
-    @property
-    def aperture_labs(self) -> RepoConfig:
-        """Deprecated — use ``default_repo`` instead."""
-        warnings.warn(
-            "Config.aperture_labs is deprecated, use Config.default_repo",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.default_repo
-
 
 # --- Machine registry ---
 
@@ -273,7 +261,7 @@ def project_name() -> str:
     if not name:
         raise RuntimeError(
             "WORKTREE_PROJECT environment variable is required but not set. "
-            "Set it to your project name (e.g. 'aperture-labs', 'dotfiles')."
+            "Set it to your project name (e.g. 'my-project', 'dotfiles')."
         )
     if not _PROJECT_NAME_RE.match(name):
         raise ValueError(

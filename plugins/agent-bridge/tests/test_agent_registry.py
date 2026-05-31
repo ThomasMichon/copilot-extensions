@@ -22,23 +22,23 @@ from agent_bridge.transport import SpawnTarget
 
 SAMPLE_AGENTS = {
     "local-agent": {
-        "cwd": "/home/tmichon/src/project",
+        "cwd": "/home/user/src/project",
         "description": "Local test agent",
-        "project": "aperture-labs",
+        "project": "my-project",
     },
-    "wheatley-agent": {
-        "host": "wheatley",
-        "cwd": "/home/cjohnson/src/project",
-        "description": "Agent on Wheatley",
+    "remote-agent": {
+        "host": "server-a",
+        "cwd": "/home/user/src/project",
+        "description": "Agent on Server A",
         "copilot_args": ["--extensions-dir", "/opt/copilot/ext"],
         "env": {"MY_VAR": "hello"},
-        "project": "aperture-labs",
+        "project": "my-project",
     },
     "lambda-agent": {
-        "host": "lambda-core",
+        "host": "workstation",
         "ssh_environment": "wsl",
-        "cwd": "/home/tmichon/src/aperture",
-        "description": "Agent on Lambda-Core WSL",
+        "cwd": "/home/user/src/project",
+        "description": "Agent on Workstation WSL",
     },
     "managed-agent": {
         "managed": True,
@@ -46,46 +46,46 @@ SAMPLE_AGENTS = {
         "description": "A managed TCP agent",
     },
     "windows-only-agent": {
-        "host": "tmichon-book2",
-        "cwd": "C:\\Users\\tmichon\\src",
+        "host": "laptop",
+        "cwd": "C:\\Users\\user\\src",
         "description": "Agent on pwsh-only machine",
     },
 }
 
 SAMPLE_MACHINES_DATA = {
     "machines": {
-        "wheatley": {
-            "display_name": "Wheatley",
+        "server-a": {
+            "display_name": "Server A",
             "environment": "Debian 13",
-            "role": "Media",
+            "role": "Services",
             "ssh": {
                 "environments": [
-                    {"name": "linux", "alias": "wheatley", "port": 22, "user": "cjohnson", "shell": "bash"},
+                    {"name": "linux", "alias": "server-a", "port": 22, "user": "deploy", "shell": "bash"},
                 ],
-                "ip": "192.168.0.54",
+                "ip": "10.0.0.10",
                 "ready": True,
             },
         },
-        "lambda-core": {
-            "display_name": "Lambda-Core",
+        "workstation": {
+            "display_name": "Workstation",
             "environment": "Windows 11",
-            "role": "AI",
+            "role": "Dev",
             "ssh": {
                 "environments": [
-                    {"name": "windows", "alias": "lambda-core", "port": 2222, "user": "tmichon", "shell": "pwsh"},
-                    {"name": "wsl", "alias": "lambda-core-wsl", "port": 22, "user": "tmichon", "shell": "bash"},
+                    {"name": "windows", "alias": "workstation", "port": 2222, "user": "dev", "shell": "pwsh"},
+                    {"name": "wsl", "alias": "workstation-wsl", "port": 22, "user": "dev", "shell": "bash"},
                 ],
-                "ip": "192.168.0.189",
+                "ip": "10.0.0.20",
                 "ready": True,
             },
         },
-        "tmichon-book2": {
-            "display_name": "tmichon-book2",
+        "laptop": {
+            "display_name": "Laptop",
             "environment": "Windows 11",
             "role": "Field terminal",
             "ssh": {
                 "environments": [
-                    {"name": "windows", "alias": "tmichon-book2", "port": 2222, "user": "tmichon", "shell": "pwsh"},
+                    {"name": "windows", "alias": "laptop", "port": 2222, "user": "dev", "shell": "pwsh"},
                 ],
                 "ready": False,
             },
@@ -104,17 +104,17 @@ class TestParseAgentRegistry:
         registry = parse_agent_registry(SAMPLE_AGENTS)
         agent = registry["local-agent"]
         assert agent.host is None
-        assert agent.cwd == "/home/tmichon/src/project"
+        assert agent.cwd == "/home/user/src/project"
         assert agent.managed is False
-        assert agent.project == "aperture-labs"
+        assert agent.project == "my-project"
 
     def test_ssh_agent_fields(self):
         registry = parse_agent_registry(SAMPLE_AGENTS)
-        agent = registry["wheatley-agent"]
-        assert agent.host == "wheatley"
+        agent = registry["remote-agent"]
+        assert agent.host == "server-a"
         assert agent.copilot_args == ["--extensions-dir", "/opt/copilot/ext"]
         assert agent.env == {"MY_VAR": "hello"}
-        assert agent.project == "aperture-labs"
+        assert agent.project == "my-project"
 
     def test_managed_agent(self):
         registry = parse_agent_registry(SAMPLE_AGENTS)
@@ -135,24 +135,24 @@ class TestAgentResolver:
     def test_resolve_local_agent(self):
         target = self.resolver.resolve("local-agent")
         assert target.type == "local"
-        assert target.cwd == "/home/tmichon/src/project"
+        assert target.cwd == "/home/user/src/project"
         assert target.host is None
-        assert target.project == "aperture-labs"
+        assert target.project == "my-project"
 
     def test_resolve_ssh_agent(self):
-        target = self.resolver.resolve("wheatley-agent")
+        target = self.resolver.resolve("remote-agent")
         assert target.type == "ssh"
-        assert target.host == "wheatley"
-        assert target.user == "cjohnson"
-        assert target.cwd == "/home/cjohnson/src/project"
+        assert target.host == "server-a"
+        assert target.user == "deploy"
+        assert target.cwd == "/home/user/src/project"
         assert target.env == {"MY_VAR": "hello"}
-        assert target.project == "aperture-labs"
+        assert target.project == "my-project"
 
     def test_resolve_ssh_agent_explicit_environment(self):
         target = self.resolver.resolve("lambda-agent")
         assert target.type == "ssh"
-        assert target.host == "lambda-core-wsl"
-        assert target.user == "tmichon"
+        assert target.host == "workstation-wsl"
+        assert target.user == "dev"
 
     def test_resolve_managed_agent_raises(self):
         with pytest.raises(ValueError, match="managed"):
@@ -170,7 +170,7 @@ class TestAgentResolver:
     def test_resolve_agent_no_posix_shell(self):
         """Agent on a machine with only pwsh environments should fail in Phase 2."""
         # Make the machine ready but keep only pwsh shells
-        self.machines["tmichon-book2"].ssh_ready = True
+        self.machines["laptop"].ssh_ready = True
         resolver = AgentResolver(self.agents, self.machines)
         with pytest.raises(ValueError, match="POSIX"):
             resolver.resolve("windows-only-agent")
