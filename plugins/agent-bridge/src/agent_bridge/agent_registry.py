@@ -26,7 +26,7 @@ class AgentConfig:
     host: str | None = None
     ssh_user: str | None = None
     ssh_environment: str | None = None
-    cwd: str = "."
+    cwd: str | None = None
     copilot_path: str | None = None
     copilot_args: list[str] = field(default_factory=list)
     managed: bool = False
@@ -45,7 +45,7 @@ def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
             host=config.get("host"),
             ssh_user=config.get("ssh_user"),
             ssh_environment=config.get("ssh_environment"),
-            cwd=config.get("cwd", "."),
+            cwd=config.get("cwd"),
             copilot_path=config.get("copilot_path"),
             copilot_args=config.get("copilot_args", []),
             managed=bool(config.get("managed")),

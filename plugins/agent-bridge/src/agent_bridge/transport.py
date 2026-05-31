@@ -18,7 +18,7 @@ class SpawnTarget:
     """Where and how to spawn an agent process."""
 
     type: str = "local"  # "local" or "ssh"
-    cwd: str = "."
+    cwd: str | None = None
     host: str | None = None  # SSH alias (from machines.yaml)
     user: str | None = None
     copilot_path: str | None = None
@@ -94,11 +94,10 @@ async def spawn_local(target: SpawnTarget) -> AgentProcess:
             target.project, "--base", "--no-mux", "--no-update",
             "--", "--acp", "--stdio",
         ] + target.copilot_args
-        log.info(
-            "Spawning local agent via binstub: %s (cwd=%s)",
-            " ".join(args), target.cwd,
-        )
+        log.info("Spawning local agent via binstub: %s", " ".join(args))
     else:
+        if not target.cwd:
+            raise ValueError("Local agent without 'project' requires 'cwd'")
         copilot = target.copilot_path or _find_copilot()
         args = [copilot, "--acp", "--stdio"] + target.copilot_args
         log.info("Spawning local agent: %s (cwd=%s)", " ".join(args), target.cwd)
@@ -108,7 +107,7 @@ async def spawn_local(target: SpawnTarget) -> AgentProcess:
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        cwd=target.cwd,
+        cwd=target.cwd or None,
         env=env,
     )
 
@@ -147,6 +146,8 @@ async def spawn_ssh(target: SpawnTarget) -> AgentProcess:
             binstub_args.extend(target.copilot_args)
         remote_cmd = " ".join(shlex.quote(a) for a in binstub_args)
     else:
+        if not target.cwd:
+            raise ValueError("SSH agent without 'project' requires 'cwd'")
         parts = [f"cd {shlex.quote(target.cwd)}"]
         if target.env:
             for k, v in target.env.items():
