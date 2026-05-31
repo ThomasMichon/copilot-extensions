@@ -43,6 +43,7 @@ GET    /api/v1/sessions/{id}             # Get session info
 POST   /api/v1/sessions/{id}/turns       # Submit prompt
 GET    /api/v1/sessions/{id}/events      # SSE event stream
 POST   /api/v1/sessions/{id}/stop        # Stop (preserve state)
+POST   /api/v1/sessions/{id}/resume      # Resume stopped session
 DELETE /api/v1/sessions/{id}             # End (full cleanup)
 ```
 

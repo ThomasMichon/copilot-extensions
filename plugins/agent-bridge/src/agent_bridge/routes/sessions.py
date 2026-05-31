@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ..models import (
+    ResumeSessionRequest,
     SessionInfo,
     SessionListResponse,
     SessionStatus,
@@ -149,6 +150,22 @@ async def stop_session(session_id: str, request: Request):
         await mgr.stop_session(session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+
+@router.post("/{session_id}/resume", response_model=SessionInfo)
+async def resume_session(session_id: str, request: Request):
+    """Resume a stopped session by spawning a new agent process."""
+    mgr: SessionManager = request.app.state.session_manager
+    try:
+        session = await mgr.resume_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return _session_info(session)
 
 
 @router.delete("/{session_id}", status_code=204)

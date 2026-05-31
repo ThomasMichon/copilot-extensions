@@ -61,6 +61,7 @@ class Session:
         self.event_log: EventLog | None = None
         self.acp_session_id: str | None = None
         self._prompt_task: asyncio.Task | None = None
+        self._lifecycle_lock = asyncio.Lock()
 
     @property
     def pid(self) -> int | None:
@@ -87,7 +88,8 @@ class SessionManager:
 
         Running processes are gone after a restart, so any session that
         was RUNNING/IDLE/STARTING gets marked STOPPED (resumable).
-        Sessions that were ENDED get cleaned up.
+        Sessions that were ENDED get cleaned up. Incomplete turns are
+        marked as interrupted.
         """
         rows = self._db.list_sessions()
         now = time.time()
@@ -112,6 +114,7 @@ class SessionManager:
             )
             session.created_at = row["created_at"]
             session.updated_at = row["updated_at"]
+            session.acp_session_id = row.get("acp_session_id")
 
             # Mark formerly-active sessions as stopped
             if status in (
@@ -122,6 +125,15 @@ class SessionManager:
                 session.status = SessionStatus.STOPPED
                 self._db.update_session_status(sid, SessionStatus.STOPPED.value, now)
                 log.info("Session %s (%s) marked STOPPED after restart", sid, session.name)
+
+                # Mark incomplete turns as interrupted
+                for turn in self._db.get_turns(sid):
+                    if turn.get("completed_at") is None:
+                        self._db.update_turn(
+                            sid, turn["turn_index"],
+                            stop_reason="interrupted",
+                            completed_at=now,
+                        )
             else:
                 session.status = SessionStatus(status)
 
@@ -184,6 +196,7 @@ class SessionManager:
             session.client = client
             session.acp_session_id = acp_sid
             session.status = SessionStatus.IDLE
+            self._db.update_session_acp_id(session_id, acp_sid)
             self._db.update_session_status(
                 session_id, SessionStatus.IDLE.value, time.time(), pid=session.pid
             )
@@ -202,6 +215,83 @@ class SessionManager:
             )
             session.event_log.append("error", {"message": str(exc)})
             log.error("Failed to start session %s: %s", session_id, exc)
+
+        session.touch()
+        return session
+
+    async def resume_session(self, session_id: str) -> Session:
+        """Resume a stopped session by spawning a new process.
+
+        Uses AcpClient.load_session() to reattach to the persisted ACP
+        session. The session is ready to receive prompts when this returns.
+        """
+        session = self._sessions.get(session_id)
+        if not session:
+            raise KeyError(f"Session {session_id} not found")
+
+        async with session._lifecycle_lock:
+            if session.status != SessionStatus.STOPPED:
+                raise ValueError(
+                    f"Session {session_id} is {session.status.value}, not stopped"
+                )
+            if not session.acp_session_id:
+                raise RuntimeError(
+                    f"Session {session_id} has no ACP session ID -- cannot resume"
+                )
+
+            session.status = SessionStatus.STARTING
+            self._db.update_session_status(
+                session_id, SessionStatus.STARTING.value, time.time()
+            )
+
+            def on_acp_event(event_type: str, data: dict[str, Any]) -> None:
+                if session.event_log:
+                    session.event_log.append(event_type, data)
+
+            client: AcpClient | None = None
+            try:
+                agent_proc = await spawn_local(session.target)
+                client = AcpClient(on_event=on_acp_event)
+                await client.start(agent_proc.proc)
+                await client.load_session(
+                    cwd=session.target.cwd,
+                    session_id=session.acp_session_id,
+                )
+
+                session.client = client
+                session.status = SessionStatus.IDLE
+                self._db.update_session_status(
+                    session_id, SessionStatus.IDLE.value, time.time(),
+                    pid=session.pid,
+                )
+                if session.event_log:
+                    session.event_log.append("session_state_changed", {
+                        "status": SessionStatus.IDLE.value,
+                        "resumed": True,
+                        "acp_session_id": session.acp_session_id,
+                    })
+                log.info(
+                    "Session %s (%s) resumed, pid=%s",
+                    session_id, session.name, session.pid,
+                )
+            except Exception as exc:
+                # Clean up the client/process on failure
+                if client:
+                    try:
+                        await client.shutdown()
+                    except Exception:
+                        pass
+                session.client = None
+                session.status = SessionStatus.STOPPED
+                self._db.update_session_status(
+                    session_id, SessionStatus.STOPPED.value, time.time()
+                )
+                if session.event_log:
+                    session.event_log.append("error", {
+                        "message": f"Resume failed: {exc}",
+                    })
+                log.error("Failed to resume session %s: %s", session_id, exc)
+                raise
 
         session.touch()
         return session
