@@ -35,6 +35,7 @@ class TestSpawnTargetSerialization:
             copilot_path="/usr/local/bin/copilot",
             copilot_args=["--extensions-dir", "/opt/ext"],
             env={"MY_VAR": "hello"},
+            project="aperture-labs",
         )
         restored = SpawnTarget.from_json(target.to_json())
         assert restored.type == "ssh"
@@ -43,6 +44,7 @@ class TestSpawnTargetSerialization:
         assert restored.copilot_path == "/usr/local/bin/copilot"
         assert restored.copilot_args == ["--extensions-dir", "/opt/ext"]
         assert restored.env == {"MY_VAR": "hello"}
+        assert restored.project == "aperture-labs"
 
     def test_to_json_produces_valid_json(self):
         target = SpawnTarget(type="ssh", host="test", cwd=".")
@@ -163,6 +165,108 @@ class TestSpawnSsh:
         target = SpawnTarget(type="ssh", cwd=".")
         with pytest.raises(ValueError, match="host"):
             await spawn_ssh(target)
+
+    @pytest.mark.asyncio
+    async def test_ssh_with_project_uses_binstub(self):
+        """SSH with project should use the binstub instead of copilot."""
+        target = SpawnTarget(
+            type="ssh", cwd="/home/user/src", host="wheatley", user="cjohnson",
+            project="aperture-labs",
+            copilot_args=["--allow-all"],
+        )
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 99999
+        mock_proc.returncode = None
+
+        with patch("agent_bridge.transport.asyncio") as mock_asyncio:
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
+            mock_asyncio.subprocess = asyncio.subprocess
+
+            await spawn_ssh(target)
+
+            remote_cmd = mock_asyncio.create_subprocess_exec.call_args[0][-1]
+            assert "aperture-labs" in remote_cmd
+            assert "--base" in remote_cmd
+            assert "--no-mux" in remote_cmd
+            assert "--acp" in remote_cmd
+            assert "--stdio" in remote_cmd
+            assert "--allow-all" in remote_cmd
+            # Should NOT contain cd or export (binstub handles setup)
+            assert "cd " not in remote_cmd
+
+    @pytest.mark.asyncio
+    async def test_ssh_without_project_uses_direct_copilot(self):
+        """SSH without project should use cd + copilot (legacy behavior)."""
+        target = SpawnTarget(
+            type="ssh", cwd="/home/user/src", host="wheatley",
+        )
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 99999
+        mock_proc.returncode = None
+
+        with patch("agent_bridge.transport.asyncio") as mock_asyncio:
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
+            mock_asyncio.subprocess = asyncio.subprocess
+
+            await spawn_ssh(target)
+
+            remote_cmd = mock_asyncio.create_subprocess_exec.call_args[0][-1]
+            assert "cd " in remote_cmd
+            assert "exec " in remote_cmd
+            assert "copilot" in remote_cmd
+
+
+class TestSpawnLocal:
+
+    @pytest.mark.asyncio
+    async def test_local_with_project_uses_binstub(self):
+        """Local spawn with project should use the binstub."""
+        target = SpawnTarget(
+            type="local", cwd="/tmp/test",
+            project="aperture-labs",
+            copilot_args=["--allow-all"],
+        )
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 12345
+        mock_proc.returncode = None
+
+        with patch("agent_bridge.transport.asyncio") as mock_asyncio:
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
+            mock_asyncio.subprocess = asyncio.subprocess
+
+            await spawn_local(target)
+
+            call_args = mock_asyncio.create_subprocess_exec.call_args
+            args = call_args[0]
+            assert args[0] == "aperture-labs"
+            assert "--base" in args
+            assert "--no-mux" in args
+            assert "--acp" in args
+            assert "--stdio" in args
+            assert "--allow-all" in args
+
+    @pytest.mark.asyncio
+    async def test_local_without_project_uses_copilot_directly(self):
+        """Local spawn without project should call copilot directly."""
+        target = SpawnTarget(type="local", cwd="/tmp/test")
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 12345
+        mock_proc.returncode = None
+
+        with patch("agent_bridge.transport.asyncio") as mock_asyncio, \
+             patch("agent_bridge.transport._find_copilot", return_value="copilot"):
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
+            mock_asyncio.subprocess = asyncio.subprocess
+
+            await spawn_local(target)
+
+            call_args = mock_asyncio.create_subprocess_exec.call_args
+            args = call_args[0]
+            assert args[0] == "copilot"
 
 
 class TestSpawnDispatcher:
