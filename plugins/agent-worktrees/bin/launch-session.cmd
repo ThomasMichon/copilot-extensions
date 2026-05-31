@@ -3,15 +3,10 @@ setlocal
 
 set "PYTHONHOME="
 
-rem Dual-layout resolution: prefer ~/.agent-worktrees/, fall back to legacy
-set "NEW_RUNTIME=%USERPROFILE%\.agent-worktrees"
-set "LEGACY_RUNTIME=%USERPROFILE%\.aperture-labs"
+rem Runtime resolution
+set "RUNTIME_DIR=%USERPROFILE%\.agent-worktrees"
 
-if exist "%NEW_RUNTIME%\.venv\Scripts\python.exe" (
-    set "RUNTIME_DIR=%NEW_RUNTIME%"
-) else if exist "%LEGACY_RUNTIME%\.venv\Scripts\python.exe" (
-    set "RUNTIME_DIR=%LEGACY_RUNTIME%"
-) else (
+if not exist "%RUNTIME_DIR%\.venv\Scripts\python.exe" (
     echo ERROR: Venv not found. Run the installer first. >&2
     exit /b 1
 )

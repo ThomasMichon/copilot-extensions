@@ -31,18 +31,13 @@ ls -t "$_SETUP_LOG_DIR"/setup-*.log 2>/dev/null | tail -n +11 | xargs rm -f 2>/d
 
 setup_log INFO 'launch-session.sh starting'
 
-# Dual-layout resolution: prefer ~/.agent-worktrees/, fall back to legacy
-NEW_RUNTIME="$HOME/.agent-worktrees"
-LEGACY_RUNTIME="$HOME/.aperture-labs"
+# Runtime resolution
+RUNTIME_DIR="$HOME/.agent-worktrees"
 
-if [[ -x "$NEW_RUNTIME/.venv/bin/python" ]]; then
-    RUNTIME_DIR="$NEW_RUNTIME"
-    setup_log INFO "Venv resolved: $NEW_RUNTIME"
-elif [[ -x "$LEGACY_RUNTIME/.venv/bin/python" ]]; then
-    RUNTIME_DIR="$LEGACY_RUNTIME"
-    setup_log INFO "Venv resolved (legacy): $LEGACY_RUNTIME"
+if [[ -x "$RUNTIME_DIR/.venv/bin/python" ]]; then
+    setup_log INFO "Venv resolved: $RUNTIME_DIR"
 else
-    setup_log ERROR 'Venv not found — aborting'
+    setup_log ERROR 'Venv not found - aborting'
     echo "ERROR: Venv not found. Run the installer first." >&2
     exit 1
 fi

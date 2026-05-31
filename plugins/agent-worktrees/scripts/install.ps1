@@ -824,11 +824,9 @@ function Sync-TerminalState {
 function Clean-TerminalSettingsJson {
     <# Remove stale profiles and schemes from WT settings.json.
 
-       Handles three categories:
-       1. AgentWorktrees-sourced profiles whose GUID is not in the current
-          fragment (stale from previous installs or unregistered projects).
-       2. Legacy ApertureLabs-sourced profiles (fragment dir migrated away).
-       3. Manually-added profiles matching Aperture naming/GUIDs. #>
+       Removes AgentWorktrees-sourced profiles whose GUID is not in the
+       current fragment (stale from previous installs or unregistered
+       projects). #>
     param(
         [string[]]$NewFragmentGuids = @()
     )
@@ -855,21 +853,14 @@ function Clean-TerminalSettingsJson {
         }
     }
 
-    # Well-known legacy static GUIDs (pre-fragment era)
-    $knownGuids = @('{e8ba8d13-cc41-5a92-b5dd-5e4a5418e9a0}', '{fd1e4088-c416-5daa-b87c-a6546fa1cc25}')
-    $legacyFragExists = Test-Path (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs')
-
     $changed = $false
 
     if ($json.profiles -and $json.profiles.list) {
         $before = $json.profiles.list.Count
         $json.profiles.list = @($json.profiles.list | Where-Object {
             if (-not $_.PSObject.Properties['source']) {
-                # Manually-added (no source) -- remove if it matches our GUIDs or naming
-                $isOurs = ($_.PSObject.Properties['guid'] -and $_.guid.ToLower() -in $NewFragmentGuids) -or
-                          ($_.PSObject.Properties['guid'] -and $_.guid.ToLower() -in $knownGuids) -or
-                          ($_.PSObject.Properties['name'] -and $_.name -match 'Aperture.*Labs') -or
-                          ($_.PSObject.Properties['commandline'] -and $_.commandline -match 'aperture-labs')
+                # Manually-added (no source) -- remove if GUID matches current fragment
+                $isOurs = ($_.PSObject.Properties['guid'] -and $_.guid.ToLower() -in $NewFragmentGuids)
                 return -not $isOurs
             }
 
@@ -881,11 +872,6 @@ function Clean-TerminalSettingsJson {
                 return $false  # no GUID = orphan, remove
             }
 
-            # Legacy ApertureLabs-sourced: remove when the legacy dir is gone
-            if ($_.source -eq 'ApertureLabs' -and -not $legacyFragExists) {
-                return $false
-            }
-
             return $true
         })
         $removed = $before - $json.profiles.list.Count
@@ -895,19 +881,8 @@ function Clean-TerminalSettingsJson {
         }
     }
 
-    # Remove manually-added Aperture Science color schemes (fragment provides these)
-    if ($json.schemes) {
-        $beforeSchemes = $json.schemes.Count
-        $json.schemes = @($json.schemes | Where-Object { $_.name -ne 'Aperture Science' })
-        $removedSchemes = $beforeSchemes - $json.schemes.Count
-        if ($removedSchemes -gt 0) {
-            $changed = $true
-            Write-ServiceChanged "Removed $removedSchemes stale 'Aperture Science' color scheme(s) from WT settings.json"
-        }
-    }
-
     if ($changed) {
-        $backup = "$settingsPath.aperture-backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        $backup = "$settingsPath.wt-backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
         Copy-Item $settingsPath $backup -Force
         $json | ConvertTo-Json -Depth 20 | Set-Content $settingsPath -Encoding UTF8
         Write-ServiceOk "WT settings.json cleaned (backup: $backup)"
@@ -1012,26 +987,17 @@ function Deploy-Shortcuts {
         New-Item -ItemType Directory -Path $fragmentDir -Force | Out-Null
     }
 
-    # Collect GUIDs from existing fragments BEFORE any deletions or overwrites.
+    # Collect GUIDs from existing fragment BEFORE any overwrites.
     # We need these to compute stale GUIDs for state cleanup later.
     $oldFragGuids = @()
     $fragmentDst = Join-Path $fragmentDir 'agent-worktrees.json'
-    $oldFragmentDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs'
-    foreach ($fp in @($fragmentDst, (Join-Path $oldFragmentDir 'aperture-labs.json'))) {
-        if (Test-Path $fp) {
-            try {
-                $oldFrag = Get-Content $fp -Raw | ConvertFrom-Json
-                $oldFragGuids += @($oldFrag.profiles | ForEach-Object { $_.guid.ToLower() })
-            } catch { }
-        }
+    if (Test-Path $fragmentDst) {
+        try {
+            $oldFrag = Get-Content $fragmentDst -Raw | ConvertFrom-Json
+            $oldFragGuids += @($oldFrag.profiles | ForEach-Object { $_.guid.ToLower() })
+        } catch { }
     }
     $oldFragGuids = @($oldFragGuids | Sort-Object -Unique)
-
-    # Remove old ApertureLabs-specific fragment dir if present (migrated to shared)
-    if (Test-Path $oldFragmentDir) {
-        Remove-Item $oldFragmentDir -Recurse -Force -ErrorAction SilentlyContinue
-        Write-ServiceChanged "Migrated from ApertureLabs to AgentWorktrees fragment dir"
-    }
 
     # Generate the fragment dynamically from projects.yaml + machines.yaml
     $fragment = Build-TerminalFragment -Machine $Machine
@@ -1356,15 +1322,11 @@ switch ($Action) {
 
         Remove-Binstub
 
-        # Remove Windows Terminal fragment (both old and new locations)
-        foreach ($dir in @(
-            (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\AgentWorktrees'),
-            (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\ApertureLabs')
-        )) {
-            if (Test-Path $dir) {
-                Remove-Item $dir -Recurse -Force
-                Write-ServiceChanged "Removed Windows Terminal fragment: $dir"
-            }
+        # Remove Windows Terminal fragment
+        $fragDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\AgentWorktrees'
+        if (Test-Path $fragDir) {
+            Remove-Item $fragDir -Recurse -Force
+            Write-ServiceChanged "Removed Windows Terminal fragment: $fragDir"
         }
 
         # Remove psmux config
@@ -1374,9 +1336,9 @@ switch ($Action) {
             Write-ServiceChanged "Removed psmux config ($psmuxConf)"
         }
 
-        # Remove shortcuts (project-specific + legacy)
+        # Remove shortcuts
         $displayName = ($ProjectName -replace '-', ' ') -replace '(^| )(.)', { $_.Value.ToUpper() }
-        foreach ($lnk in @("$displayName.lnk", "$displayName (WSL).lnk", 'Aperture Labs.lnk', 'Aperture Labs (WSL).lnk')) {
+        foreach ($lnk in @("$displayName.lnk", "$displayName (WSL).lnk")) {
             $lnkPath = Join-Path $LocalBin $lnk
             if (Test-Path $lnkPath) { Remove-Item $lnkPath -Force }
         }
@@ -1505,17 +1467,20 @@ switch ($Action) {
         if (Test-Path $wtSettingsPath) {
             try {
                 $wtJson = Get-Content $wtSettingsPath -Raw | ConvertFrom-Json
+                $fragPath = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\AgentWorktrees\agent-worktrees.json'
+                $fragGuids = @()
+                if (Test-Path $fragPath) {
+                    $frag = Get-Content $fragPath -Raw | ConvertFrom-Json
+                    $fragGuids = @($frag.profiles | ForEach-Object { $_.guid.ToLower() })
+                }
                 $stale = @($wtJson.profiles.list | Where-Object {
-                    -not $_.PSObject.Properties['source'] -and (
-                        ($_.PSObject.Properties['name'] -and $_.name -match 'Aperture.*Labs') -or
-                        ($_.PSObject.Properties['commandline'] -and $_.commandline -match 'aperture-labs')
-                    )
+                    $_.PSObject.Properties['source'] -and $_.source -eq 'AgentWorktrees' -and
+                    $_.PSObject.Properties['guid'] -and $_.guid.ToLower() -notin $fragGuids
                 })
-                $staleSchemes = @($wtJson.schemes | Where-Object { $_.name -eq 'Aperture Science' })
-                if ($stale.Count -gt 0 -or $staleSchemes.Count -gt 0) {
-                    Write-ServiceWarn "WT settings.json has $($stale.Count) stale profile(s) + $($staleSchemes.Count) stale scheme(s) - run 'update' to clean"
+                if ($stale.Count -gt 0) {
+                    Write-ServiceWarn "WT settings.json has $($stale.Count) stale profile(s) - run 'update' to clean"
                 } else {
-                    Write-ServiceOk "WT settings.json clean (no stale Aperture entries)"
+                    Write-ServiceOk "WT settings.json clean"
                 }
             } catch { }
         }
