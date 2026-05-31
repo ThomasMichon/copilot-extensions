@@ -16,6 +16,8 @@ from .routes import agents, health, sessions
 from .session_manager import SessionManager
 from .topology import load_machines_yaml
 
+from . import __version__
+
 log = logging.getLogger("agent-bridge")
 
 
@@ -74,7 +76,7 @@ def create_app(*, config=None, token: str | None = None) -> FastAPI:  # noqa: AN
     app = FastAPI(
         title="Agent Bridge",
         description="Persistent inter-agent communication service",
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan,
     )
 
