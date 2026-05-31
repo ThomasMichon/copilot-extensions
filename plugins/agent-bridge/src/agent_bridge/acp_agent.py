@@ -19,6 +19,7 @@ import asyncio
 import logging
 from typing import Any
 
+from . import __version__
 from acp import (
     PROTOCOL_VERSION,
     Agent,
@@ -185,7 +186,7 @@ class BridgeAgent(Agent):
         )
         return InitializeResponse(
             protocol_version=PROTOCOL_VERSION,
-            agent_info=Implementation(name="agent-bridge", version="0.1.0"),
+            agent_info=Implementation(name="agent-bridge", version=__version__),
             agent_capabilities=AgentCapabilities(
                 load_session=True,
                 session_capabilities=SessionCapabilities(

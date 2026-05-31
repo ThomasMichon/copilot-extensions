@@ -14,6 +14,7 @@ import logging
 import os
 from typing import Any, Callable
 
+from . import __version__
 from acp import PROTOCOL_VERSION, Client, RequestError, text_block
 from acp.client.connection import ClientSideConnection
 from acp.schema import (
@@ -228,7 +229,7 @@ class AcpClient:
             client_capabilities=ClientCapabilities(),
             client_info=Implementation(
                 name="agent-bridge",
-                version="0.1.0",
+                version=__version__,
             ),
         )
 
