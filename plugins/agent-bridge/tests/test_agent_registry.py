@@ -22,13 +22,11 @@ from agent_bridge.transport import SpawnTarget
 
 SAMPLE_AGENTS = {
     "local-agent": {
-        "cwd": "/home/user/src/project",
         "description": "Local test agent",
         "project": "my-project",
     },
     "remote-agent": {
         "host": "server-a",
-        "cwd": "/home/user/src/project",
         "description": "Agent on Server A",
         "copilot_args": ["--extensions-dir", "/opt/copilot/ext"],
         "env": {"MY_VAR": "hello"},
@@ -104,7 +102,7 @@ class TestParseAgentRegistry:
         registry = parse_agent_registry(SAMPLE_AGENTS)
         agent = registry["local-agent"]
         assert agent.host is None
-        assert agent.cwd == "/home/user/src/project"
+        assert agent.cwd is None
         assert agent.managed is False
         assert agent.project == "my-project"
 
@@ -135,7 +133,7 @@ class TestAgentResolver:
     def test_resolve_local_agent(self):
         target = self.resolver.resolve("local-agent")
         assert target.type == "local"
-        assert target.cwd == "/home/user/src/project"
+        assert target.cwd is None
         assert target.host is None
         assert target.project == "my-project"
 
@@ -144,7 +142,7 @@ class TestAgentResolver:
         assert target.type == "ssh"
         assert target.host == "server-a"
         assert target.user == "deploy"
-        assert target.cwd == "/home/user/src/project"
+        assert target.cwd is None
         assert target.env == {"MY_VAR": "hello"}
         assert target.project == "my-project"
 

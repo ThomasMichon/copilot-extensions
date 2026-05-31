@@ -170,7 +170,7 @@ class TestSpawnSsh:
     async def test_ssh_with_project_uses_binstub(self):
         """SSH with project should use the binstub instead of copilot."""
         target = SpawnTarget(
-            type="ssh", cwd="/home/user/src", host="server-a", user="deploy",
+            type="ssh", host="server-a", user="deploy",
             project="my-project",
             copilot_args=["--allow-all"],
         )
@@ -224,7 +224,7 @@ class TestSpawnLocal:
     async def test_local_with_project_uses_binstub(self):
         """Local spawn with project should use the binstub."""
         target = SpawnTarget(
-            type="local", cwd="/tmp/test",
+            type="local",
             project="my-project",
             copilot_args=["--allow-all"],
         )
@@ -296,3 +296,20 @@ class TestSpawnDispatcher:
             result = await spawn(target)
             mock_ssh.assert_called_once_with(target)
             assert result == mock_proc
+
+
+class TestCwdValidation:
+
+    @pytest.mark.asyncio
+    async def test_local_without_project_requires_cwd(self):
+        """Local spawn without project and without cwd should raise."""
+        target = SpawnTarget(type="local")
+        with pytest.raises(ValueError, match="requires 'cwd'"):
+            await spawn_local(target)
+
+    @pytest.mark.asyncio
+    async def test_ssh_without_project_requires_cwd(self):
+        """SSH spawn without project and without cwd should raise."""
+        target = SpawnTarget(type="ssh", host="testhost")
+        with pytest.raises(ValueError, match="requires 'cwd'"):
+            await spawn_ssh(target)
