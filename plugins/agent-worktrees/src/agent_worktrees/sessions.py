@@ -260,6 +260,27 @@ def find_latest_session_id(worktree_path: str) -> str | None:
     return best_id
 
 
+@dataclass
+class MuxInfo:
+    """Multiplexer session status for a worktree."""
+
+    exists: bool = False
+    """Whether a tmux/psmux session exists for this worktree."""
+
+    clients: int | None = None
+    """Number of attached terminal clients, or None if unknown."""
+
+    @property
+    def attached(self) -> bool | None:
+        """Whether a human terminal is attached.
+
+        Returns None if client count is unknown (e.g. psmux fallback).
+        """
+        if self.clients is None:
+            return None
+        return self.clients > 0
+
+
 def has_mux_session(worktree_id: str) -> bool:
     """Check if a multiplexer session exists for a worktree (without killing it).
 
@@ -279,6 +300,62 @@ def has_mux_session(worktree_id: str) -> bool:
         return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
+
+
+def _list_mux_sessions() -> dict[str, int] | None:
+    """Query all mux sessions with their attached client counts.
+
+    Returns a dict of session_name -> attached_client_count, or None if
+    the list-sessions command is unavailable or fails.
+    """
+    import subprocess
+
+    if platform.system() == "Windows":
+        cmd = ["psmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
+    else:
+        cmd = ["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        if result.returncode != 0:
+            return None
+        sessions_map: dict[str, int] = {}
+        for line in result.stdout.strip().splitlines():
+            if ":" not in line:
+                continue
+            name, _, count_str = line.rpartition(":")
+            try:
+                sessions_map[name] = int(count_str)
+            except ValueError:
+                sessions_map[name] = 0
+        return sessions_map
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+
+def mux_status_many(worktree_ids: list[str]) -> dict[str, MuxInfo]:
+    """Get mux session status for multiple worktrees efficiently.
+
+    Uses a single ``list-sessions`` call when available. Falls back to
+    per-worktree ``has-session`` checks if list-sessions is unsupported
+    (clients will be None in that case).
+    """
+    result: dict[str, MuxInfo] = {}
+
+    all_sessions = _list_mux_sessions()
+    if all_sessions is not None:
+        for wt_id in worktree_ids:
+            sess_name = f"wt-{wt_id}"
+            if sess_name in all_sessions:
+                result[wt_id] = MuxInfo(exists=True, clients=all_sessions[sess_name])
+            else:
+                result[wt_id] = MuxInfo(exists=False, clients=0)
+    else:
+        # Fallback: per-worktree has-session (no client count available)
+        for wt_id in worktree_ids:
+            exists = has_mux_session(wt_id)
+            result[wt_id] = MuxInfo(exists=exists, clients=None)
+
+    return result
 
 
 def kill_tmux_session(worktree_id: str) -> bool:

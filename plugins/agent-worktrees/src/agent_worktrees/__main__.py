@@ -256,11 +256,15 @@ def _worktree_to_dict(
     rec: tracking.WorktreeRecord,
     *,
     state_info: git_ops.WorktreeStateInfo | None = None,
+    mux_info: sessions.MuxInfo | None = None,
 ) -> dict:
     """Serialize a WorktreeRecord to a JSON-friendly dict.
 
     If ``state_info`` is provided, includes git-derived classification
     (state, ahead, behind, dirty) alongside the tracking status.
+
+    If ``mux_info`` is provided, includes multiplexer session status
+    (existence and attached client count).
     """
     d: dict = {
         "id": rec.worktree_id,
@@ -283,6 +287,10 @@ def _worktree_to_dict(
         if state_info.branch_drift and state_info.current_branch:
             d["current_branch"] = state_info.current_branch
             d["branch_drift"] = True
+    if mux_info is not None:
+        d["mux_session"] = mux_info.exists
+        d["mux_clients"] = mux_info.clients
+        d["mux_attached"] = mux_info.attached
     return d
 
 
@@ -1416,6 +1424,12 @@ def cmd_status(args: argparse.Namespace) -> int:
     session_ctx = sessions.scan_sessions(all_paths)
     active_paths = _build_active_paths(records)
 
+    # Mux status (batch query if requested)
+    mux_map: dict[str, sessions.MuxInfo] = {}
+    if getattr(args, "mux_details", False):
+        wt_ids = [rec.worktree_id for rec in records]
+        mux_map = sessions.mux_status_many(wt_ids)
+
     results: list[dict] = []
     for rec in records:
         info = git_ops.classify_worktree(
@@ -1424,7 +1438,9 @@ def cmd_status(args: argparse.Namespace) -> int:
             active_paths=active_paths,
         )
         info = _apply_tracking_override(rec, info)
-        result_entry = _worktree_to_dict(rec, state_info=info)
+        result_entry = _worktree_to_dict(
+            rec, state_info=info, mux_info=mux_map.get(rec.worktree_id),
+        )
         # Add display helpers for table output
         short_id = rec.worktree_id[-4:] if len(rec.worktree_id) > 4 else rec.worktree_id
         result_entry["short_id"] = short_id
@@ -1491,7 +1507,14 @@ def cmd_list(args: argparse.Namespace) -> int:
     records = tracking.list_records(tracking_path, status_filter=status_filter)
 
     if args.json:
-        worktrees = [_worktree_to_dict(rec) for rec in records]
+        mux_map: dict[str, sessions.MuxInfo] = {}
+        if getattr(args, "mux_details", False):
+            wt_ids = [rec.worktree_id for rec in records]
+            mux_map = sessions.mux_status_many(wt_ids)
+        worktrees = [
+            _worktree_to_dict(rec, mux_info=mux_map.get(rec.worktree_id))
+            for rec in records
+        ]
         _json_output({"worktrees": worktrees})
         return 0
 
@@ -3273,11 +3296,15 @@ def build_parser() -> argparse.ArgumentParser:
     # status
     p = sub.add_parser("status", help="Show worktree git status")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--mux-details", action="store_true",
+                   help="Include mux session attached/detached status (JSON only)")
 
     # list (lightweight inventory from tracking records)
     p = sub.add_parser("list", help="List worktrees from tracking records")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
+    p.add_argument("--mux-details", action="store_true",
+                   help="Include mux session attached/detached status (JSON only)")
     p.add_argument("--tracking-status", default="all",
                    choices=["active", "complete", "finalized", "orphaned", "all"],
                    help="Filter by tracking status (default: all)")
