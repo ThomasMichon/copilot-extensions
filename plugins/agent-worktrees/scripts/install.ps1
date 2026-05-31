@@ -392,13 +392,13 @@ function Deploy-Wrappers {
         Write-ServiceOk "Wrapper: $wrapper"
     }
 
-    # Deploy bootstrap-check scripts (called by sessionStart hook)
-    foreach ($script in @('bootstrap-check.ps1', 'bootstrap-check.sh')) {
+    # Deploy sessionStart hook scripts (bootstrap-check + project-hooks)
+    foreach ($script in @('bootstrap-check.ps1', 'bootstrap-check.sh', 'project-hooks.ps1', 'project-hooks.sh')) {
         $src = Join-Path $ScriptDir $script
         $dst = Join-Path $BinDir $script
         if (Test-Path $src) {
             Copy-Item $src $dst -Force
-            Write-ServiceOk "Bootstrap: $script"
+            Write-ServiceOk "Hook: $script"
         }
     }
 
