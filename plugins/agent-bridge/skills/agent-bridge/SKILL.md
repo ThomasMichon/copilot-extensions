@@ -10,7 +10,7 @@ description: >
 
 Agent-bridge is the inter-agent communication service. It manages
 persistent sessions with agents running on any configured machine
-via SSH transport.
+via local subprocess or SSH transport.
 
 ## Service Architecture
 
@@ -18,6 +18,9 @@ Each machine runs its own agent-bridge instance (port 9280). The topology
 is a mesh -- each instance manages outbound connections to other machines
 via SSH. Sessions are persistent (SQLite-backed) and survive service
 restarts.
+
+Runs on **Windows** (scheduled task + PID file), **Linux/WSL** (systemd),
+with macOS support planned.
 
 **Code lives in:** `~/src/copilot-extensions/plugins/agent-bridge/`
 (external repo, tracked in `external-repos.yaml`)
