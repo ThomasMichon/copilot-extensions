@@ -11,7 +11,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     agent_name TEXT,
     target_dir TEXT NOT NULL,
     target_type TEXT NOT NULL DEFAULT 'local',
+    target_json TEXT,
     status TEXT NOT NULL DEFAULT 'created',
     pid INTEGER,
     acp_session_id TEXT,
@@ -86,7 +87,7 @@ class Database:
         return self._local.conn
 
     def _init_schema(self) -> None:
-        """Create tables if they don't exist."""
+        """Create tables if they don't exist, run migrations."""
         conn = self._get_conn()
         with self._write_lock:
             conn.executescript(_SCHEMA_SQL)
@@ -98,6 +99,24 @@ class Database:
                     (SCHEMA_VERSION,),
                 )
                 conn.commit()
+            else:
+                current = row["version"]
+                if current < SCHEMA_VERSION:
+                    self._migrate(conn, current)
+
+    def _migrate(self, conn: sqlite3.Connection, from_version: int) -> None:
+        """Run schema migrations from from_version to SCHEMA_VERSION."""
+        if from_version < 2:
+            # v1 -> v2: add target_json column for full SpawnTarget persistence
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
+            if "target_json" not in cols:
+                conn.execute("ALTER TABLE sessions ADD COLUMN target_json TEXT")
+                log.info("Migration v1->v2: added target_json column to sessions")
+            conn.execute(
+                "UPDATE schema_version SET version=?", (2,)
+            )
+            conn.commit()
+            log.info("Schema migrated to version 2")
 
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
@@ -124,12 +143,14 @@ class Database:
         status: str,
         now: float,
         config_json: str | None = None,
+        target_json: str | None = None,
     ) -> None:
         self.execute_write(
             "INSERT INTO sessions (id, name, agent_name, target_dir, target_type, "
-            "status, config_json, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, name, agent_name, target_dir, target_type, status, config_json, now, now),
+            "status, config_json, target_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, name, agent_name, target_dir, target_type, status,
+             config_json, target_json, now, now),
         )
 
     def update_session_status(

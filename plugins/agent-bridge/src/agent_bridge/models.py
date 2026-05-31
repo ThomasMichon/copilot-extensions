@@ -53,6 +53,7 @@ class SessionInfo(BaseModel):
     agent_name: str | None = None
     target_dir: str
     target_type: Literal["local", "ssh"] = "local"
+    target_host: str | None = None
     status: SessionStatus
     pid: int | None = None
     turn_count: int = 0

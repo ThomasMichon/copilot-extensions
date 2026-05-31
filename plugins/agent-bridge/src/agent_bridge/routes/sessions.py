@@ -36,6 +36,7 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         agent_name=s.agent_name,
         target_dir=s.target.cwd,
         target_type=s.target.type,
+        target_host=s.target.host,
         status=s.status,
         pid=s.pid,
         turn_count=s.turn_count,
@@ -48,10 +49,25 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
 async def start_session(req: StartSessionRequest, request: Request):
     mgr: SessionManager = request.app.state.session_manager
 
-    target = SpawnTarget(
-        type="local",
-        cwd=req.target_dir or ".",
-    )
+    if req.agent:
+        # Resolve agent via registry
+        resolver = getattr(request.app.state, "resolver", None)
+        if not resolver:
+            raise HTTPException(
+                status_code=500,
+                detail="No agent resolver configured -- topology not loaded",
+            )
+        try:
+            target = resolver.resolve(req.agent)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    else:
+        target = SpawnTarget(
+            type="local",
+            cwd=req.target_dir or ".",
+        )
 
     session = await mgr.start_session(target, agent_name=req.agent)
 
