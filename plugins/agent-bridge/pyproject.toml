@@ -17,6 +17,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "pyyaml>=6.0",
     "pydantic>=2.0",
+    "agent-client-protocol>=0.9,<1",
 ]
 
 [project.scripts]
