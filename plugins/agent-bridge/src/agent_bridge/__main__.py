@@ -1,7 +1,8 @@
 """CLI entry point for agent-bridge.
 
 Server commands:  start, status, version
-Client commands:  agents, machines, sessions, send, wait, stop, end
+Client commands:  agents, machines, sessions, send, wait, stop, end, resume
+Agent mode:       agent (run as ACP agent on stdio)
 """
 
 from __future__ import annotations
@@ -393,6 +394,73 @@ def _cmd_resume(args: argparse.Namespace) -> None:
     print(f"[OK] Session {args.session_id} resumed ({status})")
 
 
+def _cmd_agent(args: argparse.Namespace) -> None:
+    """Run agent-bridge as an upstream ACP agent on stdio."""
+    import asyncio
+    from pathlib import Path
+
+    from .acp_agent import BridgeAgent
+    from .agent_registry import AgentResolver, load_agent_registry
+    from .config import load_config
+    from .db import Database
+    from .session_manager import SessionManager
+    from .topology import load_machines_yaml
+
+    log = logging.getLogger("agent-bridge")
+
+    cfg = load_config()
+
+    # Initialize DB and session manager
+    db_path = Path(cfg.db_path).expanduser()
+    db = Database(db_path)
+    sm = SessionManager(db)
+
+    # Load topology/resolver
+    resolver = None
+    all_machines: dict = {}
+    all_agents: dict = {}
+    for _profile_name, profile in cfg.topologies.items():
+        if profile.machines_yaml:
+            machines = load_machines_yaml(profile.machines_yaml)
+            all_machines.update(machines)
+        if profile.agents_config:
+            agents_cfg = load_agent_registry(profile.agents_config)
+            all_agents.update(agents_cfg)
+
+    if all_machines or all_agents:
+        resolver = AgentResolver(all_agents, all_machines)
+
+    agent_name = getattr(args, "agent", None)
+    if not agent_name:
+        print("[FAIL] --agent is required for agent mode", file=sys.stderr)
+        sys.exit(1)
+
+    # Validate agent exists
+    if resolver and agent_name not in resolver.agents:
+        available = list(resolver.agents.keys())
+        print(
+            f"[FAIL] Agent '{agent_name}' not found. Available: {available}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    bridge_agent = BridgeAgent(
+        sm, resolver=resolver, default_agent=agent_name,
+    )
+
+    log.info("Starting ACP agent mode (agent=%s)", agent_name)
+
+    async def _run() -> None:
+        from acp import run_agent
+
+        try:
+            await run_agent(bridge_agent)
+        finally:
+            await bridge_agent.cleanup()
+
+    asyncio.run(_run())
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -466,6 +534,17 @@ def main(argv: list[str] | None = None) -> None:
     resume_p = sub.add_parser("resume", help="Resume a stopped session")
     resume_p.add_argument("session_id", help="Session ID")
     resume_p.set_defaults(func=_cmd_resume)
+
+    # -- Agent mode --
+
+    agent_p = sub.add_parser(
+        "agent", help="Run as an ACP agent on stdio",
+    )
+    agent_p.add_argument(
+        "--agent", required=True,
+        help="Name of the downstream agent to route to",
+    )
+    agent_p.set_defaults(func=_cmd_agent)
 
     args = parser.parse_args(argv)
 

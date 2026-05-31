@@ -153,12 +153,20 @@ class SessionManager:
         self,
         target: SpawnTarget,
         agent_name: str | None = None,
+        permission_callback: Any | None = None,
     ) -> Session:
         """Create and start a new agent session.
 
         Spawns a copilot --acp --stdio subprocess, initializes the ACP
         protocol, and creates a new ACP session. The session is ready
         to receive prompts when this returns.
+
+        Args:
+            target: Where/how to spawn the agent.
+            agent_name: Optional display name for the agent.
+            permission_callback: Optional async callback for permission
+                requests. Signature: (session_id, options, tool_call) ->
+                RequestPermissionResponse. If set, auto_approve is disabled.
         """
         session_id = str(uuid.uuid4())[:12]
         name = _generate_name()
@@ -192,7 +200,12 @@ class SessionManager:
             agent_proc = await spawn(target)
 
             # Initialize ACP protocol on the subprocess
-            client = AcpClient(on_event=on_acp_event)
+            client = AcpClient(
+                on_event=on_acp_event,
+                on_permission=permission_callback,
+            )
+            if permission_callback:
+                client.auto_approve = False
             await client.start(agent_proc.proc)
 
             # Create ACP session
@@ -224,7 +237,11 @@ class SessionManager:
         session.touch()
         return session
 
-    async def resume_session(self, session_id: str) -> Session:
+    async def resume_session(
+        self,
+        session_id: str,
+        permission_callback: Any | None = None,
+    ) -> Session:
         """Resume a stopped session by spawning a new process.
 
         Uses AcpClient.load_session() to reattach to the persisted ACP
@@ -256,7 +273,12 @@ class SessionManager:
             client: AcpClient | None = None
             try:
                 agent_proc = await spawn(session.target)
-                client = AcpClient(on_event=on_acp_event)
+                client = AcpClient(
+                    on_event=on_acp_event,
+                    on_permission=permission_callback,
+                )
+                if permission_callback:
+                    client.auto_approve = False
                 await client.start(agent_proc.proc)
                 await client.load_session(
                     cwd=session.target.cwd,
