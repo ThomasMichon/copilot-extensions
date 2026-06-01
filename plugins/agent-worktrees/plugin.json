@@ -1,7 +1,7 @@
 {
   "name": "agent-worktrees",
   "description": "Worktree isolation system for concurrent Copilot CLI sessions \u2014 init, adopt repos, manage lifecycle, finalize, and deploy services",
-  "version": "1.4.1-dev15",
+  "version": "1.4.1-dev16",
   "author": {
     "name": "Thomas Michon"
   },
