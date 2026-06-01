@@ -419,6 +419,11 @@ do_status() {
         state=$(systemctl --user is-enabled "$SYSTEMD_UNIT" 2>/dev/null || echo "not found")
         _ok "systemd unit: $state"
     fi
+
+    # Exit non-zero when not installed (used by module update orchestrator)
+    if [[ ! -x "$VENV_DIR/bin/agent-bridge" ]]; then
+        exit 1
+    fi
 }
 
 do_update() {

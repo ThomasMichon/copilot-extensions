@@ -499,6 +499,11 @@ function Invoke-Status {
     } else {
         Write-Step 'No scheduled task registered'
     }
+
+    # Exit non-zero when not installed (used by module update orchestrator)
+    if (-not $agentBridge) {
+        exit 1
+    }
 }
 
 function Invoke-Update {
