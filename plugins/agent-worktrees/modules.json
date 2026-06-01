@@ -4,11 +4,7 @@
     {
       "name": "agent-bridge",
       "source": "agent-bridge",
-      "description": "Inter-agent communication service",
-      "update": {
-        "windows": ["scripts/install.ps1", "update"],
-        "linux": ["scripts/install.sh", "update"]
-      }
+      "description": "Inter-agent communication service"
     }
   ]
 }
