@@ -437,14 +437,14 @@ def _build_launch_cmd(
             setup_path = str(Path(anchor) / "tools" / "setup" / "setup.ps1")
             if not Path(setup_path).is_file():
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.ps1")
-            cmd = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", setup_path, "-Machine", config.machine, "-WorkDir", work_dir]
+            cmd = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", setup_path, "-Machine", config.machine]
             if recovery:
                 cmd.append("-Recovery")
         else:
             setup_path = str(Path(anchor) / "tools" / "setup" / "setup.sh")
             if not Path(setup_path).is_file():
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.sh")
-            cmd = ["bash", setup_path, "--machine", config.machine, "--work-dir", work_dir]
+            cmd = ["bash", setup_path, "--machine", config.machine]
             if recovery:
                 cmd.append("--recovery")
 
