@@ -79,10 +79,10 @@ async def spawn_local(target: SpawnTarget) -> AgentProcess:
     """Spawn a Copilot ACP agent as a local subprocess.
 
     When a ``project`` is configured, launches via the project binstub
-    (e.g. ``my-project --base --no-mux -- --acp --stdio``).  The
-    binstub resolves the setup script, loads vault credentials, and execs
-    copilot.  This keeps secrets in the subprocess environment without
-    transmitting them through the bridge.
+    (e.g. ``my-project --no-mux -- --acp --stdio``).  The binstub
+    resolves the setup script, loads vault credentials, creates a
+    worktree session, and execs copilot.  This keeps secrets in the
+    subprocess environment without transmitting them through the bridge.
 
     Without ``project``, runs copilot directly (legacy behavior).
     """
@@ -91,7 +91,7 @@ async def spawn_local(target: SpawnTarget) -> AgentProcess:
 
     if target.project:
         args = [
-            target.project, "--base", "--no-mux", "--no-update",
+            target.project, "--no-mux", "--no-update",
             "--", "--acp", "--stdio",
         ] + target.copilot_args
         log.info("Spawning local agent via binstub: %s", " ".join(args))
@@ -139,7 +139,7 @@ async def spawn_ssh(target: SpawnTarget) -> AgentProcess:
         # credentials, and copilot resolution.  Secrets stay on the remote
         # machine -- they never traverse the SSH channel back to the bridge.
         binstub_args = [
-            target.project, "--base", "--no-mux", "--no-update",
+            target.project, "--no-mux", "--no-update",
             "--", "--acp", "--stdio",
         ]
         if target.copilot_args:
