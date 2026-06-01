@@ -187,7 +187,7 @@ class TestSpawnSsh:
 
             remote_cmd = mock_asyncio.create_subprocess_exec.call_args[0][-1]
             assert "my-project" in remote_cmd
-            assert "--base" in remote_cmd
+            assert "--base" not in remote_cmd
             assert "--no-mux" in remote_cmd
             assert "--acp" in remote_cmd
             assert "--stdio" in remote_cmd
@@ -242,7 +242,7 @@ class TestSpawnLocal:
             call_args = mock_asyncio.create_subprocess_exec.call_args
             args = call_args[0]
             assert args[0] == "my-project"
-            assert "--base" in args
+            assert "--base" not in args
             assert "--no-mux" in args
             assert "--acp" in args
             assert "--stdio" in args
