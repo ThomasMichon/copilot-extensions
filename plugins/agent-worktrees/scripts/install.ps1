@@ -242,6 +242,68 @@ function Register-ProjectEntry {
     Write-ServiceOk "Project '$ProjectName' registered in projects.yaml"
 }
 
+# -- WSL availability (cached, with timeout) ------------------------------
+
+$script:WslTimeoutSeconds = 5
+$script:WslChecked = $false
+$script:WslAvailable = $false
+
+function Invoke-WslWithTimeout {
+    <# Run wsl.exe with a timeout. Returns @{ Success; ExitCode; Output; TimedOut }. #>
+    param(
+        [string[]]$Arguments,
+        [int]$TimeoutSeconds = $script:WslTimeoutSeconds
+    )
+    $result = @{ Success = $false; ExitCode = -1; Output = ''; TimedOut = $false }
+    try {
+        $job = Start-Job -ScriptBlock {
+            param($args_)
+            $out = & wsl.exe @args_ 2>&1
+            [PSCustomObject]@{ ExitCode = $LASTEXITCODE; Output = ($out | Out-String) }
+        } -ArgumentList (,@($Arguments))
+        $done = Wait-Job $job -Timeout $TimeoutSeconds
+        if ($done) {
+            $data = Receive-Job $job
+            $result.ExitCode = $data.ExitCode
+            $result.Output = $data.Output
+            $result.Success = ($data.ExitCode -eq 0)
+        } else {
+            $result.TimedOut = $true
+            Stop-Job $job -ErrorAction SilentlyContinue
+        }
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+    } catch {
+        # wsl.exe not found or other fatal error
+    }
+    return $result
+}
+
+function Test-WslAvailable {
+    <# One-time check whether WSL is functional. Caches result for this script run. #>
+    if ($script:WslChecked) { return $script:WslAvailable }
+    $script:WslChecked = $true
+    $r = Invoke-WslWithTimeout -Arguments @('-l', '-q')
+    if ($r.TimedOut) {
+        Write-ServiceWarn "WSL timed out after ${script:WslTimeoutSeconds}s - skipping all WSL operations"
+        $script:WslAvailable = $false
+        return $false
+    }
+    if (-not $r.Success) {
+        Write-ServiceWarn "WSL not available (exit code $($r.ExitCode)) - skipping all WSL operations"
+        $script:WslAvailable = $false
+        return $false
+    }
+    # Verify at least one distro is listed
+    $distros = ($r.Output -replace "`0", '') -split "`n" | Where-Object { $_ -match '\S' }
+    if ($distros.Count -eq 0) {
+        Write-ServiceWarn "No WSL distros found - skipping all WSL operations"
+        $script:WslAvailable = $false
+        return $false
+    }
+    $script:WslAvailable = $true
+    return $true
+}
+
 # -- Machine detection ----------------------------------------------------
 
 $HostnameMap = @{
@@ -515,25 +577,24 @@ function Test-WslBinstubExists {
         [string]$Name,
         [string]$Distro
     )
-    try {
-        if ($Distro) {
-            & wsl.exe -d $Distro -- bash -c 'test -x "$HOME/.local/bin/$1"' _ $Name 2>$null
-        } else {
-            & wsl.exe -- bash -c 'test -x "$HOME/.local/bin/$1"' _ $Name 2>$null
-        }
-        return ($LASTEXITCODE -eq 0)
-    } catch {
-        return $false
+    if (-not (Test-WslAvailable)) { return $false }
+    $args_ = if ($Distro) {
+        @('-d', $Distro, '--', 'bash', '-c', "test -x `"`$HOME/.local/bin/$Name`"")
+    } else {
+        @('--', 'bash', '-c', "test -x `"`$HOME/.local/bin/$Name`"")
     }
+    $r = Invoke-WslWithTimeout -Arguments $args_
+    return $r.Success
 }
 
 # Helper: detect the default WSL distro name
 function Get-WslDefaultDistro {
-    try {
-        $line = & wsl.exe -l -q 2>&1 | Where-Object { $_ -match '\S' } | Select-Object -First 1
-        $name = ($line -replace "`0", '').Trim()
-        if ($name) { return $name }
-    } catch {}
+    if (-not (Test-WslAvailable)) { return $null }
+    $r = Invoke-WslWithTimeout -Arguments @('-l', '-q')
+    if (-not $r.Success) { return $null }
+    $name = ($r.Output -replace "`0", '') -split "`n" | Where-Object { $_ -match '\S' } | Select-Object -First 1
+    $name = $name.Trim()
+    if ($name) { return $name }
     return $null
 }
 
@@ -895,24 +956,10 @@ function Deploy-WslBinstub {
        or prints setup instructions if not.  Returns $true if deployed,
        $false if WSL is unavailable or deployment failed. #>
 
-    # Check WSL availability
-    try {
-        $wslStatus = & wsl.exe --status 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-ServiceWarn "WSL not available - skipping binstub"
-            return $false
-        }
-    } catch {
-        Write-ServiceWarn "WSL not available - skipping binstub"
-        return $false
-    }
+    if (-not (Test-WslAvailable)) { return $false }
 
-    # Detect default distro
-    $distro = ''
-    try {
-        $distroLine = & wsl.exe -l -q 2>&1 | Where-Object { $_ -match '\S' } | Select-Object -First 1
-        $distro = ($distroLine -replace "`0", '').Trim()
-    } catch {}
+    # Detect default distro (already validated by Test-WslAvailable)
+    $distro = Get-WslDefaultDistro
     if (-not $distro) {
         Write-ServiceWarn "No WSL distro found - skipping binstub"
         return $false
@@ -938,13 +985,22 @@ fi
 
     # Deploy to WSL via base64 to avoid quoting issues
     try {
-        & wsl.exe -d $distro -- bash -c 'mkdir -p "$HOME/.local/bin"' 2>$null
+        $r = Invoke-WslWithTimeout -Arguments @('-d', $distro, '--', 'bash', '-c', 'mkdir -p "$HOME/.local/bin"') -TimeoutSeconds 10
+        if ($r.TimedOut) {
+            Write-ServiceWarn "WSL mkdir timed out - skipping binstub"
+            return $false
+        }
 
         $cleanScript = $binstubScript -replace "`r", ""
         $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($cleanScript))
-        & wsl.exe -d $distro -- bash -c 'echo "$1" | base64 -d > "$HOME/.local/bin/$2" && chmod +x "$HOME/.local/bin/$2"' _ $b64 $ProjectName
+        $deployCmd = "echo `"$b64`" | base64 -d > `"`$HOME/.local/bin/$ProjectName`" && chmod +x `"`$HOME/.local/bin/$ProjectName`""
+        $r = Invoke-WslWithTimeout -Arguments @('-d', $distro, '--', 'bash', '-c', $deployCmd) -TimeoutSeconds 10
 
-        if ($LASTEXITCODE -eq 0) {
+        if ($r.TimedOut) {
+            Write-ServiceWarn "WSL binstub deploy timed out"
+            return $false
+        }
+        if ($r.Success) {
             Write-ServiceOk "WSL binstub deployed to ~/.local/bin/$ProjectName ($distro)"
 
             # Record distro in projects registry (metadata only, not used for gating)
