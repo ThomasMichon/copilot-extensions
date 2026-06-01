@@ -39,6 +39,21 @@ def _generate_name() -> str:
     return f"{random.choice(_ADJECTIVES)}-{random.choice(_NOUNS)}"  # noqa: S311
 
 
+def _default_cwd(target: SpawnTarget) -> str:
+    """Derive a plausible default CWD for a spawn target.
+
+    Binstub SSH agents resolve CWD remotely, so target.cwd is None.
+    The ACP spec requires an absolute path for new_session/load_session.
+    The actual working directory is set by the remote launch script --
+    this value is only used to satisfy the ACP protocol requirement.
+    """
+    user = target.user or "root"
+    # PowerShell/cmd targets are Windows -- home is C:\Users\<user>
+    if target.ssh_shell in ("pwsh", "powershell", "cmd"):
+        return f"C:\\Users\\{user}"
+    return f"/home/{user}"
+
+
 class Session:
     """In-memory state for a single agent-bridge session."""
 
@@ -209,9 +224,10 @@ class SessionManager:
             await client.start(agent_proc.proc)
 
             # Create ACP session -- binstub agents resolve CWD remotely,
-            # so target.cwd may be None; fall back to "." (the agent's
-            # actual CWD is set by the launch script, not by this value).
-            acp_sid = await client.new_session(cwd=target.cwd or ".")
+            # so target.cwd may be None.  The ACP spec requires an absolute
+            # path.  Derive a plausible home-dir default from the target.
+            session_cwd = target.cwd or _default_cwd(target)
+            acp_sid = await client.new_session(cwd=session_cwd)
 
             session.client = client
             session.acp_session_id = acp_sid
@@ -283,7 +299,7 @@ class SessionManager:
                     client.auto_approve = False
                 await client.start(agent_proc.proc)
                 await client.load_session(
-                    cwd=session.target.cwd or ".",
+                    cwd=session.target.cwd or _default_cwd(session.target),
                     session_id=session.acp_session_id,
                 )
 

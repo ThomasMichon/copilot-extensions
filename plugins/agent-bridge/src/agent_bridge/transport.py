@@ -25,6 +25,7 @@ class SpawnTarget:
     copilot_args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     project: str | None = None  # agent-worktrees project (binstub name)
+    ssh_shell: str | None = None  # remote shell (e.g. "pwsh", "bash")
 
     def to_json(self) -> str:
         """Serialize for DB persistence."""
