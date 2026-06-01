@@ -22,8 +22,9 @@ restarts.
 Runs on **Windows** (scheduled task + PID file), **Linux/WSL** (systemd),
 with macOS support planned.
 
-**Code lives in:** `~/src/copilot-extensions/plugins/agent-bridge/`
-(external repo, tracked in `external-repos.yaml`)
+**Installed as plugin:** Part of the `copilot-extensions` marketplace
+plugin. Source code lives in the installed plugin directory at
+`~/.copilot/installed-plugins/copilot-extensions/agent-bridge/`.
 
 **Config lives at:** `~/.agent-bridge/config.yaml` (topology profiles
 pointing to this repo's `machines.yaml` and `acp-agents.json`)
