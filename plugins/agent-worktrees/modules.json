@@ -1,0 +1,14 @@
+{
+  "description": "Sibling modules updated by 'agent-worktrees update'. Order matters.",
+  "modules": [
+    {
+      "name": "agent-bridge",
+      "source": "agent-bridge",
+      "description": "Inter-agent communication service",
+      "update": {
+        "windows": ["scripts/install.ps1", "update"],
+        "linux": ["scripts/install.sh", "update"]
+      }
+    }
+  ]
+}

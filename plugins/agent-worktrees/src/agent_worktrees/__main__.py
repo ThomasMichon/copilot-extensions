@@ -2370,7 +2370,120 @@ def cmd_update(args: argparse.Namespace) -> int:
         return 1
 
     result = subprocess.run(argv, cwd=plugin_dir, timeout=300)
-    return result.returncode
+    if result.returncode != 0:
+        return result.returncode
+
+    # Step 4 — update registered sibling modules (agent-bridge, etc.)
+    skip_modules = getattr(args, "skip_modules", None)
+    _update_modules(plugin_dir, plat, skip_modules)
+
+    return 0
+
+
+def _update_modules(
+    plugin_dir: Path,
+    platform: str,
+    skip_modules: list[str] | None,
+) -> None:
+    """Update sibling modules registered in modules.json.
+
+    Modules are updated in the order listed in the manifest.  Failures
+    are warned but do not abort the overall update.
+
+    Args:
+        plugin_dir: Path to the installed agent-worktrees plugin directory.
+        platform: ``"windows"`` or ``"linux"``.
+        skip_modules: ``None`` = update all, ``[]`` = skip all,
+            ``["name", ...]`` = skip named modules.
+    """
+    manifest = plugin_dir / "modules.json"
+    if not manifest.exists():
+        return
+
+    try:
+        data = json.loads(manifest.read_text())
+    except Exception as exc:
+        output.warn(f"Failed to parse modules.json: {exc}")
+        return
+
+    modules = data.get("modules", [])
+    if not modules:
+        return
+
+    # --skip-modules with no names => skip all
+    if skip_modules is not None and len(skip_modules) == 0:
+        output.info("Skipping all module updates (--skip-modules)")
+        return
+
+    extensions_root = plugin_dir.parent
+    results: list[tuple[str, str]] = []  # (name, "OK" | "SKIPPED" | error)
+
+    for mod in modules:
+        name = mod.get("name", "unknown")
+
+        if skip_modules and name in skip_modules:
+            output.info(f"Skipping module: {name}")
+            results.append((name, "SKIPPED"))
+            continue
+
+        update_cmd = mod.get("update", {})
+        plat_key = "windows" if platform == "windows" else "linux"
+        argv_tail = update_cmd.get(plat_key)
+        if not argv_tail:
+            output.warn(f"Module '{name}' has no update command for {plat_key}")
+            results.append((name, f"no update command for {plat_key}"))
+            continue
+
+        source = mod.get("source", name)
+        module_dir = extensions_root / source
+        if not module_dir.is_dir():
+            output.warn(f"Module '{name}' source not found: {module_dir}")
+            results.append((name, "source dir not found"))
+            continue
+
+        # Build the full command with platform shell prefix
+        installer = module_dir / argv_tail[0]
+        if not installer.exists():
+            output.warn(f"Module '{name}' installer not found: {installer}")
+            results.append((name, "installer not found"))
+            continue
+
+        if platform == "windows":
+            shell = shutil.which("pwsh") or shutil.which("powershell")
+            if not shell:
+                output.warn(f"Module '{name}': PowerShell not found")
+                results.append((name, "powershell not found"))
+                continue
+            argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", str(installer)] + list(argv_tail[1:])
+        else:
+            argv = ["bash", str(installer)] + list(argv_tail[1:])
+
+        output.header(f"Updating Module: {name}")
+        try:
+            r = subprocess.run(argv, cwd=module_dir, timeout=300)
+            if r.returncode == 0:
+                results.append((name, "OK"))
+            else:
+                output.warn(f"Module '{name}' update exited with code {r.returncode}")
+                results.append((name, f"exited {r.returncode}"))
+        except subprocess.TimeoutExpired:
+            output.warn(f"Module '{name}' update timed out")
+            results.append((name, "timed out"))
+        except Exception as exc:
+            output.warn(f"Module '{name}' update failed: {exc}")
+            results.append((name, str(exc)))
+
+    # Summary
+    if results:
+        output.header("Module Update Summary")
+        for name, status in results:
+            if status == "OK":
+                output.ok(f"{name}")
+            elif status == "SKIPPED":
+                output.info(f"{name} (skipped)")
+            else:
+                output.warn(f"{name}: {status}")
 
 
 def _find_installed_plugin_dir() -> Path | None:
@@ -3399,6 +3512,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("update", help="Re-deploy from repo")
     p.add_argument("--recreate-venv", action="store_true",
                    help="Force full venv recreation (cannot run from managed venv)")
+    p.add_argument("--skip-modules", nargs="*", default=None,
+                   metavar="MODULE",
+                   help="Skip module updates (all if no names given, or named modules)")
 
     # install-status
     sub.add_parser("install-status", help="Show installation status")
