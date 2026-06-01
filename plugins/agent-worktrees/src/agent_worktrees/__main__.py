@@ -2390,6 +2390,12 @@ def _update_modules(
     Modules are updated in the order listed in the manifest.  Failures
     are warned but do not abort the overall update.
 
+    Each module must follow the standard installer convention:
+    - ``scripts/install.{ps1,sh}`` with ``install``, ``update``,
+      ``status`` verbs.
+    - ``status`` exits 0 if installed, non-zero if not.
+    - On first encounter, runs ``install``; thereafter ``update``.
+
     Args:
         plugin_dir: Path to the installed agent-worktrees plugin directory.
         platform: ``"windows"`` or ``"linux"``.
@@ -2426,14 +2432,6 @@ def _update_modules(
             results.append((name, "SKIPPED"))
             continue
 
-        update_cmd = mod.get("update", {})
-        plat_key = "windows" if platform == "windows" else "linux"
-        argv_tail = update_cmd.get(plat_key)
-        if not argv_tail:
-            output.warn(f"Module '{name}' has no update command for {plat_key}")
-            results.append((name, f"no update command for {plat_key}"))
-            continue
-
         source = mod.get("source", name)
         module_dir = extensions_root / source
         if not module_dir.is_dir():
@@ -2441,37 +2439,59 @@ def _update_modules(
             results.append((name, "source dir not found"))
             continue
 
-        # Build the full command with platform shell prefix
-        installer = module_dir / argv_tail[0]
+        # Locate the platform installer (convention: scripts/install.{ps1,sh})
+        if platform == "windows":
+            installer = module_dir / "scripts" / "install.ps1"
+        else:
+            installer = module_dir / "scripts" / "install.sh"
+
         if not installer.exists():
             output.warn(f"Module '{name}' installer not found: {installer}")
             results.append((name, "installer not found"))
             continue
 
+        # Determine shell prefix
         if platform == "windows":
             shell = shutil.which("pwsh") or shutil.which("powershell")
             if not shell:
                 output.warn(f"Module '{name}': PowerShell not found")
                 results.append((name, "powershell not found"))
                 continue
-            argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
-                    "-File", str(installer)] + list(argv_tail[1:])
+            shell_prefix = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
+                            "-File", str(installer)]
         else:
-            argv = ["bash", str(installer)] + list(argv_tail[1:])
+            shell_prefix = ["bash", str(installer)]
 
-        output.header(f"Updating Module: {name}")
+        # Detect whether the module is already installed (status exits 0)
         try:
-            r = subprocess.run(argv, cwd=module_dir, timeout=300)
+            status_r = subprocess.run(
+                shell_prefix + ["status"],
+                cwd=module_dir, timeout=30,
+                capture_output=True,
+            )
+            is_installed = status_r.returncode == 0
+        except Exception:
+            is_installed = False
+
+        action = "update" if is_installed else "install"
+        action_label = "Updating" if is_installed else "Installing"
+        output.header(f"{action_label} Module: {name}")
+
+        try:
+            r = subprocess.run(
+                shell_prefix + [action],
+                cwd=module_dir, timeout=300,
+            )
             if r.returncode == 0:
                 results.append((name, "OK"))
             else:
-                output.warn(f"Module '{name}' update exited with code {r.returncode}")
-                results.append((name, f"exited {r.returncode}"))
+                output.warn(f"Module '{name}' {action} exited with code {r.returncode}")
+                results.append((name, f"{action} exited {r.returncode}"))
         except subprocess.TimeoutExpired:
-            output.warn(f"Module '{name}' update timed out")
+            output.warn(f"Module '{name}' {action} timed out")
             results.append((name, "timed out"))
         except Exception as exc:
-            output.warn(f"Module '{name}' update failed: {exc}")
+            output.warn(f"Module '{name}' {action} failed: {exc}")
             results.append((name, str(exc)))
 
     # Summary
