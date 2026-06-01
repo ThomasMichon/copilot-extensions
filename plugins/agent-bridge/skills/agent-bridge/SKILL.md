@@ -115,6 +115,26 @@ Presents agent-bridge as an ACP-compatible agent. Upstream ACP clients
 connect via stdio and the bridge routes prompts to the named downstream
 agent. Used by chat interfaces that speak ACP natively.
 
+### Config Management
+
+```bash
+# Show current config
+agent-bridge config show
+agent-bridge config show --json
+
+# Add/update a topology profile for a repo
+agent-bridge config adopt --repo /path/to/repo --profile facility
+
+# Remove a topology profile
+agent-bridge config remove my-profile
+
+# Validate config (checks file paths, topology completeness)
+agent-bridge config validate
+```
+
+For first-time setup, see the `agent-bridge-init` skill. For wiring
+topology to a repo, see the `agent-bridge-adopt` skill.
+
 ## Common Patterns
 
 ### Quick Remote Agent Interaction

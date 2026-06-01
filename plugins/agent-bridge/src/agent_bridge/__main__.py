@@ -462,6 +462,93 @@ def _cmd_agent(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Config commands
+# ---------------------------------------------------------------------------
+
+
+def _cmd_config_show(args: argparse.Namespace) -> None:
+    """Show current configuration."""
+    from .config import config_dir, load_config
+
+    cfg = load_config()
+    cfg_path = config_dir() / "config.yaml"
+
+    if args.json:
+        _json_out(cfg.model_dump())
+        return
+
+    print(f"Config: {cfg_path}")
+    print(f"  port: {cfg.port}")
+    print(f"  bind: {cfg.bind}")
+    print(f"  db_path: {cfg.db_path}")
+    print(f"  log_level: {cfg.log_level}")
+    print()
+    if cfg.topologies:
+        print("Topologies:")
+        for name, profile in cfg.topologies.items():
+            print(f"  {name}:")
+            if profile.machines_yaml:
+                print(f"    machines_yaml: {profile.machines_yaml}")
+            if profile.agents_config:
+                print(f"    agents_config: {profile.agents_config}")
+    else:
+        print("Topologies: (none)")
+
+
+def _cmd_config_adopt(args: argparse.Namespace) -> None:
+    """Add or update a topology profile for a repo."""
+    from .config import adopt_topology
+
+    try:
+        cfg = adopt_topology(
+            profile_name=args.profile,
+            repo_path=args.repo,
+            machines_yaml=getattr(args, "machines_yaml", None),
+            agents_config=getattr(args, "agents_config", None),
+        )
+    except FileNotFoundError as exc:
+        print(f"[FAIL] {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    profile = cfg.topologies[args.profile]
+    print(f"[OK] Topology profile '{args.profile}' configured")
+    if profile.machines_yaml:
+        print(f"  machines_yaml: {profile.machines_yaml}")
+    if profile.agents_config:
+        print(f"  agents_config: {profile.agents_config}")
+    print()
+    print("[>] Restart agent-bridge to load the new topology")
+
+
+def _cmd_config_remove(args: argparse.Namespace) -> None:
+    """Remove a topology profile."""
+    from .config import remove_topology
+
+    try:
+        remove_topology(args.profile)
+    except KeyError as exc:
+        print(f"[FAIL] {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"[OK] Topology profile '{args.profile}' removed")
+
+
+def _cmd_config_validate(args: argparse.Namespace) -> None:
+    """Validate the current configuration."""
+    from .config import validate_config
+
+    issues = validate_config()
+    if not issues:
+        print("[OK] Configuration is valid")
+        return
+
+    print(f"[WARN] {len(issues)} issue(s) found:")
+    for issue in issues:
+        print(f"  - {issue}")
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -545,6 +632,48 @@ def main(argv: list[str] | None = None) -> None:
         help="Name of the downstream agent to route to",
     )
     agent_p.set_defaults(func=_cmd_agent)
+
+    # -- Config commands --
+
+    config_p = sub.add_parser(
+        "config", help="Manage configuration and topology profiles",
+    )
+    config_sub = config_p.add_subparsers(dest="config_command")
+
+    config_show_p = config_sub.add_parser("show", help="Show current config")
+    config_show_p.set_defaults(func=_cmd_config_show)
+
+    config_adopt_p = config_sub.add_parser(
+        "adopt", help="Add/update a topology profile for a repo",
+    )
+    config_adopt_p.add_argument(
+        "--repo", required=True,
+        help="Path to the repo root (containing machines.yaml)",
+    )
+    config_adopt_p.add_argument(
+        "--profile", required=True,
+        help="Topology profile name (e.g. 'facility', 'aperture-labs')",
+    )
+    config_adopt_p.add_argument(
+        "--machines-yaml",
+        help="Explicit path to machines.yaml (auto-discovered if omitted)",
+    )
+    config_adopt_p.add_argument(
+        "--agents-config",
+        help="Explicit path to acp-agents.json (auto-discovered if omitted)",
+    )
+    config_adopt_p.set_defaults(func=_cmd_config_adopt)
+
+    config_remove_p = config_sub.add_parser(
+        "remove", help="Remove a topology profile",
+    )
+    config_remove_p.add_argument("profile", help="Profile name to remove")
+    config_remove_p.set_defaults(func=_cmd_config_remove)
+
+    config_validate_p = config_sub.add_parser(
+        "validate", help="Validate current configuration",
+    )
+    config_validate_p.set_defaults(func=_cmd_config_validate)
 
     args = parser.parse_args(argv)
 
