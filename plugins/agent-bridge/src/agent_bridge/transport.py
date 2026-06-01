@@ -7,6 +7,8 @@ import json
 import logging
 import os
 import shlex
+import shutil
+import sys
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -76,6 +78,37 @@ class AgentProcess:
                 self.proc.kill()
 
 
+def _wrap_batch_for_windows(
+    args: list[str], env: dict[str, str],
+) -> list[str]:
+    """Wrap .cmd/.bat executables with cmd.exe on Windows.
+
+    ``asyncio.create_subprocess_exec`` uses ``CreateProcess`` which
+    cannot execute batch files directly.  When the resolved executable
+    ends with ``.cmd`` or ``.bat``, we prepend ``cmd.exe /d /s /c`` so
+    that ``CreateProcess`` receives a real PE executable.
+
+    On non-Windows platforms this is a no-op.
+    """
+    if sys.platform != "win32":
+        return args
+
+    exe = args[0]
+    resolved = shutil.which(exe, path=env.get("PATH"))
+    target_path = resolved or exe
+
+    if target_path.lower().endswith((".cmd", ".bat")):
+        comspec = os.environ.get("COMSPEC", "cmd.exe")
+        args = [comspec, "/d", "/s", "/c", target_path, *args[1:]]
+        log.debug("Wrapped batch file for Windows: %s", " ".join(args))
+
+    elif resolved:
+        # Use the fully resolved path even for non-batch executables
+        args = [resolved, *args[1:]]
+
+    return args
+
+
 async def spawn_local(target: SpawnTarget) -> AgentProcess:
     """Spawn a Copilot ACP agent as a local subprocess.
 
@@ -102,6 +135,8 @@ async def spawn_local(target: SpawnTarget) -> AgentProcess:
         copilot = target.copilot_path or _find_copilot()
         args = [copilot, "--acp", "--stdio"] + target.copilot_args
         log.info("Spawning local agent: %s (cwd=%s)", " ".join(args), target.cwd)
+
+    args = _wrap_batch_for_windows(args, env)
 
     proc = await asyncio.create_subprocess_exec(
         *args,

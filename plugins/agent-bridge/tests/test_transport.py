@@ -11,6 +11,7 @@ import pytest
 from agent_bridge.transport import (
     AgentProcess,
     SpawnTarget,
+    _wrap_batch_for_windows,
     spawn,
     spawn_local,
     spawn_ssh,
@@ -258,9 +259,11 @@ class TestSpawnLocal:
         mock_proc.returncode = None
 
         with patch("agent_bridge.transport.asyncio") as mock_asyncio, \
-             patch("agent_bridge.transport._find_copilot", return_value="copilot"):
+             patch("agent_bridge.transport._find_copilot", return_value="copilot"), \
+             patch("agent_bridge.transport.shutil") as mock_shutil:
             mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
             mock_asyncio.subprocess = asyncio.subprocess
+            mock_shutil.which.return_value = None
 
             await spawn_local(target)
 
@@ -313,3 +316,128 @@ class TestCwdValidation:
         target = SpawnTarget(type="ssh", host="testhost")
         with pytest.raises(ValueError, match="requires 'cwd'"):
             await spawn_ssh(target)
+
+
+class TestWrapBatchForWindows:
+    """Tests for _wrap_batch_for_windows -- .cmd/.bat wrapping on Windows."""
+
+    def test_wraps_cmd_file_on_windows(self):
+        """A resolved .cmd executable should be wrapped with cmd.exe."""
+        args = ["my-project.cmd", "--no-mux", "--acp", "--stdio"]
+        env = {"PATH": "C:\\Users\\test\\.local\\bin"}
+
+        with patch("agent_bridge.transport.sys") as mock_sys, \
+             patch("agent_bridge.transport.shutil") as mock_shutil:
+            mock_sys.platform = "win32"
+            mock_shutil.which.return_value = "C:\\Users\\test\\.local\\bin\\my-project.cmd"
+
+            result = _wrap_batch_for_windows(args, env)
+
+        assert result[0].endswith("cmd.exe")
+        assert result[1:4] == ["/d", "/s", "/c"]
+        assert result[4] == "C:\\Users\\test\\.local\\bin\\my-project.cmd"
+        assert "--no-mux" in result
+        assert "--acp" in result
+
+    def test_wraps_bat_file_on_windows(self):
+        """.bat files should also be wrapped."""
+        args = ["launcher.bat", "--stdio"]
+        env = {}
+
+        with patch("agent_bridge.transport.sys") as mock_sys, \
+             patch("agent_bridge.transport.shutil") as mock_shutil:
+            mock_sys.platform = "win32"
+            mock_shutil.which.return_value = "C:\\tools\\launcher.bat"
+
+            result = _wrap_batch_for_windows(args, env)
+
+        assert result[0].endswith("cmd.exe")
+        assert result[4] == "C:\\tools\\launcher.bat"
+
+    def test_does_not_wrap_exe_on_windows(self):
+        """.exe files should not be wrapped."""
+        args = ["copilot.exe", "--acp", "--stdio"]
+        env = {}
+
+        with patch("agent_bridge.transport.sys") as mock_sys, \
+             patch("agent_bridge.transport.shutil") as mock_shutil:
+            mock_sys.platform = "win32"
+            mock_shutil.which.return_value = "C:\\tools\\copilot.exe"
+
+            result = _wrap_batch_for_windows(args, env)
+
+        assert result[0] == "C:\\tools\\copilot.exe"
+        assert "/d" not in result
+
+    def test_noop_on_non_windows(self):
+        """Non-Windows platforms should return args unchanged."""
+        args = ["my-project", "--acp", "--stdio"]
+        env = {}
+
+        with patch("agent_bridge.transport.sys") as mock_sys:
+            mock_sys.platform = "linux"
+
+            result = _wrap_batch_for_windows(args, env)
+
+        assert result == args
+
+    def test_which_returns_none_but_literal_is_cmd(self):
+        """If which() fails but the literal arg ends in .cmd, still wrap."""
+        args = ["my-project.cmd", "--stdio"]
+        env = {}
+
+        with patch("agent_bridge.transport.sys") as mock_sys, \
+             patch("agent_bridge.transport.shutil") as mock_shutil:
+            mock_sys.platform = "win32"
+            mock_shutil.which.return_value = None
+
+            result = _wrap_batch_for_windows(args, env)
+
+        assert result[0].endswith("cmd.exe")
+        assert result[4] == "my-project.cmd"
+
+    def test_which_resolves_bare_name_to_cmd(self):
+        """A bare project name that resolves to .cmd should be wrapped."""
+        args = ["aperture-labs", "--no-mux", "--acp", "--stdio"]
+        env = {"PATH": "C:\\Users\\test\\.local\\bin"}
+
+        with patch("agent_bridge.transport.sys") as mock_sys, \
+             patch("agent_bridge.transport.shutil") as mock_shutil:
+            mock_sys.platform = "win32"
+            mock_shutil.which.return_value = "C:\\Users\\test\\.local\\bin\\aperture-labs.cmd"
+
+            result = _wrap_batch_for_windows(args, env)
+
+        assert result[0].endswith("cmd.exe")
+        assert result[4] == "C:\\Users\\test\\.local\\bin\\aperture-labs.cmd"
+        assert "--no-mux" in result
+
+    def test_uses_comspec_env_var(self):
+        """Should use COMSPEC if set, not hardcoded cmd.exe."""
+        args = ["test.cmd"]
+        env = {}
+
+        with patch("agent_bridge.transport.sys") as mock_sys, \
+             patch("agent_bridge.transport.shutil") as mock_shutil, \
+             patch.dict("os.environ", {"COMSPEC": "C:\\Windows\\System32\\cmd.exe"}):
+            mock_sys.platform = "win32"
+            mock_shutil.which.return_value = "test.cmd"
+
+            result = _wrap_batch_for_windows(args, env)
+
+        assert result[0] == "C:\\Windows\\System32\\cmd.exe"
+
+    def test_uses_effective_path_for_resolution(self):
+        """shutil.which should be called with the env's PATH."""
+        args = ["my-project"]
+        custom_path = "C:\\custom\\bin"
+        env = {"PATH": custom_path}
+
+        with patch("agent_bridge.transport.sys") as mock_sys, \
+             patch("agent_bridge.transport.shutil") as mock_shutil:
+            mock_sys.platform = "win32"
+            mock_shutil.which.return_value = None
+
+            _wrap_batch_for_windows(args, env)
+
+        mock_shutil.which.assert_called_once_with("my-project", path=custom_path)
