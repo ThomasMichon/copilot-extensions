@@ -2462,36 +2462,45 @@ def _update_modules(
         else:
             shell_prefix = ["bash", str(installer)]
 
-        # Detect whether the module is already installed (status exits 0)
-        try:
-            status_r = subprocess.run(
-                shell_prefix + ["status"],
-                cwd=module_dir, timeout=30,
-                capture_output=True,
-            )
-            is_installed = status_r.returncode == 0
-        except Exception:
-            is_installed = False
-
-        action = "update" if is_installed else "install"
-        action_label = "Updating" if is_installed else "Installing"
-        output.header(f"{action_label} Module: {name}")
-
+        # Try update first; if it fails, fall back to install.
+        # This is more robust than relying on the status command's exit
+        # code, since the installed module scripts may be stale (only the
+        # host plugin's files are refreshed by copilot plugin update).
+        output.header(f"Updating Module: {name}")
         try:
             r = subprocess.run(
-                shell_prefix + [action],
+                shell_prefix + ["update"],
                 cwd=module_dir, timeout=300,
             )
             if r.returncode == 0:
                 results.append((name, "OK"))
-            else:
-                output.warn(f"Module '{name}' {action} exited with code {r.returncode}")
-                results.append((name, f"{action} exited {r.returncode}"))
+                continue
         except subprocess.TimeoutExpired:
-            output.warn(f"Module '{name}' {action} timed out")
+            output.warn(f"Module '{name}' update timed out")
+            results.append((name, "timed out"))
+            continue
+        except Exception as exc:
+            output.warn(f"Module '{name}' update failed: {exc}")
+            results.append((name, str(exc)))
+            continue
+
+        # Update failed -- attempt fresh install
+        output.info(f"Module '{name}' update failed (not installed?), trying install...")
+        try:
+            r = subprocess.run(
+                shell_prefix + ["install"],
+                cwd=module_dir, timeout=300,
+            )
+            if r.returncode == 0:
+                results.append((name, "OK (installed)"))
+            else:
+                output.warn(f"Module '{name}' install exited with code {r.returncode}")
+                results.append((name, f"install exited {r.returncode}"))
+        except subprocess.TimeoutExpired:
+            output.warn(f"Module '{name}' install timed out")
             results.append((name, "timed out"))
         except Exception as exc:
-            output.warn(f"Module '{name}' {action} failed: {exc}")
+            output.warn(f"Module '{name}' install failed: {exc}")
             results.append((name, str(exc)))
 
     # Summary
