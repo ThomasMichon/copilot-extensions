@@ -47,9 +47,16 @@ export PYTHONPATH="$RUNTIME_DIR/lib"
 unset PYTHONHOME
 
 # --recovery: skip vault credential loading (propagated via env var to setup.sh)
+# --: everything after this separator is copilot passthrough args (e.g. --acp --stdio)
 FILTERED_ARGS=()
+COPILOT_PASSTHROUGH=()
+_SEEN_SEPARATOR=0
 for arg in "$@"; do
-    if [[ "$arg" == "--recovery" || "$arg" == "recovery" ]]; then
+    if [[ $_SEEN_SEPARATOR -eq 1 ]]; then
+        COPILOT_PASSTHROUGH+=("$arg")
+    elif [[ "$arg" == "--" ]]; then
+        _SEEN_SEPARATOR=1
+    elif [[ "$arg" == "--recovery" || "$arg" == "recovery" ]]; then
         export WORKTREE_RECOVERY=1
         export APERTURE_RECOVERY=1  # backward compat
         setup_log INFO 'Recovery mode requested via CLI arg'
@@ -58,6 +65,9 @@ for arg in "$@"; do
     fi
 done
 set -- "${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"}"
+if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
+    setup_log INFO "Copilot passthrough args: ${COPILOT_PASSTHROUGH[*]}"
+fi
 
 # Recovery escape hatch (broken venv)
 if [[ "${WORKTREE_RECOVERY:-${APERTURE_RECOVERY:-}}" == "1" ]] && [[ ! -x "$PYTHON" ]]; then
@@ -299,6 +309,11 @@ import sys, json, shlex
 d = json.load(sys.stdin)
 print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
 ") )"
+
+    # Append copilot passthrough args (from after -- separator)
+    if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
+        CMD_ARRAY+=("${COPILOT_PASSTHROUGH[@]}")
+    fi
 
     if [[ -n "$WORK_DIR" ]]; then
         cd "$WORK_DIR"

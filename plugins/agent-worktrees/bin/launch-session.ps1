@@ -11,11 +11,10 @@
     Uses $WORKTREE_PROJECT to determine the active project.
     Runtime lives at ~/.agent-worktrees/; project config at ~/.{project}/.
 #>
-[CmdletBinding()]
-param(
-    [Parameter(ValueFromRemainingArguments)]
-    [string[]]$CopilotArgs
-)
+# Accept all arguments via $args (not param block) to avoid PowerShell's
+# parameter binding rejecting unknown flags like --acp, --stdio, --no-mux
+# when called via 'pwsh -File'.
+$CopilotArgs = $args
 
 $ErrorActionPreference = 'Stop'
 
@@ -58,10 +57,17 @@ Write-SetupLog 'launch-session.ps1 starting'
 
 # --recovery: bypass worktree resolution entirely, go straight to setup script
 # --no-update: skip pre-launch self-update (propagated via WORKTREE_NO_UPDATE)
+# --: everything after this separator is copilot passthrough args (e.g. --acp --stdio)
 $FilteredArgs = @()
+$CopilotPassthrough = @()
 $RecoveryMode = $false
+$SeenSeparator = $false
 foreach ($arg in $CopilotArgs) {
-    if ($arg -eq '--recovery' -or $arg -eq '-Recovery' -or $arg -eq 'recovery') {
+    if ($SeenSeparator) {
+        $CopilotPassthrough += $arg
+    } elseif ($arg -eq '--') {
+        $SeenSeparator = $true
+    } elseif ($arg -eq '--recovery' -or $arg -eq '-Recovery' -or $arg -eq 'recovery') {
         $RecoveryMode = $true
         $env:WORKTREE_RECOVERY = '1'
         $env:APERTURE_RECOVERY = '1'  # backward compat
@@ -75,6 +81,9 @@ foreach ($arg in $CopilotArgs) {
     }
 }
 $CopilotArgs = $FilteredArgs
+if ($CopilotPassthrough.Count -gt 0) {
+    Write-SetupLog "Copilot passthrough args: $($CopilotPassthrough -join ' ')"
+}
 
 # Recovery fast-path: skip resolve/picker, launch directly in anchor repo
 if ($RecoveryMode) {
@@ -353,6 +362,11 @@ if ($plan.worktree_id) {
 }
 
 $cmd = @($plan.cmd)
+
+# Append copilot passthrough args (from after -- separator)
+if ($CopilotPassthrough.Count -gt 0) {
+    $cmd += $CopilotPassthrough
+}
 
 # ── psmux session-per-worktree ───────────────────────────────────────
 # Each worktree gets a single shared psmux session. Multiple terminal
