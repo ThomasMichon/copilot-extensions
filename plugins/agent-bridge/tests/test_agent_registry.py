@@ -11,6 +11,7 @@ import pytest
 from agent_bridge.agent_registry import (
     AgentConfig,
     AgentResolver,
+    discover_local_agents,
     load_agent_registry,
     parse_agent_registry,
 )
@@ -258,3 +259,101 @@ class TestLoadAgentRegistry:
         reg_path.write_text("{invalid json")
         registry = load_agent_registry(reg_path)
         assert isinstance(registry, dict)
+
+
+class TestDiscoverLocalAgents:
+
+    def test_discovers_projects(self, tmp_path: Path, monkeypatch):
+        projects_yaml = tmp_path / "projects.yaml"
+        projects_yaml.write_text(
+            "projects:\n"
+            "  my-app:\n"
+            '    anchor: "/home/user/src/my-app"\n'
+            '    registered_at: "2026-01-01"\n'
+            "  dotfiles:\n"
+            '    anchor: "/home/user/src/dotfiles"\n'
+        )
+        monkeypatch.setenv("AGENT_WORKTREES_PROJECTS_YAML", str(projects_yaml))
+        agents = discover_local_agents()
+        assert len(agents) == 2
+        assert "my-app" in agents
+        assert "dotfiles" in agents
+        assert agents["my-app"].project == "my-app"
+        assert agents["my-app"].host is None
+        assert agents["my-app"].auto_discovered is True
+        assert agents["my-app"].cwd == "/home/user/src/my-app"
+
+    def test_missing_projects_yaml(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setenv(
+            "AGENT_WORKTREES_PROJECTS_YAML",
+            str(tmp_path / "nonexistent.yaml"),
+        )
+        agents = discover_local_agents()
+        assert agents == {}
+
+    def test_malformed_yaml(self, tmp_path: Path, monkeypatch):
+        projects_yaml = tmp_path / "projects.yaml"
+        projects_yaml.write_text("{{{not valid yaml")
+        monkeypatch.setenv("AGENT_WORKTREES_PROJECTS_YAML", str(projects_yaml))
+        agents = discover_local_agents()
+        assert agents == {}
+
+    def test_empty_projects(self, tmp_path: Path, monkeypatch):
+        projects_yaml = tmp_path / "projects.yaml"
+        projects_yaml.write_text("projects: {}\n")
+        monkeypatch.setenv("AGENT_WORKTREES_PROJECTS_YAML", str(projects_yaml))
+        agents = discover_local_agents()
+        assert agents == {}
+
+    def test_no_projects_key(self, tmp_path: Path, monkeypatch):
+        projects_yaml = tmp_path / "projects.yaml"
+        projects_yaml.write_text("other_key: value\n")
+        monkeypatch.setenv("AGENT_WORKTREES_PROJECTS_YAML", str(projects_yaml))
+        agents = discover_local_agents()
+        assert agents == {}
+
+    def test_explicit_agents_win_over_discovered(self):
+        """Verify that explicit registry entries take precedence."""
+        explicit = parse_agent_registry({
+            "my-app": {
+                "host": "remote-server",
+                "description": "Explicit remote agent",
+            },
+        })
+        discovered = {
+            "my-app": AgentConfig(
+                name="my-app",
+                project="my-app",
+                auto_discovered=True,
+            ),
+            "other-project": AgentConfig(
+                name="other-project",
+                project="other-project",
+                auto_discovered=True,
+            ),
+        }
+        # Simulate merge logic: explicit wins
+        merged = dict(explicit)
+        for name, agent in discovered.items():
+            if name not in merged:
+                merged[name] = agent
+
+        assert merged["my-app"].host == "remote-server"
+        assert merged["my-app"].auto_discovered is False
+        assert merged["other-project"].auto_discovered is True
+
+    def test_list_agents_shows_auto_discovered(self):
+        agents = {
+            "explicit": AgentConfig(name="explicit", description="Explicit"),
+            "discovered": AgentConfig(
+                name="discovered",
+                project="discovered",
+                auto_discovered=True,
+                description="Auto-discovered",
+            ),
+        }
+        resolver = AgentResolver(agents, {})
+        listing = resolver.list_agents()
+        by_name = {a["name"]: a for a in listing}
+        assert by_name["explicit"]["auto_discovered"] is False
+        assert by_name["discovered"]["auto_discovered"] is True

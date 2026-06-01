@@ -2,12 +2,16 @@
 
 Loads agent profiles from acp-agents.json (or similar), cross-references
 with machine topology, and resolves named agents to SpawnTargets.
+
+Also auto-discovers local agents from agent-worktrees projects.yaml so
+that loopback (same-machine) communication works without explicit config.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,6 +20,8 @@ from .topology import MachineConfig, SshEnvironment
 from .transport import SpawnTarget
 
 log = logging.getLogger("agent-bridge")
+
+_PROJECTS_YAML_DEFAULT = "~/.agent-worktrees/projects.yaml"
 
 
 @dataclass
@@ -34,6 +40,7 @@ class AgentConfig:
     display_name: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     project: str | None = None  # agent-worktrees project (binstub name)
+    auto_discovered: bool = False  # True for agents from projects.yaml
 
 
 def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
@@ -71,6 +78,111 @@ def load_agent_registry(path: str | Path) -> dict[str, AgentConfig]:
     except Exception as exc:
         log.error("Failed to parse agent registry at %s: %s", p, exc)
         return {}
+
+
+def discover_local_agents() -> dict[str, AgentConfig]:
+    """Auto-discover local agents from agent-worktrees projects.yaml.
+
+    For each adopted project, synthesizes a local AgentConfig that uses
+    the project binstub for spawning. This enables loopback communication
+    (same-machine, cross-worktree) without explicit acp-agents.json entries.
+
+    Returns an empty dict if projects.yaml is missing or unparseable.
+    """
+    try:
+        import yaml
+    except ImportError:
+        log.debug("pyyaml not available -- skipping local agent discovery")
+        return {}
+
+    projects_path = Path(
+        os.environ.get("AGENT_WORKTREES_PROJECTS_YAML", _PROJECTS_YAML_DEFAULT)
+    ).expanduser()
+
+    if not projects_path.exists():
+        log.debug("projects.yaml not found at %s -- no local agents", projects_path)
+        return {}
+
+    try:
+        data = yaml.safe_load(projects_path.read_text()) or {}
+    except Exception as exc:
+        log.warning("Failed to parse projects.yaml at %s: %s", projects_path, exc)
+        return {}
+
+    projects = data.get("projects", {})
+    if not isinstance(projects, dict):
+        log.warning("projects.yaml 'projects' key is not a dict -- skipping")
+        return {}
+
+    discovered: dict[str, AgentConfig] = {}
+    for project_name, project_data in projects.items():
+        if not isinstance(project_data, dict):
+            continue
+        anchor = project_data.get("anchor", "")
+        discovered[project_name] = AgentConfig(
+            name=project_name,
+            project=project_name,
+            cwd=anchor or None,
+            display_name=f"{project_name} (local)",
+            description=f"Local agent for {project_name} (auto-discovered from projects.yaml)",
+            auto_discovered=True,
+        )
+
+    if discovered:
+        log.info(
+            "Auto-discovered %d local agent(s) from projects.yaml: %s",
+            len(discovered), list(discovered.keys()),
+        )
+    return discovered
+
+
+def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
+    """Build an AgentResolver from config profiles + local discovery.
+
+    Loads topology profiles from config, then merges auto-discovered
+    local agents. Explicit registry entries always take precedence over
+    auto-discovered ones.
+
+    Args:
+        cfg: Loaded BridgeConfig with topologies dict.
+
+    Returns:
+        AgentResolver if any agents or machines were found, else None.
+    """
+    from .topology import load_machines_yaml
+
+    all_machines: dict[str, MachineConfig] = {}
+    all_agents: dict[str, AgentConfig] = {}
+
+    for _profile_name, profile in cfg.topologies.items():
+        if profile.machines_yaml:
+            machines = load_machines_yaml(profile.machines_yaml)
+            all_machines.update(machines)
+        if profile.agents_config:
+            agents_cfg = load_agent_registry(profile.agents_config)
+            all_agents.update(agents_cfg)
+
+    # Auto-discover local agents from adopted projects; explicit wins
+    discovered = discover_local_agents()
+    for name, agent in discovered.items():
+        if name in all_agents:
+            log.debug(
+                "Skipping auto-discovered agent '%s' -- explicit entry exists", name,
+            )
+        else:
+            all_agents[name] = agent
+
+    if all_machines or all_agents:
+        resolver = AgentResolver(all_agents, all_machines)
+        log.info(
+            "Resolver built: %d machines, %d agents (%d auto-discovered)",
+            len(all_machines), len(all_agents),
+            sum(1 for a in all_agents.values() if a.auto_discovered),
+        )
+        return resolver
+
+    log.info("No topology profiles or local agents found")
+    return None
 
 
 class AgentResolver:
@@ -195,5 +307,6 @@ class AgentResolver:
                 "spawnable": spawnable,
                 "target_type": target_type,
                 "host": config.host or "",
+                "auto_discovered": config.auto_discovered,
             })
         return result
