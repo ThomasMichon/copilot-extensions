@@ -166,12 +166,59 @@ class TestAgentResolver:
             self.resolver.resolve("windows-only-agent")
 
     def test_resolve_agent_no_posix_shell(self):
-        """Agent on a machine with only pwsh environments should fail in Phase 2."""
+        """Non-binstub agent on a machine with only pwsh should fail."""
         # Make the machine ready but keep only pwsh shells
         self.machines["laptop"].ssh_ready = True
         resolver = AgentResolver(self.agents, self.machines)
         with pytest.raises(ValueError, match="POSIX"):
             resolver.resolve("windows-only-agent")
+
+    def test_resolve_binstub_agent_windows_env(self):
+        """Binstub agent with explicit windows env should resolve via pwsh."""
+        agents = parse_agent_registry({
+            "win-binstub": {
+                "host": "workstation",
+                "ssh_environment": "windows",
+                "project": "my-project",
+                "description": "Windows native with binstub",
+            },
+        })
+        resolver = AgentResolver(agents, self.machines)
+        target = resolver.resolve("win-binstub")
+        assert target.type == "ssh"
+        assert target.host == "workstation"  # windows alias
+        assert target.user == "dev"
+        assert target.project == "my-project"
+
+    def test_resolve_binstub_agent_auto_selects_wsl(self):
+        """Binstub agent with no ssh_environment prefers wsl on dual-env machines."""
+        agents = parse_agent_registry({
+            "auto-binstub": {
+                "host": "workstation",
+                "project": "my-project",
+                "description": "Auto-select env",
+            },
+        })
+        resolver = AgentResolver(agents, self.machines)
+        target = resolver.resolve("auto-binstub")
+        assert target.type == "ssh"
+        assert target.host == "workstation-wsl"  # wsl preferred by default
+
+    def test_resolve_binstub_pwsh_only_machine(self):
+        """Binstub agent on pwsh-only machine should succeed (unlike non-binstub)."""
+        self.machines["laptop"].ssh_ready = True
+        agents = parse_agent_registry({
+            "laptop-binstub": {
+                "host": "laptop",
+                "project": "my-project",
+                "description": "Laptop with binstub",
+            },
+        })
+        resolver = AgentResolver(agents, self.machines)
+        target = resolver.resolve("laptop-binstub")
+        assert target.type == "ssh"
+        assert target.host == "laptop"
+        assert target.project == "my-project"
 
     def test_resolve_agent_missing_machine(self):
         """Agent targeting a machine not in topology should fail."""

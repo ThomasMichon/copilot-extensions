@@ -140,9 +140,24 @@ class AgentResolver:
                 "in the topology"
             )
 
-        ssh_env = machine.get_spawnable_ssh_env(config.ssh_environment)
+        # When a project binstub is configured, the remote command does
+        # not require POSIX shell constructs (no cd/export/exec) -- it
+        # just invokes the binstub directly.  Any SSH environment works.
+        # Without a binstub, the command uses POSIX constructs, so we
+        # restrict to POSIX-compatible shells.
+        if config.project:
+            ssh_env = machine.get_ssh_env(config.ssh_environment)
+        else:
+            ssh_env = machine.get_spawnable_ssh_env(config.ssh_environment)
         if not ssh_env:
             available = [e.name for e in machine.ssh_environments]
+            if config.project:
+                raise ValueError(
+                    f"No SSH environment "
+                    f"{repr(config.ssh_environment) + ' ' if config.ssh_environment else ''}"
+                    f"for agent '{agent_name}' on '{config.host}'. "
+                    f"Available: {available}"
+                )
             posix = [
                 e.name for e in machine.ssh_environments
                 if e.shell in {"bash", "sh", "zsh", "dash", "fish"}
@@ -151,7 +166,7 @@ class AgentResolver:
                 f"No suitable SSH environment for agent '{agent_name}' on "
                 f"'{config.host}'. Available: {available}, "
                 f"POSIX-compatible: {posix}. "
-                "Phase 2 only supports POSIX shells for SSH targets."
+                "Non-binstub SSH targets require a POSIX-compatible shell."
             )
 
         return SpawnTarget(
