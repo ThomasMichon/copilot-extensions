@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, and developer workflow automation",
-    "version": "1.4.1-dev13"
+    "version": "1.4.1-dev14"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.4.1-dev13",
+      "version": "1.4.1-dev14",
       "source": "plugins/agent-worktrees"
     },
     {
