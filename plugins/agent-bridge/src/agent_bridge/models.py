@@ -51,7 +51,7 @@ class SessionInfo(BaseModel):
     session_id: str
     name: str
     agent_name: str | None = None
-    target_dir: str
+    target_dir: str | None = None
     target_type: Literal["local", "ssh"] = "local"
     target_host: str | None = None
     status: SessionStatus

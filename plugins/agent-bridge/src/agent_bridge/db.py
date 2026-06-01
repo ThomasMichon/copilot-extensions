@@ -11,7 +11,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     agent_name TEXT,
-    target_dir TEXT NOT NULL,
+    target_dir TEXT,
     target_type TEXT NOT NULL DEFAULT 'local',
     target_json TEXT,
     status TEXT NOT NULL DEFAULT 'created',
@@ -118,6 +118,43 @@ class Database:
             conn.commit()
             log.info("Schema migrated to version 2")
 
+        if from_version < 3:
+            # v2 -> v3: make target_dir nullable (binstub agents have no cwd)
+            conn.executescript("""
+                PRAGMA foreign_keys = OFF;
+                DROP TABLE IF EXISTS sessions_new;
+                CREATE TABLE sessions_new (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    agent_name TEXT,
+                    target_dir TEXT,
+                    target_type TEXT NOT NULL DEFAULT 'local',
+                    target_json TEXT,
+                    status TEXT NOT NULL DEFAULT 'created',
+                    pid INTEGER,
+                    acp_session_id TEXT,
+                    config_json TEXT,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                INSERT INTO sessions_new
+                    (id, name, agent_name, target_dir, target_type,
+                     target_json, status, pid, acp_session_id,
+                     config_json, created_at, updated_at)
+                SELECT id, name, agent_name, target_dir, target_type,
+                       target_json, status, pid, acp_session_id,
+                       config_json, created_at, updated_at
+                FROM sessions;
+                DROP TABLE sessions;
+                ALTER TABLE sessions_new RENAME TO sessions;
+                PRAGMA foreign_keys = ON;
+            """)
+            conn.execute(
+                "UPDATE schema_version SET version=?", (3,)
+            )
+            conn.commit()
+            log.info("Schema migrated to version 3")
+
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
         conn = self._get_conn()
@@ -138,7 +175,7 @@ class Database:
         session_id: str,
         name: str,
         agent_name: str | None,
-        target_dir: str,
+        target_dir: str | None,
         target_type: str,
         status: str,
         now: float,
