@@ -234,7 +234,7 @@ class SessionManager:
                 session_id, SessionStatus.FAILED.value, time.time()
             )
             session.event_log.append("error", {"message": str(exc)})
-            log.error("Failed to start session %s: %s", session_id, exc)
+            log.error("Failed to start session %s: %s", session_id, exc, exc_info=True)
 
         session.touch()
         return session
