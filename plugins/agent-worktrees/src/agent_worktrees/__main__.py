@@ -2434,6 +2434,28 @@ def _update_modules(
 
         source = mod.get("source", name)
         module_dir = extensions_root / source
+
+        # Refresh the module's installed files via copilot plugin update.
+        # copilot plugin update only refreshes the named plugin, so sibling
+        # module directories go stale unless explicitly updated.
+        plugin_ref = f"{name}@copilot-extensions"
+        try:
+            r = subprocess.run(
+                ["copilot", "plugin", "update", plugin_ref],
+                capture_output=True, text=True, timeout=120,
+            )
+            if r.returncode == 0:
+                for line in r.stdout.strip().splitlines():
+                    output.ok(line)
+            else:
+                output.warn(f"Plugin update for {name} returned non-zero "
+                            f"(continuing with installed version)")
+        except FileNotFoundError:
+            output.warn("'copilot' CLI not found -- skipping plugin refresh")
+        except subprocess.TimeoutExpired:
+            output.warn(f"Plugin update for {name} timed out -- "
+                        "continuing with installed version")
+
         if not module_dir.is_dir():
             output.warn(f"Module '{name}' source not found: {module_dir}")
             results.append((name, "source dir not found"))
