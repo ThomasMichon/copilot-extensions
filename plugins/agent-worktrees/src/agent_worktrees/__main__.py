@@ -470,9 +470,15 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     With ``--base``, resolves for the anchor repo directly (no picker, no
     worktree).  Used by agent-bridge to launch ACP agents with credentials.
     ``--base`` implies ``--no-mux`` and ``--no-resume``.
+
+    With ``--auto``, skips the interactive picker and auto-creates a new
+    worktree.  Used by agent-bridge for non-interactive SSH sessions.
+    ``--auto`` implies ``--no-mux``.  Also triggered automatically when
+    stdin is not a TTY and no other non-interactive flag is set.
     """
     use_json = getattr(args, "json", False)
     use_base = getattr(args, "base", False)
+    use_auto = getattr(args, "auto", False)
 
     if use_json:
         args.no_mux = True
@@ -484,6 +490,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     if use_base:
         args.no_mux = True
         args.no_resume = True
+
+    if use_auto:
+        args.no_mux = True
 
     with output.stdout_to_stderr():
         if use_base:
@@ -559,6 +568,16 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             wsl_cmd = ["wsl", "bash", "-lc", f"{no_mux_export}export WORKTREE_PROJECT={project}; ~/.agent-worktrees/bin/launch-session.sh {' '.join(remaining)}"]
             _emit_plan({"action": "wsl", "cmd": wsl_cmd})
             return 0
+
+        # Non-interactive auto-create: explicit --auto flag or TTY fallback
+        if not use_auto and not sys.stdin.isatty():
+            print("No TTY detected -- auto-creating worktree", file=sys.stderr)
+            use_auto = True
+            args.no_mux = True
+
+        if use_auto:
+            profile = _resolve_profile(config, args)
+            return _resolve_new(config, args, profile=profile)
 
         tracking_path = cfg.tracking_dir()
         tracking_path.mkdir(parents=True, exist_ok=True)
@@ -975,6 +994,21 @@ def _system_pause(msg: str) -> None:
     """Show a brief message via a single-item picker (press Enter to dismiss)."""
     items = [MenuItem(label=f"↩ {msg}", kind=ItemKind.ACTION, value="ok")]
     pick(items, title="", subtitle="Enter to return", default=0)
+
+
+def _resolve_profile(
+    config: cfg.Config,
+    args: argparse.Namespace,
+) -> cfg.CopilotProfile | None:
+    """Resolve --profile flag to a CopilotProfile object."""
+    requested = getattr(args, "profile", None)
+    if not requested:
+        return None
+    profiles = config.copilot_profiles or [cfg.DEFAULT_PROFILE]
+    for p in profiles:
+        if p.name == requested:
+            return p
+    return None
 
 
 def _resolve_base_repo(
@@ -3285,6 +3319,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Worktree ID to resolve (required with --json)")
     p.add_argument("--base", action="store_true",
                    help="Resolve for the anchor repo (no picker, no worktree)")
+    p.add_argument("--auto", action="store_true",
+                   help="Auto-create a new worktree (no picker, non-interactive)")
     p.add_argument("--profile", help="Copilot backend profile name (skips Tab toggle)")
     p.add_argument("copilot_args", nargs="*", default=[])
 

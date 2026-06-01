@@ -139,7 +139,7 @@ async def spawn_ssh(target: SpawnTarget) -> AgentProcess:
         # credentials, and copilot resolution.  Secrets stay on the remote
         # machine -- they never traverse the SSH channel back to the bridge.
         binstub_args = [
-            target.project, "--no-mux", "--no-update",
+            target.project, "--auto", "--no-mux", "--no-update",
             "--", "--acp", "--stdio",
         ]
         if target.copilot_args:
