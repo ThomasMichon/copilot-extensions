@@ -208,8 +208,10 @@ class SessionManager:
                 client.auto_approve = False
             await client.start(agent_proc.proc)
 
-            # Create ACP session
-            acp_sid = await client.new_session(cwd=target.cwd)
+            # Create ACP session -- binstub agents resolve CWD remotely,
+            # so target.cwd may be None; fall back to "." (the agent's
+            # actual CWD is set by the launch script, not by this value).
+            acp_sid = await client.new_session(cwd=target.cwd or ".")
 
             session.client = client
             session.acp_session_id = acp_sid
@@ -281,7 +283,7 @@ class SessionManager:
                     client.auto_approve = False
                 await client.start(agent_proc.proc)
                 await client.load_session(
-                    cwd=session.target.cwd,
+                    cwd=session.target.cwd or ".",
                     session_id=session.acp_session_id,
                 )
 
