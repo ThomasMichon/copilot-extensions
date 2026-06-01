@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # =============================================================================
-# install.sh -- Agent Bridge -- standardized installer interface
+# install.sh -- Agent Bridge -- plugin installer for Linux/WSL
 # =============================================================================
 # Manages the agent-bridge service lifecycle: install, uninstall, start, stop,
 # status, update.
 #
 # Runtime lives at ~/.agent-bridge/ (venv, config, DB, auth).
 # Binstub goes to ~/.local/bin/agent-bridge.
+#
+# On first install, detects and migrates from the aperture-labs service
+# installer (services/agent-bridge/) if present, preserving config, auth,
+# and DB.
 #
 # Usage:
 #   bash plugins/agent-bridge/scripts/install.sh install
@@ -27,6 +31,8 @@ VENV_DIR="$INSTALL_DIR/venv"
 LOCAL_BIN="$HOME/.local/bin"
 BINSTUB="$LOCAL_BIN/agent-bridge"
 PID_FILE="$INSTALL_DIR/agent-bridge.pid"
+PORT=9280
+SYSTEMD_UNIT="agent-bridge.service"
 
 # Ensure ~/.local/bin is on PATH
 if [[ ":$PATH:" != *":$LOCAL_BIN:"* ]]; then
@@ -43,44 +49,17 @@ PURGE=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --purge) PURGE=true; shift ;;
-        *)       echo "Unknown option: $1" >&2; exit 1 ;;
+        *)       echo "[FAIL] Unknown option: $1" >&2; exit 1 ;;
     esac
 done
 
 # -- Helpers -----------------------------------------------------------------
 
-_info()  { echo "[agent-bridge] $*"; }
-_ok()    { echo "[OK] $*"; }
-_fail()  { echo "[FAIL] $*" >&2; }
-_warn()  { echo "[WARN] $*" >&2; }
-
-_ensure_venv() {
-    if [[ ! -d "$VENV_DIR" ]]; then
-        _info "Creating venv at $VENV_DIR"
-        python3 -m venv "$VENV_DIR"
-    fi
-}
-
-_pip() {
-    "$VENV_DIR/bin/pip" "$@"
-}
-
-_venv_python() {
-    "$VENV_DIR/bin/python" "$@"
-}
-
-_find_repo_root() {
-    # Walk up from PLUGIN_DIR to find .git
-    local dir="$PLUGIN_DIR"
-    while [[ "$dir" != "/" ]]; do
-        if [[ -d "$dir/.git" ]]; then
-            echo "$dir"
-            return 0
-        fi
-        dir="$(dirname "$dir")"
-    done
-    echo "$PLUGIN_DIR"
-}
+_ok()   { echo "  [OK]   $*"; }
+_skip() { echo "  [SKIP] $*"; }
+_fail() { echo "  [FAIL] $*" >&2; }
+_step() { echo "  ...    $*"; }
+_warn() { echo "  [WARN] $*" >&2; }
 
 _get_pid() {
     if [[ -f "$PID_FILE" ]]; then
@@ -95,61 +74,233 @@ _get_pid() {
     return 1
 }
 
+_health_check() {
+    local retries=5
+    for i in $(seq 1 $retries); do
+        if curl -sf "http://127.0.0.1:${PORT}/health" > /dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+
+_git_info() {
+    local path="$1"
+    local commit branch dirty
+    commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    dirty="false"
+    if [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]]; then
+        dirty="true"
+    fi
+    echo "$commit $branch $dirty"
+}
+
+_write_deploy_manifest() {
+    local manifest="$INSTALL_DIR/deploy-manifest.json"
+    local repo_root
+    repo_root="$(cd "$PLUGIN_DIR/.." && pwd)"
+
+    local ver="0.0.0"
+    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+        ver=$(grep -m1 '^version' "$PLUGIN_DIR/pyproject.toml" | sed 's/.*"\(.*\)".*/\1/' || echo "0.0.0")
+    fi
+
+    read -r commit branch dirty <<< "$(_git_info "$repo_root")"
+
+    cat > "$manifest" << EOF
+{
+  "schema_version": 2,
+  "service": "agent-bridge",
+  "installer": "plugin",
+  "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "deployed_by": "$(hostname)",
+  "runtime_source": {
+    "repo": "copilot-extensions",
+    "plugin": "agent-bridge",
+    "version": "$ver",
+    "commit": "$commit",
+    "branch": "$branch",
+    "dirty": $dirty,
+    "path": "$PLUGIN_DIR"
+  }
+}
+EOF
+    _ok "Deploy manifest written"
+}
+
+_install_systemd_unit() {
+    # Only install systemd unit if systemd is available and we have user units
+    if ! command -v systemctl &>/dev/null; then
+        _skip "systemd not available -- skipping unit installation"
+        return
+    fi
+
+    local unit_dir="$HOME/.config/systemd/user"
+    mkdir -p "$unit_dir"
+
+    local venv_bridge="$VENV_DIR/bin/agent-bridge"
+
+    cat > "$unit_dir/$SYSTEMD_UNIT" << EOF
+[Unit]
+Description=Agent-Bridge -- inter-agent communication service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$venv_bridge start
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=$INSTALL_DIR
+Environment=PYTHONUTF8=1
+
+[Install]
+WantedBy=default.target
+EOF
+
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable "$SYSTEMD_UNIT" 2>/dev/null || true
+    _ok "systemd user unit installed and enabled"
+}
+
+_migration_check() {
+    local old_manifest="$INSTALL_DIR/deploy-manifest.json"
+    [[ -f "$old_manifest" ]] || return 0
+
+    if grep -q '"installer_path".*services/agent-bridge' "$old_manifest" 2>/dev/null; then
+        _step "Migrating from aperture-labs service installer"
+        _step "  Preserving config, auth, and DB"
+
+        # Stop old instance
+        if pid=$(_get_pid); then
+            _step "  Stopping running instance (pid=$pid)"
+            kill "$pid" 2>/dev/null || true
+            sleep 2
+            rm -f "$PID_FILE"
+        fi
+
+        # Stop old systemd unit if managed by aperture-labs
+        if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
+            systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
+        fi
+
+        _ok "Migration from aperture-labs installer detected"
+    fi
+}
+
 # -- Actions -----------------------------------------------------------------
 
 do_install() {
-    _info "Installing agent-bridge"
+    echo ""
+    echo "=== agent-bridge install ==="
+    echo ""
+
+    _migration_check
+
+    # Find Python
+    local python_cmd=""
+    for candidate in python3 python; do
+        if command -v "$candidate" &>/dev/null; then
+            if "$candidate" --version 2>&1 | grep -q "Python"; then
+                python_cmd="$candidate"
+                break
+            fi
+        fi
+    done
+    if [[ -z "$python_cmd" ]]; then
+        _fail "Python not found (need 3.10+)"
+        exit 1
+    fi
+    _ok "Python: $python_cmd"
 
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 
-    _ensure_venv
+    # Create venv (prefer uv)
+    if [[ ! -f "$VENV_DIR/bin/python" ]]; then
+        if command -v uv &>/dev/null; then
+            _step "Creating venv via uv..."
+            if ! uv venv "$VENV_DIR" --allow-existing 2>/dev/null; then
+                _step "uv venv failed -- falling back to python3 -m venv"
+                "$python_cmd" -m venv "$VENV_DIR"
+            fi
+        else
+            _step "Creating venv via python -m venv..."
+            "$python_cmd" -m venv "$VENV_DIR"
+        fi
+        _ok "Venv created"
+    else
+        _skip "Venv already exists"
+    fi
 
-    _info "Installing package (editable from repo)"
-    _pip install --quiet --upgrade pip
-    _pip install --quiet -e "$PLUGIN_DIR"
+    # Install package
+    _step "Installing agent-bridge package..."
+    if command -v uv &>/dev/null; then
+        uv pip install --python "$VENV_DIR/bin/python" "$PLUGIN_DIR" --quiet 2>/dev/null
+    else
+        "$VENV_DIR/bin/pip" install --quiet --upgrade pip
+        "$VENV_DIR/bin/pip" install --quiet "$PLUGIN_DIR"
+    fi
+    _ok "Package installed"
 
     # Create binstub
     cat > "$BINSTUB" << 'STUB'
 #!/usr/bin/env bash
-# Agent Bridge binstub -- delegates to venv
+export PYTHONUTF8=1
 exec "$HOME/.agent-bridge/venv/bin/agent-bridge" "$@"
 STUB
     chmod +x "$BINSTUB"
+    _ok "Binstub: $BINSTUB"
 
-    # Generate default config if missing
-    _venv_python -c "from agent_bridge.config import load_config, write_default_config; write_default_config(load_config())" 2>/dev/null || true
+    # Generate default config
+    "$VENV_DIR/bin/python" -c \
+        "from agent_bridge.config import load_config, write_default_config; write_default_config(load_config())" \
+        2>/dev/null || true
+    _ok "Default config generated"
 
+    # Install systemd unit
+    _install_systemd_unit
+
+    # Write deploy manifest
+    _write_deploy_manifest
+
+    echo ""
     _ok "agent-bridge installed"
-    _info "Binstub: $BINSTUB"
-    _info "Config:  $INSTALL_DIR/config.yaml"
-    _info "Run 'agent-bridge start' to start the service"
+    echo "  Install dir: $INSTALL_DIR"
+    echo "  Binstub:     $BINSTUB"
+    echo "  Start:       agent-bridge start  (or: systemctl --user start $SYSTEMD_UNIT)"
+    echo "  Config:      agent-bridge config show"
+    echo "  API:         http://127.0.0.1:$PORT"
 }
 
 do_uninstall() {
-    _info "Uninstalling agent-bridge"
+    echo ""
+    echo "=== agent-bridge uninstall ==="
+    echo ""
 
-    # Stop if running
-    if pid=$(_get_pid); then
-        _info "Stopping running instance (pid=$pid)"
-        kill "$pid" 2>/dev/null || true
-        sleep 1
-        rm -f "$PID_FILE"
+    do_stop
+
+    # Remove systemd unit
+    if command -v systemctl &>/dev/null; then
+        systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
+        rm -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT"
+        systemctl --user daemon-reload 2>/dev/null || true
+        _ok "systemd unit removed"
     fi
 
-    # Remove binstub
     rm -f "$BINSTUB"
+    _ok "Binstub removed"
 
-    # Remove venv
     if [[ -d "$VENV_DIR" ]]; then
         rm -rf "$VENV_DIR"
-        _info "Removed venv"
+        _ok "Venv removed"
     fi
 
     if $PURGE; then
-        _info "Purging config, DB, and auth"
+        _warn "Purging config, DB, and auth"
         rm -rf "$INSTALL_DIR"
     else
-        _info "Preserved config/DB at $INSTALL_DIR (use --purge to remove)"
+        _skip "Preserved config/DB at $INSTALL_DIR (use --purge to remove)"
     fi
 
     _ok "agent-bridge uninstalled"
@@ -166,14 +317,35 @@ do_start() {
         exit 1
     fi
 
-    _info "Starting agent-bridge"
+    _step "Starting agent-bridge..."
+
+    # Prefer systemd if available
+    if command -v systemctl &>/dev/null && [[ -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT" ]]; then
+        systemctl --user start "$SYSTEMD_UNIT"
+        sleep 2
+        if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
+            if _health_check; then
+                _ok "agent-bridge started via systemd (port=$PORT)"
+            else
+                _warn "agent-bridge started via systemd but health check failed"
+            fi
+            return 0
+        fi
+        _warn "systemd start failed -- falling back to direct start"
+    fi
+
+    # Direct start
     nohup "$VENV_DIR/bin/agent-bridge" start > "$INSTALL_DIR/agent-bridge.log" 2>&1 &
     local pid=$!
     echo "$pid" > "$PID_FILE"
-    sleep 1
+    sleep 2
 
     if kill -0 "$pid" 2>/dev/null; then
-        _ok "agent-bridge started (pid=$pid)"
+        if _health_check; then
+            _ok "agent-bridge started (pid=$pid, port=$PORT)"
+        else
+            _warn "agent-bridge started (pid=$pid) but health check failed"
+        fi
     else
         _fail "agent-bridge failed to start -- check $INSTALL_DIR/agent-bridge.log"
         rm -f "$PID_FILE"
@@ -182,64 +354,122 @@ do_start() {
 }
 
 do_stop() {
+    # Try systemd first
+    if command -v systemctl &>/dev/null; then
+        if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
+            _step "Stopping agent-bridge via systemd..."
+            systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
+            _ok "agent-bridge stopped (systemd)"
+            rm -f "$PID_FILE"
+            return
+        fi
+    fi
+
+    # Direct stop via PID
     if pid=$(_get_pid); then
-        _info "Stopping agent-bridge (pid=$pid)"
+        _step "Stopping agent-bridge (pid=$pid)..."
         kill "$pid" 2>/dev/null || true
         sleep 1
         rm -f "$PID_FILE"
         _ok "agent-bridge stopped"
     else
-        _info "agent-bridge is not running"
+        _skip "agent-bridge is not running"
     fi
 }
 
 do_status() {
-    if pid=$(_get_pid); then
-        _ok "agent-bridge is running (pid=$pid)"
+    local running=false
 
-        # Try health check
-        local cfg_bind cfg_port
-        cfg_bind="127.0.0.1"
-        cfg_port="9280"
-        if curl -sf "http://$cfg_bind:$cfg_port/health" > /dev/null 2>&1; then
-            _ok "Health check passed"
+    # Check systemd
+    if command -v systemctl &>/dev/null && systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
+        _ok "agent-bridge is running (systemd)"
+        running=true
+    elif pid=$(_get_pid); then
+        _ok "agent-bridge is running (pid=$pid)"
+        running=true
+    else
+        _step "agent-bridge is not running"
+    fi
+
+    if $running; then
+        if _health_check; then
+            _ok "Health check passed (port $PORT)"
         else
             _warn "Process running but health check failed"
         fi
-    else
-        _info "agent-bridge is not running"
     fi
 
-    # Show install state
+    # Install state
     if [[ -x "$VENV_DIR/bin/agent-bridge" ]]; then
         local version
         version=$("$VENV_DIR/bin/agent-bridge" version 2>/dev/null || echo "unknown")
-        _info "Installed: $version"
+        _ok "Installed: $version"
     else
-        _info "Not installed"
+        _step "Not installed"
+    fi
+
+    # Config
+    if [[ -f "$INSTALL_DIR/config.yaml" ]]; then
+        _ok "Config: $INSTALL_DIR/config.yaml"
+    fi
+
+    # Systemd unit
+    if command -v systemctl &>/dev/null && [[ -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT" ]]; then
+        local state
+        state=$(systemctl --user is-enabled "$SYSTEMD_UNIT" 2>/dev/null || echo "not found")
+        _ok "systemd unit: $state"
     fi
 }
 
 do_update() {
-    _info "Updating agent-bridge"
+    echo ""
+    echo "=== agent-bridge update ==="
+    echo ""
 
     if [[ ! -d "$VENV_DIR" ]]; then
         _fail "agent-bridge not installed. Run: install.sh install"
         exit 1
     fi
 
-    # Reinstall from source
-    _pip install --quiet --upgrade pip
-    _pip install --quiet -e "$PLUGIN_DIR"
-
-    _ok "agent-bridge updated"
-
-    # Restart if running
-    if pid=$(_get_pid); then
-        _info "Restarting service"
+    # Stop running instance
+    local was_running=false
+    if pid=$(_get_pid) || (command -v systemctl &>/dev/null && systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null); then
+        was_running=true
         do_stop
+    fi
+
+    # Reinstall package
+    _step "Updating agent-bridge package..."
+    if command -v uv &>/dev/null; then
+        uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge \
+            "$PLUGIN_DIR" --quiet 2>/dev/null
+    else
+        "$VENV_DIR/bin/pip" install --quiet --upgrade pip
+        "$VENV_DIR/bin/pip" install --quiet --force-reinstall "$PLUGIN_DIR"
+    fi
+    _ok "Package updated"
+
+    # Update binstub
+    cat > "$BINSTUB" << 'STUB'
+#!/usr/bin/env bash
+export PYTHONUTF8=1
+exec "$HOME/.agent-bridge/venv/bin/agent-bridge" "$@"
+STUB
+    chmod +x "$BINSTUB"
+
+    # Update systemd unit
+    _install_systemd_unit
+
+    # Update deploy manifest
+    _write_deploy_manifest
+
+    # Restart if it was running
+    if $was_running; then
+        _step "Restarting service..."
         do_start
     fi
+
+    _ok "Update complete"
 }
 
 # -- Dispatch ----------------------------------------------------------------
