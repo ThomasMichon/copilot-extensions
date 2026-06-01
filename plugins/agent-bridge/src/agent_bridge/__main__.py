@@ -400,11 +400,10 @@ def _cmd_agent(args: argparse.Namespace) -> None:
     from pathlib import Path
 
     from .acp_agent import BridgeAgent
-    from .agent_registry import AgentResolver, load_agent_registry
+    from .agent_registry import build_resolver
     from .config import load_config
     from .db import Database
     from .session_manager import SessionManager
-    from .topology import load_machines_yaml
 
     log = logging.getLogger("agent-bridge")
 
@@ -415,20 +414,8 @@ def _cmd_agent(args: argparse.Namespace) -> None:
     db = Database(db_path)
     sm = SessionManager(db)
 
-    # Load topology/resolver
-    resolver = None
-    all_machines: dict = {}
-    all_agents: dict = {}
-    for _profile_name, profile in cfg.topologies.items():
-        if profile.machines_yaml:
-            machines = load_machines_yaml(profile.machines_yaml)
-            all_machines.update(machines)
-        if profile.agents_config:
-            agents_cfg = load_agent_registry(profile.agents_config)
-            all_agents.update(agents_cfg)
-
-    if all_machines or all_agents:
-        resolver = AgentResolver(all_agents, all_machines)
+    # Load topology/resolver (includes auto-discovered local agents)
+    resolver = build_resolver(cfg)
 
     agent_name = getattr(args, "agent", None)
     if not agent_name:
