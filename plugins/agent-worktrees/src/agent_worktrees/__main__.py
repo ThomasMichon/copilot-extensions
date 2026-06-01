@@ -2193,13 +2193,14 @@ def cmd_register(args: argparse.Namespace) -> int:
     if not inst.deploy_binstubs(repo_dir, project=project):
         return 1
 
-    # Update projects registry — include WSL state if running inside WSL
+    # Update projects registry — include WSL state only when actually in WSL
     wsl_state: str | None = None
     wsl_distro: str | None = None
     wsl_path: str | None = None
-    if plat in ("wsl", "linux"):
+    wsl_distro_name = os.environ.get("WSL_DISTRO_NAME")
+    if wsl_distro_name:
         wsl_state = "adopted"
-        wsl_distro = os.environ.get("WSL_DISTRO_NAME")
+        wsl_distro = wsl_distro_name
         wsl_path = str(repo_dir)
     inst.register_project(
         project,
@@ -3129,47 +3130,28 @@ def cmd_pre_launch(args: argparse.Namespace) -> int:
 def _build_installer_argv(installer: Path) -> tuple[str, list[str]] | None:
     """Build a (display_cmd, argv) pair for running an installer.
 
-    On Windows, ``.sh`` installers must be invoked via ``wsl bash`` with the
-    path converted from Windows to WSL format (``wslpath -u``).  Raw Windows
-    backslash paths passed directly to ``bash`` get mangled (backslashes are
-    stripped, producing ``C:DataSrc...`` instead of ``C:\\Data\\Src\\...``).
+    On Windows, only ``.ps1`` installers are supported.  ``.sh`` installers
+    are skipped to avoid invoking WSL (which can hang when unavailable).
+    If an ``.sh`` installer is given on Windows, attempts to find a ``.ps1``
+    sibling in the same directory.
     """
     if installer.suffix == ".sh":
         if platform.system() == "Windows":
-            # Convert Windows path → WSL path for bash
-            try:
-                r = subprocess.run(
-                    ["wsl", "wslpath", "-u", str(installer)],
-                    capture_output=True, text=True, timeout=5,
-                )
-                if r.returncode == 0:
-                    wsl_path = r.stdout.strip()
-                else:
-                    # Fallback: manual drive-letter conversion
-                    wsl_path = _win_to_wsl_path(str(installer))
-            except Exception:
-                wsl_path = _win_to_wsl_path(str(installer))
-            cmd = f"wsl bash {wsl_path} update"
-            argv = ["wsl", "bash", wsl_path, "update"]
+            # Don't invoke WSL — look for a .ps1 sibling instead
+            ps1_sibling = installer.with_name("install.ps1")
+            if ps1_sibling.exists():
+                installer = ps1_sibling
+            else:
+                return None
         else:
             cmd = f"bash {installer} update"
             argv = ["bash", str(installer), "update"]
-        return cmd, argv
-    elif installer.suffix == ".ps1":
+            return cmd, argv
+    if installer.suffix == ".ps1":
         cmd = f"pwsh -File {installer} update"
         argv = ["pwsh", "-File", str(installer), "update"]
         return cmd, argv
     return None
-
-
-def _win_to_wsl_path(win_path: str) -> str:
-    """Best-effort Windows → WSL path conversion without calling wslpath."""
-    # C:\Data\Src\... → /mnt/c/Data/Src/...
-    path = win_path.replace("\\", "/")
-    if len(path) >= 2 and path[1] == ":":
-        drive = path[0].lower()
-        path = f"/mnt/{drive}{path[2:]}"
-    return path
 
 
 def _append_update_if_stale(
