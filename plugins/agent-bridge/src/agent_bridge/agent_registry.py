@@ -178,6 +178,7 @@ class AgentResolver:
             copilot_args=config.copilot_args,
             env=config.env,
             project=config.project,
+            ssh_shell=ssh_env.shell,
         )
 
     def list_agents(self) -> list[dict[str, Any]]:
