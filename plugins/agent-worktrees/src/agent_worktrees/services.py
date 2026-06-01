@@ -73,13 +73,15 @@ def _expand_install_dir(raw: str) -> str:
     return os.path.expanduser(os.path.expandvars(raw))
 
 
-def _preferred_installer_order() -> tuple[str, str]:
+def _preferred_installer_order() -> tuple[str, ...]:
     """Return installer filenames in platform-preferred order.
 
-    ``.ps1`` first on Windows, ``.sh`` first on Linux/WSL.
+    On Windows, only ``.ps1`` is returned -- ``.sh`` would require WSL which
+    can hang when unavailable.  On Linux/WSL, ``.sh`` first with ``.ps1``
+    fallback.
     """
     if cfg.detect_platform() == "windows":
-        return ("install.ps1", "install.sh")
+        return ("install.ps1",)
     return ("install.sh", "install.ps1")
 
 

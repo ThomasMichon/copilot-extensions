@@ -73,28 +73,8 @@ def _check_bash(full_path: Path) -> ValidationFailure | None:
     bash_cmd = None
 
     if platform.system() == "Windows":
-        # Try WSL first
-        try:
-            wsl_result = subprocess.run(
-                ["wsl", "wslpath", "-u", str(full_path).replace("\\", "/")],
-                capture_output=True, text=True,
-            )
-            if wsl_result.returncode == 0:
-                wsl_path = wsl_result.stdout.strip()
-                result = subprocess.run(
-                    ["wsl", "bash", "-c", f"tr -d '\\r' < '{wsl_path}' | bash -n"],
-                    capture_output=True, text=True,
-                )
-                if result.returncode != 0:
-                    return ValidationFailure(
-                        file=str(full_path),
-                        check_type="Bash syntax",
-                        errors=result.stderr.strip(),
-                    )
-                return None
-        except FileNotFoundError:
-            pass
-        # Try native bash
+        # Use native bash on Windows (Git Bash, etc.) -- avoid WSL calls
+        # that can hang when WSL is unavailable or unresponsive.
         bash_cmd = "bash"
     else:
         bash_cmd = "bash"

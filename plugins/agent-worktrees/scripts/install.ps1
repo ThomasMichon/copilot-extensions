@@ -710,19 +710,16 @@ function Build-TerminalFragment {
             hidden            = $false
         }
 
-        # Local WSL profile — only when the binstub actually exists in WSL
-        $wslDistro = if ($pWslInfo) { $pWslInfo['distro'] } else { Get-WslDefaultDistro }
-        if (Test-WslBinstubExists -Name $pName -Distro $wslDistro) {
+        # Local WSL profile — only when WSL support is recorded in the registry
+        $wslDistro = if ($pWslInfo) { $pWslInfo['distro'] } else { $null }
+        $wslState = if ($pWslInfo) { $pWslInfo['state'] } else { $null }
+        if ($wslState -and $wslDistro) {
             $wslIconPath = "%USERPROFILE%\.${pName}\aperture-science-wsl.ico"
             if (-not (Test-Path (Join-Path $env:USERPROFILE ".$pName\aperture-science-wsl.ico"))) {
                 $wslIconPath = $iconPath
             }
-            # Use distro-specific invocation when known
-            $wslCmd = if ($wslDistro) {
-                "wsl.exe -d $wslDistro -- bash -lc $pName"
-            } else {
-                "wsl.exe bash -lc $pName"
-            }
+            # Distro is always known (required for WSL profile generation)
+            $wslCmd = "wsl.exe -d $wslDistro -- bash -lc $pName"
             $wslLabel = "$pDisplay (WSL)"
 
             $guid = New-StableGuid "${pName}-local-wsl"
@@ -1096,7 +1093,7 @@ function Deploy-Shortcuts {
         $lnk.IconLocation = "$InstallDir\aperture-science.ico, 0"
         $lnk.Save()
 
-        # WSL shortcut — only when the binstub actually exists in WSL
+        # WSL shortcut — only when WSL support is recorded in registry
         $projWslInfo = $null
         if ($registry.projects -is [PSCustomObject] -and $registry.projects.PSObject.Properties[$proj]) {
             $projEntry = $registry.projects.$proj
@@ -1104,8 +1101,9 @@ function Deploy-Shortcuts {
                 $projWslInfo = $projEntry.wsl
             }
         }
+        $shortcutWslState = if ($projWslInfo -is [PSCustomObject] -and $projWslInfo.PSObject.Properties['state']) { $projWslInfo.state } else { $null }
         $shortcutWslDistro = if ($projWslInfo -is [PSCustomObject] -and $projWslInfo.PSObject.Properties['distro']) { $projWslInfo.distro } else { $null }
-        if (Test-WslBinstubExists -Name $proj -Distro $shortcutWslDistro) {
+        if ($shortcutWslState -and $shortcutWslDistro) {
             $wslLabel = "$displayName (WSL)"
             $lnkPath = Join-Path $LocalBin "$wslLabel.lnk"
             $lnk = $shell.CreateShortcut($lnkPath)
