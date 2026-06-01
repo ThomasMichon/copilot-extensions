@@ -1,155 +1,46 @@
 # Agent Bridge
 
-Persistent inter-agent communication service for Copilot CLI. One instance
-per machine, serving all Copilot CLI sessions with session management,
-SSE event streaming, and agent subprocess spawning.
+Persistent inter-agent communication service for Copilot CLI. One
+instance per machine, providing session management, SSE event streaming,
+and agent subprocess spawning across local and remote machines.
 
-Supports **Windows**, **Linux**, and **WSL**. macOS support is planned.
+Supports **Windows** and **Linux/WSL** (macOS planned).
 
-## Quick Start
-
-```bash
-# Install (from the copilot-extensions checkout)
-pip install -e plugins/agent-bridge
-
-# Start the service
-agent-bridge start
-
-# Check status
-agent-bridge status
-```
-
-On facility machines, use the aperture-labs service framework instead:
-
-```bash
-aperture-labs services agent-bridge install   # first time
-aperture-labs services agent-bridge update    # code + config refresh
-aperture-labs services agent-bridge start     # start the service
-```
-
-This works on both Windows (PowerShell) and Linux/WSL (bash) -- the
-framework dispatches to `install.ps1` or `install.sh` based on platform.
-
-## What It Does
+## How It Works
 
 Agent Bridge runs as a local HTTP service (`localhost:9280`) that manages
-agent conversations on your behalf:
+agent conversations on your behalf. Multiple Copilot CLI sessions can
+start, stop, and resume conversations with agents running on any
+configured machine via local subprocess or SSH transport.
 
-- **Session lifecycle** -- start, stop, resume, and end agent sessions
-- **Event streaming** -- SSE streams with durable event IDs for
-  reconnect-safe consumption
-- **Subprocess management** -- spawns `copilot --acp --stdio` processes
-  and manages their lifecycle
-- **Persistence** -- SQLite-backed session state survives service restarts
+Unlike agent-worktrees (a per-session plugin), agent-bridge is a
+**persistent daemon** -- it runs continuously and survives session
+restarts.
 
-## API
+## Getting Started
 
-All endpoints require `Authorization: Bearer <token>` (except `/health`).
-The token is generated on first run and stored in `~/.agent-bridge/auth.yaml`.
+See [Getting Started](docs/getting-started.md) for install, configuration,
+and service startup.
 
-### Session Management
+## Docs
 
-```
-POST   /api/v1/sessions                  # Start new session
-GET    /api/v1/sessions                  # List sessions
-GET    /api/v1/sessions/{id}             # Get session info
-POST   /api/v1/sessions/{id}/turns       # Submit prompt
-GET    /api/v1/sessions/{id}/events      # SSE event stream
-POST   /api/v1/sessions/{id}/stop        # Stop (preserve state)
-POST   /api/v1/sessions/{id}/resume      # Resume stopped session
-DELETE /api/v1/sessions/{id}             # End (full cleanup)
-```
+| Document | Description |
+|----------|-------------|
+| [Getting Started](docs/getting-started.md) | Install, configure, start the service |
+| [Architecture](docs/architecture.md) | Service design, API reference, deployment |
+| [Machine Configuration](docs/machine-config.md) | Topology setup -- machines.yaml, agents config |
 
-### Health
+## Skills
 
-```
-GET    /health                           # Service health check
-```
+| Skill | Description |
+|-------|-------------|
+| `agent-bridge` | CLI control plane -- sessions, agents, machines, config |
+| `copilot-extensions-setup` | Install and adopt (shared with agent-worktrees) |
 
-## Configuration
+## Platforms
 
-Config lives at `~/.agent-bridge/config.yaml` on all platforms.
-
-```yaml
-# ~/.agent-bridge/config.yaml
-port: 9280
-bind: 127.0.0.1
-db_path: ~/.agent-bridge/sessions.db
-log_level: info
-
-topologies:
-  my-project:
-    machines_yaml: /path/to/machines.yaml       # Linux/WSL
-    # machines_yaml: C:/Data/Src/project/machines.yaml  # Windows
-    agents_config: /path/to/agents.json
-```
-
-## Architecture
-
-```
-Copilot CLI sessions (multiple)
-  |
-  |  HTTP (localhost:9280)
-  v
-+--------------------------------------------+
-|  agent-bridge (persistent, one per machine) |
-|  +--------------------------------------+  |
-|  |  Session Manager                     |  |
-|  |  - Lifecycle (start/stop/resume/end) |  |
-|  |  - Turn tracking + event log         |  |
-|  |  - SQLite persistence                |  |
-|  +--------------------------------------+  |
-|  |  Transport Layer                     |  |
-|  |  - Local stdio spawn (Phase 1)      |  |
-|  |  - SSH spawn (Phase 2)              |  |
-|  +--------------------------------------+  |
-+--------------------------------------------+
-```
-
-## Deployment
-
-### Standalone (Development)
-
-The plugin includes platform-specific installers for standalone use:
-
-```powershell
-# Windows
-pwsh -File plugins\agent-bridge\scripts\install.ps1 install
-pwsh -File plugins\agent-bridge\scripts\install.ps1 status
-```
-
-```bash
-# Linux / WSL
-bash plugins/agent-bridge/scripts/install.sh install
-bash plugins/agent-bridge/scripts/install.sh status
-```
-
-### Facility Service (Production)
-
-On facility machines, agent-bridge deploys via the aperture-labs service
-framework which handles config layering, deploy manifests, and service
-registration (systemd on Linux, scheduled task on Windows):
-
-```bash
-aperture-labs services agent-bridge install   # first time
-aperture-labs services agent-bridge update    # code + config refresh
-```
-
-### Platform Details
-
-| Platform | Service manager | Install location | Auto-start |
-|----------|----------------|-----------------|------------|
-| Linux/WSL | systemd | `/opt/agent-bridge/` | systemd unit (enabled) |
-| Windows | Scheduled task | `~/.agent-bridge/` | At-logon task |
-| macOS | -- | Planned | -- |
-
-## Phases
-
-- **Phase 1** (complete): Service scaffold, local sessions, SQLite, SSE
-- **Phase 2** (complete): SSH transport, machine topology, connection pooling
-- **Phase 3**: CLI tools, Copilot CLI integration, MCP shim
-- **Phase 4**: Consumer migration (upstream agents, agent-worktrees)
-
-## License
-
-MIT
+| Platform | Service manager | Auto-start |
+|----------|----------------|------------|
+| Windows | Scheduled task | At-logon (15s delay) |
+| Linux/WSL | systemd user unit | Enabled |
+| macOS | Planned | -- |

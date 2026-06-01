@@ -22,7 +22,7 @@ projects registry.
 
 **Prerequisite:** WSL must be installed with at least one distribution.
 The agent-worktrees runtime must already be installed on Windows (see
-the `agent-worktrees-init` skill).
+the `copilot-extensions-setup` skill).
 
 ## When to Use
 

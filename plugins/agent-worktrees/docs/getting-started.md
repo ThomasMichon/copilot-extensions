@@ -177,10 +177,12 @@ Use the `worktree` skill or run `agent-worktrees finalize` manually.
 
 ## Next Steps
 
-- **Customize sessions** — create a setup script for your repo
-- **Add custom instructions** — put an `AGENTS.md` in your repo root
+- **Customize sessions** -- create a setup script for your repo
+- **Add custom instructions** -- put an `AGENTS.md` in your repo root
   for Copilot CLI context
-- **Manage services** — if your repo has services with `service.yaml`
+- **Manage services** -- if your repo has services with `service.yaml`
   manifests, agent-worktrees can discover and deploy them
-- **Multiple machines** — add a `machines.yaml` to your repo for
+- **Multiple machines** -- add a `machines.yaml` to your repo for
   per-machine configuration
+- **Architecture** -- see [Architecture](architecture.md) for internals
+- **CLI reference** -- see [CLI Reference](cli-reference.md) for commands

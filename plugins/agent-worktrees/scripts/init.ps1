@@ -408,6 +408,6 @@ Write-Host "  Runtime:  $InstallDir" -ForegroundColor DarkGray
 Write-Host "  Binstub:  agent-worktrees" -ForegroundColor DarkGray
 Write-Host ''
 Write-Host '  Next: cd into a repo and run: agent-worktrees register <project-name>' -ForegroundColor DarkGray
-Write-Host '  Or ask Copilot to adopt a repo with the agent-worktrees-adopt skill.' -ForegroundColor DarkGray
+Write-Host '  Or ask Copilot to adopt a repo with the copilot-extensions-setup skill.' -ForegroundColor DarkGray
 Write-Host ''
 exit 0
