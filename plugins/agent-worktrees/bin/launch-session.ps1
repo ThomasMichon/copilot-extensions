@@ -85,6 +85,28 @@ if ($CopilotPassthrough.Count -gt 0) {
     Write-SetupLog "Copilot passthrough args: $($CopilotPassthrough -join ' ')"
 }
 
+# When launched in --stdio mode (ACP protocol), stdout is the JSON-RPC
+# channel.  Redirect Write-Host to stderr so status messages don't
+# corrupt the protocol stream.
+if ($CopilotPassthrough -contains '--stdio') {
+    Write-SetupLog 'stdio mode detected -- redirecting Write-Host to stderr'
+    function global:Write-Host {
+        param(
+            [Parameter(Position = 0, ValueFromRemainingArguments)]
+            [object[]]$Object,
+            [switch]$NoNewline,
+            [ConsoleColor]$ForegroundColor,
+            [ConsoleColor]$BackgroundColor
+        )
+        $text = ($Object -join ' ')
+        if ($NoNewline) {
+            [Console]::Error.Write($text)
+        } else {
+            [Console]::Error.WriteLine($text)
+        }
+    }
+}
+
 # Recovery fast-path: skip resolve/picker, launch directly in anchor repo
 if ($RecoveryMode) {
     Write-SetupLog 'Recovery fast-path — bypassing worktree resolution'
