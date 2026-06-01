@@ -132,8 +132,8 @@ agent-bridge config remove my-profile
 agent-bridge config validate
 ```
 
-For first-time setup, see the `agent-bridge-init` skill. For wiring
-topology to a repo, see the `agent-bridge-adopt` skill.
+For first-time setup, see the `copilot-extensions-setup` skill. For
+detailed topology configuration, see `plugins/agent-bridge/docs/machine-config.md`.
 
 ## Common Patterns
 

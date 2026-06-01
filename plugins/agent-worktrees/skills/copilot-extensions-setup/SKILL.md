@@ -239,6 +239,13 @@ Wire agent-bridge to a repo's machine mesh. This creates a **topology
 profile** in `~/.agent-bridge/config.yaml` pointing to the same
 `machines.yaml` used by Windows Terminal fragments.
 
+> **Detailed machine config guide:** For `machines.yaml` format,
+> `acp-agents.json` format, creating these files from scratch, and
+> troubleshooting topology issues, read
+> `plugins/agent-bridge/docs/machine-config.md` in the installed plugin
+> directory before proceeding. That doc is the canonical reference for
+> topology setup.
+
 ```bash
 # Auto-discovers machines.yaml and acp-agents.json
 agent-bridge config adopt --repo /path/to/repo --profile facility
@@ -254,6 +261,18 @@ agent-bridge config validate
 |------|-------------------|
 | machines.yaml | `{repo}/machines.yaml`, `{repo}/config/machines.yaml`, `{repo}/.github/machines.yaml` |
 | acp-agents.json | `{repo}/tools/mcp/acp-agents.json`, `{repo}/acp-agents.json`, `{repo}/config/acp-agents.json` |
+
+### If the repo has no machines.yaml
+
+The user may need to create `machines.yaml` and `acp-agents.json` from
+scratch. Read `plugins/agent-bridge/docs/machine-config.md` (section
+"Creating machines.yaml from Scratch") for templates and examples, then
+guide the user interactively through:
+
+1. Identifying their machines (hostname, platform, SSH alias)
+2. Defining agents (name, host, type)
+3. Writing both files to the repo
+4. Running `agent-bridge config adopt`
 
 ### Explicit Paths
 
@@ -277,7 +296,7 @@ Restart agent-bridge to load new topology:
 
 ```bash
 # Windows
-install.ps1 stop; install.ps1 start
+agent-bridge stop; agent-bridge start
 
 # Linux
 systemctl --user restart agent-bridge.service
