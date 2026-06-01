@@ -73,20 +73,20 @@ actions:
 
 ```powershell
 # Windows -- from the copilot-extensions checkout
-cd C:\Src\copilot-extensions\plugins\agent-worktrees
+cd <copilot-extensions-checkout>\plugins\agent-worktrees
 .\scripts\install.ps1 install -ProjectName my-project
 ```
 
 ```bash
 # Linux/WSL
-cd ~/src/copilot-extensions/plugins/agent-worktrees
+cd <copilot-extensions-checkout>/plugins/agent-worktrees
 bash scripts/install.sh install --project-name my-project
 ```
 
 ### Remote Deployment
 
 ```bash
-ssh my-machine "cd ~/src/copilot-extensions/plugins/agent-worktrees && bash scripts/install.sh update"
+ssh my-machine "cd <copilot-extensions-checkout>/plugins/agent-worktrees && bash scripts/install.sh update"
 ```
 
 ---
