@@ -196,50 +196,36 @@ do_install() {
     echo "=== agent-bridge install ==="
     echo ""
 
-    _migration_check
-
-    # Find Python
-    local python_cmd=""
-    for candidate in python3 python; do
-        if command -v "$candidate" &>/dev/null; then
-            if "$candidate" --version 2>&1 | grep -q "Python"; then
-                python_cmd="$candidate"
-                break
-            fi
-        fi
-    done
-    if [[ -z "$python_cmd" ]]; then
-        _fail "Python not found (need 3.10+)"
+    # Prerequisite: uv
+    if ! command -v uv &>/dev/null; then
+        _fail "uv not found on PATH (required for venv + package management)"
+        _fail "Install: curl -LsSf https://astral.sh/uv/install.sh | sh"
         exit 1
     fi
-    _ok "Python: $python_cmd"
+
+    _migration_check
 
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 
-    # Create venv (prefer uv)
-    if [[ ! -f "$VENV_DIR/bin/python" ]]; then
-        if command -v uv &>/dev/null; then
-            _step "Creating venv via uv..."
-            if ! uv venv "$VENV_DIR" --allow-existing 2>/dev/null; then
-                _step "uv venv failed -- falling back to python3 -m venv"
-                "$python_cmd" -m venv "$VENV_DIR"
+    # Create venv via uv
+    if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+        _step "Creating venv via uv..."
+        if ! uv venv "$VENV_DIR" --python 3.10 --allow-existing; then
+            if ! uv venv "$VENV_DIR" --allow-existing; then
+                _fail "Failed to create venv at $VENV_DIR"
+                exit 1
             fi
-        else
-            _step "Creating venv via python -m venv..."
-            "$python_cmd" -m venv "$VENV_DIR"
         fi
         _ok "Venv created"
     else
         _skip "Venv already exists"
     fi
 
-    # Install package
+    # Install package via uv
     _step "Installing agent-bridge package..."
-    if command -v uv &>/dev/null; then
-        uv pip install --python "$VENV_DIR/bin/python" "$PLUGIN_DIR" --quiet 2>/dev/null
-    else
-        "$VENV_DIR/bin/pip" install --quiet --upgrade pip
-        "$VENV_DIR/bin/pip" install --quiet "$PLUGIN_DIR"
+    if ! uv pip install --python "$VENV_DIR/bin/python" "$PLUGIN_DIR" --quiet; then
+        _fail "Package install failed"
+        exit 1
     fi
     _ok "Package installed"
 
@@ -431,9 +417,25 @@ do_update() {
     echo "=== agent-bridge update ==="
     echo ""
 
-    if [[ ! -d "$VENV_DIR" ]]; then
-        _fail "agent-bridge not installed. Run: install.sh install"
+    # Prerequisite: uv
+    if ! command -v uv &>/dev/null; then
+        _fail "uv not found on PATH (required for package management)"
+        _fail "Install: curl -LsSf https://astral.sh/uv/install.sh | sh"
         exit 1
+    fi
+
+    # Repair venv if python binary is missing
+    if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+        if [[ -d "$VENV_DIR" ]]; then
+            _step "Repairing venv (python binary missing)..."
+        else
+            _fail "agent-bridge not installed. Run: install.sh install"
+            exit 1
+        fi
+        if ! uv venv "$VENV_DIR" --python 3.10 --allow-existing; then
+            uv venv "$VENV_DIR" --allow-existing || { _fail "Venv repair failed"; exit 1; }
+        fi
+        _ok "Venv repaired"
     fi
 
     # Stop running instance
@@ -443,14 +445,12 @@ do_update() {
         do_stop
     fi
 
-    # Reinstall package
+    # Reinstall package via uv
     _step "Updating agent-bridge package..."
-    if command -v uv &>/dev/null; then
-        uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge \
-            "$PLUGIN_DIR" --quiet 2>/dev/null
-    else
-        "$VENV_DIR/bin/pip" install --quiet --upgrade pip
-        "$VENV_DIR/bin/pip" install --quiet --force-reinstall "$PLUGIN_DIR"
+    if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge \
+            "$PLUGIN_DIR" --quiet; then
+        _fail "Package update failed"
+        exit 1
     fi
     _ok "Package updated"
 

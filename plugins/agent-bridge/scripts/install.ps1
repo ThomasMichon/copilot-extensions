@@ -254,31 +254,15 @@ function Invoke-Install {
     Write-Host '=== agent-bridge install ===' -ForegroundColor Cyan
     Write-Host ''
 
-    # Check for migration from old installer
-    Invoke-MigrationCheck
-
-    # Find Python
-    $pythonCmd = $null
-    foreach ($candidate in @('python', 'python3', 'py')) {
-        $found = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($found) {
-            $prevEAP = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
-            try {
-                $testOut = & $found.Source --version 2>&1
-                if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') {
-                    $pythonCmd = $found.Source
-                }
-            } catch { }
-            $ErrorActionPreference = $prevEAP
-            if ($pythonCmd) { break }
-        }
-    }
-    if (-not $pythonCmd) {
-        Write-Fail 'Python not found on PATH (need 3.10+)'
+    # Prerequisite: uv
+    try { uv --version 2>&1 | Out-Null } catch {
+        Write-Fail 'uv not found on PATH (required for venv + package management)'
+        Write-Fail 'Install: https://docs.astral.sh/uv/getting-started/installation/'
         exit 1
     }
-    Write-Ok "Python: $pythonCmd"
+
+    # Check for migration from old installer
+    Invoke-MigrationCheck
 
     # Create directories
     foreach ($dir in @($InstallDir, $LocalBin)) {
@@ -287,21 +271,18 @@ function Invoke-Install {
         }
     }
 
-    # Create venv (prefer uv)
+    # Create venv via uv
     if (-not (Test-Path $VenvPython)) {
-        $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+        Write-Step 'Creating venv via uv...'
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        if ($uvCmd) {
-            Write-Step 'Creating venv via uv...'
+        & uv venv $VenvDir --python 3.10 --allow-existing 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
             & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
-                Write-Step 'uv venv failed -- falling back to python -m venv'
-                & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
+                Write-Fail "Failed to create venv at $VenvDir"
+                exit 1
             }
-        } else {
-            Write-Step 'Creating venv via python -m venv...'
-            & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
         }
         $ErrorActionPreference = $prevEAP
 
@@ -314,17 +295,11 @@ function Invoke-Install {
         Write-Skip 'Venv already exists'
     }
 
-    # Install package (prefer uv pip)
+    # Install package via uv
     Write-Step 'Installing agent-bridge package...'
-    $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    if ($uvCmd) {
-        & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
-    } else {
-        & $VenvPython -m pip install --quiet --upgrade pip 2>&1 | Out-Null
-        & $VenvPython -m pip install --quiet "$PluginDir" 2>&1 | Out-Null
-    }
+    & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
     $installResult = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
     if ($installResult -ne 0) { throw 'Package install failed' }
@@ -511,9 +486,33 @@ function Invoke-Update {
     Write-Host '=== agent-bridge update ===' -ForegroundColor Cyan
     Write-Host ''
 
-    if (-not (Test-Path $VenvPython)) {
-        Write-Fail 'agent-bridge not installed. Run: install.ps1 install'
+    # Prerequisite: uv
+    try { uv --version 2>&1 | Out-Null } catch {
+        Write-Fail 'uv not found on PATH (required for package management)'
+        Write-Fail 'Install: https://docs.astral.sh/uv/getting-started/installation/'
         exit 1
+    }
+
+    # Repair venv if python binary is missing
+    if (-not (Test-Path $VenvPython)) {
+        if (Test-Path $VenvDir) {
+            Write-Step 'Repairing venv (python binary missing)...'
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            & uv venv $VenvDir --python 3.10 --allow-existing 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
+            }
+            $ErrorActionPreference = $prevEAP
+            if (-not (Test-Path $VenvPython)) {
+                Write-Fail 'Venv repair failed'
+                exit 1
+            }
+            Write-Ok 'Venv repaired'
+        } else {
+            Write-Fail 'agent-bridge not installed. Run: install.ps1 install'
+            exit 1
+        }
     }
 
     # Stop running instance to avoid file locks
@@ -522,18 +521,12 @@ function Invoke-Update {
         Invoke-Stop
     }
 
-    # Reinstall package
+    # Reinstall package via uv
     Write-Step 'Updating agent-bridge package...'
-    $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    if ($uvCmd) {
-        & uv pip install --python $VenvPython --reinstall-package agent-bridge `
-            "$PluginDir" --quiet 2>&1 | Out-Null
-    } else {
-        & $VenvPython -m pip install --quiet --upgrade pip 2>&1 | Out-Null
-        & $VenvPython -m pip install --quiet --force-reinstall "$PluginDir" 2>&1 | Out-Null
-    }
+    & uv pip install --python $VenvPython --reinstall-package agent-bridge `
+        "$PluginDir" --quiet 2>&1 | Out-Null
     $updateResult = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
     if ($updateResult -ne 0) { throw 'Package update failed' }
