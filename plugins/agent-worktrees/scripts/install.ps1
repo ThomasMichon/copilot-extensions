@@ -679,7 +679,9 @@ function Build-TerminalFragment {
             $registeredNames += $prop.Name
             $e = $prop.Value
             $anchor = if ($e.PSObject.Properties['anchor']) { $e.anchor } else { $null }
-            $my = if ($e.PSObject.Properties['machines_yaml']) { $e.machines_yaml } else { $null }
+            # Only accept string values -- corrupted registries from the
+            # PSObject-wrapping bug may have machines_yaml as {Length: N}.
+            $my = if ($e.PSObject.Properties['machines_yaml'] -and $e.machines_yaml -is [string]) { [string]$e.machines_yaml } else { $null }
             $projectList += [PSCustomObject]@{
                 name          = $prop.Name
                 anchor        = $anchor
