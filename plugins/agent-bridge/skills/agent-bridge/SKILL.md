@@ -14,7 +14,10 @@ via local subprocess or SSH transport.
 
 ## Service Architecture
 
-Each machine runs its own agent-bridge instance (port 9280). The topology
+Each machine runs its own agent-bridge instance. The default port is
+platform-specific: **9280 on Windows**, **9281 on Linux/WSL**. This avoids
+TCP port collisions when both environments share the same host (WSL2 shares
+the Windows TCP port space). The topology
 is a mesh -- each instance manages outbound connections to other machines
 via SSH. Sessions are persistent (SQLite-backed) and survive service
 restarts.
@@ -94,9 +97,9 @@ agent-bridge end <session-id>
 ### Service Control
 
 ```bash
-# Start the service
+# Start the service (uses platform default port: 9280 Windows, 9281 Linux/WSL)
 agent-bridge start
-agent-bridge start --port 9280 --bind 127.0.0.1
+agent-bridge start --port 9280 --bind 127.0.0.1  # explicit override
 
 # Check service health
 agent-bridge status
