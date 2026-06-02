@@ -188,6 +188,7 @@ class TestSpawnSsh:
 
             remote_cmd = mock_asyncio.create_subprocess_exec.call_args[0][-1]
             assert "my-project" in remote_cmd
+            assert "--auto" in remote_cmd
             assert "--base" not in remote_cmd
             assert "--no-mux" in remote_cmd
             assert "--acp" in remote_cmd
@@ -222,32 +223,126 @@ class TestSpawnSsh:
 class TestSpawnLocal:
 
     @pytest.mark.asyncio
-    async def test_local_with_project_uses_binstub(self):
-        """Local spawn with project should use the binstub."""
+    async def test_local_with_project_resolves_then_execs(self):
+        """Local spawn with project should resolve via --json --new, then exec copilot."""
         target = SpawnTarget(
             type="local",
             project="my-project",
             copilot_args=["--allow-all"],
         )
 
-        mock_proc = MagicMock()
-        mock_proc.pid = 12345
-        mock_proc.returncode = None
+        # Mock the resolve subprocess (returns JSON plan)
+        resolve_proc = MagicMock()
+        resolve_proc.returncode = 0
+        resolve_plan = {
+            "version": 1,
+            "worktree": {"id": "test-wt-1234"},
+            "launch": {
+                "work_dir": "/tmp/worktree",
+                "cmd": ["/usr/bin/copilot"],
+                "env": {"MY_VAR": "val"},
+                "worktree_id": "test-wt-1234",
+            },
+        }
+        resolve_proc.communicate = AsyncMock(
+            return_value=(json.dumps(resolve_plan).encode(), b"")
+        )
 
-        with patch("agent_bridge.transport.asyncio") as mock_asyncio:
-            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
+        # Mock the copilot subprocess
+        copilot_proc = MagicMock()
+        copilot_proc.pid = 12345
+        copilot_proc.returncode = None
+
+        with patch("agent_bridge.transport.asyncio") as mock_asyncio, \
+             patch("agent_bridge.transport.os.path.exists", return_value=True):
+            mock_asyncio.create_subprocess_exec = AsyncMock(
+                side_effect=[resolve_proc, copilot_proc]
+            )
+            mock_asyncio.subprocess = asyncio.subprocess
+
+            result = await spawn_local(target)
+
+            # First call: resolve (calls python directly, not binstub)
+            resolve_call = mock_asyncio.create_subprocess_exec.call_args_list[0]
+            resolve_args = resolve_call[0]
+            assert resolve_args[0].endswith("python.exe") or resolve_args[0].endswith("python")
+            assert "-m" in resolve_args
+            assert "agent_worktrees" in resolve_args
+            assert "resolve" in resolve_args
+            assert "--json" in resolve_args
+            assert "--new" in resolve_args
+
+            # Second call: copilot exec
+            exec_call = mock_asyncio.create_subprocess_exec.call_args_list[1]
+            exec_args = exec_call[0]
+            assert exec_args[0] == "/usr/bin/copilot"
+            assert "--acp" in exec_args
+            assert "--stdio" in exec_args
+            assert "--allow-all" in exec_args
+            assert exec_call[1]["cwd"] == "/tmp/worktree"
+
+            assert result.proc == copilot_proc
+
+    @pytest.mark.asyncio
+    async def test_local_with_project_resume_worktree(self):
+        """Local spawn with worktree_id should resolve with --worktree-id."""
+        target = SpawnTarget(
+            type="local",
+            project="my-project",
+            worktree_id="existing-wt-5678",
+        )
+
+        resolve_proc = MagicMock()
+        resolve_proc.returncode = 0
+        resolve_plan = {
+            "version": 1,
+            "launch": {
+                "work_dir": "/tmp/existing",
+                "cmd": ["/usr/bin/copilot", "--resume", "sess-abc"],
+                "env": {},
+                "worktree_id": "existing-wt-5678",
+            },
+        }
+        resolve_proc.communicate = AsyncMock(
+            return_value=(json.dumps(resolve_plan).encode(), b"")
+        )
+
+        copilot_proc = MagicMock()
+        copilot_proc.pid = 12345
+        copilot_proc.returncode = None
+
+        with patch("agent_bridge.transport.asyncio") as mock_asyncio, \
+             patch("agent_bridge.transport.os.path.exists", return_value=True):
+            mock_asyncio.create_subprocess_exec = AsyncMock(
+                side_effect=[resolve_proc, copilot_proc]
+            )
             mock_asyncio.subprocess = asyncio.subprocess
 
             await spawn_local(target)
 
-            call_args = mock_asyncio.create_subprocess_exec.call_args
-            args = call_args[0]
-            assert args[0] == "my-project"
-            assert "--base" not in args
-            assert "--no-mux" in args
-            assert "--acp" in args
-            assert "--stdio" in args
-            assert "--allow-all" in args
+            resolve_args = mock_asyncio.create_subprocess_exec.call_args_list[0][0]
+            assert "--worktree-id" in resolve_args
+            assert "existing-wt-5678" in resolve_args
+            assert "--new" not in resolve_args
+
+    @pytest.mark.asyncio
+    async def test_local_resolve_failure_raises(self):
+        """Resolve failure should raise RuntimeError."""
+        target = SpawnTarget(type="local", project="my-project")
+
+        resolve_proc = MagicMock()
+        resolve_proc.returncode = 1
+        resolve_proc.communicate = AsyncMock(
+            return_value=(b"", b"resolve error details")
+        )
+
+        with patch("agent_bridge.transport.asyncio") as mock_asyncio, \
+             patch("agent_bridge.transport.os.path.exists", return_value=True):
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=resolve_proc)
+            mock_asyncio.subprocess = asyncio.subprocess
+
+            with pytest.raises(RuntimeError, match="Worktree resolve failed"):
+                await spawn_local(target)
 
     @pytest.mark.asyncio
     async def test_local_without_project_uses_copilot_directly(self):
