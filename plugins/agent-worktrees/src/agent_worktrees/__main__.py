@@ -484,8 +484,11 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         args.no_mux = True
         # Validate required args before any I/O
         wt_id = getattr(args, "worktree_id", None)
-        if not wt_id:
-            return _json_error("--worktree-id is required with --json")
+        use_new = getattr(args, "new_worktree", False)
+        if wt_id and use_new:
+            return _json_error("--worktree-id and --new are mutually exclusive")
+        if not wt_id and not use_new:
+            return _json_error("--json requires --worktree-id or --new")
 
     if use_base:
         args.no_mux = True
@@ -521,6 +524,18 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 config = cfg.load_config()
             except Exception as e:
                 return _json_error(str(e))
+
+            if use_new:
+                # --json --new: create a new worktree, return JSON plan
+                profile = _resolve_profile(config, args)
+                try:
+                    result = _create_worktree_core(
+                        config, profile=profile, no_mux=True,
+                    )
+                except RuntimeError as e:
+                    return _json_error(str(e))
+                _json_output(result)
+                return 0
 
             wt_id = _resolve_worktree_id(wt_id)  # type: ignore[possibly-undefined]
             yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
@@ -3485,6 +3500,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Resolve for the anchor repo (no picker, no worktree)")
     p.add_argument("--auto", action="store_true",
                    help="Auto-create a new worktree (no picker, non-interactive)")
+    p.add_argument("--new", action="store_true", dest="new_worktree",
+                   help="Create a new worktree (use with --json for programmatic callers)")
     p.add_argument("--profile", help="Copilot backend profile name (skips Tab toggle)")
     p.add_argument("copilot_args", nargs="*", default=[])
 
