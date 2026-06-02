@@ -681,7 +681,11 @@ function Build-TerminalFragment {
             $anchor = if ($e.PSObject.Properties['anchor']) { $e.anchor } else { $null }
             # Only accept string values -- corrupted registries from the
             # PSObject-wrapping bug may have machines_yaml as {Length: N}.
+            # Fall back to anchor/machines.yaml if stored path is missing or stale.
             $my = if ($e.PSObject.Properties['machines_yaml'] -and $e.machines_yaml -is [string]) { [string]$e.machines_yaml } else { $null }
+            if ((-not $my -or -not (Test-Path $my)) -and $anchor -and (Test-Path (Join-Path $anchor 'machines.yaml'))) {
+                $my = [string](Join-Path $anchor 'machines.yaml')
+            }
             $projectList += [PSCustomObject]@{
                 name          = $prop.Name
                 anchor        = $anchor
@@ -692,6 +696,10 @@ function Build-TerminalFragment {
     }
 
     # Generate profiles for each project
+    # Track plain SSH GUIDs already emitted to avoid duplicates when multiple
+    # projects reference the same machines.yaml.
+    $emittedSshGuids = @{}
+
     foreach ($proj in $projectList) {
         $pName = $proj.name
         $pDisplay = Get-DisplayName $pName
@@ -762,17 +770,21 @@ function Build-TerminalFragment {
                                 default   { $sshEnv.name }
                             }
 
-                            # Plain SSH profile
-                            $sshGuid = New-StableGuid "${pName}-ssh-${key}-$($sshEnv.name)"
-                            $profileName = if ($envLabel -eq 'WSL') { "$($mEntry.display_name) (WSL)" } else { $mEntry.display_name }
-                            $profiles += @{
-                                guid              = "{$sshGuid}"
-                                name              = $profileName
-                                commandline       = "ssh $alias"
-                                icon              = $iconPath
-                                startingDirectory = "%USERPROFILE%"
-                                colorScheme       = 'Aperture Science'
-                                hidden            = $false
+                            # Plain SSH profile -- deduplicate across projects since
+                            # multiple projects may reference the same machines.yaml.
+                            $sshGuid = New-StableGuid "ssh-${key}-$($sshEnv.name)"
+                            if (-not $emittedSshGuids.ContainsKey("{$sshGuid}")) {
+                                $profileName = if ($envLabel -eq 'WSL') { "$($mEntry.display_name) (WSL)" } else { $mEntry.display_name }
+                                $profiles += @{
+                                    guid              = "{$sshGuid}"
+                                    name              = $profileName
+                                    commandline       = "ssh $alias"
+                                    icon              = $iconPath
+                                    startingDirectory = "%USERPROFILE%"
+                                    colorScheme       = 'Aperture Science'
+                                    hidden            = $false
+                                }
+                                $emittedSshGuids["{$sshGuid}"] = $true
                             }
 
                             # Launch-via-SSH profile
@@ -848,8 +860,15 @@ function Sync-TerminalState {
           WT rediscovers them fresh on next launch. #>
     param(
         [string[]]$OldFragmentGuids = @(),
-        [string[]]$NewFragmentGuids = @()
+        [string[]]$NewFragmentGuids = @(),
+        [string[]]$ChangedGuids = @()
     )
+
+    # Warn if WT is running -- state.json changes may be overwritten on WT exit
+    $wtProc = Get-Process -Name WindowsTerminal -ErrorAction SilentlyContinue
+    if ($wtProc) {
+        Write-ServiceWarn "Windows Terminal is running -- close it fully and re-run update for new profiles to appear"
+    }
 
     # --- state.json: generatedProfiles ---
     $statePath = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\state.json'
@@ -860,11 +879,12 @@ function Sync-TerminalState {
                 $genProfiles = @($state.generatedProfiles)
                 $before = $genProfiles.Count
 
-                # GUIDs to remove: stale (old but not new) + newly added (new but not old).
-                # Unchanged GUIDs (in both) stay, preserving any user profile customizations.
+                # GUIDs to remove: stale (old but not new) + newly added (new but not old)
+                # + changed (same GUID, different content -- force rediscovery).
+                # Unchanged GUIDs (in both, same content) stay, preserving user customizations.
                 $staleGuids = @($OldFragmentGuids | Where-Object { $_ -notin $NewFragmentGuids })
                 $newlyAdded = @($NewFragmentGuids | Where-Object { $_ -notin $OldFragmentGuids })
-                $removeSet  = @(@($staleGuids) + @($newlyAdded) | Sort-Object -Unique)
+                $removeSet  = @(@($staleGuids) + @($newlyAdded) + @($ChangedGuids) | Sort-Object -Unique)
 
                 if ($removeSet.Count -gt 0) {
                     $state.generatedProfiles = @($genProfiles | Where-Object {
@@ -883,16 +903,17 @@ function Sync-TerminalState {
     }
 
     # --- settings.json: stale cached profiles ---
-    Clean-TerminalSettingsJson -NewFragmentGuids $NewFragmentGuids
+    Clean-TerminalSettingsJson -StaleGuids @(@($staleGuids) + @($ChangedGuids) | Sort-Object -Unique) -NewFragmentGuids $NewFragmentGuids
 }
 
 function Clean-TerminalSettingsJson {
     <# Remove stale profiles and schemes from WT settings.json.
 
-       Removes AgentWorktrees-sourced profiles whose GUID is not in the
-       current fragment (stale from previous installs or unregistered
-       projects). #>
+       Removes AgentWorktrees-sourced profiles whose GUID is stale (no longer
+       in the current fragment) or changed (same GUID, updated content --
+       must be rediscovered from the new fragment). #>
     param(
+        [string[]]$StaleGuids = @(),
         [string[]]$NewFragmentGuids = @()
     )
 
@@ -924,15 +945,20 @@ function Clean-TerminalSettingsJson {
         $before = $json.profiles.list.Count
         $json.profiles.list = @($json.profiles.list | Where-Object {
             if (-not $_.PSObject.Properties['source']) {
-                # Manually-added (no source) -- remove if GUID matches current fragment
-                $isOurs = ($_.PSObject.Properties['guid'] -and $_.guid.ToLower() -in $NewFragmentGuids)
-                return -not $isOurs
+                # Manually-added (no source) -- keep unless GUID is explicitly stale
+                if ($_.PSObject.Properties['guid'] -and $_.guid.ToLower() -in $StaleGuids) {
+                    return $false
+                }
+                return $true
             }
 
-            # AgentWorktrees-sourced: remove if GUID is not in the current fragment
+            # AgentWorktrees-sourced: remove if stale or not in current fragment
             if ($_.source -eq 'AgentWorktrees') {
                 if ($_.PSObject.Properties['guid']) {
-                    return ($_.guid.ToLower() -in $NewFragmentGuids)
+                    $g = $_.guid.ToLower()
+                    # Remove if stale/changed, or if not in current fragment at all
+                    if ($g -in $StaleGuids) { return $false }
+                    return ($g -in $NewFragmentGuids)
                 }
                 return $false  # no GUID = orphan, remove
             }
@@ -1064,9 +1090,33 @@ function Deploy-Shortcuts {
     $newFragObj = $fragment | ConvertFrom-Json
     $newFragGuids = @($newFragObj.profiles | ForEach-Object { $_.guid.ToLower() })
 
+    # Detect changed profiles: same GUID but different content (e.g. renamed
+    # machine, changed SSH alias).  These need WT rediscovery even though the
+    # GUID didn't change.
+    $changedGuids = @()
+    if ($oldFragGuids.Count -gt 0) {
+        $commonGuids = @($oldFragGuids | Where-Object { $_ -in $newFragGuids })
+        foreach ($g in $commonGuids) {
+            $oldP = $oldFrag.profiles | Where-Object { $_.guid.ToLower() -eq $g }
+            $newP = $newFragObj.profiles | Where-Object { $_.guid.ToLower() -eq $g }
+            if ($oldP -and $newP) {
+                $oldCmd  = if ($oldP.PSObject.Properties['commandline']) { $oldP.commandline } else { '' }
+                $newCmd  = if ($newP.PSObject.Properties['commandline']) { $newP.commandline } else { '' }
+                $oldName = if ($oldP.PSObject.Properties['name']) { $oldP.name } else { '' }
+                $newName = if ($newP.PSObject.Properties['name']) { $newP.name } else { '' }
+                if ($oldCmd -ne $newCmd -or $oldName -ne $newName) {
+                    $changedGuids += $g
+                }
+            }
+        }
+        if ($changedGuids.Count -gt 0) {
+            Write-ServiceChanged "$($changedGuids.Count) profile(s) changed content -- will force WT rediscovery"
+        }
+    }
+
     # Clean WT state BEFORE writing the new fragment to avoid a race where
     # WT reads the new fragment while stale GUIDs are still in state.json.
-    Sync-TerminalState -OldFragmentGuids $oldFragGuids -NewFragmentGuids $newFragGuids
+    Sync-TerminalState -OldFragmentGuids $oldFragGuids -NewFragmentGuids $newFragGuids -ChangedGuids $changedGuids
 
     # Write the new fragment
     $fragment | Set-Content $fragmentDst -Encoding UTF8
