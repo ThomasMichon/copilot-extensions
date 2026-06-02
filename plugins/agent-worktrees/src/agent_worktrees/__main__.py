@@ -3003,7 +3003,9 @@ def _cmd_services_batch(action: str, flags: list[str]) -> int:
 
     force = "--force" in flags
     dry_run = "--dry-run" in flags
-    pass_flags = [f for f in flags if f not in ("--force", "--dry-run")]
+    # --dry-run is binstub-only; --force is used by the binstub for
+    # staleness filtering AND forwarded to installers for config drift.
+    pass_flags = [f for f in flags if f not in ("--dry-run",)]
 
     output.header(f"Services {action} ({env})")
 
