@@ -151,7 +151,12 @@ function Write-YamlFields {
     $result = @()
     foreach ($field in $fields) {
         $val = $field.Value
-        if ($val -is [hashtable] -or $val -is [PSCustomObject]) {
+        # Check scalars first: Join-Path and other cmdlets wrap strings in
+        # PSObject, making them pass -is [PSCustomObject].  Checking string/
+        # ValueType/null before the PSCustomObject test prevents that.
+        if ($null -eq $val -or $val -is [string] -or $val -is [ValueType]) {
+            $result += "${pad}$($field.Name): $(Format-YamlValue $val)"
+        } elseif ($val -is [hashtable] -or $val -is [PSCustomObject]) {
             $result += "${pad}$($field.Name):"
             $result += Write-YamlFields -Entry $val -Indent ($Indent + 2)
         } else {
@@ -194,7 +199,7 @@ function Register-ProjectEntry {
     $entry = @{
         config_dir     = "~/.${ProjectName}"
         anchor         = if ($RepoDir) { $RepoDir } else { '' }
-        machines_yaml  = if ($RepoDir -and (Test-Path (Join-Path $RepoDir 'machines.yaml'))) { (Join-Path $RepoDir 'machines.yaml') } else { $null }
+        machines_yaml  = if ($RepoDir -and (Test-Path (Join-Path $RepoDir 'machines.yaml'))) { [string](Join-Path $RepoDir 'machines.yaml') } else { $null }
         default_branch = 'master'
         registered_at  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     }
@@ -659,7 +664,7 @@ function Build-TerminalFragment {
     $currentEntry = @{
         name          = $ProjectName
         anchor        = $RepoDir
-        machines_yaml = if ($RepoDir -and (Test-Path (Join-Path $RepoDir 'machines.yaml'))) { Join-Path $RepoDir 'machines.yaml' } else { $null }
+        machines_yaml = if ($RepoDir -and (Test-Path (Join-Path $RepoDir 'machines.yaml'))) { [string](Join-Path $RepoDir 'machines.yaml') } else { $null }
         wsl_info      = if ($currentRegEntry) { Get-WslInfo $currentRegEntry } else { $null }
     }
     $projectList += [PSCustomObject]$currentEntry
