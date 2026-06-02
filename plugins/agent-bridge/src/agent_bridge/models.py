@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+# -- Platform defaults -------------------------------------------------------
+
+
+def default_port() -> int:
+    """Return the platform-default listen port.
+
+    Windows uses 9280, Linux/WSL uses 9281.  This avoids TCP port
+    collisions when both environments run on the same host (WSL2
+    shares the Windows TCP port space).
+    """
+    return 9280 if sys.platform == "win32" else 9281
 
 
 # -- Session status ----------------------------------------------------------
@@ -154,7 +168,7 @@ class TopologyProfile(BaseModel):
 class ServiceConfig(BaseModel):
     """Root config loaded from ~/.agent-bridge/config.yaml."""
 
-    port: int = 9280
+    port: int = Field(default_factory=default_port)
     bind: str = "127.0.0.1"
     db_path: str = "~/.agent-bridge/sessions.db"
     log_level: str = "info"

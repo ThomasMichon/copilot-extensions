@@ -31,7 +31,7 @@ VENV_DIR="$INSTALL_DIR/venv"
 LOCAL_BIN="$HOME/.local/bin"
 BINSTUB="$LOCAL_BIN/agent-bridge"
 PID_FILE="$INSTALL_DIR/agent-bridge.pid"
-PORT=9280
+PORT=9281
 SYSTEMD_UNIT="agent-bridge.service"
 
 # Ensure ~/.local/bin is on PATH

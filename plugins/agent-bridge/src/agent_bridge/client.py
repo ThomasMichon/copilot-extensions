@@ -43,13 +43,15 @@ class BridgeClient:
         """
         import os
 
+        from .models import default_port
+
         config_dir = Path(
             os.environ.get("AGENT_BRIDGE_CONFIG_DIR", "~/.agent-bridge")
         ).expanduser()
 
         # Load config
         cfg_path = config_dir / "config.yaml"
-        port = 9280
+        port = default_port()
         bind = "127.0.0.1"
         if cfg_path.exists():
             try:
