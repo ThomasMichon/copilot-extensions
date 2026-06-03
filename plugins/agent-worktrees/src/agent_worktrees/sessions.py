@@ -3,6 +3,11 @@
 Scans ~/.copilot/session-state/ to detect active Copilot sessions
 (by lock file + process check) and extract latest session summaries
 for worktree annotation.
+
+Provides two scanning modes:
+- ``scan_sessions()`` — full walk of all session directories (legacy)
+- ``scan_sessions_fast()`` — targeted lookup using the per-worktree
+  session registry, falling back to full scan for unindexed records
 """
 
 from __future__ import annotations
@@ -30,6 +35,9 @@ class SessionContext:
 
     turn_count: dict[str, int] = field(default_factory=dict)
     """normalized_path → total user-message turns across all sessions"""
+
+    _latest_ts: dict[str, str] = field(default_factory=dict)
+    """Internal: tracks latest updated_at per path for summary selection."""
 
 
 def _normalize_path(p: str) -> str:
@@ -204,7 +212,195 @@ def scan_sessions(worktree_paths: list[str]) -> SessionContext:
     return ctx
 
 
-def find_latest_session_id(worktree_path: str) -> str | None:
+def _enrich_session_dir(
+    session_dir: Path,
+    session_id: str,
+    worktree_path: str,
+    ctx: SessionContext,
+) -> None:
+    """Read a single session directory and populate ctx fields.
+
+    Shared helper for fast-path scanning — reads workspace.yaml for
+    summary, events.jsonl for turn count, and lock files for liveness.
+    """
+    entry = session_dir / session_id
+    if not entry.is_dir():
+        return
+
+    norm_path = _normalize_path(worktree_path)
+
+    # Turn count from events.jsonl
+    events_file = entry / "events.jsonl"
+    if events_file.exists():
+        try:
+            with open(events_file, encoding="utf-8", errors="replace") as ef:
+                turns = sum(1 for line in ef if '"user.message"' in line)
+            if turns > 0:
+                ctx.turn_count[norm_path] = (
+                    ctx.turn_count.get(norm_path, 0) + turns
+                )
+        except OSError:
+            pass
+
+    # Summary from workspace.yaml
+    ws_file = entry / "workspace.yaml"
+    if ws_file.exists():
+        try:
+            with open(ws_file, encoding="utf-8") as f:
+                ws_data = yaml.safe_load(f)
+        except Exception:
+            ws_data = None
+
+        if ws_data and isinstance(ws_data, dict):
+            _placeholder = ("", "|-", "|", ">-", ">", "null", "Untitled")
+            display_text = ""
+            summary = ws_data.get("summary", "")
+            if isinstance(summary, str) and summary.strip() and summary not in _placeholder:
+                display_text = summary.strip()
+            if not display_text:
+                name = ws_data.get("name", "")
+                if isinstance(name, str) and name.strip() and name not in _placeholder:
+                    display_text = name.strip()
+
+            if display_text:
+                updated_at = str(ws_data.get("updated_at", ""))
+                prev_ts = ctx._latest_ts.get(norm_path, "")
+                if not prev_ts or updated_at > prev_ts:
+                    ctx._latest_ts[norm_path] = updated_at
+                    if len(display_text) > 60:
+                        display_text = display_text[:57] + "..."
+                    ctx.latest_summary[norm_path] = display_text
+
+    # Session count
+    ctx.session_count[norm_path] = ctx.session_count.get(norm_path, 0) + 1
+
+    # Liveness check via lock files
+    for lock_file in entry.glob("inuse.*.lock"):
+        parts = lock_file.stem.split(".")
+        if len(parts) >= 2:
+            try:
+                lock_pid = int(parts[1])
+            except ValueError:
+                continue
+            if _is_copilot_process(lock_pid):
+                if norm_path not in ctx.active_sessions:
+                    ctx.active_sessions[norm_path] = []
+                ctx.active_sessions[norm_path].append(session_id)
+                break
+
+
+def scan_sessions_fast(
+    records: list,
+) -> SessionContext:
+    """Targeted session scan using the per-worktree session registry.
+
+    Instead of walking all of ``~/.copilot/session-state/``, reads
+    session IDs from each record's ``sessions`` list and checks only
+    those specific directories.
+
+    Records whose ``sessions`` field is None (pre-registry, not yet
+    indexed) are collected and their paths passed to the legacy
+    ``scan_sessions()`` for a full-scan fallback.  This ensures
+    correct behavior during the migration window.
+
+    Args:
+        records: List of WorktreeRecord objects (with sessions field).
+
+    Returns:
+        SessionContext with active sessions and latest summaries.
+    """
+    ctx = SessionContext()
+    session_dir = _session_state_dir()
+
+    if not session_dir.exists():
+        return ctx
+
+    # Separate indexed vs unindexed records
+    fallback_paths: list[str] = []
+
+    for rec in records:
+        if not rec.worktree_path:
+            continue
+
+        # sessions=None means pre-registry — needs full scan fallback
+        sessions = getattr(rec, "sessions", None)
+        if sessions is None:
+            fallback_paths.append(rec.worktree_path)
+            continue
+
+        # Fast path — only check known session IDs
+        for entry in sessions:
+            _enrich_session_dir(
+                session_dir, entry.session_id, rec.worktree_path, ctx,
+            )
+
+    # Fallback for unindexed records
+    if fallback_paths:
+        fallback_ctx = scan_sessions(fallback_paths)
+        # Merge fallback results
+        for k, v in fallback_ctx.active_sessions.items():
+            ctx.active_sessions.setdefault(k, []).extend(v)
+        for k, v in fallback_ctx.latest_summary.items():
+            if k not in ctx.latest_summary:
+                ctx.latest_summary[k] = v
+        for k, v in fallback_ctx.session_count.items():
+            ctx.session_count[k] = ctx.session_count.get(k, 0) + v
+        for k, v in fallback_ctx.turn_count.items():
+            ctx.turn_count[k] = ctx.turn_count.get(k, 0) + v
+
+    return ctx
+
+
+def find_latest_session_id_fast(
+    worktree_path: str,
+    sessions: list | None,
+) -> str | None:
+    """Find the most recent Copilot session ID using the registry.
+
+    If *sessions* is None (pre-registry), falls back to the full-scan
+    ``find_latest_session_id()``.
+
+    Validates each candidate: session dir must exist and contain
+    ``session.db`` or ``events.jsonl`` (not a stale stub).
+    """
+    if sessions is None:
+        return find_latest_session_id(worktree_path)
+
+    if not sessions:
+        return None
+
+    session_dir = _session_state_dir()
+    if not session_dir.exists():
+        return None
+
+    best_id: str | None = None
+    best_ts: str = ""
+
+    for entry in sessions:
+        sid = entry.session_id
+        sdir = session_dir / sid
+        if not sdir.is_dir():
+            continue
+        # Must have conversation data
+        if not (sdir / "session.db").exists() and not (sdir / "events.jsonl").exists():
+            continue
+        # Use workspace.yaml updated_at for ordering
+        ws_file = sdir / "workspace.yaml"
+        if ws_file.exists():
+            try:
+                with open(ws_file, encoding="utf-8") as f:
+                    ws_data = yaml.safe_load(f)
+                updated_at = str(ws_data.get("updated_at", "")) if ws_data else ""
+            except Exception:
+                updated_at = ""
+        else:
+            updated_at = entry.started_at or ""
+
+        if updated_at > best_ts:
+            best_ts = updated_at
+            best_id = sid
+
+    return best_id
     """Find the most recent Copilot session ID for a worktree path.
 
     Scans ``~/.copilot/session-state/`` for sessions whose ``cwd``
