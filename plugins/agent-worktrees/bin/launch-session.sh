@@ -128,7 +128,7 @@ if [[ "$_NO_UPDATE" != "1" ]]; then
         setup_log INFO "Plugin auto-update: layout=$_PLUGIN_LAYOUT dir=$_PLUGIN_DIR"
 
         # Snapshot key plugin files to detect changes after update
-        _HASH_FILES="pyproject.toml plugin.json bin/launch-session.ps1 bin/launch-session.sh scripts/install.ps1 scripts/install.sh"
+        _HASH_FILES="pyproject.toml plugin.json bin/launch-session.ps1 bin/launch-session.sh bin/pane-wrapper.sh scripts/install.ps1 scripts/install.sh"
         _OLD_FP=""
         for _f in $_HASH_FILES; do
             _fp="$_PLUGIN_DIR/$_f"
@@ -366,6 +366,10 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             TMUX_ENV_FLAGS+=(-e "WORKTREE_ID=$WORKTREE_ID")
             TMUX_ENV_FLAGS+=(-e "APERTURE_WORKTREE_ID=$WORKTREE_ID")
         fi
+        if [[ -n "${SETUP_LOG:-}" ]]; then
+            TMUX_ENV_FLAGS+=(-e "WORKTREE_SETUP_LOG=$SETUP_LOG")
+            TMUX_ENV_FLAGS+=(-e "APERTURE_SETUP_LOG=$SETUP_LOG")
+        fi
         if [[ -n "$ENV_EXPORTS" ]]; then
             while IFS= read -r line; do
                 # Strip 'export ' prefix → KEY=VALUE
@@ -374,37 +378,22 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             done <<< "$ENV_EXPORTS"
         fi
 
+        # Pane wrapper — catches exit codes, shows diagnostics on crash,
+        # and always exits 0 so remain-on-exit doesn't trap the pane.
+        PANE_WRAPPER="$HOME/.agent-worktrees/bin/pane-wrapper.sh"
+        if [[ -r "$PANE_WRAPPER" ]]; then
+            PANE_CMD=(bash "$PANE_WRAPPER" "${CMD_ARRAY[@]}")
+        else
+            setup_log WARN "pane wrapper missing at $PANE_WRAPPER; using direct command"
+            PANE_CMD=("${CMD_ARRAY[@]}")
+        fi
+
         if ! tmux new-session -d -s "$TMUX_SESS" -c "${WORK_DIR:-.}" \
             "${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}" \
-            "${CMD_ARRAY[@]}"; then
+            "${PANE_CMD[@]}"; then
             echo "WARNING: Failed to create tmux session. Falling back to direct launch." >&2
             set -e
         else
-            # Brief pause — let the command initialize so we can detect
-            # immediate crashes before trying to attach.
-            sleep 0.1
-
-            if ! tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
-                # Session died before we could attach — command crashed on
-                # startup.  Pause so the user can read the error before the
-                # terminal tab closes (the binstub chain uses exec, so exit
-                # here = tab closes).
-                setup_log ERROR "tmux session $TMUX_SESS died immediately — command crashed"
-                echo "" >&2
-                echo "ERROR: Session crashed before startup completed." >&2
-                echo "       tmux session '$TMUX_SESS' exited immediately." >&2
-                echo "" >&2
-                echo "Tip: check the setup log at $SETUP_LOG" >&2
-                echo "     or run with --no-update to skip pre-flight checks." >&2
-                echo "" >&2
-                read -rp "Press Enter to close..." _ </dev/tty 2>/dev/null || sleep 5
-                set -e
-
-                if [[ "$POST_EXIT" == "1" && -n "$WORKTREE_ID" ]]; then
-                    "$PYTHON" -m agent_worktrees post-exit "$WORKTREE_ID" 2>/dev/null || true
-                fi
-                exit 1
-            fi
 
             if [[ -n "${TMUX:-}" ]]; then
                 tmux switch-client -t "=$TMUX_SESS"
@@ -428,27 +417,15 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
                             echo "Handoff detected — relaunching with continuation prompt..."
                             echo ""
                             HANDOFF_PROMPT="Continuing from a previous session in this worktree. A handoff was prepared - read it for full context: cat \"$HANDOFF_PATH\""
+                            HANDOFF_CMD=("${CMD_ARRAY[@]}" -i "$HANDOFF_PROMPT")
+                            if [[ -r "$PANE_WRAPPER" ]]; then
+                                HANDOFF_PANE_CMD=(bash "$PANE_WRAPPER" "${HANDOFF_CMD[@]}")
+                            else
+                                HANDOFF_PANE_CMD=("${HANDOFF_CMD[@]}")
+                            fi
                             set +e
-                            tmux new-session -d -s "$TMUX_SESS" -c "$WORK_DIR" "${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}" "${CMD_ARRAY[@]}" -i "$HANDOFF_PROMPT"
+                            tmux new-session -d -s "$TMUX_SESS" -c "$WORK_DIR" "${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}" "${HANDOFF_PANE_CMD[@]}"
                             if [[ $? -eq 0 ]]; then
-                                # Smoke-test: let the process initialize so
-                                # we can detect immediate crashes before attach.
-                                sleep 0.3
-
-                                if ! tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
-                                    setup_log ERROR "tmux handoff session $TMUX_SESS died immediately — relaunch crashed"
-                                    echo "" >&2
-                                    echo "ERROR: Handoff relaunch crashed before startup completed." >&2
-                                    echo "       tmux session '$TMUX_SESS' exited immediately." >&2
-                                    echo "" >&2
-                                    echo "Tip: check the setup log at $SETUP_LOG" >&2
-                                    echo "     or relaunch manually." >&2
-                                    echo "" >&2
-                                    read -rp "Press Enter to close..." _ </dev/tty 2>/dev/null || sleep 5
-                                    set -e
-                                    exit 1
-                                fi
-
                                 if [[ -n "${TMUX:-}" ]]; then
                                     tmux switch-client -t "=$TMUX_SESS"
                                 else
