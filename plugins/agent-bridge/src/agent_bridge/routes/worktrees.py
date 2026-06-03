@@ -293,27 +293,19 @@ def get_cache() -> WorktreeDiscoveryCache:
 # -- Route handlers -----------------------------------------------------------
 
 
-_TERMINAL_STATUSES = frozenset({"finalized", "ended"})
-
-
 @router.get("/api/v1/worktrees")
-async def list_worktrees(
-    request: Request,
-    include_finalized: bool = False,
-) -> dict[str, Any]:
+async def list_worktrees(request: Request) -> dict[str, Any]:
     """List discovered worktrees across all agents, grouped by agent name.
 
-    By default only non-finalized worktrees are returned.  Pass
-    ``?include_finalized=true`` to include completed worktrees.
+    Returns all worktrees reported by each machine's binstub.  Worktrees
+    that have been deleted from disk are not returned (the binstub only
+    reports what physically exists).
     """
     cache = get_cache()
     groups = cache.get_all()
     return {
         "groups": {
-            name: [
-                wt.to_dict() for wt in worktrees
-                if include_finalized or wt.status not in _TERMINAL_STATUSES
-            ]
+            name: [wt.to_dict() for wt in worktrees]
             for name, worktrees in groups.items()
         },
     }
