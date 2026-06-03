@@ -5,11 +5,12 @@ Orchestrates the full worktree finalization lifecycle:
 2. Fetch from remote
 3. Pre-squash all worktree commits into one
 4. Rebase the single commit onto upstream
-5. Fast-forward merge into default branch
-6. Push with retry
-7. Remove worktree and branch
-8. Merge permissions back to anchor
-9. Update tracking YAML → finalized
+5. Anchor hygiene check (block on dirty, warn on stash)
+6. Update local default branch and fast-forward merge
+7. Push with retry
+8. Remove worktree and branch
+9. Merge permissions back to anchor
+10. Update tracking YAML → finalized
 """
 
 from __future__ import annotations
@@ -247,7 +248,30 @@ def finalize(
                         tracking.update_status(record, "active")
                     return False
 
-        # 5. Update local default branch and merge
+        # 5. Anchor hygiene -- refuse finalization if anchor has dirty files
+        #    (dirty files can survive checkout and silently accumulate)
+        from . import anchor_hygiene
+        anchor_report = anchor_hygiene.check_anchor(anchor)
+        if anchor_report.has_dirty_files:
+            output.err(
+                f"Anchor repo has {len(anchor_report.dirty_files)} uncommitted "
+                f"file(s). Commit, stash, or discard them before finalizing."
+            )
+            for f in anchor_report.dirty_files[:5]:
+                print(f"       {f}")
+            if len(anchor_report.dirty_files) > 5:
+                print(f"       ... and {len(anchor_report.dirty_files) - 5} more")
+            return False
+        if anchor_report.has_stash:
+            output.warn(
+                f"Anchor repo has {len(anchor_report.stash_entries)} stash "
+                f"entr{'y' if len(anchor_report.stash_entries) == 1 else 'ies'} "
+                f"-- consider rescuing this work."
+            )
+            for entry in anchor_report.stash_entries[:3]:
+                print(f"       {entry}")
+
+        # 6. Update local default branch and merge
         print(f"Updating local {repo.default_branch}...")
         git_ops.checkout(repo.default_branch, cwd=anchor)
         if not git_ops.merge_ff(f"{repo.remote}/{repo.default_branch}", cwd=anchor):
@@ -270,7 +294,7 @@ def finalize(
                 tracking.update_status(record, "orphaned")
             return False
 
-        # 6. Push with retry
+        # 7. Push with retry
         max_retries = 3
         pushed = False
         for attempt in range(1, max_retries + 1):
@@ -400,6 +424,7 @@ def _dry_run_preview(
 
     output.dry_run(f"Would fetch from {repo.remote}")
     output.dry_run(f"Would squash and rebase onto {upstream}")
+    output.dry_run("Would check anchor repo for uncommitted work (blocks if dirty)")
     output.dry_run(f"Would fast-forward merge into local {repo.default_branch}")
     output.dry_run(f"Would push {repo.default_branch} to {repo.remote}")
     output.dry_run(f"Would remove worktree: {worktree_path}")

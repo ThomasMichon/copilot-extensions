@@ -3638,6 +3638,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--worktree-id", required=True, help="Worktree ID")
     sp.add_argument("--session-id", required=True, help="Copilot session ID")
 
+    # anchor-check (anchor repo hygiene)
+    sp = sub.add_parser("anchor-check",
+                        help="Check anchor repo for uncommitted work and stash entries")
+    sp.add_argument("--json", action="store_true",
+                    help="JSON output mode (stdout is JSON only)")
+    sp.add_argument("--quiet", action="store_true",
+                    help="Only print if issues are found")
+    sp.add_argument("--strict", action="store_true",
+                    help="Exit nonzero if anchor is not clean")
+    sp.add_argument("--repo-path", default=None,
+                    help="Path inside a repo (defaults to cwd)")
+
     return parser
 
 
@@ -3735,6 +3747,36 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_anchor_check(args: argparse.Namespace) -> int:
+    """Check anchor repo for uncommitted work and stash entries."""
+    from . import anchor_hygiene
+
+    repo_path = getattr(args, "repo_path", None) or os.getcwd()
+    use_json = getattr(args, "json", False)
+    quiet = getattr(args, "quiet", False)
+    strict = getattr(args, "strict", False)
+
+    try:
+        report = anchor_hygiene.check_anchor(repo_path)
+    except Exception as e:
+        if use_json:
+            json.dump({"version": 1, "error": str(e)}, sys.stdout)
+            print()
+        else:
+            output.err(f"Anchor check failed: {e}")
+        return 1
+
+    if use_json:
+        json.dump(anchor_hygiene.report_as_json(report), sys.stdout, indent=2)
+        print()
+    else:
+        anchor_hygiene.report_anchor_state(report, quiet=quiet)
+
+    if strict and not report.is_clean:
+        return 1
+    return 0
+
+
 COMMAND_MAP = {
     "resolve": cmd_resolve,
     "post-exit": cmd_post_exit,
@@ -3758,6 +3800,7 @@ COMMAND_MAP = {
     "handoff": cmd_handoff,
     "register-session": cmd_register_session,
     "deregister-session": cmd_deregister_session,
+    "anchor-check": cmd_anchor_check,
 }
 
 
