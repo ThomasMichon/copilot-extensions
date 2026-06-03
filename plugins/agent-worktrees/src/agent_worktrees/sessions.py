@@ -357,17 +357,15 @@ def find_latest_session_id_fast(
 ) -> str | None:
     """Find the most recent Copilot session ID using the registry.
 
-    If *sessions* is None (pre-registry), falls back to the full-scan
-    ``find_latest_session_id()``.
+    If *sessions* is None (pre-registry) or empty (registry active but
+    no sessions recorded -- e.g. hook failed to fire), falls back to the
+    full-scan ``find_latest_session_id()``.
 
     Validates each candidate: session dir must exist and contain
     ``session.db`` or ``events.jsonl`` (not a stale stub).
     """
-    if sessions is None:
-        return find_latest_session_id(worktree_path)
-
     if not sessions:
-        return None
+        return find_latest_session_id(worktree_path)
 
     session_dir = _session_state_dir()
     if not session_dir.exists():
@@ -457,6 +455,83 @@ def find_latest_session_id(worktree_path: str) -> str | None:
             best_id = entry.name
 
     return best_id
+
+
+def backfill_sessions(records: list) -> dict[str, list[str]]:
+    """Populate empty session registries from existing session-state data.
+
+    Scans ``~/.copilot/session-state/`` once, matches sessions to
+    worktree paths, and returns a mapping of worktree_id to session IDs
+    that were discovered.  The caller is responsible for writing the
+    entries into the tracking YAMLs.
+
+    Only processes records whose ``sessions`` field is empty (``None``
+    or ``[]``).  Records with populated session lists are skipped.
+    """
+    session_dir = _session_state_dir()
+    if not session_dir.exists():
+        return {}
+
+    # Collect worktrees that need backfilling
+    path_to_wt: dict[str, str] = {}  # normalized_path → worktree_id
+    for rec in records:
+        sessions = getattr(rec, "sessions", None)
+        if sessions:
+            continue  # already has entries
+        if not rec.worktree_path:
+            continue
+        path_to_wt[_normalize_path(rec.worktree_path)] = rec.worktree_id
+
+    if not path_to_wt:
+        return {}
+
+    # Single pass over all session directories
+    # worktree_id → list of (session_id, updated_at)
+    discovered: dict[str, list[tuple[str, str]]] = {}
+
+    for entry in session_dir.iterdir():
+        if not entry.is_dir():
+            continue
+
+        ws_file = entry / "workspace.yaml"
+        if not ws_file.exists():
+            continue
+
+        # Must have conversation data (not a stale stub)
+        if not (entry / "session.db").exists() and not (entry / "events.jsonl").exists():
+            continue
+
+        try:
+            with open(ws_file, encoding="utf-8") as f:
+                ws_data = yaml.safe_load(f)
+        except Exception:
+            continue
+
+        if not ws_data or not isinstance(ws_data, dict):
+            continue
+
+        cwd = ws_data.get("cwd", "")
+        if not cwd:
+            continue
+
+        norm_cwd = _normalize_path(cwd)
+
+        # Match against worktree paths
+        for wt_path, wt_id in path_to_wt.items():
+            if norm_cwd == wt_path or norm_cwd.startswith(wt_path + os.sep):
+                updated_at = str(ws_data.get("updated_at", ""))
+                discovered.setdefault(wt_id, []).append(
+                    (entry.name, updated_at)
+                )
+                break
+
+    # Return just the session IDs, sorted by updated_at (newest last)
+    result: dict[str, list[str]] = {}
+    for wt_id, entries in discovered.items():
+        entries.sort(key=lambda e: e[1])
+        result[wt_id] = [sid for sid, _ in entries]
+
+    return result
 
 
 @dataclass

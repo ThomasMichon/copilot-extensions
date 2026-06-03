@@ -359,9 +359,18 @@ class TestFindLatestSessionIdFast:
 
         assert result == "fallback-sess"
 
-    def test_fast_empty_sessions(self, tmp_session_state_dir: Path):
-        result = find_latest_session_id_fast("/tmp/wt", [])
-        assert result is None
+    def test_fast_empty_sessions_falls_back(self, tmp_session_state_dir: Path):
+        """sessions=[] should fall back to full scan (hook may not have fired)."""
+        wt_path = "/tmp/wt-empty-fallback"
+        make_session_dir(
+            tmp_session_state_dir, "discovered-sess", wt_path,
+            updated_at="2026-06-01T10:00:00.000Z",
+        )
+
+        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+            result = find_latest_session_id_fast(wt_path, [])
+
+        assert result == "discovered-sess"
 
     def test_fast_skips_missing_dirs(self, tmp_session_state_dir: Path):
         sessions = [SessionEntry("gone-sess", "2026-06-01T10:00:00")]
