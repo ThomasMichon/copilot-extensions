@@ -178,9 +178,13 @@ def _normalize_path(p: str) -> str:
     return p
 
 
-def _build_active_paths(records: list[tracking.WorktreeRecord]) -> set[str]:
+def _build_active_paths(
+    records: list[tracking.WorktreeRecord],
+    session_ctx: sessions.SessionContext | None = None,
+) -> set[str]:
     """Build set of normalized paths with live sessions (lock files OR mux sessions)."""
-    session_ctx = sessions.scan_sessions_fast(records)
+    if session_ctx is None:
+        session_ctx = sessions.scan_sessions_fast(records)
     active = {
         _normalize_path(p) for p, sids in session_ctx.active_sessions.items() if sids
     }
@@ -637,7 +641,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
             # Scan for live Copilot sessions and mux sessions
             session_ctx = sessions.scan_sessions_fast(records)
-            active_paths = _build_active_paths(records)
+            active_paths = _build_active_paths(records, session_ctx)
 
             # Classify each by git state (session-aware)
             classified: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo]] = []
@@ -958,7 +962,7 @@ def _system_status(config: cfg.Config) -> int | None:
 
     all_paths = [r.worktree_path for r in records]
     session_ctx = sessions.scan_sessions_fast(records)
-    active_paths = _build_active_paths(records)
+    active_paths = _build_active_paths(records, session_ctx)
 
     # Build status as picker items (view-only)
     status_items: list[MenuItem] = []
@@ -1502,7 +1506,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     # Scan for live sessions to feed into classification
     all_paths = [r.worktree_path for r in records]
     session_ctx = sessions.scan_sessions_fast(records)
-    active_paths = _build_active_paths(records)
+    active_paths = _build_active_paths(records, session_ctx)
 
     # Mux status (batch query if requested)
     mux_map: dict[str, sessions.MuxInfo] = {}

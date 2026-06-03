@@ -78,19 +78,52 @@ def _is_process_alive(pid: int) -> bool:
             return False
 
 
+# Cached kernel32 handle for Windows process queries (avoids per-call DLL setup)
+_kernel32 = None
+
+
+def _get_kernel32():
+    """Return a configured kernel32 WinDLL handle, cached after first call."""
+    global _kernel32
+    if _kernel32 is not None:
+        return _kernel32
+    import ctypes
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD,
+        wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD),
+    ]
+    k32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    k32.CloseHandle.restype = wintypes.BOOL
+    _kernel32 = k32
+    return k32
+
+
 def _is_copilot_process(pid: int) -> bool:
     """Check if a PID belongs to a Copilot CLI process."""
     if platform.system() == "Windows":
-        try:
-            import subprocess
+        import ctypes
+        from ctypes import wintypes
 
-            result = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                capture_output=True, text=True,
-            )
-            return "copilot" in result.stdout.lower()
-        except Exception:
-            return _is_process_alive(pid)
+        kernel32 = _get_kernel32()
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            size = wintypes.DWORD(len(buf))
+            if kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                exe_name = Path(buf.value).name.lower()
+                return "copilot" in exe_name
+            return False
+        finally:
+            kernel32.CloseHandle(handle)
     else:
         cmdline_path = Path(f"/proc/{pid}/cmdline")
         try:
