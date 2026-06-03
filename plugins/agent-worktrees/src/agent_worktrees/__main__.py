@@ -3666,6 +3666,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--worktree-id", required=True, help="Worktree ID")
     sp.add_argument("--session-id", required=True, help="Copilot session ID")
 
+    # backfill-sessions (one-time registry population)
+    sub.add_parser("backfill-sessions",
+                   help="Populate empty session registries from session-state data")
+
     # anchor-check (anchor repo hygiene)
     sp = sub.add_parser("anchor-check",
                         help="Check anchor repo for uncommitted work and stash entries")
@@ -3775,6 +3779,47 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_backfill_sessions(args: argparse.Namespace) -> int:
+    """Populate empty session registries from existing session-state data."""
+    tracking_path = cfg.tracking_dir()
+    records = tracking.list_records(tracking_path)
+
+    # Only backfill records with empty sessions lists
+    need_backfill = [r for r in records if not r.sessions]
+    if not need_backfill:
+        output.ok("All worktree records already have session data")
+        return 0
+
+    print(f"Scanning session-state for {len(need_backfill)} worktree(s)...")
+    discovered = sessions.backfill_sessions(need_backfill)
+
+    updated = 0
+    for rec in need_backfill:
+        sids = discovered.get(rec.worktree_id, [])
+        if not sids:
+            # Mark as indexed (empty list) so we don't rescan
+            if rec.sessions is None:
+                rec.sessions = []
+                tracking.save_record(rec)
+                updated += 1
+            continue
+
+        rec.sessions = [
+            tracking.SessionEntry(session_id=sid, started_at="")
+            for sid in sids
+        ]
+        tracking.save_record(rec)
+        updated += 1
+
+    total_sessions = sum(len(v) for v in discovered.values())
+    print(
+        f"Backfilled {total_sessions} session(s) "
+        f"across {len(discovered)} worktree(s) "
+        f"({updated} record(s) updated)"
+    )
+    return 0
+
+
 def cmd_anchor_check(args: argparse.Namespace) -> int:
     """Check anchor repo for uncommitted work and stash entries."""
     from . import anchor_hygiene
@@ -3828,6 +3873,7 @@ COMMAND_MAP = {
     "handoff": cmd_handoff,
     "register-session": cmd_register_session,
     "deregister-session": cmd_deregister_session,
+    "backfill-sessions": cmd_backfill_sessions,
     "anchor-check": cmd_anchor_check,
 }
 

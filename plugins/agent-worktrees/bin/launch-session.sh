@@ -362,6 +362,9 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
         # The tmux server may predate this shell, so exported vars aren't
         # automatically inherited by new sessions.
         TMUX_ENV_FLAGS=()
+        if [[ -n "${WORKTREE_PROJECT:-}" ]]; then
+            TMUX_ENV_FLAGS+=(-e "WORKTREE_PROJECT=$WORKTREE_PROJECT")
+        fi
         if [[ -n "${WORKTREE_ID:-}" ]]; then
             TMUX_ENV_FLAGS+=(-e "WORKTREE_ID=$WORKTREE_ID")
             TMUX_ENV_FLAGS+=(-e "APERTURE_WORKTREE_ID=$WORKTREE_ID")
