@@ -6,7 +6,6 @@ tracking its lifecycle state.
 
 from __future__ import annotations
 
-import fcntl
 import os
 import tempfile
 from dataclasses import dataclass, field
@@ -327,11 +326,16 @@ class _RecordLock:
     def __enter__(self) -> "_RecordLock":
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
         self._fd = os.open(str(self._lock_path), os.O_CREAT | os.O_RDWR)
+        try:
+            import fcntl as _fcntl
+        except ImportError:
+            # Windows — no fcntl; proceed unlocked
+            return self
         import time
         deadline = time.monotonic() + self._timeout
         while True:
             try:
-                fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _fcntl.flock(self._fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
                 return self
             except (OSError, BlockingIOError):
                 if time.monotonic() >= deadline:
@@ -342,8 +346,9 @@ class _RecordLock:
     def __exit__(self, *_: object) -> None:
         if self._fd is not None:
             try:
-                fcntl.flock(self._fd, fcntl.LOCK_UN)
-            except OSError:
+                import fcntl as _fcntl
+                _fcntl.flock(self._fd, _fcntl.LOCK_UN)
+            except (ImportError, OSError):
                 pass
             os.close(self._fd)
             self._fd = None
