@@ -205,6 +205,50 @@ def _enrich_local_agents(
     )
 
 
+def _find_covering_agent(
+    local_agent: AgentConfig,
+    registry: dict[str, AgentConfig],
+    machines: dict[str, MachineConfig],
+) -> str | None:
+    """Return the name of a registry agent that covers a local agent, or None.
+
+    A registry agent "covers" an auto-discovered local agent when it
+    targets the same project on the local machine in the local environment.
+    """
+    if not local_agent.project:
+        return None
+
+    machine, platform = _detect_local_machine(machines)
+    if not machine:
+        return None
+
+    # Map platform to the ssh_environment name used in agent configs
+    env_name = platform  # 'windows', 'wsl', 'linux'
+
+    for name, agent in registry.items():
+        if agent.auto_discovered or agent.project != local_agent.project:
+            continue
+        # Agent must target this machine (host matches machine key)
+        if not agent.host:
+            continue
+        # Resolve the host to a machine key (could be alias or key)
+        host_lower = agent.host.lower()
+        target_machine = machines.get(host_lower)
+        if not target_machine:
+            # Try matching against machine keys case-insensitively
+            for mk, mc in machines.items():
+                if mk.lower() == host_lower:
+                    target_machine = mc
+                    break
+        if target_machine and target_machine.key == machine.key:
+            # Same machine -- check if the environment matches
+            agent_env = (agent.ssh_environment or "").lower()
+            if agent_env == env_name:
+                return name
+
+    return None
+
+
 def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     """Build an AgentResolver from config profiles + local discovery.
 
@@ -231,7 +275,9 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             agents_cfg = load_agent_registry(profile.agents_config)
             all_agents.update(agents_cfg)
 
-    # Auto-discover local agents from adopted projects; explicit wins
+    # Auto-discover local agents from adopted projects; explicit wins.
+    # Also suppress auto-discovered agents when a registry agent already
+    # covers this machine+environment for the same project.
     discovered = discover_local_agents()
     if discovered and all_machines:
         _enrich_local_agents(discovered, all_machines)
@@ -239,6 +285,16 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
         if name in all_agents:
             log.debug(
                 "Skipping auto-discovered agent '%s' -- explicit entry exists", name,
+            )
+            continue
+        # Check if a registry agent already covers this project on the
+        # local machine+environment (making the auto-discovered one redundant).
+        covering = _find_covering_agent(agent, all_agents, all_machines)
+        if covering:
+            log.info(
+                "Suppressing auto-discovered agent '%s' -- registry agent "
+                "'%s' covers this project on the local machine",
+                name, covering,
             )
         else:
             all_agents[name] = agent
