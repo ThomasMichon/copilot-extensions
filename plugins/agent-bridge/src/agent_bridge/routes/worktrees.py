@@ -119,11 +119,17 @@ class WorktreeDiscoveryCache:
             except (KeyError, ValueError) as exc:
                 log.warning("Cannot resolve agent %s for discovery: %s", agent_name, exc)
                 return []
-            raw = await _run_ssh(
-                host=target.host or config.host,
-                user=target.user or config.ssh_user,
-                project=config.project,
-            )
+
+            # If the resolved target is the local machine, run locally
+            # instead of SSH (avoids loopback SSH failures)
+            if _is_local_target(target.host, resolver):
+                raw = await _run_local(config.project)
+            else:
+                raw = await _run_ssh(
+                    host=target.host or config.host,
+                    user=target.user or config.ssh_user,
+                    project=config.project,
+                )
 
         if raw is None:
             return []
@@ -160,6 +166,39 @@ async def _run_local(project: str) -> str | None:
 
     cmd = [binstub_str, "list", "--json"]
     return await _exec(cmd)
+
+
+def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
+    """Check if an SSH host alias resolves to the local machine.
+
+    Compares the SSH alias against the local hostname and known
+    local aliases (e.g., 'lambda-core-wsl' when running on Lambda-Core WSL).
+    """
+    if not ssh_host:
+        return True
+
+    import socket
+    hostname = socket.gethostname().lower()
+    host_lower = ssh_host.lower()
+
+    # Direct hostname match
+    if host_lower == hostname:
+        return True
+
+    # Check against machine topology -- if the SSH alias resolves to the
+    # same machine key as the local hostname, it's local
+    from ..agent_registry import _detect_local_machine
+    machine, platform = _detect_local_machine(resolver.machines)
+    if not machine:
+        return False
+
+    # Check if the SSH alias matches any alias for the local machine's
+    # environments that match our platform
+    for env in machine.ssh_environments:
+        if env.name == platform and env.alias and env.alias.lower() == host_lower:
+            return True
+
+    return False
 
 
 async def _run_ssh(host: str, user: str | None, project: str) -> str | None:
@@ -249,14 +288,27 @@ def get_cache() -> WorktreeDiscoveryCache:
 # -- Route handlers -----------------------------------------------------------
 
 
+_TERMINAL_STATUSES = frozenset({"finalized", "ended"})
+
+
 @router.get("/api/v1/worktrees")
-async def list_worktrees(request: Request) -> dict[str, Any]:
-    """List discovered worktrees across all agents, grouped by agent name."""
+async def list_worktrees(
+    request: Request,
+    include_finalized: bool = False,
+) -> dict[str, Any]:
+    """List discovered worktrees across all agents, grouped by agent name.
+
+    By default only non-finalized worktrees are returned.  Pass
+    ``?include_finalized=true`` to include completed worktrees.
+    """
     cache = get_cache()
     groups = cache.get_all()
     return {
         "groups": {
-            name: [wt.to_dict() for wt in worktrees]
+            name: [
+                wt.to_dict() for wt in worktrees
+                if include_finalized or wt.status not in _TERMINAL_STATUSES
+            ]
             for name, worktrees in groups.items()
         },
     }
