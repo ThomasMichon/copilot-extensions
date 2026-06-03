@@ -38,8 +38,11 @@ class AgentConfig:
     managed: bool = False
     description: str | None = None
     display_name: str | None = None
+    icon: str | None = None
+    worktree_root: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     project: str | None = None  # agent-worktrees project (binstub name)
+    setup_script: str | None = None
     auto_discovered: bool = False  # True for agents from projects.yaml
 
 
@@ -58,8 +61,11 @@ def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
             managed=bool(config.get("managed")),
             description=config.get("description"),
             display_name=config.get("display_name"),
+            icon=config.get("icon"),
+            worktree_root=config.get("worktree_root"),
             env={str(k): str(v) for k, v in config.get("env", {}).items()},
             project=config.get("project"),
+            setup_script=config.get("setup_script"),
         )
     return registry
 
@@ -358,10 +364,19 @@ class AgentResolver:
                 "name": config.name,
                 "display_name": config.display_name or config.name,
                 "description": config.description or "",
+                "icon": config.icon,
                 "managed": config.managed,
                 "spawnable": spawnable,
                 "target_type": target_type,
                 "host": config.host or "",
+                "ssh_user": config.ssh_user,
+                "ssh_environment": config.ssh_environment,
+                "cwd": config.cwd,
+                "copilot_path": config.copilot_path,
+                "copilot_args": config.copilot_args,
+                "worktree_root": config.worktree_root,
+                "env": config.env or {},
+                "project": config.project,
                 "auto_discovered": config.auto_discovered,
             })
         return result

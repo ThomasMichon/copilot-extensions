@@ -31,11 +31,20 @@ async def get_agent(agent_name: str, request: Request):
         "name": config.name,
         "display_name": config.display_name or config.name,
         "description": config.description or "",
+        "icon": config.icon,
         "managed": config.managed,
         "spawnable": not config.managed,
         "target_type": "local" if not config.host else "ssh",
         "host": config.host or "",
+        "ssh_user": config.ssh_user,
+        "ssh_environment": config.ssh_environment,
         "cwd": config.cwd,
+        "copilot_path": config.copilot_path,
+        "copilot_args": config.copilot_args,
+        "worktree_root": config.worktree_root,
+        "env": config.env or {},
+        "project": config.project,
+        "auto_discovered": config.auto_discovered,
     }
 
 
