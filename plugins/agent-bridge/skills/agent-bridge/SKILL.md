@@ -1,12 +1,61 @@
 ---
 name: agent-bridge
 description: >
-  Agent-bridge control plane -- manage inter-agent sessions, send prompts
-  to remote agents, and check session status via CLI commands.
-  Trigger phrases include: - 'agent-bridge' - 'remote agent' - 'send to agent' - 'agent session' - 'bridge session' - 'inter-agent' - 'cross-machine agent'
+  Agent-bridge control plane -- send prompts to agents on OTHER MACHINES
+  via CLI commands. Use this for cross-machine communication, NOT the
+  Task tool.
+  Trigger phrases include:
+  - 'agent-bridge'
+  - 'agent-bridge send'
+  - 'remote agent'
+  - 'send to agent'
+  - 'talk to borealis'
+  - 'talk to wheatley'
+  - 'talk to lambda-core'
+  - 'bridge to'
+  - 'cross-machine'
+  - 'facility agent'
+  - 'external agent'
+  - 'inter-agent'
+  - 'relay to'
+  - 'send to borealis'
+  - 'send to wheatley'
+  - 'send to lambda-core'
 ---
 
 # Agent-Bridge Control Plane
+
+## Agent-Bridge vs Internal Sub-Agents -- READ THIS FIRST
+
+**agent-bridge is NOT the Task tool.** They solve completely different
+problems:
+
+| | agent-bridge | Task tool (sub-agents) |
+|---|---|---|
+| **What** | Communicates with Copilot sessions on **other physical machines** | Spawns local background agents in **this session** |
+| **How** | `agent-bridge send <agent> "prompt"` CLI command | `task` function call in your response |
+| **Transport** | SSH to remote machines | Local subprocess |
+| **Scope** | Cross-machine, cross-network | Same machine only |
+
+**Rule:** When asked to "talk to", "send to", "relay to", or
+"communicate with" a known facility machine or agent name (wheatley,
+borealis, lambda-core, borealis-wsl, lambda-core-wsl, etc.), **ALWAYS
+use `agent-bridge send <agent-name> "prompt"`**. Never use the Task
+tool for cross-machine communication -- it cannot reach other machines.
+
+### Relay Chain Pattern
+
+When relaying a message through multiple machines (A -> B -> C), each
+hop uses `agent-bridge send` on **its own local bridge** to reach the
+next machine. The chain is:
+
+```
+Machine A: agent-bridge send agent-on-B "relay this to C"
+Machine B: agent-bridge send agent-on-C "the message"
+```
+
+Each machine's bridge manages its own outbound connections. Do NOT
+create all sessions from one machine (that's a star, not a chain).
 
 Agent-bridge is the inter-agent communication service. It manages
 persistent sessions with agents running on any configured machine

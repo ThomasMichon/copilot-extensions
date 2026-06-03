@@ -254,9 +254,13 @@ STUB
     _ok "agent-bridge installed"
     echo "  Install dir: $INSTALL_DIR"
     echo "  Binstub:     $BINSTUB"
-    echo "  Start:       agent-bridge start  (or: systemctl --user start $SYSTEMD_UNIT)"
     echo "  Config:      agent-bridge config show"
     echo "  API:         http://127.0.0.1:$PORT"
+
+    # Start service and verify health
+    echo ""
+    _step "Starting service after install..."
+    do_start
 }
 
 do_uninstall() {
@@ -468,11 +472,9 @@ STUB
     # Update deploy manifest
     _write_deploy_manifest
 
-    # Restart if it was running
-    if $was_running; then
-        _step "Restarting service..."
-        do_start
-    fi
+    # (Re)start service -- always ensure running after update
+    _step "Starting service..."
+    do_start
 
     _ok "Update complete"
 }

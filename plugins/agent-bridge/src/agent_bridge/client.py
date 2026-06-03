@@ -28,9 +28,10 @@ class BridgeClientError(Exception):
 class BridgeClient:
     """Sync HTTP client for the agent-bridge REST API."""
 
-    def __init__(self, base_url: str, token: str) -> None:
+    def __init__(self, base_url: str, token: str, *, timeout: int = 120) -> None:
         self._base = base_url.rstrip("/")
         self._token = token
+        self._timeout = timeout
 
     # -- Factory -------------------------------------------------------------
 
@@ -69,6 +70,20 @@ class BridgeClient:
 
         base_url = f"http://{bind}:{port}"
 
+        # Client timeout (seconds) -- configurable, validated
+        raw_timeout = data.get("client_timeout", 120) if cfg_path.exists() else 120
+        try:
+            timeout = int(raw_timeout)
+            if timeout <= 0:
+                raise ValueError("must be positive")
+        except (TypeError, ValueError):
+            print(
+                "[WARN] Invalid client_timeout in config (%r), using 120s"
+                % raw_timeout,
+                file=sys.stderr,
+            )
+            timeout = 120
+
         # Load auth token -- fail if missing
         auth_path = config_dir / "auth.yaml"
         if not auth_path.exists():
@@ -92,7 +107,7 @@ class BridgeClient:
             )
             sys.exit(1)
 
-        return cls(base_url, str(token))
+        return cls(base_url, str(token), timeout=timeout)
 
     # -- HTTP helpers --------------------------------------------------------
 
@@ -118,7 +133,7 @@ class BridgeClient:
             req.add_header("Content-Type", "application/json")
 
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 if resp.status == 204:
                     return None
                 return json.loads(resp.read().decode())
