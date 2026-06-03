@@ -9,18 +9,13 @@ description: >
   - 'agent-bridge send'
   - 'remote agent'
   - 'send to agent'
-  - 'talk to borealis'
-  - 'talk to wheatley'
-  - 'talk to lambda-core'
   - 'bridge to'
   - 'cross-machine'
-  - 'facility agent'
   - 'external agent'
   - 'inter-agent'
   - 'relay to'
-  - 'send to borealis'
-  - 'send to wheatley'
-  - 'send to lambda-core'
+  - 'talk to <machine>'
+  - 'send to <machine>'
 ---
 
 # Agent-Bridge Control Plane
@@ -38,10 +33,14 @@ problems:
 | **Scope** | Cross-machine, cross-network | Same machine only |
 
 **Rule:** When asked to "talk to", "send to", "relay to", or
-"communicate with" a known facility machine or agent name (wheatley,
-borealis, lambda-core, borealis-wsl, lambda-core-wsl, etc.), **ALWAYS
+"communicate with" a named machine or agent from the topology, **ALWAYS
 use `agent-bridge send <agent-name> "prompt"`**. Never use the Task
 tool for cross-machine communication -- it cannot reach other machines.
+
+Run `agent-bridge agents` to see which agent names are available. If
+your deployment includes a facility-specific adapter skill (e.g.
+`facility-agent-bridge`), it will list the concrete machine and agent
+names for your environment.
 
 ### Relay Chain Pattern
 
