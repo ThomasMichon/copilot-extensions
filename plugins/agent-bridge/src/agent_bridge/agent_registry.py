@@ -142,6 +142,69 @@ def discover_local_agents() -> dict[str, AgentConfig]:
     return discovered
 
 
+def _detect_platform() -> str:
+    """Detect the local platform: 'windows', 'wsl', or 'linux'."""
+    import sys
+    if sys.platform == "win32":
+        return "windows"
+    try:
+        with open("/proc/version") as f:
+            if "microsoft" in f.read().lower():
+                return "wsl"
+    except OSError:
+        pass
+    return "linux"
+
+
+def _detect_local_machine(
+    machines: dict[str, MachineConfig],
+) -> tuple[MachineConfig | None, str]:
+    """Match the local hostname to a machine in topology.
+
+    Returns (machine, platform) where platform is 'windows', 'wsl', or 'linux'.
+    """
+    import socket
+    hostname = socket.gethostname().lower()
+    platform = _detect_platform()
+
+    # Try exact key match first, then check aliases
+    machine = machines.get(hostname)
+    if machine:
+        return machine, platform
+
+    # Try case-insensitive key match
+    for key, mc in machines.items():
+        if key.lower() == hostname:
+            return mc, platform
+
+    return None, platform
+
+
+def _enrich_local_agents(
+    agents: dict[str, AgentConfig],
+    machines: dict[str, MachineConfig],
+) -> None:
+    """Set display_name and description on auto-discovered agents using machine identity."""
+    machine, platform = _detect_local_machine(machines)
+    if not machine:
+        return
+
+    suffix = " (WSL)" if platform == "wsl" else ""
+    display_name = f"{machine.display_name}{suffix}"
+
+    for agent in agents.values():
+        agent.display_name = display_name
+        agent.description = (
+            f"Local agent on {display_name} "
+            f"(auto-discovered from projects.yaml)"
+        )
+
+    log.info(
+        "Enriched %d local agent(s) with machine identity: %s",
+        len(agents), display_name,
+    )
+
+
 def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     """Build an AgentResolver from config profiles + local discovery.
 
@@ -170,6 +233,8 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
 
     # Auto-discover local agents from adopted projects; explicit wins
     discovered = discover_local_agents()
+    if discovered and all_machines:
+        _enrich_local_agents(discovered, all_machines)
     for name, agent in discovered.items():
         if name in all_agents:
             log.debug(
