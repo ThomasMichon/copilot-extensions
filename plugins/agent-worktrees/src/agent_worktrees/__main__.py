@@ -1580,11 +1580,35 @@ def cmd_status(args: argparse.Namespace) -> int:
 def cmd_list(args: argparse.Namespace) -> int:
     """List worktrees from tracking records.
 
-    Cheaper than ``status`` -- no git fetch or classification.
+    By default, applies the same filters as the interactive picker:
+    only worktrees for the current platform whose directories still
+    exist on disk.  Pass ``--all`` to skip existence checks, or
+    ``--tracking-status`` / ``--include-other-platforms`` for finer
+    control.
     """
     tracking_path = cfg.tracking_dir()
     status_filter = None if args.tracking_status == "all" else args.tracking_status
-    records = tracking.list_records(tracking_path, status_filter=status_filter)
+
+    if getattr(args, "include_other_platforms", False):
+        platform_filter = None
+    else:
+        platform_filter = cfg.detect_platform()
+
+    records = tracking.list_records(
+        tracking_path,
+        status_filter=status_filter,
+        platform_filter=platform_filter,
+    )
+
+    # Unless --all is passed, filter to worktrees that still exist on disk
+    # (matching the picker's behaviour).
+    if not getattr(args, "all", False):
+        records = [
+            r for r in records
+            if r.worktree_path
+            and Path(r.worktree_path).exists()
+            and (Path(r.worktree_path) / ".git").exists()
+        ]
 
     if args.json:
         mux_map: dict[str, sessions.MuxInfo] = {}
@@ -3542,6 +3566,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tracking-status", default="all",
                    choices=["active", "complete", "finalized", "orphaned", "all"],
                    help="Filter by tracking status (default: all)")
+    p.add_argument("--all", action="store_true",
+                   help="Include worktrees whose directories no longer exist on disk")
+    p.add_argument("--include-other-platforms", action="store_true",
+                   help="Include worktrees from other platforms (e.g. Windows when on Linux)")
 
     # create (non-interactive worktree creation)
     p = sub.add_parser("create", help="Create a new worktree non-interactively")
