@@ -12,7 +12,7 @@ from .agent_registry import build_resolver
 from .auth import BearerAuthMiddleware
 from .config import load_config, load_or_create_auth_token
 from .db import Database
-from .routes import agents, health, sessions
+from .routes import agents, health, sessions, worktrees
 from .session_manager import SessionManager
 
 from . import __version__
@@ -36,11 +36,21 @@ async def lifespan(app: FastAPI):
     resolver = build_resolver(cfg)
     app.state.resolver = resolver
 
+    # Start worktree discovery if topology is available
+    if resolver:
+        from .routes.worktrees import get_cache
+        wt_cache = get_cache()
+        wt_cache.start(resolver)
+
     log.info(
         "agent-bridge started (port=%s, db=%s, sessions=%d)",
         cfg.port, db_path, len(mgr.list_sessions()),
     )
     yield
+
+    # Shutdown: stop worktree discovery
+    from .routes.worktrees import get_cache
+    await get_cache().stop()
 
     # Shutdown: stop all active sessions gracefully
     for session in mgr.list_sessions():
@@ -70,5 +80,6 @@ def create_app(*, config=None, token: str | None = None) -> FastAPI:  # noqa: AN
     app.include_router(health.router)
     app.include_router(sessions.router)
     app.include_router(agents.router)
+    app.include_router(worktrees.router)
 
     return app
