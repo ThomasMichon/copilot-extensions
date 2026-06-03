@@ -184,6 +184,67 @@ Agent names come from `acp-agents.json` in your project repo. Use
 
 Run `agent-bridge agents` to see the full list for your deployment.
 
+## Remote Worktree Lifecycle
+
+When agent-bridge spawns a session for an agent with `project` configured,
+it creates a **new git worktree** on the target machine via
+`agent-worktrees resolve --new`. The `agent-bridge end` command cleans up
+the bridge session (subprocess, DB record) but does **not** finalize or
+remove the spawned worktree. Without cleanup, these accumulate as orphaned
+"unused" worktrees.
+
+### Cleanup Responsibility
+
+The **host agent** (the session that called `agent-bridge send`) is
+responsible for cleaning up worktrees it caused to be created. During
+the host session's wrap-up:
+
+1. **End bridge sessions first.** Run `agent-bridge sessions` to find
+   any active sessions. End each one with `agent-bridge end <id>`.
+
+2. **Run worktree cleanup.** After ending bridge sessions, run:
+   ```bash
+   aperture-labs worktrees cleanup
+   ```
+   This lists worktrees eligible for removal. The default (no flags)
+   only removes worktrees that went through proper finalization --
+   this is always safe to run with `--clean`.
+
+3. **Report unused worktrees -- do not auto-purge.** The cleanup output
+   may show "unused" worktrees (no commits, no uncommitted changes).
+   Some of these may be bridge-spawned orphans; others may be
+   intentional. **Do not run `--include-unused` automatically.**
+   Instead, note any unused worktrees that appeared during this
+   session's lifetime and ask the user whether to remove them.
+
+4. **Proceed with host finalization.** After bridge cleanup, continue
+   with the host session's own worktree finalization / sign-off flow.
+
+### Remote (SSH) Agents
+
+For worktrees spawned on a remote machine via SSH transport, cleanup
+must run **on the target machine** where the worktree was created:
+
+```bash
+ssh <machine-alias> "aperture-labs worktrees cleanup"
+```
+
+Use the same SSH alias that agent-bridge used for the session.
+
+### Worktrees With Commits
+
+If the remote agent made commits or has uncommitted changes, the
+worktree is **not** unused -- it contains real work. Do not remove it.
+Report the worktree path, branch, and status to the user for manual
+review or normal worktree finalization.
+
+### Future: Surgical Cleanup
+
+Currently, worktree cleanup operates at the project level -- it cannot
+distinguish bridge-spawned worktrees from user-created ones. A future
+improvement will track the worktree ID in the bridge session metadata,
+enabling targeted cleanup of only bridge-spawned orphans.
+
 ## Troubleshooting
 
 - **"agent-bridge is not responding"** -- service isn't running. Start it
