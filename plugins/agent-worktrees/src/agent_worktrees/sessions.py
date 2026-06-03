@@ -401,6 +401,9 @@ def find_latest_session_id_fast(
             best_id = sid
 
     return best_id
+
+
+def find_latest_session_id(worktree_path: str) -> str | None:
     """Find the most recent Copilot session ID for a worktree path.
 
     Scans ``~/.copilot/session-state/`` for sessions whose ``cwd``
