@@ -1,4 +1,4 @@
-"""Custom ANSI TTY picker — arrow-key menu with sections and dimming.
+"""Custom ANSI TTY picker -- arrow-key menu with sections and dimming.
 
 Platform backends:
 - Windows: msvcrt for key reading
@@ -88,7 +88,7 @@ def _visible_len(text: str) -> int:
 
 
 def _display_width(text: str) -> int:
-    """Terminal display width — wide chars (emoji, CJK) count as 2 columns."""
+    """Terminal display width -- wide chars (emoji, CJK) count as 2 columns."""
     import unicodedata
 
     w = 0
@@ -207,7 +207,7 @@ def _read_key_windows() -> str | None:
     if ch == ":":
         return "colon"
     if ch in ("\x00", "\xe0"):
-        # Extended key — read the scan code
+        # Extended key -- read the scan code
         scan = msvcrt.getwch()
         if scan == "H":
             return "up"
@@ -222,7 +222,7 @@ def _read_key_unix() -> str | None:
 
     Uses os.read() on the raw fd instead of sys.stdin.read() to avoid
     Python's internal BufferedReader consuming bytes that select() then
-    can't see — which caused arrow keys and other escape sequences to be
+    can't see -- which caused arrow keys and other escape sequences to be
     misidentified as bare Esc.
     """
     import select
@@ -257,7 +257,7 @@ def _read_key_unix() -> str | None:
                         return "down"
                     return None
                 return None
-            # No follow-up bytes — bare Esc
+            # No follow-up bytes -- bare Esc
             return "escape"
         if ch in (b"\r", b"\n"):
             return "enter"
@@ -462,7 +462,7 @@ def pick(
                 default = i
                 break
         else:
-            # All items are separators — nothing selectable
+            # All items are separators -- nothing selectable
             return PickResult(selected=-1, profile_idx=profile_default)
 
     has_profiles = bool(profile_labels and len(profile_labels) > 1)
@@ -501,7 +501,7 @@ def pick(
 
     render_height = profile_line_count + viewport_height + (2 if needs_scroll else 0)
 
-    # Enter alternate screen buffer — isolates all picker output
+    # Enter alternate screen buffer -- isolates all picker output
     _enter_alt_screen()
     _clear_screen()
 

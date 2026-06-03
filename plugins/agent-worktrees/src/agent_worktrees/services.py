@@ -5,9 +5,9 @@ environment, reads ``deploy-manifest.json`` for provenance, and compares
 deployed commits against HEAD to detect staleness.
 
 Discovery paths (relative to repo root):
-    services/*/service.yaml              — shared services
-    tools/*/service.yaml                 — tool services
-    {machine}/services/*/service.yaml    — machine-scoped services
+    services/*/service.yaml              -- shared services
+    tools/*/service.yaml                 -- tool services
+    {machine}/services/*/service.yaml    -- machine-scoped services
 
 Pure Python with git via subprocess (no libgit2).
 """
@@ -242,7 +242,7 @@ def discover_services(
     machine = _machine_from_environment(environment, machine_keys)
 
     if service_paths:
-        # Config-provided paths — expand {machine} placeholder
+        # Config-provided paths -- expand {machine} placeholder
         scan_globs = [
             p.replace("{machine}", machine) if machine else p
             for p in service_paths
@@ -288,9 +288,9 @@ def check_staleness(manifest_path: Path, repo_dir: Path) -> str:
         repo_dir: Absolute path to the repo root.
 
     Returns:
-        ``"current"`` — deployed commit is up-to-date for source paths.
-        ``"stale:N"`` — N commits behind HEAD.
-        ``"unknown"`` — cannot determine (missing manifest, no git, etc.).
+        ``"current"`` -- deployed commit is up-to-date for source paths.
+        ``"stale:N"`` -- N commits behind HEAD.
+        ``"unknown"`` -- cannot determine (missing manifest, no git, etc.).
     """
     manifest = _read_manifest(manifest_path)
     if manifest is None:

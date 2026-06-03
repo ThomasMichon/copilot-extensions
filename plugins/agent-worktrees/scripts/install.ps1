@@ -116,7 +116,7 @@ function Read-ProjectsRegistry {
         return @{ projects = @{} }
     }
     if (-not (Test-Path $VenvPython)) {
-        # Can't parse YAML without Python — return empty
+        # Can't parse YAML without Python -- return empty
         return @{ projects = @{} }
     }
     try {
@@ -509,7 +509,7 @@ function Deploy-Config {
     }
 
     if (-not $RepoDir) {
-        Write-ServiceSkipped "Config generation skipped (no repo detected — set CWD to the repo or create config.yaml manually)"
+        Write-ServiceSkipped "Config generation skipped (no repo detected -- set CWD to the repo or create config.yaml manually)"
         return $false
     }
 
@@ -725,7 +725,7 @@ function Build-TerminalFragment {
             hidden            = $false
         }
 
-        # Local WSL profile — only when WSL support is recorded in the registry
+        # Local WSL profile -- only when WSL support is recorded in the registry
         $wslDistro = if ($pWslInfo) { $pWslInfo['distro'] } else { $null }
         $wslState = if ($pWslInfo) { $pWslInfo['state'] } else { $null }
         if ($wslState -and $wslDistro) {
@@ -1150,7 +1150,7 @@ function Deploy-Shortcuts {
         $lnk.IconLocation = "$InstallDir\aperture-science.ico, 0"
         $lnk.Save()
 
-        # WSL shortcut — only when WSL support is recorded in registry
+        # WSL shortcut -- only when WSL support is recorded in registry
         $projWslInfo = $null
         if ($registry.projects -is [PSCustomObject] -and $registry.projects.PSObject.Properties[$proj]) {
             $projEntry = $registry.projects.$proj
@@ -1208,7 +1208,7 @@ function Deploy-CopilotPlugin {
 
     # Detect if we are running from the installed plugin directory.
     # When cmd_update invokes us, it sets cwd to the plugin dir and
-    # has already done the plugin update — re-running it would EBUSY
+    # has already done the plugin update -- re-running it would EBUSY
     # on Windows because copilot CLI tries to rmdir our own cwd.
     $installedPluginsDir = Join-Path $env:USERPROFILE '.copilot\installed-plugins'
     $runningFromInstalled = $PluginDir.Path -like "$installedPluginsDir*"
@@ -1267,7 +1267,7 @@ function Deploy-CopilotPlugin {
 
 function Ensure-CopilotExperimental {
     <# Ensure experimental: true in Copilot CLI settings.json.
-       The CLI gates extension loading on this flag — COPILOT_FEATURE_FLAGS
+       The CLI gates extension loading on this flag -- COPILOT_FEATURE_FLAGS
        alone is not sufficient. Both are required. #>
     $settingsFile = Join-Path $env:USERPROFILE '.copilot\settings.json'
     if (-not (Test-Path $settingsFile)) { return }
@@ -1276,7 +1276,7 @@ function Ensure-CopilotExperimental {
         $raw = Get-Content $settingsFile -Raw
         $settings = $raw | ConvertFrom-Json -AsHashtable
     } catch {
-        Write-ServiceWarn "Could not parse $settingsFile — skipping"
+        Write-ServiceWarn "Could not parse $settingsFile -- skipping"
         return
     }
 

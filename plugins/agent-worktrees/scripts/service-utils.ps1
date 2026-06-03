@@ -66,7 +66,7 @@ function Start-ServiceTask {
     param([string]$TaskName)
     $task = Get-ServiceTask $TaskName
     if (-not $task) {
-        Write-ServiceErr "Scheduled task '$TaskName' not found — install first"
+        Write-ServiceErr "Scheduled task '$TaskName' not found -- install first"
         return $false
     }
     if ($task.State -eq 'Running') {
@@ -155,7 +155,7 @@ function Invoke-SelfElevated {
         non-elevated parent can replay it for callers that capture stdout
         (e.g., agent-worktrees services update).
 
-        Status and other read-only actions should NOT call this — keep them
+        Status and other read-only actions should NOT call this -- keep them
         non-elevated so automated checks (session boot, pre-launch) don't
         trigger UAC prompts.
     .PARAMETER ScriptPath
@@ -165,7 +165,7 @@ function Invoke-SelfElevated {
     .EXAMPLE
         # At the top of an 'install' or 'update' action:
         Invoke-SelfElevated -ScriptPath $PSCommandPath -ArgumentList $Action
-        # If we reach here, we're elevated — continue with the real work.
+        # If we reach here, we're elevated -- continue with the real work.
     #>
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
@@ -177,7 +177,7 @@ function Invoke-SelfElevated {
     Write-ServiceChanged "Requesting elevation via UAC..."
 
     # Pre-resolve paths in the caller's context (avoids $env:TEMP divergence
-    # between non-elevated and elevated sessions — see elevation skill).
+    # between non-elevated and elevated sessions -- see elevation skill).
     $tmpDir = Join-Path $env:USERPROFILE '.aperture-labs\services\.tmp'
     if (-not (Test-Path $tmpDir)) {
         New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
@@ -248,8 +248,8 @@ function Resolve-ServicePassword {
         unavailable.
     .DESCRIPTION
         Scheduled tasks that run before login (ONSTART, /RL HIGHEST) require the
-        user's plaintext password. This function tries Vault.psm1 first — entry
-        "Aperture Science/Windows on <Machine>" — then falls back to a masked
+        user's plaintext password. This function tries Vault.psm1 first -- entry
+        "Aperture Science/Windows on <Machine>" -- then falls back to a masked
         interactive prompt.
 
         The vault module is resolved relative to $PSScriptRoot (assumes we're
@@ -495,7 +495,7 @@ function Assert-DeploymentTarget {
 
     $env_ = Get-CurrentEnvironment
 
-    # Simple YAML parse — look for our environment under deployments:
+    # Simple YAML parse -- look for our environment under deployments:
     $content = Get-Content $ServiceYamlPath -Raw
     $inDeployments = $false
     $foundEnv = $false
@@ -533,7 +533,7 @@ function Assert-DeploymentTarget {
     }
 
     if ($deployType -notin @('full', 'redirector')) {
-        Write-ServiceErr "Environment '$env_' has deployment type '$deployType' — not deployable"
+        Write-ServiceErr "Environment '$env_' has deployment type '$deployType' -- not deployable"
         return $false
     }
 
@@ -550,7 +550,7 @@ function Write-DeployManifest {
     .DESCRIPTION
         Records git provenance (commit, branch, dirty state), deployment
         timestamp, environment, and source paths. Call this as the FINAL
-        step of a successful install or update — after code deploy, task
+        step of a successful install or update -- after code deploy, task
         registration, and restart have all succeeded.
     .PARAMETER InstallDir
         Path to the service install directory.
@@ -571,7 +571,7 @@ function Write-DeployManifest {
     $env_ = Get-CurrentEnvironment
     $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
 
-    # Find repo root — use the pre-resolved repo root from load time,
+    # Find repo root -- use the pre-resolved repo root from load time,
     # falling back to CWD-based detection for external callers.
     $repoRoot = $null
     if ($script:_ServiceUtilsRepoRoot -and (Test-Path (Join-Path $script:_ServiceUtilsRepoRoot '.git'))) {
@@ -658,7 +658,7 @@ function Test-ServiceStale {
     .PARAMETER InstallDir
         Path to the service install directory.
     .OUTPUTS
-        [Nullable[bool]] — $true = stale, $false = current, $null = unknown.
+        [Nullable[bool]] -- $true = stale, $false = current, $null = unknown.
     #>
     param(
         [Parameter(Mandatory)][string]$InstallDir
@@ -707,7 +707,7 @@ function Show-DeployStatus {
 
     if ($manifest.dirty) {
         $dirtyCount = @($manifest.dirty_files).Count
-        Write-ServiceChanged "Deployed from $branch @ $commitShort (DIRTY — $dirtyCount file(s) modified)"
+        Write-ServiceChanged "Deployed from $branch @ $commitShort (DIRTY -- $dirtyCount file(s) modified)"
     } else {
         Write-ServiceOk "Deployed from $branch @ $commitShort"
     }
@@ -727,7 +727,7 @@ function Show-DeployStatus {
         if ($staleCommits.Count -eq 0) {
             Write-ServiceOk "Up to date (no source changes since deploy)"
         } else {
-            Write-ServiceChanged "Stale — $($staleCommits.Count) commit(s) behind HEAD:"
+            Write-ServiceChanged "Stale -- $($staleCommits.Count) commit(s) behind HEAD:"
             $staleCommits | Select-Object -First 5 | ForEach-Object {
                 Write-Host "    $_"
             }

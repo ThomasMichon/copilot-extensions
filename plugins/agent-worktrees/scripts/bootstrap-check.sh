@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bootstrap hook — runs on session start via hooks.json
+# Bootstrap hook -- runs on session start via hooks.json
 # Auto-updates the agent-worktrees runtime payload when stale.
 # If not installed, prints a hint (full install requires interactive setup).
 
@@ -36,7 +36,7 @@ if [[ -z "$deployed_commit" || -z "$current_commit" || "$deployed_commit" == "$c
     exit 0
 fi
 
-# Stale — re-deploy package
+# Stale -- re-deploy package
 echo -e '\033[90m[agent-worktrees] Updating runtime payload...\033[0m'
 rm -rf "$PKG_DST"
 mkdir -p "$LIB_DIR"

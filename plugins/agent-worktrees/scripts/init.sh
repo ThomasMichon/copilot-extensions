@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bootstrap the agent-worktrees runtime.
 # Creates ~/.agent-worktrees/ with venv, package, wrappers, binstub.
-# Idempotent — safe to re-run for repairs or upgrades.
+# Idempotent -- safe to re-run for repairs or upgrades.
 set -euo pipefail
 
 # ── Output helpers ─────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ if [[ ! -f "$VENV_PYTHON" ]]; then
     if command -v uv &>/dev/null; then
         step "Creating venv via uv..."
         if ! uv venv "$VENV_DIR" --allow-existing 2>/dev/null; then
-            step "uv failed — falling back to python -m venv"
+            step "uv failed -- falling back to python -m venv"
             $PYTHON_CMD -m venv "$VENV_DIR"
         fi
     else
@@ -108,7 +108,7 @@ if [[ ! -f "$VENV_PYTHON" ]]; then
     fi
 
     if [[ ! -f "$VENV_PYTHON" ]]; then
-        fail "Venv creation failed — $VENV_PYTHON not found"
+        fail "Venv creation failed -- $VENV_PYTHON not found"
         exit 1
     fi
     ok "Venv created"
@@ -267,7 +267,7 @@ else
             ok "PATH: Already in $shell_profile"
         fi
     else
-        echo "  [WARN] No shell profile found — add 'export PATH=\"\$HOME/.local/bin:\$PATH\"' manually"
+        echo "  [WARN] No shell profile found -- add 'export PATH=\"\$HOME/.local/bin:\$PATH\"' manually"
     fi
 fi
 

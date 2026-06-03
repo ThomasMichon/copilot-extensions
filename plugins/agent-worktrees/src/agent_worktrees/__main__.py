@@ -1,4 +1,4 @@
-"""CLI entry point — subcommand dispatcher for agent-worktrees.
+"""CLI entry point -- subcommand dispatcher for agent-worktrees.
 
 Usage (via binstub):
     <project>                             # launch interactive picker
@@ -103,7 +103,7 @@ def _env_set(new_name: str, value: str) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Default launch — exec into launch-session.sh when no subcommand given
+# Default launch -- exec into launch-session.sh when no subcommand given
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -152,7 +152,7 @@ def cmd_launch(argv: list[str]) -> int:
         ))
     else:
         os.execvp("bash", ["bash", str(launch_script), *passthrough])
-    return 1  # unreachable — os.execvp replaces process
+    return 1  # unreachable -- os.execvp replaces process
 
 
 def _age_str(started_at: str) -> str:
@@ -200,7 +200,7 @@ def _apply_tracking_override(
     When a worktree was finalized with zero commits (e.g., manual
     intervention, no code changes), the reflog has no ``commit`` entries
     and ``classify_worktree`` returns UNUSED. The tracking YAML correctly
-    records ``status: finalized`` — trust it.
+    records ``status: finalized`` -- trust it.
     """
     if info.state == git_ops.WorktreeState.UNUSED and rec.status == "finalized":
         return dataclasses.replace(info, state=git_ops.WorktreeState.COMPLETED)
@@ -208,7 +208,7 @@ def _apply_tracking_override(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# resolve — JSON launch plan (Python exits before Copilot starts)
+# resolve -- JSON launch plan (Python exits before Copilot starts)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _emit_plan(plan: dict) -> None:
@@ -228,7 +228,7 @@ def _emit_plan(plan: dict) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# JSON output helpers — shared by all --json modes
+# JSON output helpers -- shared by all --json modes
 # ═══════════════════════════════════════════════════════════════════════════
 
 _JSON_SCHEMA_VERSION = 1
@@ -427,7 +427,7 @@ def _build_launch_cmd(
         }
         cmd = [arg.format(**variables) for arg in template]
     else:
-        # Legacy fallback — repo-specific setup script, then default.
+        # Legacy fallback -- repo-specific setup script, then default.
         # Always resolve from the anchor repo so that worktrees pinned
         # to an older commit still pick up the latest setup script
         # (the anchor is fetched before every launch).
@@ -599,10 +599,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         tracking_path.mkdir(parents=True, exist_ok=True)
         current_platform = cfg.detect_platform()
 
-        # Picker loop — re-enters after system menu actions
+        # Picker loop -- re-enters after system menu actions
         while True:
 
-            # Load active worktrees (include "complete" — these are worktrees
+            # Load active worktrees (include "complete" -- these are worktrees
             # where finalization failed or was skipped, e.g. terminal closed
             # before post-exit could run).  They still have local commits and
             # should be resumable in the picker.
@@ -773,7 +773,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
             result = pick(
                 menu_items,
-                title=f"🌳 {config.repo_name.replace('-', ' ').title()} — Worktree Picker",
+                title=f"🌳 {config.repo_name.replace('-', ' ').title()} -- Worktree Picker",
                 subtitle="Use ↑↓, Enter select, : system menu, Esc cancel",
                 default=new_idx,
                 profile_labels=profile_labels if len(profiles) > 1 else None,
@@ -834,7 +834,7 @@ def _run_system_menu(config: cfg.Config, args: argparse.Namespace) -> int | None
 
     result = pick(
         system_items,
-        title=f"⚙ {config.repo_name.replace('-', ' ').title()} — System Menu",
+        title=f"⚙ {config.repo_name.replace('-', ' ').title()} -- System Menu",
         subtitle="Use ↑↓, Enter select, Esc back",
         default=0,
     )
@@ -856,7 +856,7 @@ def _run_system_menu(config: cfg.Config, args: argparse.Namespace) -> int | None
 
 
 def _system_cleanup(config: cfg.Config) -> int | None:
-    """Compact cleanup flow for the system menu — picker-style UX."""
+    """Compact cleanup flow for the system menu -- picker-style UX."""
     repo = config.default_repo
     tracking_path = cfg.tracking_dir()
     records = tracking.list_records(tracking_path)
@@ -897,7 +897,7 @@ def _system_cleanup(config: cfg.Config) -> int | None:
             unused.append((rec, info))
 
     if not cleanable and not unused:
-        _system_pause("Nothing to clean — all worktrees are active or have unmerged work.")
+        _system_pause("Nothing to clean -- all worktrees are active or have unmerged work.")
         return None
 
     # Build confirmation picker
@@ -922,7 +922,7 @@ def _system_cleanup(config: cfg.Config) -> int | None:
 
     result = pick(
         confirm_items,
-        title="🧹 Cleanup — select action",
+        title="🧹 Cleanup -- select action",
         subtitle="Use ↑↓, Enter select, Esc cancel",
         default=0,
     )
@@ -998,7 +998,7 @@ def _system_status(config: cfg.Config) -> int | None:
 
     pick(
         status_items,
-        title=f"📊 {config.repo_name.replace('-', ' ').title()} — Status",
+        title=f"📊 {config.repo_name.replace('-', ' ').title()} -- Status",
         subtitle="Esc or Enter to return",
         default=len(status_items) - 1,
     )
@@ -1034,7 +1034,7 @@ def _resolve_base_repo(
     """Resolve launch plan for base repo mode."""
     repo = config.default_repo
     print()
-    print("📂 Base Repo Mode — No Worktree")
+    print("📂 Base Repo Mode -- No Worktree")
     print(f"   Path: {repo.anchor}")
     print()
     output.warn("Commits will go directly to the current branch.")
@@ -1135,7 +1135,7 @@ def _resolve_new(
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
 
     print()
-    print(f"🌳 {config.repo_name.replace('-', ' ').title()} — New Worktree")
+    print(f"🌳 {config.repo_name.replace('-', ' ').title()} -- New Worktree")
     print(f"   Worktree: {worktree_id}")
     print(f"   Path:     {worktree_path}")
     print()
@@ -1152,7 +1152,7 @@ def _resolve_new(
         if merged_env:
             output.dry_run(f"Would set env: {', '.join(f'{k}={v}' for k, v in merged_env.items())}")
         print()
-        output.ok("Dry run complete — no changes made")
+        output.ok("Dry run complete -- no changes made")
         _emit_plan({"action": "none", "exit_code": 0})
         return 0
 
@@ -1167,7 +1167,7 @@ def _resolve_new(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Worktree-ID inference — shared by finalize, post-exit, mark-complete
+# Worktree-ID inference -- shared by finalize, post-exit, mark-complete
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _infer_worktree_id(
@@ -1180,10 +1180,10 @@ def _infer_worktree_id(
       1. Explicit value passed on the CLI
       2. CWD under the configured ``worktree_root`` directory
       3. ``WORKTREE_ID`` environment variable (falls back to
-         ``APERTURE_WORKTREE_ID`` for backward compat; last resort — may
+         ``APERTURE_WORKTREE_ID`` for backward compat; last resort -- may
          be stale in long-lived tmux servers or sub-agent contexts)
 
-    Git branch is intentionally *not* used for identification — worktrees
+    Git branch is intentionally *not* used for identification -- worktrees
     are permitted to switch to feature branches, so the branch name is
     not a reliable indicator of which worktree directory we're in.
 
@@ -1272,7 +1272,7 @@ def _resolve_worktree_id(raw_id: str) -> str:
 
     tdir = cfg.tracking_dir()
 
-    # Exact match — fast path
+    # Exact match -- fast path
     if (tdir / f"{raw_id}.yaml").exists():
         return raw_id
 
@@ -1293,12 +1293,12 @@ def _resolve_worktree_id(raw_id: str) -> str:
         )
         raise SystemExit(1)
 
-    # No tracking match — return as-is (caller will fail on missing YAML)
+    # No tracking match -- return as-is (caller will fail on missing YAML)
     return raw_id
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# post-exit — finalization after Copilot exits
+# post-exit -- finalization after Copilot exits
 # ═══════════════════════════════════════════════════════════════════════════
 
 def cmd_post_exit(args: argparse.Namespace) -> int:
@@ -1312,7 +1312,7 @@ def cmd_post_exit(args: argparse.Namespace) -> int:
 
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
-        output.warn(f"No tracking record for {worktree_id} — skipping post-exit.")
+        output.warn(f"No tracking record for {worktree_id} -- skipping post-exit.")
         return 0
 
     try:
@@ -1321,7 +1321,7 @@ def cmd_post_exit(args: argparse.Namespace) -> int:
         output.err(f"Failed to load record {worktree_id}: {e}")
         return 1
 
-    # Already finalized — nothing to do
+    # Already finalized -- nothing to do
     if record.status == "finalized":
         output.ok(f"Worktree {worktree_id} already finalized.")
         return 0
@@ -1337,7 +1337,7 @@ def _post_exit_gate(record: tracking.WorktreeRecord, config: cfg.Config) -> int:
     worktree_id = record.worktree_id
 
     if record.status == "complete":
-        print(f"Session {worktree_id} marked complete — starting finalization...")
+        print(f"Session {worktree_id} marked complete -- starting finalization...")
         success = fin.finalize(worktree_id, config)
         if success:
             return 0
@@ -1354,7 +1354,7 @@ def _post_exit_gate(record: tracking.WorktreeRecord, config: cfg.Config) -> int:
         )
         return 0
 
-    # status == "active" — session wasn't marked complete
+    # status == "active" -- session wasn't marked complete
     print(
         f"Session {worktree_id} is still active (not marked complete). "
         f"Skipping finalization."
@@ -1463,7 +1463,7 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
         msg += f" Title: {args.title}"
     print(msg)
 
-    # Attempt finalization immediately — rebase, merge, push.
+    # Attempt finalization immediately -- rebase, merge, push.
     # The session is still running, so finalize() will skip worktree/branch
     # removal but will push content to the remote.  If finalization fails
     # (e.g. no network), revert to "active" so the worktree reappears in
@@ -1472,7 +1472,7 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
     success = fin.finalize(worktree_id, config)
     if not success:
         output.warn(
-            "Finalization failed — reverting to active. "
+            "Finalization failed -- reverting to active. "
             "Content is committed locally; finalize will be retried on next "
             "mark-complete or via 'agent-worktrees finalize'."
         )
@@ -1544,7 +1544,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     }
 
     print()
-    print(f"🌳 {config.repo_name.replace('-', ' ').title()} — Worktree Status")
+    print(f"🌳 {config.repo_name.replace('-', ' ').title()} -- Worktree Status")
     print()
     print(f"{'ID':<6} {'State':<11} {'Ahead':<7} {'Behind':<8} Title")
     print(f"{'─'*5:<6} {'─'*10:<11} {'─'*6:<7} {'─'*7:<8} {'─'*30}")
@@ -1574,13 +1574,13 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# list — lightweight inventory from tracking records
+# list -- lightweight inventory from tracking records
 # ═══════════════════════════════════════════════════════════════════════════
 
 def cmd_list(args: argparse.Namespace) -> int:
     """List worktrees from tracking records.
 
-    Cheaper than ``status`` — no git fetch or classification.
+    Cheaper than ``status`` -- no git fetch or classification.
     """
     tracking_path = cfg.tracking_dir()
     status_filter = None if args.tracking_status == "all" else args.tracking_status
@@ -1624,7 +1624,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# create — non-interactive worktree creation
+# create -- non-interactive worktree creation
 # ═══════════════════════════════════════════════════════════════════════════
 
 def cmd_create(args: argparse.Namespace) -> int:
@@ -1632,7 +1632,7 @@ def cmd_create(args: argparse.Namespace) -> int:
 
     When ``--json`` is passed, emits a JSON envelope with the new
     worktree info and launch plan.  The caller is responsible for
-    launching Copilot — this command returns the command info only.
+    launching Copilot -- this command returns the command info only.
     """
     with output.stdout_to_stderr():
         try:
@@ -1678,7 +1678,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     wip_count = 0
 
     print()
-    print(f"🌳 {config.repo_name.replace('-', ' ').title()} — Worktree Sessions")
+    print(f"🌳 {config.repo_name.replace('-', ' ').title()} -- Worktree Sessions")
     print()
     print(f"{'Worktree ID':<50} {'State':<12} {'Age':<12} Path")
     print(f"{'─'*48:<50} {'─'*10:<12} {'─'*10:<12} {'─'*30}")
@@ -1768,7 +1768,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         print(f"{len(to_clean)} session(s) eligible for cleanup.")
 
     if not args.include_unused and unused_count > 0:
-        print(f"{unused_count} unused worktree(s) preserved — no commits, no uncommitted changes (pass --include-unused to also clean).")
+        print(f"{unused_count} unused worktree(s) preserved -- no commits, no uncommitted changes (pass --include-unused to also clean).")
 
     if dirty_count > 0 or wip_count > 0:
         parts = []
@@ -1776,7 +1776,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
             parts.append(f"{dirty_count} with uncommitted changes")
         if wip_count:
             parts.append(f"{wip_count} with unmerged commits")
-        output.warn(f"{' and '.join(parts)} — not eligible for cleanup.")
+        output.warn(f"{' and '.join(parts)} -- not eligible for cleanup.")
 
     if not args.clean or not to_clean:
         if to_clean:
@@ -1789,7 +1789,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     try:
         lock.acquire()
     except TimeoutError:
-        output.err("Timed out waiting for finalization lock — another finalization in progress?")
+        output.err("Timed out waiting for finalization lock -- another finalization in progress?")
         return 1
 
     failures = 0
@@ -1799,7 +1799,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
             if rec.worktree_path and Path(rec.worktree_path).exists():
                 if not git_ops.remove_worktree(repo.anchor, rec.worktree_path):
-                    output.warn(f"Could not remove worktree via git — forcing directory removal.")
+                    output.warn(f"Could not remove worktree via git -- forcing directory removal.")
                 wt_dir = Path(rec.worktree_path)
                 if wt_dir.exists():
                     shutil.rmtree(wt_dir, ignore_errors=True)
@@ -1913,9 +1913,9 @@ def _deploy_copilot_instructions(
 
     Deploys into the COPILOT_CUSTOM_INSTRUCTIONS_DIRS directory:
 
-    - ``.github/instructions/machine.instructions.md`` — machine identity,
+    - ``.github/instructions/machine.instructions.md`` -- machine identity,
       project name, and binstub info.
-    - ``AGENTS.md`` — discovered as a nested AGENTS.md in custom dirs
+    - ``AGENTS.md`` -- discovered as a nested AGENTS.md in custom dirs
       (machine identity content, same as machine.instructions.md).
 
     All files are tagged with an ownership marker so stale files can be
@@ -2137,7 +2137,7 @@ def cmd_register(args: argparse.Namespace) -> int:
             output.err(f"Not a git repository: {repo_dir}")
             return 1
     else:
-        # For `register`, the current directory is authoritative — resolve the
+        # For `register`, the current directory is authoritative -- resolve the
         # git root of cwd first. _find_repo_dir() walks up from the installed
         # module location (~/.agent-worktrees/...) before checking cwd, which
         # can resolve to an unrelated repo (e.g. when $HOME itself is a git
@@ -2181,7 +2181,7 @@ def cmd_register(args: argparse.Namespace) -> int:
         except Exception:
             pass
     if not default_branch:
-        # origin/HEAD unset — do NOT fall back to the current branch, which is
+        # origin/HEAD unset -- do NOT fall back to the current branch, which is
         # often a feature branch in worktree workflows and would silently record
         # the wrong default. Probe for a conventional default branch instead.
         for candidate in ("master", "main"):
@@ -2197,7 +2197,7 @@ def cmd_register(args: argparse.Namespace) -> int:
             except Exception:
                 pass
     if not default_branch:
-        # No conventional default found — ask explicitly rather than guessing.
+        # No conventional default found -- ask explicitly rather than guessing.
         output.warn(
             "Could not detect default branch "
             "(no origin/HEAD, no master or main branch)"
@@ -2214,7 +2214,7 @@ def cmd_register(args: argparse.Namespace) -> int:
     print(f"  Machine:  {machine}")
     print(f"  Platform: {plat}")
 
-    # Machine registry is optional — external repos may not have machines.yaml
+    # Machine registry is optional -- external repos may not have machines.yaml
     machine_entry: cfg.MachineEntry | None = None
     machines_yaml = repo_dir / "machines.yaml"
     if machines_yaml.exists():
@@ -2244,7 +2244,7 @@ def cmd_register(args: argparse.Namespace) -> int:
     if not inst.deploy_binstubs(repo_dir, project=project):
         return 1
 
-    # Update projects registry — include WSL state only when actually in WSL
+    # Update projects registry -- include WSL state only when actually in WSL
     wsl_state: str | None = None
     wsl_distro: str | None = None
     wsl_path: str | None = None
@@ -2335,7 +2335,7 @@ def cmd_update(args: argparse.Namespace) -> int:
         output.warn("--recreate-venv is not supported by the plugin-based "
                      "update flow; use 'agent-worktrees install' instead")
 
-    # Step 1 — update the Copilot CLI plugin (pulls latest from marketplace)
+    # Step 1 -- update the Copilot CLI plugin (pulls latest from marketplace)
     plugin_ref = "agent-worktrees@copilot-extensions"
     output.info(f"Updating plugin: {plugin_ref}")
     plugin_update_ok = False
@@ -2358,7 +2358,7 @@ def cmd_update(args: argparse.Namespace) -> int:
     except subprocess.TimeoutExpired:
         output.warn("Plugin update timed out -- continuing with installed version")
 
-    # Step 2 — find the installed plugin directory
+    # Step 2 -- find the installed plugin directory
     plugin_dir = _find_installed_plugin_dir()
     if not plugin_dir:
         output.err("Cannot find installed plugin directory")
@@ -2368,7 +2368,7 @@ def cmd_update(args: argparse.Namespace) -> int:
 
     output.info(f"Plugin source: {plugin_dir}")
 
-    # Step 3 — run the platform-specific installer from the plugin dir
+    # Step 3 -- run the platform-specific installer from the plugin dir
     plat = cfg.detect_platform()
     if plat == "windows":
         installer = plugin_dir / "scripts" / "install.ps1"
@@ -2390,7 +2390,7 @@ def cmd_update(args: argparse.Namespace) -> int:
     if result.returncode != 0:
         return result.returncode
 
-    # Step 4 — update registered sibling modules (agent-bridge, etc.)
+    # Step 4 -- update registered sibling modules (agent-bridge, etc.)
     skip_modules = getattr(args, "skip_modules", None)
     _update_modules(plugin_dir, plat, skip_modules)
 
@@ -2639,7 +2639,7 @@ _GET_KEYS: dict[str, str] = {
 
 
 def cmd_get(args: argparse.Namespace) -> int:
-    """Query project paths and config values — machine-readable output."""
+    """Query project paths and config values -- machine-readable output."""
     key: str = args.key
 
     if key == "keys":
@@ -2678,7 +2678,7 @@ def cmd_install_status(args: argparse.Namespace) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# services — discovery, staleness, and update
+# services -- discovery, staleness, and update
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -2736,7 +2736,7 @@ def _service_is_installed(service: svc.ServiceInfo) -> bool:
 
 
 def cmd_services_dispatch(argv: list[str]) -> int:
-    """Route services subcommands — built-in aggregates or passthrough."""
+    """Route services subcommands -- built-in aggregates or passthrough."""
     if not argv:
         _services_usage()
         return 1
@@ -2902,12 +2902,12 @@ def _ensure_repo_current(repo_dir: Path, config: "cfg.Config") -> None:
     from a worktree via ``git push origin HEAD:master``.  A fast-forward
     merge keeps the anchor in sync so installers copy the latest code.
 
-    Worktrees are left alone — they track their own branch.
+    Worktrees are left alone -- they track their own branch.
     """
     # Worktrees have a .git *file*; the anchor has a .git *directory*
     git_path = repo_dir / ".git"
     if not git_path.is_dir():
-        return  # worktree — nothing to do
+        return  # worktree -- nothing to do
 
     remote = config.default_repo.remote or "origin"
     branch = config.default_repo.default_branch or "master"
@@ -2921,7 +2921,7 @@ def _ensure_repo_current(repo_dir: Path, config: "cfg.Config") -> None:
         )
         if result.returncode != 0:
             output.warn(
-                "Anchor has local commits — fast-forward failed. "
+                "Anchor has local commits -- fast-forward failed. "
                 "Deploying from current anchor HEAD."
             )
     except Exception as exc:
@@ -2941,7 +2941,7 @@ def _cmd_service_passthrough(name: str, action_args: list[str]) -> int:
         output.err(f"Cannot load config: {e}")
         return 1
 
-    # Determine the action before discovery — the first positional arg
+    # Determine the action before discovery -- the first positional arg
     action = action_args[0] if action_args else "status"
     if not action_args:
         action_args = ["status"]
@@ -2978,7 +2978,7 @@ def _cmd_service_passthrough(name: str, action_args: list[str]) -> int:
     label = service.display_name or service.name
     output.header(f"{label} → {' '.join(action_args)}")
 
-    # Stream output directly — the installer owns the terminal
+    # Stream output directly -- the installer owns the terminal
     result = subprocess.run(cmd, cwd=str(repo_dir))
     return result.returncode
 
@@ -3034,25 +3034,25 @@ def _cmd_services_batch(action: str, flags: list[str]) -> int:
                     skipped += 1
                     continue
                 if not is_installed:
-                    output.warn(f"{label} — not installed, skipping update")
+                    output.warn(f"{label} -- not installed, skipping update")
                     skipped += 1
                     continue
 
         if not s.installer_path:
-            output.skipped(f"{label} — no installer")
+            output.skipped(f"{label} -- no installer")
             skipped += 1
             continue
 
         installer = repo_dir / s.installer_path
         if not installer.exists():
-            output.err(f"{label} — installer missing at {installer}")
+            output.err(f"{label} -- installer missing at {installer}")
             errors += 1
             continue
 
         cmd_args = [action] + pass_flags
         cmd = _installer_cmd(installer, cmd_args)
         if not cmd:
-            output.err(f"{label} — unknown installer type: {installer.suffix}")
+            output.err(f"{label} -- unknown installer type: {installer.suffix}")
             errors += 1
             continue
 
@@ -3082,7 +3082,7 @@ def _cmd_services_batch(action: str, flags: list[str]) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# pre-launch — two-pass declarative self-update protocol
+# pre-launch -- two-pass declarative self-update protocol
 # ═══════════════════════════════════════════════════════════════════════════
 # Repos registry
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3265,15 +3265,15 @@ def cmd_pre_launch(args: argparse.Namespace) -> int:
     """Check bootstrap service staleness and return a JSON action plan.
 
     Returns JSON to stdout:
-      {"action": "continue"}  — all bootstrap services are current
-      {"action": "self-update", "updates": [...]}  — services need updating
+      {"action": "continue"}  -- all bootstrap services are current
+      {"action": "self-update", "updates": [...]}  -- services need updating
 
     The shell wrapper interprets this JSON, runs the update commands,
     and re-invokes pre-launch (max 1 retry).
     """
     repo_dir = _find_repo_dir()
     if not repo_dir:
-        # Can't determine staleness — proceed anyway
+        # Can't determine staleness -- proceed anyway
         print(json.dumps({"action": "continue", "reason": "no-repo"}))
         return 0
 
@@ -3297,7 +3297,7 @@ def cmd_pre_launch(args: argparse.Namespace) -> int:
         if wm_manifest.exists():
             staleness = svc.check_staleness(wm_manifest, repo_dir)
             if staleness != "current":
-                # Find the installer — check manifest's installer_path first,
+                # Find the installer -- check manifest's installer_path first,
                 # then known repo locations (current and legacy).
                 installer = None
                 manifest_data = svc._read_manifest(wm_manifest)
@@ -3354,7 +3354,7 @@ def _build_installer_argv(installer: Path) -> tuple[str, list[str]] | None:
     """
     if installer.suffix == ".sh":
         if platform.system() == "Windows":
-            # Don't invoke WSL — look for a .ps1 sibling instead
+            # Don't invoke WSL -- look for a .ps1 sibling instead
             ps1_sibling = installer.with_name("install.ps1")
             if ps1_sibling.exists():
                 installer = ps1_sibling
@@ -3404,14 +3404,14 @@ def _find_repo_dir() -> Path | None:
       1. Running script location (navigate up to git root)
       2. WORKTREE_REPO env var (falls back to APERTURE_REPO for compat)
       3. cwd git root (via git rev-parse)
-      4. Config anchor (last resort — may be stale)
+      4. Config anchor (last resort -- may be stale)
 
     All paths are resolved through :func:`git_ops.resolve_to_anchor` so
     that running from inside a git worktree returns the main checkout,
     not the ephemeral worktree path.
     """
 
-    # 1. Running script location — walk up from __file__ to find .git
+    # 1. Running script location -- walk up from __file__ to find .git
     here = Path(__file__).resolve().parent
     candidate = here
     for _ in range(8):  # limit traversal depth
@@ -3440,7 +3440,7 @@ def _find_repo_dir() -> Path | None:
     except Exception:
         pass
 
-    # 4. Config anchor (last resort — may deploy stale code if anchor
+    # 4. Config anchor (last resort -- may deploy stale code if anchor
     #    hasn't been updated, but better than failing entirely)
     try:
         config = cfg.load_config()
@@ -3488,7 +3488,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    # resolve (emit JSON launch plan, then exit — shell handles execution)
+    # resolve (emit JSON launch plan, then exit -- shell handles execution)
     p = sub.add_parser("resolve", help="Resolve launch plan as JSON (for shell wrappers)")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--recovery", action="store_true")
@@ -3601,11 +3601,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("get", help="Query project paths and config values")
     p.add_argument("key", help="Key to query (use 'keys' to list available keys)")
 
-    # services — dispatched pre-argparse (see cmd_services_dispatch)
+    # services -- dispatched pre-argparse (see cmd_services_dispatch)
     # Stub entry for --help visibility only
     sub.add_parser("services", help="Service discovery and management (run 'services' for usage)")
 
-    # repos — dispatched pre-argparse (see cmd_repos_dispatch)
+    # repos -- dispatched pre-argparse (see cmd_repos_dispatch)
     sub.add_parser("repos", help="Repos registry and source roots (run 'repos' for usage)")
 
     # pre-launch (two-pass self-update protocol)
@@ -3686,8 +3686,8 @@ def cmd_handoff(args: argparse.Namespace) -> int:
     """Manage handoff prompt state on a worktree record.
 
     Subcommands:
-        set <worktree_id> <prompt_path>  — set the handoff_prompt field
-        consume <worktree_id>            — read and clear; prints JSON
+        set <worktree_id> <prompt_path>  -- set the handoff_prompt field
+        consume <worktree_id>            -- read and clear; prints JSON
     """
     sub = getattr(args, "handoff_sub", None)
     wt_id = getattr(args, "worktree_id", None)
@@ -3970,7 +3970,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
 
-    # Services uses manual dispatch for passthrough support —
+    # Services uses manual dispatch for passthrough support --
     # argparse can't handle "unknown subcommand = service name".
     if args_list[0] == "services":
         try:

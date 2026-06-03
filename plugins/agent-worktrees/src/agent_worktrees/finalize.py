@@ -1,4 +1,4 @@
-"""Finalization flow — squash, rebase, merge, push, cleanup with locking.
+"""Finalization flow -- squash, rebase, merge, push, cleanup with locking.
 
 Orchestrates the full worktree finalization lifecycle:
 1. Acquire file-based lock
@@ -50,7 +50,7 @@ class FinalizeLock:
             except OSError:
                 break
             if age > self.timeout:
-                output.warn(f"Stale lock detected (age: {int(age)}s) — breaking.")
+                output.warn(f"Stale lock detected (age: {int(age)}s) -- breaking.")
                 self.lock_path.unlink(missing_ok=True)
                 break
 
@@ -106,7 +106,7 @@ def finalize(
         except Exception:
             pass
 
-    # Guard against branch drift — if the worktree's HEAD is on a
+    # Guard against branch drift -- if the worktree's HEAD is on a
     # different branch (e.g. a feature branch), refuse to finalize.
     # Squashing/rebasing/deleting an unexpected branch is dangerous.
     if Path(worktree_path).exists():
@@ -141,7 +141,7 @@ def finalize(
         print(f"Fetching from {repo.remote}...")
         git_ops.fetch(repo.remote, cwd=anchor)
 
-        # 1b. Dirty check — refuse finalization with uncommitted changes
+        # 1b. Dirty check -- refuse finalization with uncommitted changes
         wt_exists = Path(worktree_path).exists()
         if wt_exists and not git_ops.is_clean(cwd=worktree_path):
             output.err(
@@ -150,7 +150,7 @@ def finalize(
             )
             return False
 
-        # 1c. Divergence check — inform before squash/rebase
+        # 1c. Divergence check -- inform before squash/rebase
         ahead_commits = git_ops.get_commits_ahead(branch, upstream, cwd=worktree_path)
         behind_r = git_ops.git(
             "rev-list", "--count", f"{branch}..{upstream}",
@@ -167,24 +167,24 @@ def finalize(
             )
         elif ahead_count == 0:
             output.warn(
-                f"Branch {branch} has no commits ahead of {upstream} — "
+                f"Branch {branch} has no commits ahead of {upstream} -- "
                 f"nothing to merge."
             )
 
-        # 2. Pre-squash — collapse all worktree commits into one
+        # 2. Pre-squash -- collapse all worktree commits into one
         if wt_exists and ahead_count > 1:
             title = record.title if record else None
             squash_msg = title or f"squash: merge worktree/{worktree_id}"
             print(f"Squashing {ahead_count} commits into one...")
             if not git_ops.squash_branch(upstream, squash_msg, cwd=worktree_path):
-                output.warn("Pre-squash failed — proceeding with individual commits.")
+                output.warn("Pre-squash failed -- proceeding with individual commits.")
             else:
                 ahead_count = 1
 
         # 3. Rebase
         print(f"Rebasing {branch} onto {upstream}...")
         if not git_ops.rebase(upstream, cwd=worktree_path):
-            output.warn("Rebase failed — aborting and preserving worktree.")
+            output.warn("Rebase failed -- aborting and preserving worktree.")
             # Restore original commits if we squashed
             if git_ops.restore_backup_ref(cwd=worktree_path):
                 output.warn("Restored original commits from pre-squash backup.")
@@ -218,7 +218,7 @@ def finalize(
                     tracking.update_status(record, "active")
                 return False
         elif repo.validate_paths:
-            # Config provides paths — use built-in Python validator
+            # Config provides paths -- use built-in Python validator
             print("Checking for core infrastructure changes...")
             failures = val.validate_files(
                 worktree_path,
@@ -231,7 +231,7 @@ def finalize(
                     tracking.update_status(record, "active")
                 return False
         else:
-            # No validation configured — check for legacy script
+            # No validation configured -- check for legacy script
             validate_script = Path(worktree_path) / "tools" / "worktree" / "validate-core.ps1"
             if validate_script.exists():
                 print("Checking for core infrastructure changes (legacy)...")
@@ -303,7 +303,7 @@ def finalize(
                 pushed = True
                 break
             if attempt < max_retries:
-                output.warn("Push rejected — fetching and retrying...")
+                output.warn("Push rejected -- fetching and retrying...")
                 git_ops.fetch(repo.remote, cwd=anchor)
                 if not git_ops.rebase(upstream, cwd=anchor):
                     output.err("Rebase after push rejection failed")
@@ -317,12 +317,12 @@ def finalize(
                 tracking.update_status(record, "orphaned")
             return False
 
-        # 7. Cleanup — remove worktree and branch (only if not actively in use)
+        # 7. Cleanup -- remove worktree and branch (only if not actively in use)
         #
         # Safety rule: if we are running *inside* the target worktree or a
         # live Copilot session owns it, we must not delete the directory or
         # branch.  Everything else (push, permissions, tracking) still
-        # proceeds — the worktree becomes inert content already on master.
+        # proceeds -- the worktree becomes inert content already on master.
         inside_worktree = git_ops.is_cwd_inside(worktree_path)
         has_live_session = _has_live_session(worktree_path)
 
@@ -336,7 +336,7 @@ def finalize(
         else:
             print("Removing worktree...")
             if not git_ops.remove_worktree(anchor, worktree_path):
-                output.warn("Could not remove worktree via git — forcing directory removal.")
+                output.warn("Could not remove worktree via git -- forcing directory removal.")
 
             print(f"Removing branch {branch}...")
             if not git_ops.delete_branch(branch, cwd=anchor):
@@ -434,7 +434,7 @@ def _dry_run_preview(
     output.dry_run("Would update worktree YAML status: finalized")
     output.dry_run("Would release lock")
     print()
-    output.ok("Dry run complete — no changes made")
+    output.ok("Dry run complete -- no changes made")
 
 
 
