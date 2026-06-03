@@ -334,8 +334,8 @@ deploy_wrappers() {
     mv -f "$tmp" "$BIN_DIR/launch-session.sh"
     ok "Wrapper: launch-session.sh"
 
-    # Deploy sessionStart hook scripts (bootstrap-check + project-hooks + register-session)
-    for script in bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh; do
+    # Deploy sessionStart hook scripts (bootstrap-check + project-hooks + register-session + anchor-hygiene-check)
+    for script in bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh; do
         local script_src="$SCRIPT_DIR/$script"
         if [[ -f "$script_src" ]]; then
             tmp="$(mktemp "$BIN_DIR/$script.XXXXXX")"
