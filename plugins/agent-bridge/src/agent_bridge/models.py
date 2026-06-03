@@ -173,3 +173,8 @@ class ServiceConfig(BaseModel):
     db_path: str = "~/.agent-bridge/sessions.db"
     log_level: str = "info"
     topologies: dict[str, TopologyProfile] = Field(default_factory=dict)
+    worktree_discovery_interval: float = Field(
+        default=0,
+        description="Seconds between periodic worktree discovery sweeps. "
+        "0 disables periodic crawling (on-demand only).",
+    )

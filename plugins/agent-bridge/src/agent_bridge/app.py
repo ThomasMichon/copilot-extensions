@@ -40,6 +40,7 @@ async def lifespan(app: FastAPI):
     if resolver:
         from .routes.worktrees import get_cache
         wt_cache = get_cache()
+        wt_cache.configure(interval=cfg.worktree_discovery_interval)
         wt_cache.start(resolver)
 
     log.info(

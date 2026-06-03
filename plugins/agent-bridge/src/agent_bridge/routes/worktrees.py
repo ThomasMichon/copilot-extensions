@@ -22,7 +22,6 @@ log = logging.getLogger("agent-bridge")
 
 router = APIRouter(tags=["worktrees"])
 
-DEFAULT_INTERVAL = 60.0  # seconds between sweeps
 _CMD_TIMEOUT = 30.0
 
 
@@ -55,18 +54,38 @@ class _WorktreeEntry:
 
 
 class WorktreeDiscoveryCache:
-    """In-memory cache for discovered worktrees, refreshed periodically."""
+    """In-memory cache for discovered worktrees.
 
-    def __init__(self, interval: float = DEFAULT_INTERVAL) -> None:
+    When *interval* > 0, a background task refreshes the cache
+    periodically.  When *interval* is 0 (the default), no background
+    task is created and the cache is populated on-demand via
+    :meth:`crawl_if_empty`.
+    """
+
+    def __init__(self, interval: float = 0) -> None:
         self._cache: dict[str, list[_WorktreeEntry]] = {}
         self._interval = interval
         self._task: asyncio.Task[None] | None = None
+        self._resolver: AgentResolver | None = None
+        self._crawl_lock = asyncio.Lock()
+
+    def configure(self, *, interval: float) -> None:
+        """Update the discovery interval (must be called before start)."""
+        self._interval = interval
 
     def start(self, resolver: AgentResolver) -> None:
-        """Start periodic discovery in the background."""
-        self._task = asyncio.create_task(
-            self._loop(resolver), name="worktree-discovery",
-        )
+        """Start periodic discovery in the background (if interval > 0)."""
+        self._resolver = resolver
+        if self._interval > 0:
+            self._task = asyncio.create_task(
+                self._loop(resolver), name="worktree-discovery",
+            )
+            log.info(
+                "Worktree periodic discovery enabled (interval=%.0fs)",
+                self._interval,
+            )
+        else:
+            log.info("Worktree periodic discovery disabled (on-demand only)")
 
     async def stop(self) -> None:
         if self._task and not self._task.done():
@@ -78,6 +97,19 @@ class WorktreeDiscoveryCache:
 
     def get_all(self) -> dict[str, list[_WorktreeEntry]]:
         return dict(self._cache)
+
+    async def crawl_if_empty(self) -> None:
+        """Trigger a crawl only if the cache has no data yet.
+
+        Uses a lock to prevent concurrent callers from stampeding
+        multiple crawls simultaneously.
+        """
+        if self._cache or not self._resolver:
+            return
+        async with self._crawl_lock:
+            if self._cache:
+                return
+            await self.crawl(self._resolver)
 
     async def crawl(self, resolver: AgentResolver) -> None:
         """Crawl all eligible agents concurrently."""
@@ -224,6 +256,7 @@ async def _run_ssh(host: str, user: str | None, project: str) -> str | None:
 
 async def _exec(cmd: list[str]) -> str | None:
     """Execute a command and return stdout, or None on failure."""
+    proc: asyncio.subprocess.Process | None = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -242,8 +275,22 @@ async def _exec(cmd: list[str]) -> str | None:
             return None
         return stdout.decode()
     except TimeoutError:
-        log.error("Command timed out: %s", " ".join(cmd))
+        log.error("Command timed out after %.0fs: %s", _CMD_TIMEOUT, " ".join(cmd))
+        if proc:
+            proc.kill()
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=5)
+            except Exception:
+                pass
         return None
+    except asyncio.CancelledError:
+        if proc and proc.returncode is None:
+            proc.kill()
+            try:
+                await proc.communicate()
+            except Exception:
+                pass
+        raise
     except Exception:
         log.exception("Failed to run: %s", " ".join(cmd))
         return None
@@ -300,8 +347,12 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
     Returns all worktrees reported by each machine's binstub.  Worktrees
     that have been deleted from disk are not returned (the binstub only
     reports what physically exists).
+
+    When periodic discovery is disabled, the first request triggers an
+    on-demand crawl (subsequent requests return cached results).
     """
     cache = get_cache()
+    await cache.crawl_if_empty()
     groups = cache.get_all()
     return {
         "groups": {
