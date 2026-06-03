@@ -180,8 +180,7 @@ def _normalize_path(p: str) -> str:
 
 def _build_active_paths(records: list[tracking.WorktreeRecord]) -> set[str]:
     """Build set of normalized paths with live sessions (lock files OR mux sessions)."""
-    all_paths = [r.worktree_path for r in records if r.worktree_path]
-    session_ctx = sessions.scan_sessions(all_paths)
+    session_ctx = sessions.scan_sessions_fast(records)
     active = {
         _normalize_path(p) for p, sids in session_ctx.active_sessions.items() if sids
     }
@@ -550,7 +549,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             # Auto-resume session
             no_resume = getattr(args, "no_resume", False)
             if not no_resume:
-                last_session = sessions.find_latest_session_id(record.worktree_path)
+                last_session = sessions.find_latest_session_id_fast(
+                    record.worktree_path, record.sessions,
+                )
                 if last_session:
                     launch_cmd.extend(["--resume", last_session])
 
@@ -635,8 +636,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             ]
 
             # Scan for live Copilot sessions and mux sessions
-            all_paths = [r.worktree_path for r in records if r.worktree_path]
-            session_ctx = sessions.scan_sessions(all_paths)
+            session_ctx = sessions.scan_sessions_fast(records)
             active_paths = _build_active_paths(records)
 
             # Classify each by git state (session-aware)
@@ -957,7 +957,7 @@ def _system_status(config: cfg.Config) -> int | None:
         return None
 
     all_paths = [r.worktree_path for r in records]
-    session_ctx = sessions.scan_sessions(all_paths)
+    session_ctx = sessions.scan_sessions_fast(records)
     active_paths = _build_active_paths(records)
 
     # Build status as picker items (view-only)
@@ -1090,7 +1090,9 @@ def _resolve_resume(
     # and pass --resume <session-id> so the user picks up where they left off.
     no_resume = getattr(args, "no_resume", False)
     if not no_resume:
-        last_session = sessions.find_latest_session_id(record.worktree_path)
+        last_session = sessions.find_latest_session_id_fast(
+            record.worktree_path, record.sessions,
+        )
         if last_session:
             launch_cmd.extend(["--resume", last_session])
             print(f"   Resuming session: {last_session[:12]}…")
@@ -1499,7 +1501,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     # Scan for live sessions to feed into classification
     all_paths = [r.worktree_path for r in records]
-    session_ctx = sessions.scan_sessions(all_paths)
+    session_ctx = sessions.scan_sessions_fast(records)
     active_paths = _build_active_paths(records)
 
     # Mux status (batch query if requested)
@@ -1602,7 +1604,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     # Light session scan for display text (names/summaries)
     all_paths = [r.worktree_path for r in records if r.worktree_path]
-    session_ctx = sessions.scan_sessions(all_paths)
+    session_ctx = sessions.scan_sessions_fast(records)
 
     print()
     print(f"{'ID':<42} {'Status':<12} {'Platform':<8} Title")
@@ -3623,6 +3625,19 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("prompt_path", nargs="?", default=None,
                     help="Path to handoff prompt file (required for 'set')")
 
+    # register-session / deregister-session (called from hooks)
+    sp = sub.add_parser("register-session",
+                        help="Register a Copilot session against a worktree")
+    sp.add_argument("--worktree-id", required=True, help="Worktree ID")
+    sp.add_argument("--session-id", required=True, help="Copilot session ID")
+    sp.add_argument("--pid", type=int, default=None,
+                    help="PID of the Copilot process (diagnostic only)")
+
+    sp = sub.add_parser("deregister-session",
+                        help="Mark a Copilot session as ended on a worktree")
+    sp.add_argument("--worktree-id", required=True, help="Worktree ID")
+    sp.add_argument("--session-id", required=True, help="Copilot session ID")
+
     return parser
 
 
@@ -3689,6 +3704,37 @@ def cmd_handoff(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_register_session(args: argparse.Namespace) -> int:
+    """Register a Copilot session against a worktree (hook-invoked)."""
+    wt_id = getattr(args, "worktree_id", None)
+    session_id = getattr(args, "session_id", None)
+    pid = getattr(args, "pid", None)
+    if not wt_id or not session_id:
+        output.err("Usage: register-session --worktree-id ID --session-id ID")
+        return 1
+    try:
+        tracking.register_session(wt_id, session_id, pid=pid)
+    except Exception as e:
+        output.err(f"Failed to register session: {e}")
+        return 1
+    return 0
+
+
+def cmd_deregister_session(args: argparse.Namespace) -> int:
+    """Mark a Copilot session as ended on a worktree (hook-invoked)."""
+    wt_id = getattr(args, "worktree_id", None)
+    session_id = getattr(args, "session_id", None)
+    if not wt_id or not session_id:
+        output.err("Usage: deregister-session --worktree-id ID --session-id ID")
+        return 1
+    try:
+        tracking.deregister_session(wt_id, session_id)
+    except Exception as e:
+        output.err(f"Failed to deregister session: {e}")
+        return 1
+    return 0
+
+
 COMMAND_MAP = {
     "resolve": cmd_resolve,
     "post-exit": cmd_post_exit,
@@ -3701,6 +3747,7 @@ COMMAND_MAP = {
     "validate": cmd_validate,
     "install": cmd_install,
     "register": cmd_register,
+    "unregister": cmd_uninstall,
     "uninstall": cmd_uninstall,
     "update": cmd_update,
     "install-status": cmd_install_status,
@@ -3709,6 +3756,8 @@ COMMAND_MAP = {
     "pre-launch": cmd_pre_launch,
     "dev": cmd_dev,
     "handoff": cmd_handoff,
+    "register-session": cmd_register_session,
+    "deregister-session": cmd_deregister_session,
 }
 
 

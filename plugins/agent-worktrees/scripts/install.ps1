@@ -459,8 +459,8 @@ function Deploy-Wrappers {
         Write-ServiceOk "Wrapper: $wrapper"
     }
 
-    # Deploy sessionStart hook scripts (bootstrap-check + project-hooks)
-    foreach ($script in @('bootstrap-check.ps1', 'bootstrap-check.sh', 'project-hooks.ps1', 'project-hooks.sh')) {
+    # Deploy sessionStart/sessionEnd hook scripts (bootstrap-check + project-hooks + register/deregister-session)
+    foreach ($script in @('bootstrap-check.ps1', 'bootstrap-check.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh')) {
         $src = Join-Path $ScriptDir $script
         $dst = Join-Path $BinDir $script
         if (Test-Path $src) {
