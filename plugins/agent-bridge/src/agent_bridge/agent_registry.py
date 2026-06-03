@@ -200,6 +200,19 @@ class AgentResolver:
     ) -> None:
         self._agents = agents
         self._machines = machines
+        # Build alias -> (machine, env) index for fast lookup
+        self._alias_index: dict[str, tuple[MachineConfig, SshEnvironment]] = {}
+        for machine in machines.values():
+            for env in machine.ssh_environments:
+                if env.alias in self._alias_index:
+                    log.warning(
+                        "Duplicate SSH alias '%s' (machines '%s' and '%s')",
+                        env.alias,
+                        self._alias_index[env.alias][0].key,
+                        machine.key,
+                    )
+                else:
+                    self._alias_index[env.alias] = (machine, env)
 
     @property
     def agents(self) -> dict[str, AgentConfig]:
@@ -208,6 +221,41 @@ class AgentResolver:
     @property
     def machines(self) -> dict[str, MachineConfig]:
         return self._machines
+
+    def _resolve_machine(
+        self, host: str, ssh_environment: str | None = None,
+    ) -> tuple[MachineConfig, SshEnvironment | None]:
+        """Resolve a host to a machine, checking keys then SSH aliases.
+
+        Returns (machine, forced_env) where forced_env is set when the
+        host matched via an SSH alias (the caller should use that
+        environment directly rather than selecting one).
+
+        Raises:
+            ValueError: Host not found by key or alias, or conflicting
+                ssh_environment specified alongside an alias match.
+        """
+        # Direct machine key match
+        machine = self._machines.get(host)
+        if machine:
+            return machine, None
+
+        # Alias-based fallback
+        entry = self._alias_index.get(host)
+        if entry:
+            machine, matched_env = entry
+            if ssh_environment and ssh_environment != matched_env.name:
+                raise ValueError(
+                    f"Host '{host}' resolved via SSH alias to machine "
+                    f"'{machine.key}' environment '{matched_env.name}', "
+                    f"but agent config specifies ssh_environment="
+                    f"'{ssh_environment}' (conflict)"
+                )
+            return machine, matched_env
+
+        raise ValueError(
+            f"Machine '{host}' not found by key or SSH alias in topology"
+        )
 
     def resolve(self, agent_name: str) -> SpawnTarget:
         """Resolve an agent name to a SpawnTarget.
@@ -238,36 +286,43 @@ class AgentResolver:
                 project=config.project,
             )
 
-        # SSH agent -- resolve machine and environment
-        machine = self._machines.get(config.host)
-        if not machine:
-            raise ValueError(
-                f"Agent '{agent_name}' targets machine '{config.host}' "
-                "which is not in the topology"
-            )
+        # SSH agent -- resolve machine (by key or alias) and environment
+        machine, alias_env = self._resolve_machine(
+            config.host, config.ssh_environment,
+        )
 
         if not machine.ssh_ready:
             raise ValueError(
-                f"Machine '{config.host}' is not marked as SSH-ready "
+                f"Machine '{machine.key}' is not marked as SSH-ready "
                 "in the topology"
             )
 
-        # When a project binstub is configured, the remote command does
-        # not require POSIX shell constructs (no cd/export/exec) -- it
-        # just invokes the binstub directly.  Any SSH environment works.
-        # Without a binstub, the command uses POSIX constructs, so we
-        # restrict to POSIX-compatible shells.
-        if config.project:
+        # When resolved via alias, use the matched environment directly.
+        # Otherwise, select environment via the standard logic.
+        if alias_env:
+            ssh_env = alias_env
+            # Still enforce shell compatibility for non-binstub targets
+            if not config.project:
+                POSIX_SHELLS = {"bash", "sh", "zsh", "dash", "fish"}
+                if ssh_env.shell not in POSIX_SHELLS:
+                    raise ValueError(
+                        f"Agent '{agent_name}' resolved via SSH alias "
+                        f"'{config.host}' to environment '{ssh_env.name}' "
+                        f"(shell={ssh_env.shell}), but non-binstub SSH "
+                        "targets require a POSIX-compatible shell"
+                    )
+        elif config.project:
             ssh_env = machine.get_ssh_env(config.ssh_environment)
         else:
             ssh_env = machine.get_spawnable_ssh_env(config.ssh_environment)
+
         if not ssh_env:
             available = [e.name for e in machine.ssh_environments]
             if config.project:
                 raise ValueError(
                     f"No SSH environment "
                     f"{repr(config.ssh_environment) + ' ' if config.ssh_environment else ''}"
-                    f"for agent '{agent_name}' on '{config.host}'. "
+                    f"for agent '{agent_name}' on '{machine.key}'. "
                     f"Available: {available}"
                 )
             posix = [
@@ -276,7 +331,7 @@ class AgentResolver:
             ]
             raise ValueError(
                 f"No suitable SSH environment for agent '{agent_name}' on "
-                f"'{config.host}'. Available: {available}, "
+                f"'{machine.key}'. Available: {available}, "
                 f"POSIX-compatible: {posix}. "
                 "Non-binstub SSH targets require a POSIX-compatible shell."
             )

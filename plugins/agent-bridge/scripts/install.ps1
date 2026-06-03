@@ -339,9 +339,13 @@ function Invoke-Install {
     Write-Ok 'agent-bridge installed'
     Write-Host "  Install dir: $InstallDir"
     Write-Host "  Binstub:     $Binstub"
-    Write-Host "  Start:       agent-bridge start"
     Write-Host "  Config:      agent-bridge config show"
     Write-Host "  API:         http://127.0.0.1:$Port"
+
+    # Start service and verify health
+    Write-Host ''
+    Write-Step 'Starting service after install...'
+    Invoke-Start
 }
 
 function Invoke-Uninstall {
@@ -545,11 +549,9 @@ function Invoke-Update {
     # Update deploy manifest
     Write-DeployManifest
 
-    # Restart if it was running
-    if ($wasRunning) {
-        Write-Step 'Restarting service...'
-        Invoke-Start
-    }
+    # (Re)start service -- always ensure running after update
+    Write-Step 'Starting service...'
+    Invoke-Start
 
     Write-Ok 'Update complete'
 }

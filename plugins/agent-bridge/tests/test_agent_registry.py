@@ -227,8 +227,98 @@ class TestAgentResolver:
             "ghost": {"host": "nonexistent-machine", "cwd": "."},
         })
         resolver = AgentResolver(agents, self.machines)
-        with pytest.raises(ValueError, match="not in the topology"):
+        with pytest.raises(ValueError, match="not found by key or SSH alias"):
             resolver.resolve("ghost")
+
+    # -- Alias-based resolution (#10) ----------------------------------------
+
+    def test_resolve_via_ssh_alias(self):
+        """host matching an SSH alias should resolve to that machine+env."""
+        agents = parse_agent_registry({
+            "wsl-via-alias": {
+                "host": "workstation-wsl",
+                "project": "my-project",
+                "description": "Uses alias to reach WSL",
+            },
+        })
+        resolver = AgentResolver(agents, self.machines)
+        target = resolver.resolve("wsl-via-alias")
+        assert target.type == "ssh"
+        assert target.host == "workstation-wsl"
+        assert target.project == "my-project"
+        assert target.ssh_shell == "bash"
+
+    def test_resolve_alias_non_binstub_posix(self):
+        """Non-binstub agent via alias to POSIX shell should succeed."""
+        agents = parse_agent_registry({
+            "raw-wsl": {
+                "host": "workstation-wsl",
+                "cwd": "/home/dev/src",
+                "description": "No binstub, WSL alias",
+            },
+        })
+        resolver = AgentResolver(agents, self.machines)
+        target = resolver.resolve("raw-wsl")
+        assert target.type == "ssh"
+        assert target.host == "workstation-wsl"
+        assert target.ssh_shell == "bash"
+
+    def test_resolve_alias_non_binstub_pwsh_fails(self):
+        """Non-binstub agent via alias to pwsh should fail."""
+        self.machines["laptop"].ssh_ready = True
+        agents = parse_agent_registry({
+            "raw-laptop": {
+                "host": "laptop",
+                "cwd": "C:\\Users\\dev",
+                "description": "No binstub, pwsh alias",
+            },
+        })
+        resolver = AgentResolver(agents, self.machines)
+        with pytest.raises(ValueError, match="POSIX-compatible shell"):
+            resolver.resolve("raw-laptop")
+
+    def test_resolve_alias_binstub_pwsh_succeeds(self):
+        """Binstub agent via alias to pwsh should succeed."""
+        self.machines["laptop"].ssh_ready = True
+        agents = parse_agent_registry({
+            "binstub-laptop": {
+                "host": "laptop",
+                "project": "my-project",
+                "description": "Binstub on pwsh alias",
+            },
+        })
+        resolver = AgentResolver(agents, self.machines)
+        target = resolver.resolve("binstub-laptop")
+        assert target.type == "ssh"
+        assert target.host == "laptop"
+        assert target.project == "my-project"
+
+    def test_resolve_alias_conflicting_ssh_environment(self):
+        """Alias match + conflicting ssh_environment should raise."""
+        agents = parse_agent_registry({
+            "conflict": {
+                "host": "workstation-wsl",
+                "ssh_environment": "windows",
+                "project": "my-project",
+            },
+        })
+        resolver = AgentResolver(agents, self.machines)
+        with pytest.raises(ValueError, match="conflict"):
+            resolver.resolve("conflict")
+
+    def test_resolve_alias_matching_ssh_environment(self):
+        """Alias match + matching ssh_environment should succeed."""
+        agents = parse_agent_registry({
+            "matching": {
+                "host": "workstation-wsl",
+                "ssh_environment": "wsl",
+                "project": "my-project",
+            },
+        })
+        resolver = AgentResolver(agents, self.machines)
+        target = resolver.resolve("matching")
+        assert target.type == "ssh"
+        assert target.host == "workstation-wsl"
 
     def test_list_agents(self):
         agents = self.resolver.list_agents()
