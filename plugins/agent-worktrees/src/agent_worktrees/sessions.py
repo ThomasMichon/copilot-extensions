@@ -5,8 +5,8 @@ Scans ~/.copilot/session-state/ to detect active Copilot sessions
 for worktree annotation.
 
 Provides two scanning modes:
-- ``scan_sessions()`` — full walk of all session directories (legacy)
-- ``scan_sessions_fast()`` — targeted lookup using the per-worktree
+- ``scan_sessions()`` -- full walk of all session directories (legacy)
+- ``scan_sessions_fast()`` -- targeted lookup using the per-worktree
   session registry, falling back to full scan for unindexed records
 """
 
@@ -41,7 +41,7 @@ class SessionContext:
 
 
 def _normalize_path(p: str) -> str:
-    """Normalize a path for comparison — lowercase on Windows, strip trailing sep."""
+    """Normalize a path for comparison -- lowercase on Windows, strip trailing sep."""
     p = p.rstrip("/\\")
     if platform.system() == "Windows":
         return p.lower()
@@ -144,7 +144,7 @@ def scan_sessions(worktree_paths: list[str]) -> SessionContext:
 
         norm_cwd = _normalize_path(cwd)
 
-        # Match against worktree roots — session cwd may be a subdirectory
+        # Match against worktree roots -- session cwd may be a subdirectory
         matched_path: str | None = None
         for wt_path in path_set:
             if norm_cwd == wt_path or norm_cwd.startswith(wt_path + os.sep):
@@ -220,7 +220,7 @@ def _enrich_session_dir(
 ) -> None:
     """Read a single session directory and populate ctx fields.
 
-    Shared helper for fast-path scanning — reads workspace.yaml for
+    Shared helper for fast-path scanning -- reads workspace.yaml for
     summary, events.jsonl for turn count, and lock files for liveness.
     """
     entry = session_dir / session_id
@@ -322,13 +322,13 @@ def scan_sessions_fast(
         if not rec.worktree_path:
             continue
 
-        # sessions=None means pre-registry — needs full scan fallback
+        # sessions=None means pre-registry -- needs full scan fallback
         sessions = getattr(rec, "sessions", None)
         if sessions is None:
             fallback_paths.append(rec.worktree_path)
             continue
 
-        # Fast path — only check known session IDs
+        # Fast path -- only check known session IDs
         for entry in sessions:
             _enrich_session_dir(
                 session_dir, entry.session_id, rec.worktree_path, ctx,

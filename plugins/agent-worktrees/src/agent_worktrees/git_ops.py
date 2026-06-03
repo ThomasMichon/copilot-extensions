@@ -139,7 +139,7 @@ def _get_current_branch_safe(cwd: str | Path) -> str | None:
     if result.returncode != 0:
         return None
     name = result.stdout.strip()
-    # "HEAD" means detached — not a named branch
+    # "HEAD" means detached -- not a named branch
     return None if name == "HEAD" else name
 
 
@@ -162,7 +162,7 @@ def classify_worktree(
         default_branch: Default branch name.
         active_paths: Set of normalized worktree paths with live Copilot
             sessions.  When provided, any worktree whose path is in this
-            set is classified as ACTIVE regardless of git state — it must
+            set is classified as ACTIVE regardless of git state -- it must
             never appear as COMPLETED or UNUSED.
 
     Returns:
@@ -172,7 +172,7 @@ def classify_worktree(
     if not path.exists():
         return WorktreeStateInfo(state=WorktreeState.GONE)
 
-    # A directory without a .git entry (file or dir) is a zombie — the
+    # A directory without a .git entry (file or dir) is a zombie -- the
     # worktree was partially removed or never fully created.
     if not (path / ".git").exists():
         return WorktreeStateInfo(state=WorktreeState.GONE)
@@ -187,7 +187,7 @@ def classify_worktree(
     )
     effective_branch = actual_branch if drift else branch
 
-    # If a live Copilot session owns this worktree, it is ACTIVE — period.
+    # If a live Copilot session owns this worktree, it is ACTIVE -- period.
     # Use simple normalization (strip trailing sep + lowercase on Windows)
     # to match the active_paths set built by callers.
     if active_paths is not None:
@@ -211,7 +211,7 @@ def classify_worktree(
     dirty_lines = [l for l in result.stdout.splitlines() if l.strip()]
     dirty_count = len(dirty_lines)
 
-    # Merge base — use effective_branch (actual HEAD when drifted)
+    # Merge base -- use effective_branch (actual HEAD when drifted)
     mb = git("merge-base", upstream, effective_branch, cwd=path, check=False)
     if mb.returncode != 0:
         return WorktreeStateInfo(
@@ -269,7 +269,7 @@ def classify_worktree(
             **_drift_fields,
         )
 
-    # Branch has commits — check if changes already in master (squash-merged).
+    # Branch has commits -- check if changes already in master (squash-merged).
     #
     # Use `git cherry` for patch-id comparison: it detects equivalent
     # patches even when commit SHAs differ (squash-merge) and even when
@@ -507,7 +507,7 @@ def is_branch_merged(
     # Fast path: branch ref doesn't exist locally
     ref_check = git("rev-parse", "--verify", branch, cwd=cwd, check=False)
     if ref_check.returncode != 0:
-        return True  # branch already gone — nothing to protect
+        return True  # branch already gone -- nothing to protect
 
     # Check commit ancestry first
     result = git(
@@ -517,7 +517,7 @@ def is_branch_merged(
     if result.returncode == 0:
         return True
 
-    # Patch-id comparison via `git cherry` — detects equivalent patches
+    # Patch-id comparison via `git cherry` -- detects equivalent patches
     # even when commit SHAs differ (squash-merge) and even when the
     # target later modified the same files.
     cherry_r = git("cherry", target, branch, cwd=cwd, check=False)
@@ -530,7 +530,7 @@ def is_branch_merged(
     # Fallback: direct blob comparison for cases git-cherry can't match.
     diff_r = git("diff", "--name-only", branch, target, cwd=cwd, check=False)
     if diff_r.returncode != 0:
-        return False  # can't determine — assume not merged
+        return False  # can't determine -- assume not merged
     changed = [f for f in diff_r.stdout.splitlines() if f.strip()]
     if not changed:
         return True  # identical trees

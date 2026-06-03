@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import git_ops, output
 
-# Legacy hardcoded paths — used as default when no config is provided.
+# Legacy hardcoded paths -- used as default when no config is provided.
 # New deployments should set validate_paths in config.yaml instead.
 _LEGACY_CORE_PATHS: list[str] = [
     "tools/setup/",
@@ -113,7 +113,7 @@ def _check_python(full_path: Path) -> ValidationFailure | None:
     except FileNotFoundError:
         pass  # python not available
 
-    # Best-effort ruff check (warn-only — don't block on missing ruff)
+    # Best-effort ruff check (warn-only -- don't block on missing ruff)
     try:
         result = subprocess.run(
             ["ruff", "check", "--no-fix", "--force-exclude", str(full_path)],
@@ -205,7 +205,7 @@ def validate_files(
         )
 
     if not files:
-        output.ok("No core infrastructure files changed — validation skipped.")
+        output.ok("No core infrastructure files changed -- validation skipped.")
         return []
 
     print()
@@ -216,7 +216,7 @@ def validate_files(
         for f in files:
             print(f"  Would validate: {f}")
         print()
-        output.ok("Dry run complete — no validation performed.")
+        output.ok("Dry run complete -- no validation performed.")
         return []
 
     failures: list[ValidationFailure] = []
@@ -236,17 +236,17 @@ def validate_files(
             if failure:
                 failure.file = rel_path
                 failures.append(failure)
-                output.err(f"{rel_path} — {failure.check_type} error")
+                output.err(f"{rel_path} -- {failure.check_type} error")
                 for line in failure.errors.splitlines()[:3]:
                     print(f"       {line}")
             else:
                 output.ok(rel_path)
         else:
-            print(f"  ─ {rel_path} — no validator for {ext}")
+            print(f"  ─ {rel_path} -- no validator for {ext}")
 
     print()
     if failures:
-        output.err(f"Validation FAILED — {len(failures)} file(s) have errors")
+        output.err(f"Validation FAILED -- {len(failures)} file(s) have errors")
     else:
         output.ok(f"All {len(files)} core file(s) passed validation.")
 

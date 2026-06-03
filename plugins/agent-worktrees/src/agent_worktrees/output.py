@@ -1,4 +1,4 @@
-"""Shared output helpers — colored status lines and ANSI formatting."""
+"""Shared output helpers -- colored status lines and ANSI formatting."""
 
 from __future__ import annotations
 

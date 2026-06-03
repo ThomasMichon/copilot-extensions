@@ -1,4 +1,4 @@
-"""Worktree tracking YAML — read, write, and update operations.
+"""Worktree tracking YAML -- read, write, and update operations.
 
 Each worktree gets a YAML file at ~/.{project}/worktrees/{id}.yaml
 tracking its lifecycle state.
@@ -68,7 +68,7 @@ def _atomic_write(path: Path, content: str) -> None:
     try:
         os.write(fd, content.encode())
         os.close(fd)
-        # On Windows, can't rename over existing — remove first
+        # On Windows, can't rename over existing -- remove first
         if path.exists():
             path.unlink()
         os.rename(tmp, str(path))
@@ -103,7 +103,7 @@ def load_record(path: Path) -> WorktreeRecord:
     elif hasattr(completed_raw, "isoformat"):
         completed_raw = completed_raw.isoformat()
 
-    # Parse sessions list — None means "not yet indexed" (pre-registry),
+    # Parse sessions list -- None means "not yet indexed" (pre-registry),
     # [] means "indexed, no sessions recorded".  This distinction drives
     # fallback: None -> full scan, [] -> skip scan.
     raw_sessions = data.get("sessions")
@@ -174,7 +174,7 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
     if record.handoff_prompt:
         content += f"handoff_prompt: {record.handoff_prompt}\n"
 
-    # Serialize sessions list — None omitted (not yet indexed),
+    # Serialize sessions list -- None omitted (not yet indexed),
     # [] written as empty list (indexed, no sessions).
     if record.sessions is not None:
         entries = [
@@ -253,7 +253,7 @@ def consume_handoff(worktree_id: str) -> str | None:
     """Atomically read and clear the handoff_prompt field.
 
     Returns the prompt path if one was set, or None.
-    Only active worktrees can consume handoffs — finalized, complete,
+    Only active worktrees can consume handoffs -- finalized, complete,
     or orphaned worktrees return None (and clear any stale prompt).
     """
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
@@ -306,14 +306,14 @@ def create_new_record(
 
 
 # ---------------------------------------------------------------------------
-# Session registry — per-worktree session tracking via hooks
+# Session registry -- per-worktree session tracking via hooks
 # ---------------------------------------------------------------------------
 
 class _RecordLock:
     """Short-lived file lock for read-modify-write on a tracking YAML.
 
     Uses fcntl advisory locks on Unix.  Falls back to no-op on platforms
-    where fcntl is unavailable (Windows) — the atomic-write pattern still
+    where fcntl is unavailable (Windows) -- the atomic-write pattern still
     prevents torn files, and concurrent sessions in the same worktree are
     rare enough that lost updates are acceptable there.
     """
@@ -329,7 +329,7 @@ class _RecordLock:
         try:
             import fcntl as _fcntl
         except ImportError:
-            # Windows — no fcntl; proceed unlocked
+            # Windows -- no fcntl; proceed unlocked
             return self
         import time
         deadline = time.monotonic() + self._timeout
@@ -339,7 +339,7 @@ class _RecordLock:
                 return self
             except (OSError, BlockingIOError):
                 if time.monotonic() >= deadline:
-                    # Timeout — proceed unlocked rather than stall launch
+                    # Timeout -- proceed unlocked rather than stall launch
                     return self
                 time.sleep(0.05)
 
@@ -369,7 +369,7 @@ def register_session(
         if record.sessions is None:
             record.sessions = []
 
-        # Dedupe — update existing entry instead of appending
+        # Dedupe -- update existing entry instead of appending
         for entry in record.sessions:
             if entry.session_id == session_id:
                 entry.started_at = _now_iso()

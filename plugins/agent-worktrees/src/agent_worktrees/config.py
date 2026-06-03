@@ -191,7 +191,7 @@ def detect_machine(repo_dir: str | Path | None = None) -> str:
                 if entry.alias and hostname == entry.alias.lower():
                     return machine_name(entry)
         except (FileNotFoundError, ValueError):
-            pass  # no registry — fall through to raw hostname
+            pass  # no registry -- fall through to raw hostname
 
     return hostname
 

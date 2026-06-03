@@ -1,10 +1,10 @@
-"""Repos registry — catalog of known repositories and source roots.
+"""Repos registry -- catalog of known repositories and source roots.
 
 Manages ``~/.agent-worktrees/repos.yaml``, a two-tier registry:
 
 - **project** repos get full agent-worktrees management (binstubs,
   worktrees, terminal profiles).  These are also in ``projects.yaml``.
-- **repo** entries are tracked locations only — used for path lookup,
+- **repo** entries are tracked locations only -- used for path lookup,
   clone resolution, and future ACP bridge dispatch.
 
 The registry also stores per-platform source roots (``srcroot``) so

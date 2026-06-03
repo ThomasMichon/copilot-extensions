@@ -1,4 +1,4 @@
-"""Installer logic — deploy Python package, venv, and wrappers.
+"""Installer logic -- deploy Python package, venv, and wrappers.
 
 This module handles the Python-side of installation. The native
 install.ps1/install.sh scripts call into this for package deployment
@@ -31,7 +31,7 @@ def install_dir() -> Path:
 
 
 def lib_dir() -> Path:
-    """~/.agent-worktrees/lib — deployed Python package source."""
+    """~/.agent-worktrees/lib -- deployed Python package source."""
     return install_dir() / "lib"
 
 
@@ -196,7 +196,7 @@ def upgrade_venv_deps() -> bool:
     """
     python = _venv_python(venv_dir())
     if not python.exists():
-        output.err("Venv Python missing — use --recreate-venv")
+        output.err("Venv Python missing -- use --recreate-venv")
         return False
     try:
         subprocess.run(
@@ -217,7 +217,7 @@ def stamp_build_info(
 ) -> None:
     """Overwrite _build_info.py in the deployed package with provenance.
 
-    Called after every package copy — from ``deploy_package()``, bootstrap
+    Called after every package copy -- from ``deploy_package()``, bootstrap
     auto-update, and the native install scripts.
     """
     version = "1.0.0"
@@ -347,7 +347,7 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
     is_windows = platform.system() == "Windows"
 
     # Project-specific launcher (sets WORKTREE_PROJECT, routes to the CLI).
-    # Generated for every supported platform — previously this only had a
+    # Generated for every supported platform -- previously this only had a
     # Windows code path, so on macOS/Linux `register` silently created no
     # launcher at all.
     if project:
@@ -387,7 +387,7 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
         output.ok(f"Binstub: {dst}")
 
     # Unified agent-worktrees command (project-agnostic; routes straight to
-    # the Python CLI). It must NOT require WORKTREE_PROJECT — global
+    # the Python CLI). It must NOT require WORKTREE_PROJECT -- global
     # subcommands like `register <project>`, `update`, and `--version` run
     # without a project context. The project-specific launchers above are the
     # gating mechanism that sets WORKTREE_PROJECT; this stub stays unconditional

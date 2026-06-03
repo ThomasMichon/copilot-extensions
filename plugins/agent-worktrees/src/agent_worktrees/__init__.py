@@ -1,1 +1,1 @@
-# Agent Worktrees — Python package for worktree session management.
+# Agent Worktrees -- Python package for worktree session management.

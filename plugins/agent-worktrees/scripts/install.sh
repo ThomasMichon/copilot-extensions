@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# install.sh — Worktree Session Manager — standardized installer interface
+# install.sh -- Worktree Session Manager -- standardized installer interface
 # =============================================================================
 # Manages the worktree session infrastructure lifecycle: install, uninstall,
 # start, stop, status, update-config, update.
@@ -119,7 +119,7 @@ fi
 DEPLOY_SOURCE_PATHS=("plugins/agent-worktrees/")
 INSTALLER_REL_PATH="plugins/agent-worktrees/scripts/install.sh"
 
-# Legacy scripts (pre-Python) — for cleanup during migration
+# Legacy scripts (pre-Python) -- for cleanup during migration
 LEGACY_SCRIPTS=(
     launch-session.ps1
     finalize-session.ps1
@@ -325,7 +325,7 @@ deploy_wrappers() {
         err "Wrapper source not found: $src"
         return 1
     fi
-    # Atomic replace — write to temp then mv, so a concurrent session
+    # Atomic replace -- write to temp then mv, so a concurrent session
     # reading launch-session.sh isn't corrupted mid-write.
     local tmp
     tmp="$(mktemp "$BIN_DIR/launch-session.sh.XXXXXX")"
@@ -409,7 +409,7 @@ deploy_config() {
     fi
 
     if [[ -z "$REPO_DIR" ]]; then
-        skipped "Config generation skipped (no repo detected — create config.yaml manually)"
+        skipped "Config generation skipped (no repo detected -- create config.yaml manually)"
         return 1
     fi
 
@@ -516,7 +516,7 @@ show_deploy_status() {
         if [[ "$stale_count" -eq 0 ]]; then
             ok "Up to date (no source changes since deploy)"
         else
-            changed "Stale — $stale_count commit(s) behind HEAD"
+            changed "Stale -- $stale_count commit(s) behind HEAD"
         fi
     fi
 }
@@ -528,7 +528,7 @@ deploy_tabby_profile() {
     local machines_yaml="${REPO_DIR:+$REPO_DIR/machines.yaml}"
     local tabby_config="$HOME/.config/tabby/config.yaml"
 
-    # Skip on WSL — Tabby is a native Linux desktop app
+    # Skip on WSL -- Tabby is a native Linux desktop app
     if [[ "$platform" == "wsl" ]]; then
         skipped "Tabby profile: skipped on WSL"
         return
@@ -545,9 +545,9 @@ deploy_tabby_profile() {
         return 1
     fi
 
-    # Warn if Tabby is running — it overwrites config.yaml from memory on exit
+    # Warn if Tabby is running -- it overwrites config.yaml from memory on exit
     if pgrep -x tabby >/dev/null 2>&1; then
-        echo "  ⚠ Tabby is running — close it before updating, or changes will be overwritten"
+        echo "  ⚠ Tabby is running -- close it before updating, or changes will be overwritten"
     fi
 
     "$VENV_PYTHON" -c "
@@ -581,7 +581,7 @@ if Path(config_path).exists():
     try:
         config = yaml.safe_load(Path(config_path).read_text()) or {}
     except yaml.YAMLError:
-        print('  ⚠ Tabby config is malformed — skipping profile merge', file=sys.stderr)
+        print('  ⚠ Tabby config is malformed -- skipping profile merge', file=sys.stderr)
         sys.exit(0)
 else:
     config = {}
@@ -653,7 +653,7 @@ if Path(machines_path).exists():
             if upsert_profile(ssh_profile):
                 changed = True
 
-            # Project launcher profile — SSH + run binstub
+            # Project launcher profile -- SSH + run binstub
             binstub = f'{project_name}.cmd' if shell == 'pwsh' else project_name
             launcher_id = f'{project_name}:{key}-{env_name}'
             launcher_label = display_name if env_label == 'Linux' else f'{display_name} {env_label}'
@@ -856,7 +856,7 @@ deploy_git_hooks_path() {
         return
     fi
     if [[ -n "$current" ]]; then
-        echo "  ⚠ Git core.hooksPath already set to '$current' — not overwriting" >&2
+        echo "  ⚠ Git core.hooksPath already set to '$current' -- not overwriting" >&2
         echo "    To update manually: git -C $REPO_DIR config --local core.hooksPath tools/hooks" >&2
         return
     fi
@@ -878,7 +878,7 @@ deploy_tmux_config() {
             skipped "tmux config up to date"
             return
         fi
-        changed "tmux config drift detected — updating"
+        changed "tmux config drift detected -- updating"
     fi
 
     cp "$src" "$dst"
@@ -964,7 +964,7 @@ assert_path() {
 
 ensure_copilot_experimental() {
     # Ensure experimental: true in Copilot CLI settings.json.
-    # The CLI gates extension loading on this flag — COPILOT_FEATURE_FLAGS
+    # The CLI gates extension loading on this flag -- COPILOT_FEATURE_FLAGS
     # alone is not sufficient. Both are required.
     local settings_file="$HOME/.copilot/settings.json"
     [[ -f "$settings_file" ]] || return 0
@@ -1151,7 +1151,7 @@ p.write_text(json.dumps(m, indent=2))
 
     stop)
         header "Stopping $SERVICE_NAME"
-        skipped "Not a daemon — Ctrl+C or close the terminal to end a session"
+        skipped "Not a daemon -- Ctrl+C or close the terminal to end a session"
         ;;
 
     status)
