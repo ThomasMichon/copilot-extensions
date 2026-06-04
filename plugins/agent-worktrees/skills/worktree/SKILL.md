@@ -64,14 +64,14 @@ inside a worktree session.
 
 ```
 # CORRECT -- always use the binstub
-agent-worktrees mark-complete --title "Fix auth regression"
+agent-worktrees push-changes --title "Fix auth regression"
 agent-worktrees finalize
 agent-worktrees status
 agent-worktrees cleanup --clean
 
 # WRONG -- never do any of these
 python -m worktree_manager mark-complete ...
-python -m agent_worktrees mark-complete ...
+python -m agent_worktrees push-changes ...
 $env:PYTHONPATH = "..."; python -m worktree_manager ...
 git rebase && git checkout master && git merge ...
 ```

@@ -43,13 +43,12 @@ After full installation and project registration:
 ~/.{project}/                       # Per-project config + state
   config.yaml                       #   Machine, repos, launch commands
   worktrees/                        #   Per-worktree tracking
-    {worktree-id}.yaml              #     status: active|complete|finalized|orphaned
+    {worktree-id}.yaml              #     status: active|pushed|complete|finalized|orphaned
 
 ~/.local/bin/                       # Binstubs on PATH
   agent-worktrees{.cmd}             #   CLI tool
   {project}{.cmd}                   #   Project launcher (one per registered repo)
   cleanup-worktrees{.cmd}           #   Bulk worktree cleanup
-  mark-worktree-complete{.cmd}      #   Mark worktree done / set title
 ```
 
 ## Session Lifecycle
@@ -72,25 +71,28 @@ Copilot CLI session                # your work happens here
   v
 Post-exit checks                   # detect completion markers
   |
-  +-- status: complete --> finalize (squash, rebase, ff-merge, push, cleanup)
-  +-- status: active   --> preserve worktree for later resume
+  +-- status: pushed  --> finalize (validate content on master, cleanup)
+  +-- status: active  --> preserve worktree for later resume
 ```
 
-### Finalization Flow
+### Two-Phase Completion
 
-When a session is marked complete (via the `worktree` skill or
-`mark-worktree-complete`), the finalization flow:
+Worktree completion is split into two explicit steps:
 
-1. Acquires a local lock
-2. Fetches from origin
-3. Squashes commits on the worktree branch
-4. Rebases onto `origin/{default_branch}`
-5. Fast-forward merges into local `{default_branch}`
-6. Pushes to origin (with retry on rejection)
-7. Removes the worktree directory and branch
-8. Updates tracking YAML to `status: finalized`
+**Step 1 -- push-changes** (run by the agent during the session):
+1. Squashes commits on the worktree branch
+2. Rebases onto `origin/{default_branch}`
+3. Validates core files
+4. Fast-forward merges into local `{default_branch}`
+5. Pushes to origin (with retry on rejection)
+6. Updates tracking YAML to `status: pushed`
 
-On any failure, the worktree is preserved and marked `status: orphaned`.
+**Step 2 -- finalize** (run by the agent or post-exit hook):
+1. Non-mutating validation that branch content is on upstream
+2. Removes the worktree directory and branch
+3. Updates tracking YAML to `status: finalized`
+
+On push failure, the worktree is preserved and marked `status: orphaned`.
 
 ### Recovery Mode
 
