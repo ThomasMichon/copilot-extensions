@@ -122,7 +122,7 @@ def load_machines_yaml(path: str | Path) -> dict[str, MachineConfig]:
         log.warning("machines.yaml not found at %s", p)
         return {}
     try:
-        data = yaml.safe_load(p.read_text()) or {}
+        data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
         machines = parse_machines_yaml(data)
         log.info("Loaded %d machines from %s", len(machines), p)
         return machines

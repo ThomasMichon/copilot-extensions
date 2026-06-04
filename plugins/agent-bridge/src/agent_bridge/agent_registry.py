@@ -77,7 +77,7 @@ def load_agent_registry(path: str | Path) -> dict[str, AgentConfig]:
         log.warning("Agent registry not found at %s", p)
         return {}
     try:
-        data = json.loads(p.read_text()) or {}
+        data = json.loads(p.read_text(encoding="utf-8")) or {}
         registry = parse_agent_registry(data)
         log.info("Loaded %d agents from %s", len(registry), p)
         return registry
