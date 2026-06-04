@@ -11,9 +11,11 @@ import pytest
 from agent_bridge.transport import (
     AgentProcess,
     SpawnTarget,
+    _build_remote_cmd,
     _wrap_batch_for_windows,
     spawn,
     spawn_local,
+    spawn_raw,
     spawn_ssh,
 )
 
@@ -54,11 +56,90 @@ class TestSpawnTargetSerialization:
         assert data["host"] == "test"
 
 
+class TestBuildRemoteCmd:
+    """Tests for _build_remote_cmd -- remote command string construction."""
+
+    def test_project_uses_binstub(self):
+        """With project, should use binstub with --auto --no-mux --acp --stdio."""
+        target = SpawnTarget(
+            type="ssh", host="server-a", user="deploy",
+            project="my-project",
+            copilot_args=["--allow-all"],
+        )
+        cmd = _build_remote_cmd(target)
+        assert "my-project" in cmd
+        assert "--auto" in cmd
+        assert "--no-mux" in cmd
+        assert "--acp" in cmd
+        assert "--stdio" in cmd
+        assert "--allow-all" in cmd
+        # Should NOT contain cd or export (binstub handles setup)
+        assert "cd " not in cmd
+
+    def test_no_project_uses_cd_exec(self):
+        """Without project, should use cd + export + exec copilot."""
+        target = SpawnTarget(
+            type="ssh", cwd="/home/user/src", host="server-a",
+        )
+        cmd = _build_remote_cmd(target)
+        assert "cd " in cmd
+        assert "exec " in cmd
+        assert "copilot" in cmd
+        assert "--acp" in cmd
+        assert "--stdio" in cmd
+
+    def test_env_vars_exported(self):
+        """Without project, should export env vars."""
+        target = SpawnTarget(
+            type="ssh", cwd=".", host="testhost", user="user",
+            env={"FOO": "bar", "BAZ": "qux with spaces"},
+        )
+        cmd = _build_remote_cmd(target)
+        assert "export FOO=" in cmd
+        assert "export BAZ=" in cmd
+
+    def test_extra_copilot_args(self):
+        """Extra copilot args should be included in the command."""
+        target = SpawnTarget(
+            type="ssh", cwd=".", host="testhost",
+            copilot_args=["--extensions-dir", "/opt/ext"],
+        )
+        cmd = _build_remote_cmd(target)
+        assert "--extensions-dir" in cmd
+
+    def test_no_project_requires_cwd(self):
+        """Without project and without cwd should raise ValueError."""
+        target = SpawnTarget(type="ssh", host="testhost")
+        with pytest.raises(ValueError, match="requires 'cwd'"):
+            _build_remote_cmd(target)
+
+    def test_custom_copilot_path(self):
+        """Custom copilot_path should be used in the command."""
+        target = SpawnTarget(
+            type="ssh", cwd=".", host="testhost",
+            copilot_path="/usr/local/bin/copilot-beta",
+        )
+        cmd = _build_remote_cmd(target)
+        assert "copilot-beta" in cmd
+
+
 class TestSpawnSsh:
+    """Tests for spawn_ssh using ssh-manager's ConnectionManager."""
+
+    @pytest.fixture
+    def mock_manager(self):
+        """Create a mock ConnectionManager."""
+        mgr = MagicMock()
+        mgr.ensure_connected = AsyncMock()
+        mock_proc = MagicMock()
+        mock_proc.pid = 99999
+        mock_proc.returncode = None
+        mgr.open_stdio_channel = AsyncMock(return_value=mock_proc)
+        return mgr
 
     @pytest.mark.asyncio
-    async def test_ssh_command_structure(self):
-        """Verify SSH command includes all hardening flags."""
+    async def test_ssh_uses_connection_manager(self, mock_manager):
+        """spawn_ssh should use ssh-manager's ConnectionManager."""
         target = SpawnTarget(
             type="ssh",
             cwd="/home/deploy/src",
@@ -66,99 +147,63 @@ class TestSpawnSsh:
             user="deploy",
         )
 
-        mock_proc = MagicMock()
-        mock_proc.pid = 99999
-        mock_proc.returncode = None
-
-        with patch("agent_bridge.transport.asyncio") as mock_asyncio:
-            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
-            mock_asyncio.subprocess = asyncio.subprocess
-
+        with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
             result = await spawn_ssh(target)
-            assert result.proc == mock_proc
 
-            call_args = mock_asyncio.create_subprocess_exec.call_args
-            args = call_args[0]
+        # Verify ensure_connected was called with correct host and source
+        mock_manager.ensure_connected.assert_called_once()
+        call_args = mock_manager.ensure_connected.call_args
+        assert call_args[0][0] == "server-a"  # host
+        source = call_args[0][1]
+        config = source.get_ssh_config()
+        assert config.host_alias == "server-a"
+        assert config.user == "deploy"
 
-            # Verify SSH command structure
-            assert args[0] == "ssh"
-            assert "-T" in args
-            assert "BatchMode=yes" in " ".join(args)
-            assert "ConnectTimeout=15" in " ".join(args)
-            assert "ServerAliveInterval=30" in " ".join(args)
-            assert "deploy@server-a" in args
+        # Verify open_stdio_channel was called
+        mock_manager.open_stdio_channel.assert_called_once()
+        channel_args = mock_manager.open_stdio_channel.call_args
+        assert channel_args[0][0] == "server-a"  # host
+        remote_cmd = channel_args[0][1]
+        assert "cd " in remote_cmd
+        assert "--acp" in remote_cmd
+        assert "--stdio" in remote_cmd
 
-            # Verify remote command includes cd and exec
-            remote_cmd = args[-1]
-            assert "cd " in remote_cmd
-            assert "exec " in remote_cmd
-            assert "copilot" in remote_cmd
-            assert "--acp" in remote_cmd
-            assert "--stdio" in remote_cmd
+        # Result should be an AgentProcess
+        assert isinstance(result, AgentProcess)
+        assert result.target == target
 
     @pytest.mark.asyncio
-    async def test_ssh_without_user(self):
-        """SSH target without user should omit user@ prefix."""
+    async def test_ssh_without_user(self, mock_manager):
+        """SSH target without user should pass None to SSHProfileSource."""
         target = SpawnTarget(type="ssh", cwd=".", host="myhost")
 
-        mock_proc = MagicMock()
-        mock_proc.pid = 99999
-        mock_proc.returncode = None
-
-        with patch("agent_bridge.transport.asyncio") as mock_asyncio:
-            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
-            mock_asyncio.subprocess = asyncio.subprocess
-
+        with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
             await spawn_ssh(target)
 
-            call_args = mock_asyncio.create_subprocess_exec.call_args
-            args = call_args[0]
-            # Should be just "myhost", not "None@myhost"
-            assert "myhost" in args
-            assert "None@myhost" not in args
+        source = mock_manager.ensure_connected.call_args[0][1]
+        config = source.get_ssh_config()
+        assert config.host_alias == "myhost"
+        assert config.user is None
 
     @pytest.mark.asyncio
-    async def test_ssh_with_env_vars(self):
-        """SSH command should export env vars on the remote side."""
+    async def test_ssh_with_project(self, mock_manager):
+        """SSH with project should use binstub in the remote command."""
         target = SpawnTarget(
-            type="ssh", cwd=".", host="testhost", user="user",
-            env={"FOO": "bar", "BAZ": "qux with spaces"},
+            type="ssh", host="server-a", user="deploy",
+            project="my-project",
+            copilot_args=["--allow-all"],
         )
 
-        mock_proc = MagicMock()
-        mock_proc.pid = 99999
-        mock_proc.returncode = None
-
-        with patch("agent_bridge.transport.asyncio") as mock_asyncio:
-            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
-            mock_asyncio.subprocess = asyncio.subprocess
-
+        with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
             await spawn_ssh(target)
 
-            remote_cmd = mock_asyncio.create_subprocess_exec.call_args[0][-1]
-            assert "export FOO=" in remote_cmd
-            assert "export BAZ=" in remote_cmd
-
-    @pytest.mark.asyncio
-    async def test_ssh_with_extra_args(self):
-        """SSH command should pass extra copilot args."""
-        target = SpawnTarget(
-            type="ssh", cwd=".", host="testhost",
-            copilot_args=["--extensions-dir", "/opt/ext"],
-        )
-
-        mock_proc = MagicMock()
-        mock_proc.pid = 99999
-        mock_proc.returncode = None
-
-        with patch("agent_bridge.transport.asyncio") as mock_asyncio:
-            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
-            mock_asyncio.subprocess = asyncio.subprocess
-
-            await spawn_ssh(target)
-
-            remote_cmd = mock_asyncio.create_subprocess_exec.call_args[0][-1]
-            assert "--extensions-dir" in remote_cmd
+        remote_cmd = mock_manager.open_stdio_channel.call_args[0][1]
+        assert "my-project" in remote_cmd
+        assert "--auto" in remote_cmd
+        assert "--no-mux" in remote_cmd
+        assert "--acp" in remote_cmd
+        assert "--allow-all" in remote_cmd
+        assert "cd " not in remote_cmd
 
     @pytest.mark.asyncio
     async def test_ssh_requires_host(self):
@@ -168,56 +213,29 @@ class TestSpawnSsh:
             await spawn_ssh(target)
 
     @pytest.mark.asyncio
-    async def test_ssh_with_project_uses_binstub(self):
-        """SSH with project should use the binstub instead of copilot."""
-        target = SpawnTarget(
-            type="ssh", host="server-a", user="deploy",
-            project="my-project",
-            copilot_args=["--allow-all"],
+    async def test_ssh_connection_error_wrapped(self, mock_manager):
+        """ConnectionError from ssh-manager should be wrapped in RuntimeError."""
+        target = SpawnTarget(type="ssh", host="badhost", cwd=".")
+        mock_manager.ensure_connected = AsyncMock(
+            side_effect=ConnectionError("ControlMaster failed")
         )
 
-        mock_proc = MagicMock()
-        mock_proc.pid = 99999
-        mock_proc.returncode = None
-
-        with patch("agent_bridge.transport.asyncio") as mock_asyncio:
-            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
-            mock_asyncio.subprocess = asyncio.subprocess
-
-            await spawn_ssh(target)
-
-            remote_cmd = mock_asyncio.create_subprocess_exec.call_args[0][-1]
-            assert "my-project" in remote_cmd
-            assert "--auto" in remote_cmd
-            assert "--base" not in remote_cmd
-            assert "--no-mux" in remote_cmd
-            assert "--acp" in remote_cmd
-            assert "--stdio" in remote_cmd
-            assert "--allow-all" in remote_cmd
-            # Should NOT contain cd or export (binstub handles setup)
-            assert "cd " not in remote_cmd
+        with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
+            with pytest.raises(RuntimeError, match="Failed to establish SSH"):
+                await spawn_ssh(target)
 
     @pytest.mark.asyncio
-    async def test_ssh_without_project_uses_direct_copilot(self):
-        """SSH without project should use cd + copilot (legacy behavior)."""
-        target = SpawnTarget(
-            type="ssh", cwd="/home/user/src", host="server-a",
-        )
+    async def test_ssh_connection_reused(self, mock_manager):
+        """Multiple spawns to the same host should call ensure_connected each time."""
+        target = SpawnTarget(type="ssh", host="server-a", cwd="/tmp")
 
-        mock_proc = MagicMock()
-        mock_proc.pid = 99999
-        mock_proc.returncode = None
-
-        with patch("agent_bridge.transport.asyncio") as mock_asyncio:
-            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
-            mock_asyncio.subprocess = asyncio.subprocess
-
+        with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
+            await spawn_ssh(target)
             await spawn_ssh(target)
 
-            remote_cmd = mock_asyncio.create_subprocess_exec.call_args[0][-1]
-            assert "cd " in remote_cmd
-            assert "exec " in remote_cmd
-            assert "copilot" in remote_cmd
+        # ensure_connected is idempotent -- called twice but manager handles dedup
+        assert mock_manager.ensure_connected.call_count == 2
+        assert mock_manager.open_stdio_channel.call_count == 2
 
 
 class TestSpawnLocal:
@@ -409,8 +427,14 @@ class TestCwdValidation:
     async def test_ssh_without_project_requires_cwd(self):
         """SSH spawn without project and without cwd should raise."""
         target = SpawnTarget(type="ssh", host="testhost")
-        with pytest.raises(ValueError, match="requires 'cwd'"):
-            await spawn_ssh(target)
+
+        mock_manager = MagicMock()
+        mock_manager.ensure_connected = AsyncMock()
+        mock_manager.open_stdio_channel = AsyncMock()
+
+        with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
+            with pytest.raises(ValueError, match="requires 'cwd'"):
+                await spawn_ssh(target)
 
 
 class TestWrapBatchForWindows:
@@ -536,3 +560,92 @@ class TestWrapBatchForWindows:
             _wrap_batch_for_windows(args, env)
 
         mock_shutil.which.assert_called_once_with("my-project", path=custom_path)
+
+
+class TestSpawnTargetCommandSerialization:
+    """Tests for SpawnTarget with spawn_command field."""
+
+    def test_roundtrip_command(self):
+        target = SpawnTarget(
+            type="command",
+            spawn_command=["agent-codespaces", "ssh", "--stdio", "my-cs"],
+        )
+        restored = SpawnTarget.from_json(target.to_json())
+        assert restored.type == "command"
+        assert restored.spawn_command == [
+            "agent-codespaces", "ssh", "--stdio", "my-cs",
+        ]
+
+    def test_spawn_command_none_by_default(self):
+        target = SpawnTarget(type="local", cwd="/tmp")
+        assert target.spawn_command is None
+        data = json.loads(target.to_json())
+        assert data["spawn_command"] is None
+
+    def test_roundtrip_preserves_env(self):
+        target = SpawnTarget(
+            type="command",
+            spawn_command=["echo", "hello"],
+            env={"KEY": "value"},
+        )
+        restored = SpawnTarget.from_json(target.to_json())
+        assert restored.env == {"KEY": "value"}
+
+
+class TestSpawnRaw:
+    """Tests for spawn_raw -- raw command spawning."""
+
+    @pytest.mark.asyncio
+    async def test_spawn_raw_runs_command(self):
+        target = SpawnTarget(
+            type="command",
+            spawn_command=["echo", "hello"],
+        )
+        with patch("agent_bridge.transport.asyncio") as mock_asyncio, \
+             patch("agent_bridge.transport._wrap_batch_for_windows") as mock_wrap, \
+             patch("agent_bridge.transport._creation_flags", return_value=0):
+            mock_proc = MagicMock()
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
+            mock_asyncio.subprocess = asyncio.subprocess
+            mock_wrap.return_value = ["echo", "hello"]
+
+            result = await spawn_raw(target)
+
+            assert result.proc is mock_proc
+            mock_asyncio.create_subprocess_exec.assert_called_once()
+            call_args = mock_asyncio.create_subprocess_exec.call_args
+            assert call_args[0] == ("echo", "hello")
+
+    @pytest.mark.asyncio
+    async def test_spawn_raw_requires_spawn_command(self):
+        target = SpawnTarget(type="command")
+        with pytest.raises(ValueError, match="spawn_command"):
+            await spawn_raw(target)
+
+
+class TestSpawnDispatchCommand:
+    """Tests for spawn() dispatching to spawn_raw for command targets."""
+
+    @pytest.mark.asyncio
+    async def test_spawn_dispatches_command_type(self):
+        target = SpawnTarget(
+            type="command",
+            spawn_command=["agent-codespaces", "ssh", "--stdio", "my-cs"],
+        )
+        with patch("agent_bridge.transport.spawn_raw", new_callable=AsyncMock) as mock_raw:
+            mock_raw.return_value = MagicMock(spec=AgentProcess)
+            await spawn(target)
+            mock_raw.assert_called_once_with(target)
+
+    @pytest.mark.asyncio
+    async def test_spawn_dispatches_spawn_command_field(self):
+        """spawn_command field triggers spawn_raw even without type=command."""
+        target = SpawnTarget(
+            type="local",
+            spawn_command=["echo", "hello"],
+        )
+        with patch("agent_bridge.transport.spawn_raw", new_callable=AsyncMock) as mock_raw:
+            mock_raw.return_value = MagicMock(spec=AgentProcess)
+            await spawn(target)
+            mock_raw.assert_called_once_with(target)
+

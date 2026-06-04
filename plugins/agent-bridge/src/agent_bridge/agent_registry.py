@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,22 @@ class AgentConfig:
     project: str | None = None  # agent-worktrees project (binstub name)
     setup_script: str | None = None
     auto_discovered: bool = False  # True for agents from projects.yaml
+    provider: str | None = None  # provider name (e.g. "codespaces")
+    spawn_command: list[str] | None = None  # raw command for provider agents
+
+
+@dataclass
+class AgentProvider:
+    """A registered external agent provider (e.g. codespaces).
+
+    Providers contribute dynamic agents that are merged into the resolver.
+    Agents expire after ``ttl`` seconds from ``registered_at`` (monotonic).
+    """
+
+    name: str
+    agents: dict[str, AgentConfig] = field(default_factory=dict)
+    registered_at: float = 0.0  # time.monotonic()
+    ttl: float = 300.0  # seconds before agents expire (0 = no expiry)
 
 
 def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
@@ -327,6 +344,7 @@ class AgentResolver:
     ) -> None:
         self._agents = agents
         self._machines = machines
+        self._providers: dict[str, AgentProvider] = {}
         # Build alias -> (machine, env) index for fast lookup
         self._alias_index: dict[str, tuple[MachineConfig, SshEnvironment]] = {}
         for machine in machines.values():
@@ -348,6 +366,93 @@ class AgentResolver:
     @property
     def machines(self) -> dict[str, MachineConfig]:
         return self._machines
+
+    # --- Provider management ---
+
+    def register_provider(
+        self,
+        name: str,
+        agents: dict[str, AgentConfig],
+        ttl: float = 300.0,
+    ) -> AgentProvider:
+        """Register or refresh an agent provider.
+
+        Provider agents are merged into the resolver with lowest
+        precedence -- static and auto-discovered agents always win
+        on name conflicts.
+        """
+        provider = AgentProvider(
+            name=name,
+            agents=agents,
+            registered_at=time.monotonic(),
+            ttl=ttl,
+        )
+        self._providers[name] = provider
+        log.info(
+            "Registered provider '%s' with %d agents (ttl=%.0fs)",
+            name, len(agents), ttl,
+        )
+        return provider
+
+    def unregister_provider(self, name: str) -> bool:
+        """Remove a provider. Returns True if it existed."""
+        removed = self._providers.pop(name, None)
+        if removed:
+            log.info(
+                "Unregistered provider '%s' (%d agents removed)",
+                name, len(removed.agents),
+            )
+        return removed is not None
+
+    def _is_provider_expired(self, provider: AgentProvider) -> bool:
+        """Check if a provider's TTL has elapsed (monotonic clock)."""
+        if provider.ttl <= 0:
+            return False
+        return (time.monotonic() - provider.registered_at) > provider.ttl
+
+    def _live_provider_agents(self) -> dict[str, AgentConfig]:
+        """Collect all non-expired provider agents.
+
+        Expired providers are purged lazily. Static/auto-discovered
+        agents override provider agents on name conflict.
+        """
+        expired = [
+            name for name, p in self._providers.items()
+            if self._is_provider_expired(p)
+        ]
+        for name in expired:
+            log.info("Provider '%s' expired (ttl elapsed), removing", name)
+            del self._providers[name]
+
+        result: dict[str, AgentConfig] = {}
+        for provider in self._providers.values():
+            for agent_name, agent in provider.agents.items():
+                if agent_name in self._agents:
+                    continue  # static/auto-discovered wins
+                if agent_name in result:
+                    continue  # first provider wins
+                result[agent_name] = agent
+        return result
+
+    def list_providers(self) -> list[dict[str, Any]]:
+        """List registered providers with status metadata."""
+        result = []
+        for provider in self._providers.values():
+            expired = self._is_provider_expired(provider)
+            conflicts = [
+                name for name in provider.agents
+                if name in self._agents
+            ]
+            result.append({
+                "name": provider.name,
+                "agents": len(provider.agents),
+                "active_agents": len(provider.agents) - len(conflicts),
+                "conflicts": conflicts,
+                "ttl": provider.ttl,
+                "age": time.monotonic() - provider.registered_at,
+                "expired": expired,
+            })
+        return result
 
     def _resolve_machine(
         self, host: str, ssh_environment: str | None = None,
@@ -387,6 +492,8 @@ class AgentResolver:
     def resolve(self, agent_name: str) -> SpawnTarget:
         """Resolve an agent name to a SpawnTarget.
 
+        Checks static/auto-discovered agents first, then provider agents.
+
         Raises:
             KeyError: Agent not found in registry.
             ValueError: Agent is managed (non-spawnable), target machine
@@ -394,12 +501,24 @@ class AgentResolver:
         """
         config = self._agents.get(agent_name)
         if not config:
+            # Check provider agents
+            provider_agents = self._live_provider_agents()
+            config = provider_agents.get(agent_name)
+        if not config:
             raise KeyError(f"Agent '{agent_name}' not found in registry")
 
         if config.managed:
             raise ValueError(
                 f"Agent '{agent_name}' is managed (non-spawnable) -- "
                 "it cannot be started via agent-bridge transport"
+            )
+
+        # Provider agents with spawn_command bypass topology resolution
+        if config.spawn_command:
+            return SpawnTarget(
+                type="command",
+                spawn_command=config.spawn_command,
+                env=config.env,
             )
 
         if not config.host:
@@ -475,29 +594,47 @@ class AgentResolver:
             ssh_shell=ssh_env.shell,
         )
 
+    def _agent_to_dict(self, config: AgentConfig) -> dict[str, Any]:
+        """Convert an AgentConfig to API-ready dict."""
+        spawnable = not config.managed
+        if config.spawn_command:
+            target_type = "command"
+        elif config.host:
+            target_type = "ssh"
+        else:
+            target_type = "local"
+        return {
+            "name": config.name,
+            "display_name": config.display_name or config.name,
+            "description": config.description or "",
+            "icon": config.icon,
+            "managed": config.managed,
+            "spawnable": spawnable,
+            "target_type": target_type,
+            "host": config.host or "",
+            "ssh_user": config.ssh_user,
+            "ssh_environment": config.ssh_environment,
+            "cwd": config.cwd,
+            "copilot_path": config.copilot_path,
+            "copilot_args": config.copilot_args,
+            "worktree_root": config.worktree_root,
+            "env": config.env or {},
+            "project": config.project,
+            "auto_discovered": config.auto_discovered,
+            "provider": config.provider,
+        }
+
     def list_agents(self) -> list[dict[str, Any]]:
-        """List all agents with metadata for the API."""
+        """List all agents with metadata for the API.
+
+        Includes static, auto-discovered, and live provider agents.
+        """
         result = []
         for config in self._agents.values():
-            spawnable = not config.managed
-            target_type = "local" if not config.host else "ssh"
-            result.append({
-                "name": config.name,
-                "display_name": config.display_name or config.name,
-                "description": config.description or "",
-                "icon": config.icon,
-                "managed": config.managed,
-                "spawnable": spawnable,
-                "target_type": target_type,
-                "host": config.host or "",
-                "ssh_user": config.ssh_user,
-                "ssh_environment": config.ssh_environment,
-                "cwd": config.cwd,
-                "copilot_path": config.copilot_path,
-                "copilot_args": config.copilot_args,
-                "worktree_root": config.worktree_root,
-                "env": config.env or {},
-                "project": config.project,
-                "auto_discovered": config.auto_discovered,
-            })
+            result.append(self._agent_to_dict(config))
+
+        # Add non-conflicting provider agents
+        for config in self._live_provider_agents().values():
+            result.append(self._agent_to_dict(config))
+
         return result

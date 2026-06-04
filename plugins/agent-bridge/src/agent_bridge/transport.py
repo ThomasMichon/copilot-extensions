@@ -1,4 +1,10 @@
-"""Transport -- spawn Copilot ACP agent processes (local + SSH)."""
+"""Transport -- spawn Copilot ACP agent processes (local + SSH).
+
+SSH connections are managed by the shared ssh-manager library, which
+provides ControlMaster multiplexing on Unix and direct SSH fallback on
+Windows. Multiple ACP sessions to the same host share a single master
+connection.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +18,8 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+from ssh_manager import SSHProfileSource, get_default_manager
 
 log = logging.getLogger("agent-bridge")
 
@@ -32,7 +40,7 @@ def _creation_flags() -> int:
 class SpawnTarget:
     """Where and how to spawn an agent process."""
 
-    type: str = "local"  # "local" or "ssh"
+    type: str = "local"  # "local", "ssh", or "command"
     cwd: str | None = None
     host: str | None = None  # SSH alias (from machines.yaml)
     user: str | None = None
@@ -42,6 +50,7 @@ class SpawnTarget:
     project: str | None = None  # agent-worktrees project (binstub name)
     ssh_shell: str | None = None  # remote shell (e.g. "pwsh", "bash")
     worktree_id: str | None = None  # resume a specific worktree
+    spawn_command: list[str] | None = None  # raw command for provider agents
 
     def to_json(self) -> str:
         """Serialize for DB persistence."""
@@ -263,78 +272,104 @@ async def spawn_local(target: SpawnTarget) -> AgentProcess:
     return AgentProcess(proc, target)
 
 
-async def spawn_ssh(target: SpawnTarget) -> AgentProcess:
-    """Spawn a Copilot ACP agent on a remote machine via SSH.
+def _build_remote_cmd(target: SpawnTarget) -> str:
+    """Build the POSIX remote command string for SSH execution.
 
-    Uses SSH config aliases from machines.yaml. The alias encodes host,
-    port, key, and proxy settings via the local SSH config.
-
-    Hardened for ACP protocol safety:
-    - BatchMode=yes (no interactive password prompts)
-    - -T (no PTY -- prevents MOTD/banner noise on stdout)
-    - ServerAliveInterval for keepalive
-    - ConnectTimeout for fast failure
-    - All remote arguments shell-escaped
+    Two modes:
+    - With ``project``: uses the project binstub (handles setup scripts,
+      vault credentials, copilot resolution on the remote side).
+    - Without ``project``: cd + export + exec copilot (legacy).
     """
-    if not target.host:
-        raise ValueError("SSH target requires a host (SSH alias)")
-
     copilot = target.copilot_path or "copilot"
-    ssh_target = f"{target.user}@{target.host}" if target.user else target.host
 
-    # Build the remote POSIX command
     if target.project:
-        # Use the project binstub which handles setup scripts, vault
-        # credentials, and copilot resolution.  Secrets stay on the remote
-        # machine -- they never traverse the SSH channel back to the bridge.
         binstub_args = [
             target.project, "--auto", "--no-mux", "--no-update",
             "--", "--acp", "--stdio",
         ]
         if target.copilot_args:
             binstub_args.extend(target.copilot_args)
-        remote_cmd = " ".join(shlex.quote(a) for a in binstub_args)
-    else:
-        if not target.cwd:
-            raise ValueError("SSH agent without 'project' requires 'cwd'")
-        parts = [f"cd {shlex.quote(target.cwd)}"]
-        if target.env:
-            for k, v in target.env.items():
-                parts.append(f"export {k}={shlex.quote(v)}")
-        copilot_cmd = f"exec {shlex.quote(copilot)} --acp --stdio"
-        if target.copilot_args:
-            copilot_cmd += " " + " ".join(shlex.quote(a) for a in target.copilot_args)
-        parts.append(copilot_cmd)
-        remote_cmd = " && ".join(parts)
+        return " ".join(shlex.quote(a) for a in binstub_args)
 
-    ssh_args = [
-        "ssh",
-        "-o", "ConnectTimeout=15",
-        "-o", "ServerAliveInterval=30",
-        "-o", "BatchMode=yes",
-        "-T",
-        ssh_target,
-        remote_cmd,
-    ]
+    if not target.cwd:
+        raise ValueError("SSH agent without 'project' requires 'cwd'")
+    parts = [f"cd {shlex.quote(target.cwd)}"]
+    if target.env:
+        for k, v in target.env.items():
+            parts.append(f"export {k}={shlex.quote(v)}")
+    copilot_cmd = f"exec {shlex.quote(copilot)} --acp --stdio"
+    if target.copilot_args:
+        copilot_cmd += " " + " ".join(shlex.quote(a) for a in target.copilot_args)
+    parts.append(copilot_cmd)
+    return " && ".join(parts)
 
-    log.info("Spawning SSH agent: %s", " ".join(ssh_args))
 
-    proc = await asyncio.create_subprocess_exec(
-        *ssh_args,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        creationflags=_creation_flags(),
-    )
+async def spawn_ssh(target: SpawnTarget) -> AgentProcess:
+    """Spawn a Copilot ACP agent on a remote machine via SSH.
 
+    Uses ssh-manager's ConnectionManager for ControlMaster multiplexing.
+    The manager maintains a persistent master connection per host, and
+    subsequent ACP sessions multiplex over it (on Unix). On Windows,
+    falls back to direct SSH (no multiplexing).
+
+    SSH hardening (BatchMode, -T, ConnectTimeout, ServerAliveInterval)
+    is handled by ssh-manager's base args.
+    """
+    if not target.host:
+        raise ValueError("SSH target requires a host (SSH alias)")
+
+    manager = get_default_manager()
+    source = SSHProfileSource(host_alias=target.host, user=target.user)
+
+    try:
+        await manager.ensure_connected(target.host, source)
+    except ConnectionError as exc:
+        raise RuntimeError(
+            f"Failed to establish SSH connection to {target.host}"
+        ) from exc
+
+    remote_cmd = _build_remote_cmd(target)
+    log.info("Spawning SSH agent on %s: %s", target.host, remote_cmd)
+
+    proc = await manager.open_stdio_channel(target.host, remote_cmd)
     return AgentProcess(proc, target)
 
 
 async def spawn(target: SpawnTarget) -> AgentProcess:
-    """Spawn an ACP agent process (local or SSH)."""
+    """Spawn an ACP agent process (local, SSH, or command)."""
+    if target.type == "command" or target.spawn_command:
+        return await spawn_raw(target)
     if target.type == "ssh":
         return await spawn_ssh(target)
     return await spawn_local(target)
+
+
+async def spawn_raw(target: SpawnTarget) -> AgentProcess:
+    """Spawn an ACP agent via a raw command.
+
+    Used for provider agents that handle their own transport (e.g.
+    agent-codespaces wraps SSH connection and copilot launch internally).
+    The command is expected to speak ACP protocol on stdin/stdout.
+    """
+    if not target.spawn_command:
+        raise ValueError("Command target requires spawn_command")
+
+    env = os.environ.copy()
+    env.update(target.env)
+
+    args = _wrap_batch_for_windows(list(target.spawn_command), env)
+    log.info("Spawning command agent: %s", " ".join(args))
+
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+        creationflags=_creation_flags(),
+    )
+
+    return AgentProcess(proc, target)
 
 
 def _find_copilot() -> str:
@@ -346,3 +381,16 @@ def _find_copilot() -> str:
 
     # Default to "copilot" on PATH
     return "copilot"
+
+
+async def shutdown_ssh() -> None:
+    """Disconnect all SSH master connections.
+
+    Called during app shutdown, after ACP sessions are stopped.
+    Safe to call even if no connections exist.
+    """
+    try:
+        manager = get_default_manager()
+        await manager.disconnect_all()
+    except Exception:
+        log.warning("Error during SSH connection shutdown", exc_info=True)

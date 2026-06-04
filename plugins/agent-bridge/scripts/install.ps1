@@ -295,10 +295,12 @@ function Invoke-Install {
         Write-Skip 'Venv already exists'
     }
 
-    # Install package via uv
+    # Install package via uv (ssh-manager library first, then agent-bridge)
     Write-Step 'Installing agent-bridge package...'
+    $SshManagerDir = (Resolve-Path (Join-Path $PluginDir '..\..\libs\ssh-manager')).Path
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+    & uv pip install --python $VenvPython "$SshManagerDir" --quiet 2>&1 | Out-Null
     & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
     $installResult = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
@@ -525,10 +527,13 @@ function Invoke-Update {
         Invoke-Stop
     }
 
-    # Reinstall package via uv
+    # Reinstall package via uv (ssh-manager + agent-bridge)
     Write-Step 'Updating agent-bridge package...'
+    $SshManagerDir = (Resolve-Path (Join-Path $PluginDir '..\..\libs\ssh-manager')).Path
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+    & uv pip install --python $VenvPython --reinstall-package ssh-manager `
+        "$SshManagerDir" --quiet 2>&1 | Out-Null
     & uv pip install --python $VenvPython --reinstall-package agent-bridge `
         "$PluginDir" --quiet 2>&1 | Out-Null
     $updateResult = $LASTEXITCODE
