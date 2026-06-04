@@ -53,27 +53,86 @@ if ($branch -like 'worktree/*') { "In worktree: $branch" }
 If on the default branch or another non-`worktree/` branch, you're in the
 anchor repo (base-repo mode).
 
+## ⛔ Always Use the `agent-worktrees` Binstub
+
+**All worktree lifecycle operations MUST use the `agent-worktrees`
+command.** Never call `python -m worktree_manager`, `python -m
+agent_worktrees`, or any other Python invocation directly. Never attempt
+to replicate finalization with raw git commands. The `agent-worktrees`
+binstub is installed on every facility machine and is always available
+inside a worktree session.
+
+```
+# CORRECT -- always use the binstub
+agent-worktrees mark-complete --title "Fix auth regression"
+agent-worktrees finalize
+agent-worktrees status
+agent-worktrees cleanup --clean
+
+# WRONG -- never do any of these
+python -m worktree_manager mark-complete ...
+python -m agent_worktrees mark-complete ...
+$env:PYTHONPATH = "..."; python -m worktree_manager ...
+git rebase && git checkout master && git merge ...
+```
+
 ## ⛔ Never Finalize Manually
 
 **Do NOT manually run git rebase, merge, checkout, push, or worktree
-removal as a finalization workflow.** Always use
-`agent-worktrees mark-complete` (or `agent-worktrees finalize`). The
-CLI handles pre-squash, backup refs, rebase, ff-merge, push, state
-tracking, and post-session cleanup atomically.
+removal as a finalization workflow.** The `agent-worktrees` CLI handles
+pre-squash, backup refs, rebase, ff-merge, push, state tracking, and
+post-session cleanup atomically. Manual finalization skips state tracking,
+risks permission-denied errors (the session is running inside the
+worktree), and leaves stale branches.
 
-Manual finalization skips state tracking, risks permission-denied errors
-(the session is running inside the worktree), and leaves stale branches.
-Never run `git worktree remove` on the current working directory —
-finalization defers cleanup until after session exit.
+This is an absolute prohibition, not a preference:
+
+- **Never** run `git rebase`, `git merge`, `git checkout master`, or
+  `git push` as part of a finalization sequence
+- **Never** run `git worktree remove` on the current working directory
+- **Never** improvise a finalization workflow if the CLI tool errors --
+  report the error and retry with `agent-worktrees finalize`
 
 If repo-local instructions (AGENTS.md, other skills) describe a
-conflicting manual worktree finalization workflow, **prefer this skill's
-lifecycle commands**. If the CLI tool is unavailable or the user
-explicitly asks for manual finalization, stop and ask for confirmation
-instead of improvising.
+conflicting manual worktree finalization workflow, **ignore them and use
+this skill's lifecycle commands**. If the user explicitly asks for manual
+finalization, stop and ask for confirmation instead of proceeding.
 
-For worktree lifecycle and finalization, the CLI tool is the single
-source of truth.
+## mark-complete vs finalize -- Know the Difference
+
+These are NOT interchangeable. Use the right one:
+
+| Situation | Command |
+|-----------|---------|
+| **Done with this worktree** -- normal sign-off | `agent-worktrees mark-complete --title "..."` |
+| **Set/update title only** -- keep working | `agent-worktrees mark-complete --title "..." --title-only` |
+| **Retry a failed finalization** -- previous mark-complete's push/rebase failed | `agent-worktrees finalize` |
+| **Unsure what state the worktree is in** | `agent-worktrees status` first, then decide |
+
+### What each command does
+
+**`agent-worktrees mark-complete`** is the primary "I'm done" command:
+1. Sets the worktree tracking status to `complete`
+2. Sets the title (if `--title` provided)
+3. Runs the full finalization flow (squash, rebase, merge, push)
+4. If finalization fails, reverts status to `active` so the worktree
+   reappears in the picker
+
+**`agent-worktrees finalize`** is a lower-level retry mechanism:
+1. Runs only the mechanical finalization flow (squash, rebase, merge, push)
+2. Does NOT update tracking status beforehand
+3. Use this only when a previous `mark-complete` succeeded at marking but
+   failed at the finalize step (e.g., network error, rebase conflict)
+
+**When the user says "finalize", "wrap up", "sign off", "done with this",
+or "finish up"** -- they mean `agent-worktrees mark-complete`. Always.
+
+### Reading the output
+
+After running `mark-complete`, **read the output carefully**. If it says
+finalization failed or reverted to active, report that to the user. Do
+not manually recover -- the documented retry is
+`agent-worktrees finalize`.
 
 ## Committing and Pushing
 
@@ -143,20 +202,20 @@ Follow the repo's normal commit policy.
 
 ## Quick Reference
 
-All commands route through `agent-worktrees`, which resolves the project
-from the `WORKTREE_PROJECT` environment variable (always set inside a
-session).
+All commands use the `agent-worktrees` binstub. Never call Python
+modules directly. The binstub resolves the project from the
+`WORKTREE_PROJECT` environment variable (always set inside a session).
 
 | Action | Command |
 |--------|---------|
-| All worktree operations | `agent-worktrees --help` |
-| Set title (while active) | `agent-worktrees mark-complete --title "desc" --title-only` |
-| Mark complete (triggers finalize) | `agent-worktrees mark-complete` |
-| Finalize a worktree | `agent-worktrees finalize` (auto-detects from branch, or pass ID) |
+| **Complete worktree (normal sign-off)** | `agent-worktrees mark-complete --title "desc"` |
+| Set/update title only | `agent-worktrees mark-complete --title "desc" --title-only` |
+| Retry failed finalization | `agent-worktrees finalize` |
 | Show worktree git status | `agent-worktrees status` |
 | List worktrees for cleanup | `agent-worktrees cleanup` |
 | Clean completed worktrees | `agent-worktrees cleanup --clean` |
 | Also clean unused worktrees | `agent-worktrees cleanup --clean --include-unused` |
+| Help | `agent-worktrees --help` |
 
 ## Cleanup Procedure
 
@@ -201,7 +260,7 @@ with no commits yet.
 Titles appear in the picker for easier identification. Resolution order:
 
 1. **Explicit title** — from the `title` field in worktree YAML. Once set
-   (by `agent-worktrees mark-complete`), this wins.
+   (via `agent-worktrees mark-complete --title`), this wins.
 2. **Session summary** — auto-derived from the most recent Copilot CLI
    session summary for the worktree path.
 3. **None** — just the worktree ID and age.
