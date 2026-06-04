@@ -1,0 +1,21 @@
+{
+  "name": "agent-codespaces",
+  "description": "GitHub Codespaces lifecycle management, SSH transport, and credential relay -- persistent service for CodeSpace creation, deletion, SSH multiplexing, and credential forwarding",
+  "version": "0.1.0-dev1",
+  "author": {
+    "name": "Thomas Michon"
+  },
+  "homepage": "https://github.com/ThomasMichon/copilot-extensions",
+  "repository": "https://github.com/ThomasMichon/copilot-extensions",
+  "license": "MIT",
+  "keywords": [
+    "codespaces",
+    "ssh",
+    "credential-relay",
+    "lifecycle",
+    "service"
+  ],
+  "skills": [
+    "skills/"
+  ]
+}

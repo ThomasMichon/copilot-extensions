@@ -8,14 +8,14 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from . import __version__
 from .agent_registry import build_resolver
 from .auth import BearerAuthMiddleware
 from .config import load_config, load_or_create_auth_token
 from .db import Database
-from .routes import agents, health, sessions, worktrees
+from .routes import agents, health, providers, sessions, worktrees
 from .session_manager import SessionManager
-
-from . import __version__
+from .transport import shutdown_ssh
 
 log = logging.getLogger("agent-bridge")
 
@@ -56,11 +56,20 @@ async def lifespan(app: FastAPI):
     # Shutdown: stop all active sessions gracefully
     for session in mgr.list_sessions():
         if session.client and session.client.is_running:
-            log.info("Stopping session %s on shutdown", session.session_id)
-            await mgr.stop_session(session.session_id)
+            try:
+                log.info("Stopping session %s on shutdown", session.session_id)
+                await mgr.stop_session(session.session_id)
+            except Exception:
+                log.warning(
+                    "Failed to stop session %s on shutdown",
+                    session.session_id, exc_info=True,
+                )
+
+    # Shutdown: disconnect SSH master connections (after sessions are stopped)
+    await shutdown_ssh()
 
 
-def create_app(*, config=None, token: str | None = None) -> FastAPI:  # noqa: ANN001
+def create_app(*, config=None, token: str | None = None) -> FastAPI:
     """Create and configure the FastAPI application."""
     cfg = config or load_config()
     auth_token = token or load_or_create_auth_token()
@@ -81,6 +90,7 @@ def create_app(*, config=None, token: str | None = None) -> FastAPI:  # noqa: AN
     app.include_router(health.router)
     app.include_router(sessions.router)
     app.include_router(agents.router)
+    app.include_router(providers.router)
     app.include_router(worktrees.router)
 
     return app

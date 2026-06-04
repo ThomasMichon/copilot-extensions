@@ -395,6 +395,171 @@ class TestDiscoverLocalAgents:
         agents = discover_local_agents()
         assert agents == {}
 
+
+# -- Provider tests ------------------------------------------------------------
+
+
+def _make_resolver_with_agents():
+    """Build a resolver with sample agents for provider tests."""
+    agents = parse_agent_registry(SAMPLE_AGENTS)
+    machines = parse_machines_yaml(SAMPLE_MACHINES_DATA)
+    return AgentResolver(agents, machines)
+
+
+class TestProviderRegistration:
+
+    def test_register_provider(self):
+        resolver = _make_resolver_with_agents()
+        provider_agents = {
+            "cs-my-codespace": AgentConfig(
+                name="cs-my-codespace",
+                display_name="My Codespace",
+                spawn_command=["agent-codespaces", "ssh", "--stdio", "my-cs"],
+                provider="codespaces",
+            ),
+        }
+        provider = resolver.register_provider("codespaces", provider_agents, ttl=300)
+        assert provider.name == "codespaces"
+        assert len(provider.agents) == 1
+
+    def test_unregister_provider(self):
+        resolver = _make_resolver_with_agents()
+        resolver.register_provider("codespaces", {}, ttl=300)
+        assert resolver.unregister_provider("codespaces") is True
+        assert resolver.unregister_provider("codespaces") is False
+
+    def test_provider_agents_in_list(self):
+        resolver = _make_resolver_with_agents()
+        resolver.register_provider("codespaces", {
+            "cs-test": AgentConfig(
+                name="cs-test",
+                display_name="Test CS",
+                spawn_command=["echo", "hello"],
+                provider="codespaces",
+            ),
+        })
+        names = [a["name"] for a in resolver.list_agents()]
+        assert "cs-test" in names
+
+    def test_static_agent_overrides_provider(self):
+        resolver = _make_resolver_with_agents()
+        # Register a provider agent with same name as a static agent
+        resolver.register_provider("codespaces", {
+            "local-agent": AgentConfig(
+                name="local-agent",
+                spawn_command=["should", "not", "appear"],
+                provider="codespaces",
+            ),
+        })
+        # Static should win -- no provider field
+        agents = resolver.list_agents()
+        local = [a for a in agents if a["name"] == "local-agent"]
+        assert len(local) == 1
+        assert local[0]["provider"] is None
+
+    def test_provider_agent_resolves(self):
+        resolver = _make_resolver_with_agents()
+        resolver.register_provider("codespaces", {
+            "cs-test": AgentConfig(
+                name="cs-test",
+                spawn_command=["agent-codespaces", "ssh", "--stdio", "test"],
+                provider="codespaces",
+            ),
+        })
+        target = resolver.resolve("cs-test")
+        assert target.type == "command"
+        assert target.spawn_command == [
+            "agent-codespaces", "ssh", "--stdio", "test",
+        ]
+
+    def test_expired_provider_removed(self, monkeypatch):
+        import time as time_mod
+        resolver = _make_resolver_with_agents()
+        resolver.register_provider("codespaces", {
+            "cs-expired": AgentConfig(
+                name="cs-expired",
+                spawn_command=["echo"],
+                provider="codespaces",
+            ),
+        }, ttl=10)
+        # Patch monotonic to simulate time passing
+        original = resolver._providers["codespaces"].registered_at
+        monkeypatch.setattr(
+            time_mod, "monotonic", lambda: original + 20,
+        )
+        names = [a["name"] for a in resolver.list_agents()]
+        assert "cs-expired" not in names
+
+    def test_expired_provider_resolve_fails(self, monkeypatch):
+        import time as time_mod
+        resolver = _make_resolver_with_agents()
+        resolver.register_provider("codespaces", {
+            "cs-gone": AgentConfig(
+                name="cs-gone",
+                spawn_command=["echo"],
+                provider="codespaces",
+            ),
+        }, ttl=5)
+        original = resolver._providers["codespaces"].registered_at
+        monkeypatch.setattr(
+            time_mod, "monotonic", lambda: original + 10,
+        )
+        with pytest.raises(KeyError, match="cs-gone"):
+            resolver.resolve("cs-gone")
+
+    def test_zero_ttl_never_expires(self, monkeypatch):
+        import time as time_mod
+        resolver = _make_resolver_with_agents()
+        resolver.register_provider("permanent", {
+            "cs-perm": AgentConfig(
+                name="cs-perm",
+                spawn_command=["echo"],
+                provider="permanent",
+            ),
+        }, ttl=0)
+        original = resolver._providers["permanent"].registered_at
+        monkeypatch.setattr(
+            time_mod, "monotonic", lambda: original + 999999,
+        )
+        names = [a["name"] for a in resolver.list_agents()]
+        assert "cs-perm" in names
+
+    def test_list_providers(self):
+        resolver = _make_resolver_with_agents()
+        resolver.register_provider("codespaces", {
+            "cs-one": AgentConfig(
+                name="cs-one",
+                spawn_command=["echo"],
+                provider="codespaces",
+            ),
+            "local-agent": AgentConfig(
+                name="local-agent",
+                spawn_command=["conflict"],
+                provider="codespaces",
+            ),
+        })
+        providers = resolver.list_providers()
+        assert len(providers) == 1
+        p = providers[0]
+        assert p["name"] == "codespaces"
+        assert p["agents"] == 2
+        assert p["active_agents"] == 1
+        assert p["conflicts"] == ["local-agent"]
+
+    def test_provider_agent_target_type_is_command(self):
+        resolver = _make_resolver_with_agents()
+        resolver.register_provider("codespaces", {
+            "cs-cmd": AgentConfig(
+                name="cs-cmd",
+                spawn_command=["agent-codespaces", "ssh", "--stdio", "x"],
+                provider="codespaces",
+            ),
+        })
+        agents = resolver.list_agents()
+        cs = [a for a in agents if a["name"] == "cs-cmd"][0]
+        assert cs["target_type"] == "command"
+        assert cs["provider"] == "codespaces"
+
     def test_no_projects_key(self, tmp_path: Path, monkeypatch):
         projects_yaml = tmp_path / "projects.yaml"
         projects_yaml.write_text("other_key: value\n")

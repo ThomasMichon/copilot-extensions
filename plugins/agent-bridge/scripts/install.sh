@@ -221,8 +221,14 @@ do_install() {
         _skip "Venv already exists"
     fi
 
-    # Install package via uv
+    # Install package via uv (ssh-manager library first, then agent-bridge)
     _step "Installing agent-bridge package..."
+    local ssh_manager_dir
+    ssh_manager_dir="$(cd "$PLUGIN_DIR/../../libs/ssh-manager" && pwd)"
+    if ! uv pip install --python "$VENV_DIR/bin/python" "$ssh_manager_dir" --quiet; then
+        _fail "ssh-manager install failed"
+        exit 1
+    fi
     if ! uv pip install --python "$VENV_DIR/bin/python" "$PLUGIN_DIR" --quiet; then
         _fail "Package install failed"
         exit 1
@@ -449,8 +455,15 @@ do_update() {
         do_stop
     fi
 
-    # Reinstall package via uv
+    # Reinstall package via uv (ssh-manager + agent-bridge)
     _step "Updating agent-bridge package..."
+    local ssh_manager_dir
+    ssh_manager_dir="$(cd "$PLUGIN_DIR/../../libs/ssh-manager" && pwd)"
+    if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package ssh-manager \
+            "$ssh_manager_dir" --quiet; then
+        _fail "ssh-manager update failed"
+        exit 1
+    fi
     if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package update failed"
