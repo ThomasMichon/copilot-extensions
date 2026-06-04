@@ -30,13 +30,28 @@ DEFAULT_TTL = 300.0
 PROVIDER_NAME = "codespaces"
 
 # Where agent-bridge stores its auth token
+_BRIDGE_AUTH_PATH = Path.home() / ".agent-bridge" / "auth.yaml"
+# Legacy fallback
 _BRIDGE_TOKEN_PATH = Path.home() / ".agent-bridge" / "auth_token"
 
 
 def _load_bridge_token() -> str | None:
-    """Load the agent-bridge auth token from its standard location."""
+    """Load the agent-bridge auth token from its standard location.
+
+    Reads from ``auth.yaml`` (current format) or falls back to
+    ``auth_token`` (legacy plaintext file).
+    """
+    if _BRIDGE_AUTH_PATH.exists():
+        import yaml
+
+        data = yaml.safe_load(_BRIDGE_AUTH_PATH.read_text()) or {}
+        token = data.get("token")
+        if token:
+            return str(token).strip()
+
     if _BRIDGE_TOKEN_PATH.exists():
         return _BRIDGE_TOKEN_PATH.read_text().strip()
+
     return None
 
 
