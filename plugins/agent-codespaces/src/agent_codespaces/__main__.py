@@ -29,7 +29,7 @@ from .config import (
     save_adopted_repos,
     validate_config,
 )
-from .lifecycle import delete_codespace, list_codespaces
+from .lifecycle import cleanup_stale, delete_codespace, list_codespaces
 
 log = logging.getLogger("agent-codespaces")
 
@@ -113,6 +113,26 @@ def main(argv: list[str] | None = None) -> int:
         "--bridge-url", default="http://127.0.0.1:9280",
         help="Agent-bridge URL",
     )
+    bridge_refresh = bridge_sub.add_parser(
+        "refresh", help="Re-register with current live codespace state",
+    )
+    bridge_refresh.add_argument(
+        "--ttl", type=float, default=300.0,
+        help="TTL in seconds (default: 300)",
+    )
+    bridge_refresh.add_argument(
+        "--bridge-url", default="http://127.0.0.1:9280",
+        help="Agent-bridge URL",
+    )
+
+    # --- cleanup ---
+    cleanup_parser = sub.add_parser(
+        "cleanup", help="Remove stale local state (SSH configs, sockets)",
+    )
+    cleanup_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would be removed without removing",
+    )
 
     # --- status ---
     sub.add_parser("status", help="Show service status")
@@ -144,6 +164,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_delete(args)
         if args.command == "bridge":
             return _cmd_bridge(args)
+        if args.command == "cleanup":
+            return _cmd_cleanup(args)
         if args.command == "status":
             return _cmd_status()
         if args.command == "version":
@@ -411,11 +433,53 @@ def _cmd_bridge(args: argparse.Namespace) -> int:
             print(f"  Conflicts: {', '.join(conflicts)}")
         return 0
 
+    if args.bridge_command == "refresh":
+        # Re-register with fresh codespace state (drops stale agents)
+        result = register_with_bridge(
+            bridge_url=args.bridge_url,
+            ttl=args.ttl,
+        )
+        print(
+            f"[OK] Refreshed: {result.get('agents', 0)} agent(s) "
+            f"registered (ttl={result.get('ttl', 0):.0f}s)"
+        )
+        return 0
+
     print(
-        "Usage: agent-codespaces bridge {register|unregister|status}",
+        "Usage: agent-codespaces bridge {register|unregister|status|refresh}",
         file=sys.stderr,
     )
     return 1
+
+
+def _cmd_cleanup(args: argparse.Namespace) -> int:
+    """Remove stale local state for deleted/rotated codespaces."""
+    mode = "Dry run" if args.dry_run else "Cleanup"
+    print(f"=== {mode}: pruning stale codespace state ===")
+
+    removed = cleanup_stale(dry_run=args.dry_run)
+
+    ssh_count = len(removed["ssh_configs"])
+    socket_count = len(removed["sockets"])
+    total = ssh_count + socket_count
+
+    if ssh_count:
+        print(f"\nSSH configs ({ssh_count}):")
+        for p in removed["ssh_configs"]:
+            print(f"  {'[WOULD REMOVE]' if args.dry_run else '[REMOVED]'} {p}")
+
+    if socket_count:
+        print(f"\nSockets ({socket_count}):")
+        for p in removed["sockets"]:
+            print(f"  {'[WOULD REMOVE]' if args.dry_run else '[REMOVED]'} {p}")
+
+    if total == 0:
+        print("No stale state found")
+    else:
+        verb = "would be removed" if args.dry_run else "removed"
+        print(f"\n{total} item(s) {verb}")
+
+    return 0
 
 
 def _cmd_status() -> int:
