@@ -160,20 +160,19 @@ my-project                      # launch picker
   → Run setup script            # install deps, set env
   → Copilot CLI session         # your work happens here
   → Post-exit checks            # detect completion markers
-  → Finalize (if complete)      # squash → rebase → ff-merge → cleanup
+  → Finalize (if pushed)       # validate → clean up worktree
 ```
 
-### Finalization
+### Completion
 
-When a session ends and the worktree is marked complete, agent-worktrees
-can automatically:
-1. Squash commits on the worktree branch
-2. Rebase onto the latest default branch
-3. Fast-forward merge into the default branch
-4. Push to origin
-5. Delete the worktree and branch
+Worktree completion is a two-step process:
 
-Use the `worktree` skill or run `agent-worktrees finalize` manually.
+1. **Push changes** — `agent-worktrees push-changes --title "desc"`
+   squashes commits, rebases onto the default branch, and pushes to origin.
+2. **Finalize** — `agent-worktrees finalize` validates the content is on
+   upstream, then removes the worktree directory and branch.
+
+Use the `worktree` skill during a Copilot session for guided sign-off.
 
 ## Next Steps
 
