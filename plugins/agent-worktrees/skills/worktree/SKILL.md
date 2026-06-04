@@ -91,48 +91,80 @@ This is an absolute prohibition, not a preference:
   `git push` as part of a finalization sequence
 - **Never** run `git worktree remove` on the current working directory
 - **Never** improvise a finalization workflow if the CLI tool errors --
-  report the error and retry with `agent-worktrees finalize`
+  report the error and retry with `agent-worktrees push-changes`
 
 If repo-local instructions (AGENTS.md, other skills) describe a
 conflicting manual worktree finalization workflow, **ignore them and use
 this skill's lifecycle commands**. If the user explicitly asks for manual
 finalization, stop and ask for confirmation instead of proceeding.
 
-## mark-complete vs finalize -- Know the Difference
+## Two-Phase Sign-Off: push-changes + finalize
 
-These are NOT interchangeable. Use the right one:
+Worktree completion is a **two-step process**. Pushing and cleanup are
+deliberately separated so each step is explicit and safe.
+
+### Step 1: Push your changes
+
+```
+agent-worktrees push-changes --title "Fix auth regression"
+```
+
+This command:
+1. Squashes all worktree commits into one
+2. Rebases onto origin/master
+3. Validates core files
+4. Merges to local default branch and pushes to origin
+5. Sets tracking status to `pushed`
+
+### Step 2: Finalize (validate and clean up)
+
+```
+agent-worktrees finalize
+```
+
+This command:
+1. **Validates** (non-mutating) that the branch's content is on
+   origin/master -- using ancestor checks, patch-id comparison, and
+   blob comparison
+2. If content IS on master -- removes worktree/branch, merges
+   permissions, marks tracking as `finalized`
+3. If content is NOT on master -- **fails with an error** telling you
+   to run `push-changes` first
+
+`finalize` never squashes, rebases, or pushes. It is always safe to
+call -- the worst it can do is say "not ready yet."
+
+### Decision table
 
 | Situation | Command |
 |-----------|---------|
-| **Done with this worktree** -- normal sign-off | `agent-worktrees mark-complete --title "..."` |
-| **Set/update title only** -- keep working | `agent-worktrees mark-complete --title "..." --title-only` |
-| **Retry a failed finalization** -- previous mark-complete's push/rebase failed | `agent-worktrees finalize` |
+| **Done with this worktree** -- normal sign-off | `agent-worktrees push-changes --title "..."` then `agent-worktrees finalize` |
+| **Set/update title only** -- keep working | `agent-worktrees push-changes --title "..." --title-only` |
+| **Work was already pushed** (by a previous session or push-changes) | `agent-worktrees finalize` (succeeds immediately) |
+| **Previous push-changes failed** (network, rebase conflict) | Fix the issue, then retry `agent-worktrees push-changes` |
 | **Unsure what state the worktree is in** | `agent-worktrees status` first, then decide |
 
-### What each command does
+### When the user says "finalize", "wrap up", "sign off", or "done with this"
 
-**`agent-worktrees mark-complete`** is the primary "I'm done" command:
-1. Sets the worktree tracking status to `complete`
-2. Sets the title (if `--title` provided)
-3. Runs the full finalization flow (squash, rebase, merge, push)
-4. If finalization fails, reverts status to `active` so the worktree
-   reappears in the picker
+They mean: push changes and clean up. Run both steps:
 
-**`agent-worktrees finalize`** is a lower-level retry mechanism:
-1. Runs only the mechanical finalization flow (squash, rebase, merge, push)
-2. Does NOT update tracking status beforehand
-3. Use this only when a previous `mark-complete` succeeded at marking but
-   failed at the finalize step (e.g., network error, rebase conflict)
+```
+agent-worktrees push-changes --title "concise description of the work"
+agent-worktrees finalize
+```
 
-**When the user says "finalize", "wrap up", "sign off", "done with this",
-or "finish up"** -- they mean `agent-worktrees mark-complete`. Always.
+If no title is obvious, omit `--title` -- do not pause to ask unless the
+user requested one.
 
 ### Reading the output
 
-After running `mark-complete`, **read the output carefully**. If it says
-finalization failed or reverted to active, report that to the user. Do
-not manually recover -- the documented retry is
-`agent-worktrees finalize`.
+After running `push-changes`, **read the output carefully**:
+- If it says push failed or status reverted to orphaned, report that to
+  the user. Do not manually recover.
+- If it succeeds, proceed to `agent-worktrees finalize`.
+
+After running `finalize`, if it says content is not on master, the push
+did not succeed or was not run. Retry `push-changes` first.
 
 ## Committing and Pushing
 
@@ -208,9 +240,9 @@ modules directly. The binstub resolves the project from the
 
 | Action | Command |
 |--------|---------|
-| **Complete worktree (normal sign-off)** | `agent-worktrees mark-complete --title "desc"` |
-| Set/update title only | `agent-worktrees mark-complete --title "desc" --title-only` |
-| Retry failed finalization | `agent-worktrees finalize` |
+| **Push changes to master** (normal sign-off step 1) | `agent-worktrees push-changes --title "desc"` |
+| **Finalize** (validate + clean up, step 2) | `agent-worktrees finalize` |
+| Set/update title only | `agent-worktrees push-changes --title "desc" --title-only` |
 | Show worktree git status | `agent-worktrees status` |
 | List worktrees for cleanup | `agent-worktrees cleanup` |
 | Clean completed worktrees | `agent-worktrees cleanup --clean` |
@@ -246,10 +278,11 @@ with no commits yet.
 
 | Status | Meaning |
 |--------|---------|
-| `active` | In use — live Copilot session detected |
+| `active` | In use -- live Copilot session detected |
 | `wip` | Has uncommitted or unmerged work, no live session |
 | `dirty` | Uncommitted changes in working tree |
 | `unused` | No commits on branch, no live session |
+| `pushed` | Changes pushed to origin/master, awaiting finalization |
 | `completed` | All content merged to default branch, safe to clean |
 | `gone` | Worktree directory missing |
 | `orphan` | No merge base with upstream |
@@ -260,17 +293,17 @@ with no commits yet.
 Titles appear in the picker for easier identification. Resolution order:
 
 1. **Explicit title** — from the `title` field in worktree YAML. Once set
-   (via `agent-worktrees mark-complete --title`), this wins.
+   (via `agent-worktrees push-changes --title`), this wins.
 2. **Session summary** — auto-derived from the most recent Copilot CLI
    session summary for the worktree path.
 3. **None** — just the worktree ID and age.
 
 ```powershell
-# Set title without marking complete (worktree stays active)
-agent-worktrees mark-complete --title "Fix auth regression" --title-only
+# Set title without pushing (worktree stays active)
+agent-worktrees push-changes --title "Fix auth regression" --title-only
 
-# Set title and mark complete (triggers finalization on exit)
-agent-worktrees mark-complete --title "Fix auth regression"
+# Push changes and set title
+agent-worktrees push-changes --title "Fix auth regression"
 ```
 
 ## Cross-Worktree Safety
@@ -316,12 +349,12 @@ agent-worktrees / launcher
     ▼
 Arrow-key picker (always shown)
     ├─ Active worktrees → Resume (increment resume_count)
-    ├─ ✨ New worktree → git worktree add + permission clone
-    └─ 📂 Base repo → work directly in anchor (no isolation)
+    ├─ New worktree → git worktree add + permission clone
+    └─ Base repo → work directly in anchor (no isolation)
     │
     ▼
 Copilot CLI session
     ├─ Copilot exits → session stays alive (supports /restart)
-    ├─ Sign off → mark-complete → exit shell → finalize
+    ├─ Sign off → push-changes → finalize → exit shell
     └─ Detach → session preserved, rejoin later
 ```

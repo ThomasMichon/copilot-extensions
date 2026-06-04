@@ -10,8 +10,9 @@ agent-worktrees <subcommand> [options]
 |------------|-------------|
 | `resolve` | Interactive picker -- select or create a worktree, emit JSON launch plan |
 | `create` | Create a new worktree non-interactively |
-| `mark-complete` | Mark a worktree as complete (triggers finalization on exit) |
-| `finalize` | Squash-merge a completed worktree back to the default branch |
+| `push-changes` | Push worktree changes to remote default branch (squash, rebase, push) |
+| `finalize` | Validate content is on upstream and clean up worktree/branch |
+| `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
 | `cleanup` | List and remove orphaned or finalized worktrees |
 | `status` | Show worktree git status |
 | `list` | List worktrees from tracking records |
