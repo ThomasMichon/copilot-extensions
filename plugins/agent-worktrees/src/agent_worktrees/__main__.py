@@ -1340,9 +1340,9 @@ def _post_exit_gate(record: tracking.WorktreeRecord, config: cfg.Config) -> int:
     """
     worktree_id = record.worktree_id
 
-    if record.status == "complete":
-        print(f"Session {worktree_id} marked complete -- starting finalization...")
-        success = fin.finalize(worktree_id, config)
+    if record.status in ("complete", "pushed"):
+        print(f"Session {worktree_id} ready for finalization -- validating...")
+        success = fin.validate_and_finalize(worktree_id, config)
         if success:
             return 0
         output.err(
@@ -1353,14 +1353,15 @@ def _post_exit_gate(record: tracking.WorktreeRecord, config: cfg.Config) -> int:
 
     if record.status == "orphaned":
         output.warn(
-            f"Session {worktree_id} is orphaned (previous finalization failed). "
-            f"Run 'agent-worktrees finalize' to retry."
+            f"Session {worktree_id} is orphaned (previous push failed). "
+            f"Run 'agent-worktrees push-changes' to retry pushing, "
+            f"then 'agent-worktrees finalize' to clean up."
         )
         return 0
 
     # status == "active" -- session wasn't marked complete
     print(
-        f"Session {worktree_id} is still active (not marked complete). "
+        f"Session {worktree_id} is still active (not pushed/completed). "
         f"Skipping finalization."
     )
     return 0
@@ -1393,7 +1394,9 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             output.err(msg)
             return 1
         worktree_id = _resolve_worktree_id(worktree_id)
-        success = fin.finalize(worktree_id, config, dry_run=args.dry_run)
+        success = fin.validate_and_finalize(
+            worktree_id, config, dry_run=args.dry_run,
+        )
 
         if use_json:
             yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
@@ -1417,10 +1420,80 @@ def cmd_finalize(args: argparse.Namespace) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# push-changes
+# ═══════════════════════════════════════════════════════════════════════════
+
+def cmd_push_changes(args: argparse.Namespace) -> int:
+    use_json = getattr(args, "json", False)
+    if use_json:
+        ctx = output.stdout_to_stderr()
+        ctx.__enter__()
+    else:
+        ctx = None  # type: ignore[assignment]
+
+    try:
+        try:
+            config = cfg.load_config(Path(args.config) if args.config else None)
+        except Exception as e:
+            if use_json:
+                return _json_error(str(e))
+            raise
+        worktree_id = _infer_worktree_id(args.worktree_id, config)
+        if not worktree_id:
+            msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
+            if use_json:
+                return _json_error(msg)
+            output.err(msg)
+            return 1
+        worktree_id = _resolve_worktree_id(worktree_id)
+
+        # --title-only: just set the title, don't push
+        if getattr(args, "title_only", False):
+            yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+            if yaml_path.exists():
+                record = tracking.load_record(yaml_path)
+                if args.title:
+                    record.title = args.title.replace("\n", " ").strip()
+                    tracking.save_record(record)
+                print(f"[OK] Worktree {worktree_id} title updated: {args.title}")
+            else:
+                output.err(f"Tracking file not found for {worktree_id}")
+                return 1
+            return 0
+
+        success = fin.push_changes(
+            worktree_id, config,
+            title=args.title,
+            dry_run=args.dry_run,
+        )
+
+        if use_json:
+            yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+            final_status = "pushed"
+            if yaml_path.exists():
+                try:
+                    rec = tracking.load_record(yaml_path)
+                    final_status = rec.status
+                except Exception:
+                    pass
+            _json_output({
+                "worktree_id": worktree_id,
+                "success": success,
+                "status": final_status,
+            })
+
+        return 0 if success else 1
+    finally:
+        if ctx is not None:
+            ctx.__exit__(None, None, None)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # mark-complete
 # ═══════════════════════════════════════════════════════════════════════════
 
 def cmd_mark_complete(args: argparse.Namespace) -> int:
+    """Manual recovery only -- set tracking status without pushing or finalizing."""
     config = cfg.load_config()
     worktree_id = _infer_worktree_id(args.worktree_id, config)
 
@@ -1459,28 +1532,18 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
             tracking.save_record(record)
 
     if args.title_only:
-        print(f"🏷️  Worktree {worktree_id} title updated: {args.title}")
+        print(f"[OK] Worktree {worktree_id} title updated: {args.title}")
         return 0
 
-    msg = f"✅ Worktree {worktree_id} marked complete."
+    msg = f"[OK] Worktree {worktree_id} marked complete (status flag only)."
     if args.title:
         msg += f" Title: {args.title}"
     print(msg)
-
-    # Attempt finalization immediately -- rebase, merge, push.
-    # The session is still running, so finalize() will skip worktree/branch
-    # removal but will push content to the remote.  If finalization fails
-    # (e.g. no network), revert to "active" so the worktree reappears in
-    # the picker on next launch.
-    print(f"Finalizing {worktree_id}...")
-    success = fin.finalize(worktree_id, config)
-    if not success:
-        output.warn(
-            "Finalization failed -- reverting to active. "
-            "Content is committed locally; finalize will be retried on next "
-            "mark-complete or via 'agent-worktrees finalize'."
-        )
-        tracking.update_status(record, "active")
+    print(
+        "NOTE: This only sets the tracking flag. Content has NOT been pushed. "
+        "For normal sign-off, use 'agent-worktrees push-changes' + "
+        "'agent-worktrees finalize' instead."
+    )
 
     return 0
 
@@ -3542,15 +3605,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("worktree_id", nargs="?", default=None)
 
     # finalize
-    p = sub.add_parser("finalize", help="Finalize a completed worktree")
+    p = sub.add_parser("finalize", help="Validate content is on upstream and clean up worktree")
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
     p.add_argument("--config", default=None)
 
-    # mark-complete
-    p = sub.add_parser("mark-complete", help="Mark a worktree as complete")
+    # push-changes
+    p = sub.add_parser("push-changes", help="Push worktree changes to remote default branch")
+    p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("--title", default=None, help="Set worktree title")
+    p.add_argument("--title-only", action="store_true",
+                   help="Set title without pushing (worktree stays active)")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--json", action="store_true",
+                   help="JSON output mode (stdout is JSON only)")
+    p.add_argument("--config", default=None)
+
+    # mark-complete (manual recovery only -- hidden from normal help)
+    p = sub.add_parser(
+        "mark-complete",
+        help=argparse.SUPPRESS,
+    )
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--title", default=None)
     p.add_argument("--title-only", action="store_true")
@@ -3858,6 +3935,7 @@ COMMAND_MAP = {
     "resolve": cmd_resolve,
     "post-exit": cmd_post_exit,
     "finalize": cmd_finalize,
+    "push-changes": cmd_push_changes,
     "mark-complete": cmd_mark_complete,
     "status": cmd_status,
     "list": cmd_list,

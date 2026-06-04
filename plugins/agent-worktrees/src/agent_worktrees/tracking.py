@@ -17,7 +17,7 @@ import yaml
 
 from . import config as cfg
 
-WorktreeStatus = Literal["active", "complete", "finalized", "orphaned"]
+WorktreeStatus = Literal["active", "complete", "pushed", "finalized", "orphaned"]
 
 
 @dataclass
@@ -226,7 +226,7 @@ def list_records(
 def update_status(record: WorktreeRecord, new_status: WorktreeStatus) -> None:
     """Update a record's status and save it."""
     record.status = new_status
-    if new_status in ("finalized", "orphaned", "complete"):
+    if new_status in ("finalized", "orphaned", "complete", "pushed"):
         if record.completed_at is None:
             record.completed_at = _now_iso()
     save_record(record)

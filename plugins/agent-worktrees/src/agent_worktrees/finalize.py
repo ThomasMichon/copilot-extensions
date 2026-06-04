@@ -1,23 +1,29 @@
-"""Finalization flow -- squash, rebase, merge, push, cleanup with locking.
+"""Finalization flow -- push-changes and validate-and-finalize with locking.
 
-Orchestrates the full worktree finalization lifecycle:
-1. Acquire file-based lock
-2. Fetch from remote
-3. Pre-squash all worktree commits into one
-4. Rebase the single commit onto upstream
-5. Anchor hygiene check (block on dirty, warn on stash)
-6. Update local default branch and fast-forward merge
-7. Push with retry
-8. Remove worktree and branch
-9. Merge permissions back to anchor
-10. Update tracking YAML → finalized
+Two-phase worktree completion:
+
+Phase 1 -- push_changes():
+  1. Acquire lock
+  2. Fetch from remote
+  3. Pre-squash all worktree commits into one
+  4. Rebase the single commit onto upstream
+  5. Validate core files (config-driven hooks)
+  6. Anchor hygiene check (block on dirty, warn on stash)
+  7. Update local default branch and fast-forward merge
+  8. Push with retry
+  9. Update tracking status to "pushed"
+
+Phase 2 -- validate_and_finalize():
+  1. Non-mutating check: is the branch content already on origin/master?
+  2. If yes: remove worktree and branch, merge permissions, update
+     tracking to "finalized"
+  3. If no: error with guidance to run push-changes first
 """
 
 from __future__ import annotations
 
 import os
 import shutil
-import tempfile
 import time
 from pathlib import Path
 
@@ -73,17 +79,23 @@ class FinalizeLock:
         self.release()
 
 
-def finalize(
+def push_changes(
     worktree_id: str,
     config: Config,
     *,
+    title: str | None = None,
     dry_run: bool = False,
 ) -> bool:
-    """Run the full finalization flow for a worktree.
+    """Push worktree changes to the remote default branch.
+
+    Squashes all worktree commits, rebases onto upstream, validates,
+    merges to local default branch, and pushes.  Does NOT remove the
+    worktree or branch -- call validate_and_finalize() after this.
 
     Args:
         worktree_id: The worktree identifier.
         config: Loaded project configuration.
+        title: Optional title to set on the tracking record.
         dry_run: If True, preview without side effects.
 
     Returns:
@@ -106,22 +118,25 @@ def finalize(
         except Exception:
             pass
 
-    # Guard against branch drift -- if the worktree's HEAD is on a
-    # different branch (e.g. a feature branch), refuse to finalize.
-    # Squashing/rebasing/deleting an unexpected branch is dangerous.
+    # Set title early so it survives even if push fails
+    if title and record:
+        record.title = title.replace("\n", " ").strip()
+        tracking.save_record(record)
+
+    # Guard against branch drift
     if Path(worktree_path).exists():
         actual = git_ops._get_current_branch_safe(worktree_path)
         if actual and actual != branch:
             output.err(
                 f"Branch drift detected: worktree HEAD is on '{actual}', "
-                f"but finalization expects '{branch}'. "
+                f"but push-changes expects '{branch}'. "
                 f"Switch back to '{branch}' or handle the feature branch "
-                f"manually before finalizing."
+                f"manually before pushing."
             )
             return False
 
     if dry_run:
-        _dry_run_preview(
+        _dry_run_push_preview(
             worktree_id, config, worktree_path, branch, upstream, lock_path,
         )
         return True
@@ -141,16 +156,16 @@ def finalize(
         print(f"Fetching from {repo.remote}...")
         git_ops.fetch(repo.remote, cwd=anchor)
 
-        # 1b. Dirty check -- refuse finalization with uncommitted changes
+        # 2. Dirty check
         wt_exists = Path(worktree_path).exists()
         if wt_exists and not git_ops.is_clean(cwd=worktree_path):
             output.err(
                 "Working tree has uncommitted changes. "
-                "Commit or stash them before finalizing."
+                "Commit or stash them before pushing."
             )
             return False
 
-        # 1c. Divergence check -- inform before squash/rebase
+        # 3. Divergence check
         ahead_commits = git_ops.get_commits_ahead(branch, upstream, cwd=worktree_path)
         behind_r = git_ops.git(
             "rev-list", "--count", f"{branch}..{upstream}",
@@ -159,48 +174,49 @@ def finalize(
         behind_count = int(behind_r.stdout.strip()) if behind_r.returncode == 0 else 0
         ahead_count = len(ahead_commits)
 
-        if ahead_count > 0 and behind_count > 0:
+        if ahead_count == 0:
+            output.warn(
+                f"Branch {branch} has no commits ahead of {upstream} -- "
+                f"nothing to push."
+            )
+            # Still mark as pushed if title was set -- content is on master
+            if record:
+                tracking.update_status(record, "pushed")
+            return True
+
+        if behind_count > 0:
             output.warn(
                 f"Branch {branch} has diverged from {upstream}: "
                 f"{ahead_count} ahead, {behind_count} behind. "
                 f"Will squash and rebase."
             )
-        elif ahead_count == 0:
-            output.warn(
-                f"Branch {branch} has no commits ahead of {upstream} -- "
-                f"nothing to merge."
-            )
 
-        # 2. Pre-squash -- collapse all worktree commits into one
+        # 4. Pre-squash
         if wt_exists and ahead_count > 1:
-            title = record.title if record else None
-            squash_msg = title or f"squash: merge worktree/{worktree_id}"
+            squash_title = title or (record.title if record else None)
+            squash_msg = squash_title or f"squash: merge worktree/{worktree_id}"
             print(f"Squashing {ahead_count} commits into one...")
             if not git_ops.squash_branch(upstream, squash_msg, cwd=worktree_path):
                 output.warn("Pre-squash failed -- proceeding with individual commits.")
             else:
                 ahead_count = 1
 
-        # 3. Rebase
+        # 5. Rebase
         print(f"Rebasing {branch} onto {upstream}...")
         if not git_ops.rebase(upstream, cwd=worktree_path):
             output.warn("Rebase failed -- aborting and preserving worktree.")
-            # Restore original commits if we squashed
             if git_ops.restore_backup_ref(cwd=worktree_path):
                 output.warn("Restored original commits from pre-squash backup.")
             if record:
                 tracking.update_status(record, "orphaned")
             return False
 
-        # 4. Validate core files
-        #    Uses config-driven validate_hook if set, otherwise falls back
-        #    to the built-in Python validator with config-driven paths.
+        # 6. Validate core files
         from . import validate as val
         plat = cfg.detect_platform()
         hook_cmd = repo.validate_hook.get(plat)
 
         if hook_cmd:
-            # Config provides an external validation command
             print("Running configured validation hook...")
             expanded = [
                 c.replace("{work_dir}", worktree_path)
@@ -218,7 +234,6 @@ def finalize(
                     tracking.update_status(record, "active")
                 return False
         elif repo.validate_paths:
-            # Config provides paths -- use built-in Python validator
             print("Checking for core infrastructure changes...")
             failures = val.validate_files(
                 worktree_path,
@@ -231,7 +246,6 @@ def finalize(
                     tracking.update_status(record, "active")
                 return False
         else:
-            # No validation configured -- check for legacy script
             validate_script = Path(worktree_path) / "tools" / "worktree" / "validate-core.ps1"
             if validate_script.exists():
                 print("Checking for core infrastructure changes (legacy)...")
@@ -248,14 +262,13 @@ def finalize(
                         tracking.update_status(record, "active")
                     return False
 
-        # 5. Anchor hygiene -- refuse finalization if anchor has dirty files
-        #    (dirty files can survive checkout and silently accumulate)
+        # 7. Anchor hygiene
         from . import anchor_hygiene
         anchor_report = anchor_hygiene.check_anchor(anchor)
         if anchor_report.has_dirty_files:
             output.err(
                 f"Anchor repo has {len(anchor_report.dirty_files)} uncommitted "
-                f"file(s). Commit, stash, or discard them before finalizing."
+                f"file(s). Commit, stash, or discard them before pushing."
             )
             for f in anchor_report.dirty_files[:5]:
                 print(f"       {f}")
@@ -271,7 +284,7 @@ def finalize(
             for entry in anchor_report.stash_entries[:3]:
                 print(f"       {entry}")
 
-        # 6. Update local default branch and merge
+        # 8. Update local default branch and merge
         print(f"Updating local {repo.default_branch}...")
         git_ops.checkout(repo.default_branch, cwd=anchor)
         if not git_ops.merge_ff(f"{repo.remote}/{repo.default_branch}", cwd=anchor):
@@ -282,7 +295,6 @@ def finalize(
 
         print(f"Merging {branch} into {repo.default_branch}...")
         if not git_ops.merge_ff(branch, cwd=anchor):
-            # After pre-squash + rebase this should not happen.
             head_sha = git_ops.git("rev-parse", "HEAD", cwd=anchor, check=False).stdout.strip()[:8]
             branch_sha = git_ops.git("rev-parse", branch, cwd=anchor, check=False).stdout.strip()[:8]
             output.err(
@@ -294,7 +306,7 @@ def finalize(
                 tracking.update_status(record, "orphaned")
             return False
 
-        # 7. Push with retry
+        # 9. Push with retry
         max_retries = 3
         pushed = False
         for attempt in range(1, max_retries + 1):
@@ -317,12 +329,183 @@ def finalize(
                 tracking.update_status(record, "orphaned")
             return False
 
-        # 7. Cleanup -- remove worktree and branch (only if not actively in use)
-        #
-        # Safety rule: if we are running *inside* the target worktree or a
-        # live Copilot session owns it, we must not delete the directory or
-        # branch.  Everything else (push, permissions, tracking) still
-        # proceeds -- the worktree becomes inert content already on master.
+        # 10. Update tracking status
+        if record:
+            tracking.update_status(record, "pushed")
+
+        # Clean up pre-squash backup ref
+        if wt_exists:
+            git_ops.delete_backup_ref(cwd=worktree_path)
+
+        output.ok(
+            f"Worktree {worktree_id} pushed to "
+            f"{repo.remote}/{repo.default_branch}. "
+            f"Run 'agent-worktrees finalize' to clean up."
+        )
+        return True
+
+    except Exception as e:
+        output.err(f"Push failed: {e}")
+        output.warn(f"Worktree preserved at {worktree_path} for manual resolution.")
+        if Path(worktree_path).exists():
+            if git_ops.restore_backup_ref(cwd=worktree_path):
+                output.warn("Restored original commits from pre-squash backup.")
+        if record:
+            tracking.update_status(record, "orphaned")
+        return False
+    finally:
+        lock.release()
+
+
+def _is_content_on_upstream(
+    branch: str,
+    upstream: str,
+    cwd: str,
+) -> bool:
+    """Non-mutating check: is the branch's content already on upstream?
+
+    Uses multiple strategies in order of reliability:
+    1. Ancestor check (branch is ancestor of upstream)
+    2. git cherry (patch-id comparison)
+    3. Blob comparison of changed files
+    """
+    # Strategy 1: branch is an ancestor of upstream (already merged)
+    r = git_ops.git(
+        "merge-base", "--is-ancestor", branch, upstream,
+        cwd=cwd, check=False,
+    )
+    if r.returncode == 0:
+        return True
+
+    # Strategy 2: git cherry -- all patches accounted for on upstream
+    cherry_r = git_ops.git(
+        "cherry", upstream, branch,
+        cwd=cwd, check=False,
+    )
+    if cherry_r.returncode == 0 and cherry_r.stdout.strip():
+        unmerged = [l for l in cherry_r.stdout.splitlines() if l.startswith("+")]
+        if not unmerged:
+            return True
+
+    # Strategy 3: compare file blobs between branch and upstream
+    merge_base_r = git_ops.git(
+        "merge-base", branch, upstream,
+        cwd=cwd, check=False,
+    )
+    if merge_base_r.returncode != 0:
+        return False
+
+    diff_r = git_ops.git(
+        "diff", "--name-only", merge_base_r.stdout.strip(), branch,
+        cwd=cwd, check=False,
+    )
+    changed_files = [f for f in diff_r.stdout.splitlines() if f.strip()]
+    if not changed_files:
+        return True
+
+    for file in changed_files:
+        b_blob = git_ops.git(
+            "rev-parse", f"{branch}:{file}", cwd=cwd, check=False
+        )
+        m_blob = git_ops.git(
+            "rev-parse", f"{upstream}:{file}", cwd=cwd, check=False
+        )
+        if b_blob.stdout.strip() != m_blob.stdout.strip():
+            return False
+
+    return True
+
+
+def validate_and_finalize(
+    worktree_id: str,
+    config: Config,
+    *,
+    dry_run: bool = False,
+) -> bool:
+    """Validate that worktree content is on upstream, then clean up.
+
+    This is a non-mutating validation step -- it never squashes, rebases,
+    or pushes.  If the branch's content is not yet on origin/master, it
+    fails with guidance to run push-changes first.
+
+    Args:
+        worktree_id: The worktree identifier.
+        config: Loaded project configuration.
+        dry_run: If True, preview without side effects.
+
+    Returns:
+        True on success, False if content is not yet on upstream.
+    """
+    repo = config.default_repo
+    anchor = repo.anchor
+    worktree_path = str(Path(repo.worktree_root) / worktree_id)
+    branch = f"worktree/{worktree_id}"
+    upstream = f"{repo.remote}/{repo.default_branch}"
+    lock_path = Path(repo.worktree_root) / ".finalize.lock"
+
+    # Load tracking record
+    from . import config as cfg
+    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    record = None
+    if yaml_path.exists():
+        try:
+            record = tracking.load_record(yaml_path)
+        except Exception:
+            pass
+
+    wt_exists = Path(worktree_path).exists()
+
+    if dry_run:
+        _dry_run_finalize_preview(
+            worktree_id, config, worktree_path, branch, upstream,
+        )
+        return True
+
+    # Fetch to get current upstream state
+    print(f"Fetching from {repo.remote}...")
+    git_ops.fetch(repo.remote, cwd=anchor)
+
+    # Check if the worktree is unused (0 commits, clean tree)
+    if wt_exists:
+        ahead_commits = git_ops.get_commits_ahead(branch, upstream, cwd=worktree_path)
+        is_clean = git_ops.is_clean(cwd=worktree_path)
+        if len(ahead_commits) == 0 and is_clean:
+            print(f"No commits and clean tree -- finalizing unused worktree.")
+            # Fall through to cleanup
+        elif not _is_content_on_upstream(branch, upstream, cwd=worktree_path):
+            output.err(
+                f"Unmerged work detected on {branch}. "
+                f"Run 'agent-worktrees push-changes' to push your changes "
+                f"to {repo.remote}/{repo.default_branch} first, "
+                f"then retry 'agent-worktrees finalize'."
+            )
+            return False
+        else:
+            print(f"Verified: all content from {branch} is on {upstream}.")
+    else:
+        # Worktree directory gone -- check if branch content is on upstream
+        # from the anchor repo
+        branch_exists = git_ops.git(
+            "rev-parse", "--verify", branch, cwd=anchor, check=False,
+        ).returncode == 0
+        if branch_exists and not _is_content_on_upstream(branch, upstream, cwd=anchor):
+            output.err(
+                f"Unmerged work detected on {branch}. "
+                f"Cannot finalize -- content is not on "
+                f"{repo.remote}/{repo.default_branch}."
+            )
+            return False
+
+    # Acquire lock for cleanup
+    lock = FinalizeLock(lock_path)
+    try:
+        lock.acquire()
+    except TimeoutError:
+        output.err("Timed out waiting for finalization lock.")
+        return False
+
+    try:
+        # Cleanup -- remove worktree and branch
         inside_worktree = git_ops.is_cwd_inside(worktree_path)
         has_live_session = _has_live_session(worktree_path)
 
@@ -342,56 +525,55 @@ def finalize(
             if not git_ops.delete_branch(branch, cwd=anchor):
                 output.warn(f"Could not delete branch {branch} (may already be gone).")
 
-            # Remove directory if still present
             wt_dir = Path(worktree_path)
             if wt_dir.exists():
                 shutil.rmtree(wt_dir, ignore_errors=True)
                 if wt_dir.exists():
                     output.warn(f"Directory still present after cleanup: {wt_dir}")
 
-            # Prune stale worktree entries
             git_ops.prune_worktrees(cwd=anchor)
-
-            # Kill any associated tmux session
             sessions.kill_tmux_session(worktree_id)
 
-        # 8. Merge permissions
+        # Merge permissions
         merged = permissions.merge_permissions(anchor, worktree_path)
         if merged:
             for m in merged:
                 print(f"  Merged new permission: {m}")
             print("Permissions merged back to anchor and worktree entry removed.")
 
-        # Remove worktree from trusted_folders
         if permissions.remove_trusted_folder(worktree_path):
             print("Removed worktree path from trusted_folders.")
 
-        # 9. Update tracking
+        # Update tracking
         if record:
             tracking.update_status(record, "finalized")
 
-        # Clean up pre-squash backup ref
-        if wt_exists:
-            git_ops.delete_backup_ref(cwd=worktree_path)
-
-        output.ok(f"Worktree {worktree_id} finalized and pushed to {repo.remote}.")
+        output.ok(f"Worktree {worktree_id} finalized.")
         return True
 
     except Exception as e:
-        output.err(f"Finalization failed: {e}")
-        output.warn(f"Worktree preserved at {worktree_path} for manual resolution.")
-        # Restore original commits if we squashed
-        if Path(worktree_path).exists():
-            if git_ops.restore_backup_ref(cwd=worktree_path):
-                output.warn("Restored original commits from pre-squash backup.")
-        if record:
-            tracking.update_status(record, "orphaned")
+        output.err(f"Finalization cleanup failed: {e}")
         return False
     finally:
         lock.release()
 
 
-def _dry_run_preview(
+# Keep finalize() as a backward-compatible wrapper that runs both phases.
+def finalize(
+    worktree_id: str,
+    config: Config,
+    *,
+    dry_run: bool = False,
+) -> bool:
+    """Legacy wrapper -- runs validate_and_finalize only.
+
+    This no longer pushes changes. Use push_changes() + validate_and_finalize()
+    for the full two-phase flow.
+    """
+    return validate_and_finalize(worktree_id, config, dry_run=dry_run)
+
+
+def _dry_run_push_preview(
     worktree_id: str,
     config: Config,
     worktree_path: str,
@@ -399,18 +581,17 @@ def _dry_run_preview(
     upstream: str,
     lock_path: Path,
 ) -> None:
-    """Show what finalization would do without side effects."""
+    """Show what push-changes would do without side effects."""
     repo = config.default_repo
 
     print()
-    print(f"Finalization plan for worktree {worktree_id}:")
+    print(f"Push-changes plan for worktree {worktree_id}:")
     output.dry_run(f"Would acquire lock: {lock_path}")
 
-    # Show commits on branch
     try:
         commits = git_ops.get_commits_ahead(branch, upstream, cwd=worktree_path)
         if commits:
-            output.dry_run(f"Worktree has {len(commits)} commit(s) to merge:")
+            output.dry_run(f"Worktree has {len(commits)} commit(s) to push:")
             for c in commits[:5]:
                 print(f"       {c}")
             if len(commits) > 5:
@@ -427,12 +608,31 @@ def _dry_run_preview(
     output.dry_run("Would check anchor repo for uncommitted work (blocks if dirty)")
     output.dry_run(f"Would fast-forward merge into local {repo.default_branch}")
     output.dry_run(f"Would push {repo.default_branch} to {repo.remote}")
+    output.dry_run("Would update tracking status to 'pushed'")
+    output.dry_run("Would release lock")
+    print()
+    output.ok("Dry run complete -- no changes made")
+
+
+def _dry_run_finalize_preview(
+    worktree_id: str,
+    config: Config,
+    worktree_path: str,
+    branch: str,
+    upstream: str,
+) -> None:
+    """Show what finalize would do without side effects."""
+    repo = config.default_repo
+
+    print()
+    print(f"Finalization plan for worktree {worktree_id}:")
+    output.dry_run(f"Would fetch from {repo.remote}")
+    output.dry_run(f"Would validate that {branch} content is on {upstream}")
     output.dry_run(f"Would remove worktree: {worktree_path}")
     output.dry_run(f"Would delete branch: {branch}")
     output.dry_run("Would merge worktree permissions back to anchor")
     output.dry_run("Would remove worktree path from trusted_folders")
     output.dry_run("Would update worktree YAML status: finalized")
-    output.dry_run("Would release lock")
     print()
     output.ok("Dry run complete -- no changes made")
 
