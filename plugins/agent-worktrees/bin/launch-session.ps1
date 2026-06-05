@@ -494,17 +494,22 @@ if (-not $noMux -and $psmuxCmd) {
 
         # We're back — either the user detached or the session ended.
         # Only run post-exit if the session is truly gone.
+        Write-SetupLog "psmux attach returned, checking session state"
         $null = & psmux has-session -t $sessName 2>&1
         if ($LASTEXITCODE -ne 0) {
+            Write-SetupLog "psmux session gone, running post-exit checks"
             # Check for handoff-driven relaunch before post-exit
             if ($plan.worktree_id) {
+                Write-SetupLog "Checking handoff for worktree $($plan.worktree_id)"
                 $handoffJson = & $VenvPython -m agent_worktrees handoff consume $plan.worktree_id 2>$null
-                if ($LASTEXITCODE -eq 0 -and $handoffJson) {
+                $handoffExit = $LASTEXITCODE
+                Write-SetupLog "handoff consume exit=$handoffExit output=$($handoffJson -join ' ')"
+                if ($handoffExit -eq 0 -and $handoffJson) {
                     $handoff = ($handoffJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
                     if ($handoff -and $handoff.prompt_path -and (Test-Path $handoff.prompt_path)) {
                         Write-SetupLog "Handoff relaunch (psmux): consuming $($handoff.prompt_path)"
                         Write-Host ''
-                        Write-Host 'Handoff detected — relaunching with continuation prompt...'
+                        Write-Host 'Handoff detected -- relaunching with continuation prompt...'
                         Write-Host ''
                         $handoffPrompt = "Continuing from a previous session in this worktree. A handoff was prepared - read it for full context: cat `"$($handoff.prompt_path)`""
                         $savedPsmuxSession = $env:PSMUX_SESSION; $env:PSMUX_SESSION = $null
@@ -524,19 +529,35 @@ if (-not $noMux -and $psmuxCmd) {
                             } catch [System.Management.Automation.PipelineStoppedException] {
                                 Write-SetupLog "psmux attach (handoff relaunch) interrupted (Ctrl+C)"
                             }
+                        } else {
+                            Write-SetupLog "psmux new-session for relaunch failed (exit=$LASTEXITCODE)" 'ERROR'
+                            Write-Host "Handoff relaunch failed (psmux new-session exit=$LASTEXITCODE)." -ForegroundColor Red
+                            Write-Host "Prompt path: $($handoff.prompt_path)"
+                            Write-Host "Exiting in 10 seconds..." -ForegroundColor Yellow
+                            Start-Sleep -Seconds 10
                         }
+                    } else {
+                        Write-SetupLog "Handoff data missing or prompt_path not found" 'WARN'
                     }
+                } else {
+                    Write-SetupLog "No handoff pending (exit=$handoffExit)"
                 }
             }
 
             # Post-exit finalization (runs after both original and relaunched sessions)
             $null = & psmux has-session -t $sessName 2>&1
             if ($LASTEXITCODE -ne 0 -and $plan.post_exit -and $plan.worktree_id) {
+                Write-SetupLog "Running post-exit finalization"
                 & $VenvPython -m agent_worktrees post-exit $plan.worktree_id
                 if ($LASTEXITCODE -ne 0) {
+                    Write-SetupLog "Post-exit finalization failed (exit=$LASTEXITCODE)" 'ERROR'
                     Write-Warning "Post-exit finalization failed (exit code $LASTEXITCODE). Run 'agent-worktrees finalize' to retry."
+                    Write-Host "Exiting in 10 seconds..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds 10
                 }
             }
+        } else {
+            Write-SetupLog "psmux session still alive (detached)"
         }
 
         exit 0
