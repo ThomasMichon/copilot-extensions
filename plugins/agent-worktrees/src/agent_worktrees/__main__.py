@@ -3750,14 +3750,6 @@ def build_parser() -> argparse.ArgumentParser:
                     choices=["setup", "test", "status"],
                     help="Action: setup, test, or status")
 
-    # handoff (manage handoff prompt state for auto-relaunch)
-    sp = sub.add_parser("handoff", help="Manage handoff prompt state on a worktree")
-    sp.add_argument("handoff_sub", choices=["set", "consume"],
-                    help="set: write handoff path; consume: read and clear (JSON)")
-    sp.add_argument("worktree_id", help="Worktree ID")
-    sp.add_argument("prompt_path", nargs="?", default=None,
-                    help="Path to handoff prompt file (required for 'set')")
-
     # register-session / deregister-session (called from hooks)
     sp = sub.add_parser("register-session",
                         help="Register a Copilot session against a worktree")
@@ -3817,40 +3809,6 @@ def cmd_dev(args: argparse.Namespace) -> int:
             return 1
         os.execvp("bash", ["bash", str(script), dev_action])
         return 1  # unreachable
-
-
-def cmd_handoff(args: argparse.Namespace) -> int:
-    """Manage handoff prompt state on a worktree record.
-
-    Subcommands:
-        set <worktree_id> <prompt_path>  -- set the handoff_prompt field
-        consume <worktree_id>            -- read and clear; prints JSON
-    """
-    sub = getattr(args, "handoff_sub", None)
-    wt_id = getattr(args, "worktree_id", None)
-
-    if sub == "set":
-        prompt_path = getattr(args, "prompt_path", None)
-        if not wt_id or not prompt_path:
-            output.err("Usage: handoff set <worktree_id> <prompt_path>")
-            return 1
-        try:
-            tracking.set_handoff(wt_id, prompt_path)
-        except FileNotFoundError as exc:
-            output.err(str(exc))
-            return 1
-        return 0
-
-    if sub == "consume":
-        if not wt_id:
-            output.err("Usage: handoff consume <worktree_id>")
-            return 1
-        prompt_path = tracking.consume_handoff(wt_id)
-        _json_output({"prompt_path": prompt_path})
-        return 0
-
-    output.err("Usage: handoff {set|consume} <worktree_id> [<prompt_path>]")
-    return 1
 
 
 def cmd_register_session(args: argparse.Namespace) -> int:
@@ -3976,7 +3934,6 @@ COMMAND_MAP = {
     "get": cmd_get,
     "pre-launch": cmd_pre_launch,
     "dev": cmd_dev,
-    "handoff": cmd_handoff,
     "register-session": cmd_register_session,
     "deregister-session": cmd_deregister_session,
     "backfill-sessions": cmd_backfill_sessions,

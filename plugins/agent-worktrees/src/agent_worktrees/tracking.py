@@ -46,7 +46,7 @@ class WorktreeRecord:
     title: str | None
     status: WorktreeStatus
     completed_at: str | None
-    handoff_prompt: str | None
+    handoff_prompt: str | None  # deprecated, kept for YAML compat
     sessions: list[SessionEntry] | None = field(default=None)
 
     @property
@@ -171,8 +171,6 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         f"status: {record.status}\n"
         f"completed_at: {record.completed_at or 'null'}\n"
     )
-    if record.handoff_prompt:
-        content += f"handoff_prompt: {record.handoff_prompt}\n"
 
     # Serialize sessions list -- None omitted (not yet indexed),
     # [] written as empty list (indexed, no sessions).
@@ -237,42 +235,6 @@ def mark_resumed(record: WorktreeRecord) -> None:
     record.resume_count += 1
     record.last_resumed_at = _now_iso()
     save_record(record)
-
-
-def set_handoff(worktree_id: str, prompt_path: str) -> None:
-    """Set the handoff_prompt field on a worktree record."""
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
-    if not yaml_path.exists():
-        raise FileNotFoundError(f"Worktree record not found: {yaml_path}")
-    record = load_record(yaml_path)
-    record.handoff_prompt = prompt_path
-    save_record(record)
-
-
-def consume_handoff(worktree_id: str) -> str | None:
-    """Atomically read and clear the handoff_prompt field.
-
-    Returns the prompt path if one was set, or None.
-    Orphaned and complete worktrees return None (and clear any stale
-    prompt).  Active and finalized worktrees can consume handoffs --
-    finalized worktrees may still relaunch if a handoff was armed before
-    or during finalization.
-    """
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
-    if not yaml_path.exists():
-        return None
-    record = load_record(yaml_path)
-    # Orphaned/complete worktrees should not relaunch
-    if record.status in ("orphaned", "complete"):
-        if record.handoff_prompt:
-            record.handoff_prompt = None
-            save_record(record)
-        return None
-    prompt_path = record.handoff_prompt
-    if prompt_path:
-        record.handoff_prompt = None
-        save_record(record)
-    return prompt_path
 
 
 def create_new_record(
