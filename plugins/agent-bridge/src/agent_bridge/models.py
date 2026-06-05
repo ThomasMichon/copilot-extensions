@@ -68,6 +68,7 @@ class SessionInfo(BaseModel):
     target_dir: str | None = None
     target_type: Literal["local", "ssh"] = "local"
     target_host: str | None = None
+    worktree_id: str | None = None  # agent-worktrees worktree ID
     status: SessionStatus
     pid: int | None = None
     turn_count: int = 0
@@ -111,6 +112,7 @@ class StartSessionRequest(BaseModel):
     agent: str | None = None
     target_dir: str | None = None
     topology: str | None = None
+    worktree_id: str | None = None  # agent-worktrees worktree ID for session roll
 
 
 class SubmitPromptRequest(BaseModel):

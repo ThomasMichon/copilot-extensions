@@ -37,6 +37,7 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         target_dir=s.target.cwd,
         target_type=s.target.type,
         target_host=s.target.host,
+        worktree_id=s.target.worktree_id,
         status=s.status,
         pid=s.pid,
         turn_count=s.turn_count,
@@ -63,6 +64,11 @@ async def start_session(req: StartSessionRequest, request: Request):
             raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        # Session roll: reuse existing worktree instead of creating a new one
+        if req.worktree_id:
+            target.worktree_id = req.worktree_id
+        if req.target_dir:
+            target.cwd = req.target_dir
     else:
         target = SpawnTarget(
             type="local",

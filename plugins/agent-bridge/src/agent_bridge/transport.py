@@ -166,7 +166,7 @@ async def _resolve_worktree(
     if target.project:
         env["WORKTREE_PROJECT"] = target.project
 
-    resolve_args = [python, "-m", "agent_worktrees", "resolve", "--json"]
+    resolve_args = [python, "-m", "agent_worktrees", "resolve", "--json", "--no-resume"]
     if target.worktree_id:
         resolve_args.extend(["--worktree-id", target.worktree_id])
     else:
@@ -240,6 +240,12 @@ async def spawn_local(target: SpawnTarget) -> AgentProcess:
         if not cmd:
             raise RuntimeError("Worktree resolve returned empty cmd")
 
+        # Store resolved values back into target for DB persistence
+        if worktree_id and not target.worktree_id:
+            target.worktree_id = worktree_id
+        if work_dir and not target.cwd:
+            target.cwd = work_dir
+
         # Merge plan environment into the process env
         env.update(plan_env)
 
@@ -283,10 +289,19 @@ def _build_remote_cmd(target: SpawnTarget) -> str:
     copilot = target.copilot_path or "copilot"
 
     if target.project:
-        binstub_args = [
-            target.project, "--new", "--no-mux", "--no-update",
-            "--", "--acp", "--stdio",
-        ]
+        if target.worktree_id:
+            # Session roll: resume existing worktree, skip Copilot session
+            # resume (bridge manages ACP sessions independently)
+            binstub_args = [
+                target.project, "--worktree-id", target.worktree_id,
+                "--no-mux", "--no-update", "--no-resume",
+                "--", "--acp", "--stdio",
+            ]
+        else:
+            binstub_args = [
+                target.project, "--new", "--no-mux", "--no-update",
+                "--", "--acp", "--stdio",
+            ]
         if target.copilot_args:
             binstub_args.extend(target.copilot_args)
         return " ".join(shlex.quote(a) for a in binstub_args)

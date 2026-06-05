@@ -122,6 +122,22 @@ class TestBuildRemoteCmd:
         cmd = _build_remote_cmd(target)
         assert "copilot-beta" in cmd
 
+    def test_project_with_worktree_id_uses_resume(self):
+        """SSH session roll: --worktree-id replaces --new."""
+        target = SpawnTarget(
+            type="ssh", host="server-a", user="deploy",
+            project="my-project",
+            worktree_id="lambda-core-wsl-20250101-120000-abc1",
+        )
+        cmd = _build_remote_cmd(target)
+        assert "my-project" in cmd
+        assert "--worktree-id" in cmd
+        assert "lambda-core-wsl-20250101-120000-abc1" in cmd
+        assert "--no-resume" in cmd
+        assert "--new" not in cmd
+        assert "--acp" in cmd
+        assert "--stdio" in cmd
+
 
 class TestSpawnSsh:
     """Tests for spawn_ssh using ssh-manager's ConnectionManager."""
@@ -289,6 +305,7 @@ class TestSpawnLocal:
             assert "resolve" in resolve_args
             assert "--json" in resolve_args
             assert "--new" in resolve_args
+            assert "--no-resume" in resolve_args
 
             # Second call: copilot exec
             exec_call = mock_asyncio.create_subprocess_exec.call_args_list[1]
@@ -300,6 +317,10 @@ class TestSpawnLocal:
             assert exec_call[1]["cwd"] == "/tmp/worktree"
 
             assert result.proc == copilot_proc
+
+            # Resolved values should be stored back into target
+            assert target.worktree_id == "test-wt-1234"
+            assert target.cwd == "/tmp/worktree"
 
     @pytest.mark.asyncio
     async def test_local_with_project_resume_worktree(self):
@@ -342,6 +363,7 @@ class TestSpawnLocal:
             assert "--worktree-id" in resolve_args
             assert "existing-wt-5678" in resolve_args
             assert "--new" not in resolve_args
+            assert "--no-resume" in resolve_args
 
     @pytest.mark.asyncio
     async def test_local_resolve_failure_raises(self):

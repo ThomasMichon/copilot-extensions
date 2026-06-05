@@ -233,6 +233,10 @@ class SessionManager:
             session.acp_session_id = acp_sid
             session.status = SessionStatus.IDLE
             self._db.update_session_acp_id(session_id, acp_sid)
+            # Persist target with resolved values (worktree_id, cwd from plan)
+            self._db.update_session_target(
+                session_id, target.to_json(), target.cwd
+            )
             self._db.update_session_status(
                 session_id, SessionStatus.IDLE.value, time.time(), pid=session.pid
             )
