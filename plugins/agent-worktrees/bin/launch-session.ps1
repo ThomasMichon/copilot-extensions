@@ -357,12 +357,6 @@ if ($plan.action -eq 'none') {
     exit ([int]($plan.exit_code))
 }
 
-if ($plan.action -eq 'wsl') {
-    $cmd = $plan.cmd
-    & $cmd[0] $cmd[1..($cmd.Count - 1)]
-    exit $LASTEXITCODE
-}
-
 if ($plan.action -ne 'exec') {
     Write-Error "Unknown action: $($plan.action)"
     exit 1

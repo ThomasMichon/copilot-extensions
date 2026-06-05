@@ -218,11 +218,11 @@ def _apply_tracking_override(
 def _emit_plan(plan: dict) -> None:
     """Write the JSON launch plan to the real stdout (not the swapped one).
 
-    For exec/wsl actions, injects COPILOT_CUSTOM_INSTRUCTIONS_DIRS pointing
+    For exec actions, injects COPILOT_CUSTOM_INSTRUCTIONS_DIRS pointing
     to the project dir so machine+repo-specific instructions are loaded
     without polluting other repos on the same machine.
     """
-    if plan.get("action") in ("exec", "wsl"):
+    if plan.get("action") == "exec":
         env = plan.setdefault("env", {})
         env.setdefault(
             "COPILOT_CUSTOM_INSTRUCTIONS_DIRS", str(cfg.project_dir())
@@ -578,19 +578,6 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
         config = cfg.load_config()
         repo = config.default_repo
-
-        # WSL delegation
-        if args.copilot_args and args.copilot_args[0] == "wsl":
-            remaining = args.copilot_args[1:]
-            project = cfg.project_name()
-            no_mux_export = "export WORKTREE_NO_MUX=1; export APERTURE_NO_MUX=1; " if args.no_mux else ""
-            if args.dry_run:
-                output.dry_run(f"Would delegate to WSL: WORKTREE_PROJECT={project} ~/.agent-worktrees/bin/launch-session.sh {' '.join(remaining)}")
-                _emit_plan({"action": "none", "exit_code": 0})
-                return 0
-            wsl_cmd = ["wsl", "bash", "-lc", f"{no_mux_export}export WORKTREE_PROJECT={project}; ~/.agent-worktrees/bin/launch-session.sh {' '.join(remaining)}"]
-            _emit_plan({"action": "wsl", "cmd": wsl_cmd})
-            return 0
 
         # Non-interactive: require explicit --new to create a worktree.
         # Without a TTY the picker can't run, so error out with guidance.
@@ -4171,12 +4158,9 @@ def main(argv: list[str] | None = None) -> int:
     # non-existent namespaces (e.g. "worktrees") silently fall into
     # cmd_launch -> resolve, which may spawn an unwanted worktree.
     if not args_list[0].startswith("-"):
-        # "wsl" is a known launch passthrough (handled by resolve's
-        # WSL delegation, not a subcommand in COMMAND_MAP).
-        if args_list[0] != "wsl":
-            output.err(f"Unknown subcommand: {args_list[0]}")
-            output.err("Run 'agent-worktrees --help' for available commands.")
-            return 1
+        output.err(f"Unknown subcommand: {args_list[0]}")
+        output.err("Run 'agent-worktrees --help' for available commands.")
+        return 1
 
     # Anything else (flags like --recovery, --no-update, or unknown) →
     # default launch with passthrough
