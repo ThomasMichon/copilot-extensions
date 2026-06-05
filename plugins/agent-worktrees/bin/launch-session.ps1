@@ -534,42 +534,51 @@ if (-not $noMux -and $psmuxCmd) {
 }
 
 # ── Direct launch (no psmux, or psmux failed) ───────────────────────
+# Wrap in try/finally so Ctrl+C (PipelineStoppedException) kills the
+# child but the launcher survives to check for handoff state.
 
 Write-SetupLog "Handing off to setup script: $($cmd -join ' ')"
 Write-Host 'Launching Copilot...'
 Write-Host ''
 
-& $cmd[0] $cmd[1..($cmd.Count - 1)]
-$copilotExit = $LASTEXITCODE
+$copilotExit = 0
+try {
+    try {
+        & $cmd[0] $cmd[1..($cmd.Count - 1)]
+        $copilotExit = $LASTEXITCODE
+    } catch [System.Management.Automation.PipelineStoppedException] {
+        $copilotExit = 130  # 128 + SIGINT(2)
+        Write-SetupLog "Session interrupted (Ctrl+C)"
+    }
+} finally {
+    # ── Handoff-driven relaunch (max once per launcher invocation) ────
+    # If the session generated a handoff with auto_relaunch, the extension
+    # wrote the prompt path into the worktree YAML. Consume it and relaunch.
 
-# ── Handoff-driven relaunch (max once per launcher invocation) ───────
-# If the session generated a handoff with auto_relaunch, the extension
-# wrote the prompt path into the worktree YAML. Consume it and relaunch.
+    if ($plan.worktree_id) {
+        $handoffJson = & $VenvPython -m agent_worktrees handoff consume $plan.worktree_id 2>$null
+        if ($LASTEXITCODE -eq 0 -and $handoffJson) {
+            $handoff = ($handoffJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
+            if ($handoff -and $handoff.prompt_path -and (Test-Path $handoff.prompt_path)) {
+                Write-SetupLog "Handoff relaunch: consuming $($handoff.prompt_path)"
+                Write-Host ''
+                Write-Host 'Handoff detected -- relaunching with continuation prompt...'
+                Write-Host ''
 
-if ($plan.worktree_id) {
-    $handoffJson = & $VenvPython -m agent_worktrees handoff consume $plan.worktree_id 2>$null
-    if ($LASTEXITCODE -eq 0 -and $handoffJson) {
-        $handoff = ($handoffJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
-        if ($handoff -and $handoff.prompt_path -and (Test-Path $handoff.prompt_path)) {
-            Write-SetupLog "Handoff relaunch: consuming $($handoff.prompt_path)"
-            Write-Host ''
-            Write-Host 'Handoff detected — relaunching with continuation prompt...'
-            Write-Host ''
-
-            # Relaunch via setup script with -i (interactive + initial prompt)
-            $handoffPrompt = "Continuing from a previous session in this worktree. A handoff was prepared - read it for full context: cat `"$($handoff.prompt_path)`""
-            & $cmd[0] ($cmd[1..($cmd.Count - 1)] + @('-i', $handoffPrompt))
-            $copilotExit = $LASTEXITCODE
+                # Relaunch via setup script with -i (interactive + initial prompt)
+                $handoffPrompt = "Continuing from a previous session in this worktree. A handoff was prepared - read it for full context: cat `"$($handoff.prompt_path)`""
+                & $cmd[0] ($cmd[1..($cmd.Count - 1)] + @('-i', $handoffPrompt))
+                $copilotExit = $LASTEXITCODE
+            }
         }
     }
-}
 
-# ── Post-exit finalization ───────────────────────────────────────────────
-
-if ($plan.post_exit -and $plan.worktree_id) {
-    & $VenvPython -m agent_worktrees post-exit $plan.worktree_id
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Post-exit finalization failed (exit code $LASTEXITCODE). Run 'agent-worktrees finalize' to retry."
+    # ── Post-exit finalization ───────────────────────────────────────────
+    if ($plan.post_exit -and $plan.worktree_id) {
+        & $VenvPython -m agent_worktrees post-exit $plan.worktree_id
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Post-exit finalization failed (exit code $LASTEXITCODE). Run 'agent-worktrees finalize' to retry."
+        }
     }
 }
 
