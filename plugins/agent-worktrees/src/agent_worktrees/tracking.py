@@ -253,15 +253,17 @@ def consume_handoff(worktree_id: str) -> str | None:
     """Atomically read and clear the handoff_prompt field.
 
     Returns the prompt path if one was set, or None.
-    Only active worktrees can consume handoffs -- finalized, complete,
-    or orphaned worktrees return None (and clear any stale prompt).
+    Orphaned and complete worktrees return None (and clear any stale
+    prompt).  Active and finalized worktrees can consume handoffs --
+    finalized worktrees may still relaunch if a handoff was armed before
+    or during finalization.
     """
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return None
     record = load_record(yaml_path)
-    # Only active worktrees should relaunch via handoff
-    if record.status != "active":
+    # Orphaned/complete worktrees should not relaunch
+    if record.status in ("orphaned", "complete"):
         if record.handoff_prompt:
             record.handoff_prompt = None
             save_record(record)
