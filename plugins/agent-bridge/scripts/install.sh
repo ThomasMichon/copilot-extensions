@@ -85,6 +85,60 @@ _health_check() {
     return 1
 }
 
+# Resolve ssh-manager library path across multiple layouts.
+# Prints the resolved directory path to stdout (nothing else).
+# Returns 0 if found, 1 if not.
+_resolve_ssh_manager() {
+    local candidate
+
+    # 1. Relative path (git checkout layout: plugins/agent-bridge/../../libs/ssh-manager)
+    candidate="$PLUGIN_DIR/../../libs/ssh-manager"
+    if [[ -f "$candidate/pyproject.toml" ]]; then
+        cd "$candidate" && pwd
+        return 0
+    fi
+
+    # 2. Git repo registry (~/.git-repos) -- use Python for safe YAML parsing
+    if [[ -f "$HOME/.git-repos" ]]; then
+        candidate="$(python3 -c "
+import pathlib, os
+try:
+    import yaml
+except ImportError:
+    raise SystemExit(1)
+reg = yaml.safe_load(pathlib.Path.home().joinpath('.git-repos').read_text())
+repo = (reg or {}).get('repos', {}).get('copilot-extensions', {})
+if repo:
+    p = repo.get('path', os.path.join(reg.get('srcroot', ''), 'copilot-extensions'))
+    p = os.path.expanduser(p)
+    lib = os.path.join(p, 'libs', 'ssh-manager')
+    if os.path.isfile(os.path.join(lib, 'pyproject.toml')):
+        print(lib)
+        raise SystemExit(0)
+raise SystemExit(1)
+" 2>/dev/null)" && {
+            echo "$candidate"
+            return 0
+        }
+    fi
+
+    # 3. Common checkout path (repo exists but registry absent/stale)
+    candidate="$HOME/src/copilot-extensions/libs/ssh-manager"
+    if [[ -f "$candidate/pyproject.toml" ]]; then
+        cd "$candidate" && pwd
+        return 0
+    fi
+
+    return 1
+}
+
+# Check if ssh-manager is already importable in the venv.
+# Returns 0 if the key symbols can be imported successfully.
+_ssh_manager_installed() {
+    [[ -x "$VENV_DIR/bin/python" ]] || return 1
+    "$VENV_DIR/bin/python" -c 'from ssh_manager import SSHProfileSource, get_default_manager' 2>/dev/null
+}
+
 _git_info() {
     local path="$1"
     local commit branch dirty
@@ -224,9 +278,15 @@ do_install() {
     # Install package via uv (ssh-manager library first, then agent-bridge)
     _step "Installing agent-bridge package..."
     local ssh_manager_dir
-    ssh_manager_dir="$(cd "$PLUGIN_DIR/../../libs/ssh-manager" && pwd)"
-    if ! uv pip install --python "$VENV_DIR/bin/python" "$ssh_manager_dir" --quiet; then
-        _fail "ssh-manager install failed"
+    if ssh_manager_dir="$(_resolve_ssh_manager)"; then
+        if ! uv pip install --python "$VENV_DIR/bin/python" "$ssh_manager_dir" --quiet; then
+            _fail "ssh-manager install failed"
+            exit 1
+        fi
+    elif _ssh_manager_installed; then
+        _step "ssh-manager already installed in venv (marketplace layout)"
+    else
+        _fail "Cannot locate ssh-manager library. Clone copilot-extensions so libs/ssh-manager exists, then rerun: aperture-labs services agent-bridge update"
         exit 1
     fi
     if ! uv pip install --python "$VENV_DIR/bin/python" "$PLUGIN_DIR" --quiet; then
@@ -458,10 +518,16 @@ do_update() {
     # Reinstall package via uv (ssh-manager + agent-bridge)
     _step "Updating agent-bridge package..."
     local ssh_manager_dir
-    ssh_manager_dir="$(cd "$PLUGIN_DIR/../../libs/ssh-manager" && pwd)"
-    if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package ssh-manager \
-            "$ssh_manager_dir" --quiet; then
-        _fail "ssh-manager update failed"
+    if ssh_manager_dir="$(_resolve_ssh_manager)"; then
+        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package ssh-manager \
+                "$ssh_manager_dir" --quiet; then
+            _fail "ssh-manager update failed"
+            exit 1
+        fi
+    elif _ssh_manager_installed; then
+        _step "ssh-manager already installed in venv (marketplace layout)"
+    else
+        _fail "Cannot locate ssh-manager library. Clone copilot-extensions so libs/ssh-manager exists, then rerun: aperture-labs services agent-bridge update"
         exit 1
     fi
     if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge \
