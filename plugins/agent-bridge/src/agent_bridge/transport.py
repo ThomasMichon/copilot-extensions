@@ -284,7 +284,7 @@ def _build_remote_cmd(target: SpawnTarget) -> str:
 
     if target.project:
         binstub_args = [
-            target.project, "--auto", "--no-mux", "--no-update",
+            target.project, "--new", "--no-mux", "--no-update",
             "--", "--acp", "--stdio",
         ]
         if target.copilot_args:

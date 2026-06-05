@@ -474,20 +474,23 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     worktree).  Used by agent-bridge to launch ACP agents with credentials.
     ``--base`` implies ``--no-mux`` and ``--no-resume``.
 
-    With ``--auto``, skips the interactive picker and auto-creates a new
+    With ``--new``, skips the interactive picker and creates a new
     worktree.  Used by agent-bridge for non-interactive SSH sessions.
-    ``--auto`` implies ``--no-mux``.  Also triggered automatically when
-    stdin is not a TTY and no other non-interactive flag is set.
+    ``--new`` implies ``--no-mux``.
+
+    When stdin is not a TTY and no non-interactive flag is set
+    (``--json``, ``--base``, ``--new``), resolve errors out instead of
+    running the picker.  Use ``--new`` to create a worktree
+    non-interactively, or ``--json --worktree-id <id>`` to resume one.
     """
     use_json = getattr(args, "json", False)
     use_base = getattr(args, "base", False)
-    use_auto = getattr(args, "auto", False)
+    use_new = getattr(args, "new_worktree", False) or getattr(args, "auto", False)
 
     if use_json:
         args.no_mux = True
         # Validate required args before any I/O
         wt_id = getattr(args, "worktree_id", None)
-        use_new = getattr(args, "new_worktree", False)
         if wt_id and use_new:
             return _json_error("--worktree-id and --new are mutually exclusive")
         if not wt_id and not use_new:
@@ -497,7 +500,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         args.no_mux = True
         args.no_resume = True
 
-    if use_auto:
+    if use_new:
         args.no_mux = True
 
     with output.stdout_to_stderr():
@@ -589,13 +592,16 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             _emit_plan({"action": "wsl", "cmd": wsl_cmd})
             return 0
 
-        # Non-interactive auto-create: explicit --auto flag or TTY fallback
-        if not use_auto and not sys.stdin.isatty():
-            print("No TTY detected -- auto-creating worktree", file=sys.stderr)
-            use_auto = True
-            args.no_mux = True
+        # Non-interactive: require explicit --new to create a worktree.
+        # Without a TTY the picker can't run, so error out with guidance.
+        if not use_new and not sys.stdin.isatty():
+            output.err("No TTY detected and no worktree specified.")
+            output.err("Use --new to create a new worktree,")
+            output.err("or --json --worktree-id <id> to resume an existing one.")
+            output.err("Run 'agent-worktrees list' to see available worktrees.")
+            return 1
 
-        if use_auto:
+        if use_new:
             profile = _resolve_profile(config, args)
             return _resolve_new(config, args, profile=profile)
 
@@ -3594,9 +3600,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--base", action="store_true",
                    help="Resolve for the anchor repo (no picker, no worktree)")
     p.add_argument("--auto", action="store_true",
-                   help="Auto-create a new worktree (no picker, non-interactive)")
+                   help=argparse.SUPPRESS)  # deprecated alias for --new
     p.add_argument("--new", action="store_true", dest="new_worktree",
-                   help="Create a new worktree (use with --json for programmatic callers)")
+                   help="Create a new worktree (non-interactive, implies --no-mux)")
     p.add_argument("--profile", help="Copilot backend profile name (skips Tab toggle)")
     p.add_argument("copilot_args", nargs="*", default=[])
 
@@ -4159,6 +4165,18 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
+
+    # Reject unrecognized bare-word subcommands -- only --flags pass
+    # through to the launch flow.  Without this guard, typos and
+    # non-existent namespaces (e.g. "worktrees") silently fall into
+    # cmd_launch -> resolve, which may spawn an unwanted worktree.
+    if not args_list[0].startswith("-"):
+        # "wsl" is a known launch passthrough (handled by resolve's
+        # WSL delegation, not a subcommand in COMMAND_MAP).
+        if args_list[0] != "wsl":
+            output.err(f"Unknown subcommand: {args_list[0]}")
+            output.err("Run 'agent-worktrees --help' for available commands.")
+            return 1
 
     # Anything else (flags like --recovery, --no-update, or unknown) →
     # default launch with passthrough
