@@ -484,7 +484,13 @@ if (-not $noMux -and $psmuxCmd) {
             exit 0
         }
         Reset-SshConptyViewport
-        & psmux attach-session -t $sessName
+        # Wrap attach in try/catch so Ctrl+C (PipelineStoppedException)
+        # kills the pane but the launcher survives to check for handoffs.
+        try {
+            & psmux attach-session -t $sessName
+        } catch [System.Management.Automation.PipelineStoppedException] {
+            Write-SetupLog "psmux attach interrupted (Ctrl+C)"
+        }
 
         # We're back — either the user detached or the session ended.
         # Only run post-exit if the session is truly gone.
@@ -513,7 +519,11 @@ if (-not $noMux -and $psmuxCmd) {
                         }
                         if ($LASTEXITCODE -eq 0) {
                             Reset-SshConptyViewport
-                            & psmux attach-session -t $sessName
+                            try {
+                                & psmux attach-session -t $sessName
+                            } catch [System.Management.Automation.PipelineStoppedException] {
+                                Write-SetupLog "psmux attach (handoff relaunch) interrupted (Ctrl+C)"
+                            }
                         }
                     }
                 }
