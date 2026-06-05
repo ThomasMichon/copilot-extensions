@@ -146,10 +146,27 @@ def cmd_launch(argv: list[str]) -> int:
         return 1
 
     if plat == "windows":
-        # On Windows, use cmd.exe to run the .cmd launcher
-        sys.exit(subprocess.call(
+        # On Windows, use cmd.exe to run the .cmd launcher.
+        # Use Popen + wait so we can catch KeyboardInterrupt (Ctrl+C)
+        # and still let the child finish its cleanup. launch-session.ps1
+        # has a try/finally that checks for handoff state and runs
+        # post-exit finalization -- we must not kill it prematurely.
+        proc = subprocess.Popen(
             ["cmd.exe", "/c", str(launch_script), *passthrough],
-        ))
+        )
+        try:
+            rc = proc.wait()
+        except KeyboardInterrupt:
+            # Ctrl+C was sent to the entire console process group.
+            # The child (cmd.exe -> pwsh -> copilot) received it too.
+            # Wait for the child to finish its cleanup (handoff check,
+            # post-exit finalization) rather than killing it.
+            try:
+                rc = proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                rc = 130  # 128 + SIGINT(2)
+        sys.exit(rc)
     else:
         os.execvp("bash", ["bash", str(launch_script), *passthrough])
     return 1  # unreachable -- os.execvp replaces process
