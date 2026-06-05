@@ -125,6 +125,104 @@ class TestSessionRoutes:
         resp = client.post("/api/v1/sessions/nonexistent/resume")
         assert resp.status_code == 404
 
+    @patch("agent_bridge.session_manager.spawn")
+    @patch("agent_bridge.session_manager.AcpClient")
+    def test_start_session_with_agent_and_worktree_id(
+        self, mock_acp_cls, mock_spawn, client, app,
+    ) -> None:
+        """Session roll: start session with agent + worktree_id."""
+        # Register a test agent via resolver
+        from agent_bridge.transport import SpawnTarget
+
+        mock_resolver = MagicMock()
+        mock_resolver.resolve.return_value = SpawnTarget(
+            type="local", cwd="/original/dir", project="test-project",
+        )
+        app.state.resolver = mock_resolver
+
+        mock_proc = MagicMock()
+        mock_proc.proc = MagicMock()
+        mock_proc.proc.pid = 99
+        mock_proc.proc.returncode = None
+        mock_proc.proc.stdin = MagicMock()
+        mock_proc.proc.stdout = MagicMock()
+        mock_proc.proc.stderr = MagicMock()
+        mock_proc.proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_spawn.return_value = mock_proc
+
+        mock_client = MagicMock()
+        mock_client.is_running = True
+        mock_client.pid = 99
+        mock_client.start = AsyncMock()
+        mock_client.new_session = AsyncMock(return_value="acp-456")
+        mock_client.shutdown = AsyncMock()
+        mock_client.cancel_prompt = AsyncMock()
+        mock_acp_cls.return_value = mock_client
+
+        resp = client.post(
+            "/api/v1/sessions",
+            json={
+                "agent": "test-agent",
+                "worktree_id": "lambda-core-wsl-20250101-120000-abc1",
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert "session_id" in data
+        assert data["status"] == "idle"
+
+        # Verify the resolved target got worktree_id set
+        spawn_call = mock_spawn.call_args
+        target = spawn_call.args[0]
+        assert target.worktree_id == "lambda-core-wsl-20250101-120000-abc1"
+
+    @patch("agent_bridge.session_manager.spawn")
+    @patch("agent_bridge.session_manager.AcpClient")
+    def test_start_session_with_agent_and_target_dir(
+        self, mock_acp_cls, mock_spawn, client, app,
+    ) -> None:
+        """Session roll: start session with agent + target_dir."""
+        from agent_bridge.transport import SpawnTarget
+
+        mock_resolver = MagicMock()
+        mock_resolver.resolve.return_value = SpawnTarget(
+            type="local", cwd="/original/dir",
+        )
+        app.state.resolver = mock_resolver
+
+        mock_proc = MagicMock()
+        mock_proc.proc = MagicMock()
+        mock_proc.proc.pid = 100
+        mock_proc.proc.returncode = None
+        mock_proc.proc.stdin = MagicMock()
+        mock_proc.proc.stdout = MagicMock()
+        mock_proc.proc.stderr = MagicMock()
+        mock_proc.proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_spawn.return_value = mock_proc
+
+        mock_client = MagicMock()
+        mock_client.is_running = True
+        mock_client.pid = 100
+        mock_client.start = AsyncMock()
+        mock_client.new_session = AsyncMock(return_value="acp-789")
+        mock_client.shutdown = AsyncMock()
+        mock_client.cancel_prompt = AsyncMock()
+        mock_acp_cls.return_value = mock_client
+
+        resp = client.post(
+            "/api/v1/sessions",
+            json={
+                "agent": "test-agent",
+                "target_dir": "/worktree/path",
+            },
+        )
+        assert resp.status_code == 201
+
+        # Verify the resolved target got cwd overridden
+        spawn_call = mock_spawn.call_args
+        target = spawn_call.args[0]
+        assert target.cwd == "/worktree/path"
+
 
 class TestAgentRoutes:
     """Agent registry routes."""

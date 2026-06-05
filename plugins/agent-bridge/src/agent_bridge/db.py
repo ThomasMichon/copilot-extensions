@@ -211,6 +211,15 @@ class Database:
             (acp_session_id, session_id),
         )
 
+    def update_session_target(
+        self, session_id: str, target_json: str, target_dir: str | None = None,
+    ) -> None:
+        """Persist updated target (e.g. after spawn resolves worktree_id/cwd)."""
+        self.execute_write(
+            "UPDATE sessions SET target_json=?, target_dir=? WHERE id=?",
+            (target_json, target_dir, session_id),
+        )
+
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         rows = self.execute_read("SELECT * FROM sessions WHERE id=?", (session_id,))
         if rows:

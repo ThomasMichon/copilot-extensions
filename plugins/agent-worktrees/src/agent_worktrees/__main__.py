@@ -588,6 +588,20 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             output.err("Run 'agent-worktrees list' to see available worktrees.")
             return 1
 
+        # Non-interactive resume by worktree ID (used by agent-bridge SSH
+        # for session roll -- resume existing worktree without creating new).
+        wt_id_noninteractive = getattr(args, "worktree_id", None)
+        if wt_id_noninteractive:
+            wt_id_noninteractive = _resolve_worktree_id(wt_id_noninteractive)
+            yaml_path = cfg.tracking_dir() / f"{wt_id_noninteractive}.yaml"
+            if not yaml_path.exists():
+                output.err(f"Worktree not found: {wt_id_noninteractive}")
+                return 1
+            record = tracking.load_record(yaml_path)
+            args.no_mux = True
+            profile = _resolve_profile(config, args)
+            return _resolve_resume(record, config, args, profile=profile)
+
         if use_new:
             profile = _resolve_profile(config, args)
             return _resolve_new(config, args, profile=profile)
