@@ -245,7 +245,7 @@ fi
 # Subcommands that agent_worktrees's main() handles directly — these
 # must NOT fall through to the resolve→picker flow.  Keep in sync with
 # COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
-_DIRECT_COMMANDS="services agent-worktrees resolve post-exit finalize mark-complete status list create cleanup validate install register uninstall update install-status deploy-instructions get pre-launch dev handoff register-session deregister-session"
+_DIRECT_COMMANDS="services repos agent-worktrees resolve post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch dev handoff register-session deregister-session backfill-sessions anchor-check"
 if [[ $# -gt 0 ]]; then
     for _dc in $_DIRECT_COMMANDS; do
         if [[ "$1" == "$_dc" ]]; then

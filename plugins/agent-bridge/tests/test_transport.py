@@ -60,7 +60,7 @@ class TestBuildRemoteCmd:
     """Tests for _build_remote_cmd -- remote command string construction."""
 
     def test_project_uses_binstub(self):
-        """With project, should use binstub with --auto --no-mux --acp --stdio."""
+        """With project, should use binstub with --new --no-mux --acp --stdio."""
         target = SpawnTarget(
             type="ssh", host="server-a", user="deploy",
             project="my-project",
@@ -68,7 +68,7 @@ class TestBuildRemoteCmd:
         )
         cmd = _build_remote_cmd(target)
         assert "my-project" in cmd
-        assert "--auto" in cmd
+        assert "--new" in cmd
         assert "--no-mux" in cmd
         assert "--acp" in cmd
         assert "--stdio" in cmd
@@ -199,7 +199,7 @@ class TestSpawnSsh:
 
         remote_cmd = mock_manager.open_stdio_channel.call_args[0][1]
         assert "my-project" in remote_cmd
-        assert "--auto" in remote_cmd
+        assert "--new" in remote_cmd
         assert "--no-mux" in remote_cmd
         assert "--acp" in remote_cmd
         assert "--allow-all" in remote_cmd
