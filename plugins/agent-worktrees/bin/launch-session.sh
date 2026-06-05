@@ -273,7 +273,7 @@ if [[ "$ACTION" == "none" ]]; then
     exit "$EXIT_CODE"
 fi
 
-if [[ "$ACTION" == "wsl" || "$ACTION" == "exec" ]]; then
+if [[ "$ACTION" == "exec" ]]; then
     WORK_DIR=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('work_dir',''))")
     POST_EXIT=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('post_exit') else '0')")
     WORKTREE_ID=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('worktree_id') or '')")
