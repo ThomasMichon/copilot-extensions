@@ -64,6 +64,58 @@ if ($env:OS -eq 'Windows_NT') {
 
 # -- Helpers -----------------------------------------------------------------
 
+# Resolve ssh-manager library path across multiple layouts.
+# Returns the path string, or $null if not found.
+function Resolve-SshManager {
+    # 1. Relative path (git checkout layout)
+    $candidate = Join-Path $PluginDir '..\..\libs\ssh-manager'
+    if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
+        return (Resolve-Path $candidate).Path
+    }
+
+    # 2. Git repo registry (~/.git-repos) -- use Python for safe YAML parsing
+    $gitRepos = Join-Path $env:USERPROFILE '.git-repos'
+    if (Test-Path $gitRepos) {
+        try {
+            $result = & python3 -c @"
+import pathlib, os
+try:
+    import yaml
+except ImportError:
+    raise SystemExit(1)
+reg = yaml.safe_load(pathlib.Path.home().joinpath('.git-repos').read_text())
+repo = (reg or {}).get('repos', {}).get('copilot-extensions', {})
+if repo:
+    p = repo.get('path', os.path.join(reg.get('srcroot', ''), 'copilot-extensions'))
+    p = os.path.expanduser(p)
+    lib = os.path.join(p, 'libs', 'ssh-manager')
+    if os.path.isfile(os.path.join(lib, 'pyproject.toml')):
+        print(lib)
+        raise SystemExit(0)
+raise SystemExit(1)
+"@ 2>$null
+            if ($LASTEXITCODE -eq 0 -and $result) {
+                return $result.Trim()
+            }
+        } catch { }
+    }
+
+    # 3. Common checkout path (repo exists but registry absent/stale)
+    $candidate = Join-Path $env:USERPROFILE 'src\copilot-extensions\libs\ssh-manager'
+    if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
+        return (Resolve-Path $candidate).Path
+    }
+
+    return $null
+}
+
+# Check if ssh-manager is already importable in the venv.
+function Test-SshManagerInstalled {
+    if (-not (Test-Path $VenvPython)) { return $false }
+    & $VenvPython -c 'from ssh_manager import SSHProfileSource, get_default_manager' 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
 function Get-AgentBridgeBin {
     $p = Join-Path $VenvDir 'Scripts\agent-bridge.exe'
     if (Test-Path $p) { return $p }
@@ -297,10 +349,16 @@ function Invoke-Install {
 
     # Install package via uv (ssh-manager library first, then agent-bridge)
     Write-Step 'Installing agent-bridge package...'
-    $SshManagerDir = (Resolve-Path (Join-Path $PluginDir '..\..\libs\ssh-manager')).Path
+    $SshManagerDir = Resolve-SshManager
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & uv pip install --python $VenvPython "$SshManagerDir" --quiet 2>&1 | Out-Null
+    if ($SshManagerDir) {
+        & uv pip install --python $VenvPython "$SshManagerDir" --quiet 2>&1 | Out-Null
+    } elseif (Test-SshManagerInstalled) {
+        Write-Step 'ssh-manager already installed in venv (marketplace layout)'
+    } else {
+        throw 'Cannot locate ssh-manager library. Clone copilot-extensions so libs/ssh-manager exists, then rerun: aperture-labs services agent-bridge update'
+    }
     & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
     $installResult = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
@@ -529,11 +587,17 @@ function Invoke-Update {
 
     # Reinstall package via uv (ssh-manager + agent-bridge)
     Write-Step 'Updating agent-bridge package...'
-    $SshManagerDir = (Resolve-Path (Join-Path $PluginDir '..\..\libs\ssh-manager')).Path
+    $SshManagerDir = Resolve-SshManager
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & uv pip install --python $VenvPython --reinstall-package ssh-manager `
-        "$SshManagerDir" --quiet 2>&1 | Out-Null
+    if ($SshManagerDir) {
+        & uv pip install --python $VenvPython --reinstall-package ssh-manager `
+            "$SshManagerDir" --quiet 2>&1 | Out-Null
+    } elseif (Test-SshManagerInstalled) {
+        Write-Step 'ssh-manager already installed in venv (marketplace layout)'
+    } else {
+        throw 'Cannot locate ssh-manager library. Clone copilot-extensions so libs/ssh-manager exists, then rerun: aperture-labs services agent-bridge update'
+    }
     & uv pip install --python $VenvPython --reinstall-package agent-bridge `
         "$PluginDir" --quiet 2>&1 | Out-Null
     $updateResult = $LASTEXITCODE
