@@ -190,11 +190,8 @@ def _age_str(started_at: str) -> str:
 
 
 def _normalize_path(p: str) -> str:
-    """Normalize for comparison."""
-    p = p.rstrip("/\\")
-    if platform.system() == "Windows":
-        return p.lower()
-    return p
+    """Normalize for comparison -- strip trailing separators."""
+    return p.rstrip("/\\")
 
 
 def _build_active_paths(
