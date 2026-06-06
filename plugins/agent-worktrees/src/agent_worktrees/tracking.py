@@ -170,6 +170,7 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         f"title: {title_val}\n"
         f"status: {record.status}\n"
         f"completed_at: {record.completed_at or 'null'}\n"
+        f"handoff_prompt: {record.handoff_prompt or 'null'}\n"
     )
 
     # Serialize sessions list -- None omitted (not yet indexed),

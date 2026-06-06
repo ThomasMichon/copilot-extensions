@@ -41,11 +41,8 @@ class SessionContext:
 
 
 def _normalize_path(p: str) -> str:
-    """Normalize a path for comparison -- lowercase on Windows, strip trailing sep."""
-    p = p.rstrip("/\\")
-    if platform.system() == "Windows":
-        return p.lower()
-    return p
+    """Normalize a path for comparison -- strip trailing separators."""
+    return p.rstrip("/\\")
 
 
 def _session_state_dir() -> Path:
@@ -179,8 +176,10 @@ def scan_sessions(worktree_paths: list[str]) -> SessionContext:
 
         # Match against worktree roots -- session cwd may be a subdirectory
         matched_path: str | None = None
+        _casefold = platform.system() == "Windows"
         for wt_path in path_set:
-            if norm_cwd == wt_path or norm_cwd.startswith(wt_path + os.sep):
+            a, b = (norm_cwd.lower(), wt_path.lower()) if _casefold else (norm_cwd, wt_path)
+            if a == b or a.startswith(b + "/") or a.startswith(b + "\\"):
                 matched_path = wt_path
                 break
 
