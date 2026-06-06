@@ -484,8 +484,6 @@ if (-not $noMux -and $psmuxCmd) {
             exit 0
         }
         Reset-SshConptyViewport
-        # Wrap attach in try/catch so Ctrl+C (PipelineStoppedException)
-        # kills the pane but the launcher survives to check for handoffs.
         try {
             & psmux attach-session -t $sessName
         } catch [System.Management.Automation.PipelineStoppedException] {
@@ -494,11 +492,6 @@ if (-not $noMux -and $psmuxCmd) {
 
         # We're back — either the user detached or the session ended.
         # Only run post-exit if the session is truly gone.
-        #
-        # NOTE: Handoff relaunch for psmux sessions is handled inside
-        # setup.ps1 (the pane command) — it loops on Ctrl+C, checks for
-        # a handoff, and relaunches copilot in the same pane.  The
-        # launcher only needs to handle post-exit finalization here.
         Write-SetupLog "psmux attach returned, checking session state"
         $null = & psmux has-session -t $sessName 2>&1
         if ($LASTEXITCODE -ne 0) {
@@ -542,9 +535,6 @@ try {
     }
 } finally {
     # ── Post-exit finalization ───────────────────────────────────────────
-    # NOTE: Handoff relaunch is handled inside setup.ps1 (the pane command)
-    # — it loops on Ctrl+C and relaunches copilot in-place.  The launcher
-    # only needs post-exit finalization.
     if ($plan.post_exit -and $plan.worktree_id) {
         & $VenvPython -m agent_worktrees post-exit $plan.worktree_id
         if ($LASTEXITCODE -ne 0) {
