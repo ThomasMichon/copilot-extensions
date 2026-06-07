@@ -357,6 +357,17 @@ if ($plan.action -eq 'none') {
     exit ([int]($plan.exit_code))
 }
 
+# ── Remote machine handoff via SSH ───────────────────────────────────────
+if ($plan.action -eq 'remote') {
+    $sshAlias = $plan.ssh_alias
+    $remoteCmd = $plan.remote_command
+    Write-SetupLog "Handing off to remote machine: $($plan.display_name) via $sshAlias"
+    Write-Host "Connecting to $($plan.display_name)..." -ForegroundColor Cyan
+    # exec ssh with TTY allocation; the remote binstub takes over
+    & ssh -t $sshAlias $remoteCmd
+    exit $LASTEXITCODE
+}
+
 if ($plan.action -ne 'exec') {
     Write-Error "Unknown action: $($plan.action)"
     exit 1
