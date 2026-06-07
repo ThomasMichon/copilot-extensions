@@ -3762,13 +3762,22 @@ def _find_repo_dir() -> Path | None:
     """
 
     # 1. Running script location -- walk up from __file__ to find .git
+    #    Only useful when running from a dev checkout inside the repo.
+    #    When installed (under ~/.agent-worktrees/), the walk would escape
+    #    the install tree and hit unrelated git repos (e.g. a stray .git
+    #    in $HOME).  Stop at the install dir boundary to prevent this.
     here = Path(__file__).resolve().parent
+    _install_root = cfg.install_dir().resolve()
     candidate = here
     for _ in range(8):  # limit traversal depth
         if (candidate / ".git").exists() or (candidate / ".git").is_file():
             return git_ops.resolve_to_anchor(candidate)
         parent = candidate.parent
         if parent == candidate:
+            break
+        # Stop before escaping the install tree -- if our code lives
+        # under ~/.agent-worktrees/, there's no project repo above it.
+        if candidate == _install_root:
             break
         candidate = parent
 
