@@ -273,6 +273,17 @@ if [[ "$ACTION" == "none" ]]; then
     exit "$EXIT_CODE"
 fi
 
+# ── Remote machine handoff via SSH ───────────────────────────────────────
+if [[ "$ACTION" == "remote" ]]; then
+    SSH_ALIAS=$(echo "$JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('ssh_alias',''))")
+    REMOTE_CMD=$(echo "$JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('remote_command',''))")
+    DISPLAY_NAME=$(echo "$JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('display_name',''))")
+    setup_log INFO "Handing off to remote machine: $DISPLAY_NAME via $SSH_ALIAS"
+    echo "Connecting to $DISPLAY_NAME..."
+    # exec ssh with TTY allocation; the remote binstub takes over
+    exec ssh -t "$SSH_ALIAS" "$REMOTE_CMD"
+fi
+
 if [[ "$ACTION" == "exec" ]]; then
     WORK_DIR=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('work_dir',''))")
     POST_EXIT=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('post_exit') else '0')")
