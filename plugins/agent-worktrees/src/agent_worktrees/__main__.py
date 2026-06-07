@@ -760,19 +760,17 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
             new_idx = len(menu_items)
             menu_items.append(MenuItem(label="✨ New worktree", kind=ItemKind.ACTION, value=("new", None)))
-            menu_items.append(MenuItem(label="📂 Base repo (no worktree)", kind=ItemKind.ACTION, value=("base", None)))
 
-            # Remote machines (SSH handoff targets) -- placed with actions
-            # so they're visible without scrolling past worktree history
+            # "Other machines" sub-menu entry (only if remotes exist)
             remote_machines = _load_remote_machines(config)
             if remote_machines:
-                for entry in remote_machines:
-                    menu_items.append(MenuItem(
-                        label=f"🖥 {entry.display_name}",
-                        subtitle=f"{entry.environment} -- {entry.role}" if entry.role else entry.environment,
-                        kind=ItemKind.ACTION,
-                        value=("remote", entry),
-                    ))
+                menu_items.append(MenuItem(
+                    label="🖥 Other machines  ▸",
+                    kind=ItemKind.ACTION,
+                    value=("machines", None),
+                ))
+
+            menu_items.append(MenuItem(label="📂 Base repo (no worktree)", kind=ItemKind.ACTION, value=("base", None)))
 
             if recent_wts:
                 menu_items.append(MenuItem(label="─── recent ─────────────────────", kind=ItemKind.SEPARATOR))
@@ -872,6 +870,13 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 })
                 return 0
 
+            # --- Other machines sub-menu ---
+            if action == "machines":
+                result_machine = _run_machine_menu(config)
+                if result_machine is not None:
+                    return result_machine
+                continue  # back to main picker
+
             # --- Resume ---
             if action == "worktree":
                 rec = value  # type: ignore[assignment]
@@ -915,6 +920,82 @@ def _run_system_menu(config: cfg.Config, args: argparse.Namespace) -> int | None
         return _system_status(config)
 
     return None
+
+
+def _run_machine_menu(config: cfg.Config) -> int | None:
+    """Show the remote machines sub-menu.
+
+    Each SSH environment on each remote machine gets its own entry
+    (e.g., Borealis Windows and Borealis WSL are separate choices).
+
+    Returns an exit code if a remote machine was selected and the plan
+    was emitted, or None to return to the main picker.
+    """
+    remote_machines = _load_remote_machines(config)
+    if not remote_machines:
+        return None
+
+    machine_items: list[MenuItem] = []
+    # Track (machine_entry, ssh_env) for each item
+    machine_values: list[tuple[cfg.MachineEntry, cfg.SSHEnvironment]] = []
+
+    for entry in remote_machines:
+        if len(entry.ssh_environments) == 1:
+            # Single environment -- show machine name only
+            ssh_env = entry.ssh_environments[0]
+            subtitle = f"{entry.environment} -- {entry.role}" if entry.role else entry.environment
+            machine_items.append(MenuItem(
+                label=f"🖥 {entry.display_name}",
+                subtitle=subtitle,
+                kind=ItemKind.NORMAL,
+                value=len(machine_values),
+            ))
+            machine_values.append((entry, ssh_env))
+        else:
+            # Multiple environments -- one entry per SSH env
+            for ssh_env in entry.ssh_environments:
+                env_label = ssh_env.name.upper() if ssh_env.name else ssh_env.alias
+                shell_tag = f" ({ssh_env.shell})" if ssh_env.shell else ""
+                machine_items.append(MenuItem(
+                    label=f"🖥 {entry.display_name} ({env_label})",
+                    subtitle=f"{ssh_env.alias}{shell_tag} -- {entry.role}" if entry.role else ssh_env.alias + shell_tag,
+                    kind=ItemKind.NORMAL,
+                    value=len(machine_values),
+                ))
+                machine_values.append((entry, ssh_env))
+
+    machine_items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
+    machine_items.append(MenuItem(
+        label="↩ Back to picker",
+        kind=ItemKind.ACTION,
+        value=-1,
+    ))
+
+    result = pick(
+        machine_items,
+        title=f"🖥 {config.repo_name.replace('-', ' ').title()} -- Other Machines",
+        subtitle="Use ↑↓, Enter to connect, Esc back",
+        default=0,
+    )
+
+    if result.selected < 0:
+        return None  # Esc -- back to picker
+
+    val = machine_items[result.selected].value
+    if val == -1:
+        return None  # "Back" item
+
+    entry, ssh_env = machine_values[val]  # type: ignore[index]
+    project = cfg.project_name()
+    print(f"   Connecting to {entry.display_name} via {ssh_env.alias}...")
+    _emit_plan({
+        "action": "remote",
+        "ssh_alias": ssh_env.alias,
+        "remote_command": project,
+        "machine": entry.key,
+        "display_name": entry.display_name,
+    })
+    return 0
 
 
 def _system_cleanup(config: cfg.Config) -> int | None:
