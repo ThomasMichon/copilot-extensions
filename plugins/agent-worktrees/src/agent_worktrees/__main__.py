@@ -762,6 +762,18 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             menu_items.append(MenuItem(label="✨ New worktree", kind=ItemKind.ACTION, value=("new", None)))
             menu_items.append(MenuItem(label="📂 Base repo (no worktree)", kind=ItemKind.ACTION, value=("base", None)))
 
+            # Remote machines (SSH handoff targets) -- placed with actions
+            # so they're visible without scrolling past worktree history
+            remote_machines = _load_remote_machines(config)
+            if remote_machines:
+                for entry in remote_machines:
+                    menu_items.append(MenuItem(
+                        label=f"🖥 {entry.display_name}",
+                        subtitle=f"{entry.environment} -- {entry.role}" if entry.role else entry.environment,
+                        kind=ItemKind.ACTION,
+                        value=("remote", entry),
+                    ))
+
             if recent_wts:
                 menu_items.append(MenuItem(label="─── recent ─────────────────────", kind=ItemKind.SEPARATOR))
             for rec, info in recent_wts:
@@ -792,22 +804,6 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             # System menu item
             menu_items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
             menu_items.append(MenuItem(label="⚙ System menu", kind=ItemKind.ACTION, value=("system", None)))
-
-            # Remote machines (SSH handoff targets)
-            remote_machines = _load_remote_machines(config)
-            if remote_machines:
-                menu_items.append(MenuItem(
-                    label="─── remote machines ────────────",
-                    kind=ItemKind.SEPARATOR,
-                ))
-                for entry in remote_machines:
-                    subtitle = f"{entry.environment} -- {entry.role}" if entry.role else entry.environment
-                    menu_items.append(MenuItem(
-                        label=f"🖥 {entry.display_name}",
-                        subtitle=subtitle,
-                        kind=ItemKind.ACTION,
-                        value=("remote", entry),
-                    ))
 
             # Build profile labels for the picker toggle
             profiles = config.copilot_profiles or [cfg.DEFAULT_PROFILE]
