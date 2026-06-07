@@ -623,10 +623,12 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             profile = _resolve_profile(config, args)
             return _resolve_new(config, args, profile=profile)
 
-        # Machine picker -- offer remote machine selection before worktrees
-        machine_rc = _try_machine_picker(config, args)
-        if machine_rc is not None:
-            return machine_rc
+        # --machine <remote> flag: skip picker entirely, emit SSH handoff
+        requested_machine = getattr(args, "machine", None)
+        if requested_machine and requested_machine != config.machine:
+            rc = _try_machine_handoff(config, requested_machine)
+            if rc is not None:
+                return rc
 
         tracking_path = cfg.tracking_dir()
         tracking_path.mkdir(parents=True, exist_ok=True)
@@ -791,6 +793,22 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             menu_items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
             menu_items.append(MenuItem(label="⚙ System menu", kind=ItemKind.ACTION, value=("system", None)))
 
+            # Remote machines (SSH handoff targets)
+            remote_machines = _load_remote_machines(config)
+            if remote_machines:
+                menu_items.append(MenuItem(
+                    label="─── remote machines ────────────",
+                    kind=ItemKind.SEPARATOR,
+                ))
+                for entry in remote_machines:
+                    subtitle = f"{entry.environment} -- {entry.role}" if entry.role else entry.environment
+                    menu_items.append(MenuItem(
+                        label=f"🖥 {entry.display_name}",
+                        subtitle=subtitle,
+                        kind=ItemKind.ACTION,
+                        value=("remote", entry),
+                    ))
+
             # Build profile labels for the picker toggle
             profiles = config.copilot_profiles or [cfg.DEFAULT_PROFILE]
             profile_labels = [p.label for p in profiles]
@@ -842,6 +860,21 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             # --- Base repo mode ---
             if action == "base":
                 return _resolve_base_repo(config, args, profile=selected_profile)
+
+            # --- Remote machine SSH handoff ---
+            if action == "remote":
+                entry = value  # type: ignore[assignment]
+                ssh_alias = _resolve_ssh_alias(entry)
+                project = cfg.project_name()
+                print(f"   Connecting to {entry.display_name} via {ssh_alias}...")
+                _emit_plan({
+                    "action": "remote",
+                    "ssh_alias": ssh_alias,
+                    "remote_command": project,
+                    "machine": entry.key,
+                    "display_name": entry.display_name,
+                })
+                return 0
 
             # --- Resume ---
             if action == "worktree":
@@ -1048,13 +1081,13 @@ def _system_pause(msg: str) -> None:
 # Machine picker -- select target machine before worktree resolution
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _load_reachable_machines(
+def _load_remote_machines(
     config: cfg.Config,
 ) -> list[cfg.MachineEntry]:
-    """Load machines from machines.yaml, filtered to ssh_ready entries.
+    """Load remote machines from machines.yaml, filtered to reachable entries.
 
-    Returns machines sorted with the local machine first.
-    The local machine is always included regardless of ssh_ready status.
+    Returns machines that are not the local machine, have ssh_ready=True,
+    and have at least one SSH environment configured.
     """
     repo = config.default_repo
     try:
@@ -1063,20 +1096,52 @@ def _load_reachable_machines(
         return []
 
     local_key = config.machine
-    result: list[cfg.MachineEntry] = []
+    return [
+        entry for key, entry in machines.items()
+        if key != local_key and entry.ssh_ready and entry.ssh_environments
+    ]
 
-    # Local machine always first
-    if local_key in machines:
-        result.append(machines[local_key])
 
-    # Remote machines with ssh_ready=True
-    for key, entry in machines.items():
-        if key == local_key:
-            continue
-        if entry.ssh_ready and entry.ssh_environments:
-            result.append(entry)
+def _try_machine_handoff(
+    config: cfg.Config,
+    machine_name: str,
+) -> int | None:
+    """Handle --machine flag for a remote machine.
 
-    return result
+    Returns an exit code if the remote plan was emitted, or None if the
+    machine wasn't found (caller should error).
+    """
+    machines = _load_remote_machines(config)
+    target = cfg.find_machine_entry(
+        {m.key: m for m in machines}, machine_name,
+    )
+    if not target:
+        output.err(f"Unknown or unreachable remote machine: {machine_name}")
+        all_machines = _load_all_machine_keys(config)
+        if all_machines:
+            output.err("Available: " + ", ".join(all_machines))
+        return 1
+
+    ssh_alias = _resolve_ssh_alias(target)
+    project = cfg.project_name()
+    _emit_plan({
+        "action": "remote",
+        "ssh_alias": ssh_alias,
+        "remote_command": project,
+        "machine": target.key,
+        "display_name": target.display_name,
+    })
+    return 0
+
+
+def _load_all_machine_keys(config: cfg.Config) -> list[str]:
+    """Load all machine keys from machines.yaml for error messages."""
+    repo = config.default_repo
+    try:
+        machines = cfg.load_machines_yaml(repo.anchor)
+        return list(machines.keys())
+    except (FileNotFoundError, ValueError):
+        return []
 
 
 def _resolve_ssh_alias(entry: cfg.MachineEntry) -> str:
@@ -1101,109 +1166,6 @@ def _resolve_ssh_alias(entry: cfg.MachineEntry) -> str:
                 return ssh_env.alias
 
     return entry.ssh_environments[0].alias
-
-
-def _pick_machine(
-    machines: list[cfg.MachineEntry],
-    local_key: str,
-    project_name: str,
-) -> cfg.MachineEntry | None:
-    """Show interactive machine picker.
-
-    Returns the selected machine entry, or None if cancelled.
-    """
-    items: list[MenuItem] = []
-    for entry in machines:
-        is_local = entry.key == local_key
-        icon = ">" if is_local else " "
-        tag = " (local)" if is_local else ""
-        label = f"{icon} {entry.display_name}{tag}"
-        subtitle = f"{entry.environment} -- {entry.role}" if entry.role else entry.environment
-        items.append(MenuItem(
-            label=label,
-            subtitle=subtitle,
-            kind=ItemKind.NORMAL,
-            value=entry,
-        ))
-
-    result = pick(
-        items,
-        title=f"  {project_name.replace('-', ' ').title()} -- Machine",
-        subtitle="Use arrow keys, Enter to select, Esc to cancel",
-        default=0,
-    )
-
-    if result.selected < 0:
-        return None
-    return items[result.selected].value  # type: ignore[return-value]
-
-
-def _try_machine_picker(
-    config: cfg.Config,
-    args: argparse.Namespace,
-) -> int | None:
-    """Run the machine picker if multiple machines are reachable.
-
-    Returns:
-        - An exit code (int) if a remote machine was selected and the
-          plan was emitted (caller should return this code).
-        - None if the local machine was selected or only one machine
-          is available (caller should proceed with local worktree picker).
-    """
-    # --machine flag bypasses interactive picker
-    requested_machine = getattr(args, "machine", None)
-    if requested_machine:
-        machines = _load_reachable_machines(config)
-        if requested_machine == config.machine:
-            return None  # local -- proceed normally
-
-        target = cfg.find_machine_entry(
-            {m.key: m for m in machines}, requested_machine,
-        )
-        if not target:
-            output.err(f"Unknown machine: {requested_machine}")
-            output.err("Available: " + ", ".join(m.key for m in machines))
-            return 1
-
-        ssh_alias = _resolve_ssh_alias(target)
-        project = cfg.project_name()
-        _emit_plan({
-            "action": "remote",
-            "ssh_alias": ssh_alias,
-            "remote_command": project,
-            "machine": target.key,
-            "display_name": target.display_name,
-        })
-        return 0
-
-    machines = _load_reachable_machines(config)
-
-    # Skip picker if only local machine (or no machines at all)
-    if len(machines) <= 1:
-        return None
-
-    project = cfg.project_name()
-    selected = _pick_machine(machines, config.machine, project)
-
-    if selected is None:
-        # Cancelled
-        _emit_plan({"action": "none", "exit_code": 0})
-        return 0
-
-    if selected.key == config.machine:
-        return None  # local -- proceed to worktree picker
-
-    # Remote machine -- emit SSH handoff plan
-    ssh_alias = _resolve_ssh_alias(selected)
-    print(f"   Connecting to {selected.display_name} via {ssh_alias}...")
-    _emit_plan({
-        "action": "remote",
-        "ssh_alias": ssh_alias,
-        "remote_command": project,
-        "machine": selected.key,
-        "display_name": selected.display_name,
-    })
-    return 0
 
 
 def _resolve_profile(
