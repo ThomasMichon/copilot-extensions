@@ -104,11 +104,22 @@ spawning a headless agent). The script must handle both modes:
    encoding failures when output is piped between processes. Use
    `[OK]`, `[>]`, `[!]` etc.
 
-5. **Custom CLI wrappers** -- if the repo uses a wrapper around
-   `copilot` (e.g., `agency copilot` for Microsoft-internal auth),
-   the wrapper must pass `--acp --stdio` through to the underlying
-   Copilot CLI. The launch command in the setup script should be
-   `<wrapper> copilot @CopilotArgs`, not bare `copilot @CopilotArgs`.
+5. **CLI wrappers** -- if the repo uses a wrapper around `copilot`
+   (e.g., for auth, MCP injection, or plugin loading), **test it in
+   ACP mode before relying on it**. Wrappers may inject flags that
+   conflict with `--acp` (e.g., `--session-id`), emit startup banners
+   to stdout, or otherwise break the JSON-RPC transport. If the wrapper
+   is not ACP-safe, call `copilot` directly in ACP mode and use
+   `.copilot/mcp.json` to register any MCP servers the wrapper would
+   normally provide. The setup script can detect ACP mode and switch
+   launch commands accordingly:
+   ```powershell
+   if ($IsAcp) {
+       copilot @CopilotArgs          # direct -- wrapper not ACP-safe
+   } else {
+       my-wrapper copilot @CopilotArgs  # wrapper adds value interactively
+   }
+   ```
 
 **ACP-compatible example:**
 
