@@ -15,6 +15,15 @@ from agent_bridge.session_manager import Session, SessionManager
 from agent_bridge.transport import SpawnTarget
 
 
+@pytest.fixture(autouse=True)
+def _isolate_local_discovery(tmp_path, monkeypatch):
+    """Prevent auto-discovery from picking up real projects.yaml."""
+    monkeypatch.setenv(
+        "AGENT_WORKTREES_PROJECTS_YAML",
+        str(tmp_path / "nonexistent-projects.yaml"),
+    )
+
+
 @pytest.fixture
 def app(tmp_path):
     """Create a FastAPI test app with real DB but mocked session starts."""
