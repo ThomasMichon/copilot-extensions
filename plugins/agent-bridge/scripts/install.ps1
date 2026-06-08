@@ -161,8 +161,31 @@ function Install-SiblingPlugins {
         $ErrorActionPreference = $prevEAP
         if ($result -eq 0) {
             Write-Ok "Sibling plugin: $name"
+            # Create binstub for sibling if it has a console_scripts entry point
+            $sibBin = Join-Path $VenvDir "Scripts\$name.exe"
+            if (-not (Test-Path $sibBin)) {
+                $sibBin = Join-Path $VenvDir "bin/$name"
+            }
+            if (Test-Path $sibBin) {
+                $sibStub = Join-Path $LocalBin "$name.cmd"
+                $sibContent = "@echo off`r`nset `"PYTHONUTF8=1`"`r`n`"$sibBin`" %*"
+                [System.IO.File]::WriteAllText($sibStub, $sibContent)
+                Write-Ok "Binstub: $sibStub"
+            }
         } else {
             Write-Warn "Sibling plugin $name install failed (non-fatal)"
+        }
+    }
+}
+
+# Remove binstubs for sibling plugins during uninstall.
+function Remove-SiblingBinstubs {
+    $siblings = @('agent-codespaces')
+    foreach ($name in $siblings) {
+        $sibStub = Join-Path $LocalBin "$name.cmd"
+        if (Test-Path $sibStub) {
+            Remove-Item -Force $sibStub
+            Write-Ok "Sibling binstub removed: $name"
         }
     }
 }
@@ -498,6 +521,8 @@ function Invoke-Uninstall {
         Remove-Item -Force $Binstub
         Write-Ok 'Binstub removed'
     }
+
+    Remove-SiblingBinstubs
 
     if (Test-Path $VenvDir) {
         Remove-Item -Recurse -Force $VenvDir

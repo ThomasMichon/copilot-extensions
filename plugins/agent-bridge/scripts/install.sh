@@ -182,13 +182,39 @@ _install_sibling_plugins() {
                 _ok "Sibling plugin: $name"
             else
                 _warn "Sibling plugin $name install failed (non-fatal)"
+                continue
             fi
         else
             if uv pip install --python "$VENV_DIR/bin/python" "$sib_dir" --quiet 2>/dev/null; then
                 _ok "Sibling plugin: $name"
             else
                 _warn "Sibling plugin $name install failed (non-fatal)"
+                continue
             fi
+        fi
+        # Create binstub for sibling if it has a console_scripts entry point
+        local sib_bin="$VENV_DIR/bin/$name"
+        if [[ -x "$sib_bin" ]]; then
+            local sib_stub="$LOCAL_BIN/$name"
+            cat > "$sib_stub" << SIBSTUB
+#!/usr/bin/env bash
+export PYTHONUTF8=1
+exec "$HOME/.agent-bridge/venv/bin/$name" "\$@"
+SIBSTUB
+            chmod +x "$sib_stub"
+            _ok "Binstub: $sib_stub"
+        fi
+    done
+}
+
+# Remove binstubs for sibling plugins during uninstall.
+_remove_sibling_binstubs() {
+    local siblings=(agent-codespaces)
+    for name in "${siblings[@]}"; do
+        local sib_stub="$LOCAL_BIN/$name"
+        if [[ -f "$sib_stub" ]]; then
+            rm -f "$sib_stub"
+            _ok "Sibling binstub removed: $name"
         fi
     done
 }
@@ -404,6 +430,8 @@ do_uninstall() {
 
     rm -f "$BINSTUB"
     _ok "Binstub removed"
+
+    _remove_sibling_binstubs
 
     if [[ -d "$VENV_DIR" ]]; then
         rm -rf "$VENV_DIR"
