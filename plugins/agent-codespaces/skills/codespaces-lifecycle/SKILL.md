@@ -22,7 +22,78 @@ description: >
 Day-to-day operations for GitHub Codespaces via agent-codespaces. For
 first-time setup and config changes, see the `codespaces-setup` skill.
 
-## SSH into a CodeSpace
+## Connecting to CodeSpaces
+
+All CodeSpace interaction should go through **agent-bridge**, not raw SSH.
+CodeSpace agents are discovered automatically via the agent-codespaces
+namespace resolver — any CodeSpace (running or stopped) is addressable
+as `codespace:<name>`.
+
+### Agent-Bridge CLI
+
+| Command | Purpose |
+|---------|---------|
+| `agent-bridge agents` | List all available agents (local + codespace) |
+| `agent-bridge send codespace:<name> "<prompt>"` | Start a new session (blocks until turn completes) |
+| `agent-bridge send <session-id> "<prompt>"` | Send follow-up prompt on existing session |
+| `agent-bridge send --no-wait <target> "<prompt>"` | Send without waiting — returns session ID immediately |
+| `agent-bridge wait <session-id>` | Block until current turn completes |
+| `agent-bridge sessions` | List all sessions with status |
+| `agent-bridge sessions --status idle` | List sessions ready for follow-up |
+| `agent-bridge stop <session-id>` | Pause session (preserves state for resume) |
+| `agent-bridge resume <session-id>` | Resume a stopped session |
+| `agent-bridge end <session-id>` | End and clean up session |
+
+### Sync pattern (default — recommended for interactive use)
+
+`agent-bridge send` blocks until the turn completes. Use when you need
+the result before continuing.
+
+```
+powershell(command: 'agent-bridge send "codespace:<name>" "<prompt>"', initial_wait: 120)
+```
+
+### Async pattern (for long-running tasks)
+
+Use `--no-wait` to dispatch and continue working.
+
+```
+powershell(mode: "async", command: 'agent-bridge send --no-wait "codespace:<name>" "<prompt>"')
+# ... continue working ...
+# [system_notification: shell completed]
+powershell(command: 'agent-bridge wait <session-id>', initial_wait: 300)
+```
+
+### Multi-turn sessions
+
+Sessions are persistent. After the first `send` creates a session, send
+follow-ups using the session ID:
+
+```bash
+agent-bridge send "codespace:<name>" "Research the auth module"
+# → Session abc123-def (keen-river) created
+
+agent-bridge send abc123-def "Now implement the changes"
+# → [response]
+
+agent-bridge end abc123-def
+```
+
+### Startup and Shutdown Behavior
+
+- **Shutdown CodeSpaces auto-start** when the bridge connects. Startup
+  takes 60–120 s; the SSH layer retries automatically (up to ~180 s).
+- **Do NOT pre-start CodeSpaces with manual SSH** — the bridge handles
+  startup end-to-end.
+- **Concurrency limit:** Max 4 active CodeSpaces. Check before creating:
+  `gh codespace list --json name,state -q '[.[] | select(.state == "Available")] | length'`
+- **Throttling:** 30 seconds between create/resume operations.
+
+## SSH (Diagnostic Only)
+
+SSH is for diagnostics and one-off commands, **not routine dispatch**.
+If you find yourself using SSH for dispatch or status checks, diagnose
+the bridge connection instead.
 
 ```bash
 # Interactive SSH session (with credential relay tunnel)
@@ -38,28 +109,18 @@ agent-codespaces ssh <codespace-name> --stdio --remote-cmd "copilot --acp --stdi
 agent-codespaces ssh <codespace-name> --no-relay
 ```
 
-SSH connections go through ssh-manager for multiplexing. The credential
-relay port is automatically forwarded via SSH `-R` unless `--no-relay`
-is specified.
-
 ## Listing and Status
 
 ```bash
-# List all active codespaces
 agent-codespaces list
 agent-codespaces list --json
-
-# Service status overview (adopted repos, config, tool availability)
 agent-codespaces status
-
-# Show version
 agent-codespaces version
 ```
 
 ## Creating and Deleting
 
 ```bash
-# Delete a codespace
 agent-codespaces delete <codespace-name>
 agent-codespaces delete <codespace-name> --force
 ```
@@ -67,6 +128,31 @@ agent-codespaces delete <codespace-name> --force
 CodeSpace creation uses `gh codespace create` with defaults from
 `codespaces.yaml`. Per-repo overrides (machine type, location) apply
 automatically based on the target repository.
+
+## Syncing Dotfiles on CodeSpaces
+
+Use `agent-codespaces ssh` to pull latest:
+```bash
+agent-codespaces ssh <name> --remote-cmd "cd /workspaces/.codespaces/.persistedshare/dotfiles && git pull origin main && bash install.sh"
+```
+
+If credential relay isn't active, use `gh cs ssh` with a token-injected URL:
+```bash
+token=$(gh auth token)
+gh cs ssh -c <name> -- "cd /workspaces/.codespaces/.persistedshare/dotfiles && git pull https://x-access-token:${token}@github.com/<user>/dotfiles.git main"
+```
+
+### Fresh clone (when .git is missing or corrupted)
+
+```bash
+token=$(gh auth token)
+gh cs ssh -c <name> -- "rm -rf /workspaces/.codespaces/.persistedshare/dotfiles && git clone https://x-access-token:${token}@github.com/<user>/dotfiles.git /workspaces/.codespaces/.persistedshare/dotfiles"
+gh cs ssh -c <name> -- "bash /workspaces/.codespaces/.persistedshare/dotfiles/install.sh"
+```
+
+> **Do NOT use `tar` or `git archive` pipes** to sync dotfiles. They
+> destroy `.git` state, introduce CRLF from Windows, and leave stale
+> files from renames/deletes. Always maintain a proper git clone.
 
 ## Credential Relay
 
@@ -97,33 +183,23 @@ All requests pass through a policy gate before reaching any source:
 - **Host allowlist** -- fnmatch-style patterns per source
 - **Resource allowlist** -- exact-match for Azure resources (az-login)
 
-Requests that fail policy checks are rejected before reaching the
-credential store.
-
 ## Agent-Bridge Integration
 
-Register active CodeSpaces as dynamic agents with agent-bridge. Each
-`Available` codespace becomes a `command`-type agent that spawns via
-`agent-codespaces ssh --stdio`.
+Register active CodeSpaces as dynamic agents with agent-bridge. Both
+Available and Shutdown CodeSpaces are included (Shutdown ones auto-start
+on connection).
 
 ```bash
-# Register codespace agents with agent-bridge
 agent-codespaces bridge register
 agent-codespaces bridge register --ttl 600
-agent-codespaces bridge register --bridge-url http://127.0.0.1:9280
-
-# Check registration status
 agent-codespaces bridge status
-
-# Remove codespace agents from agent-bridge
 agent-codespaces bridge unregister
 ```
 
 ### TTL and Refresh
 
 Registrations expire after the TTL (default: 300s). For long sessions,
-either increase the TTL or re-register periodically. Expired
-registrations are cleaned up by agent-bridge automatically.
+either increase the TTL or re-register periodically.
 
 ### Agent Naming
 
@@ -134,11 +210,16 @@ chars). Use `agent-bridge agents` to see them after registration.
 
 - **SSH hangs** -- check `gh codespace ssh --config -c <name>` works
   directly. Verify `gh auth status` is authenticated.
+- **Bridge connection fails** -- the bridge auto-starts Shutdown
+  CodeSpaces and retries SSH (up to ~180 s). If it still fails, try
+  `agent-codespaces ssh <name> --remote-cmd "echo ok" --no-relay`.
+  Check `agent-bridge status` and `~/.agent-bridge/agent-bridge-err.log`.
+- **Session fails on start** -- check `~/.agent-bridge/agent-bridge-err.log`.
+  Common cause: wrong `ssh_user` in `codespaces.yaml`.
 - **Credential relay not working** -- ensure relay port (9847) is not
   blocked. Check that `--no-relay` was not accidentally passed.
-- **Bridge registration fails** -- verify agent-bridge is running
-  (`agent-bridge status`) and the auth token exists at
-  `~/.agent-bridge/auth_token`.
+- **Quota exceeded** -- `gh codespace start` returns HTTP 400 "too many
+  codespaces running". Stop idle CodeSpaces first, then retry.
 - **"gh CLI not found"** -- install from https://cli.github.com/
 - **WSL credential slowness** -- first GCM call through PowerShell
   takes ~25s. Subsequent calls use the 300s cache.
