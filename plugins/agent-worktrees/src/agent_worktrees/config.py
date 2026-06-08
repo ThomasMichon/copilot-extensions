@@ -102,6 +102,7 @@ class MachineEntry:
     role: str = ""
     ssh_environments: list[SSHEnvironment] = field(default_factory=list)
     ssh_ready: bool = False
+    copilot: bool = True
 
 
 def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
@@ -140,6 +141,7 @@ def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
             role=data.get("role", ""),
             ssh_environments=ssh_envs,
             ssh_ready=bool(ssh_block.get("ready", False)),
+            copilot=bool(data.get("copilot", True)),
         )
     return entries
 
