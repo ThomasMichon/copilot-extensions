@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -235,13 +236,16 @@ async def _pipe_stdio(proc) -> None:
     def _forward_in() -> None:
         """Read from our stdin, write to subprocess stdin (blocking)."""
         try:
+            stdin_fd = sys.stdin.buffer.fileno()
             while True:
-                data = sys.stdin.buffer.read(4096)
+                # os.read returns as soon as any data is available (no
+                # buffering), unlike sys.stdin.buffer.read(n) which can
+                # block until n bytes arrive on a pipe.
+                data = os.read(stdin_fd, 4096)
                 if not data:
                     break
                 if proc.stdin:
                     proc.stdin.write(data)
-                    # drain() is a coroutine -- schedule from thread
                     asyncio.run_coroutine_threadsafe(
                         proc.stdin.drain(), loop
                     ).result(timeout=10)

@@ -16,6 +16,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
 import sys
@@ -74,7 +75,7 @@ class CodespaceResolver:
         """
         from agent_bridge.transport import SpawnTarget
 
-        codespaces = list_codespaces()
+        codespaces = await asyncio.to_thread(list_codespaces)
         cs = None
         for c in codespaces:
             if c.name == name:
@@ -105,7 +106,7 @@ class CodespaceResolver:
         """List all codespaces as namespace agent info."""
         from agent_bridge.agent_registry import NamespaceAgentInfo
 
-        codespaces = list_codespaces()
+        codespaces = await asyncio.to_thread(list_codespaces)
         agents = []
         for cs in codespaces:
             repo_short = cs.repository.split("/")[-1] if cs.repository else ""
@@ -135,7 +136,7 @@ class CodespaceResolver:
         Currently just checks state. Future: could start a shutdown
         codespace and wait for it to become Available.
         """
-        codespaces = list_codespaces()
+        codespaces = await asyncio.to_thread(list_codespaces)
         for cs in codespaces:
             if cs.name == name:
                 if cs.state == "Available":
