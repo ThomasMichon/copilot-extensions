@@ -11,7 +11,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     agent_name TEXT,
+    caller_id TEXT,
     target_dir TEXT,
     target_type TEXT NOT NULL DEFAULT 'local',
     target_json TEXT,
@@ -155,6 +156,18 @@ class Database:
             conn.commit()
             log.info("Schema migrated to version 3")
 
+        if from_version < 4:
+            # v3 -> v4: add caller_id for session-per-worktree affinity
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
+            if "caller_id" not in cols:
+                conn.execute("ALTER TABLE sessions ADD COLUMN caller_id TEXT")
+                log.info("Migration v3->v4: added caller_id column to sessions")
+            conn.execute(
+                "UPDATE schema_version SET version=?", (4,)
+            )
+            conn.commit()
+            log.info("Schema migrated to version 4")
+
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
         conn = self._get_conn()
@@ -181,13 +194,14 @@ class Database:
         now: float,
         config_json: str | None = None,
         target_json: str | None = None,
+        caller_id: str | None = None,
     ) -> None:
         self.execute_write(
-            "INSERT INTO sessions (id, name, agent_name, target_dir, target_type, "
-            "status, config_json, target_json, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, name, agent_name, target_dir, target_type, status,
-             config_json, target_json, now, now),
+            "INSERT INTO sessions (id, name, agent_name, caller_id, target_dir, "
+            "target_type, status, config_json, target_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, name, agent_name, caller_id, target_dir, target_type,
+             status, config_json, target_json, now, now),
         )
 
     def update_session_status(

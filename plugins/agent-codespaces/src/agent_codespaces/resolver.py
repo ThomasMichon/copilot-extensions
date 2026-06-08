@@ -97,9 +97,11 @@ class CodespaceResolver:
         spawn_cmd = _build_spawn_command(name)
         log.info("Resolved codespace:%s -> %s", name, " ".join(spawn_cmd))
 
+        config = load_merged_config()
         return SpawnTarget(
             type="command",
             spawn_command=spawn_cmd,
+            user=config.ssh_user,
         )
 
     async def list(self) -> list["NamespaceAgentInfo"]:

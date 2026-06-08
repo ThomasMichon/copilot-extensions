@@ -34,6 +34,7 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         session_id=s.session_id,
         name=s.name,
         agent_name=s.agent_name,
+        caller_id=s.caller_id,
         target_dir=s.target.cwd,
         target_type=s.target.type,
         target_host=s.target.host,
@@ -75,7 +76,9 @@ async def start_session(req: StartSessionRequest, request: Request):
             cwd=req.target_dir or ".",
         )
 
-    session = await mgr.start_session(target, agent_name=req.agent)
+    session = await mgr.start_session(
+        target, agent_name=req.agent, caller_id=req.caller_id,
+    )
 
     return StartSessionResponse(
         session_id=session.session_id,

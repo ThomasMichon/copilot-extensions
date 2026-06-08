@@ -248,7 +248,11 @@ class BridgeClient:
         return self._request("GET", f"/api/v1/sessions/{session_id}") or {}
 
     def start_session(
-        self, *, agent: str | None = None, target_dir: str | None = None
+        self,
+        *,
+        agent: str | None = None,
+        target_dir: str | None = None,
+        caller_id: str | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions"""
         body: dict[str, Any] = {}
@@ -256,6 +260,8 @@ class BridgeClient:
             body["agent"] = agent
         if target_dir:
             body["target_dir"] = target_dir
+        if caller_id:
+            body["caller_id"] = caller_id
         return self._request("POST", "/api/v1/sessions", body) or {}
 
     def submit_prompt(self, session_id: str, prompt: str) -> dict[str, Any]:

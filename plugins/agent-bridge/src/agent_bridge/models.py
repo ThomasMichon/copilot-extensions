@@ -65,6 +65,7 @@ class SessionInfo(BaseModel):
     session_id: str
     name: str
     agent_name: str | None = None
+    caller_id: str | None = None
     target_dir: str | None = None
     target_type: Literal["local", "ssh", "command"] = "local"
     target_host: str | None = None
@@ -113,6 +114,7 @@ class StartSessionRequest(BaseModel):
     target_dir: str | None = None
     topology: str | None = None
     worktree_id: str | None = None  # agent-worktrees worktree ID for session roll
+    caller_id: str | None = None  # caller identity for session affinity
 
 
 class SubmitPromptRequest(BaseModel):

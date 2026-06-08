@@ -127,10 +127,12 @@ class Session:
         name: str,
         target: SpawnTarget,
         agent_name: str | None = None,
+        caller_id: str | None = None,
     ) -> None:
         self.session_id = session_id
         self.name = name
         self.agent_name = agent_name
+        self.caller_id = caller_id
         self.target = target
         self.client: AcpClient | None = None
         self.status = SessionStatus.CREATED
@@ -194,6 +196,7 @@ class SessionManager:
                 name=row["name"],
                 target=target,
                 agent_name=row.get("agent_name"),
+                caller_id=row.get("caller_id"),
             )
             session.created_at = row["created_at"]
             session.updated_at = row["updated_at"]
@@ -232,6 +235,7 @@ class SessionManager:
         self,
         target: SpawnTarget,
         agent_name: str | None = None,
+        caller_id: str | None = None,
         permission_callback: Any | None = None,
     ) -> Session:
         """Create and start a new agent session.
@@ -243,6 +247,9 @@ class SessionManager:
         Args:
             target: Where/how to spawn the agent.
             agent_name: Optional display name for the agent.
+            caller_id: Optional caller identity (e.g. worktree ID) for
+                session affinity.  Sessions with matching (agent_name,
+                caller_id) are reused instead of creating new ones.
             permission_callback: Optional async callback for permission
                 requests. Signature: (session_id, options, tool_call) ->
                 RequestPermissionResponse. If set, auto_approve is disabled.
@@ -251,7 +258,7 @@ class SessionManager:
         name = _generate_name()
         now = time.time()
 
-        session = Session(session_id, name, target, agent_name)
+        session = Session(session_id, name, target, agent_name, caller_id=caller_id)
         session.event_log = EventLog(db=self._db, session_id=session_id)
 
         # Wire ACP events into the session's event log
@@ -264,6 +271,7 @@ class SessionManager:
             session_id=session_id,
             name=name,
             agent_name=agent_name,
+            caller_id=caller_id,
             target_dir=target.cwd,
             target_type=target.type,
             status=SessionStatus.STARTING.value,

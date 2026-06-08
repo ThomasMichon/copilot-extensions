@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from typing import Any
@@ -192,17 +193,27 @@ def _cmd_sessions(args: argparse.Namespace) -> None:
     if args.json:
         _json_out(sessions)
         return
-    # Add short timestamps
-    for s in sessions:
-        s["time"] = _short_dt(s.get("updated_at"))
-    _table(sessions, [
-        ("session_id", "ID", 14),
-        ("name", "NAME", 16),
-        ("agent_name", "AGENT", 20),
-        ("status", "STATUS", 10),
-        ("turn_count", "TURNS", 6),
-        ("time", "UPDATED", 10),
-    ])
+
+    if not sessions:
+        print("No sessions")
+        return
+
+    for i, s in enumerate(sessions):
+        if i > 0:
+            print()
+        sid = s.get("session_id", "")
+        name = s.get("name", "")
+        status = s.get("status", "")
+        agent = s.get("agent_name") or "(none)"
+        caller = s.get("caller_id") or ""
+        turns = s.get("turn_count", 0)
+        updated = _short_dt(s.get("updated_at"))
+
+        print(f"  {sid}  ({name})  [{status}]")
+        print(f"    Agent:   {agent}")
+        if caller:
+            print(f"    Caller:  {caller}")
+        print(f"    Turns:   {turns}    Updated: {updated}")
 
 
 def _cmd_send(args: argparse.Namespace) -> None:
@@ -217,7 +228,8 @@ def _cmd_send(args: argparse.Namespace) -> None:
     prompt = args.prompt
 
     # Resolve: try agent name first, then session ID
-    session_id = _resolve_target(client, target)
+    force_new = getattr(args, "new", False)
+    session_id = _resolve_target(client, target, force_new=force_new)
 
     # Get current session state to know where events start
     session_info = client.get_session(session_id)
@@ -242,10 +254,16 @@ def _cmd_send(args: argparse.Namespace) -> None:
     _stream_until_complete(client, session_id, turn_index)
 
 
-def _resolve_target(client, target: str) -> str:
+def _resolve_target(client, target: str, *, force_new: bool = False) -> str:
     """Resolve a target string to a session ID.
 
-    Tries agent name first (starts new session), then existing session ID.
+    Resolution order:
+    1. Existing session ID (exact match)
+    2. Registered agent name (exact match, e.g. ``codespace:my-cs``)
+    3. Namespace-prefixed fallback -- if *target* has no ``:`` and no
+       exact agent match, try ``<prefix>:<target>`` for each registered
+       namespace resolver.  This lets users type bare codespace names
+       instead of ``codespace:<name>``.
     """
     from .client import BridgeClientError
 
@@ -275,23 +293,100 @@ def _resolve_target(client, target: str) -> str:
         agents = client.list_agents()
         agent_names = [a.get("name", "") for a in agents]
         if target in agent_names:
-            print(f"[>] Starting session for agent '{target}'...")
-            resp = client.start_session(agent=target)
-            sid = resp.get("session_id", "")
-            name = resp.get("name", "")
-            print(f"[>] Session {sid} ({name}) created")
-
-            # Wait for session to become idle
-            _wait_for_idle(client, sid)
-            return sid
+            return _start_agent_session(client, target, force_new=force_new)
     except BridgeClientError:
         pass
+
+    # Namespace fallback: if target has no ":" prefix, try each
+    # registered namespace (e.g. "codespace:<target>").
+    if ":" not in target:
+        try:
+            agents = client.list_agents()
+            agent_names = [a.get("name", "") for a in agents]
+            # Collect unique namespace prefixes from agent names
+            prefixes = sorted({
+                n.split(":")[0]
+                for n in agent_names
+                if ":" in n
+            })
+            for prefix in prefixes:
+                candidate = f"{prefix}:{target}"
+                if candidate in agent_names:
+                    print(
+                        f"[>] Resolved '{target}' as '{candidate}'",
+                    )
+                    return _start_agent_session(client, candidate, force_new=force_new)
+            # No exact match even with prefix -- try start_session
+            # directly and let the server's resolve_async try namespace
+            # resolvers (which may do on-demand lookup).
+            for prefix in prefixes:
+                candidate = f"{prefix}:{target}"
+                try:
+                    print(
+                        f"[>] Trying '{candidate}'...",
+                    )
+                    return _start_agent_session(client, candidate, force_new=force_new)
+                except (BridgeClientError, SystemExit):
+                    continue
+        except BridgeClientError:
+            pass
 
     print(
         f"[FAIL] '{target}' is not a known agent name or session ID",
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+def _get_caller_id() -> str | None:
+    """Read caller identity from the environment.
+
+    Uses WORKTREE_ID (set by agent-worktrees) so that each worktree
+    gets its own session affinity with remote agents.  Falls back to
+    None if not running inside a worktree session.
+    """
+    return os.environ.get("WORKTREE_ID")
+
+
+def _start_agent_session(client, agent_name: str, *, force_new: bool = False) -> str:
+    """Start or reuse a session for a named agent.
+
+    Checks for an existing idle session with matching (agent_name,
+    caller_id) first.  If found, reuses it instead of creating a new
+    one (avoids session pollution).  Different worktrees calling the
+    same agent get separate sessions because their caller_id differs.
+
+    Pass ``force_new=True`` (``--new`` flag) to skip reuse and always
+    create a fresh session.
+    """
+    caller_id = _get_caller_id()
+
+    if not force_new:
+        try:
+            sessions = client.list_sessions(status="idle")
+            for s in sessions:
+                if (
+                    s.get("agent_name") == agent_name
+                    and s.get("caller_id") == caller_id
+                ):
+                    sid = s.get("session_id", "")
+                    name = s.get("name", "")
+                    turns = s.get("turn_count", 0)
+                    print(
+                        f"[>] Reusing session {sid} ({name}) "
+                        f"for '{agent_name}' ({turns} prior turn(s))",
+                    )
+                    return sid
+        except Exception:
+            pass  # Fall through to create new
+
+    print(f"[>] Starting session for agent '{agent_name}'...")
+    resp = client.start_session(agent=agent_name, caller_id=caller_id)
+    sid = resp.get("session_id", "")
+    name = resp.get("name", "")
+    print(f"[>] Session {sid} ({name}) created")
+    _wait_for_idle(client, sid)
+    return sid
 
 
 def _wait_for_idle(client, session_id: str, timeout: float = 30.0) -> None:
@@ -611,6 +706,10 @@ def main(argv: list[str] | None = None) -> None:
     send_p.add_argument(
         "--no-wait", action="store_true",
         help="Return immediately without waiting for response",
+    )
+    send_p.add_argument(
+        "--new", action="store_true",
+        help="Force a new session even if an idle one exists for this agent",
     )
     send_p.set_defaults(func=_cmd_send)
 
