@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import random
+import sys
 import time
 import uuid
 from typing import Any
@@ -37,6 +39,68 @@ _NOUNS = [
 
 def _generate_name() -> str:
     return f"{random.choice(_ADJECTIVES)}-{random.choice(_NOUNS)}"  # noqa: S311
+
+
+async def _cleanup_worktree(target: SpawnTarget, turn_count: int) -> None:
+    """Attempt to clean up the worktree associated with a session.
+
+    For 0-turn sessions (unused worktrees), runs agent-worktrees cleanup
+    with --include-unused to remove worktrees that have no commits. For
+    sessions with turns, logs a notice -- manual finalization is required.
+    """
+    worktree_id = target.worktree_id
+    if not worktree_id or not target.project:
+        return
+
+    if turn_count > 0:
+        log.info(
+            "Worktree %s has %d turn(s) -- skipping automatic cleanup "
+            "(manual finalization required)",
+            worktree_id, turn_count,
+        )
+        return
+
+    # 0-turn session: run cleanup --clean --include-unused to remove
+    # all accumulated unused worktrees (including this one)
+    home = os.path.expanduser("~")
+    aw_venv = os.path.join(home, ".agent-worktrees", ".venv")
+    aw_lib = os.path.join(home, ".agent-worktrees", "lib")
+
+    if sys.platform == "win32":
+        python = os.path.join(aw_venv, "Scripts", "python.exe")
+    else:
+        python = os.path.join(aw_venv, "bin", "python")
+
+    if not os.path.exists(python):
+        log.warning("Cannot cleanup worktree %s: agent-worktrees venv not found", worktree_id)
+        return
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = aw_lib
+    env["PYTHONUTF8"] = "1"
+    env["WORKTREE_PROJECT"] = target.project
+
+    cmd = [python, "-m", "agent_worktrees", "cleanup", "--clean", "--include-unused"]
+    log.info("Cleaning up unused worktrees (session %s was 0-turn): %s", worktree_id, " ".join(cmd))
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode == 0:
+            log.info("Worktree cleanup completed successfully")
+            if stdout:
+                for line in stdout.decode(errors="replace").strip().splitlines():
+                    log.debug("cleanup: %s", line)
+        else:
+            err = stderr.decode(errors="replace").strip()
+            log.warning("Worktree cleanup failed (exit %d): %s", proc.returncode, err)
+    except Exception as exc:
+        log.warning("Worktree cleanup error: %s", exc)
 
 
 def _default_cwd(target: SpawnTarget) -> str:
@@ -445,6 +509,9 @@ class SessionManager:
             await session.client.shutdown()
             session.client = None
 
+        # Clean up unused worktrees (0-turn sessions from crash-loops)
+        await _cleanup_worktree(session.target, session.turn_count)
+
         session.status = SessionStatus.STOPPED
         now = time.time()
         self._db.update_session_status(session_id, SessionStatus.STOPPED.value, now)
@@ -467,6 +534,9 @@ class SessionManager:
         if session.client:
             await session.client.shutdown()
             session.client = None
+
+        # Clean up unused worktrees (0-turn sessions from crash-loops)
+        await _cleanup_worktree(session.target, session.turn_count)
 
         session.status = SessionStatus.ENDED
         self._db.delete_session(session_id)
