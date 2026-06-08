@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import shlex
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -195,19 +196,28 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
 
     manager = ConnectionManager()
 
+    # Wrap remote commands in a login shell so the CodeSpace platform
+    # environment is loaded (GITHUB_TOKEN, gh auth state, profile.d
+    # scripts).  Non-interactive SSH commands skip /etc/profile and
+    # ~/.profile by default, which leaves tools like `copilot` and `gh`
+    # unauthenticated.
+    remote_cmd = args.remote_cmd
+    if remote_cmd:
+        remote_cmd = f"bash -l -c {shlex.quote(remote_cmd)}"
+
     async def _run() -> int:
         await manager.ensure_connected(args.name, source, port_forwards)
 
-        if args.stdio and args.remote_cmd:
+        if args.stdio and remote_cmd:
             # Structured stdio mode for agent-bridge
-            proc = await manager.open_stdio_channel(args.name, args.remote_cmd)
+            proc = await manager.open_stdio_channel(args.name, remote_cmd)
             # Pipe through to our own stdio
             await _pipe_stdio(proc)
             return proc.returncode if proc.returncode is not None else 1
 
-        if args.remote_cmd:
+        if remote_cmd:
             # Non-interactive command execution
-            result = await manager.exec_command(args.name, args.remote_cmd)
+            result = await manager.exec_command(args.name, remote_cmd)
             if result.stdout:
                 print(result.stdout)
             if result.stderr:
