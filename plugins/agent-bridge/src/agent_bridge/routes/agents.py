@@ -13,7 +13,7 @@ async def list_agents(request: Request):
     resolver = getattr(request.app.state, "resolver", None)
     if not resolver:
         return {"agents": []}
-    return {"agents": resolver.list_agents()}
+    return {"agents": await resolver.list_agents_async()}
 
 
 @router.get("/api/v1/agents/{agent_name}")
