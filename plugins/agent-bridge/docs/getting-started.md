@@ -145,18 +145,19 @@ install.ps1 update    # Windows
 install.sh update     # Linux/WSL
 ```
 
-### Via aperture-labs (facility machines)
+### Via a project binstub (if configured)
 
 ```bash
-aperture-labs services agent-bridge update
+# Project binstubs can dispatch to the installer
+<project> services agent-bridge update
 ```
 
 ## Migration from Old Installer
 
-If the machine previously used `aperture-labs services agent-bridge
-install`, the plugin installer detects this automatically: stops the old
-service, preserves config/auth/DB, and replaces the service registration
-with plugin-owned versions.
+If the machine previously used a project binstub (e.g. `<project>
+services agent-bridge install`), the plugin installer detects this
+automatically: stops the old service, preserves config/auth/DB, and
+replaces the service registration with plugin-owned versions.
 
 ## Next Steps
 

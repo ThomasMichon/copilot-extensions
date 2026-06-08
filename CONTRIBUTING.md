@@ -58,6 +58,14 @@ plugin you changed:
 | `plugins/agent-bridge/pyproject.toml` | `version` under `[project]` | Python package version; shown in `agent-bridge version` output |
 | `.github/plugin/marketplace.json` | `plugins[1].version` | Marketplace catalog entry for agent-bridge |
 
+**agent-codespaces:**
+
+| File | Field | Purpose |
+|------|-------|---------|
+| `plugins/agent-codespaces/plugin.json` | `version` | Plugin version for marketplace detection |
+| `plugins/agent-codespaces/pyproject.toml` | `version` under `[project]` | Python package version; shown in `agent-codespaces version` output |
+| `.github/plugin/marketplace.json` | `plugins[2].version` | Marketplace catalog entry for agent-codespaces |
+
 **All three files must be bumped together in the same commit.** If any
 file is out of sync:
 
@@ -128,19 +136,21 @@ from a local commit instead of a pushed one.
 ## Deploying Agent Bridge
 
 Agent Bridge is a persistent HTTP service (not a per-session plugin).
-It deploys via the **aperture-labs service framework**, not the Copilot
-CLI marketplace update flow.
+It deploys via its **own installer scripts** in
+`plugins/agent-bridge/scripts/`, not the Copilot CLI marketplace update
+flow.
 
 ### The Deployment Pipeline
 
 1. **Commit** changes in `plugins/agent-bridge/`
 2. **Bump the version** in all three files (see "Where the version lives")
 3. **Push** to `main` on GitHub: `git push origin main`
-4. **Update on each machine** via `aperture-labs services agent-bridge update`
+4. **Update on each machine** via the installer (see below)
 
-The aperture-labs installer resolves the local checkout via `~/.git-repos`,
-installs agent-bridge into a venv, deploys layered config, and restarts
-the service.
+The installer resolves the local checkout via `~/.git-repos`, installs
+agent-bridge into a venv, deploys layered config, and restarts the
+service. Project binstubs (e.g. `my-project services agent-bridge
+update`) can also dispatch to the installer.
 
 ### Platform-Specific Deployment
 
@@ -173,6 +183,52 @@ When fixing bugs or adding features that apply to both codebases:
 
 The two codebases are forked — they share structure and much of the code,
 but are not automatically synchronized.
+
+## Deploying Agent Codespaces
+
+Agent Codespaces is a session plugin with a CLI binstub. It provides the
+`codespace:<name>` namespace resolver for agent-bridge and a standalone
+`agent-codespaces` CLI for SSH transport, credential relay, and lifecycle
+management.
+
+**Note:** Agent Codespaces does not yet have marketplace installer scripts.
+The `scripts/` directory needs `init.ps1`/`init.sh` and
+`install.ps1`/`install.sh` (modeled after agent-worktrees) before
+`copilot plugin install agent-codespaces@copilot-extensions` will work.
+
+### Current Install Path (from checkout)
+
+```bash
+cd plugins/agent-codespaces
+pip install -e ".[dev]" -e "../../libs/ssh-manager[dev]"
+```
+
+This creates the `agent-codespaces` console script entry point defined in
+`pyproject.toml` `[project.scripts]`.
+
+### Version Files
+
+Bump all three files for agent-codespaces before pushing (same rule as
+other plugins):
+
+| File | Field |
+|------|-------|
+| `plugins/agent-codespaces/plugin.json` | `version` |
+| `plugins/agent-codespaces/pyproject.toml` | `version` under `[project]` |
+| `.github/plugin/marketplace.json` | `plugins[2].version` |
+
+### Future: Marketplace Install
+
+Once installer scripts are added to `plugins/agent-codespaces/scripts/`,
+the install path will be:
+
+```bash
+copilot plugin install agent-codespaces@copilot-extensions
+```
+
+The installer should create a venv at `~/.agent-codespaces/`, install the
+package and ssh-manager dependency, place a binstub in `~/.local/bin/`,
+and register the namespace resolver with agent-bridge if present.
 
 ## Code Style
 

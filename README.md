@@ -9,6 +9,7 @@ plugin marketplace for developer workflow automation.
 |--------|------|-------------|
 | [agent-worktrees](plugins/agent-worktrees/) | Session tool | Worktree isolation for concurrent Copilot CLI sessions |
 | [agent-bridge](plugins/agent-bridge/) | Persistent service | Inter-agent communication, SSH transport, machine mesh |
+| [agent-codespaces](plugins/agent-codespaces/) | Session tool + CLI | GitHub Codespaces lifecycle, SSH transport, credential relay |
 
 **Which do I need?**
 
@@ -17,9 +18,15 @@ plugin marketplace for developer workflow automation.
 - **agent-bridge** -- machines that need to talk to agents on other
   machines. Runs as an always-on HTTP service (port 9280). Requires
   agent-worktrees.
+- **agent-codespaces** -- machines that create, manage, or SSH into
+  GitHub Codespaces. Provides the `codespace:<name>` namespace resolver
+  for agent-bridge routing, credential relay (git-credential, gh-auth,
+  az-login), and SSH multiplexing via ssh-manager. Requires
+  agent-worktrees; integrates with agent-bridge for inter-agent
+  communication.
 
-Both plugins ship from this repo and install via the Copilot CLI
-marketplace. Both support **Windows** and **Linux/WSL** (macOS planned).
+All plugins ship from this repo and install via the Copilot CLI
+marketplace. All support **Windows** and **Linux/WSL** (macOS planned).
 
 ## Prerequisites
 
@@ -40,6 +47,14 @@ copilot plugin marketplace add ThomasMichon/copilot-extensions
 
 ```bash
 copilot plugin install agent-worktrees@copilot-extensions
+```
+
+Agent-codespaces does not yet have marketplace installer scripts. Install
+from the local checkout instead:
+
+```bash
+cd plugins/agent-codespaces
+pip install -e ".[dev]" -e "../../libs/ssh-manager[dev]"
 ```
 
 ### 3. Bootstrap the runtime
@@ -86,6 +101,14 @@ Agent-worktrees also auto-updates on each session launch via the
 | [Getting Started](plugins/agent-bridge/docs/getting-started.md) | Install, configure, start the service |
 | [Architecture](plugins/agent-bridge/docs/architecture.md) | Service design, API reference, deployment |
 | [Machine Configuration](plugins/agent-bridge/docs/machine-config.md) | Topology setup -- machines.yaml, acp-agents.json |
+
+### Agent Codespaces
+
+| Document | Description |
+|----------|-------------|
+| [README](plugins/agent-codespaces/README.md) | Plugin overview, CLI reference, config format |
+| [codespaces-setup](plugins/agent-codespaces/skills/codespaces-setup/SKILL.md) | First-time setup, adoption, credential relay config |
+| [codespaces-lifecycle](plugins/agent-codespaces/skills/codespaces-lifecycle/SKILL.md) | Day-to-day operations -- SSH, listing, bridge integration |
 
 ### Repo-Level
 
