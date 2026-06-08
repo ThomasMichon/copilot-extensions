@@ -57,6 +57,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import yaml
+
 from . import config as cfg
 from . import finalize as fin
 from . import git_ops
@@ -277,6 +279,7 @@ def _worktree_to_dict(
     *,
     state_info: git_ops.WorktreeStateInfo | None = None,
     mux_info: sessions.MuxInfo | None = None,
+    session_ctx: sessions.SessionContext | None = None,
 ) -> dict:
     """Serialize a WorktreeRecord to a JSON-friendly dict.
 
@@ -285,6 +288,9 @@ def _worktree_to_dict(
 
     If ``mux_info`` is provided, includes multiplexer session status
     (existence and attached client count).
+
+    If ``session_ctx`` is provided, includes session-derived metrics
+    (turn_count, session_count, latest_summary).
     """
     d: dict = {
         "id": rec.worktree_id,
@@ -311,6 +317,10 @@ def _worktree_to_dict(
         d["mux_session"] = mux_info.exists
         d["mux_clients"] = mux_info.clients
         d["mux_attached"] = mux_info.attached
+    if session_ctx is not None:
+        norm = _normalize_path(rec.worktree_path)
+        d["turn_count"] = session_ctx.turn_count.get(norm, 0)
+        d["session_count"] = session_ctx.session_count.get(norm, 0)
     return d
 
 
@@ -1846,6 +1856,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         info = _apply_tracking_override(rec, info)
         result_entry = _worktree_to_dict(
             rec, state_info=info, mux_info=mux_map.get(rec.worktree_id),
+            session_ctx=session_ctx,
         )
         # Add display helpers for table output
         short_id = rec.worktree_id[-4:] if len(rec.worktree_id) > 4 else rec.worktree_id
@@ -1941,10 +1952,21 @@ def cmd_list(args: argparse.Namespace) -> int:
         if getattr(args, "mux_details", False):
             wt_ids = [rec.worktree_id for rec in records]
             mux_map = sessions.mux_status_many(wt_ids)
+        session_ctx = sessions.scan_sessions_fast(records)
         worktrees = [
-            _worktree_to_dict(rec, mux_info=mux_map.get(rec.worktree_id))
+            _worktree_to_dict(
+                rec, mux_info=mux_map.get(rec.worktree_id),
+                session_ctx=session_ctx,
+            )
             for rec in records
         ]
+        # Enrich titles from session data (same cascade as table output)
+        for wt_dict, rec in zip(worktrees, records):
+            title = wt_dict.get("title")
+            if not title or title == "null":
+                norm = _normalize_path(rec.worktree_path)
+                title = session_ctx.latest_summary.get(norm)
+            wt_dict["title"] = title
         _json_output({"worktrees": worktrees})
         return 0
 
@@ -4074,7 +4096,12 @@ def cmd_register_session(args: argparse.Namespace) -> int:
 
 
 def cmd_deregister_session(args: argparse.Namespace) -> int:
-    """Mark a Copilot session as ended on a worktree (hook-invoked)."""
+    """Mark a Copilot session as ended on a worktree (hook-invoked).
+
+    Also captures the session summary/name from workspace.yaml and
+    persists it to the tracking YAML ``title`` field (if not already
+    set), ensuring the title survives session-state directory cleanup.
+    """
     wt_id = getattr(args, "worktree_id", None)
     session_id = getattr(args, "session_id", None)
     if not wt_id or not session_id:
@@ -4082,10 +4109,57 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
         return 1
     try:
         tracking.deregister_session(wt_id, session_id)
+        # Capture session title from workspace.yaml → tracking YAML
+        _capture_session_title(wt_id, session_id)
     except Exception as e:
         output.err(f"Failed to deregister session: {e}")
         return 1
     return 0
+
+
+def _capture_session_title(worktree_id: str, session_id: str) -> None:
+    """Read summary/name from the session's workspace.yaml and persist it
+    to the tracking YAML ``title`` field if not already set.
+
+    This ensures the worktree retains a descriptive title even after the
+    Copilot session-state directory is cleaned up.
+    """
+    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    if not yaml_path.exists():
+        return
+
+    rec = tracking.load_record(yaml_path)
+    if rec.title and rec.title != "null":
+        return  # already has a title
+
+    # Read summary/name from the session's workspace.yaml
+    session_dir = sessions._session_state_dir() / session_id
+    ws_file = session_dir / "workspace.yaml"
+    if not ws_file.exists():
+        return
+
+    try:
+        with open(ws_file, encoding="utf-8") as f:
+            ws_data = yaml.safe_load(f)
+    except Exception:
+        return
+
+    if not ws_data or not isinstance(ws_data, dict):
+        return
+
+    _placeholder = ("", "|-", "|", ">-", ">", "null", "Untitled")
+    display_text = ""
+    summary = ws_data.get("summary", "")
+    if isinstance(summary, str) and summary.strip() and summary not in _placeholder:
+        display_text = summary.strip()
+    if not display_text:
+        name = ws_data.get("name", "")
+        if isinstance(name, str) and name.strip() and name not in _placeholder:
+            display_text = name.strip()
+
+    if display_text:
+        rec.title = display_text
+        tracking.save_record(rec)
 
 
 def cmd_backfill_sessions(args: argparse.Namespace) -> int:
