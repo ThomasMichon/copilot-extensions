@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
     db = Database(db_path)
     app.state.db = db
 
-    mgr = SessionManager(db)
+    mgr = SessionManager(db, context_thresholds=cfg.context_thresholds)
     app.state.session_manager = mgr
 
     # Load topology profiles + auto-discover local agents

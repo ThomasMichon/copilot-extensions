@@ -20,7 +20,7 @@ from typing import Any
 from .acp_client import AcpClient
 from .db import Database
 from .events import EventLog
-from .models import SessionStatus
+from .models import ContextThresholds, SessionStatus
 from .transport import SpawnTarget, spawn
 
 log = logging.getLogger("agent-bridge")
@@ -137,6 +137,11 @@ class Session:
         self.client: AcpClient | None = None
         self.status = SessionStatus.CREATED
         self.turn_count = 0
+        self.context_size: int | None = None
+        self.context_used: int | None = None
+        self.usage_model: str | None = None
+        self.last_usage_at: float | None = None
+        self._crossed_thresholds: set[str] = set()
         self.created_at = time.time()
         self.updated_at = self.created_at
         self.event_log: EventLog | None = None
@@ -150,6 +155,13 @@ class Session:
             return self.client.pid
         return None
 
+    @property
+    def context_pct(self) -> float | None:
+        """Context usage as a percentage, or None if unknown."""
+        if self.context_size and self.context_used is not None:
+            return round(self.context_used / self.context_size * 100, 1)
+        return None
+
     def touch(self) -> None:
         self.updated_at = time.time()
 
@@ -159,9 +171,15 @@ class SessionManager:
 
     MAX_SESSIONS = 100
 
-    def __init__(self, db: Database) -> None:
+    def __init__(
+        self,
+        db: Database,
+        *,
+        context_thresholds: ContextThresholds | None = None,
+    ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
+        self._thresholds = context_thresholds or ContextThresholds()
         self._rehydrate()
 
     def _rehydrate(self) -> None:
@@ -227,6 +245,12 @@ class SessionManager:
             session.event_log = EventLog.from_db(self._db, sid)
             session.turn_count = len(self._db.get_turns(sid))
 
+            # Restore context usage from DB
+            session.context_size = row.get("context_size")
+            session.context_used = row.get("context_used")
+            session.usage_model = row.get("usage_model")
+            session.last_usage_at = row.get("last_usage_at")
+
             self._sessions[sid] = session
 
         log.info("Rehydrated %d sessions from DB", len(self._sessions))
@@ -265,6 +289,8 @@ class SessionManager:
         def on_acp_event(event_type: str, data: dict[str, Any]) -> None:
             if session.event_log:
                 session.event_log.append(event_type, data)
+            if event_type == "usage_update":
+                self._handle_usage_update(session, data)
 
         # Persist to DB
         self._db.create_session(
@@ -363,6 +389,8 @@ class SessionManager:
             def on_acp_event(event_type: str, data: dict[str, Any]) -> None:
                 if session.event_log:
                     session.event_log.append(event_type, data)
+                if event_type == "usage_update":
+                    self._handle_usage_update(session, data)
 
             client: AcpClient | None = None
             try:
@@ -500,6 +528,55 @@ class SessionManager:
             )
 
         session.touch()
+
+    def _handle_usage_update(
+        self, session: Session, data: dict[str, Any]
+    ) -> None:
+        """Persist context usage and emit threshold warnings."""
+        now = time.time()
+        ctx_size = data.get("context_size")
+        ctx_used = data.get("context_used")
+        model = data.get("model")
+
+        session.context_size = ctx_size
+        session.context_used = ctx_used
+        session.usage_model = model
+        session.last_usage_at = now
+
+        self._db.update_session_usage(
+            session.session_id,
+            context_size=ctx_size,
+            context_used=ctx_used,
+            usage_model=model,
+            now=now,
+        )
+
+        # Check thresholds and emit warnings
+        if ctx_size and ctx_used is not None and ctx_size > 0:
+            pct = ctx_used / ctx_size * 100
+            thresholds = self._thresholds
+
+            if pct >= thresholds.critical and "critical" not in session._crossed_thresholds:
+                session._crossed_thresholds.add("critical")
+                if session.event_log:
+                    session.event_log.append("context_critical", {
+                        "context_size": ctx_size,
+                        "context_used": ctx_used,
+                        "context_pct": round(pct, 1),
+                        "threshold": thresholds.critical,
+                        "message": "Context window usage critical -- consider handoff",
+                    })
+
+            elif pct >= thresholds.warning and "warning" not in session._crossed_thresholds:
+                session._crossed_thresholds.add("warning")
+                if session.event_log:
+                    session.event_log.append("context_warning", {
+                        "context_size": ctx_size,
+                        "context_used": ctx_used,
+                        "context_pct": round(pct, 1),
+                        "threshold": thresholds.warning,
+                        "message": "Context window usage elevated -- prepare for handoff",
+                    })
 
     async def stop_session(self, session_id: str) -> None:
         """Stop a session -- shut down ACP client, preserve state for resume."""

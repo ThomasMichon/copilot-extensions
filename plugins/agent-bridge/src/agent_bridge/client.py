@@ -247,6 +247,10 @@ class BridgeClient:
         """GET /api/v1/sessions/{id}"""
         return self._request("GET", f"/api/v1/sessions/{session_id}") or {}
 
+    def get_session_usage(self, session_id: str) -> dict[str, Any]:
+        """GET /api/v1/sessions/{id}/usage"""
+        return self._request("GET", f"/api/v1/sessions/{session_id}/usage") or {}
+
     def start_session(
         self,
         *,

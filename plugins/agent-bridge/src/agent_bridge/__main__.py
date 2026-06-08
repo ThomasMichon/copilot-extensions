@@ -1,7 +1,7 @@
 """CLI entry point for agent-bridge.
 
 Server commands:  start, status, version
-Client commands:  agents, machines, sessions, send, wait, stop, end, resume
+Client commands:  agents, machines, sessions, session-usage, send, wait, stop, end, resume
 Agent mode:       agent (run as ACP agent on stdio)
 """
 
@@ -193,7 +193,6 @@ def _cmd_sessions(args: argparse.Namespace) -> None:
     if args.json:
         _json_out(sessions)
         return
-
     if not sessions:
         print("No sessions")
         return
@@ -209,10 +208,21 @@ def _cmd_sessions(args: argparse.Namespace) -> None:
         turns = s.get("turn_count", 0)
         updated = _short_dt(s.get("updated_at"))
 
+        # Context usage
+        ctx_size = s.get("context_size")
+        ctx_used = s.get("context_used")
+        if ctx_size and ctx_used is not None:
+            pct = round(ctx_used / ctx_size * 100)
+            context = f"{ctx_used // 1000}k/{ctx_size // 1000}k ({pct}%)"
+        else:
+            context = ""
+
         print(f"  {sid}  ({name})  [{status}]")
         print(f"    Agent:   {agent}")
         if caller:
             print(f"    Caller:  {caller}")
+        if context:
+            print(f"    Context: {context}")
         print(f"    Turns:   {turns}    Updated: {updated}")
 
 
@@ -512,6 +522,37 @@ def _cmd_resume(args: argparse.Namespace) -> None:
     print(f"[OK] Session {args.session_id} resumed ({status})")
 
 
+def _cmd_session_usage(args: argparse.Namespace) -> None:
+    """Show context window usage for a session."""
+    client = _get_client()
+    usage = client.get_session_usage(args.session_id)
+    if args.json:
+        _json_out(usage)
+        return
+
+    ctx_size = usage.get("context_size")
+    ctx_used = usage.get("context_used")
+    ctx_pct = usage.get("context_pct")
+    model = usage.get("usage_model") or "(unknown)"
+    last_at = usage.get("last_usage_at") or ""
+    turns = usage.get("turn_count", 0)
+    status = usage.get("status", "")
+
+    print(f"Session:  {args.session_id} ({status})")
+    print(f"Model:    {model}")
+    print(f"Turns:    {turns}")
+    if ctx_size and ctx_used is not None:
+        print(f"Context:  {ctx_used:,} / {ctx_size:,} tokens ({ctx_pct}%)")
+        bar_width = 30
+        filled = int(bar_width * ctx_used / ctx_size)
+        bar = "#" * filled + "-" * (bar_width - filled)
+        print(f"          [{bar}]")
+    else:
+        print("Context:  (no usage data yet)")
+    if last_at:
+        print(f"Updated:  {_short_dt(last_at)}")
+
+
 def _cmd_agent(args: argparse.Namespace) -> None:
     """Run agent-bridge as an upstream ACP agent on stdio."""
     import asyncio
@@ -530,7 +571,7 @@ def _cmd_agent(args: argparse.Namespace) -> None:
     # Initialize DB and session manager
     db_path = Path(cfg.db_path).expanduser()
     db = Database(db_path)
-    sm = SessionManager(db)
+    sm = SessionManager(db, context_thresholds=cfg.context_thresholds)
 
     # Load topology/resolver (includes auto-discovered local agents)
     resolver = build_resolver(cfg)
@@ -730,6 +771,12 @@ def main(argv: list[str] | None = None) -> None:
     resume_p = sub.add_parser("resume", help="Resume a stopped session")
     resume_p.add_argument("session_id", help="Session ID")
     resume_p.set_defaults(func=_cmd_resume)
+
+    usage_p = sub.add_parser(
+        "session-usage", help="Show context window usage for a session"
+    )
+    usage_p.add_argument("session_id", help="Session ID")
+    usage_p.set_defaults(func=_cmd_session_usage)
 
     # -- Agent mode --
 

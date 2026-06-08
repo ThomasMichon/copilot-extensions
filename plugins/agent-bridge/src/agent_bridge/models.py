@@ -73,6 +73,11 @@ class SessionInfo(BaseModel):
     status: SessionStatus
     pid: int | None = None
     turn_count: int = 0
+    context_size: int | None = None
+    context_used: int | None = None
+    context_pct: float | None = None
+    usage_model: str | None = None
+    last_usage_at: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -162,6 +167,13 @@ class SseEventData(BaseModel):
 # -- Config models -----------------------------------------------------------
 
 
+class ContextThresholds(BaseModel):
+    """Configurable context window usage thresholds (percentages)."""
+
+    warning: int = 75
+    critical: int = 90
+
+
 class TopologyProfile(BaseModel):
     """A topology profile pointing to external config files."""
 
@@ -177,6 +189,7 @@ class ServiceConfig(BaseModel):
     db_path: str = "~/.agent-bridge/sessions.db"
     log_level: str = "info"
     topologies: dict[str, TopologyProfile] = Field(default_factory=dict)
+    context_thresholds: ContextThresholds = Field(default_factory=ContextThresholds)
     worktree_discovery_interval: float = Field(
         default=0,
         description="Seconds between periodic worktree discovery sweeps. "

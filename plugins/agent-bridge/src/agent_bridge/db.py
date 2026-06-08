@@ -157,11 +157,20 @@ class Database:
             log.info("Schema migrated to version 3")
 
         if from_version < 4:
-            # v3 -> v4: add caller_id for session-per-worktree affinity
+            # v3 -> v4: add caller_id + context window usage columns
             cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
             if "caller_id" not in cols:
                 conn.execute("ALTER TABLE sessions ADD COLUMN caller_id TEXT")
                 log.info("Migration v3->v4: added caller_id column to sessions")
+            for col, col_type in [
+                ("context_size", "INTEGER"),
+                ("context_used", "INTEGER"),
+                ("usage_model", "TEXT"),
+                ("last_usage_at", "REAL"),
+            ]:
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {col_type}")
+                    log.info("Migration v3->v4: added %s column to sessions", col)
             conn.execute(
                 "UPDATE schema_version SET version=?", (4,)
             )
@@ -232,6 +241,22 @@ class Database:
         self.execute_write(
             "UPDATE sessions SET target_json=?, target_dir=? WHERE id=?",
             (target_json, target_dir, session_id),
+        )
+
+    def update_session_usage(
+        self,
+        session_id: str,
+        *,
+        context_size: int | None = None,
+        context_used: int | None = None,
+        usage_model: str | None = None,
+        now: float,
+    ) -> None:
+        """Persist the latest context window usage for a session."""
+        self.execute_write(
+            "UPDATE sessions SET context_size=?, context_used=?, "
+            "usage_model=?, last_usage_at=?, updated_at=? WHERE id=?",
+            (context_size, context_used, usage_model, now, now, session_id),
         )
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
