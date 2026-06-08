@@ -159,10 +159,15 @@ async def _resolve_worktree(
         )
 
     # Set PYTHONPATH so agent_worktrees module is importable,
-    # and WORKTREE_PROJECT so it resolves the right project config
+    # and WORKTREE_PROJECT so it resolves the right project config.
+    # Clear VIRTUAL_ENV/PYTHONHOME to avoid the bridge's own venv
+    # polluting the agent-worktrees subprocess (they may use different
+    # Python versions).
     env = dict(env)
     env["PYTHONPATH"] = aw_lib
     env["PYTHONUTF8"] = "1"
+    env.pop("VIRTUAL_ENV", None)
+    env.pop("PYTHONHOME", None)
     if target.project:
         env["WORKTREE_PROJECT"] = target.project
 
@@ -226,6 +231,9 @@ async def spawn_local(target: SpawnTarget) -> AgentProcess:
     Without ``project``, runs copilot directly (legacy behavior).
     """
     env = os.environ.copy()
+    # Strip bridge's venv vars so child processes use their own Python
+    env.pop("VIRTUAL_ENV", None)
+    env.pop("PYTHONHOME", None)
     env.update(target.env)
 
     if target.project:
@@ -370,6 +378,9 @@ async def spawn_raw(target: SpawnTarget) -> AgentProcess:
         raise ValueError("Command target requires spawn_command")
 
     env = os.environ.copy()
+    # Strip bridge's venv vars so child processes use their own Python
+    env.pop("VIRTUAL_ENV", None)
+    env.pop("PYTHONHOME", None)
     env.update(target.env)
 
     args = _wrap_batch_for_windows(list(target.spawn_command), env)

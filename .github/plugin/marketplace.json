@@ -5,8 +5,8 @@
     "email": "thomas@thomasmichon.com"
   },
   "metadata": {
-    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, and developer workflow automation",
-    "version": "1.4.1-dev70"
+    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, and GitHub Codespaces management",
+    "version": "1.4.1-dev71"
   },
   "plugins": [
     {
@@ -18,8 +18,14 @@
     {
       "name": "agent-bridge",
       "description": "Persistent inter-agent communication service - session management, SSE event streaming, and agent subprocess spawning",
-      "version": "0.1.0-dev20",
+      "version": "0.1.0-dev21",
       "source": "plugins/agent-bridge"
+    },
+    {
+      "name": "agent-codespaces",
+      "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
+      "version": "0.1.0-dev2",
+      "source": "plugins/agent-codespaces"
     }
   ]
 }
