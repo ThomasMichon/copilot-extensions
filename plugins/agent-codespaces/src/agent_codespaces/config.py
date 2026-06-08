@@ -61,6 +61,7 @@ class CodespacesConfig:
     default_machine_type: str = "largePremiumLinux"
     default_location: str = "EastUs"
     dotfiles_repo: str | None = None
+    ssh_user: str = "vscode"
 
     # Credential relay
     credentials: CredentialsConfig = field(default_factory=CredentialsConfig)
@@ -173,6 +174,9 @@ def load_merged_config() -> CodespacesConfig:
             )
             merged.dotfiles_repo = defaults.get(
                 "dotfiles_repo", merged.dotfiles_repo
+            )
+            merged.ssh_user = defaults.get(
+                "ssh_user", merged.ssh_user
             )
             defaults_set = True
 
