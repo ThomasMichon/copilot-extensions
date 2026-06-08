@@ -30,20 +30,27 @@ def _json_out(data: Any) -> None:
 def _table(rows: list[dict[str, Any]], columns: list[tuple[str, str, int]]) -> None:
     """Print a simple text table.
 
-    *columns* is a list of (key, header, width) tuples.
+    *columns* is a list of (key, header, min_width) tuples.  Column widths
+    auto-expand to fit the longest value so nothing is truncated.
     """
     if not rows:
         print("(none)")
         return
 
-    header = "  ".join(h.ljust(w) for _, h, w in columns)
+    # Compute effective widths: max of min_width, header length, and longest value
+    widths = []
+    for key, hdr, min_w in columns:
+        data_w = max((len(str(row.get(key, ""))) for row in rows), default=0)
+        widths.append(max(min_w, len(hdr), data_w))
+
+    header = "  ".join(h.ljust(w) for (_, h, _), w in zip(columns, widths))
     print(header)
     print("-" * len(header))
     for row in rows:
         parts = []
-        for key, _, width in columns:
+        for (key, _, _), width in zip(columns, widths):
             val = str(row.get(key, ""))
-            parts.append(val.ljust(width)[:width])
+            parts.append(val.ljust(width))
         print("  ".join(parts))
 
 
@@ -129,13 +136,29 @@ def _cmd_agents(args: argparse.Namespace) -> None:
     if args.json:
         _json_out(agents)
         return
-    _table(agents, [
-        ("name", "AGENT", 20),
-        ("display_name", "DISPLAY", 24),
-        ("target_type", "TYPE", 6),
-        ("host", "HOST", 20),
-        ("managed", "MANAGED", 8),
-    ])
+    if not agents:
+        print("(no agents registered)")
+        return
+    for i, a in enumerate(agents):
+        name = a.get("name", "")
+        display = a.get("display_name", "")
+        target_type = a.get("target_type", "")
+        host = a.get("host", "")
+        managed = a.get("managed", False)
+        # Use display name as heading when available, otherwise raw name
+        heading = display or name
+        print(heading)
+        # Show raw name when it differs from display (e.g. codespace agents)
+        if display and name != display:
+            print(f"  Name:     {name}")
+        if target_type:
+            print(f"  Type:     {target_type}")
+        if host:
+            print(f"  Host:     {host}")
+        if managed:
+            print(f"  Managed:  {managed}")
+        if i < len(agents) - 1:
+            print()
 
 
 def _cmd_machines(args: argparse.Namespace) -> None:
