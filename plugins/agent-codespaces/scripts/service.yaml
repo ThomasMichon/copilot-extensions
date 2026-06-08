@@ -1,0 +1,39 @@
+name: agent-codespaces
+display_name: GitHub Codespaces Manager
+description: >
+  GitHub Codespaces lifecycle management, SSH transport via ssh-manager,
+  credential relay (git-credential, gh-auth, az-login), and agent-bridge
+  provider integration. Runtime at ~/.agent-codespaces/.
+
+# CLI tool with skills -- not a daemon. Deployed and updated through the
+# standard installer lifecycle. Runs on any machine with Python 3.10+,
+# Git, and the gh CLI.
+type: installed-service
+level: user
+
+runtime:
+  install_dir: "${HOME}/.agent-codespaces"
+  config_dir: "${HOME}/.agent-codespaces"
+
+prereqs:
+  - name: python3
+    notes: "Python 3.10+"
+  - name: gh
+    notes: "GitHub CLI (authenticated)"
+  - name: ssh
+    notes: "OpenSSH client"
+
+data:
+  config:
+    - path: adopted-repos.yaml
+      description: Registry of repos with codespaces.yaml
+      recovery: Re-run 'agent-codespaces config adopt' in each repo
+      notes: Stored in ~/.agent-codespaces/
+  internal:
+    - path: deploy-manifest.json
+      description: Deployment provenance (version, commit, timestamp)
+      recovery: Re-run installer
+
+maturity: alpha
+
+consumers: []

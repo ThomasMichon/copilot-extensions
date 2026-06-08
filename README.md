@@ -49,14 +49,6 @@ copilot plugin marketplace add ThomasMichon/copilot-extensions
 copilot plugin install agent-worktrees@copilot-extensions
 ```
 
-Agent-codespaces does not yet have marketplace installer scripts. Install
-from the local checkout instead:
-
-```bash
-cd plugins/agent-codespaces
-pip install -e ".[dev]" -e "../../libs/ssh-manager[dev]"
-```
-
 ### 3. Bootstrap the runtime
 
 Start a Copilot CLI session and say:
