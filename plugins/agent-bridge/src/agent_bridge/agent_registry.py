@@ -359,6 +359,11 @@ class AgentResolver:
                 else:
                     self._alias_index[env.alias] = (machine, env)
 
+        # Cache local identity for loopback detection
+        self._local_machine, self._local_platform = _detect_local_machine(
+            machines,
+        )
+
     @property
     def agents(self) -> dict[str, AgentConfig]:
         return self._agents
@@ -580,6 +585,29 @@ class AgentResolver:
                 f"'{machine.key}'. Available: {available}, "
                 f"POSIX-compatible: {posix}. "
                 "Non-binstub SSH targets require a POSIX-compatible shell."
+            )
+
+        # Loopback detection: if the resolved machine is the local machine
+        # and the SSH environment matches our platform, spawn locally instead
+        # of SSH-ing to ourselves. SSH loopback causes binstub stdout
+        # pollution that breaks ACP JSON-RPC parsing.
+        if (
+            self._local_machine
+            and machine.key == self._local_machine.key
+            and ssh_env.name == self._local_platform
+        ):
+            log.info(
+                "Loopback detected for agent '%s' (machine '%s', env '%s') "
+                "-- spawning locally instead of SSH",
+                agent_name, machine.key, ssh_env.name,
+            )
+            return SpawnTarget(
+                type="local",
+                cwd=config.cwd,
+                copilot_path=config.copilot_path,
+                copilot_args=config.copilot_args,
+                env=config.env,
+                project=config.project,
             )
 
         return SpawnTarget(

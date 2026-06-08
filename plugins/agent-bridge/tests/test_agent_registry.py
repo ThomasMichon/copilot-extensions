@@ -332,6 +332,50 @@ class TestAgentResolver:
         assert managed["managed"] is True
 
 
+    def test_resolve_loopback_returns_local(self):
+        """SSH agent targeting the local machine should resolve as local."""
+        agents = parse_agent_registry({
+            "loopback-agent": {
+                "host": "workstation",
+                "ssh_environment": "wsl",
+                "project": "my-project",
+                "description": "Same machine agent",
+            },
+        })
+        from unittest.mock import patch
+        local_machine = self.machines["workstation"]
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local_machine, "wsl"),
+        ):
+            resolver = AgentResolver(agents, self.machines)
+            target = resolver.resolve("loopback-agent")
+        assert target.type == "local"
+        assert target.host is None
+        assert target.project == "my-project"
+
+    def test_resolve_loopback_different_platform_stays_ssh(self):
+        """SSH agent targeting local machine but different platform stays SSH."""
+        agents = parse_agent_registry({
+            "cross-env-agent": {
+                "host": "workstation",
+                "ssh_environment": "windows",
+                "project": "my-project",
+                "description": "Windows env from WSL",
+            },
+        })
+        from unittest.mock import patch
+        local_machine = self.machines["workstation"]
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local_machine, "wsl"),
+        ):
+            resolver = AgentResolver(agents, self.machines)
+            target = resolver.resolve("cross-env-agent")
+        assert target.type == "ssh"
+        assert target.host == "workstation"
+
+
 class TestLoadAgentRegistry:
 
     def test_load_valid_file(self, tmp_path: Path):
