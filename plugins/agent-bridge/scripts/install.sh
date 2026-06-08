@@ -85,6 +85,19 @@ _health_check() {
     return 1
 }
 
+# Wait until the port is free (no listener). Returns 0 once clear, 1 on timeout.
+_wait_port_free() {
+    local retries=10
+    for i in $(seq 1 $retries); do
+        if ! ss -tlnp 2>/dev/null | grep -q ":${PORT} " && \
+           ! curl -sf "http://127.0.0.1:${PORT}/health" > /dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
 # Resolve ssh-manager library path across multiple layouts.
 # Prints the resolved directory path to stdout (nothing else).
 # Returns 0 if found, 1 if not.
@@ -211,6 +224,7 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=$venv_bridge start
+ExecStopPost=/bin/sleep 2
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$INSTALL_DIR
@@ -422,6 +436,7 @@ do_stop() {
         if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
             _step "Stopping agent-bridge via systemd..."
             systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
+            _wait_port_free || _warn "Port $PORT still in use after stop"
             _ok "agent-bridge stopped (systemd)"
             rm -f "$PID_FILE"
             return
@@ -432,7 +447,7 @@ do_stop() {
     if pid=$(_get_pid); then
         _step "Stopping agent-bridge (pid=$pid)..."
         kill "$pid" 2>/dev/null || true
-        sleep 1
+        _wait_port_free || _warn "Port $PORT still in use after stop"
         rm -f "$PID_FILE"
         _ok "agent-bridge stopped"
     else

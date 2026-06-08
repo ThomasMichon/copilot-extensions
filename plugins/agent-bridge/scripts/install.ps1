@@ -359,16 +359,26 @@ function Invoke-Install {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     if ($SshManagerDir) {
-        & uv pip install --python $VenvPython "$SshManagerDir" --quiet 2>&1 | Out-Null
+        $sshOut = & uv pip install --python $VenvPython "$SshManagerDir" --quiet 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Fail "ssh-manager install failed (exit $LASTEXITCODE)"
+            if ($sshOut) { Write-Host ($sshOut | Out-String) }
+            throw 'ssh-manager install failed'
+        }
     } elseif (Test-SshManagerInstalled) {
         Write-Step 'ssh-manager already installed in venv (marketplace layout)'
     } else {
         throw 'Cannot locate ssh-manager library. Clone copilot-extensions so libs/ssh-manager exists, then rerun: aperture-labs services agent-bridge update'
     }
-    & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
+    $bridgeOut = & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1
     $installResult = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
-    if ($installResult -ne 0) { throw 'Package install failed' }
+    if ($installResult -ne 0) {
+        Write-Fail "Package install failed (exit $installResult)"
+        if ($bridgeOut) { Write-Host ($bridgeOut | Out-String) }
+        throw 'Package install failed'
+    }
     Write-Ok 'Package installed'
 
     # Create binstub
@@ -597,18 +607,28 @@ function Invoke-Update {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     if ($SshManagerDir) {
-        & uv pip install --python $VenvPython --reinstall-package ssh-manager `
-            "$SshManagerDir" --quiet 2>&1 | Out-Null
+        $sshOut = & uv pip install --python $VenvPython --reinstall-package ssh-manager `
+            "$SshManagerDir" --quiet 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Fail "ssh-manager update failed (exit $LASTEXITCODE)"
+            if ($sshOut) { Write-Host ($sshOut | Out-String) }
+            throw 'ssh-manager update failed'
+        }
     } elseif (Test-SshManagerInstalled) {
         Write-Step 'ssh-manager already installed in venv (marketplace layout)'
     } else {
         throw 'Cannot locate ssh-manager library. Clone copilot-extensions so libs/ssh-manager exists, then rerun: aperture-labs services agent-bridge update'
     }
-    & uv pip install --python $VenvPython --reinstall-package agent-bridge `
-        "$PluginDir" --quiet 2>&1 | Out-Null
+    $bridgeOut = & uv pip install --python $VenvPython --reinstall-package agent-bridge `
+        "$PluginDir" --quiet 2>&1
     $updateResult = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
-    if ($updateResult -ne 0) { throw 'Package update failed' }
+    if ($updateResult -ne 0) {
+        Write-Fail "Package update failed (exit $updateResult)"
+        if ($bridgeOut) { Write-Host ($bridgeOut | Out-String) }
+        throw 'Package update failed'
+    }
     Write-Ok 'Package updated'
 
     # Update binstub
