@@ -188,13 +188,15 @@ def classify_worktree(
     effective_branch = actual_branch if drift else branch
 
     # If a live Copilot session owns this worktree, it is ACTIVE -- period.
-    # Use simple normalization (strip trailing sep + lowercase on Windows)
-    # to match the active_paths set built by callers.
+    # active_paths stores paths stripped of trailing separators (but NOT
+    # lowercased).  Use case-insensitive lookup on Windows to match.
     if active_paths is not None:
         norm = worktree_path.rstrip("/\\")
-        if platform.system() == "Windows":
-            norm = norm.lower()
-        if norm in active_paths:
+        _casefold = platform.system() == "Windows"
+        if any(
+            norm == ap if not _casefold else norm.lower() == ap.lower()
+            for ap in active_paths
+        ):
             return WorktreeStateInfo(
                 state=WorktreeState.ACTIVE,
                 current_branch=actual_branch,
