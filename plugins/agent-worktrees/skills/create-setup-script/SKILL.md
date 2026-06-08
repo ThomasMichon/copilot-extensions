@@ -78,10 +78,42 @@ The setup script receives these from the launcher:
 ### Responsibilities
 
 The setup script **must** launch the Copilot CLI as its final action.
-Everything before that is pre-session setup:
+Everything before that is pre-session setup.
+
+### ACP Compatibility (CRITICAL)
+
+Setup scripts are invoked both for **interactive** worktree sessions
+(user at a terminal) and for **ACP stdio** sessions (agent-bridge
+spawning a headless agent). The script must handle both modes:
+
+1. **Pass through all remaining args** -- `--acp`, `--stdio`, and any
+   other flags must reach the `copilot` CLI unchanged. Never filter or
+   drop arguments you don't recognize.
+
+2. **No stdout pollution in ACP mode** -- when `--acp` is in the args,
+   the Copilot CLI communicates via JSON-RPC on stdin/stdout. Any
+   `Write-Host`, `echo`, or banner output to stdout will corrupt the
+   protocol and crash the session. Either:
+   - Detect ACP mode and skip all output: `if ($CopilotArgs -contains '--acp') { ... }`
+   - Or always write banners to stderr instead of stdout
+
+3. **No interactive prompts** -- the script must never block waiting
+   for user input. Use defaults or fail fast.
+
+4. **ASCII-only output** -- emoji and Unicode symbols in stdio cause
+   encoding failures when output is piped between processes. Use
+   `[OK]`, `[>]`, `[!]` etc.
+
+5. **Custom CLI wrappers** -- if the repo uses a wrapper around
+   `copilot` (e.g., `agency copilot` for Microsoft-internal auth),
+   the wrapper must pass `--acp --stdio` through to the underlying
+   Copilot CLI. The launch command in the setup script should be
+   `<wrapper> copilot @CopilotArgs`, not bare `copilot @CopilotArgs`.
+
+**ACP-compatible example:**
 
 ```powershell
-# setup.ps1 — example
+# setup.ps1 -- ACP-compatible
 param(
     [string]$Machine = $env:COMPUTERNAME,
     [switch]$Recovery,
@@ -89,31 +121,63 @@ param(
     [string[]]$CopilotArgs
 )
 
-# 1. Environment setup
-$env:MY_API_KEY = "..."
+$IsAcp = $CopilotArgs -contains '--acp'
 
-# 2. Dependencies
-if (-not (Test-Path node_modules)) { npm ci --quiet }
+# Pre-session setup (skip banners in ACP mode)
+if (-not $IsAcp) {
+    Write-Host "[>] Ready: $env:WORKTREE_PROJECT on $Machine"
+}
 
-# 3. Codegen / build
-# npm run build
-
-# 4. Welcome banner
-Write-Host "Ready: $env:WORKTREE_PROJECT on $Machine"
-
-# 5. Launch Copilot (REQUIRED — must be last)
+# Launch Copilot (REQUIRED -- must be last)
 copilot @CopilotArgs
 ```
 
+## Full Examples
+
+### PowerShell (setup.ps1)
+
+```powershell
+# setup.ps1
+param(
+    [string]$Machine = $env:COMPUTERNAME,
+    [switch]$Recovery,
+    [Parameter(ValueFromRemainingArguments)]
+    [string[]]$CopilotArgs
+)
+
+$IsAcp = $CopilotArgs -contains '--acp'
+
+# 1. Environment setup
+$env:MY_API_KEY = "..."
+
+# 2. Dependencies (skip in ACP mode for speed)
+if (-not $IsAcp) {
+    if (-not (Test-Path node_modules)) { npm ci --quiet }
+}
+
+# 3. Welcome banner (skip in ACP mode)
+if (-not $IsAcp) {
+    Write-Host "[>] Ready: $env:WORKTREE_PROJECT on $Machine"
+    if ($Recovery) { Write-Host "[!] RECOVERY MODE" }
+}
+
+# 4. Launch Copilot (REQUIRED -- must be last)
+copilot @CopilotArgs
+```
+
+### Bash (setup.sh)
+
 ```bash
 #!/usr/bin/env bash
-# setup.sh — example
+# setup.sh
 MACHINE="${HOSTNAME}"
+IS_ACP=false
 COPILOT_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --machine)  MACHINE="$2"; shift 2 ;;
         --recovery) shift ;;
+        --acp)      IS_ACP=true; COPILOT_ARGS+=("$1"); shift ;;
         *)          COPILOT_ARGS+=("$1"); shift ;;
     esac
 done
@@ -121,10 +185,17 @@ done
 # 1. Environment
 export MY_API_KEY="..."
 
-# 2. Dependencies
-[[ -d node_modules ]] || npm ci --quiet
+# 2. Dependencies (skip in ACP mode)
+if [[ "$IS_ACP" != "true" ]]; then
+    [[ -d node_modules ]] || npm ci --quiet
+fi
 
-# 3. Launch Copilot (REQUIRED — must be last)
+# 3. Banner (skip in ACP mode)
+if [[ "$IS_ACP" != "true" ]]; then
+    echo "[>] Ready: ${WORKTREE_PROJECT:-unknown} on $MACHINE"
+fi
+
+# 4. Launch Copilot (REQUIRED -- must be last)
 exec copilot "${COPILOT_ARGS[@]}"
 ```
 
