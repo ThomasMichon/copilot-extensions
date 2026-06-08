@@ -396,10 +396,33 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             len(all_machines), len(all_agents),
             sum(1 for a in all_agents.values() if a.auto_discovered),
         )
+        _register_namespace_resolvers(resolver)
         return resolver
 
     log.info("No topology profiles or local agents found")
     return None
+
+
+def _register_namespace_resolvers(resolver: AgentResolver) -> None:
+    """Auto-discover and register namespace resolvers from optional packages.
+
+    Each resolver is imported from its package and registered on the
+    AgentResolver. Import failures are logged at debug level and silently
+    skipped -- namespace resolvers are optional extensions.
+    """
+    # codespace: -- GitHub Codespaces (agent-codespaces package)
+    try:
+        from agent_codespaces.resolver import CodespaceResolver
+
+        resolver.register_namespace_resolver(CodespaceResolver())
+        log.info("Registered codespace: namespace resolver (agent-codespaces)")
+    except ImportError:
+        log.debug("agent-codespaces not installed -- codespace: namespace unavailable")
+    except Exception:
+        log.warning(
+            "Failed to register codespace: namespace resolver",
+            exc_info=True,
+        )
 
 
 class AgentResolver:

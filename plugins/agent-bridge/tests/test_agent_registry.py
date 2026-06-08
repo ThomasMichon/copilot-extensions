@@ -656,3 +656,111 @@ class TestProviderRegistration:
         by_name = {a["name"]: a for a in listing}
         assert by_name["explicit"]["auto_discovered"] is False
         assert by_name["discovered"]["auto_discovered"] is True
+
+
+# -- Namespace resolver tests --------------------------------------------------
+
+
+class _MockResolver:
+    """A test namespace resolver (implements NamespaceResolver protocol)."""
+
+    def __init__(self, prefix_val: str = "mock"):
+        self._prefix = prefix_val
+
+    @property
+    def prefix(self) -> str:
+        return self._prefix
+
+    async def resolve(self, name: str) -> SpawnTarget:
+        if name == "missing":
+            raise KeyError(f"Agent '{name}' not found")
+        return SpawnTarget(type="command", spawn_command=["echo", name])
+
+    async def list(self):
+        from agent_bridge.agent_registry import NamespaceAgentInfo
+        return [
+            NamespaceAgentInfo(name="test-agent", display_name="Test Agent",
+                               description="A mock agent", state="available"),
+        ]
+
+    async def ensure_ready(self, name: str) -> None:
+        if name == "unready":
+            raise RuntimeError("Agent is not ready")
+
+
+class TestNamespaceResolvers:
+    """Namespace resolver registration and dispatch."""
+
+    def test_register_and_parse(self):
+        resolver = AgentResolver({}, {})
+        mock = _MockResolver()
+        resolver.register_namespace_resolver(mock)
+        assert "mock" in resolver.namespace_resolvers
+        parsed = resolver._parse_namespaced_agent("mock:my-agent")
+        assert parsed == ("mock", "my-agent")
+
+    def test_parse_unknown_prefix_returns_none(self):
+        resolver = AgentResolver({}, {})
+        assert resolver._parse_namespaced_agent("unknown:agent") is None
+
+    def test_parse_no_colon_returns_none(self):
+        resolver = AgentResolver({}, {})
+        assert resolver._parse_namespaced_agent("plain-agent") is None
+
+    def test_duplicate_prefix_raises(self):
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_MockResolver("dup"))
+        with pytest.raises(ValueError, match="already registered"):
+            resolver.register_namespace_resolver(_MockResolver("dup"))
+
+    def test_unregister(self):
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_MockResolver())
+        assert resolver.unregister_namespace_resolver("mock") is True
+        assert resolver.unregister_namespace_resolver("mock") is False
+
+    @pytest.mark.asyncio
+    async def test_resolve_async_namespace(self):
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_MockResolver())
+        target = await resolver.resolve_async("mock:my-agent")
+        assert target.type == "command"
+        assert target.spawn_command == ["echo", "my-agent"]
+
+    @pytest.mark.asyncio
+    async def test_resolve_async_not_found(self):
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_MockResolver())
+        with pytest.raises(KeyError, match="not found"):
+            await resolver.resolve_async("mock:missing")
+
+    @pytest.mark.asyncio
+    async def test_resolve_async_ensure_ready_fails(self):
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_MockResolver())
+        with pytest.raises(RuntimeError, match="not ready"):
+            await resolver.resolve_async("mock:unready")
+
+    def test_sync_resolve_rejects_namespace(self):
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_MockResolver())
+        with pytest.raises(ValueError, match="resolve_async"):
+            resolver.resolve("mock:my-agent")
+
+    @pytest.mark.asyncio
+    async def test_list_agents_async_includes_namespace(self):
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_MockResolver())
+        agents = await resolver.list_agents_async()
+        ns_agents = [a for a in agents if a["name"].startswith("mock:")]
+        assert len(ns_agents) == 1
+        assert ns_agents[0]["name"] == "mock:test-agent"
+        assert ns_agents[0]["provider"] == "mock"
+        assert ns_agents[0]["state"] == "available"
+
+    def test_list_agents_sync_excludes_namespace(self):
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_MockResolver())
+        agents = resolver.list_agents()
+        ns_agents = [a for a in agents if a["name"].startswith("mock:")]
+        assert len(ns_agents) == 0
