@@ -135,9 +135,9 @@ class TestSessionRoutes:
         from agent_bridge.transport import SpawnTarget
 
         mock_resolver = MagicMock()
-        mock_resolver.resolve.return_value = SpawnTarget(
+        mock_resolver.resolve_async = AsyncMock(return_value=SpawnTarget(
             type="local", cwd="/original/dir", project="test-project",
-        )
+        ))
         app.state.resolver = mock_resolver
 
         mock_proc = MagicMock()
@@ -185,9 +185,9 @@ class TestSessionRoutes:
         from agent_bridge.transport import SpawnTarget
 
         mock_resolver = MagicMock()
-        mock_resolver.resolve.return_value = SpawnTarget(
+        mock_resolver.resolve_async = AsyncMock(return_value=SpawnTarget(
             type="local", cwd="/original/dir",
-        )
+        ))
         app.state.resolver = mock_resolver
 
         mock_proc = MagicMock()

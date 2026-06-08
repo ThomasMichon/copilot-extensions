@@ -5,6 +5,12 @@ with machine topology, and resolves named agents to SpawnTargets.
 
 Also auto-discovers local agents from agent-worktrees projects.yaml so
 that loopback (same-machine) communication works without explicit config.
+
+Supports **namespace resolvers** for prefixed agent names (e.g.
+``codespace:my-cs``, ``admin:task``). A ``NamespaceResolver`` is an
+async plugin that handles on-demand agent resolution for a given
+prefix -- the resolver is called at dispatch time, so agent state is
+always fresh (no TTL, no registration).
 """
 
 from __future__ import annotations
@@ -13,6 +19,7 @@ import json
 import logging
 import os
 import time
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -61,6 +68,72 @@ class AgentProvider:
     agents: dict[str, AgentConfig] = field(default_factory=dict)
     registered_at: float = 0.0  # time.monotonic()
     ttl: float = 300.0  # seconds before agents expire (0 = no expiry)
+
+
+@dataclass
+class NamespaceAgentInfo:
+    """Lightweight agent info returned by namespace resolvers."""
+
+    name: str
+    display_name: str = ""
+    description: str = ""
+    icon: str | None = None
+    state: str = "available"  # resolver-defined (e.g. "available", "shutdown")
+
+
+class NamespaceResolver(ABC):
+    """Pluggable resolver for a namespace of agents.
+
+    Namespace resolvers handle prefixed agent names (e.g.
+    ``codespace:my-cs``). When agent-bridge encounters a colon in an
+    agent name, it looks up the prefix in the namespace registry and
+    delegates resolution to the matching resolver.
+
+    Resolvers are async because they may need to query external systems
+    (e.g. ``gh codespace list``, SSH health checks) at dispatch time.
+    """
+
+    @property
+    @abstractmethod
+    def prefix(self) -> str:
+        """The namespace prefix this resolver handles (e.g. ``codespace``)."""
+        ...
+
+    @abstractmethod
+    async def resolve(self, name: str) -> SpawnTarget:
+        """Resolve a bare name (without prefix) to a SpawnTarget.
+
+        Called at dispatch time when a session targets ``prefix:name``.
+        The resolver should verify the target is reachable and return
+        a SpawnTarget ready for ``transport.spawn()``.
+
+        Raises:
+            KeyError: Agent not found.
+            ValueError: Agent exists but is not in a spawnable state.
+            RuntimeError: Transient failure (SSH unreachable, etc.).
+        """
+        ...
+
+    @abstractmethod
+    async def list(self) -> list[NamespaceAgentInfo]:
+        """Enumerate available agents in this namespace.
+
+        Called by ``agent-bridge agents`` to show all reachable targets.
+        May be slow (e.g. ``gh codespace list``); callers should cache
+        or run concurrently.
+        """
+        ...
+
+    async def ensure_ready(self, name: str) -> None:
+        """Pre-flight check: ensure the target is ready for a session.
+
+        Optional hook called before ``resolve()``. Implementations may
+        start a shutdown codespace, wait for SSH, run health checks, etc.
+        The default implementation is a no-op.
+
+        Raises:
+            RuntimeError: Target cannot be made ready.
+        """
 
 
 def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
@@ -335,6 +408,10 @@ class AgentResolver:
     Cross-references the agent registry (which agents exist and how to
     configure them) with the machine topology (which machines exist and
     how to reach them via SSH).
+
+    Supports **namespace resolvers** for prefixed agent names
+    (``prefix:name``). Register resolvers via
+    :meth:`register_namespace_resolver`.
     """
 
     def __init__(
@@ -345,6 +422,7 @@ class AgentResolver:
         self._agents = agents
         self._machines = machines
         self._providers: dict[str, AgentProvider] = {}
+        self._namespace_resolvers: dict[str, NamespaceResolver] = {}
         # Build alias -> (machine, env) index for fast lookup
         self._alias_index: dict[str, tuple[MachineConfig, SshEnvironment]] = {}
         for machine in machines.values():
@@ -459,6 +537,52 @@ class AgentResolver:
             })
         return result
 
+    # --- Namespace resolver management ---
+
+    def register_namespace_resolver(self, resolver: NamespaceResolver) -> None:
+        """Register a namespace resolver for prefixed agent names.
+
+        Example: a resolver with ``prefix="codespace"`` handles all
+        agent names matching ``codespace:<name>``.
+
+        Raises ValueError if a resolver for the same prefix is already
+        registered.
+        """
+        prefix = resolver.prefix
+        if prefix in self._namespace_resolvers:
+            raise ValueError(
+                f"Namespace resolver for '{prefix}:' already registered"
+            )
+        self._namespace_resolvers[prefix] = resolver
+        log.info("Registered namespace resolver: %s:", prefix)
+
+    def unregister_namespace_resolver(self, prefix: str) -> bool:
+        """Remove a namespace resolver. Returns True if it existed."""
+        removed = self._namespace_resolvers.pop(prefix, None)
+        if removed:
+            log.info("Unregistered namespace resolver: %s:", prefix)
+        return removed is not None
+
+    @property
+    def namespace_resolvers(self) -> dict[str, NamespaceResolver]:
+        """Read-only view of registered namespace resolvers."""
+        return dict(self._namespace_resolvers)
+
+    def _parse_namespaced_agent(
+        self, agent_name: str,
+    ) -> tuple[str, str] | None:
+        """Split ``prefix:name`` into ``(prefix, name)``.
+
+        Returns None if the name contains no colon or the prefix has no
+        registered resolver.
+        """
+        if ":" not in agent_name:
+            return None
+        prefix, _, name = agent_name.partition(":")
+        if prefix in self._namespace_resolvers and name:
+            return prefix, name
+        return None
+
     def _resolve_machine(
         self, host: str, ssh_environment: str | None = None,
     ) -> tuple[MachineConfig, SshEnvironment | None]:
@@ -495,15 +619,54 @@ class AgentResolver:
         )
 
     def resolve(self, agent_name: str) -> SpawnTarget:
-        """Resolve an agent name to a SpawnTarget.
+        """Resolve an agent name to a SpawnTarget (sync path).
 
-        Checks static/auto-discovered agents first, then provider agents.
+        Handles static, auto-discovered, and provider agents. For
+        namespaced agents (``prefix:name``), use :meth:`resolve_async`.
 
         Raises:
             KeyError: Agent not found in registry.
             ValueError: Agent is managed (non-spawnable), target machine
-                not found, or no suitable SSH environment available.
+                not found, or no suitable SSH environment available, or
+                agent name is namespaced (requires async resolution).
         """
+        # Check for namespace prefix -- require async path
+        ns = self._parse_namespaced_agent(agent_name)
+        if ns:
+            raise ValueError(
+                f"Agent '{agent_name}' uses namespace '{ns[0]}:' -- "
+                "use resolve_async() for namespaced agents"
+            )
+
+        return self._resolve_static(agent_name)
+
+    async def resolve_async(self, agent_name: str) -> SpawnTarget:
+        """Resolve an agent name to a SpawnTarget (async path).
+
+        Supports both regular agents and namespaced agents
+        (``prefix:name``). For namespaced agents, calls
+        ``ensure_ready()`` then ``resolve()`` on the namespace resolver.
+
+        Raises:
+            KeyError: Agent not found.
+            ValueError: Agent not spawnable.
+            RuntimeError: Namespace resolver failed.
+        """
+        ns = self._parse_namespaced_agent(agent_name)
+        if ns:
+            prefix, name = ns
+            resolver = self._namespace_resolvers[prefix]
+            log.info(
+                "Resolving namespaced agent %s:%s via %s resolver",
+                prefix, name, prefix,
+            )
+            await resolver.ensure_ready(name)
+            return await resolver.resolve(name)
+
+        return self._resolve_static(agent_name)
+
+    def _resolve_static(self, agent_name: str) -> SpawnTarget:
+        """Resolve via static/auto-discovered/provider registries."""
         config = self._agents.get(agent_name)
         if not config:
             # Check provider agents
@@ -656,6 +819,8 @@ class AgentResolver:
         """List all agents with metadata for the API.
 
         Includes static, auto-discovered, and live provider agents.
+        Namespace agents are NOT included here (they require async
+        enumeration). Use :meth:`list_agents_async` for the full list.
         """
         result = []
         for config in self._agents.values():
@@ -664,5 +829,46 @@ class AgentResolver:
         # Add non-conflicting provider agents
         for config in self._live_provider_agents().values():
             result.append(self._agent_to_dict(config))
+
+        return result
+
+    async def list_agents_async(self) -> list[dict[str, Any]]:
+        """List all agents including namespace-resolved agents.
+
+        Calls ``list()`` on each registered namespace resolver to
+        include dynamically discovered agents (e.g. live codespaces).
+        """
+        result = self.list_agents()
+
+        for prefix, resolver in self._namespace_resolvers.items():
+            try:
+                ns_agents = await resolver.list()
+                for agent in ns_agents:
+                    result.append({
+                        "name": f"{prefix}:{agent.name}",
+                        "display_name": agent.display_name or agent.name,
+                        "description": agent.description,
+                        "icon": agent.icon,
+                        "managed": False,
+                        "spawnable": True,
+                        "target_type": "command",
+                        "host": "",
+                        "ssh_user": None,
+                        "ssh_environment": None,
+                        "cwd": None,
+                        "copilot_path": None,
+                        "copilot_args": [],
+                        "worktree_root": None,
+                        "env": {},
+                        "project": None,
+                        "auto_discovered": False,
+                        "provider": prefix,
+                        "state": agent.state,
+                    })
+            except Exception:
+                log.warning(
+                    "Namespace resolver '%s' failed to list agents",
+                    prefix, exc_info=True,
+                )
 
         return result
