@@ -67,13 +67,19 @@ if ($env:OS -eq 'Windows_NT') {
 # Resolve ssh-manager library path across multiple layouts.
 # Returns the path string, or $null if not found.
 function Resolve-SshManager {
-    # 1. Relative path (git checkout layout)
+    # 1. Vendored inside agent-bridge (marketplace install layout)
+    $candidate = Join-Path $PluginDir 'libs\ssh-manager'
+    if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
+        return (Resolve-Path $candidate).Path
+    }
+
+    # 2. Relative path (git checkout layout)
     $candidate = Join-Path $PluginDir '..\..\libs\ssh-manager'
     if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
         return (Resolve-Path $candidate).Path
     }
 
-    # 2. Git repo registry (~/.git-repos) -- use Python for safe YAML parsing
+    # 3. Git repo registry (~/.git-repos) -- use Python for safe YAML parsing
     $gitRepos = Join-Path $env:USERPROFILE '.git-repos'
     if (Test-Path $gitRepos) {
         try {
@@ -100,7 +106,7 @@ raise SystemExit(1)
         } catch { }
     }
 
-    # 3. Common checkout path (repo exists but registry absent/stale)
+    # 4. Common checkout path (repo exists but registry absent/stale)
     $candidate = Join-Path $env:USERPROFILE 'src\copilot-extensions\libs\ssh-manager'
     if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
         return (Resolve-Path $candidate).Path
