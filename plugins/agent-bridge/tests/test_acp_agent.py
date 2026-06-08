@@ -139,13 +139,16 @@ class TestEventToAcpUpdate:
     def test_usage_update(self):
         event = SseEvent(
             id=5, event="usage_update",
-            data={"input_tokens": 100, "output_tokens": 50, "model": "gpt-4"},
+            data={
+                "input_tokens": 100, "output_tokens": 50, "model": "gpt-4",
+                "context_size": 200000, "context_used": 110000,
+            },
         )
         update = _event_to_acp_update(event)
         assert update is not None
         assert isinstance(update, UsageUpdate)
-        assert update.size == 100
-        assert update.used == 50
+        assert update.size == 200000
+        assert update.used == 110000
 
     def test_session_state_changed_returns_none(self):
         event = SseEvent(

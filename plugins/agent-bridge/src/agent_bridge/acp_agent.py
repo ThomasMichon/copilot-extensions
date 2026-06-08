@@ -131,13 +131,16 @@ def _event_to_acp_update(event: SseEvent) -> Any | None:
         )
 
     elif etype == "usage_update":
-        # Map bridge usage data to ACP UsageUpdate (size/used model)
-        input_t = data.get("input_tokens") or 0
-        output_t = data.get("output_tokens") or 0
+        # Forward context window usage as ACP UsageUpdate
+        ctx_size = data.get("context_size") or 0
+        ctx_used = data.get("context_used") or 0
         return UsageUpdate(
             session_update="usage_update",
-            size=input_t,
-            used=output_t,
+            size=ctx_size,
+            used=ctx_used,
+            input_tokens=data.get("input_tokens"),
+            output_tokens=data.get("output_tokens"),
+            model=data.get("model"),
         )
 
     return None

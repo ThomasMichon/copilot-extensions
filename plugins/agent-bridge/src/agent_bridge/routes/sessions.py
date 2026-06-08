@@ -42,6 +42,14 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         status=s.status,
         pid=s.pid,
         turn_count=s.turn_count,
+        context_size=s.context_size,
+        context_used=s.context_used,
+        context_pct=s.context_pct,
+        usage_model=s.usage_model,
+        last_usage_at=(
+            datetime.fromtimestamp(s.last_usage_at, tz=timezone.utc).isoformat()
+            if s.last_usage_at else None
+        ),
         created_at=datetime.fromtimestamp(s.created_at, tz=timezone.utc),
         updated_at=datetime.fromtimestamp(s.updated_at, tz=timezone.utc),
     )
@@ -103,6 +111,30 @@ async def get_session(session_id: str, request: Request):
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     return _session_info(session)
+
+
+@router.get("/{session_id}/usage")
+async def get_session_usage(session_id: str, request: Request):
+    """Return the full context window usage snapshot for a session."""
+    mgr: SessionManager = request.app.state.session_manager
+    session = mgr.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    from datetime import datetime, timezone
+
+    return {
+        "session_id": session.session_id,
+        "context_size": session.context_size,
+        "context_used": session.context_used,
+        "context_pct": session.context_pct,
+        "usage_model": session.usage_model,
+        "last_usage_at": (
+            datetime.fromtimestamp(session.last_usage_at, tz=timezone.utc).isoformat()
+            if session.last_usage_at else None
+        ),
+        "turn_count": session.turn_count,
+        "status": session.status.value,
+    }
 
 
 @router.post("/{session_id}/turns", response_model=SubmitPromptResponse)

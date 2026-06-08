@@ -382,6 +382,8 @@ class AcpClient:
                 "input_tokens": getattr(update, "input_tokens", None),
                 "output_tokens": getattr(update, "output_tokens", None),
                 "model": getattr(update, "model", None),
+                "context_size": update.size,
+                "context_used": update.used,
             })
 
         elif isinstance(update, SessionInfoUpdate):
