@@ -424,6 +424,18 @@ def _register_namespace_resolvers(resolver: AgentResolver) -> None:
             exc_info=True,
         )
 
+    # admin: -- elevated execution (built-in)
+    try:
+        from .admin_resolver import AdminResolver
+
+        resolver.register_namespace_resolver(AdminResolver(resolver))
+        log.info("Registered admin: namespace resolver")
+    except Exception:
+        log.warning(
+            "Failed to register admin: namespace resolver",
+            exc_info=True,
+        )
+
 
 class AgentResolver:
     """Resolves agent names to SpawnTargets using topology + registry.
