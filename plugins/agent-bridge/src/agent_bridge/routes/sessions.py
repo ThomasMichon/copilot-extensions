@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/v1/sessions", tags=["sessions"])
 
 def _session_info(s) -> SessionInfo:  # noqa: ANN001
     """Convert an internal Session to the public SessionInfo model."""
-    from datetime import datetime, UTC
+    from datetime import datetime, timezone
 
     return SessionInfo(
         session_id=s.session_id,
@@ -41,8 +41,8 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         status=s.status,
         pid=s.pid,
         turn_count=s.turn_count,
-        created_at=datetime.fromtimestamp(s.created_at, tz=UTC),
-        updated_at=datetime.fromtimestamp(s.updated_at, tz=UTC),
+        created_at=datetime.fromtimestamp(s.created_at, tz=timezone.utc),
+        updated_at=datetime.fromtimestamp(s.updated_at, tz=timezone.utc),
     )
 
 

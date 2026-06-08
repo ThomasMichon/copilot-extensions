@@ -121,7 +121,7 @@ class EventLog:
         try:
             await asyncio.wait_for(waiter.wait(), timeout=timeout)
             return self.get_events(after)
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             return []
         finally:
             self._waiters.remove(waiter)
