@@ -131,15 +131,22 @@ function Get-AgentBridgeBin {
 }
 
 function Get-RunningProcess {
-    if (-not (Test-Path $PidFile)) { return $null }
-    $pid_ = Get-Content $PidFile -ErrorAction SilentlyContinue
-    if (-not $pid_) { return $null }
-    $proc = Get-Process -Id $pid_ -ErrorAction SilentlyContinue
-    if (-not $proc) {
-        Remove-Item -Force $PidFile -ErrorAction SilentlyContinue
-        return $null
+    # Try PID file first
+    if (Test-Path $PidFile) {
+        $pid_ = Get-Content $PidFile -ErrorAction SilentlyContinue
+        if ($pid_) {
+            $proc = Get-Process -Id $pid_ -ErrorAction SilentlyContinue
+            if ($proc) { return $proc }
+            Remove-Item -Force $PidFile -ErrorAction SilentlyContinue
+        }
     }
-    return $proc
+    # Fallback: find by executable path
+    $exe = Join-Path $VenvDir 'Scripts\agent-bridge.exe'
+    if (Test-Path $exe) {
+        $proc = Get-Process | Where-Object { $_.Path -eq $exe } | Select-Object -First 1
+        if ($proc) { return $proc }
+    }
+    return $null
 }
 
 function Test-HealthCheck {
@@ -503,7 +510,15 @@ function Invoke-Stop {
 
     Write-Step "Stopping agent-bridge (pid=$($proc.Id))..."
     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
+
+    # Wait up to 10s for process to exit and release file handles
+    $waited = 0
+    while ($waited -lt 10) {
+        Start-Sleep -Seconds 1
+        $waited++
+        $check = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+        if (-not $check -or $check.HasExited) { break }
+    }
 
     $check = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
     if ($check -and -not $check.HasExited) {
