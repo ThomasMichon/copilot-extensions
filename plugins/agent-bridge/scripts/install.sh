@@ -451,7 +451,17 @@ do_stop() {
         rm -f "$PID_FILE"
         _ok "agent-bridge stopped"
     else
-        _skip "agent-bridge is not running"
+        # Last resort: find orphan by port binding (PID file lost)
+        local port_pid
+        port_pid="$(ss -tlnp 2>/dev/null | grep ":${PORT} " | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1)"
+        if [[ -n "$port_pid" ]]; then
+            _step "Stopping orphaned agent-bridge (pid=$port_pid, found by port)..."
+            kill "$port_pid" 2>/dev/null || true
+            _wait_port_free || _warn "Port $PORT still in use after stop"
+            _ok "agent-bridge stopped"
+        else
+            _skip "agent-bridge is not running"
+        fi
     fi
 }
 

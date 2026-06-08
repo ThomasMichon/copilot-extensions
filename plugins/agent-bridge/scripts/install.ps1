@@ -146,6 +146,15 @@ function Get-RunningProcess {
         $proc = Get-Process | Where-Object { $_.Path -eq $exe } | Select-Object -First 1
         if ($proc) { return $proc }
     }
+    # Last resort: find by port binding (catches orphaned processes
+    # whose PID file was lost or exe path changed during update)
+    $conn = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue |
+        Where-Object { $_.State -eq 'Listen' } |
+        Select-Object -First 1
+    if ($conn) {
+        $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+        if ($proc) { return $proc }
+    }
     return $null
 }
 
@@ -511,7 +520,7 @@ function Invoke-Stop {
     Write-Step "Stopping agent-bridge (pid=$($proc.Id))..."
     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
 
-    # Wait up to 10s for process to exit and release file handles
+    # Wait up to 10s for process to exit and release the port
     $waited = 0
     while ($waited -lt 10) {
         Start-Sleep -Seconds 1
@@ -524,6 +533,15 @@ function Invoke-Stop {
     if ($check -and -not $check.HasExited) {
         Write-Fail "Process did not stop cleanly"
         return
+    }
+
+    # Verify port is actually free (catches orphaned child processes)
+    $portInUse = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue |
+        Where-Object { $_.State -eq 'Listen' }
+    if ($portInUse) {
+        Write-Warn "Port $Port still in use after stop -- killing occupant (pid=$($portInUse.OwningProcess))"
+        Stop-Process -Id $portInUse.OwningProcess -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
     }
 
     Remove-Item -Force $PidFile -ErrorAction SilentlyContinue
