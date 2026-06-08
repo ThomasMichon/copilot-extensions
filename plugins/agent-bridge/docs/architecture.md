@@ -129,5 +129,53 @@ The installer writes `~/.agent-bridge/deploy-manifest.json` tracking:
 
 - **Phase 1** (complete): Service scaffold, local sessions, SQLite, SSE
 - **Phase 2** (complete): SSH transport, machine topology, connection pooling
-- **Phase 3** (in progress): CLI tools, Copilot CLI integration, MCP shim
+- **Phase 3** (in progress): CLI tools, Copilot CLI integration, namespace resolvers
 - **Phase 4**: Consumer migration (upstream agents, agent-worktrees)
+
+## Namespace Resolvers
+
+Agent-bridge supports **namespace resolvers** for prefixed agent names
+(e.g. `codespace:my-cs`, `admin:local-agent`). When a colon appears in
+an agent name, the prefix is looked up in the namespace registry and
+resolution is delegated to the matching resolver.
+
+### Architecture
+
+```
+agent name: "codespace:my-cs"
+              |          |
+              v          v
+         prefix       bare name
+              |
+              v
+    NamespaceResolver (ABC)
+    +-- CodespaceResolver    (agent-codespaces package)
+    +-- AdminResolver        (built-in)
+```
+
+### Registered Resolvers
+
+| Prefix | Resolver | Source | Description |
+|--------|----------|--------|-------------|
+| `codespace:` | `CodespaceResolver` | `agent-codespaces` package | Queries `gh codespace list`, builds SpawnTargets via `agent-codespaces ssh --stdio` |
+| `admin:` | `AdminResolver` | Built-in (`admin_resolver.py`) | Wraps local agents in elevation (gsudo / sudo -A) |
+
+### NamespaceResolver Interface
+
+```python
+class NamespaceResolver(ABC):
+    @property
+    def prefix(self) -> str: ...
+    async def resolve(self, name: str) -> SpawnTarget: ...
+    async def list(self) -> list[NamespaceAgentInfo]: ...
+    async def ensure_ready(self, name: str) -> None: ...  # optional
+```
+
+### Registration
+
+Resolvers are auto-discovered and registered at startup by
+`_register_namespace_resolvers()` in `agent_registry.py`. Import
+failures are gracefully skipped (resolvers are optional extensions).
+
+The installer installs sibling plugin packages (e.g. `agent-codespaces`)
+into the agent-bridge venv to make their resolvers importable.
