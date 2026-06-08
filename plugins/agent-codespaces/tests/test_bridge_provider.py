@@ -44,8 +44,8 @@ class TestBuildAgentConfigs:
 
     def test_only_available_codespaces(self):
         agents = build_agent_configs(SAMPLE_CODESPACES)
-        # Should include 2 Available, skip 1 Shutdown
-        assert len(agents) == 2
+        # Should include 2 Available + 1 Shutdown (connectable states)
+        assert len(agents) == 3
 
     def test_agent_name_format(self):
         agents = build_agent_configs(SAMPLE_CODESPACES)
@@ -77,7 +77,7 @@ class TestBuildAgentConfigs:
         agents = build_agent_configs([])
         assert agents == []
 
-    def test_all_shutdown_returns_empty(self):
+    def test_all_shutdown_returns_agents(self):
         shutdown_only = [
             CodespaceInfo(
                 name="dead", display_name="dead",
@@ -86,6 +86,18 @@ class TestBuildAgentConfigs:
             ),
         ]
         agents = build_agent_configs(shutdown_only)
+        # Shutdown CodeSpaces are now connectable (auto-started by gh)
+        assert len(agents) == 1
+
+    def test_non_connectable_states_excluded(self):
+        non_connectable = [
+            CodespaceInfo(
+                name="starting", display_name="starting",
+                repository="x/y", branch="main",
+                state="Starting", machine="basic",
+            ),
+        ]
+        agents = build_agent_configs(non_connectable)
         assert agents == []
 
     def test_icon_is_codespace(self):

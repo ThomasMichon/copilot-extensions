@@ -63,8 +63,19 @@ class CodespaceSource:
         self._config_file = config_path
         return self._config
 
+    # Timeouts for successive retry attempts.  The first attempt uses a
+    # short timeout for CodeSpaces that are already running.  Subsequent
+    # attempts use longer timeouts to allow for CodeSpace cold-start
+    # (which can take 60-120 seconds).
+    _FETCH_TIMEOUTS: tuple[int, ...] = (30, 60, 90)
+
     def _fetch_gh_config(self) -> str:
-        """Call ``gh codespace ssh --config -c <name>`` and return output."""
+        """Call ``gh codespace ssh --config -c <name>`` and return output.
+
+        Retries with increasing timeouts to accommodate CodeSpaces that
+        are Shutdown and need to start up before ``gh`` can return SSH
+        config.  Total budget is ~180 s across three attempts.
+        """
         args = [
             "gh", "codespace", "ssh", "--config",
             "-c", self._codespace_name,
@@ -72,30 +83,52 @@ class CodespaceSource:
 
         log.debug("Fetching SSH config: %s", " ".join(args))
 
-        try:
-            result = subprocess.run(
-                args,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                creationflags=self._creation_flags(),
-            )
-        except FileNotFoundError:
-            raise RuntimeError(
-                "gh CLI not found. Install it: https://cli.github.com/"
-            ) from None
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(
-                f"Timed out fetching SSH config for codespace {self._codespace_name}"
-            ) from None
+        last_error: Exception | None = None
+        for attempt, timeout in enumerate(self._FETCH_TIMEOUTS, 1):
+            try:
+                result = subprocess.run(
+                    args,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    creationflags=self._creation_flags(),
+                )
+            except FileNotFoundError:
+                raise RuntimeError(
+                    "gh CLI not found. Install it: https://cli.github.com/"
+                ) from None
+            except subprocess.TimeoutExpired:
+                log.info(
+                    "Attempt %d/%d timed out after %ds for %s "
+                    "(CodeSpace may still be starting up)",
+                    attempt,
+                    len(self._FETCH_TIMEOUTS),
+                    timeout,
+                    self._codespace_name,
+                )
+                last_error = RuntimeError(
+                    f"Timed out fetching SSH config for codespace "
+                    f"{self._codespace_name} after {attempt} attempt(s) "
+                    f"(total {sum(self._FETCH_TIMEOUTS[:attempt])}s). "
+                    f"The CodeSpace may not have finished starting."
+                )
+                continue
 
-        if result.returncode != 0:
-            stderr = result.stderr.strip()
-            raise RuntimeError(
-                f"gh codespace ssh --config failed (rc={result.returncode}): {stderr}"
-            )
+            if result.returncode != 0:
+                stderr = result.stderr.strip()
+                raise RuntimeError(
+                    f"gh codespace ssh --config failed (rc={result.returncode}): {stderr}"
+                )
 
-        return result.stdout
+            if attempt > 1:
+                log.info(
+                    "SSH config obtained on attempt %d for %s",
+                    attempt,
+                    self._codespace_name,
+                )
+            return result.stdout
+
+        raise last_error  # type: ignore[misc]
 
     def _parse_ssh_config(self, raw: str) -> dict:
         """Parse the SSH config output from gh into structured data.
