@@ -764,3 +764,140 @@ class TestNamespaceResolvers:
         agents = resolver.list_agents()
         ns_agents = [a for a in agents if a["name"].startswith("mock:")]
         assert len(ns_agents) == 0
+
+
+# -- AdminResolver tests ------------------------------------------------------
+
+
+class TestAdminResolver:
+    """Tests for admin: namespace resolver."""
+
+    def _make_resolver_with_agents(self):
+        """Build an AgentResolver with a local and SSH agent."""
+        agents = {
+            "local-agent": AgentConfig(
+                name="local-agent",
+                description="Local test agent",
+                project="my-project",
+            ),
+            "ssh-agent": AgentConfig(
+                name="ssh-agent",
+                host="server-a",
+                description="Remote agent",
+            ),
+            "managed-agent": AgentConfig(
+                name="managed-agent",
+                managed=True,
+                description="Managed agent",
+            ),
+        }
+        return AgentResolver(agents, {})
+
+    def test_prefix(self):
+        from agent_bridge.admin_resolver import AdminResolver
+
+        resolver = self._make_resolver_with_agents()
+        admin = AdminResolver(resolver)
+        assert admin.prefix == "admin"
+
+    @pytest.mark.asyncio
+    async def test_resolve_local_agent(self):
+        from agent_bridge.admin_resolver import AdminResolver
+
+        resolver = self._make_resolver_with_agents()
+        admin = AdminResolver(resolver)
+        target = await admin.resolve("local-agent")
+        assert target.type == "command"
+        assert target.spawn_command is not None
+        assert len(target.spawn_command) > 0
+
+    @pytest.mark.asyncio
+    async def test_resolve_ssh_agent_raises(self):
+        """SSH agents with resolvable topology should raise on elevation."""
+        from agent_bridge.admin_resolver import AdminResolver
+
+        # Need topology for the SSH agent to resolve through _resolve_static
+        machines = {
+            "server-a": MachineConfig(
+                key="server-a",
+                display_name="Server A",
+                ssh_ready=True,
+                ssh_environments=[
+                    SshEnvironment(name="linux", alias="server-a", shell="bash"),
+                ],
+            ),
+        }
+        agents = {
+            "ssh-agent": AgentConfig(
+                name="ssh-agent",
+                host="server-a",
+                description="Remote agent",
+                project="my-project",
+            ),
+        }
+        resolver = AgentResolver(agents, machines)
+        admin = AdminResolver(resolver)
+        with pytest.raises(ValueError, match="Cannot elevate SSH"):
+            await admin.resolve("ssh-agent")
+
+    @pytest.mark.asyncio
+    async def test_resolve_unknown_agent_raises(self):
+        from agent_bridge.admin_resolver import AdminResolver
+
+        resolver = self._make_resolver_with_agents()
+        admin = AdminResolver(resolver)
+        with pytest.raises(KeyError, match="not found"):
+            await admin.resolve("nonexistent")
+
+    @pytest.mark.asyncio
+    async def test_list_excludes_ssh_and_managed(self):
+        from agent_bridge.admin_resolver import AdminResolver
+
+        resolver = self._make_resolver_with_agents()
+        admin = AdminResolver(resolver)
+        agents = await admin.list()
+        names = [a.name for a in agents]
+        assert "local-agent" in names
+        assert "ssh-agent" not in names
+        assert "managed-agent" not in names
+
+    @pytest.mark.asyncio
+    async def test_list_adds_elevated_suffix(self):
+        from agent_bridge.admin_resolver import AdminResolver
+
+        resolver = self._make_resolver_with_agents()
+        admin = AdminResolver(resolver)
+        agents = await admin.list()
+        for a in agents:
+            assert "(elevated)" in a.display_name
+
+    @pytest.mark.asyncio
+    async def test_ensure_ready_unknown_raises(self):
+        from agent_bridge.admin_resolver import AdminResolver
+
+        resolver = self._make_resolver_with_agents()
+        admin = AdminResolver(resolver)
+        with pytest.raises(RuntimeError, match="not found"):
+            await admin.ensure_ready("nonexistent")
+
+    @pytest.mark.asyncio
+    async def test_ensure_ready_known_succeeds(self):
+        from agent_bridge.admin_resolver import AdminResolver
+
+        resolver = self._make_resolver_with_agents()
+        admin = AdminResolver(resolver)
+        # Should not raise
+        await admin.ensure_ready("local-agent")
+
+    @pytest.mark.asyncio
+    async def test_integration_via_resolver(self):
+        """Test admin: dispatch through the full AgentResolver path."""
+        from agent_bridge.admin_resolver import AdminResolver
+
+        resolver = self._make_resolver_with_agents()
+        admin = AdminResolver(resolver)
+        resolver.register_namespace_resolver(admin)
+
+        target = await resolver.resolve_async("admin:local-agent")
+        assert target.type == "command"
+        assert target.spawn_command is not None
