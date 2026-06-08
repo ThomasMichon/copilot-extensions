@@ -71,7 +71,9 @@ class CodespaceResolver:
     async def resolve(self, name: str) -> "SpawnTarget":
         """Resolve a codespace name to a SpawnTarget.
 
-        Verifies the codespace exists and is Available before returning.
+        Accepts CodeSpaces in Available or Shutdown state.  Shutdown
+        CodeSpaces will be started automatically by ``gh`` during the
+        SSH connection (``gh codespace ssh --config`` triggers startup).
         """
         from agent_bridge.transport import SpawnTarget
 
@@ -85,13 +87,21 @@ class CodespaceResolver:
         if cs is None:
             raise KeyError(
                 f"Codespace '{name}' not found. "
-                f"Available: {[c.name for c in codespaces if c.state == 'Available']}"
+                f"Available: {[c.name for c in codespaces if c.state in ('Available', 'Shutdown')]}"
             )
 
-        if cs.state != "Available":
+        _CONNECTABLE_STATES = {"Available", "Shutdown"}
+        if cs.state not in _CONNECTABLE_STATES:
             raise ValueError(
                 f"Codespace '{name}' is in state '{cs.state}' "
-                "(must be Available to spawn an agent)"
+                f"(must be one of {_CONNECTABLE_STATES} to spawn an agent)"
+            )
+
+        if cs.state == "Shutdown":
+            log.info(
+                "Codespace '%s' is Shutdown — will auto-start during SSH "
+                "connection (may take 60-120 s)",
+                name,
             )
 
         spawn_cmd = _build_spawn_command(name)
@@ -133,18 +143,19 @@ class CodespaceResolver:
         return agents
 
     async def ensure_ready(self, name: str) -> None:
-        """Verify codespace is reachable.
+        """Verify codespace is reachable (or can be auto-started).
 
-        Currently just checks state. Future: could start a shutdown
-        codespace and wait for it to become Available.
+        Accepts Available and Shutdown states.  Shutdown CodeSpaces are
+        auto-started by ``gh`` when the SSH connection is established,
+        so they are considered "ready" from the resolver's perspective.
         """
         codespaces = await asyncio.to_thread(list_codespaces)
         for cs in codespaces:
             if cs.name == name:
-                if cs.state == "Available":
+                if cs.state in ("Available", "Shutdown"):
                     return
                 raise RuntimeError(
-                    f"Codespace '{name}' is '{cs.state}'. "
-                    "Start it first: gh codespace start -c {name}"
+                    f"Codespace '{name}' is '{cs.state}' "
+                    f"(not in a connectable state)."
                 )
         raise RuntimeError(f"Codespace '{name}' not found")

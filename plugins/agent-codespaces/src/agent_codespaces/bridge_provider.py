@@ -79,7 +79,9 @@ def build_agent_configs(
 
     agents = []
     for cs in codespaces:
-        if cs.state != "Available":
+        # Include Available and Shutdown codespaces.  Shutdown ones can
+        # be auto-started by gh during SSH connection establishment.
+        if cs.state not in ("Available", "Shutdown"):
             log.debug(
                 "Skipping codespace '%s' (state=%s)", cs.name, cs.state,
             )
