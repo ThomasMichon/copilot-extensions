@@ -221,38 +221,64 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
 
 
 async def _pipe_stdio(proc) -> None:
-    """Pipe a subprocess's stdio through to our own stdin/stdout."""
-    import asyncio
+    """Pipe a subprocess's stdio through to our own stdin/stdout.
 
-    async def _forward_in() -> None:
-        loop = asyncio.get_event_loop()
-        reader = asyncio.StreamReader()
-        await loop.connect_read_pipe(
-            lambda: asyncio.StreamReaderProtocol(reader), sys.stdin
-        )
-        while True:
-            data = await reader.read(4096)
-            if not data:
+    Uses threads for the stdin/stdout relay instead of asyncio pipe
+    transports, because Windows ProactorEventLoop cannot wire
+    stdin/stdout via ``connect_read_pipe`` (raises
+    ``OSError: [WinError 6] The handle is invalid``).
+
+    Threading is simple and works on all platforms.
+    """
+    import threading
+
+    def _forward_in() -> None:
+        """Read from our stdin, write to subprocess stdin (blocking)."""
+        try:
+            while True:
+                data = sys.stdin.buffer.read(4096)
+                if not data:
+                    break
                 if proc.stdin:
-                    proc.stdin.close()
-                break
+                    proc.stdin.write(data)
+                    # drain() is a coroutine -- schedule from thread
+                    asyncio.run_coroutine_threadsafe(
+                        proc.stdin.drain(), loop
+                    ).result(timeout=10)
+        except (OSError, ValueError):
+            pass
+        finally:
             if proc.stdin:
-                proc.stdin.write(data)
-                await proc.stdin.drain()
+                proc.stdin.close()
 
-    async def _forward_out() -> None:
-        while proc.stdout:
-            data = await proc.stdout.read(4096)
-            if not data:
-                break
-            sys.stdout.buffer.write(data)
-            sys.stdout.buffer.flush()
+    def _forward_out() -> None:
+        """Read from subprocess stdout, write to our stdout (blocking)."""
+        try:
+            while True:
+                # read1 is not available on asyncio streams; use the
+                # loop to schedule the async read from this thread.
+                fut = asyncio.run_coroutine_threadsafe(
+                    proc.stdout.read(4096), loop
+                )
+                data = fut.result(timeout=30)
+                if not data:
+                    break
+                sys.stdout.buffer.write(data)
+                sys.stdout.buffer.flush()
+        except (OSError, ValueError):
+            pass
 
-    await asyncio.gather(
-        _forward_in(),
-        _forward_out(),
-        proc.wait(),
-    )
+    loop = asyncio.get_event_loop()
+
+    in_thread = threading.Thread(target=_forward_in, daemon=True)
+    out_thread = threading.Thread(target=_forward_out, daemon=True)
+    in_thread.start()
+    out_thread.start()
+
+    await proc.wait()
+
+    # Give output thread a moment to flush remaining data
+    out_thread.join(timeout=2)
 
 
 def _interactive_ssh(codespace_name: str, port_forwards: list[str]) -> int:
