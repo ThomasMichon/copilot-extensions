@@ -191,20 +191,47 @@ Agent Codespaces is a session plugin with a CLI binstub. It provides the
 `agent-codespaces` CLI for SSH transport, credential relay, and lifecycle
 management.
 
-**Note:** Agent Codespaces does not yet have marketplace installer scripts.
-The `scripts/` directory needs `init.ps1`/`init.sh` and
-`install.ps1`/`install.sh` (modeled after agent-worktrees) before
-`copilot plugin install agent-codespaces@copilot-extensions` will work.
+### The Deployment Pipeline
 
-### Current Install Path (from checkout)
+1. **Commit** changes in `plugins/agent-codespaces/`
+2. **Bump the version** in all three files (see "Where the version lives")
+3. **Push** to `main` on GitHub: `git push origin main`
+4. **Update on each machine** via the installer
 
-```bash
-cd plugins/agent-codespaces
-pip install -e ".[dev]" -e "../../libs/ssh-manager[dev]"
+### Install / Update
+
+```powershell
+# Windows -- from the copilot-extensions checkout
+cd plugins\agent-codespaces
+.\scripts\install.ps1 install    # first time
+.\scripts\install.ps1 update    # subsequent updates
 ```
 
-This creates the `agent-codespaces` console script entry point defined in
-`pyproject.toml` `[project.scripts]`.
+```bash
+# Linux/WSL -- from the copilot-extensions checkout
+cd plugins/agent-codespaces
+bash scripts/install.sh install
+bash scripts/install.sh update
+```
+
+The installer creates a venv at `~/.agent-codespaces/`, deploys the
+package and ssh-manager dependency, and places a binstub in
+`~/.local/bin/`.
+
+### Bootstrap (init)
+
+For first-time setup on a new machine, the `init` scripts handle
+everything including prerequisite checks:
+
+```powershell
+# Windows
+pwsh -File plugins\agent-codespaces\scripts\init.ps1
+```
+
+```bash
+# Linux/WSL
+bash plugins/agent-codespaces/scripts/init.sh
+```
 
 ### Version Files
 
@@ -216,19 +243,6 @@ other plugins):
 | `plugins/agent-codespaces/plugin.json` | `version` |
 | `plugins/agent-codespaces/pyproject.toml` | `version` under `[project]` |
 | `.github/plugin/marketplace.json` | `plugins[2].version` |
-
-### Future: Marketplace Install
-
-Once installer scripts are added to `plugins/agent-codespaces/scripts/`,
-the install path will be:
-
-```bash
-copilot plugin install agent-codespaces@copilot-extensions
-```
-
-The installer should create a venv at `~/.agent-codespaces/`, install the
-package and ssh-manager dependency, place a binstub in `~/.local/bin/`,
-and register the namespace resolver with agent-bridge if present.
 
 ## Code Style
 
