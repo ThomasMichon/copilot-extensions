@@ -18,7 +18,7 @@
     {
       "name": "agent-bridge",
       "description": "Persistent inter-agent communication service - session management, SSE event streaming, and agent subprocess spawning",
-      "version": "0.1.0-dev23",
+      "version": "0.1.0-dev24",
       "source": "plugins/agent-bridge"
     },
     {
