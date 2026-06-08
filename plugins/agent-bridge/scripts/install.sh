@@ -159,6 +159,40 @@ _ssh_manager_installed() {
     "$VENV_DIR/bin/python" -c 'from ssh_manager import SSHProfileSource, get_default_manager' 2>/dev/null
 }
 
+# Install sibling plugin packages (e.g. agent-codespaces) into the venv.
+# These provide optional namespace resolvers that agent-bridge discovers
+# at startup. Missing siblings are silently skipped.
+#   $1 = "reinstall" to force reinstall, empty for fresh install
+_install_sibling_plugins() {
+    local mode="${1:-}"
+    local plugins_root
+    plugins_root="$(cd "$PLUGIN_DIR/.." && pwd)"
+    local siblings=(agent-codespaces)
+    for name in "${siblings[@]}"; do
+        local sib_dir="$plugins_root/$name"
+        if [[ ! -f "$sib_dir/pyproject.toml" ]]; then
+            # Check marketplace vendor layout
+            sib_dir="$PLUGIN_DIR/plugins/$name"
+            [[ -f "$sib_dir/pyproject.toml" ]] || continue
+        fi
+        local pkg_name="${name//-/_}"
+        if [[ "$mode" == "reinstall" ]]; then
+            if uv pip install --python "$VENV_DIR/bin/python" --reinstall-package "$pkg_name" \
+                    "$sib_dir" --quiet 2>/dev/null; then
+                _ok "Sibling plugin: $name"
+            else
+                _warn "Sibling plugin $name install failed (non-fatal)"
+            fi
+        else
+            if uv pip install --python "$VENV_DIR/bin/python" "$sib_dir" --quiet 2>/dev/null; then
+                _ok "Sibling plugin: $name"
+            else
+                _warn "Sibling plugin $name install failed (non-fatal)"
+            fi
+        fi
+    done
+}
+
 _git_info() {
     local path="$1"
     local commit branch dirty
@@ -315,6 +349,9 @@ do_install() {
         exit 1
     fi
     _ok "Package installed"
+
+    # Install sibling plugins (e.g. agent-codespaces for codespace: namespace)
+    _install_sibling_plugins
 
     # Create binstub
     cat > "$BINSTUB" << 'STUB'
@@ -568,6 +605,9 @@ do_update() {
         exit 1
     fi
     _ok "Package updated"
+
+    # Update sibling plugins (e.g. agent-codespaces for codespace: namespace)
+    _install_sibling_plugins reinstall
 
     # Update binstub
     cat > "$BINSTUB" << 'STUB'

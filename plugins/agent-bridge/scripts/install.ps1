@@ -130,6 +130,43 @@ function Get-AgentBridgeBin {
     return $null
 }
 
+# Install sibling plugin packages (e.g. agent-codespaces) into the venv.
+# These provide optional namespace resolvers that agent-bridge discovers at
+# startup via try-import. Missing siblings are silently skipped.
+function Install-SiblingPlugins {
+    param(
+        [switch]$Reinstall
+    )
+    $pluginsRoot = Split-Path $PluginDir
+    $siblings = @('agent-codespaces')
+    foreach ($name in $siblings) {
+        $sibDir = Join-Path $pluginsRoot $name
+        if (-not (Test-Path (Join-Path $sibDir 'pyproject.toml'))) {
+            # Also check marketplace vendor layout
+            $sibDir = Join-Path $PluginDir "plugins\$name"
+            if (-not (Test-Path (Join-Path $sibDir 'pyproject.toml'))) {
+                continue
+            }
+        }
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        if ($Reinstall) {
+            $pkgName = $name -replace '-', '_'
+            $out = & uv pip install --python $VenvPython --reinstall-package $pkgName `
+                "$sibDir" --quiet 2>&1
+        } else {
+            $out = & uv pip install --python $VenvPython "$sibDir" --quiet 2>&1
+        }
+        $result = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+        if ($result -eq 0) {
+            Write-Ok "Sibling plugin: $name"
+        } else {
+            Write-Warn "Sibling plugin $name install failed (non-fatal)"
+        }
+    }
+}
+
 function Get-RunningProcess {
     # Try PID file first
     if (Test-Path $PidFile) {
@@ -397,6 +434,9 @@ function Invoke-Install {
     }
     Write-Ok 'Package installed'
 
+    # Install sibling plugins (e.g. agent-codespaces for codespace: namespace)
+    Install-SiblingPlugins
+
     # Create binstub
     $agentBridge = Get-AgentBridgeBin
     if ($agentBridge) {
@@ -663,6 +703,9 @@ function Invoke-Update {
         throw 'Package update failed'
     }
     Write-Ok 'Package updated'
+
+    # Update sibling plugins (e.g. agent-codespaces for codespace: namespace)
+    Install-SiblingPlugins -Reinstall
 
     # Update binstub
     $agentBridge = Get-AgentBridgeBin
