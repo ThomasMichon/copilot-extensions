@@ -1175,7 +1175,10 @@ def _load_remote_machines(
     local_key = config.machine
     return [
         entry for key, entry in machines.items()
-        if key != local_key and entry.ssh_ready and entry.ssh_environments
+        if key != local_key
+        and entry.ssh_ready
+        and entry.ssh_environments
+        and entry.copilot
     ]
 
 
