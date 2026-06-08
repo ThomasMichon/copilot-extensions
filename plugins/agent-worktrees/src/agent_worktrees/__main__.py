@@ -1025,14 +1025,15 @@ def _system_cleanup(config: cfg.Config) -> int | None:
     unused: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo]] = []
 
     for rec in records:
-        if rec.status == "finalized":
-            info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
-        elif rec.worktree_path and Path(rec.worktree_path).exists():
+        if rec.worktree_path and Path(rec.worktree_path).exists():
             info = git_ops.classify_worktree(
                 rec.worktree_path, rec.branch,
                 fetch=False, remote=repo.remote, default_branch=repo.default_branch,
                 active_paths=active_paths,
             )
+            info = _apply_tracking_override(rec, info)
+        elif rec.status == "finalized":
+            info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
         else:
             info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
 
@@ -2060,16 +2061,17 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     active_paths = _build_active_paths(records)
 
     for rec in records:
-        if rec.status == "finalized":
-            state_str = "completed"
-            info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
-        elif rec.worktree_path and Path(rec.worktree_path).exists():
+        if rec.worktree_path and Path(rec.worktree_path).exists():
             info = git_ops.classify_worktree(
                 rec.worktree_path, rec.branch,
                 fetch=False, remote=repo.remote, default_branch=repo.default_branch,
                 active_paths=active_paths,
             )
+            info = _apply_tracking_override(rec, info)
             state_str = info.state.value
+        elif rec.status == "finalized":
+            state_str = "completed"
+            info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
         else:
             info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
             state_str = "gone"
@@ -2091,14 +2093,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         # Hard rule: never clean a worktree with a live session
         if info.state == git_ops.WorktreeState.ACTIVE:
             skip_reason = "active Copilot session in use"
-        elif rec.status == "finalized":
-            # Finalized records are safe unless a live session re-opened them
-            norm = _normalize_path(rec.worktree_path) if rec.worktree_path else ""
-            if norm in active_paths:
-                skip_reason = "active Copilot session in use"
-            else:
-                cleanable = True
-        elif info.state == git_ops.WorktreeState.COMPLETED:
+        elif rec.status == "finalized" or info.state == git_ops.WorktreeState.COMPLETED:
             cleanable = True
         elif info.state == git_ops.WorktreeState.GONE:
             # Safety: verify branch content is on master before deleting
