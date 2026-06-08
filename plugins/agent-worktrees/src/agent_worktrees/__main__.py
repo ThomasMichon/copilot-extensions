@@ -939,10 +939,10 @@ def _run_machine_menu(config: cfg.Config) -> int | None:
     # Track (machine_entry, ssh_env) for each item
     machine_values: list[tuple[cfg.MachineEntry, cfg.SSHEnvironment]] = []
 
-    for entry in remote_machines:
-        if len(entry.ssh_environments) == 1:
+    for entry, envs in remote_machines:
+        if len(envs) == 1:
             # Single environment -- show machine name only
-            ssh_env = entry.ssh_environments[0]
+            ssh_env = envs[0]
             subtitle = f"{entry.environment} -- {entry.role}" if entry.role else entry.environment
             machine_items.append(MenuItem(
                 label=f"🖥 {entry.display_name}",
@@ -953,7 +953,7 @@ def _run_machine_menu(config: cfg.Config) -> int | None:
             machine_values.append((entry, ssh_env))
         else:
             # Multiple environments -- one entry per SSH env
-            for ssh_env in entry.ssh_environments:
+            for ssh_env in envs:
                 env_label = ssh_env.name.upper() if ssh_env.name else ssh_env.alias
                 shell_tag = f" ({ssh_env.shell})" if ssh_env.shell else ""
                 machine_items.append(MenuItem(
@@ -1160,11 +1160,15 @@ def _system_pause(msg: str) -> None:
 
 def _load_remote_machines(
     config: cfg.Config,
-) -> list[cfg.MachineEntry]:
-    """Load remote machines from machines.yaml, filtered to reachable entries.
+) -> list[tuple[cfg.MachineEntry, list[cfg.SSHEnvironment]]]:
+    """Load machines/environments reachable via SSH from the picker.
 
-    Returns machines that are not the local machine, have ssh_ready=True,
-    and have at least one SSH environment configured.
+    Returns a list of (machine, ssh_environments) tuples. For remote
+    machines, all SSH environments are included. For the local machine,
+    only environments that differ from the current platform are included
+    (e.g., WSL when running on Windows).
+
+    Filters by ssh_ready=True, copilot=True, and non-empty environments.
     """
     repo = config.default_repo
     try:
@@ -1173,13 +1177,25 @@ def _load_remote_machines(
         return []
 
     local_key = config.machine
-    return [
-        entry for key, entry in machines.items()
-        if key != local_key
-        and entry.ssh_ready
-        and entry.ssh_environments
-        and entry.copilot
-    ]
+    current_platform = cfg.detect_platform()
+    result: list[tuple[cfg.MachineEntry, list[cfg.SSHEnvironment]]] = []
+
+    for key, entry in machines.items():
+        if not entry.ssh_ready or not entry.ssh_environments or not entry.copilot:
+            continue
+
+        if key == local_key:
+            # Local machine: only include other-platform environments
+            other_envs = [
+                e for e in entry.ssh_environments
+                if e.name != current_platform
+            ]
+            if other_envs:
+                result.append((entry, other_envs))
+        else:
+            result.append((entry, entry.ssh_environments))
+
+    return result
 
 
 def _try_machine_handoff(
@@ -1191,25 +1207,35 @@ def _try_machine_handoff(
     Returns an exit code if the remote plan was emitted, or None if the
     machine wasn't found (caller should error).
     """
-    machines = _load_remote_machines(config)
-    target = cfg.find_machine_entry(
-        {m.key: m for m in machines}, machine_name,
-    )
-    if not target:
-        output.err(f"Unknown or unreachable remote machine: {machine_name}")
-        all_machines = _load_all_machine_keys(config)
-        if all_machines:
-            output.err("Available: " + ", ".join(all_machines))
-        return 1
+    remote_targets = _load_remote_machines(config)
+    # Build a lookup from machine key to entry
+    entry_map = {entry.key: (entry, envs) for entry, envs in remote_targets}
 
-    ssh_alias = _resolve_ssh_alias(target)
+    if machine_name not in entry_map:
+        # Also check by alias
+        found = None
+        for entry, envs in remote_targets:
+            if entry.alias and entry.alias.lower() == machine_name.lower():
+                found = (entry, envs)
+                break
+        if not found:
+            output.err(f"Unknown or unreachable remote machine: {machine_name}")
+            all_machines = _load_all_machine_keys(config)
+            if all_machines:
+                output.err("Available: " + ", ".join(all_machines))
+            return 1
+        entry, envs = found
+    else:
+        entry, envs = entry_map[machine_name]
+
+    ssh_alias = _resolve_ssh_alias(entry)
     project = cfg.project_name()
     _emit_plan({
         "action": "remote",
         "ssh_alias": ssh_alias,
         "remote_command": project,
-        "machine": target.key,
-        "display_name": target.display_name,
+        "machine": entry.key,
+        "display_name": entry.display_name,
     })
     return 0
 
