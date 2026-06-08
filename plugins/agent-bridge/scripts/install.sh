@@ -91,14 +91,21 @@ _health_check() {
 _resolve_ssh_manager() {
     local candidate
 
-    # 1. Relative path (git checkout layout: plugins/agent-bridge/../../libs/ssh-manager)
+    # 1. Vendored inside agent-bridge (marketplace install layout)
+    candidate="$PLUGIN_DIR/libs/ssh-manager"
+    if [[ -f "$candidate/pyproject.toml" ]]; then
+        cd "$candidate" && pwd
+        return 0
+    fi
+
+    # 2. Relative path (git checkout layout: plugins/agent-bridge/../../libs/ssh-manager)
     candidate="$PLUGIN_DIR/../../libs/ssh-manager"
     if [[ -f "$candidate/pyproject.toml" ]]; then
         cd "$candidate" && pwd
         return 0
     fi
 
-    # 2. Git repo registry (~/.git-repos) -- use Python for safe YAML parsing
+    # 3. Git repo registry (~/.git-repos) -- use Python for safe YAML parsing
     if [[ -f "$HOME/.git-repos" ]]; then
         candidate="$(python3 -c "
 import pathlib, os
@@ -122,7 +129,7 @@ raise SystemExit(1)
         }
     fi
 
-    # 3. Common checkout path (repo exists but registry absent/stale)
+    # 4. Common checkout path (repo exists but registry absent/stale)
     candidate="$HOME/src/copilot-extensions/libs/ssh-manager"
     if [[ -f "$candidate/pyproject.toml" ]]; then
         cd "$candidate" && pwd
