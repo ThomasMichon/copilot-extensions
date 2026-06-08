@@ -125,9 +125,12 @@ in real-time: response text, thought blocks, and tool call summaries.
 ### Session Management
 
 ```bash
-# List all sessions
+# List all sessions (includes CONTEXT column showing usage %)
 agent-bridge sessions
 agent-bridge sessions --status idle
+
+# Check context window usage for a session
+agent-bridge session-usage <session-id>
 
 # Wait for a running session's current turn
 agent-bridge wait <session-id>
@@ -218,12 +221,100 @@ agent-bridge end <session-id>
 ### Checking What's Running
 
 ```bash
-# See all active sessions
+# See all active sessions (CONTEXT column shows usage %)
 agent-bridge sessions
 
 # Get JSON for programmatic use
 agent-bridge sessions --json
 ```
+
+### Context Window Monitoring
+
+The `CONTEXT` column in `agent-bridge sessions` shows token usage as a
+fraction with percentage (e.g., `110k/200k (55%)`). Use this as a
+progress indicator -- more tokens consumed generally means more work
+completed.
+
+For detailed usage on a specific session:
+
+```bash
+agent-bridge session-usage <session-id>
+```
+
+This shows the full usage snapshot: context size/used/percentage, model,
+turn count, and a visual bar.
+
+The REST API equivalent is `GET /api/v1/sessions/{id}/usage`.
+
+### Context-Aware Handoff (Long-Running Sessions)
+
+When managing a remote agent across many turns, the host agent should
+monitor context usage and **proactively cycle the session** before the
+remote agent exhausts its context window. This is the host's
+responsibility -- the remote agent does not manage its own context
+lifecycle.
+
+**When to bail: ~70% context usage.** This leaves room for the handoff
+prompt itself (which consumes context) and a safety margin before the
+75%/90% warning thresholds fire.
+
+**The handoff cycle:**
+
+```bash
+# 1. Check usage (do this every 2-3 turns on long-running sessions)
+agent-bridge session-usage <session-id>
+
+# 2. If context_pct >= 70, request a handoff from the remote agent
+agent-bridge send <session-id> \
+  "Your context window is filling up. Generate a continuation prompt
+   for a fresh session to resume this work. Include:
+   - Original objective
+   - Progress so far (with file paths)
+   - Remaining work
+   - Key decisions and their rationale
+   - Gotchas or failed approaches
+   Keep it under 250 words. The new session will have full tool access."
+
+# 3. Capture the response -- that IS the handoff payload
+
+# 4. Stop the old session
+agent-bridge stop <session-id>
+# or: agent-bridge end <session-id>  (if no resume needed)
+
+# 5. Start a new session with the handoff as the first prompt
+agent-bridge send <agent-name> "Resume: <captured handoff payload>"
+```
+
+**Key points:**
+
+- **No hooks or extensions required.** The host checks usage, makes the
+  decision, sends the handoff request, and manages the session roll.
+  The remote agent just answers a prompt.
+- **The remote agent doesn't need to know** about context limits. It
+  receives a normal prompt asking for a summary and responds normally.
+- **Session roll preserves the worktree.** When starting the new session
+  with the same agent name (and optionally the same `worktree_id` via
+  the API), the new session lands in the same checkout with all prior
+  commits available.
+- **70% is the bail point, not 75%.** The 75% `context_warning` and
+  90% `context_critical` SSE events are safety nets. If those fire,
+  the handoff should already be in progress.
+
+**Threshold reference:**
+
+| Context % | Signal | Host action |
+|-----------|--------|-------------|
+| 0-50% | Normal | Continue sending work |
+| 50-70% | Elevated | Monitor more frequently |
+| 70% | **Bail point** | Request handoff, stop sending new work |
+| 75% | `context_warning` SSE | Handoff should be in progress |
+| 90% | `context_critical` SSE | Emergency -- do not send more prompts |
+
+**Context % as a progress signal:** When listing sessions with
+`agent-bridge sessions`, the CONTEXT column doubles as a rough progress
+indicator. A session at 60% has done significant work. A session at 10%
+is just getting started. Host agents can use this to prioritize which
+sessions need attention, follow-up, or cycling.
 
 ## Agent Names
 
