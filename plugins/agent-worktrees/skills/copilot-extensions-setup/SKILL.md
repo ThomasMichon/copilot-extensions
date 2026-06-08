@@ -209,7 +209,8 @@ Linux:   ~/.config/systemd/user/agent-bridge.service (enabled)
 
 ### Migration
 
-If the machine previously used `aperture-labs services agent-bridge update`,
+If the machine previously used a project binstub to install agent-bridge
+(e.g. `<project> services agent-bridge update`),
 the plugin installer detects this automatically: stops the old service,
 preserves config/auth/DB, replaces the scheduled task/systemd unit with
 plugin-owned versions.
@@ -286,7 +287,7 @@ agent-bridge config adopt \
 ### Multiple Repos
 
 ```bash
-agent-bridge config adopt --repo ~/src/aperture-labs --profile aperture-labs
+agent-bridge config adopt --repo ~/src/my-project --profile my-project
 agent-bridge config adopt --repo ~/src/dotfiles --profile dotfiles
 ```
 

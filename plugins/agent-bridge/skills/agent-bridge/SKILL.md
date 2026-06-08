@@ -252,7 +252,7 @@ the host session's wrap-up:
 
 2. **Run worktree cleanup.** After ending bridge sessions, run:
    ```bash
-   aperture-labs worktrees cleanup
+   agent-worktrees worktrees cleanup
    ```
    This lists worktrees eligible for removal. The default (no flags)
    only removes worktrees that went through proper finalization --
@@ -274,7 +274,7 @@ For worktrees spawned on a remote machine via SSH transport, cleanup
 must run **on the target machine** where the worktree was created:
 
 ```bash
-ssh <machine-alias> "aperture-labs worktrees cleanup"
+ssh <machine-alias> "agent-worktrees worktrees cleanup"
 ```
 
 Use the same SSH alias that agent-bridge used for the session.
