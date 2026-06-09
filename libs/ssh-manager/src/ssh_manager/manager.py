@@ -292,6 +292,11 @@ class ConnectionManager:
                 "-o", f"ControlPath={info.socket_path}",
                 "-o", "ControlMaster=no",
             ])
+        else:
+            # Direct mode -- port forwards must be included on every
+            # SSH invocation since there's no persistent master process.
+            for fwd in info.port_forwards:
+                args.append(fwd)
         return args
 
     async def exec_command(

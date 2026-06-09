@@ -191,8 +191,10 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
 
     # Build port forwards for credential relay
     port_forwards: list[str] = []
+    relay_env = ""
     if not args.no_relay:
         port_forwards.append(f"-R {relay_port}:127.0.0.1:{relay_port}")
+        relay_env = f"export LC_GIT_CREDENTIAL_RELAY={relay_port}; "
 
     manager = ConnectionManager()
 
@@ -201,9 +203,13 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     # scripts).  Non-interactive SSH commands skip /etc/profile and
     # ~/.profile by default, which leaves tools like `copilot` and `gh`
     # unauthenticated.
+    #
+    # Inject LC_GIT_CREDENTIAL_RELAY before the login shell so the
+    # credential relay activation script and ado-auth-helper can find
+    # the tunnel port.
     remote_cmd = args.remote_cmd
     if remote_cmd:
-        remote_cmd = f"bash -l -c {shlex.quote(remote_cmd)}"
+        remote_cmd = f"bash -l -c {shlex.quote(relay_env + remote_cmd)}"
 
     async def _run() -> int:
         await manager.ensure_connected(args.name, source, port_forwards)
@@ -226,7 +232,11 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
 
         # Interactive SSH -- fall through to gh codespace ssh
         await manager.disconnect(args.name)
-        return _interactive_ssh(args.name, port_forwards)
+        return _interactive_ssh(
+            args.name,
+            port_forwards,
+            relay_port=relay_port if not args.no_relay else None,
+        )
 
     return asyncio.run(_run())
 
@@ -295,16 +305,24 @@ async def _pipe_stdio(proc) -> None:
     out_thread.join(timeout=2)
 
 
-def _interactive_ssh(codespace_name: str, port_forwards: list[str]) -> int:
+def _interactive_ssh(
+    codespace_name: str,
+    port_forwards: list[str],
+    relay_port: int | None = None,
+) -> int:
     """Fall back to ``gh codespace ssh`` for interactive sessions."""
     import subprocess as sp
+
+    env = None
+    if relay_port is not None:
+        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY": str(relay_port)}
 
     args = ["gh", "codespace", "ssh", "-c", codespace_name]
     for fwd in port_forwards:
         # Split "-R port:host:port" into SSH option
         args.extend(["--", fwd])
 
-    return sp.call(args)
+    return sp.call(args, env=env)
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
@@ -353,27 +371,48 @@ def _cmd_config(args: argparse.Namespace) -> int:
 
 def _config_adopt() -> int:
     """Register the current repo for config."""
+    import subprocess as sp
+
     cwd = Path.cwd()
-    config_file = cwd / "codespaces.yaml"
+
+    # Resolve to canonical repo root — worktree paths are ephemeral and
+    # will go stale when the worktree is cleaned up.
+    try:
+        result = sp.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            # git-common-dir returns the .git dir (or shared .git for
+            # worktrees).  Parent of that is the canonical repo root.
+            repo_root = Path(result.stdout.strip()).parent.resolve()
+        else:
+            repo_root = cwd
+    except FileNotFoundError:
+        repo_root = cwd
+
+    config_file = repo_root / "codespaces.yaml"
 
     if not config_file.exists():
-        print(f"ERROR: No codespaces.yaml found in {cwd}", file=sys.stderr)
+        print(f"ERROR: No codespaces.yaml found in {repo_root}", file=sys.stderr)
         print("Create one first, then re-run adopt.", file=sys.stderr)
         return 1
 
     repos = load_adopted_repos()
     existing_paths = {str(r.path) for r in repos}
 
-    if str(cwd) in existing_paths:
-        print(f"Already adopted: {cwd}")
+    if str(repo_root) in existing_paths:
+        print(f"Already adopted: {repo_root}")
         return 0
 
     repos.append(AdoptedRepo(
-        path=cwd,
+        path=repo_root,
         adopted_at=datetime.now(tz=timezone.utc).isoformat(),
     ))
     save_adopted_repos(repos)
-    print(f"Adopted: {cwd}")
+    print(f"Adopted: {repo_root}")
     print(f"Manifest: {ADOPTED_REPOS_FILE}")
     return 0
 

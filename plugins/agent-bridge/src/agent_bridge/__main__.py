@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import sys
+import urllib.error
 from datetime import datetime, timezone
 from typing import Any
 
@@ -422,65 +423,125 @@ def _stream_until_complete(
 ) -> None:
     """Stream SSE events, printing output until the turn completes.
 
-    Connects to the SSE stream from after=0 and replays all events.
-    Only prints output from events that occur after the turn starts
-    (identified by the session_state_changed to 'running' with our
-    turn_index).
+    Maintains a cursor (last seen event ID) and reconnects
+    automatically on timeout or disconnect.  Only fetches events
+    after the cursor, so output is never duplicated.
     """
-    in_our_turn = False
+    from .client import BridgeClientError
 
-    try:
-        for evt in client.stream_events(session_id, after=0):
-            event_type = evt.get("event", "")
-            data = evt.get("data", {})
+    cursor = 0
+    in_our_turn = turn_index == -1  # -1 means "any running turn" (wait)
+    max_retries = 120  # ~1 hour at 30s heartbeat interval
 
-            # Wait for our turn to start before printing anything
-            if event_type == "session_state_changed":
-                status = data.get("status", "")
-                ti = data.get("turn_index")
-                if status == "running" and ti == turn_index:
-                    in_our_turn = True
-                continue
+    for attempt in range(max_retries):
+        try:
+            for evt in client.stream_events(session_id, after=cursor):
+                # Advance cursor so reconnects resume from here
+                evt_id = evt.get("id", "")
+                if evt_id:
+                    try:
+                        cursor = int(evt_id)
+                    except (ValueError, TypeError):
+                        pass
 
-            if not in_our_turn:
-                continue
+                event_type = evt.get("event", "")
+                data = evt.get("data", {})
 
-            if event_type == "agent_message":
-                text = data.get("text", "")
-                if text:
-                    print(text, end="", flush=True)
+                # Wait for our turn to start before printing anything
+                if event_type == "session_state_changed":
+                    status = data.get("status", "")
+                    ti = data.get("turn_index")
+                    if status == "running" and (
+                        turn_index == -1 or ti == turn_index
+                    ):
+                        in_our_turn = True
+                    continue
 
-            elif event_type == "agent_thought":
-                text = data.get("text", "")
-                if text:
-                    print(f"\033[2m{text}\033[0m", end="", flush=True)
+                if not in_our_turn:
+                    continue
 
-            elif event_type == "tool_call_start":
-                title = data.get("title", "")
-                if title:
-                    print(f"\n  >> {title}", flush=True)
+                if event_type == "agent_message":
+                    text = data.get("text", "")
+                    if text:
+                        print(text, end="", flush=True)
 
-            elif event_type == "tool_call_update":
-                status = data.get("status", "")
-                if status and status not in ("pending", "running"):
-                    print(f"     [{status}]", flush=True)
+                elif event_type == "agent_thought":
+                    text = data.get("text", "")
+                    if text:
+                        print(f"\033[2m{text}\033[0m", end="", flush=True)
 
-            elif event_type == "turn_complete":
-                print()  # Final newline
-                stop = data.get("stop_reason", "")
-                if stop:
-                    print(f"[<] Turn complete ({stop})")
-                else:
-                    print("[<] Turn complete")
+                elif event_type == "tool_call_start":
+                    title = data.get("title", "")
+                    if title:
+                        print(f"\n  >> {title}", flush=True)
+
+                elif event_type == "tool_call_update":
+                    status = data.get("status", "")
+                    if status and status not in ("pending", "running"):
+                        print(f"     [{status}]", flush=True)
+
+                elif event_type == "turn_complete":
+                    print()  # Final newline
+                    stop = data.get("stop_reason", "")
+                    if stop:
+                        print(f"[<] Turn complete ({stop})")
+                    else:
+                        print("[<] Turn complete")
+                    return
+
+                elif event_type == "error":
+                    msg = data.get("message", "Unknown error")
+                    print(f"\n[FAIL] {msg}", file=sys.stderr)
+                    return
+
+        except (OSError, urllib.error.URLError):
+            # Connection dropped -- reconnect from cursor
+            pass
+        except BridgeClientError as exc:
+            if exc.status == 404:
+                print(f"\n[FAIL] Session {session_id} not found", file=sys.stderr)
                 return
+            # Transient server error -- retry
+            pass
+        except KeyboardInterrupt:
+            print("\n[>] Interrupted -- session still running")
+            return
 
-            elif event_type == "error":
-                msg = data.get("message", "Unknown error")
-                print(f"\n[FAIL] {msg}", file=sys.stderr)
+        # Check if session is still running before reconnecting
+        try:
+            session = client.get_session(session_id)
+            status = session.get("status", "")
+            if status in ("idle", "ended", "stopped", "failed"):
+                # Drain remaining events from the last cursor
+                try:
+                    for evt in client.stream_events(session_id, after=cursor):
+                        evt_id = evt.get("id", "")
+                        if evt_id:
+                            try:
+                                cursor = int(evt_id)
+                            except (ValueError, TypeError):
+                                pass
+                        event_type = evt.get("event", "")
+                        data = evt.get("data", {})
+                        if event_type == "turn_complete":
+                            print()
+                            stop = data.get("stop_reason", "")
+                            if stop:
+                                print(f"[<] Turn complete ({stop})")
+                            else:
+                                print("[<] Turn complete")
+                            return
+                except Exception:
+                    pass
+                print(f"\n[<] Session is {status}")
                 return
+        except Exception:
+            pass  # Can't check -- try reconnecting anyway
 
-    except KeyboardInterrupt:
-        print("\n[>] Interrupted -- session still running")
+        import time
+        time.sleep(1)
+
+    print("\n[FAIL] Gave up reconnecting after too many retries", file=sys.stderr)
 
 
 def _cmd_wait(args: argparse.Namespace) -> None:
