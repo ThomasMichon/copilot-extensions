@@ -3159,6 +3159,7 @@ def _cmd_services_list(json_output: bool = False) -> int:
                 "install_dir": s.install_dir,
                 "installer": s.installer_path,
                 "source_dir": s.source_dir,
+                "auto_update": s.auto_update,
             }
             for s in services
         ]
@@ -3390,6 +3391,14 @@ def _cmd_services_batch(action: str, flags: list[str]) -> int:
 
         # Smart filtering for install/update (other actions run on all)
         if not force:
+            # VAV-owned services (extensions.agent-worktrees.auto_update:false)
+            # are deployed by another owner; skip them in automatic update/
+            # install sweeps. Explicit `services <name> <action>` still runs,
+            # and `--force` overrides this.
+            if action in ("install", "update") and not s.auto_update:
+                output.skipped(f"{label} -- managed elsewhere (auto_update: false)")
+                skipped += 1
+                continue
             if action == "install" and is_installed:
                 skipped += 1
                 continue
