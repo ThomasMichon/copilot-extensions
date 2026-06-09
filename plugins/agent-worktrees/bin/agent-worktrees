@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -z "${WORKTREE_PROJECT:-}" ]]; then
-    echo "ERROR: WORKTREE_PROJECT is not set. Use the project-specific binstub or export WORKTREE_PROJECT." >&2
-    exit 1
-fi
+# Note: unlike a project binstub, WORKTREE_PROJECT may be unset here.
+# We do NOT balk -- the Python entrypoint detects the missing project
+# context and prints help + a recommended next step (see cmd_help_unrouted).
 
 # Dual-layout: prefer new runtime, fall back to legacy
 if [[ -x "$HOME/.agent-worktrees/.venv/bin/python" ]]; then
