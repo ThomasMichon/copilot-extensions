@@ -288,7 +288,7 @@ class _RecordLock:
         self._timeout = timeout
         self._fd: int | None = None
 
-    def __enter__(self) -> "_RecordLock":
+    def __enter__(self) -> _RecordLock:
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
         self._fd = os.open(str(self._lock_path), os.O_CREAT | os.O_RDWR)
         try:

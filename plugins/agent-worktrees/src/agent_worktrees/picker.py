@@ -14,9 +14,9 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Sequence
 
 
 class ItemKind(str, Enum):
@@ -226,8 +226,8 @@ def _read_key_unix() -> str | None:
     misidentified as bare Esc.
     """
     import select
-    import tty
     import termios
+    import tty
 
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
@@ -379,7 +379,7 @@ def _numbered_prompt(
             print(f"    [{i + 1}] {lbl}{default_mark}")
         print()
         try:
-            pchoice = input(f"Backend [1]: ").strip()
+            pchoice = input("Backend [1]: ").strip()
         except (EOFError, KeyboardInterrupt):
             return PickResult(selected=-1, profile_idx=0)
         if pchoice:

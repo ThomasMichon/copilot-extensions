@@ -476,7 +476,7 @@ def validate_and_finalize(
         ahead_commits = git_ops.get_commits_ahead(branch, upstream, cwd=worktree_path)
         is_clean = git_ops.is_clean(cwd=worktree_path)
         if len(ahead_commits) == 0 and is_clean:
-            print(f"No commits and clean tree -- finalizing unused worktree.")
+            print("No commits and clean tree -- finalizing unused worktree.")
             # Fall through to cleanup
         elif not _is_content_on_upstream(branch, upstream, cwd=worktree_path):
             output.err(

@@ -22,9 +22,8 @@ from typing import Any
 
 import yaml
 
-from . import git_ops
 from . import config as cfg
-
+from . import git_ops
 
 # ── Data structures ─────────────────────────────────────────────────────
 
