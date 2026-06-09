@@ -4444,6 +4444,138 @@ def _print_boot_provenance() -> None:
     print(f"  {'PASS' if all_ok else 'FAIL'}: boot provenance {'verified' if all_ok else 'has issues'}")
 
 
+def _extract_project_flag(args_list: list[str]) -> tuple[list[str], str | None]:
+    """Pop a global --project/-p flag from args, returning (remaining, value).
+
+    Supports ``--project NAME``, ``--project=NAME``, ``-p NAME``. Only the
+    first occurrence is consumed; the rest pass through to the subcommand.
+    """
+    out: list[str] = []
+    project: str | None = None
+    i = 0
+    while i < len(args_list):
+        arg = args_list[i]
+        if project is None and arg in ("--project", "-p"):
+            if i + 1 < len(args_list):
+                project = args_list[i + 1]
+                i += 2
+                continue
+            i += 1
+            continue
+        if project is None and arg.startswith("--project="):
+            project = arg.split("=", 1)[1]
+            i += 1
+            continue
+        out.append(arg)
+        i += 1
+    return out, (project.strip() if project else None)
+
+
+def _git_toplevel(path: Path) -> Path | None:
+    """Return the git toplevel of ``path`` resolved to its anchor, or None."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return git_ops.resolve_to_anchor(Path(r.stdout.strip()).resolve())
+    except Exception:
+        pass
+    return None
+
+
+# Commands that work without a project context (no load_config/project_name).
+_NO_PROJECT_COMMANDS = {
+    "--version", "-V", "--help", "-h", "repos", "install", "register",
+}
+
+
+def cmd_help_unrouted(requested: str | None = None) -> int:
+    """Help shown when ``agent-worktrees`` runs without project context.
+
+    Prints the grouped command catalog, explains why it balked, and
+    recommends the most likely next step based on the current directory
+    and the set of adopted projects.
+    """
+    out = sys.stderr
+    print("agent-worktrees -- worktree session lifecycle manager", file=out)
+    print(file=out)
+    if requested:
+        print(
+            f"No project context for '{requested}'. You ran the generic "
+            f"'agent-worktrees' binstub rather than a project binstub, and "
+            f"no --project was given.",
+            file=out,
+        )
+    else:
+        print(
+            "No project context. You ran the generic 'agent-worktrees' "
+            "binstub rather than a project binstub (e.g. 'aperture-labs').",
+            file=out,
+        )
+    print(file=out)
+
+    print("Commands:", file=out)
+    groups = [
+        ("Worktree lifecycle",
+         "worktree, create, list, status, push-changes, finalize, cleanup"),
+        ("Project / install",
+         "register, install, uninstall, update, install-status, get, validate"),
+        ("Namespaces", "services ..., repos ..."),
+        ("Diagnostics", "activity"),
+        ("Info", "--version, --help"),
+    ]
+    for title, cmds in groups:
+        print(f"  {title + ':':<22}{cmds}", file=out)
+    print(file=out)
+
+    # Ranked recommendation from cwd + adopted projects.
+    try:
+        projects = inst.read_projects_registry().get("projects", {})
+    except Exception:
+        projects = {}
+    cwd_anchor = _git_toplevel(Path.cwd())
+
+    matched: str | None = None
+    if cwd_anchor is not None:
+        for name, entry in projects.items():
+            anchor = entry.get("anchor") if isinstance(entry, dict) else None
+            if anchor and _normalize_path(str(Path(anchor).resolve())) == _normalize_path(str(cwd_anchor)):
+                matched = name
+                break
+
+    print("Recommended next step:", file=out)
+    if matched:
+        print(
+            f"  You are inside the '{matched}' project. Run:\n"
+            f"    {matched}                         # interactive picker\n"
+            f"    agent-worktrees --project {matched} worktree list",
+            file=out,
+        )
+    elif cwd_anchor is not None:
+        print(
+            f"  This git repo ({cwd_anchor.name}) is not adopted yet. Adopt it:\n"
+            f"    agent-worktrees register {cwd_anchor.name}",
+            file=out,
+        )
+    elif projects:
+        names = ", ".join(sorted(projects))
+        print(
+            f"  Pick an adopted project (run its binstub or use --project):\n"
+            f"    Adopted: {names}\n"
+            f"    e.g. agent-worktrees --project {sorted(projects)[0]} worktree list",
+            file=out,
+        )
+    else:
+        print(
+            "  No projects adopted yet. From inside a git repo, run:\n"
+            "    agent-worktrees register <name>",
+            file=out,
+        )
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
@@ -4457,9 +4589,25 @@ def main(argv: list[str] | None = None) -> int:
     if args_list and args_list[0] == "agent-worktrees":
         args_list = args_list[1:]
 
-    # No args → default launch
+    # Global --project/-p flag: set WORKTREE_PROJECT in-process so any
+    # subcommand works without the per-project binstub.
+    args_list, _proj = _extract_project_flag(args_list)
+    if _proj:
+        os.environ["WORKTREE_PROJECT"] = _proj
+
+    has_project = bool(os.environ.get("WORKTREE_PROJECT", "").strip())
+
+    # No args → launch (with project) or helpful balk (without).
     if not args_list:
-        return cmd_launch([])
+        if has_project:
+            return cmd_launch([])
+        return cmd_help_unrouted()
+
+    # A project-requiring subcommand without any project context → balk
+    # helpfully instead of raising a bare RuntimeError deep in load_config.
+    if not has_project and args_list[0] not in _NO_PROJECT_COMMANDS \
+            and not args_list[0].startswith("-"):
+        return cmd_help_unrouted(requested=args_list[0])
 
     # --version / -V → print version + build info + boot provenance
     if args_list[0] in ("--version", "-V"):
