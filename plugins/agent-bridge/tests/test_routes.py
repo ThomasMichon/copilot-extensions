@@ -405,3 +405,80 @@ class TestWorktreeRoutes:
         assert entry["session_id"] == "sess-stopped-1"
         assert entry["session_status"] == "stopped"
         assert entry["session_live"] is False
+
+    def test_worktree_linkage_includes_acp_session_id(self, client, app) -> None:
+        wt_id = "lambda-core-wsl-20250101-150000-acp"
+        self._seed_worktree("test-agent", wt_id)
+
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        session = Session("sess-acp-1", "lone-mesa", target, "test-agent")
+        session.status = SessionStatus.IDLE
+        session.acp_session_id = "acp-uuid-abcdef"
+        mgr._sessions[session.session_id] = session
+
+        resp = client.get("/api/v1/worktrees")
+        entry = resp.json()["groups"]["test-agent"][0]
+        assert entry["session_id"] == "sess-acp-1"
+        assert entry["acp_session_id"] == "acp-uuid-abcdef"
+
+    def test_resume_worktree_with_no_session_404s(self, client) -> None:
+        self._seed_worktree("test-agent", "lambda-core-wsl-20250101-160000-empty")
+        resp = client.post(
+            "/api/v1/worktrees/lambda-core-wsl-20250101-160000-empty/resume",
+        )
+        assert resp.status_code == 404
+
+    def test_resume_worktree_returns_already_live_session(
+        self, client, app,
+    ) -> None:
+        wt_id = "lambda-core-wsl-20250101-170000-live"
+        self._seed_worktree("test-agent", wt_id)
+
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        session = Session("sess-live-1", "warm-bay", target, "test-agent")
+        session.status = SessionStatus.IDLE
+        session.acp_session_id = "acp-live-1"
+        mgr._sessions[session.session_id] = session
+
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["session_id"] == "sess-live-1"
+        assert data["acp_session_id"] == "acp-live-1"
+
+
+class TestAcpAliasResolution:
+    """Session routes accept the ACP session id as an alias key."""
+
+    def test_get_session_by_acp_id(self, client, app) -> None:
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt")
+        session = Session("bridge-uuid-1", "swift-pine", target, "test-agent")
+        session.status = SessionStatus.IDLE
+        session.acp_session_id = "acp-alias-xyz"
+        mgr._sessions[session.session_id] = session
+
+        # Address the session by its ACP id rather than the bridge uuid.
+        resp = client.get("/api/v1/sessions/acp-alias-xyz")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["session_id"] == "bridge-uuid-1"
+        assert data["acp_session_id"] == "acp-alias-xyz"
+
+    def test_get_session_by_bridge_uuid_still_works(self, client, app) -> None:
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt")
+        session = Session("bridge-uuid-2", "tall-oak", target, "test-agent")
+        session.status = SessionStatus.IDLE
+        session.acp_session_id = "acp-other"
+        mgr._sessions[session.session_id] = session
+
+        resp = client.get("/api/v1/sessions/bridge-uuid-2")
+        assert resp.status_code == 200
+        assert resp.json()["session_id"] == "bridge-uuid-2"
+
+    def test_unknown_ref_404s(self, client) -> None:
+        resp = client.get("/api/v1/sessions/no-such-ref")
+        assert resp.status_code == 404

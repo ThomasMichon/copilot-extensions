@@ -66,6 +66,7 @@ class SessionInfo(BaseModel):
     name: str
     agent_name: str | None = None
     caller_id: str | None = None
+    acp_session_id: str | None = None  # ACP-sourced session id (durable identity)
     target_dir: str | None = None
     target_type: Literal["local", "ssh", "command"] = "local"
     target_host: str | None = None

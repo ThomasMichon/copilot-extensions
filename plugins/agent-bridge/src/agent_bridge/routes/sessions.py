@@ -35,6 +35,7 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         name=s.name,
         agent_name=s.agent_name,
         caller_id=s.caller_id,
+        acp_session_id=s.acp_session_id,
         target_dir=s.target.cwd,
         target_type=s.target.type,
         target_host=s.target.host,

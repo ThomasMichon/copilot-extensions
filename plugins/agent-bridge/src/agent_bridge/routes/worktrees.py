@@ -14,9 +14,10 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from ..agent_registry import AgentConfig, AgentResolver
+from ..models import SessionInfo, SessionStatus
 
 log = logging.getLogger("agent-bridge")
 
@@ -353,6 +354,8 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
     session that is still live:
 
     - ``session_id``: latest bridge session for this worktree, or None
+    - ``acp_session_id``: that session's ACP-sourced id (durable identity),
+      or None
     - ``session_status``: that session's status (idle/running/stopped/...)
     - ``session_turn_count``: number of prompt turns on that session
     - ``session_live``: True if the session is currently running or idle
@@ -383,11 +386,13 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
         if session is not None:
             status = session.status.value
             entry["session_id"] = session.session_id
+            entry["acp_session_id"] = session.acp_session_id
             entry["session_status"] = status
             entry["session_turn_count"] = session.turn_count
             entry["session_live"] = status in ("running", "idle")
         else:
             entry["session_id"] = None
+            entry["acp_session_id"] = None
             entry["session_status"] = None
             entry["session_turn_count"] = 0
             entry["session_live"] = False
@@ -399,3 +404,51 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
             for name, worktrees in groups.items()
         },
     }
+
+
+def _latest_session_for_worktree(mgr: Any, worktree_id: str) -> Any:
+    """Return the most-recently-updated bridge session for a worktree, or None."""
+    if mgr is None:
+        return None
+    for session in mgr.list_sessions():  # sorted newest-first
+        if getattr(session.target, "worktree_id", None) == worktree_id:
+            return session
+    return None
+
+
+@router.post("/api/v1/worktrees/{worktree_id}/resume", response_model=SessionInfo)
+async def resume_worktree(worktree_id: str, request: Request) -> SessionInfo:
+    """Resume a worktree by resolving and resuming its most-recent session.
+
+    Worktree-level convenience verb: finds the current (most recent) session
+    for the worktree and ensures it is live.  A stopped session is resumed
+    (ACP load_session reuses the same acp session id); an already-live
+    session is returned as-is.  Returns 404 if the worktree has no session.
+    """
+    from .sessions import _session_info
+
+    mgr = getattr(request.app.state, "session_manager", None)
+    session = _latest_session_for_worktree(mgr, worktree_id)
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No session found for worktree {worktree_id}",
+        )
+
+    # Already live -- nothing to do, return current state.
+    if session.status in (SessionStatus.RUNNING, SessionStatus.IDLE):
+        return _session_info(session)
+
+    try:
+        resumed = await mgr.resume_session(session.session_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session.session_id} not found",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return _session_info(resumed)
