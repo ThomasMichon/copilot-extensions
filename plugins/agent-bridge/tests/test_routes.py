@@ -448,6 +448,37 @@ class TestWorktreeRoutes:
         assert data["session_id"] == "sess-live-1"
         assert data["acp_session_id"] == "acp-live-1"
 
+    def test_resume_worktree_falls_back_to_fresh_session(
+        self, client, app,
+    ) -> None:
+        """If the stopped session can't be resumed, start a fresh one."""
+        from unittest.mock import AsyncMock
+
+        wt_id = "lambda-core-wsl-20250101-180000-fallback"
+        self._seed_worktree("test-agent", wt_id)
+
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        stopped = Session("sess-dead-1", "cold-fern", target, "test-agent")
+        stopped.status = SessionStatus.STOPPED
+        stopped.acp_session_id = "acp-dead-1"
+        mgr._sessions[stopped.session_id] = stopped
+
+        fresh = Session("sess-fresh-1", "new-dawn", target, "test-agent")
+        fresh.status = SessionStatus.IDLE
+        fresh.acp_session_id = "acp-fresh-1"
+
+        # resume_session blows up (ACP session gone); start_session succeeds.
+        mgr.resume_session = AsyncMock(side_effect=RuntimeError("acp session gone"))
+        mgr.start_session = AsyncMock(return_value=fresh)
+
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["session_id"] == "sess-fresh-1"
+        assert data["acp_session_id"] == "acp-fresh-1"
+        mgr.start_session.assert_awaited_once()
+
 
 class TestAcpAliasResolution:
     """Session routes accept the ACP session id as an alias key."""
