@@ -55,9 +55,51 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
     )
 
 
+# Session states considered "alive" and therefore reusable for caller affinity.
+# Terminal/stopped states are excluded -- reusing them would hand back a session
+# with no running process, so the caller should get a fresh spawn instead.
+_REUSABLE_STATES = frozenset({
+    SessionStatus.CREATED,
+    SessionStatus.STARTING,
+    SessionStatus.RUNNING,
+    SessionStatus.IDLE,
+})
+
+
+def _find_reusable_session(mgr, agent_name, caller_id):
+    """Return an alive session matching (agent_name, caller_id), or None.
+
+    Picks the most recently updated match so a reload reattaches to the
+    freshest session for that caller.
+    """
+    for session in mgr.list_sessions():  # already sorted newest-first
+        if (
+            session.caller_id == caller_id
+            and session.agent_name == agent_name
+            and session.status in _REUSABLE_STATES
+        ):
+            return session
+    return None
+
+
 @router.post("", response_model=StartSessionResponse, status_code=201)
 async def start_session(req: StartSessionRequest, request: Request):
     mgr: SessionManager = request.app.state.session_manager
+
+    # Caller-affinity reuse: if the caller supplies a caller_id (e.g. a
+    # Neuron-Forge worktree GUID) and an alive session already exists for
+    # that (agent, caller_id) pair, return it instead of spawning a new one.
+    # This makes create idempotent for HTTP consumers -- a duplicate POST
+    # from a reload or double-click resolves to the same session/worktree
+    # rather than creating a second one.  Pass force_new to opt out.
+    if req.caller_id and not req.force_new:
+        existing = _find_reusable_session(mgr, req.agent, req.caller_id)
+        if existing is not None:
+            return StartSessionResponse(
+                session_id=existing.session_id,
+                name=existing.name,
+                status=existing.status,
+            )
 
     if req.agent:
         # Resolve agent via registry

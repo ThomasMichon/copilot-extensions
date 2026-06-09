@@ -120,6 +120,7 @@ class StartSessionRequest(BaseModel):
     topology: str | None = None
     worktree_id: str | None = None  # agent-worktrees worktree ID for session roll
     caller_id: str | None = None  # caller identity for session affinity
+    force_new: bool = False  # skip caller_id reuse and always create a fresh session
 
 
 class SubmitPromptRequest(BaseModel):
