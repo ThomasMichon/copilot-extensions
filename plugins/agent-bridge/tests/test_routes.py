@@ -232,6 +232,99 @@ class TestSessionRoutes:
         target = spawn_call.args[0]
         assert target.cwd == "/worktree/path"
 
+    @patch("agent_bridge.session_manager.spawn")
+    @patch("agent_bridge.session_manager.AcpClient")
+    def test_start_session_reuses_by_caller_id(
+        self, mock_acp_cls, mock_spawn, client,
+    ) -> None:
+        """A second start with the same caller_id reuses the alive session."""
+        mock_proc = MagicMock()
+        mock_proc.proc = MagicMock()
+        mock_proc.proc.pid = 42
+        mock_proc.proc.returncode = None
+        mock_proc.proc.stdin = MagicMock()
+        mock_proc.proc.stdout = MagicMock()
+        mock_proc.proc.stderr = MagicMock()
+        mock_proc.proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_spawn.return_value = mock_proc
+
+        mock_client = MagicMock()
+        mock_client.is_running = True
+        mock_client.pid = 42
+        mock_client.start = AsyncMock()
+        mock_client.new_session = AsyncMock(return_value="acp-reuse")
+        mock_client.shutdown = AsyncMock()
+        mock_client.cancel_prompt = AsyncMock()
+        mock_acp_cls.return_value = mock_client
+
+        first = client.post(
+            "/api/v1/sessions",
+            json={"target_dir": "/tmp/test", "caller_id": "wt-guid-1"},
+        )
+        assert first.status_code == 201
+        first_id = first.json()["session_id"]
+
+        # Second create with the same caller_id must return the same session
+        # and must not spawn a second process.
+        spawn_count_after_first = mock_spawn.call_count
+        second = client.post(
+            "/api/v1/sessions",
+            json={"target_dir": "/tmp/test", "caller_id": "wt-guid-1"},
+        )
+        assert second.status_code == 201
+        assert second.json()["session_id"] == first_id
+        assert mock_spawn.call_count == spawn_count_after_first
+
+        # Only one session should exist.
+        listing = client.get("/api/v1/sessions").json()["sessions"]
+        assert len([s for s in listing if s["caller_id"] == "wt-guid-1"]) == 1
+
+    @patch("agent_bridge.session_manager.spawn")
+    @patch("agent_bridge.session_manager.AcpClient")
+    def test_start_session_force_new_bypasses_reuse(
+        self, mock_acp_cls, mock_spawn, client,
+    ) -> None:
+        """force_new creates a fresh session even when caller_id matches."""
+        mock_proc = MagicMock()
+        mock_proc.proc = MagicMock()
+        mock_proc.proc.pid = 42
+        mock_proc.proc.returncode = None
+        mock_proc.proc.stdin = MagicMock()
+        mock_proc.proc.stdout = MagicMock()
+        mock_proc.proc.stderr = MagicMock()
+        mock_proc.proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_spawn.return_value = mock_proc
+
+        mock_client = MagicMock()
+        mock_client.is_running = True
+        mock_client.pid = 42
+        mock_client.start = AsyncMock()
+        mock_client.new_session = AsyncMock(return_value="acp-force")
+        mock_client.shutdown = AsyncMock()
+        mock_client.cancel_prompt = AsyncMock()
+        mock_acp_cls.return_value = mock_client
+
+        first = client.post(
+            "/api/v1/sessions",
+            json={"target_dir": "/tmp/test", "caller_id": "wt-guid-2"},
+        )
+        assert first.status_code == 201
+        first_id = first.json()["session_id"]
+
+        second = client.post(
+            "/api/v1/sessions",
+            json={
+                "target_dir": "/tmp/test",
+                "caller_id": "wt-guid-2",
+                "force_new": True,
+            },
+        )
+        assert second.status_code == 201
+        assert second.json()["session_id"] != first_id
+
+        listing = client.get("/api/v1/sessions").json()["sessions"]
+        assert len([s for s in listing if s["caller_id"] == "wt-guid-2"]) == 2
+
 
 class TestAgentRoutes:
     """Agent registry routes."""
