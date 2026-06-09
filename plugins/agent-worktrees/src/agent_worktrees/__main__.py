@@ -464,7 +464,10 @@ def _build_launch_cmd(
             setup_path = str(Path(anchor) / "tools" / "setup" / "setup.ps1")
             if not Path(setup_path).is_file():
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.ps1")
-            cmd = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", setup_path, "-Machine", config.machine]
+            cmd = [
+                "pwsh.exe", "-NoProfile", "-NoLogo", "-File",
+                setup_path, "-Machine", config.machine,
+            ]
             if recovery:
                 cmd.append("-Recovery")
         else:
@@ -718,7 +721,12 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             # Build picker menu
             menu_items: list[MenuItem] = []
 
-            def _wt_label(rec: tracking.WorktreeRecord, info: git_ops.WorktreeStateInfo, icon: str, session_ctx: sessions.SessionContext = session_ctx) -> str:
+            def _wt_label(
+                rec: tracking.WorktreeRecord,
+                info: git_ops.WorktreeStateInfo,
+                icon: str,
+                session_ctx: sessions.SessionContext = session_ctx,
+            ) -> str:
                 age = _age_str(rec.started_at)
                 resume = f", {rec.resume_count} resumes" if rec.resume_count > 0 else ""
                 norm = _normalize_path(rec.worktree_path)
@@ -734,11 +742,22 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 if info.branch_drift and info.current_branch:
                     drift_tag = f" ⚠ {info.current_branch}"
 
-                state_tag = f" [{info.state.value}]" if info.state in (git_ops.WorktreeState.UNUSED, git_ops.WorktreeState.COMPLETED) else ""
+                state_tag = (
+                    f" [{info.state.value}]"
+                    if info.state in (
+                        git_ops.WorktreeState.UNUSED,
+                        git_ops.WorktreeState.COMPLETED,
+                    )
+                    else ""
+                )
                 short_id = rec.worktree_id[-4:] if len(rec.worktree_id) > 4 else rec.worktree_id
                 return f"{icon} …{short_id}  ({age}{resume}){tag}{drift_tag}{state_tag}"
 
-            def _wt_subtitle(rec: tracking.WorktreeRecord, info: git_ops.WorktreeStateInfo, session_ctx: sessions.SessionContext = session_ctx) -> str | None:
+            def _wt_subtitle(
+                rec: tracking.WorktreeRecord,
+                info: git_ops.WorktreeStateInfo,
+                session_ctx: sessions.SessionContext = session_ctx,
+            ) -> str | None:
                 """Resolve the best available title for a worktree."""
                 norm = _normalize_path(rec.worktree_path)
                 turns = session_ctx.turn_count.get(norm, 0)
@@ -773,7 +792,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 menu_items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
 
             new_idx = len(menu_items)
-            menu_items.append(MenuItem(label="✨ New worktree", kind=ItemKind.ACTION, value=("new", None)))
+            menu_items.append(
+                MenuItem(label="✨ New worktree", kind=ItemKind.ACTION, value=("new", None))
+            )
 
             # "Other machines" sub-menu entry (only if remotes exist)
             remote_machines = _load_remote_machines(config)
@@ -784,10 +805,17 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                     value=("machines", None),
                 ))
 
-            menu_items.append(MenuItem(label="📂 Base repo (no worktree)", kind=ItemKind.ACTION, value=("base", None)))
+            menu_items.append(
+                MenuItem(
+                    label="📂 Base repo (no worktree)",
+                    kind=ItemKind.ACTION, value=("base", None),
+                )
+            )
 
             if recent_wts:
-                menu_items.append(MenuItem(label="─── recent ─────────────────────", kind=ItemKind.SEPARATOR))
+                menu_items.append(
+                    MenuItem(label="─── recent ─────────────────────", kind=ItemKind.SEPARATOR)
+                )
             for rec, info in recent_wts:
                 menu_items.append(MenuItem(
                     label=_wt_label(rec, info, "🌳"),
@@ -796,7 +824,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 ))
 
             if unused_wts:
-                menu_items.append(MenuItem(label="─── unused ─────────────────────", kind=ItemKind.SEPARATOR))
+                menu_items.append(
+                    MenuItem(label="─── unused ─────────────────────", kind=ItemKind.SEPARATOR)
+                )
                 for rec, info in unused_wts:
                     menu_items.append(MenuItem(
                         label=_wt_label(rec, info, "⬜"),
@@ -805,7 +835,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                     ))
 
             if completed_wts:
-                menu_items.append(MenuItem(label="─── completed ──────────────────", kind=ItemKind.SEPARATOR))
+                menu_items.append(
+                    MenuItem(label="─── completed ──────────────────", kind=ItemKind.SEPARATOR)
+                )
                 for rec, info in completed_wts:
                     menu_items.append(MenuItem(
                         label=_wt_label(rec, info, "✅"),
@@ -815,7 +847,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
             # System menu item
             menu_items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
-            menu_items.append(MenuItem(label="⚙ System menu", kind=ItemKind.ACTION, value=("system", None)))
+            menu_items.append(
+                MenuItem(label="⚙ System menu", kind=ItemKind.ACTION, value=("system", None))
+            )
 
             # Build profile labels for the picker toggle
             profiles = config.copilot_profiles or [cfg.DEFAULT_PROFILE]
@@ -972,7 +1006,10 @@ def _run_machine_menu(config: cfg.Config) -> int | None:
                 shell_tag = f" ({ssh_env.shell})" if ssh_env.shell else ""
                 machine_items.append(MenuItem(
                     label=f"🖥 {entry.display_name} ({env_label})",
-                    subtitle=f"{ssh_env.alias}{shell_tag} -- {entry.role}" if entry.role else ssh_env.alias + shell_tag,
+                    subtitle=(
+                        f"{ssh_env.alias}{shell_tag} -- {entry.role}"
+                        if entry.role else ssh_env.alias + shell_tag
+                    ),
                     kind=ItemKind.NORMAL,
                     value=len(machine_values),
                 ))
@@ -1331,7 +1368,8 @@ def _resolve_base_repo(
     if args.dry_run:
         output.dry_run(f"Would launch: {' '.join(launch_cmd)}")
         if merged_env:
-            output.dry_run(f"Would set env: {', '.join(f'{k}={v}' for k, v in merged_env.items())}")
+            env_str = ", ".join(f"{k}={v}" for k, v in merged_env.items())
+            output.dry_run(f"Would set env: {env_str}")
         _emit_plan({"action": "none", "exit_code": 0})
         return 0
 
@@ -1386,7 +1424,8 @@ def _resolve_resume(
     if args.dry_run:
         output.dry_run(f"Would launch: {' '.join(launch_cmd)}")
         if merged_env:
-            output.dry_run(f"Would set env: {', '.join(f'{k}={v}' for k, v in merged_env.items())}")
+            env_str = ", ".join(f"{k}={v}" for k, v in merged_env.items())
+            output.dry_run(f"Would set env: {env_str}")
         _emit_plan({"action": "none", "exit_code": 0})
         return 0
 
@@ -1434,7 +1473,8 @@ def _resolve_new(
         merged_env = _build_env(profile)
         output.dry_run(f"Would launch: {' '.join(launch_cmd)}")
         if merged_env:
-            output.dry_run(f"Would set env: {', '.join(f'{k}={v}' for k, v in merged_env.items())}")
+            env_str = ", ".join(f"{k}={v}" for k, v in merged_env.items())
+            output.dry_run(f"Would set env: {env_str}")
         print()
         output.ok("Dry run complete -- no changes made")
         _emit_plan({"action": "none", "exit_code": 0})
@@ -1590,7 +1630,10 @@ def cmd_post_exit(args: argparse.Namespace) -> int:
     config = cfg.load_config()
     worktree_id = _infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
-        output.err("Could not determine worktree ID. Pass it explicitly or run from inside a worktree.")
+        output.err(
+            "Could not determine worktree ID. Pass it explicitly "
+            "or run from inside a worktree."
+        )
         return 1
     worktree_id = _resolve_worktree_id(worktree_id)
 
@@ -1668,7 +1711,10 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             raise
         worktree_id = _infer_worktree_id(args.worktree_id, config)
         if not worktree_id:
-            msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
+            msg = (
+                "Could not determine worktree ID. Pass it explicitly "
+                "or run from inside a worktree."
+            )
             if use_json:
                 return _json_error(msg)
             output.err(msg)
@@ -1720,7 +1766,10 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             raise
         worktree_id = _infer_worktree_id(args.worktree_id, config)
         if not worktree_id:
-            msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
+            msg = (
+                "Could not determine worktree ID. Pass it explicitly "
+                "or run from inside a worktree."
+            )
             if use_json:
                 return _json_error(msg)
             output.err(msg)
@@ -1778,7 +1827,10 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
     worktree_id = _infer_worktree_id(args.worktree_id, config)
 
     if not worktree_id:
-        output.err("Could not determine worktree ID. Pass it explicitly or run from inside a worktree.")
+        output.err(
+            "Could not determine worktree ID. Pass it explicitly "
+            "or run from inside a worktree."
+        )
         return 1
     worktree_id = _resolve_worktree_id(worktree_id)
 
@@ -1898,8 +1950,14 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     for r in results:
         color = STATE_COLORS.get(r.get("state", ""), "0")
-        state_str = f"\033[{color}m{r.get('state', ''):<11}\033[0m" if output._COLOR else f"{r.get('state', ''):<11}"
-        print(f"{r['short_id']:<6} {state_str} {r.get('ahead', ''):<7} {r.get('behind', ''):<8} {r['title']}")
+        state_str = (
+            f"\033[{color}m{r.get('state', ''):<11}\033[0m"
+            if output._COLOR else f"{r.get('state', ''):<11}"
+        )
+        print(
+            f"{r['short_id']:<6} {state_str} {r.get('ahead', ''):<7} "
+            f"{r.get('behind', ''):<8} {r['title']}"
+        )
 
     # Summary
     unused_count = sum(1 for r in results if r.get("state") == "unused")
@@ -2143,7 +2201,10 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         print(f"{len(to_clean)} session(s) eligible for cleanup.")
 
     if not args.include_unused and unused_count > 0:
-        print(f"{unused_count} unused worktree(s) preserved -- no commits, no uncommitted changes (pass --include-unused to also clean).")
+        print(
+            f"{unused_count} unused worktree(s) preserved -- no commits, "
+            "no uncommitted changes (pass --include-unused to also clean)."
+        )
 
     if dirty_count > 0 or wip_count > 0:
         parts = []
@@ -2277,7 +2338,10 @@ def _validate_machine_registry(
         output.info(f"    {machine}:")
         output.info(f"      display_name: {machine.title()}")
         output.info('      environment: "<OS and version>"')
-        output.info('      # alias: "<facility-name>"  # colloquial name if different from hostname')
+        output.info(
+            '      # alias: "<facility-name>"  '
+            '# colloquial name if different from hostname'
+        )
         return None
 
     return entry
@@ -2889,7 +2953,7 @@ def _update_modules(
         output.header(f"Updating Module: {name}")
         try:
             r = subprocess.run(
-                shell_prefix + ["update"],
+                [*shell_prefix, "update"],
                 cwd=module_dir, timeout=300,
             )
             if r.returncode == 0:
@@ -2908,7 +2972,7 @@ def _update_modules(
         output.info(f"Module '{name}' update failed (not installed?), trying install...")
         try:
             r = subprocess.run(
-                shell_prefix + ["install"],
+                [*shell_prefix, "install"],
                 cwd=module_dir, timeout=300,
             )
             if r.returncode == 0:
@@ -3103,9 +3167,9 @@ def _services_usage() -> None:
 def _installer_cmd(installer: Path, args: list[str]) -> list[str] | None:
     """Build the command to run an installer with the given args."""
     if installer.suffix == ".sh":
-        return ["bash", str(installer)] + args
+        return ["bash", str(installer), *args]
     if installer.suffix == ".ps1":
-        return ["pwsh", "-File", str(installer)] + args
+        return ["pwsh", "-File", str(installer), *args]
     return None
 
 
@@ -3219,7 +3283,10 @@ def _cmd_services_list(json_output: bool = False) -> int:
         return 1
 
     env = _resolve_environment(config)
-    services = svc.discover_services(repo_dir, env, service_paths=config.default_repo.service_paths or None)
+    services = svc.discover_services(
+        repo_dir, env,
+        service_paths=config.default_repo.service_paths or None,
+    )
 
     if json_output:
         data = [
@@ -3267,7 +3334,10 @@ def _cmd_services_status(json_output: bool = False) -> int:
         return 1
 
     env = _resolve_environment(config)
-    services = svc.discover_services(repo_dir, env, service_paths=config.default_repo.service_paths or None)
+    services = svc.discover_services(
+        repo_dir, env,
+        service_paths=config.default_repo.service_paths or None,
+    )
 
     if json_output:
         data = []
@@ -3388,7 +3458,10 @@ def _cmd_service_passthrough(name: str, action_args: list[str]) -> int:
         _ensure_repo_current(repo_dir, config)
 
     env = _resolve_environment(config)
-    services = svc.discover_services(repo_dir, env, service_paths=config.default_repo.service_paths or None)
+    services = svc.discover_services(
+        repo_dir, env,
+        service_paths=config.default_repo.service_paths or None,
+    )
 
     match = [s for s in services if s.name == name]
     if not match:
@@ -3438,7 +3511,10 @@ def _cmd_services_batch(action: str, flags: list[str]) -> int:
         _ensure_repo_current(repo_dir, config)
 
     env = _resolve_environment(config)
-    services = svc.discover_services(repo_dir, env, service_paths=config.default_repo.service_paths or None)
+    services = svc.discover_services(
+        repo_dir, env,
+        service_paths=config.default_repo.service_paths or None,
+    )
 
     force = "--force" in flags
     dry_run = "--dry-run" in flags
@@ -3494,7 +3570,7 @@ def _cmd_services_batch(action: str, flags: list[str]) -> int:
             errors += 1
             continue
 
-        cmd_args = [action] + pass_flags
+        cmd_args = [action, *pass_flags]
         cmd = _installer_cmd(installer, cmd_args)
         if not cmd:
             output.err(f"{label} -- unknown installer type: {installer.suffix}")
@@ -3729,7 +3805,10 @@ def cmd_pre_launch(args: argparse.Namespace) -> int:
         return 0
 
     env = _resolve_environment(config)
-    all_services = svc.discover_services(repo_dir, env, service_paths=config.default_repo.service_paths or None)
+    all_services = svc.discover_services(
+        repo_dir, env,
+        service_paths=config.default_repo.service_paths or None,
+    )
 
     # Filter to bootstrap services only
     bootstrap = {s.name: s for s in all_services if s.name in _BOOTSTRAP_SERVICES}
@@ -4489,7 +4568,9 @@ def _print_boot_provenance() -> None:
             all_ok = False
         print(f"  {status:6s} {name}: {detail}")
     print("")
-    print(f"  {'PASS' if all_ok else 'FAIL'}: boot provenance {'verified' if all_ok else 'has issues'}")
+    status = "PASS" if all_ok else "FAIL"
+    detail = "verified" if all_ok else "has issues"
+    print(f"  {status}: boot provenance {detail}")
 
 
 def _extract_project_flag(args_list: list[str]) -> tuple[list[str], str | None]:

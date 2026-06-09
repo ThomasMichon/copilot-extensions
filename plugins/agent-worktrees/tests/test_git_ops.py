@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -15,9 +13,7 @@ from agent_worktrees.git_ops import (
     git,
     is_cwd_inside,
     resolve_to_anchor,
-    _normalize_wt_path,
 )
-
 
 # ---------------------------------------------------------------------------
 # git() wrapper

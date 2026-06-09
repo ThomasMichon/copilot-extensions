@@ -3,10 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
-import yaml
 
 from agent_worktrees.tracking import (
     SessionEntry,
@@ -21,7 +17,6 @@ from agent_worktrees.tracking import (
     save_record,
     update_status,
 )
-
 
 # ---------------------------------------------------------------------------
 # Round-trip serialization
@@ -427,7 +422,9 @@ class TestListRecords:
 class TestStatusTransitions:
     """Test update_status and mark_resumed."""
 
-    def _make_and_save(self, tmp_tracking_dir: Path, monkeypatch_config, **overrides) -> WorktreeRecord:
+    def _make_and_save(
+        self, tmp_tracking_dir: Path, monkeypatch_config, **overrides
+    ) -> WorktreeRecord:
         defaults = dict(
             worktree_id="status-wt",
             branch="worktree/status-wt",

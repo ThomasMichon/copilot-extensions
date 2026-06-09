@@ -51,7 +51,9 @@ def _check_powershell(full_path: Path) -> ValidationFailure | None:
                     '{full_path}', [ref]$null, [ref]$errors
                 )
                 if ($errors.Count -gt 0) {{
-                    $errors | ForEach-Object {{ "Line $($_.Extent.StartLineNumber): $($_.Message)" }}
+                    $errors | ForEach-Object {{
+                        "Line $($_.Extent.StartLineNumber): $($_.Message)"
+                    }}
                     exit 1
                 }}
                 """,
@@ -224,7 +226,11 @@ def validate_files(
 
     for rel_path in files:
         wt = Path(worktree_path)
-        full_path = wt / rel_path.replace("/", os.sep) if platform.system() == "Windows" else wt / rel_path
+        full_path = (
+            wt / rel_path.replace("/", os.sep)
+            if platform.system() == "Windows"
+            else wt / rel_path
+        )
 
         if not full_path.exists():
             continue  # deleted file, fine
