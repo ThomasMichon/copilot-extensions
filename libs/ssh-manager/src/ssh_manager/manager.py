@@ -221,7 +221,7 @@ class ConnectionManager:
         ])
 
         for fwd in port_forwards:
-            args.append(fwd)  # e.g., "-R 9847:localhost:9847"
+            args.append(fwd)  # e.g., "-R 9857:localhost:9857"
 
         args.append(config.ssh_target)
 

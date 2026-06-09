@@ -221,7 +221,7 @@ class ConnectionManager:
         ])
 
         for fwd in port_forwards:
-            args.append(fwd)  # e.g., "-R 9847:localhost:9847"
+            args.append(fwd)  # e.g., "-R 9857:localhost:9857"
 
         args.append(config.ssh_target)
 
@@ -285,13 +285,25 @@ class ConnectionManager:
         return args
 
     def _mux_ssh_args(self, info: ConnectionInfo) -> list[str]:
-        """Build SSH args that use the existing ControlMaster socket."""
+        """Build SSH args that use the existing ControlMaster socket.
+
+        In direct mode (Windows), also includes port forwards since there
+        is no persistent master connection to carry them.
+        """
         args = self._base_ssh_args(info.config)
         if info.multiplexed:
             args.extend([
                 "-o", f"ControlPath={info.socket_path}",
                 "-o", "ControlMaster=no",
             ])
+        else:
+            # Direct mode: port forwards must be on every SSH invocation
+            # (no master connection to carry them).
+            # Each forward may be "-R host:port" (two tokens) or a single
+            # string — split on the first space to handle both forms.
+            for fwd in info.port_forwards:
+                parts = fwd.split(None, 1)
+                args.extend(parts)
         return args
 
     async def exec_command(

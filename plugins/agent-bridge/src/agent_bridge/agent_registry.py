@@ -808,6 +808,17 @@ class AgentResolver:
                 project=config.project,
             )
 
+        # Serialize auth hooks for the SpawnTarget (must be JSON-safe dicts)
+        auth_hook_dicts = [
+            {
+                "name": h.name,
+                "local_port": h.local_port,
+                "remote_port": h.remote_port,
+                "env": h.env,
+            }
+            for h in machine.auth_hooks
+        ]
+
         return SpawnTarget(
             type="ssh",
             cwd=config.cwd,
@@ -818,6 +829,7 @@ class AgentResolver:
             env=config.env,
             project=config.project,
             ssh_shell=ssh_env.shell,
+            auth_hooks=auth_hook_dicts,
         )
 
     def _agent_to_dict(self, config: AgentConfig) -> dict[str, Any]:
