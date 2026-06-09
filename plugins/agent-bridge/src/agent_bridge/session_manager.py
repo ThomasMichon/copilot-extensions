@@ -25,6 +25,57 @@ from .transport import SpawnTarget, spawn
 
 log = logging.getLogger("agent-bridge")
 
+# Session states that "occupy" a workspace -- a workspace with a session
+# in any of these states cannot accept a second concurrent session.
+# STOPPED is included because it is resumable (the ACP session persists),
+# so it still owns the workspace until explicitly ended.
+_ACTIVE_STATES = frozenset({
+    SessionStatus.STARTING,
+    SessionStatus.RUNNING,
+    SessionStatus.IDLE,
+    SessionStatus.STOPPING,
+    SessionStatus.STOPPED,
+})
+
+
+class SessionConflictError(Exception):
+    """Raised when an agent already has an active session and concurrent
+    sessions are not allowed.
+
+    CodeSpace (command-type) agents share a single checkout that cannot be
+    safely multiplexed, so only one active session is permitted per agent.
+    """
+
+    def __init__(self, agent_name: str, existing_session_id: str) -> None:
+        self.agent_name = agent_name
+        self.existing_session_id = existing_session_id
+        super().__init__(
+            f"Agent '{agent_name}' already has an active session "
+            f"{existing_session_id}; only one session per CodeSpace is "
+            "allowed. Reuse it (send to the session id) or end it first."
+        )
+
+
+def _workspace_key(
+    agent_name: str | None,
+    target: SpawnTarget,
+    caller_id: str | None,
+) -> tuple | None:
+    """Compute the concurrency key for a session, or None if unguarded.
+
+    A "workspace" is a checkout that can hold at most one active session.
+
+    - Command-type (CodeSpace / provider) agents share one checkout that
+      cannot be multiplexed, so the key is the agent name alone -- every
+      caller maps to the same single session regardless of worktree.
+    - Local / SSH / worktree agents can run concurrent sessions against
+      separate checkouts (each local worktree has its own caller_id), so
+      they are not hard-guarded here (returns None).
+    """
+    if agent_name and target.type == "command":
+        return ("agent", agent_name)
+    return None
+
 # -- Name generator ----------------------------------------------------------
 
 _ADJECTIVES = [
@@ -255,6 +306,19 @@ class SessionManager:
 
         log.info("Rehydrated %d sessions from DB", len(self._sessions))
 
+    def _find_active_session(self, ws_key: tuple) -> Session | None:
+        """Return an existing session that occupies the given workspace key.
+
+        A session occupies a workspace when its status is in _ACTIVE_STATES.
+        Used by the concurrency guard to enforce one session per CodeSpace.
+        """
+        for s in self._sessions.values():
+            if s.status not in _ACTIVE_STATES:
+                continue
+            if _workspace_key(s.agent_name, s.target, s.caller_id) == ws_key:
+                return s
+        return None
+
     async def start_session(
         self,
         target: SpawnTarget,
@@ -281,6 +345,20 @@ class SessionManager:
         session_id = str(uuid.uuid4())[:12]
         name = _generate_name()
         now = time.time()
+
+        # Concurrency guard: command-type (CodeSpace) agents allow only one
+        # active session at a time, since they share a single checkout. This
+        # check and the self._sessions registration below run synchronously
+        # (no await in between), so concurrent start_session calls cannot
+        # race past the guard.
+        ws_key = _workspace_key(agent_name, target, caller_id)
+        if ws_key is not None:
+            existing = self._find_active_session(ws_key)
+            if existing is not None:
+                raise SessionConflictError(
+                    agent_name=agent_name or "",
+                    existing_session_id=existing.session_id,
+                )
 
         session = Session(session_id, name, target, agent_name, caller_id=caller_id)
         session.event_log = EventLog(db=self._db, session_id=session_id)

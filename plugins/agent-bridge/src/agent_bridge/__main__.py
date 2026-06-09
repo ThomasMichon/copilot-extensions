@@ -370,6 +370,8 @@ def _start_agent_session(client, agent_name: str, *, force_new: bool = False) ->
     Pass ``force_new=True`` (``--new`` flag) to skip reuse and always
     create a fresh session.
     """
+    from .client import BridgeClientError
+
     caller_id = _get_caller_id()
 
     if not force_new:
@@ -392,12 +394,39 @@ def _start_agent_session(client, agent_name: str, *, force_new: bool = False) ->
             pass  # Fall through to create new
 
     print(f"[>] Starting session for agent '{agent_name}'...")
-    resp = client.start_session(agent=agent_name, caller_id=caller_id)
+    try:
+        resp = client.start_session(agent=agent_name, caller_id=caller_id)
+    except BridgeClientError as exc:
+        # Server-side concurrency guard: this agent (e.g. a CodeSpace)
+        # already has an active session. Reuse it instead of failing.
+        existing_sid = _conflict_session_id(exc)
+        if existing_sid:
+            print(
+                f"[>] Agent '{agent_name}' already has an active session "
+                f"{existing_sid} -- reusing it",
+            )
+            return existing_sid
+        raise
     sid = resp.get("session_id", "")
     name = resp.get("name", "")
     print(f"[>] Session {sid} ({name}) created")
     _wait_for_idle(client, sid)
     return sid
+
+
+def _conflict_session_id(exc: "BridgeClientError") -> str | None:
+    """Extract the existing session id from a 409 session-conflict error.
+
+    The server returns a structured detail dict for session conflicts:
+    {"error": "session_conflict", "existing_session_id": "...", ...}.
+    Returns None if this is not a session-conflict error.
+    """
+    if getattr(exc, "status", None) != 409:
+        return None
+    detail = getattr(exc, "detail", None)
+    if isinstance(detail, dict) and detail.get("error") == "session_conflict":
+        return detail.get("existing_session_id")
+    return None
 
 
 def _wait_for_idle(client, session_id: str, timeout: float = 30.0) -> None:

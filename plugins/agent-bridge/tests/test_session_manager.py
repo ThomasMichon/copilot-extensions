@@ -78,6 +78,105 @@ class TestStartSession:
             assert session.status == SessionStatus.FAILED
 
 
+class TestConcurrencyGuard:
+    """Single-session-per-CodeSpace concurrency guard."""
+
+    @staticmethod
+    def _command_target() -> SpawnTarget:
+        """A command-type (CodeSpace/provider) target."""
+        return SpawnTarget(
+            type="command",
+            cwd="/workspaces/repo",
+            spawn_command=["gh", "codespace", "ssh", "-c", "cs-name"],
+        )
+
+    @pytest.mark.asyncio
+    async def test_command_agent_blocks_second_session(
+        self, session_manager, _patch_spawn, _patch_acp
+    ) -> None:
+        from agent_bridge.session_manager import SessionConflictError
+
+        first = await session_manager.start_session(
+            self._command_target(), agent_name="codespace:cs-name",
+        )
+        assert first.status == SessionStatus.IDLE
+
+        with pytest.raises(SessionConflictError) as excinfo:
+            await session_manager.start_session(
+                self._command_target(), agent_name="codespace:cs-name",
+            )
+        assert excinfo.value.existing_session_id == first.session_id
+        assert excinfo.value.agent_name == "codespace:cs-name"
+
+    @pytest.mark.asyncio
+    async def test_command_agent_blocks_across_callers(
+        self, session_manager, _patch_spawn, _patch_acp
+    ) -> None:
+        """Different local callers still map to one CodeSpace session."""
+        from agent_bridge.session_manager import SessionConflictError
+
+        first = await session_manager.start_session(
+            self._command_target(), agent_name="codespace:cs-name",
+            caller_id="worktree-A",
+        )
+        with pytest.raises(SessionConflictError):
+            await session_manager.start_session(
+                self._command_target(), agent_name="codespace:cs-name",
+                caller_id="worktree-B",
+            )
+        assert first.caller_id == "worktree-A"
+
+    @pytest.mark.asyncio
+    async def test_stopped_session_still_blocks(
+        self, session_manager, _patch_spawn, _patch_acp
+    ) -> None:
+        """A STOPPED (resumable) session still owns the CodeSpace."""
+        from agent_bridge.session_manager import SessionConflictError
+
+        first = await session_manager.start_session(
+            self._command_target(), agent_name="codespace:cs-name",
+        )
+        await session_manager.stop_session(first.session_id)
+        assert first.status == SessionStatus.STOPPED
+
+        with pytest.raises(SessionConflictError) as excinfo:
+            await session_manager.start_session(
+                self._command_target(), agent_name="codespace:cs-name",
+            )
+        assert excinfo.value.existing_session_id == first.session_id
+
+    @pytest.mark.asyncio
+    async def test_ended_session_does_not_block(
+        self, session_manager, _patch_spawn, _patch_acp
+    ) -> None:
+        """Once ended, a new session for the same CodeSpace is allowed."""
+        first = await session_manager.start_session(
+            self._command_target(), agent_name="codespace:cs-name",
+        )
+        await session_manager.end_session(first.session_id)
+
+        second = await session_manager.start_session(
+            self._command_target(), agent_name="codespace:cs-name",
+        )
+        assert second.status == SessionStatus.IDLE
+        assert second.session_id != first.session_id
+
+    @pytest.mark.asyncio
+    async def test_local_agents_not_guarded(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """Local/SSH agents allow concurrent sessions (separate checkouts)."""
+        first = await session_manager.start_session(
+            spawn_target, agent_name="local-agent",
+        )
+        second = await session_manager.start_session(
+            spawn_target, agent_name="local-agent",
+        )
+        assert first.session_id != second.session_id
+        assert first.status == SessionStatus.IDLE
+        assert second.status == SessionStatus.IDLE
+
+
 class TestSubmitPrompt:
     """Prompt submission."""
 
