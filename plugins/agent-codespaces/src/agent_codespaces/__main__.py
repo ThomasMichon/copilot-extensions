@@ -392,6 +392,12 @@ def _config_show() -> int:
     print(f"  location: {config.default_location}")
     if config.dotfiles_repo:
         print(f"  dotfiles_repo: {config.dotfiles_repo}")
+    print(f"  ssh_user: {config.ssh_user}")
+    if config.workspace_folder:
+        print(f"  workspace_folder: {config.workspace_folder}")
+    if config.acp_command:
+        print(f"  acp_command: {config.acp_command} (explicit override)")
+    print(f"  effective_acp_command: {config.effective_acp_command}")
 
     print(f"\nCredential relay port: {config.credentials.relay_port}")
     for name, source in config.credentials.sources.items():

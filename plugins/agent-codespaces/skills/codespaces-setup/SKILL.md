@@ -36,6 +36,8 @@ skill.
 defaults:
   machine_type: largePremiumLinux     # gh codespace machine type
   location: EastUs                     # Azure region
+  ssh_user: vscode                     # SSH user (match CodeSpace user)
+  workspace_folder: /workspaces/odsp-web  # repo root on CodeSpace
   # dotfiles_repo: user/dotfiles      # Optional dotfiles repo
 
 credentials:
@@ -90,6 +92,40 @@ agent-codespaces config show
 | `machine_type` | string | `largePremiumLinux` | Default VM size for `gh codespace create` |
 | `location` | string | `EastUs` | Default Azure region |
 | `dotfiles_repo` | string | -- | Dotfiles repo for CodeSpace provisioning |
+| `ssh_user` | string | `vscode` | SSH user on CodeSpaces |
+| `workspace_folder` | string | -- | Workspace root on CodeSpace (e.g., `/workspaces/odsp-web`). Used to `cd` before launching Copilot, preventing CWD race conditions during cold starts. |
+| `acp_command` | string | -- | Explicit override for the remote agent command. If omitted, built automatically from `workspace_folder`. |
+
+#### `workspace_folder`
+
+The absolute path to the repo checkout on the CodeSpace. When set, the
+remote agent command becomes `cd <workspace_folder> && copilot --acp --stdio`,
+which ensures Copilot starts in the correct directory even when a
+cold-started CodeSpace's workspace volume hasn't been mounted by the time
+the SSH login profile runs.
+
+```yaml
+defaults:
+  workspace_folder: /workspaces/odsp-web
+```
+
+**Why this matters:** CodeSpace profile scripts (`/etc/profile.d/codespaces.sh`)
+run `cd $WORKING_DIRECTORY` during login shell init, but during cold starts
+from Shutdown state, the workspace volume may not be ready when SSH first
+connects. Without `workspace_folder`, Copilot can start in `/home/vscode`
+instead of the repo root, causing "not in a git repository" errors.
+
+#### `acp_command` (advanced)
+
+Explicit override for the entire remote command. If set, this takes
+priority over `workspace_folder`. Use only when you need a completely
+custom entry point:
+
+```yaml
+defaults:
+  # acp_command: "/workspaces/my-wrapper.sh"    # custom wrapper
+  # acp_command: "copilot --acp --stdio"         # bare (no cd prefix)
+```
 
 ### `credentials`
 

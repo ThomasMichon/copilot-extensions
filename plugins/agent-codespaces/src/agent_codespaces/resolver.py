@@ -40,19 +40,23 @@ def _find_agent_codespaces_cmd() -> str:
     return sys.executable
 
 
-def _build_spawn_command(codespace_name: str) -> list[str]:
-    """Build the spawn command for a codespace agent."""
+def _build_spawn_command(codespace_name: str, acp_command: str) -> list[str]:
+    """Build the spawn command for a codespace agent.
+
+    The ``acp_command`` is read from ``codespaces.yaml`` defaults and
+    passed as ``--remote-cmd`` to ``agent-codespaces ssh --stdio``.
+    """
     cmd_path = _find_agent_codespaces_cmd()
     if cmd_path == sys.executable:
         return [
             cmd_path, "-m", "agent_codespaces",
             "ssh", codespace_name, "--stdio",
-            "--remote-cmd", "copilot --acp --stdio",
+            "--remote-cmd", acp_command,
         ]
     return [
         cmd_path,
         "ssh", codespace_name, "--stdio",
-        "--remote-cmd", "copilot --acp --stdio",
+        "--remote-cmd", acp_command,
     ]
 
 
@@ -104,10 +108,10 @@ class CodespaceResolver:
                 name,
             )
 
-        spawn_cmd = _build_spawn_command(name)
+        config = load_merged_config()
+        spawn_cmd = _build_spawn_command(name, config.effective_acp_command)
         log.info("Resolved codespace:%s -> %s", name, " ".join(spawn_cmd))
 
-        config = load_merged_config()
         return SpawnTarget(
             type="command",
             spawn_command=spawn_cmd,

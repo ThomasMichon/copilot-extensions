@@ -67,11 +67,41 @@ class TestBuildAgentConfigs:
     def test_spawn_command_structure(self):
         agents = build_agent_configs(SAMPLE_CODESPACES)
         cmd = agents[0]["spawn_command"]
-        # Should contain ssh --stdio and --remote-cmd
+        # Should contain ssh --stdio and --remote-cmd with acp_command
         assert "--stdio" in cmd
         assert "fuzzy-adventure-abc123" in cmd
         assert "--remote-cmd" in cmd
+        # Default (no workspace_folder, no acp_command) uses bare copilot
         assert "copilot --acp --stdio" in cmd
+
+    def test_spawn_command_with_workspace_folder(self):
+        """workspace_folder produces a 'cd <path> && copilot' command."""
+        from agent_codespaces.config import CodespacesConfig
+
+        mock_config = CodespacesConfig(workspace_folder="/workspaces/my-repo")
+        with patch(
+            "agent_codespaces.config.load_merged_config",
+            return_value=mock_config,
+        ):
+            agents = build_agent_configs(SAMPLE_CODESPACES)
+        cmd = agents[0]["spawn_command"]
+        assert "cd /workspaces/my-repo && copilot --acp --stdio" in cmd
+
+    def test_spawn_command_with_explicit_acp_command(self):
+        """Explicit acp_command overrides workspace_folder."""
+        from agent_codespaces.config import CodespacesConfig
+
+        mock_config = CodespacesConfig(
+            workspace_folder="/workspaces/my-repo",
+            acp_command="custom-copilot --acp --stdio",
+        )
+        with patch(
+            "agent_codespaces.config.load_merged_config",
+            return_value=mock_config,
+        ):
+            agents = build_agent_configs(SAMPLE_CODESPACES)
+        cmd = agents[0]["spawn_command"]
+        assert "custom-copilot --acp --stdio" in cmd
 
     def test_empty_codespace_list(self):
         agents = build_agent_configs([])
