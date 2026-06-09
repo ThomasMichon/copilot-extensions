@@ -46,6 +46,22 @@ PYTHON="$RUNTIME_DIR/.venv/bin/python"
 export PYTHONPATH="$RUNTIME_DIR/lib"
 unset PYTHONHOME
 
+# Append a high-level lifecycle event to the persistent activity log.
+# Best-effort and fully detached -- never blocks or fails the launch.
+#   activity_log EVENT WORKTREE_ID [key=value ...]
+activity_log() {
+    local event="$1" wt="${2:-}"; shift 2 2>/dev/null || shift $# 
+    [[ -z "$event" || -z "$wt" ]] && return 0
+    local fields=()
+    local kv
+    for kv in "$@"; do
+        fields+=(--field "$kv")
+    done
+    ( "$PYTHON" -m agent_worktrees activity-log "$event" \
+        --worktree-id "$wt" --source launcher \
+        "${fields[@]+"${fields[@]}"}" >/dev/null 2>&1 & ) || true
+}
+
 # --recovery: skip vault credential loading (propagated via env var to setup.sh)
 # --: everything after this separator is copilot passthrough args (e.g. --acp --stdio)
 FILTERED_ARGS=()
@@ -245,7 +261,7 @@ fi
 # Subcommands that agent_worktrees's main() handles directly — these
 # must NOT fall through to the resolve→picker flow.  Keep in sync with
 # COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
-_DIRECT_COMMANDS="services repos agent-worktrees resolve post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch dev handoff register-session deregister-session backfill-sessions anchor-check"
+_DIRECT_COMMANDS="services repos agent-worktrees resolve post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch dev handoff register-session deregister-session backfill-sessions anchor-check activity activity-log"
 if [[ $# -gt 0 ]]; then
     for _dc in $_DIRECT_COMMANDS; do
         if [[ "$1" == "$_dc" ]]; then
@@ -349,6 +365,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
         # The attacher gets the shared view; no post-exit responsibility.
         if tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
             echo "Joining existing session: $TMUX_SESS"
+            activity_log mux_attached "$WORKTREE_ID" mux=join
             if [[ -n "${TMUX:-}" ]]; then
                 exec tmux switch-client -t "=$TMUX_SESS"
             else
@@ -409,6 +426,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             set -e
         else
 
+            activity_log mux_attached "$WORKTREE_ID" mux=create
             if [[ -n "${TMUX:-}" ]]; then
                 tmux switch-client -t "=$TMUX_SESS"
             else
@@ -419,7 +437,9 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             # We're back — either the user detached or the session ended.
             # Only run post-exit if the session is truly gone (user exited
             # the shell, not just detached).
+            activity_log mux_detached "$WORKTREE_ID"
             if ! tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
+                activity_log copilot_exited "$WORKTREE_ID" mux=tmux
                 # Check for handoff-driven relaunch before post-exit
                 if [[ -n "$WORKTREE_ID" ]]; then
                     HANDOFF_JSON=$("$PYTHON" -m agent_worktrees handoff consume "$WORKTREE_ID" 2>/dev/null) || true
@@ -475,6 +495,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
     "${CMD_ARRAY[@]}"
     COPILOT_EXIT=$?
     set -e
+    activity_log copilot_exited "$WORKTREE_ID" mux=none "exit_code=$COPILOT_EXIT"
 
     # Check for handoff-driven relaunch (max once per launcher invocation)
     if [[ -n "$WORKTREE_ID" ]]; then

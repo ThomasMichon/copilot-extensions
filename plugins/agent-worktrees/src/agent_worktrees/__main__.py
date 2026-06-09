@@ -60,6 +60,7 @@ from pathlib import Path
 import yaml
 
 from . import config as cfg
+from . import activity
 from . import finalize as fin
 from . import git_ops
 from . import installer as inst
@@ -373,6 +374,12 @@ def _create_worktree_core(
     if permissions.clone_permissions(repo.anchor, worktree_path):
         print("Copied Copilot permissions to worktree path.", file=sys.stderr)
 
+    activity.log_event(
+        "worktree_created",
+        worktree_id=worktree_id,
+        branch=branch,
+    )
+
     # Trust the new worktree path
     if permissions.add_trusted_folder(worktree_path):
         print("Added worktree path to trusted_folders.", file=sys.stderr)
@@ -573,6 +580,13 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 return _json_error(f"Worktree not found: {wt_id}")
             record = tracking.load_record(yaml_path)
             tracking.mark_resumed(record)
+
+            activity.log_event(
+                "worktree_resumed",
+                worktree_id=record.worktree_id,
+                branch=record.branch,
+                resume_count=record.resume_count,
+            )
 
             launch_cmd = _build_launch_cmd(config, args, record.worktree_path)
             env = _build_env(None)
@@ -1353,6 +1367,13 @@ def _resolve_resume(
     print(f"   Path: {record.worktree_path}")
 
     tracking.mark_resumed(record)
+
+    activity.log_event(
+        "worktree_resumed",
+        worktree_id=record.worktree_id,
+        branch=record.branch,
+        resume_count=record.resume_count,
+    )
 
     launch_cmd = _build_launch_cmd(config, args, record.worktree_path, profile=profile)
     merged_env = _build_env(profile)
@@ -2187,6 +2208,13 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
             # Kill any associated tmux session
             sessions.kill_tmux_session(rec.worktree_id)
+
+            activity.log_event(
+                "worktree_reaped",
+                worktree_id=rec.worktree_id,
+                branch=rec.branch,
+                state=info.state.value,
+            )
 
         # Prune stale worktree entries
         git_ops.prune_worktrees(cwd=repo.anchor)
@@ -4048,6 +4076,35 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--repo-path", default=None,
                     help="Path inside a repo (defaults to cwd)")
 
+    # activity -- view the high-level worktree lifecycle log
+    sp = sub.add_parser(
+        "activity",
+        help="View the worktree/session lifecycle activity log",
+    )
+    sp.add_argument("--since", default=None,
+                    help="Only show events newer than this (e.g. 2d, 12h, "
+                         "30m, or an ISO date). Default: all retained.")
+    sp.add_argument("--worktree-id", default=None,
+                    help="Filter to a single worktree id")
+    sp.add_argument("--event", default=None,
+                    help="Filter to a single event type")
+    sp.add_argument("--lines", type=int, default=None,
+                    help="Show only the most recent N events")
+    sp.add_argument("--json", action="store_true",
+                    help="Emit one JSON object per line instead of a table")
+
+    # activity-log -- append a single event (launcher/hook hook-invoked)
+    sp = sub.add_parser(
+        "activity-log",
+        help="Append one lifecycle event to the activity log (internal)",
+    )
+    sp.add_argument("event", help="Event name")
+    sp.add_argument("--worktree-id", default=None)
+    sp.add_argument("--session-id", default=None)
+    sp.add_argument("--source", default="launcher")
+    sp.add_argument("--field", action="append", default=[],
+                    help="Extra context as key=value (repeatable)")
+
     return parser
 
 
@@ -4093,6 +4150,11 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     except Exception as e:
         output.err(f"Failed to register session: {e}")
         return 1
+    activity.log_event(
+        "session_started",
+        worktree_id=wt_id,
+        session_id=session_id,
+    )
     return 0
 
 
@@ -4115,6 +4177,11 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
     except Exception as e:
         output.err(f"Failed to deregister session: {e}")
         return 1
+    activity.log_event(
+        "session_ended",
+        worktree_id=wt_id,
+        session_id=session_id,
+    )
     return 0
 
 
@@ -4259,6 +4326,8 @@ COMMAND_MAP = {
     "deregister-session": cmd_deregister_session,
     "backfill-sessions": cmd_backfill_sessions,
     "anchor-check": cmd_anchor_check,
+    "activity": activity.cmd_activity,
+    "activity-log": activity.cmd_activity_log,
 }
 
 
