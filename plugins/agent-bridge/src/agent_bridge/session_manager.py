@@ -367,6 +367,7 @@ class SessionManager:
         Uses AcpClient.load_session() to reattach to the persisted ACP
         session. The session is ready to receive prompts when this returns.
         """
+        session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
@@ -453,6 +454,7 @@ class SessionManager:
         real time. The prompt runs as a background task so the HTTP
         request can return immediately -- callers consume output via SSE.
         """
+        session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
@@ -580,6 +582,7 @@ class SessionManager:
 
     async def stop_session(self, session_id: str) -> None:
         """Stop a session -- shut down ACP client, preserve state for resume."""
+        session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
@@ -609,6 +612,7 @@ class SessionManager:
 
     async def end_session(self, session_id: str) -> None:
         """End a session -- shut down client and clean up all state."""
+        session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
@@ -628,8 +632,24 @@ class SessionManager:
         del self._sessions[session_id]
         log.info("Session %s (%s) ended and cleaned up", session_id, session.name)
 
+    def _resolve_ref(self, ref: str) -> str | None:
+        """Resolve a session reference to the canonical bridge session_id.
+
+        Accepts either the bridge session_id (the internal uuid) or the
+        ACP-sourced session id (``acp_session_id``).  Returns the bridge
+        session_id, or None if no session matches.  This lets HTTP/CLI
+        callers address sessions by the durable ACP id without knowing the
+        bridge's internal handle.
+        """
+        if ref in self._sessions:
+            return ref
+        for sid, session in self._sessions.items():
+            if session.acp_session_id == ref:
+                return sid
+        return None
+
     def get_session(self, session_id: str) -> Session | None:
-        return self._sessions.get(session_id)
+        return self._sessions.get(self._resolve_ref(session_id) or session_id)
 
     def list_sessions(self, status: str | None = None) -> list[Session]:
         sessions = list(self._sessions.values())
