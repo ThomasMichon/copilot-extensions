@@ -172,3 +172,35 @@ class TestValidation:
         )
         issues = validate_config(config)
         assert any("no allowed_hosts" in i for i in issues)
+
+
+class TestEffectiveAcpCommand:
+    def test_bare_default(self):
+        """No workspace_folder, no acp_command → bare copilot."""
+        config = CodespacesConfig()
+        assert config.effective_acp_command == "copilot --acp --stdio"
+
+    def test_workspace_folder_produces_cd_prefix(self):
+        config = CodespacesConfig(workspace_folder="/workspaces/odsp-web")
+        assert config.effective_acp_command == "cd /workspaces/odsp-web && copilot --acp --stdio"
+
+    def test_explicit_acp_command_wins(self):
+        config = CodespacesConfig(
+            workspace_folder="/workspaces/odsp-web",
+            acp_command="custom-launch --acp",
+        )
+        assert config.effective_acp_command == "custom-launch --acp"
+
+    def test_acp_command_without_workspace_folder(self):
+        config = CodespacesConfig(acp_command="copilot -C /tmp --acp --stdio")
+        assert config.effective_acp_command == "copilot -C /tmp --acp --stdio"
+
+    def test_workspace_folder_merged_from_yaml(self, config_dir):
+        repo = config_dir / "repo"
+        _write_codespaces_yaml(repo, {
+            "defaults": {"workspace_folder": "/workspaces/my-repo"},
+        })
+        save_adopted_repos([AdoptedRepo(path=repo)])
+        config = load_merged_config()
+        assert config.workspace_folder == "/workspaces/my-repo"
+        assert "cd /workspaces/my-repo" in config.effective_acp_command

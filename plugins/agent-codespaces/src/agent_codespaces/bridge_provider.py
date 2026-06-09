@@ -70,12 +70,17 @@ def build_agent_configs(
 ) -> list[dict[str, Any]]:
     """Convert active codespaces to agent-bridge provider agent configs.
 
-    Only includes codespaces in the ``Available`` state. Each agent's
-    spawn_command is ``agent-codespaces ssh --stdio <name> --remote-cmd
-    "copilot --acp --stdio"``, which handles SSH connection internally.
+    Includes Available and Shutdown codespaces.  Each agent's
+    spawn_command uses ``effective_acp_command`` from ``codespaces.yaml``
+    which resolves ``workspace_folder`` into a ``cd`` prefix.
     """
+    from .config import load_merged_config
+
     if codespaces is None:
         codespaces = list_codespaces()
+
+    config = load_merged_config()
+    acp_command = config.effective_acp_command
 
     agents = []
     for cs in codespaces:
@@ -93,13 +98,13 @@ def build_agent_configs(
             spawn_cmd = [
                 cmd_path, "-m", "agent_codespaces",
                 "ssh", "--stdio", cs.name,
-                "--remote-cmd", "copilot --acp --stdio",
+                "--remote-cmd", acp_command,
             ]
         else:
             spawn_cmd = [
                 cmd_path,
                 "ssh", "--stdio", cs.name,
-                "--remote-cmd", "copilot --acp --stdio",
+                "--remote-cmd", acp_command,
             ]
 
         # Sanitize name for agent-bridge (lowercase, alphanumeric + dash)

@@ -63,6 +63,19 @@ class CodespacesConfig:
     dotfiles_repo: str | None = None
     ssh_user: str = "vscode"
 
+    # Workspace folder on the CodeSpace.  When set, the remote agent
+    # command ``cd``s into this directory before launching Copilot CLI,
+    # ensuring a cold-started CodeSpace lands in the repo root even if
+    # the workspace volume is still mounting when the SSH session
+    # connects.  Typical value: ``/workspaces/odsp-web``.
+    workspace_folder: str | None = None
+
+    # Remote agent command -- what to run on the CodeSpace when
+    # connecting via agent-bridge.  Built dynamically from
+    # ``workspace_folder`` if not explicitly overridden.  Only set
+    # this if you need a completely custom launch command.
+    acp_command: str | None = None
+
     # Credential relay
     credentials: CredentialsConfig = field(default_factory=CredentialsConfig)
 
@@ -71,6 +84,22 @@ class CodespacesConfig:
 
     # Source tracking
     source_paths: list[Path] = field(default_factory=list)
+
+    @property
+    def effective_acp_command(self) -> str:
+        """Return the resolved remote agent command.
+
+        Priority:
+        1. Explicit ``acp_command`` if set.
+        2. ``cd <workspace_folder> && copilot --acp --stdio`` when
+           ``workspace_folder`` is configured.
+        3. Bare ``copilot --acp --stdio`` as last-resort fallback.
+        """
+        if self.acp_command:
+            return self.acp_command
+        if self.workspace_folder:
+            return f"cd {self.workspace_folder} && copilot --acp --stdio"
+        return "copilot --acp --stdio"
 
 
 @dataclass
@@ -177,6 +206,12 @@ def load_merged_config() -> CodespacesConfig:
             )
             merged.ssh_user = defaults.get(
                 "ssh_user", merged.ssh_user
+            )
+            merged.acp_command = defaults.get(
+                "acp_command", merged.acp_command
+            )
+            merged.workspace_folder = defaults.get(
+                "workspace_folder", merged.workspace_folder
             )
             defaults_set = True
 
