@@ -333,3 +333,75 @@ class TestAgentRoutes:
         resp = client.get("/api/v1/agents")
         assert resp.status_code == 200
         assert resp.json()["agents"] == []
+
+
+class TestWorktreeRoutes:
+    """Worktree discovery + session linkage."""
+
+    def _seed_worktree(self, agent_name: str, wt_id: str) -> None:
+        """Seed the discovery cache singleton with one worktree entry."""
+        from agent_bridge.routes import worktrees as wt_routes
+
+        entry = wt_routes._WorktreeEntry(
+            id=wt_id,
+            agent_name=agent_name,
+            machine=agent_name,
+            path=f"/wt/{wt_id}",
+            branch=f"worktree/{wt_id}",
+            status="active",
+        )
+        wt_routes.get_cache()._cache = {agent_name: [entry]}
+
+    def teardown_method(self) -> None:
+        """Reset the module-singleton cache between tests."""
+        from agent_bridge.routes import worktrees as wt_routes
+
+        wt_routes.get_cache()._cache = {}
+
+    def test_worktree_links_to_latest_session(self, client, app) -> None:
+        wt_id = "lambda-core-wsl-20250101-120000-link"
+        self._seed_worktree("test-agent", wt_id)
+
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        session = Session("sess-link-1", "calm-river", target, "test-agent")
+        session.status = SessionStatus.IDLE
+        session.turn_count = 3
+        mgr._sessions[session.session_id] = session
+
+        resp = client.get("/api/v1/worktrees")
+        assert resp.status_code == 200
+        entry = resp.json()["groups"]["test-agent"][0]
+        assert entry["session_id"] == "sess-link-1"
+        assert entry["session_status"] == "idle"
+        assert entry["session_turn_count"] == 3
+        assert entry["session_live"] is True
+
+    def test_worktree_without_session_has_null_linkage(self, client) -> None:
+        wt_id = "lambda-core-wsl-20250101-130000-nolink"
+        self._seed_worktree("test-agent", wt_id)
+
+        resp = client.get("/api/v1/worktrees")
+        assert resp.status_code == 200
+        entry = resp.json()["groups"]["test-agent"][0]
+        assert entry["session_id"] is None
+        assert entry["session_status"] is None
+        assert entry["session_turn_count"] == 0
+        assert entry["session_live"] is False
+
+    def test_stopped_session_is_not_live(self, client, app) -> None:
+        wt_id = "lambda-core-wsl-20250101-140000-stopped"
+        self._seed_worktree("test-agent", wt_id)
+
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        session = Session("sess-stopped-1", "old-pine", target, "test-agent")
+        session.status = SessionStatus.STOPPED
+        session.turn_count = 5
+        mgr._sessions[session.session_id] = session
+
+        resp = client.get("/api/v1/worktrees")
+        entry = resp.json()["groups"]["test-agent"][0]
+        assert entry["session_id"] == "sess-stopped-1"
+        assert entry["session_status"] == "stopped"
+        assert entry["session_live"] is False

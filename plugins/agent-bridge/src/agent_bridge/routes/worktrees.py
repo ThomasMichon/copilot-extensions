@@ -348,15 +348,54 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
     that have been deleted from disk are not returned (the binstub only
     reports what physically exists).
 
+    Each worktree is decorated with linkage to its most recent bridge
+    session (if any) so consumers can load history, resume, or detect a
+    session that is still live:
+
+    - ``session_id``: latest bridge session for this worktree, or None
+    - ``session_status``: that session's status (idle/running/stopped/...)
+    - ``session_turn_count``: number of prompt turns on that session
+    - ``session_live``: True if the session is currently running or idle
+      with a live process (i.e. attached/active, not stopped or ended)
+
     When periodic discovery is disabled, the first request triggers an
     on-demand crawl (subsequent requests return cached results).
     """
     cache = get_cache()
     await cache.crawl_if_empty()
     groups = cache.get_all()
+
+    # Build worktree_id -> latest bridge session map for linkage.  A worktree
+    # may have had several sessions over its life (session rolls); pick the
+    # most recently updated one.  list_sessions() is already sorted
+    # newest-first, so the first match per worktree wins.
+    latest_by_wt: dict[str, Any] = {}
+    mgr = getattr(request.app.state, "session_manager", None)
+    if mgr is not None:
+        for session in mgr.list_sessions():
+            wt_id = getattr(session.target, "worktree_id", None)
+            if wt_id and wt_id not in latest_by_wt:
+                latest_by_wt[wt_id] = session
+
+    def _decorate(wt: _WorktreeEntry) -> dict[str, Any]:
+        entry = wt.to_dict()
+        session = latest_by_wt.get(wt.id)
+        if session is not None:
+            status = session.status.value
+            entry["session_id"] = session.session_id
+            entry["session_status"] = status
+            entry["session_turn_count"] = session.turn_count
+            entry["session_live"] = status in ("running", "idle")
+        else:
+            entry["session_id"] = None
+            entry["session_status"] = None
+            entry["session_turn_count"] = 0
+            entry["session_live"] = False
+        return entry
+
     return {
         "groups": {
-            name: [wt.to_dict() for wt in worktrees]
+            name: [_decorate(wt) for wt in worktrees]
             for name, worktrees in groups.items()
         },
     }
