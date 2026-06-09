@@ -112,3 +112,55 @@ def test_help_unrouted_unadopted_git_repo(monkeypatch, capsys, tmp_path: Path):
     err = capsys.readouterr().err
     assert "not adopted yet" in err
     assert "register orphan" in err
+
+
+# ── worktree namespace ────────────────────────────────────────────────
+
+
+def test_worktree_verb_maps_to_canonical(monkeypatch):
+    captured = {}
+
+    def fake_handler(args):
+        captured["command"] = args.command
+        return 0
+
+    monkeypatch.setitem(m.COMMAND_MAP, "push-changes", fake_handler)
+    rc = m.cmd_worktree_dispatch(["push", "wt-1"])
+    assert rc == 0
+    assert captured["command"] == "push-changes"
+
+
+def test_worktree_create_dispatches(monkeypatch):
+    captured = {}
+
+    def fake_create(args):
+        captured["command"] = args.command
+        captured["json"] = args.json
+        return 0
+
+    monkeypatch.setitem(m.COMMAND_MAP, "create", fake_create)
+    rc = m.cmd_worktree_dispatch(["create", "--json"])
+    assert rc == 0
+    assert captured["command"] == "create"
+    assert captured["json"] is True
+
+
+def test_worktree_unknown_verb(capsys):
+    rc = m.cmd_worktree_dispatch(["bogus"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    # output.err writes to stdout; usage to stderr.
+    assert "Unknown worktree subcommand" in captured.out
+    assert "worktree <command>" in captured.err
+
+
+def test_worktree_no_args_shows_usage(capsys):
+    rc = m.cmd_worktree_dispatch([])
+    assert rc == 1
+    assert "worktree <command>" in capsys.readouterr().err
+
+
+def test_worktree_help_returns_zero(capsys):
+    rc = m.cmd_worktree_dispatch(["--help"])
+    assert rc == 0
+    assert "worktree <command>" in capsys.readouterr().err

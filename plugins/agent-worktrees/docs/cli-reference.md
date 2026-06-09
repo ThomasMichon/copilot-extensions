@@ -4,6 +4,43 @@
 agent-worktrees <subcommand> [options]
 ```
 
+## CLI mode (no project binstub)
+
+The generic `agent-worktrees` command works without a project binstub. If
+no project context is set it prints the command catalog and a recommended
+next step rather than erroring. Target a project explicitly with
+`--project <name>` (or `-p <name>`):
+
+```bash
+agent-worktrees --project aperture-labs worktree list
+agent-worktrees -p copilot-extensions worktree create --json
+```
+
+Running a project binstub bare (e.g. `aperture-labs`) still launches the
+interactive picker.
+
+## Worktree namespace
+
+`worktree` groups the non-launching lifecycle verbs as a discoverable
+alias over the top-level commands -- none of these launch Copilot. Use it
+to create and manage worktrees from the CLI (e.g. to drive an external
+repo's worktrees without opening a session inside it):
+
+```bash
+<project> worktree create [--json]      # create; print id + dir, no launch
+<project> worktree list [--json]        # this project's worktrees
+<project> worktree status <id>          # git status of a worktree
+<project> worktree push <id> [--title]  # squash + rebase + push to default branch
+<project> worktree finalize [id]        # validate on upstream, then clean up
+<project> worktree cleanup              # remove orphaned/finalized worktrees
+```
+
+`worktree create` returns the new worktree's id and directory without
+launching into it; it appears as `unused` in the project's picker/list
+until it has commits or a live session. The equivalent top-level verbs
+(`create`, `list`, `status`, `push-changes`, `finalize`, `cleanup`)
+continue to work unchanged.
+
 ## Session Lifecycle
 
 | Subcommand | Description |
@@ -17,6 +54,7 @@ agent-worktrees <subcommand> [options]
 | `status` | Show worktree git status |
 | `list` | List worktrees from tracking records |
 | `handoff` | Manage handoff prompt state on a worktree |
+
 
 ## Installation & Config
 
