@@ -12,9 +12,9 @@ import asyncio
 import contextlib
 import logging
 import os
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-from . import __version__
 from acp import PROTOCOL_VERSION, Client, RequestError, text_block
 from acp.client.connection import ClientSideConnection
 from acp.schema import (
@@ -43,6 +43,8 @@ from acp.schema import (
     WaitForTerminalExitResponse,
     WriteTextFileResponse,
 )
+
+from . import __version__
 
 log = logging.getLogger("agent-bridge")
 
@@ -87,25 +89,39 @@ class _BridgeClientImpl(Client):
         self._owner._handle_session_update(update)
 
     # Unsupported server-initiated requests -- reject cleanly
-    async def write_text_file(self, content: str, path: str, session_id: str, **kw: Any) -> WriteTextFileResponse | None:
+    async def write_text_file(
+        self, content: str, path: str, session_id: str, **kw: Any
+    ) -> WriteTextFileResponse | None:
         raise RequestError.method_not_found("fs/write_text_file")
 
-    async def read_text_file(self, path: str, session_id: str, **kw: Any) -> ReadTextFileResponse:
+    async def read_text_file(
+        self, path: str, session_id: str, **kw: Any
+    ) -> ReadTextFileResponse:
         raise RequestError.method_not_found("fs/read_text_file")
 
-    async def create_terminal(self, command: str, session_id: str, **kw: Any) -> CreateTerminalResponse:
+    async def create_terminal(
+        self, command: str, session_id: str, **kw: Any
+    ) -> CreateTerminalResponse:
         raise RequestError.method_not_found("terminal/create")
 
-    async def terminal_output(self, session_id: str, terminal_id: str, **kw: Any) -> TerminalOutputResponse:
+    async def terminal_output(
+        self, session_id: str, terminal_id: str, **kw: Any
+    ) -> TerminalOutputResponse:
         raise RequestError.method_not_found("terminal/output")
 
-    async def release_terminal(self, session_id: str, terminal_id: str, **kw: Any) -> ReleaseTerminalResponse | None:
+    async def release_terminal(
+        self, session_id: str, terminal_id: str, **kw: Any
+    ) -> ReleaseTerminalResponse | None:
         raise RequestError.method_not_found("terminal/release")
 
-    async def wait_for_terminal_exit(self, session_id: str, terminal_id: str, **kw: Any) -> WaitForTerminalExitResponse:
+    async def wait_for_terminal_exit(
+        self, session_id: str, terminal_id: str, **kw: Any
+    ) -> WaitForTerminalExitResponse:
         raise RequestError.method_not_found("terminal/wait_for_exit")
 
-    async def kill_terminal(self, session_id: str, terminal_id: str, **kw: Any) -> KillTerminalResponse | None:
+    async def kill_terminal(
+        self, session_id: str, terminal_id: str, **kw: Any
+    ) -> KillTerminalResponse | None:
         raise RequestError.method_not_found("terminal/kill")
 
     async def ext_method(self, method: str, params: dict) -> dict:
@@ -121,7 +137,7 @@ class _BridgeClientImpl(Client):
 class ToolCallRecord:
     """Tracks a single tool call during a turn."""
 
-    __slots__ = ("tool_call_id", "title", "kind", "status", "content")
+    __slots__ = ("content", "kind", "status", "title", "tool_call_id")
 
     def __init__(self, tool_call_id: str, title: str, kind: str, status: str) -> None:
         self.tool_call_id = tool_call_id
@@ -181,6 +197,14 @@ class AcpClient:
         self._stop_reason: str | None = None
         self._pending_permission_future: asyncio.Future[RequestPermissionResponse] | None = None
 
+        # True only while awaiting a prompt turn result. Distinguishes a
+        # real mid-turn crash from an idle/just-resumed process exit.
+        self._prompt_in_flight = False
+        # True while load_session replays conversation history. The replayed
+        # session/update notifications are already persisted, so suppress
+        # re-emitting them as fresh events.
+        self._loading_session = False
+
         # Completion event -- set when prompt completes or permission requested
         self._completion_event = asyncio.Event()
 
@@ -189,6 +213,7 @@ class AcpClient:
 
         # Stderr capture
         self._stderr_buffer: list[str] = []
+        self._stderr_task: asyncio.Task[None] | None = None
 
     @property
     def pid(self) -> int | None:
@@ -211,9 +236,9 @@ class AcpClient:
         if not process.stdin or not process.stdout:
             raise RuntimeError("Process must have piped stdin and stdout")
 
-        # Start stderr reader
+        # Start stderr reader (keep a reference so the task is not GC'd)
         if process.stderr:
-            asyncio.create_task(self._read_stderr())
+            self._stderr_task = asyncio.create_task(self._read_stderr())
 
         # Create ACP client-side connection
         client_impl = _BridgeClientImpl(self)
@@ -242,12 +267,22 @@ class AcpClient:
         return result.session_id
 
     async def load_session(self, cwd: str, session_id: str) -> None:
-        """Reload a previously persisted ACP session (for resume)."""
+        """Reload a previously persisted ACP session (for resume).
+
+        Per the ACP spec, the agent streams the entire conversation history
+        back as session/update notifications during load. Those events are
+        already persisted in this session's event log, so suppress
+        re-emitting them (otherwise resume duplicates the last messages).
+        """
         if not self._connection:
             raise RuntimeError("ACP connection not initialized")
-        await self._connection.load_session(
-            cwd=cwd, session_id=session_id, mcp_servers=[],
-        )
+        self._loading_session = True
+        try:
+            await self._connection.load_session(
+                cwd=cwd, session_id=session_id, mcp_servers=[],
+            )
+        finally:
+            self._loading_session = False
         self._acp_session_id = session_id
 
     async def send_prompt(self, text: str) -> dict[str, Any]:
@@ -261,6 +296,7 @@ class AcpClient:
 
         async with self._prompt_lock:
             self._reset_buffers()
+            self._prompt_in_flight = True
 
             try:
                 result = await self._connection.prompt(
@@ -277,6 +313,8 @@ class AcpClient:
                 self._prompt_complete = True
                 self._emit("error", {"message": str(exc)})
                 raise
+            finally:
+                self._prompt_in_flight = False
 
             return self._build_turn_result()
 
@@ -323,6 +361,12 @@ class AcpClient:
 
     def _handle_session_update(self, update: Any) -> None:
         """Process ACP session update notifications."""
+        # During load_session the agent replays the full conversation as
+        # session/update notifications. Those events are already persisted,
+        # so ignore them to avoid duplicating prior messages on resume.
+        if self._loading_session:
+            return
+
         if isinstance(update, AgentMessageChunk):
             content = update.content
             if isinstance(content, TextContentBlock):
@@ -474,8 +518,9 @@ class AcpClient:
 
     async def _read_stderr(self) -> None:
         """Background task to capture child stderr."""
-        assert self._process and self._process.stderr
-        try:
+        if not self._process or not self._process.stderr:
+            return
+        with contextlib.suppress(Exception):
             while True:
                 line = await self._process.stderr.readline()
                 if not line:
@@ -486,11 +531,17 @@ class AcpClient:
                 self._stderr_buffer.append(text)
                 if len(self._stderr_buffer) > self.MAX_STDERR_LINES:
                     self._stderr_buffer = self._stderr_buffer[-self.MAX_STDERR_LINES:]
-        except Exception:
-            pass
 
-        # Process exited -- capture as error if prompt was in-flight
-        if not self._prompt_complete and not self._prompt_error:
+        self._handle_child_exit()
+
+    def _handle_child_exit(self) -> None:
+        """Handle the child process exiting.
+
+        Only a real error if a prompt turn was actually in flight. An idle
+        or just-resumed process exiting (e.g. after a stop) is not an
+        "unexpected" crash and must not emit an error.
+        """
+        if self._prompt_in_flight and not self._prompt_error:
             rc = self._process.returncode if self._process else None
             stderr_tail = "\n".join(self._stderr_buffer[-10:]) if self._stderr_buffer else ""
             self._prompt_error = (
