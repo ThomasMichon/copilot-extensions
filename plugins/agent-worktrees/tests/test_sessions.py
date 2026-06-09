@@ -6,10 +6,9 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
+from conftest import make_session_dir
 
 from agent_worktrees.sessions import (
-    SessionContext,
     _normalize_path,
     find_latest_session_id,
     find_latest_session_id_fast,
@@ -19,11 +18,7 @@ from agent_worktrees.sessions import (
 from agent_worktrees.tracking import (
     SessionEntry,
     WorktreeRecord,
-    save_record,
 )
-
-from conftest import make_session_dir
-
 
 # ---------------------------------------------------------------------------
 # Path normalization
@@ -48,13 +43,19 @@ class TestScanSessions:
     """Test the full-scan scan_sessions."""
 
     def test_empty_session_dir(self, tmp_session_state_dir: Path):
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             ctx = scan_sessions(["/tmp/wt"])
         assert ctx.active_sessions == {}
         assert ctx.session_count == {}
 
     def test_no_worktree_paths(self, tmp_session_state_dir: Path):
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             ctx = scan_sessions([])
         assert ctx.session_count == {}
 
@@ -74,7 +75,10 @@ class TestScanSessions:
             tmp_session_state_dir, "sess-other", "/tmp/other-worktree",
         )
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             ctx = scan_sessions([wt_path])
 
         norm = _normalize_path(wt_path)
@@ -92,7 +96,10 @@ class TestScanSessions:
             ],
         )
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             ctx = scan_sessions([wt_path])
 
         norm = _normalize_path(wt_path)
@@ -105,7 +112,10 @@ class TestScanSessions:
             lock_pid=os.getpid(),  # current process
         )
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             # Mock _is_copilot_process to return True for our PID
             with patch("agent_worktrees.sessions._is_copilot_process", return_value=True):
                 ctx = scan_sessions([wt_path])
@@ -121,7 +131,10 @@ class TestScanSessions:
             lock_pid=99999999,  # unlikely to be running
         )
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             with patch("agent_worktrees.sessions._is_copilot_process", return_value=False):
                 ctx = scan_sessions([wt_path])
 
@@ -135,7 +148,10 @@ class TestScanSessions:
             tmp_session_state_dir, "sess-sub", wt_path + "/subdir",
         )
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             ctx = scan_sessions([wt_path])
 
         norm = _normalize_path(wt_path)
@@ -147,7 +163,10 @@ class TestScanSessions:
         sdir.mkdir()
         (sdir / "workspace.yaml").write_text("not: [valid: yaml: {{{")
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             ctx = scan_sessions(["/tmp/wt"])
 
         assert ctx.session_count == {}
@@ -190,7 +209,10 @@ class TestScanSessionsFast:
             SessionEntry("known-sess", "2026-06-01T10:00:00"),
         ])
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             ctx = scan_sessions_fast([rec])
 
         norm = _normalize_path(wt_path)
@@ -204,7 +226,10 @@ class TestScanSessionsFast:
             SessionEntry("nonexistent-sess", "2026-06-01T10:00:00"),
         ])
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             ctx = scan_sessions_fast([rec])
 
         assert ctx.session_count == {}
@@ -219,7 +244,10 @@ class TestScanSessionsFast:
 
         rec = self._make_record("unindexed-wt", wt_path, sessions=None)
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             ctx = scan_sessions_fast([rec])
 
         norm = _normalize_path(wt_path)
@@ -241,7 +269,10 @@ class TestScanSessionsFast:
             self._make_record("legacy-wt", wt_legacy, sessions=None),
         ]
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             ctx = scan_sessions_fast(records)
 
         assert ctx.session_count[_normalize_path(wt_fast)] == 1
@@ -251,7 +282,10 @@ class TestScanSessionsFast:
         """sessions=[] (indexed, none registered) should produce empty context."""
         rec = self._make_record("empty-wt", "/tmp/empty", sessions=[])
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             ctx = scan_sessions_fast([rec])
 
         assert ctx.session_count == {}
@@ -275,7 +309,10 @@ class TestFindLatestSessionId:
             updated_at="2026-06-01T12:00:00.000Z",
         )
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             result = find_latest_session_id(wt_path)
 
         assert result == "new-sess"
@@ -288,7 +325,10 @@ class TestFindLatestSessionId:
             has_events_file=False,
         )
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             result = find_latest_session_id(wt_path)
 
         assert result is None
@@ -298,7 +338,10 @@ class TestFindLatestSessionId:
             tmp_session_state_dir, "other-sess", "/tmp/other",
         )
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             result = find_latest_session_id("/tmp/wt-none")
 
         assert result is None
@@ -327,7 +370,10 @@ class TestFindLatestSessionIdFast:
             SessionEntry("new-sess", "2026-06-01T12:00:00"),
         ]
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             result = find_latest_session_id_fast(wt_path, sessions)
 
         assert result == "new-sess"
@@ -341,7 +387,10 @@ class TestFindLatestSessionIdFast:
 
         sessions = [SessionEntry("stub-sess", "2026-06-01T10:00:00")]
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             result = find_latest_session_id_fast(wt_path, sessions)
 
         assert result is None
@@ -354,7 +403,10 @@ class TestFindLatestSessionIdFast:
             updated_at="2026-06-01T10:00:00.000Z",
         )
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             result = find_latest_session_id_fast(wt_path, None)
 
         assert result == "fallback-sess"
@@ -367,7 +419,10 @@ class TestFindLatestSessionIdFast:
             updated_at="2026-06-01T10:00:00.000Z",
         )
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             result = find_latest_session_id_fast(wt_path, [])
 
         assert result == "discovered-sess"
@@ -375,7 +430,10 @@ class TestFindLatestSessionIdFast:
     def test_fast_skips_missing_dirs(self, tmp_session_state_dir: Path):
         sessions = [SessionEntry("gone-sess", "2026-06-01T10:00:00")]
 
-        with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
             result = find_latest_session_id_fast("/tmp/wt", sessions)
 
         assert result is None

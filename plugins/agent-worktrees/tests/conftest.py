@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import os
 import textwrap
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from agent_worktrees import tracking
-
 
 # ---------------------------------------------------------------------------
 # Path fixtures — redirect config helpers to tmp dirs
@@ -38,7 +35,9 @@ def monkeypatch_config(monkeypatch, tmp_path: Path, tmp_tracking_dir: Path):
     monkeypatch.setenv("WORKTREE_PROJECT", "test-project")
     monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: tmp_tracking_dir)
     monkeypatch.setattr("agent_worktrees.config.project_dir", lambda: tmp_path / ".test-project")
-    monkeypatch.setattr("agent_worktrees.config.install_dir", lambda: tmp_path / ".agent-worktrees")
+    monkeypatch.setattr(
+        "agent_worktrees.config.install_dir", lambda: tmp_path / ".agent-worktrees"
+    )
 
 
 @pytest.fixture

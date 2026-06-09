@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from agent_worktrees.picker import (
     ItemKind,
     MenuItem,
@@ -13,7 +11,6 @@ from agent_worktrees.picker import (
     _truncate,
     _visible_len,
 )
-
 
 # ---------------------------------------------------------------------------
 # _visible_len — ANSI stripping

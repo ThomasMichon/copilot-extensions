@@ -296,7 +296,9 @@ def push_changes(
         print(f"Merging {branch} into {repo.default_branch}...")
         if not git_ops.merge_ff(branch, cwd=anchor):
             head_sha = git_ops.git("rev-parse", "HEAD", cwd=anchor, check=False).stdout.strip()[:8]
-            branch_sha = git_ops.git("rev-parse", branch, cwd=anchor, check=False).stdout.strip()[:8]
+            branch_sha = git_ops.git(
+                "rev-parse", branch, cwd=anchor, check=False
+            ).stdout.strip()[:8]
             output.err(
                 f"Fast-forward merge failed unexpectedly "
                 f"(master={head_sha}, {branch}={branch_sha}). "
@@ -516,7 +518,10 @@ def validate_and_finalize(
         has_live_session = _has_live_session(worktree_path)
 
         if inside_worktree or has_live_session:
-            reason = "running inside this worktree" if inside_worktree else "live Copilot session detected"
+            reason = (
+                "running inside this worktree" if inside_worktree
+                else "live Copilot session detected"
+            )
             output.warn(
                 f"Skipping worktree/branch removal ({reason}). "
                 f"Content is already on {repo.remote}/{repo.default_branch}. "
