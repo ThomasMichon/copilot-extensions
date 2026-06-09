@@ -62,6 +62,11 @@ class Config:
     repo_name: str = ""
     repos: dict[str, RepoConfig] = field(default_factory=dict)
     copilot_profiles: list[CopilotProfile] = field(default_factory=list)
+    headless: bool = False
+    """When true, the project is driven via CLI only -- its bare binstub
+    invocation lists worktrees instead of launching an interactive Copilot
+    session. Used to control external repos (e.g. copilot-extensions) whose
+    worktree lifecycle is managed from another project's session."""
 
     @property
     def default_repo(self) -> RepoConfig:
@@ -380,6 +385,7 @@ def load_config(path: Path | None = None) -> Config:
         repo_name=repo_name,
         repos=repos,
         copilot_profiles=_parse_profiles(raw.get("copilot_profiles", [])),
+        headless=bool(raw.get("headless", False)),
     )
 
 

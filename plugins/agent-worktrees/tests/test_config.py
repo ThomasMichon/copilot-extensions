@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from agent_worktrees import config as cfg
-
 
 # ---------------------------------------------------------------------------
 # detect_platform
@@ -102,3 +99,36 @@ class TestDataModels:
         )
         assert repo.anchor == "/tmp/repo"
         assert repo.remote == "origin"
+
+
+# ---------------------------------------------------------------------------
+# headless project parsing
+# ---------------------------------------------------------------------------
+
+class TestHeadlessConfig:
+    def _write(self, path: Path, headless_line: str = "") -> None:
+        path.write_text(
+            "repo_name: ext\n"
+            "srcroot: /tmp/src\n"
+            "machine: lambda-core\n"
+            "platform: wsl\n"
+            f"{headless_line}"
+            "repos:\n"
+            "  ext:\n"
+            "    anchor: /tmp/src/ext\n"
+            "    worktree_root: /tmp/src/.worktrees/ext\n"
+            "    default_branch: main\n"
+            "    remote: origin\n"
+        )
+
+    def test_headless_true(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile, "headless: true\n")
+        conf = cfg.load_config(cfgfile)
+        assert conf.headless is True
+
+    def test_headless_absent_defaults_false(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile)
+        conf = cfg.load_config(cfgfile)
+        assert conf.headless is False

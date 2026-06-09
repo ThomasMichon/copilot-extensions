@@ -164,3 +164,45 @@ def test_worktree_help_returns_zero(capsys):
     rc = m.cmd_worktree_dispatch(["--help"])
     assert rc == 0
     assert "worktree <command>" in capsys.readouterr().err
+
+
+# ── headless projects ─────────────────────────────────────────────────
+
+
+def test_bare_headless_project_lists_not_launches(monkeypatch):
+    monkeypatch.setenv("WORKTREE_PROJECT", "ext")
+    monkeypatch.setattr(m, "_is_headless_project", lambda: True)
+    launched = {"v": False}
+
+    def fake_launch(argv):
+        launched["v"] = True
+        return 0
+
+    dispatched = {"v": None}
+
+    def fake_dispatch(argv):
+        dispatched["v"] = argv
+        return 0
+
+    monkeypatch.setattr(m, "cmd_launch", fake_launch)
+    monkeypatch.setattr(m, "cmd_worktree_dispatch", fake_dispatch)
+    monkeypatch.setattr(m.cfg, "project_name", lambda: "ext")
+    rc = m.main([])
+    assert rc == 0
+    assert launched["v"] is False
+    assert dispatched["v"] == ["list"]
+
+
+def test_bare_non_headless_project_launches(monkeypatch):
+    monkeypatch.setenv("WORKTREE_PROJECT", "demo")
+    monkeypatch.setattr(m, "_is_headless_project", lambda: False)
+    launched = {"v": False}
+
+    def fake_launch(argv):
+        launched["v"] = True
+        return 0
+
+    monkeypatch.setattr(m, "cmd_launch", fake_launch)
+    rc = m.main([])
+    assert rc == 0
+    assert launched["v"] is True
