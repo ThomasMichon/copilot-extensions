@@ -56,6 +56,34 @@ management.
 | `dev` | Dev venv and test runner |
 | `--version` | Print installed version |
 
+## Diagnostics
+
+| Subcommand | Description |
+|------------|-------------|
+| `activity` | View the persistent worktree/session lifecycle log |
+
+The launcher and lifecycle code record high-level events -- worktree
+created/resumed, session started/ended, Copilot exited, mux
+attached/detached, changes pushed, worktree finalized/reaped, and
+`finalize_skipped_removal` -- to a machine-global JSONL log at
+`~/.agent-worktrees/logs/activity.jsonl`. Unlike the per-PID launcher
+setup logs under `$TMPDIR/worktree-setup-logs` (capped at the 10 newest
+and wiped on reboot), this log persists across reboots and keeps a
+rolling 7-day window, so session-lifecycle anomalies can be reconstructed
+after the fact. Every event carries the worktree id and, where known, the
+session id.
+
+```bash
+agent-worktrees activity                       # full retained log (table)
+agent-worktrees activity --since 2d            # last 2 days (2d/12h/30m/ISO)
+agent-worktrees activity --worktree-id <id>    # one worktree's lifecycle
+agent-worktrees activity --event mux_attached  # one event type
+agent-worktrees activity --lines 50 --json     # last 50 events as JSONL
+```
+
+`activity-log` (append one event) is an internal hook used by the
+launcher and is not intended for direct use.
+
 ---
 
 ## Installer Actions

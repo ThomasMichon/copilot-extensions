@@ -27,7 +27,7 @@ import shutil
 import time
 from pathlib import Path
 
-from . import git_ops, output, permissions, sessions, tracking
+from . import activity, git_ops, output, permissions, sessions, tracking
 from .config import Config
 
 
@@ -333,6 +333,12 @@ def push_changes(
         if record:
             tracking.update_status(record, "pushed")
 
+        activity.log_event(
+            "changes_pushed",
+            worktree_id=worktree_id,
+            branch=branch,
+        )
+
         # Clean up pre-squash backup ref
         if wt_exists:
             git_ops.delete_backup_ref(cwd=worktree_path)
@@ -516,6 +522,12 @@ def validate_and_finalize(
                 f"Content is already on {repo.remote}/{repo.default_branch}. "
                 f"Run cleanup after the session ends to remove the directory and branch."
             )
+            activity.log_event(
+                "finalize_skipped_removal",
+                worktree_id=worktree_id,
+                branch=branch,
+                reason="inside_worktree" if inside_worktree else "live_session",
+            )
         else:
             print("Removing worktree...")
             if not git_ops.remove_worktree(anchor, worktree_path):
@@ -547,6 +559,13 @@ def validate_and_finalize(
         # Update tracking
         if record:
             tracking.update_status(record, "finalized")
+
+        activity.log_event(
+            "worktree_finalized",
+            worktree_id=worktree_id,
+            branch=branch,
+            removed=not (inside_worktree or has_live_session),
+        )
 
         output.ok(f"Worktree {worktree_id} finalized.")
         return True
