@@ -95,6 +95,11 @@ SSH is for diagnostics and one-off commands, **not routine dispatch**.
 If you find yourself using SSH for dispatch or status checks, diagnose
 the bridge connection instead.
 
+> **Always use `agent-codespaces ssh`**, not bare `gh codespace ssh`.
+> Raw `gh codespace ssh` bypasses ssh-manager and can conflict with
+> managed connections — duplicate ControlMaster sockets, missed
+> credential relay tunnels, and orphan SSH processes.
+
 ```bash
 # Interactive SSH session (with credential relay tunnel)
 agent-codespaces ssh <codespace-name>
@@ -136,23 +141,27 @@ Use `agent-codespaces ssh` to pull latest:
 agent-codespaces ssh <name> --remote-cmd "cd /workspaces/.codespaces/.persistedshare/dotfiles && git pull origin main && bash install.sh"
 ```
 
-If credential relay isn't active, use `gh cs ssh` with a token-injected URL:
+If credential relay isn't active, pass the token via `--remote-cmd`:
 ```bash
 token=$(gh auth token)
-gh cs ssh -c <name> -- "cd /workspaces/.codespaces/.persistedshare/dotfiles && git pull https://x-access-token:${token}@github.com/<user>/dotfiles.git main"
+agent-codespaces ssh <name> --no-relay --remote-cmd "cd /workspaces/.codespaces/.persistedshare/dotfiles && git pull https://x-access-token:${token}@github.com/<user>/dotfiles.git main"
 ```
 
 ### Fresh clone (when .git is missing or corrupted)
 
 ```bash
 token=$(gh auth token)
-gh cs ssh -c <name> -- "rm -rf /workspaces/.codespaces/.persistedshare/dotfiles && git clone https://x-access-token:${token}@github.com/<user>/dotfiles.git /workspaces/.codespaces/.persistedshare/dotfiles"
-gh cs ssh -c <name> -- "bash /workspaces/.codespaces/.persistedshare/dotfiles/install.sh"
+agent-codespaces ssh <name> --no-relay --remote-cmd "rm -rf /workspaces/.codespaces/.persistedshare/dotfiles && git clone https://x-access-token:${token}@github.com/<user>/dotfiles.git /workspaces/.codespaces/.persistedshare/dotfiles"
+agent-codespaces ssh <name> --no-relay --remote-cmd "bash /workspaces/.codespaces/.persistedshare/dotfiles/install.sh"
 ```
 
 > **Do NOT use `tar` or `git archive` pipes** to sync dotfiles. They
 > destroy `.git` state, introduce CRLF from Windows, and leave stale
 > files from renames/deletes. Always maintain a proper git clone.
+>
+> **Always use `agent-codespaces ssh`**, not bare `gh codespace ssh`.
+> The latter bypasses ssh-manager and can conflict with managed
+> connections (ControlMaster sockets, credential relay tunnels).
 
 ## Credential Relay
 
@@ -208,8 +217,9 @@ chars). Use `agent-bridge agents` to see them after registration.
 
 ## Troubleshooting
 
-- **SSH hangs** -- check `gh codespace ssh --config -c <name>` works
-  directly. Verify `gh auth status` is authenticated.
+- **SSH hangs** -- test with `agent-codespaces ssh <name> --remote-cmd "echo ok" --no-relay`.
+  If that works, check credential relay. If it doesn't, verify
+  `gh auth status` is authenticated.
 - **Bridge connection fails** -- the bridge auto-starts Shutdown
   CodeSpaces and retries SSH (up to ~180 s). If it still fails, try
   `agent-codespaces ssh <name> --remote-cmd "echo ok" --no-relay`.
