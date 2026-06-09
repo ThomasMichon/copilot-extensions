@@ -53,25 +53,18 @@ import secrets
 import shutil
 import subprocess
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 
+from . import activity, git_ops, output, permissions, sessions, tracking
 from . import config as cfg
-from . import activity
 from . import finalize as fin
-from . import git_ops
 from . import installer as inst
-from . import output
-from . import permissions
 from . import services as svc
-from . import sessions
-from . import tracking
 from . import validate as val
-from .picker import ItemKind, MenuItem, PickResult, pick
-
+from .picker import ItemKind, MenuItem, pick
 
 # ── Env var migration helpers ───────────────────────────────────────────
 # Phase 2 of copilot-worktrees extraction: APERTURE_* → WORKTREE_*
@@ -1435,9 +1428,9 @@ def _resolve_new(
     if args.dry_run:
         output.dry_run(f"Would fetch from {repo.remote}")
         output.dry_run(f"Would create worktree at {worktree_path} on branch {branch}")
-        output.dry_run(f"Would write tracking YAML")
-        output.dry_run(f"Would clone permissions")
-        output.dry_run(f"Would add worktree path to trusted_folders")
+        output.dry_run("Would write tracking YAML")
+        output.dry_run("Would clone permissions")
+        output.dry_run("Would add worktree path to trusted_folders")
         launch_cmd = _build_launch_cmd(config, args, worktree_path, profile=profile)
         merged_env = _build_env(profile)
         output.dry_run(f"Would launch: {' '.join(launch_cmd)}")
@@ -2184,7 +2177,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
             if rec.worktree_path and Path(rec.worktree_path).exists():
                 if not git_ops.remove_worktree(repo.anchor, rec.worktree_path):
-                    output.warn(f"Could not remove worktree via git -- forcing directory removal.")
+                    output.warn("Could not remove worktree via git -- forcing directory removal.")
                 wt_dir = Path(rec.worktree_path)
                 if wt_dir.exists():
                     shutil.rmtree(wt_dir, ignore_errors=True)
@@ -2283,11 +2276,11 @@ def _validate_machine_registry(
     if entry is None:
         output.err(f"Machine '{machine}' not found in machines.yaml")
         output.info("Add an entry for this machine and retry:")
-        output.info(f"  machines:")
+        output.info("  machines:")
         output.info(f"    {machine}:")
         output.info(f"      display_name: {machine.title()}")
-        output.info(f'      environment: "<OS and version>"')
-        output.info(f'      # alias: "<facility-name>"  # colloquial name if different from hostname')
+        output.info('      environment: "<OS and version>"')
+        output.info('      # alias: "<facility-name>"  # colloquial name if different from hostname')
         return None
 
     return entry
@@ -3345,7 +3338,7 @@ def _cmd_services_check_stale(install_dir_str: str, repo_dir_str: str) -> int:
 _DEPLOY_ACTIONS = {"install", "update", "copy"}
 
 
-def _ensure_repo_current(repo_dir: Path, config: "cfg.Config") -> None:
+def _ensure_repo_current(repo_dir: Path, config: cfg.Config) -> None:
     """Pull latest commits into the anchor repo before deploying.
 
     When services are deployed from the anchor (the main clone, not a
