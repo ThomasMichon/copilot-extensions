@@ -192,7 +192,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     # Build port forwards for credential relay
     port_forwards: list[str] = []
     if not args.no_relay:
-        port_forwards.append(f"-R {relay_port}:localhost:{relay_port}")
+        port_forwards.append(f"-R {relay_port}:127.0.0.1:{relay_port}")
 
     manager = ConnectionManager()
 

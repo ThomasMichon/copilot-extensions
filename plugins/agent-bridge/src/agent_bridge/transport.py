@@ -24,6 +24,20 @@ from ssh_manager import SSHProfileSource, get_default_manager
 log = logging.getLogger("agent-bridge")
 
 
+def _check_port_alive(port: int, host: str = "127.0.0.1", timeout: float = 1.0) -> bool:
+    """Check if a local TCP port is listening."""
+    import socket as _socket
+
+    try:
+        s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((host, port))
+        s.close()
+        return True
+    except (ConnectionRefusedError, _socket.timeout, OSError):
+        return False
+
+
 def _creation_flags() -> int:
     """Return subprocess creation flags for the current platform.
 
@@ -51,6 +65,7 @@ class SpawnTarget:
     ssh_shell: str | None = None  # remote shell (e.g. "pwsh", "bash")
     worktree_id: str | None = None  # resume a specific worktree
     spawn_command: list[str] | None = None  # raw command for provider agents
+    auth_hooks: list[dict] = field(default_factory=list)  # serializable auth hook dicts
 
     def to_json(self) -> str:
         """Serialize for DB persistence."""
@@ -312,7 +327,15 @@ def _build_remote_cmd(target: SpawnTarget) -> str:
             ]
         if target.copilot_args:
             binstub_args.extend(target.copilot_args)
-        return " ".join(shlex.quote(a) for a in binstub_args)
+        binstub_cmd = " ".join(shlex.quote(a) for a in binstub_args)
+        # Prepend env exports (e.g. auth hook vars) so they're available
+        # to the binstub and all child processes in the SSH session
+        if target.env:
+            exports = " && ".join(
+                f"export {k}={shlex.quote(v)}" for k, v in target.env.items()
+            )
+            return f"{exports} && {binstub_cmd}"
+        return binstub_cmd
 
     if not target.cwd:
         raise ValueError("SSH agent without 'project' requires 'cwd'")
@@ -335,17 +358,58 @@ async def spawn_ssh(target: SpawnTarget) -> AgentProcess:
     subsequent ACP sessions multiplex over it (on Unix). On Windows,
     falls back to direct SSH (no multiplexing).
 
+    Auth hooks from the machine topology are applied automatically:
+    - Port forwards (-R) are passed to the master connection
+    - Environment variables are injected into the remote command
+    - Local service liveness is checked before connecting
+
     SSH hardening (BatchMode, -T, ConnectTimeout, ServerAliveInterval)
     is handled by ssh-manager's base args.
     """
     if not target.host:
         raise ValueError("SSH target requires a host (SSH alias)")
 
+    # Resolve auth hooks into port forwards and env vars
+    port_forwards: list[str] = []
+    auth_env: dict[str, str] = {}
+    for hook in target.auth_hooks:
+        local_port = hook.get("local_port", 0)
+        remote_port = hook.get("remote_port") or local_port
+        hook_name = hook.get("name", "unknown")
+        if local_port:
+            if not _check_port_alive(local_port):
+                log.warning(
+                    "Auth hook '%s': local port %d is not listening -- "
+                    "skipping port forward (auth may not work on remote)",
+                    hook_name, local_port,
+                )
+            else:
+                port_forwards.append(f"-R {remote_port}:127.0.0.1:{local_port}")
+                log.info(
+                    "Auth hook '%s': forwarding remote:%d -> local:%d",
+                    hook_name, remote_port, local_port,
+                )
+        hook_env = hook.get("env", {})
+        if hook_env:
+            auth_env.update(hook_env)
+            log.info(
+                "Auth hook '%s': injecting env vars: %s",
+                hook_name, list(hook_env.keys()),
+            )
+
+    # Merge auth env into target env (auth hooks have lowest precedence)
+    if auth_env:
+        merged = dict(auth_env)
+        merged.update(target.env)
+        target.env = merged
+
     manager = get_default_manager()
     source = SSHProfileSource(host_alias=target.host, user=target.user)
 
     try:
-        await manager.ensure_connected(target.host, source)
+        await manager.ensure_connected(
+            target.host, source, port_forwards=port_forwards or None,
+        )
     except ConnectionError as exc:
         raise RuntimeError(
             f"Failed to establish SSH connection to {target.host}"

@@ -17,6 +17,29 @@ log = logging.getLogger("agent-bridge")
 
 
 @dataclass
+class AuthHook:
+    """A connection-time auth forwarding hook.
+
+    Declares a local service port to reverse-forward over SSH,
+    environment variables to inject into the remote session, and
+    (optionally) scripts to deploy on first connect.
+    """
+
+    name: str
+    local_port: int
+    remote_port: int | None = None  # defaults to local_port
+    env: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def effective_remote_port(self) -> int:
+        return self.remote_port or self.local_port
+
+    def port_forward_arg(self) -> str:
+        """Return the SSH -R argument for this hook."""
+        return f"-R {self.effective_remote_port}:localhost:{self.local_port}"
+
+
+@dataclass
 class SshEnvironment:
     """A single SSH environment on a machine (e.g. windows, wsl, linux)."""
 
@@ -39,6 +62,7 @@ class MachineConfig:
     ssh_environments: list[SshEnvironment] = field(default_factory=list)
     ssh_ip: str | None = None
     ssh_ready: bool = False
+    auth_hooks: list[AuthHook] = field(default_factory=list)
 
     def get_ssh_env(self, env_name: str | None = None) -> SshEnvironment | None:
         """Get an SSH environment by name, or the first available one."""
@@ -101,6 +125,17 @@ def parse_machines_yaml(data: dict[str, Any]) -> dict[str, MachineConfig]:
                 shell=env_data.get("shell", "bash"),
             ))
 
+        # Parse auth hooks
+        auth_hooks: list[AuthHook] = []
+        auth_block = mdata.get("auth", {})
+        for hook_data in auth_block.get("hooks", []):
+            auth_hooks.append(AuthHook(
+                name=hook_data.get("name", ""),
+                local_port=hook_data.get("local_port", 0),
+                remote_port=hook_data.get("remote_port"),
+                env={str(k): str(v) for k, v in hook_data.get("env", {}).items()},
+            ))
+
         machines[key] = MachineConfig(
             key=key,
             display_name=mdata.get("display_name", key),
@@ -110,6 +145,7 @@ def parse_machines_yaml(data: dict[str, Any]) -> dict[str, MachineConfig]:
             ssh_environments=ssh_envs,
             ssh_ip=ssh_block.get("ip"),
             ssh_ready=bool(ssh_block.get("ready", False)),
+            auth_hooks=auth_hooks,
         )
 
     return machines

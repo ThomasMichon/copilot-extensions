@@ -16,6 +16,11 @@ when you install the marketplace. Both plugins ship from the same repo.
 
 ## 2. Bootstrap the Service
 
+> **Prerequisite:** The `agent-codespaces` plugin must be installed in
+> the agent-bridge venv for the integrated credential relay to start.
+> When installed as a sibling plugin through the marketplace, no
+> separate relay setup is required.
+
 Start a Copilot CLI session and say:
 
 > *"set up agent-bridge"*
@@ -56,7 +61,16 @@ bash "$ab_dir/scripts/install.sh" install
 Platform service:
   Windows:   "Agent Bridge" scheduled task (at-logon, 15s delay)
   Linux/WSL: ~/.config/systemd/user/agent-bridge.service (enabled)
+
+Credential relay:
+  Port 9857                Starts with agent-bridge; no separate relay setup
+                           needed when agent-codespaces is installed as a
+                           sibling plugin
 ```
+
+The credential relay is part of agent-bridge startup. If the
+`agent-codespaces` plugin is installed into the same venv, agent-bridge
+starts the relay automatically on port `9857`.
 
 ### Verify
 

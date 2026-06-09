@@ -40,6 +40,23 @@ Copilot CLI sessions (multiple)
 | Client | `client.py` | HTTP client for CLI commands |
 | CLI | `__main__.py` | Command-line interface |
 
+## Credential Relay
+
+Agent-bridge starts a credential relay server during its FastAPI
+lifespan in `app.py` by instantiating agent-codespaces'
+`CredentialRelayServer`. The relay listens on port `9857` and proxies
+requests to the local Git Credential Manager via agent-codespaces'
+credential source integration.
+
+For SSH-spawned agents, the transport layer reads per-machine
+`auth.hooks` from `machines.yaml` and converts them into SSH reverse port
+forwards plus environment variable exports. This makes the local relay
+available inside remote agent sessions without separate relay setup.
+
+The relay speaks the git credential protocol over TCP and supports the
+standard `get`, `store`, and `erase` actions plus `get-access-token`,
+which returns a raw ADO PAT for callers that need an access token.
+
 ## HTTP API
 
 All endpoints require `Authorization: Bearer <token>` (except `/health`).

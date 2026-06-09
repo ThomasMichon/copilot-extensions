@@ -1,6 +1,6 @@
 """Credential relay TCP server.
 
-Listens on a configurable port (default 9847) for git-credential-protocol
+Listens on a configurable port (default 9857) for git-credential-protocol
 connections. Parses incoming requests, applies policy checks (allowed
 hosts/actions), routes to the first matching credential source, and
 returns the response.
@@ -28,7 +28,7 @@ from .sources import CredentialSource
 
 log = logging.getLogger("agent-codespaces.relay")
 
-DEFAULT_PORT = 9847
+DEFAULT_PORT = 9857
 
 # Actions the relay recognizes
 _KNOWN_ACTIONS = frozenset({
@@ -36,6 +36,7 @@ _KNOWN_ACTIONS = frozenset({
     "fill", "approve", "reject",
     "get-github-token",
     "get-azure-token",
+    "get-access-token",
 })
 
 
@@ -179,6 +180,33 @@ class CredentialRelayServer:
             if rejection:
                 log.warning("[%s] Policy rejected: %s", addr, rejection)
                 self.stats.policy_rejections += 1
+                return
+
+            # Handle get-access-token: synthesize a credential request for ADO
+            # and return just the raw token (password). Used by ado-auth-helper
+            # and non-git tools (npm, nuget) that need a bare PAT.
+            if action == "get-access-token":
+                ado_fields = {
+                    "protocol": "https",
+                    "host": fields.get("host", "onedrive.visualstudio.com"),
+                }
+                response = await self._route_to_source("get", ado_fields)
+                if response:
+                    token = ""
+                    for line in response.strip().split("\n"):
+                        if line.startswith("password="):
+                            token = line[len("password="):]
+                            break
+                    if token:
+                        writer.write((token + "\n\n").encode("utf-8"))
+                        await writer.drain()
+                        log.info("[%s] get-access-token: token (%d chars)", addr, len(token))
+                    else:
+                        log.warning("[%s] get-access-token: no password in response", addr)
+                        self.stats.errors += 1
+                else:
+                    log.warning("[%s] get-access-token: no source resolved", addr)
+                    self.stats.errors += 1
                 return
 
             # Route to source

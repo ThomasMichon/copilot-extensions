@@ -43,11 +43,36 @@ async def lifespan(app: FastAPI):
         wt_cache.configure(interval=cfg.worktree_discovery_interval)
         wt_cache.start(resolver)
 
+    # Start credential relay server for auth forwarding over SSH tunnels.
+    # Uses agent-codespaces' relay (GitCredentialSource proxies to local GCM).
+    relay_server = None
+    try:
+        from agent_codespaces.credential_relay import CredentialRelayServer
+        from agent_codespaces.credential_relay.sources.git_credential import (
+            GitCredentialSource,
+        )
+
+        relay_server = CredentialRelayServer(
+            sources=[GitCredentialSource()],
+        )
+        await relay_server.start()
+        app.state.credential_relay = relay_server
+        log.info("Credential relay started on port %d", relay_server.port)
+    except ImportError:
+        log.debug("agent-codespaces not installed -- credential relay disabled")
+    except OSError as exc:
+        log.warning("Credential relay failed to start: %s", exc)
+
     log.info(
         "agent-bridge started (port=%s, db=%s, sessions=%d)",
         cfg.port, db_path, len(mgr.list_sessions()),
     )
     yield
+
+    # Shutdown: stop credential relay
+    if relay_server and relay_server.running:
+        await relay_server.stop()
+        log.info("Credential relay stopped")
 
     # Shutdown: stop worktree discovery
     from .routes.worktrees import get_cache

@@ -40,7 +40,7 @@ class CredentialsConfig:
     """Credential relay configuration."""
 
     sources: dict[str, CredentialSourceConfig] = field(default_factory=dict)
-    relay_port: int = 9847
+    relay_port: int = 9857
 
 
 @dataclass

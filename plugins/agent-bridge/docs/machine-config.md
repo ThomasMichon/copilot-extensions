@@ -116,6 +116,53 @@ host, user, port, and key. Common convention:
 - **`-wsl` suffix** (e.g., `my-workstation-wsl`) = WSL SSH (port 22)
 - **Single-OS machines** use the bare name only
 
+### Auth Hooks
+
+Machines can also declare an optional `auth` block. `auth.hooks` is a
+per-machine array of auth hook definitions shared by all agents that run
+on that machine.
+
+Each hook declares SSH connection wiring that agent-bridge applies when
+spawning remote agents:
+
+- **Reverse port forwards** from `local_port` to `remote_port`
+- **Environment variables** exported from the `env` map
+
+This is how shared auth services such as the credential relay are made
+available to remote agents. The relay server runs automatically as part
+of agent-bridge, so hooks only describe how to forward it over SSH.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Hook identifier for diagnostics and future extensibility |
+| `local_port` | Yes | Local listening port on the machine running agent-bridge |
+| `remote_port` | Yes | Remote port exposed to the SSH session |
+| `env` | No | Environment variables exported for the remote process |
+
+Example:
+
+```yaml
+machines:
+  my-workstation:
+    ssh:
+      ready: true
+      environments:
+        - name: windows
+          alias: my-workstation
+          shell: pwsh
+    auth:
+      hooks:
+        - name: git-credential-relay
+          local_port: 9857
+          remote_port: 9857
+          env:
+            LC_GIT_CREDENTIAL_RELAY: "9857"
+```
+
+In this example, agent-bridge adds an SSH `-R` reverse port forward for
+`127.0.0.1:9857` and exports `LC_GIT_CREDENTIAL_RELAY=9857` for the
+remote agent process.
+
 ### File Locations
 
 `config adopt` searches these paths (first match wins):
