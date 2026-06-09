@@ -61,3 +61,45 @@ def test_tool_call_update_emits_results() -> None:
     assert update["raw_output"] == {"exit_code": 0, "stdout": "hello"}
     # content list is always present (accumulated tool-result text)
     assert update["content"] == []
+
+
+def test_load_session_replay_is_suppressed() -> None:
+    """Replayed history during load_session must not be re-emitted (#706)."""
+    from acp.schema import AgentMessageChunk, TextContentBlock
+
+    client, events = _client_with_recorder()
+    client._loading_session = True
+    client._handle_session_update(
+        AgentMessageChunk(
+            session_update="agent_message_chunk",
+            content=TextContentBlock(type="text", text="DONE"),
+        )
+    )
+    assert events == []  # suppressed while loading
+
+    client._loading_session = False
+    client._handle_session_update(
+        AgentMessageChunk(
+            session_update="agent_message_chunk",
+            content=TextContentBlock(type="text", text="DONE"),
+        )
+    )
+    assert events == [("agent_message", {"text": "DONE"})]
+
+
+def test_child_exit_without_prompt_is_not_an_error() -> None:
+    """An idle/just-resumed child exiting must not emit an error (#706)."""
+    client, events = _client_with_recorder()
+    client._prompt_in_flight = False
+    client._handle_child_exit()
+    assert events == []
+    assert client._prompt_error is None
+
+
+def test_child_exit_during_prompt_emits_error() -> None:
+    """A child dying mid-turn is still surfaced as an error."""
+    client, events = _client_with_recorder()
+    client._prompt_in_flight = True
+    client._handle_child_exit()
+    assert any(t == "error" for t, _ in events)
+    assert client._prompt_error is not None
