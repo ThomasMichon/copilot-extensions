@@ -2622,7 +2622,10 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Write config
     config_path = proj_dir / "config.yaml"
     if not config_path.exists() or args.force:
-        _write_config(config_path, repo_dir, machine, plat, project, default_branch)
+        _write_config(
+            config_path, repo_dir, machine, plat, project, default_branch,
+            headless=getattr(args, "headless", False),
+        )
     else:
         output.skipped(f"Config exists at {config_path} (use --force to overwrite)")
 
@@ -3920,12 +3923,13 @@ def _find_repo_dir() -> Path | None:
 
 def _write_config(
     path: Path, repo_dir: Path, machine: str, plat: str,
-    project: str, default_branch: str = "master",
+    project: str, default_branch: str = "master", *, headless: bool = False,
 ) -> None:
     """Write the project config YAML."""
     src_root = repo_dir.parent
     wt_root = src_root / ".worktrees" / project
 
+    headless_line = "headless: true\n" if headless else ""
     content = f"""# ~/.{project}/config.yaml
 # Machine-local configuration for worktree session management.
 
@@ -3933,7 +3937,7 @@ repo_name: {project}
 srcroot: {src_root}
 machine: {machine}
 platform: {plat}
-
+{headless_line}
 repos:
   {project}:
     anchor: {repo_dir}
@@ -4060,6 +4064,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Default branch (auto-detected from origin/HEAD if omitted)")
     p.add_argument("--force", action="store_true")
     p.add_argument("--machine", default=None)
+    p.add_argument("--headless", action="store_true",
+                   help="Adopt as a CLI-only project: the bare binstub lists "
+                        "worktrees instead of launching an interactive session")
 
     # uninstall
     p = sub.add_parser("uninstall", help="Remove worktree manager")
@@ -4634,6 +4641,38 @@ def cmd_help_unrouted(requested: str | None = None) -> int:
     return 1
 
 
+def _is_headless_project() -> bool:
+    """Return True if the active project is configured headless (CLI-only)."""
+    try:
+        return cfg.load_config().headless
+    except Exception:
+        return False
+
+
+def cmd_headless_bare() -> int:
+    """Bare invocation of a headless project's binstub.
+
+    Headless projects are driven via CLI and never launch an interactive
+    Copilot session. Show the project's worktrees and the available
+    lifecycle commands instead.
+    """
+    try:
+        project = cfg.project_name()
+    except Exception:
+        project = "<project>"
+    print(
+        f"'{project}' is a headless (CLI-only) project -- it is driven via "
+        f"worktree commands, not an interactive session.",
+        file=sys.stderr,
+    )
+    print(file=sys.stderr)
+    rc = cmd_worktree_dispatch(["list"])
+    print(file=sys.stderr)
+    print(f"Manage it with: {project} worktree <create|status|push|finalize|cleanup>",
+          file=sys.stderr)
+    return rc
+
+
 def main(argv: list[str] | None = None) -> int:
     output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
@@ -4658,6 +4697,8 @@ def main(argv: list[str] | None = None) -> int:
     # No args → launch (with project) or helpful balk (without).
     if not args_list:
         if has_project:
+            if _is_headless_project():
+                return cmd_headless_bare()
             return cmd_launch([])
         return cmd_help_unrouted()
 

@@ -19,6 +19,31 @@ agent-worktrees -p copilot-extensions worktree create --json
 Running a project binstub bare (e.g. `aperture-labs`) still launches the
 interactive picker.
 
+## Headless projects (CLI-only)
+
+Adopt an external repo as a **headless** project to drive its worktree
+lifecycle from another session without ever launching Copilot inside it:
+
+```bash
+agent-worktrees register copilot-extensions \
+    --repo-dir ~/src/copilot-extensions --headless
+```
+
+A headless project records `headless: true` in its `config.yaml`. Running
+its binstub bare lists worktrees and the available commands instead of
+launching an interactive session:
+
+```bash
+copilot-extensions                      # lists worktrees + usage (no launch)
+copilot-extensions worktree create      # create; print id + dir
+copilot-extensions worktree push <id>   # squash + rebase + push
+copilot-extensions worktree finalize <id>
+```
+
+This collapses the manual `git worktree add -> edit -> squash -> rebase ->
+push -> remove` ritual into the same lifecycle commands, driven from your
+existing (e.g. `aperture-labs`) session.
+
 ## Worktree namespace
 
 `worktree` groups the non-launching lifecycle verbs as a discoverable
