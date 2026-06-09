@@ -337,7 +337,7 @@ def check_staleness(manifest_path: Path, repo_dir: Path) -> str:
     if result.returncode != 0:
         return "unknown"
 
-    lines = [l for l in result.stdout.strip().splitlines() if l.strip()]
+    lines = [ln for ln in result.stdout.strip().splitlines() if ln.strip()]
     if lines:
         return f"stale:{len(lines)}"
     return "current"

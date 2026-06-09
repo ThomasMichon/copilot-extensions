@@ -718,7 +718,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             # Build picker menu
             menu_items: list[MenuItem] = []
 
-            def _wt_label(rec: tracking.WorktreeRecord, info: git_ops.WorktreeStateInfo, icon: str) -> str:
+            def _wt_label(rec: tracking.WorktreeRecord, info: git_ops.WorktreeStateInfo, icon: str, session_ctx: sessions.SessionContext = session_ctx) -> str:
                 age = _age_str(rec.started_at)
                 resume = f", {rec.resume_count} resumes" if rec.resume_count > 0 else ""
                 norm = _normalize_path(rec.worktree_path)
@@ -738,7 +738,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 short_id = rec.worktree_id[-4:] if len(rec.worktree_id) > 4 else rec.worktree_id
                 return f"{icon} …{short_id}  ({age}{resume}){tag}{drift_tag}{state_tag}"
 
-            def _wt_subtitle(rec: tracking.WorktreeRecord, info: git_ops.WorktreeStateInfo) -> str | None:
+            def _wt_subtitle(rec: tracking.WorktreeRecord, info: git_ops.WorktreeStateInfo, session_ctx: sessions.SessionContext = session_ctx) -> str | None:
                 """Resolve the best available title for a worktree."""
                 norm = _normalize_path(rec.worktree_path)
                 turns = session_ctx.turn_count.get(norm, 0)
@@ -1114,7 +1114,6 @@ def _system_status(config: cfg.Config) -> int | None:
         _system_pause("No tracked worktrees.")
         return None
 
-    all_paths = [r.worktree_path for r in records]
     session_ctx = sessions.scan_sessions_fast(records)
     active_paths = _build_active_paths(records, session_ctx)
 
@@ -1848,7 +1847,6 @@ def cmd_status(args: argparse.Namespace) -> int:
     repo = config.default_repo
 
     # Scan for live sessions to feed into classification
-    all_paths = [r.worktree_path for r in records]
     session_ctx = sessions.scan_sessions_fast(records)
     active_paths = _build_active_paths(records, session_ctx)
 
@@ -1973,7 +1971,7 @@ def cmd_list(args: argparse.Namespace) -> int:
             for rec in records
         ]
         # Enrich titles from session data (same cascade as table output)
-        for wt_dict, rec in zip(worktrees, records):
+        for wt_dict, rec in zip(worktrees, records, strict=True):
             title = wt_dict.get("title")
             if not title or title == "null":
                 norm = _normalize_path(rec.worktree_path)
@@ -1987,7 +1985,6 @@ def cmd_list(args: argparse.Namespace) -> int:
         return 0
 
     # Light session scan for display text (names/summaries)
-    all_paths = [r.worktree_path for r in records if r.worktree_path]
     session_ctx = sessions.scan_sessions_fast(records)
 
     print()
@@ -2495,8 +2492,6 @@ def _refresh_terminal_profiles() -> None:
 
         # The install script's "update" action regenerates terminal profiles
         # Use a targeted powershell invocation that just refreshes shortcuts
-        machine = m.get("environment", "").rsplit("-", 1)[0] or "unknown"
-
         subprocess.run(
             ["pwsh", "-NoProfile", "-File", str(install_script), "update"],
             capture_output=True, text=True, timeout=30,
@@ -2726,7 +2721,6 @@ def cmd_update(args: argparse.Namespace) -> int:
     # Step 1 -- update the Copilot CLI plugin (pulls latest from marketplace)
     plugin_ref = "agent-worktrees@copilot-extensions"
     output.info(f"Updating plugin: {plugin_ref}")
-    plugin_update_ok = False
     try:
         r = subprocess.run(
             ["copilot", "plugin", "update", plugin_ref],
@@ -2735,7 +2729,6 @@ def cmd_update(args: argparse.Namespace) -> int:
         if r.returncode == 0:
             for line in r.stdout.strip().splitlines():
                 output.ok(line)
-            plugin_update_ok = True
         else:
             detail = "\n".join(
                 x for x in [r.stdout.strip(), r.stderr.strip()] if x

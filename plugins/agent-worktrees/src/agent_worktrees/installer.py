@@ -451,7 +451,7 @@ def write_deploy_manifest(repo_dir: str | Path, machine: str) -> None:
         )
         if r.returncode == 0 and r.stdout.strip():
             dirty = True
-            dirty_files = [l[3:].strip() for l in r.stdout.splitlines() if l.strip()]
+            dirty_files = [ln[3:].strip() for ln in r.stdout.splitlines() if ln.strip()]
     except Exception:
         pass
 

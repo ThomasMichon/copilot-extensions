@@ -389,7 +389,7 @@ def _is_content_on_upstream(
         cwd=cwd, check=False,
     )
     if cherry_r.returncode == 0 and cherry_r.stdout.strip():
-        unmerged = [l for l in cherry_r.stdout.splitlines() if l.startswith("+")]
+        unmerged = [ln for ln in cherry_r.stdout.splitlines() if ln.startswith("+")]
         if not unmerged:
             return True
 
