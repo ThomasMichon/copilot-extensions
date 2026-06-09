@@ -3127,6 +3127,61 @@ def _service_is_installed(service: svc.ServiceInfo) -> bool:
     return Path(service.install_dir).exists()
 
 
+# Worktree namespace verb -> canonical top-level command.
+_WORKTREE_VERBS = {
+    "create": "create",
+    "list": "list",
+    "status": "status",
+    "push": "push-changes",
+    "push-changes": "push-changes",
+    "finalize": "finalize",
+    "cleanup": "cleanup",
+}
+
+
+def _worktree_usage() -> None:
+    out = sys.stderr
+    print("Usage: <project> worktree <command> [args...]", file=out)
+    print(file=out)
+    print("Non-launching worktree lifecycle commands:", file=out)
+    print("  create [--json]        Create a worktree; print id + dir (no launch)", file=out)
+    print("  list [--json]          List this project's worktrees", file=out)
+    print("  status <id>            Show a worktree's git status", file=out)
+    print("  push <id> [--title T]  Squash, rebase, and push to the default branch", file=out)
+    print("  finalize [id]          Validate content on upstream and clean up", file=out)
+    print("  cleanup                List and remove orphaned/finalized worktrees", file=out)
+
+
+def cmd_worktree_dispatch(argv: list[str]) -> int:
+    """Route ``worktree`` subcommands to the canonical lifecycle handlers.
+
+    A discoverable, repo-mechanical alias over existing top-level commands
+    (``create``/``list``/``status``/``push-changes``/``finalize``/``cleanup``)
+    -- none of which launch Copilot. Existing top-level verbs keep working.
+    """
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        _worktree_usage()
+        return 0 if argv and argv[0] in ("-h", "--help", "help") else 1
+
+    verb = argv[0]
+    canonical = _WORKTREE_VERBS.get(verb)
+    if not canonical:
+        output.err(f"Unknown worktree subcommand: {verb}")
+        _worktree_usage()
+        return 1
+
+    parser = build_parser()
+    try:
+        args = parser.parse_args([canonical, *argv[1:]])
+    except SystemExit as exc:
+        return int(exc.code or 0)
+    handler = COMMAND_MAP.get(args.command)
+    if not handler:
+        _worktree_usage()
+        return 1
+    return handler(args)
+
+
 def cmd_services_dispatch(argv: list[str]) -> int:
     """Route services subcommands -- built-in aggregates or passthrough."""
     if not argv:
@@ -4539,9 +4594,12 @@ def cmd_help_unrouted(requested: str | None = None) -> int:
 
     matched: str | None = None
     if cwd_anchor is not None:
+        cwd_norm = _normalize_path(str(cwd_anchor))
         for name, entry in projects.items():
             anchor = entry.get("anchor") if isinstance(entry, dict) else None
-            if anchor and _normalize_path(str(Path(anchor).resolve())) == _normalize_path(str(cwd_anchor)):
+            if not anchor:
+                continue
+            if _normalize_path(str(Path(anchor).resolve())) == cwd_norm:
                 matched = name
                 break
 
@@ -4658,6 +4716,15 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] == "repos":
         try:
             return cmd_repos_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # Worktree namespace -- groups the non-launching lifecycle verbs as a
+    # discoverable alias over the existing top-level commands.
+    if args_list[0] == "worktree":
+        try:
+            return cmd_worktree_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
