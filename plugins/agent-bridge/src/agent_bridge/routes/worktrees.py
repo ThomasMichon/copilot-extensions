@@ -418,12 +418,20 @@ def _latest_session_for_worktree(mgr: Any, worktree_id: str) -> Any:
 
 @router.post("/api/v1/worktrees/{worktree_id}/resume", response_model=SessionInfo)
 async def resume_worktree(worktree_id: str, request: Request) -> SessionInfo:
-    """Resume a worktree by resolving and resuming its most-recent session.
+    """Resume a worktree by ensuring it has a live session.
 
     Worktree-level convenience verb: finds the current (most recent) session
-    for the worktree and ensures it is live.  A stopped session is resumed
-    (ACP load_session reuses the same acp session id); an already-live
-    session is returned as-is.  Returns 404 if the worktree has no session.
+    for the worktree and ensures it is live.
+
+    - An already-live session is returned as-is.
+    - A stopped session is resumed (ACP load_session reuses the same acp
+      session id).
+    - If that session can no longer be resumed (e.g. the agent no longer
+      knows it -- common for old/finalized worktrees), fall back to starting
+      a fresh session in the same worktree directory, since the worktree
+      still exists on disk.  This keeps "open existing worktree" robust.
+
+    Returns 404 if the worktree has no session at all.
     """
     from .sessions import _session_info
 
@@ -441,14 +449,35 @@ async def resume_worktree(worktree_id: str, request: Request) -> SessionInfo:
 
     try:
         resumed = await mgr.resume_session(session.session_id)
+        return _session_info(resumed)
     except KeyError as exc:
         raise HTTPException(
             status_code=404,
             detail=f"Session {session.session_id} not found",
         ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    return _session_info(resumed)
+        # Not actually stopped / nothing to resume -- return current state.
+        log.info("resume_worktree %s: %s; returning current state", worktree_id, exc)
+        return _session_info(session)
+    except Exception as exc:
+        # Resume failed (e.g. ACP session gone). Fall back to a fresh session
+        # in the same worktree so the worktree remains usable.
+        log.warning(
+            "resume_worktree %s: resume of %s failed (%s); starting fresh session",
+            worktree_id, session.session_id, exc,
+        )
+        try:
+            fresh = await mgr.start_session(
+                session.target,
+                agent_name=session.agent_name,
+                caller_id=session.caller_id,
+            )
+        except Exception as start_exc:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Could not resume or restart worktree {worktree_id}: "
+                    f"{start_exc}"
+                ),
+            ) from start_exc
+        return _session_info(fresh)
