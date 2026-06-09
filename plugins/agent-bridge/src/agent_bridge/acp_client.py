@@ -358,6 +358,7 @@ class AcpClient:
                 "tool_call_id": tc.tool_call_id,
                 "title": tc.title,
                 "kind": tc.kind,
+                "raw_input": getattr(update, "raw_input", None),
             })
 
         elif isinstance(update, ToolCallProgress):
@@ -372,9 +373,13 @@ class AcpClient:
                         text = getattr(getattr(c, "content", None), "text", None)
                         if text:
                             existing.content.append(text)
+            # Forward the accumulated tool result (content text + raw_output)
+            # so consumers can render full fidelity, not just status.
             self._emit("tool_call_update", {
                 "tool_call_id": update.tool_call_id,
                 "status": getattr(update, "status", None),
+                "content": list(existing.content) if existing else [],
+                "raw_output": getattr(update, "raw_output", None),
             })
 
         elif isinstance(update, UsageUpdate):
