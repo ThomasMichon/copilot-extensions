@@ -208,7 +208,7 @@ def classify_worktree(
 
     # Dirty check
     result = git("status", "--porcelain", cwd=path, check=False)
-    dirty_lines = [l for l in result.stdout.splitlines() if l.strip()]
+    dirty_lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
     dirty_count = len(dirty_lines)
 
     # Merge base -- use effective_branch (actual HEAD when drifted)
@@ -260,8 +260,8 @@ def classify_worktree(
             cwd=path, check=False,
         )
         has_commits = any(
-            l.startswith("commit")
-            for l in (reflog.stdout or "").splitlines()
+            ln.startswith("commit")
+            for ln in (reflog.stdout or "").splitlines()
         )
         state = WorktreeState.COMPLETED if has_commits else WorktreeState.UNUSED
         return WorktreeStateInfo(
@@ -280,8 +280,8 @@ def classify_worktree(
         cwd=path, check=False,
     )
     if cherry_r.returncode == 0 and cherry_r.stdout.strip():
-        unmerged = [l for l in cherry_r.stdout.splitlines()
-                    if l.startswith("+")]
+        unmerged = [ln for ln in cherry_r.stdout.splitlines()
+                    if ln.startswith("+")]
         if not unmerged:
             return WorktreeStateInfo(
                 state=WorktreeState.COMPLETED,
@@ -404,7 +404,7 @@ def delete_branch(name: str, *, cwd: str | Path, force: bool = False) -> bool:
 def get_dirty_files(cwd: str | Path) -> list[str]:
     """Return list of uncommitted changes (porcelain format)."""
     result = git("status", "--porcelain", cwd=cwd, check=False)
-    return [l for l in result.stdout.splitlines() if l.strip()]
+    return [ln for ln in result.stdout.splitlines() if ln.strip()]
 
 
 def get_commits_ahead(
@@ -415,7 +415,7 @@ def get_commits_ahead(
         "log", "--oneline", f"{upstream}..{branch}",
         cwd=cwd, check=False,
     )
-    return [l for l in result.stdout.splitlines() if l.strip()]
+    return [ln for ln in result.stdout.splitlines() if ln.strip()]
 
 
 def is_clean(*, cwd: str | Path) -> bool:
@@ -522,8 +522,8 @@ def is_branch_merged(
     # target later modified the same files.
     cherry_r = git("cherry", target, branch, cwd=cwd, check=False)
     if cherry_r.returncode == 0 and cherry_r.stdout.strip():
-        unmerged = [l for l in cherry_r.stdout.splitlines()
-                    if l.startswith("+")]
+        unmerged = [ln for ln in cherry_r.stdout.splitlines()
+                    if ln.startswith("+")]
         if not unmerged:
             return True
 

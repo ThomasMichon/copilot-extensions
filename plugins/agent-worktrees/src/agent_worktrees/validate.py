@@ -7,6 +7,7 @@ configured per-repo via ``validate_paths`` in config.yaml.
 
 from __future__ import annotations
 
+import os
 import platform
 import subprocess
 from dataclasses import dataclass
@@ -251,7 +252,3 @@ def validate_files(
         output.ok(f"All {len(files)} core file(s) passed validation.")
 
     return failures
-
-
-# Needed for os.sep reference
-import os

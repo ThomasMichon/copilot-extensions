@@ -194,7 +194,7 @@ def detect_machine(repo_dir: str | Path | None = None) -> str:
                 if hostname == key:
                     return machine_name(entry)
             # Then check aliases
-            for key, entry in entries.items():
+            for entry in entries.values():
                 if entry.alias and hostname == entry.alias.lower():
                     return machine_name(entry)
         except (FileNotFoundError, ValueError):
