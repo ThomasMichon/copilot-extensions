@@ -90,13 +90,27 @@ class TestSubmitPrompt:
         assert turn_idx == 0
 
     @pytest.mark.asyncio
-    async def test_submit_rejects_non_idle(
+    async def test_submit_rejects_running(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp
     ) -> None:
         session = await session_manager.start_session(spawn_target)
-        session.status = SessionStatus.STOPPED
+        session.status = SessionStatus.RUNNING
         with pytest.raises(ValueError, match="not idle"):
             await session_manager.submit_prompt(session.session_id, "Hello")
+
+    @pytest.mark.asyncio
+    async def test_submit_auto_resumes_stopped(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """STOPPED sessions with an ACP session ID auto-resume on submit."""
+        session = await session_manager.start_session(spawn_target)
+        session.acp_session_id = "test-acp-id"
+        session.status = SessionStatus.STOPPED
+        session.client = None
+        # submit_prompt should auto-resume then deliver the prompt
+        turn = await session_manager.submit_prompt(session.session_id, "Hello")
+        assert isinstance(turn, int)
+        assert session.status == SessionStatus.RUNNING
 
     @pytest.mark.asyncio
     async def test_submit_unknown_session(self, session_manager) -> None:

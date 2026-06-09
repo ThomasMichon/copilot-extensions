@@ -453,17 +453,36 @@ class SessionManager:
         (agent_message, tool_call_start, etc.) flow to the EventLog in
         real time. The prompt runs as a background task so the HTTP
         request can return immediately -- callers consume output via SSE.
+
+        If the session process has died (e.g. after a server restart)
+        but the ACP session ID is available, the process is
+        automatically re-spawned and the session resumed before
+        delivering the prompt.
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
-        if session.status not in (SessionStatus.IDLE,):
+        if session.status not in (SessionStatus.IDLE, SessionStatus.STOPPED):
             raise ValueError(
                 f"Session {session_id} is {session.status.value}, not idle"
             )
+
+        # Auto-resume if the process is dead but session is recoverable
         if not session.client or not session.client.is_running:
-            raise RuntimeError(f"Session {session_id} has no running process")
+            if not session.acp_session_id:
+                raise RuntimeError(
+                    f"Session {session_id} has no running process and no "
+                    "ACP session ID -- cannot auto-resume"
+                )
+            log.info(
+                "Session %s (%s) process is dead -- auto-resuming",
+                session_id, session.name,
+            )
+            # Mark as STOPPED so resume_session accepts it
+            session.status = SessionStatus.STOPPED
+            await self.resume_session(session_id)
+            # resume_session sets status to IDLE and attaches a new client
 
         turn_index = session.turn_count
         session.turn_count += 1
