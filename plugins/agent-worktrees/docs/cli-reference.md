@@ -39,6 +39,16 @@ agent-worktrees <subcommand> [options]
 | `validate` | Validate core infrastructure files |
 | `pre-launch` | Check bootstrap staleness (JSON output, for launch wrappers) |
 
+### Deployment ownership (`extensions.agent-worktrees.auto_update`)
+
+A `service.yaml` may set `extensions.agent-worktrees.auto_update: false` to
+declare that another deployer (e.g. VAV) owns the service. agent-worktrees
+then **skips it in automatic update/install sweeps** (`services --all update`
+/ `--all install`). It still appears in `services list`/`status`, and an
+**explicit** `services <name> update` (or `--all update --force`) runs it
+regardless. Absent the flag, the service defaults to agent-worktrees
+management.
+
 ## Development
 
 | Subcommand | Description |

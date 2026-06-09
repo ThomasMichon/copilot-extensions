@@ -44,6 +44,10 @@ class ServiceInfo:
     install_dir: str | None  # expanded from deployments[env].install_dir
     deployment_type: str  # "full", "redirector", etc.
     source_dir: str  # repo-relative parent dir of service.yaml
+    # extensions.agent-worktrees.auto_update -- when False, this service is
+    # owned by another deployer (e.g. VAV) and agent-worktrees must skip it in
+    # automatic update sweeps. Explicit single-service actions still run.
+    auto_update: bool = True
 
 
 @dataclass
@@ -155,6 +159,14 @@ def _parse_service_yaml(
 
     service_dir = yaml_path.parent
 
+    # extensions.agent-worktrees.auto_update (default True). When False, the
+    # service is deployed by another owner (e.g. VAV) and agent-worktrees skips
+    # it in automatic update sweeps.
+    _ext = data.get("extensions") or {}
+    _aw = _ext.get("agent-worktrees") or {}
+    _auto = _aw.get("auto_update", True)
+    auto_update = _auto if isinstance(_auto, bool) else True
+
     # --- Modern: explicit deployments block ---
     deployments = data.get("deployments")
     if deployments and isinstance(deployments, dict):
@@ -174,6 +186,7 @@ def _parse_service_yaml(
                 install_dir=install_dir,
                 deployment_type=dep_type,
                 source_dir=str(service_dir),
+                auto_update=auto_update,
             )
         # Has deployments but this env isn't listed → skip
         return None
@@ -212,6 +225,7 @@ def _parse_service_yaml(
         install_dir=install_dir,
         deployment_type="full",
         source_dir=str(service_dir),
+        auto_update=auto_update,
     )
 
 
