@@ -134,6 +134,37 @@ class TestSessionRoutes:
         resp = client.post("/api/v1/sessions/nonexistent/resume")
         assert resp.status_code == 404
 
+    def test_start_session_conflict_returns_409(self, client, app) -> None:
+        """Concurrency guard surfaces as 409 with the existing session id."""
+        from agent_bridge.session_manager import SessionConflictError
+        from agent_bridge.transport import SpawnTarget
+
+        mock_resolver = MagicMock()
+        mock_resolver.resolve_async = AsyncMock(return_value=SpawnTarget(
+            type="command", cwd="/workspaces/repo",
+            spawn_command=["gh", "codespace", "ssh", "-c", "cs-name"],
+        ))
+        app.state.resolver = mock_resolver
+
+        mgr = app.state.session_manager
+        with patch.object(
+            mgr, "start_session",
+            AsyncMock(side_effect=SessionConflictError(
+                agent_name="codespace:cs-name",
+                existing_session_id="abc123",
+            )),
+        ):
+            resp = client.post(
+                "/api/v1/sessions",
+                json={"agent": "codespace:cs-name"},
+            )
+
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["error"] == "session_conflict"
+        assert detail["existing_session_id"] == "abc123"
+        assert detail["agent_name"] == "codespace:cs-name"
+
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session_with_agent_and_worktree_id(

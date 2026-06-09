@@ -18,6 +18,7 @@ from ..models import (
     SubmitPromptRequest,
     SubmitPromptResponse,
 )
+from ..session_manager import SessionConflictError
 from ..transport import SpawnTarget
 
 if TYPE_CHECKING:
@@ -127,9 +128,20 @@ async def start_session(req: StartSessionRequest, request: Request):
             cwd=req.target_dir or ".",
         )
 
-    session = await mgr.start_session(
-        target, agent_name=req.agent, caller_id=req.caller_id,
-    )
+    try:
+        session = await mgr.start_session(
+            target, agent_name=req.agent, caller_id=req.caller_id,
+        )
+    except SessionConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "session_conflict",
+                "message": str(exc),
+                "existing_session_id": exc.existing_session_id,
+                "agent_name": exc.agent_name,
+            },
+        )
 
     return StartSessionResponse(
         session_id=session.session_id,
