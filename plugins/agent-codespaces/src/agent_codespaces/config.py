@@ -41,6 +41,11 @@ class CredentialsConfig:
 
     sources: dict[str, CredentialSourceConfig] = field(default_factory=dict)
     relay_port: int = 9857
+    # Default ADO host for bare `get-access-token` requests that carry no host.
+    # Set this to your Azure DevOps host (e.g. ``your-org.visualstudio.com`` or
+    # ``dev.azure.com``). Left unset, such requests are rejected rather than
+    # assuming an organization.
+    ado_host: str | None = None
 
 
 @dataclass
@@ -48,7 +53,7 @@ class RepoConfig:
     """Per-target-repo CodeSpace settings.
 
     Keyed by the CodeSpace repository (e.g.
-    ``odsp-microsoft/odsp-web-codespaces``). ``provision`` hooks declared
+    ``my-org/my-codespaces-repo``). ``provision`` hooks declared
     here apply only to CodeSpaces of this repo.
     """
 
@@ -108,7 +113,7 @@ class CodespacesConfig:
     # command ``cd``s into this directory before launching Copilot CLI,
     # ensuring a cold-started CodeSpace lands in the repo root even if
     # the workspace volume is still mounting when the SSH session
-    # connects.  Typical value: ``/workspaces/odsp-web``.
+    # connects.  Typical value: ``/workspaces/<your-repo>``.
     workspace_folder: str | None = None
 
     # Remote agent command -- what to run on the CodeSpace when
@@ -312,6 +317,9 @@ def load_merged_config() -> CodespacesConfig:
         if creds_raw:
             merged.credentials.relay_port = creds_raw.get(
                 "relay_port", merged.credentials.relay_port
+            )
+            merged.credentials.ado_host = creds_raw.get(
+                "ado_host", merged.credentials.ado_host
             )
             for source_name, source_raw in creds_raw.get("sources", {}).items():
                 if source_name not in merged.credentials.sources:

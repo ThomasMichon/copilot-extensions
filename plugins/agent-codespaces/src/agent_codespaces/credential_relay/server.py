@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 
@@ -114,12 +115,18 @@ class CredentialRelayServer:
         port: int = DEFAULT_PORT,
         sources: list[CredentialSource] | None = None,
         policy: RelayPolicy | None = None,
+        ado_host: str | None = None,
     ) -> None:
         self.port = port
         self.sources = sources or []
         self.policy = policy or RelayPolicy()
         self.stats = RelayStats()
         self._server: asyncio.Server | None = None
+        # Default ADO host for bare `get-access-token` requests that carry no
+        # host (e.g. npm/nuget via ado-auth-helper). Resolved from the explicit
+        # arg or the CODESPACES_ADO_HOST env var; never hardcoded to a specific
+        # organization.
+        self.ado_host = ado_host or os.environ.get("CODESPACES_ADO_HOST")
 
     @property
     def running(self) -> bool:
@@ -186,9 +193,17 @@ class CredentialRelayServer:
             # and return just the raw token (password). Used by ado-auth-helper
             # and non-git tools (npm, nuget) that need a bare PAT.
             if action == "get-access-token":
+                ado_host = fields.get("host") or self.ado_host
+                if not ado_host:
+                    log.warning(
+                        "[%s] get-access-token: no host provided and no "
+                        "CODESPACES_ADO_HOST configured", addr,
+                    )
+                    self.stats.errors += 1
+                    return
                 ado_fields = {
                     "protocol": "https",
-                    "host": fields.get("host", "onedrive.visualstudio.com"),
+                    "host": ado_host,
                 }
                 response = await self._route_to_source("get", ado_fields)
                 if response:

@@ -50,7 +50,7 @@ class TestRelayPolicy:
 
     def test_host_glob_patterns(self):
         policy = RelayPolicy(allowed_hosts=["*.visualstudio.com", "dev.azure.com"])
-        assert policy.check("get", {"host": "onedrive.visualstudio.com"}) is None
+        assert policy.check("get", {"host": "myorg.visualstudio.com"}) is None
         assert policy.check("get", {"host": "dev.azure.com"}) is None
         result = policy.check("get", {"host": "github.com"})
         assert result is not None

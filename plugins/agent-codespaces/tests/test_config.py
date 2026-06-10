@@ -181,14 +181,14 @@ class TestEffectiveAcpCommand:
         assert config.effective_acp_command == "copilot --acp --stdio --allow-all-tools"
 
     def test_workspace_folder_produces_cd_prefix(self):
-        config = CodespacesConfig(workspace_folder="/workspaces/odsp-web")
+        config = CodespacesConfig(workspace_folder="/workspaces/my-repo")
         assert config.effective_acp_command == (
-            "cd /workspaces/odsp-web && copilot --acp --stdio --allow-all-tools"
+            "cd /workspaces/my-repo && copilot --acp --stdio --allow-all-tools"
         )
 
     def test_explicit_acp_command_wins(self):
         config = CodespacesConfig(
-            workspace_folder="/workspaces/odsp-web",
+            workspace_folder="/workspaces/my-repo",
             acp_command="custom-launch --acp",
         )
         assert config.effective_acp_command == "custom-launch --acp"

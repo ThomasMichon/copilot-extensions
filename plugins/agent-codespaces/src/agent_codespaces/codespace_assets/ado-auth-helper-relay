@@ -5,7 +5,7 @@
 # connecting via SSH. Proxies requests through the SSH RemoteForward tunnel
 # back to the local machine's Git Credential Manager.
 #
-# Supports all hosts — ADO (onedrive.visualstudio.com, dev.azure.com) and
+# Supports all hosts — ADO (your Azure DevOps org host, dev.azure.com) and
 # GitHub (github.com) — by relaying to the local GCM which has credentials
 # for both. This enables dotfiles repo operations over SSH without manual
 # token forwarding.
