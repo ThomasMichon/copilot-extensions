@@ -61,7 +61,12 @@ $LibDir          = Join-Path $InstallDir 'lib'
 $VenvDir         = Join-Path $InstallDir '.venv'
 $VenvPython      = Join-Path $VenvDir 'Scripts\python.exe'
 $PkgSrcDir       = Join-Path $PluginDir 'src\agent_codespaces'
-$SshMgrDir       = Join-Path $RepoRoot 'libs\ssh-manager'
+# ssh-manager: prefer the plugin-vendored copy (marketplace layout), fall back
+# to the repo-root copy (git checkout layout).
+$SshMgrDir       = Join-Path $PluginDir 'libs\ssh-manager'
+if (-not (Test-Path (Join-Path $SshMgrDir 'src\ssh_manager'))) {
+    $SshMgrDir   = Join-Path $RepoRoot 'libs\ssh-manager'
+}
 $SshMgrSrc       = Join-Path $SshMgrDir 'src\ssh_manager'
 
 $DeploySourcePaths = @('plugins/agent-codespaces/')

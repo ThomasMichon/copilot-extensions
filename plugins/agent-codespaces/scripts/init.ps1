@@ -41,9 +41,13 @@ $PluginDir  = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $ScriptDir  = $PSScriptRoot
 $PkgSrcDir  = Join-Path $PluginDir 'src\agent_codespaces'
 
-# ssh-manager lives at libs/ssh-manager relative to the repo root
+# ssh-manager: prefer the plugin-vendored copy (marketplace layout), fall back
+# to the repo-root copy (git checkout layout).
 $RepoRoot   = (Resolve-Path (Join-Path $PluginDir '..\..')).Path
-$SshMgrDir  = Join-Path $RepoRoot 'libs\ssh-manager'
+$SshMgrDir  = Join-Path $PluginDir 'libs\ssh-manager'
+if (-not (Test-Path (Join-Path $SshMgrDir 'src\ssh_manager'))) {
+    $SshMgrDir = Join-Path $RepoRoot 'libs\ssh-manager'
+}
 
 if (-not $InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-codespaces'
@@ -70,9 +74,10 @@ if (-not (Test-Path $PkgSrcDir)) {
     exit 1
 }
 
-if (-not (Test-Path $SshMgrDir)) {
-    Write-Fail "ssh-manager not found at $SshMgrDir"
-    Write-Host "  Clone copilot-extensions so libs/ssh-manager exists."
+if (-not (Test-Path (Join-Path $SshMgrDir 'src\ssh_manager'))) {
+    Write-Fail "ssh-manager not found (looked in plugin libs/ and repo libs/)"
+    Write-Host "  Reinstall the agent-codespaces plugin from the marketplace:"
+    Write-Host "    copilot plugin install agent-codespaces@copilot-extensions"
     exit 1
 }
 
