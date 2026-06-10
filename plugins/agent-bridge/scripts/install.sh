@@ -8,7 +8,7 @@
 # Runtime lives at ~/.agent-bridge/ (venv, config, DB, auth).
 # Binstub goes to ~/.local/bin/agent-bridge.
 #
-# On first install, detects and migrates from the aperture-labs service
+# On first install, detects and migrates from a legacy project-service
 # installer (services/agent-bridge/) if present, preserving config, auth,
 # and DB.
 #
@@ -159,9 +159,12 @@ _ssh_manager_installed() {
     "$VENV_DIR/bin/python" -c 'from ssh_manager import SSHProfileSource, get_default_manager' 2>/dev/null
 }
 
-# Install sibling plugin packages (e.g. agent-codespaces) into the venv.
-# These provide optional namespace resolvers that agent-bridge discovers
-# at startup. Missing siblings are silently skipped.
+# Install sibling plugin packages (e.g. agent-codespaces) into the bridge venv.
+# This provides the `codespace:` namespace resolver and credential relay that
+# agent-bridge imports at startup. Package is installed for IMPORT ONLY -- the
+# canonical agent-codespaces CLI binstub is owned by ~/.agent-codespaces via its
+# own installer. A missing sibling is non-fatal but WARNED loudly, because it
+# disables codespace support.
 #   $1 = "reinstall" to force reinstall, empty for fresh install
 _install_sibling_plugins() {
     local mode="${1:-}"
@@ -173,50 +176,34 @@ _install_sibling_plugins() {
         if [[ ! -f "$sib_dir/pyproject.toml" ]]; then
             # Check marketplace vendor layout
             sib_dir="$PLUGIN_DIR/plugins/$name"
-            [[ -f "$sib_dir/pyproject.toml" ]] || continue
+            if [[ ! -f "$sib_dir/pyproject.toml" ]]; then
+                _warn "Sibling plugin '$name' not found -- codespace support (codespace: resolver + credential relay) will be UNAVAILABLE."
+                _warn "  Install it from the marketplace: copilot plugin install $name@copilot-extensions"
+                continue
+            fi
         fi
         local pkg_name="${name//-/_}"
         if [[ "$mode" == "reinstall" ]]; then
             if uv pip install --python "$VENV_DIR/bin/python" --reinstall-package "$pkg_name" \
                     "$sib_dir" --quiet 2>/dev/null; then
-                _ok "Sibling plugin: $name"
+                _ok "Sibling plugin (relay import): $name"
             else
-                _warn "Sibling plugin $name install failed (non-fatal)"
-                continue
+                _warn "Sibling plugin $name install failed -- codespace support will be UNAVAILABLE."
             fi
         else
             if uv pip install --python "$VENV_DIR/bin/python" "$sib_dir" --quiet 2>/dev/null; then
-                _ok "Sibling plugin: $name"
+                _ok "Sibling plugin (relay import): $name"
             else
-                _warn "Sibling plugin $name install failed (non-fatal)"
-                continue
+                _warn "Sibling plugin $name install failed -- codespace support will be UNAVAILABLE."
             fi
-        fi
-        # Create binstub for sibling if it has a console_scripts entry point
-        local sib_bin="$VENV_DIR/bin/$name"
-        if [[ -x "$sib_bin" ]]; then
-            local sib_stub="$LOCAL_BIN/$name"
-            cat > "$sib_stub" << SIBSTUB
-#!/usr/bin/env bash
-export PYTHONUTF8=1
-exec "$HOME/.agent-bridge/venv/bin/$name" "\$@"
-SIBSTUB
-            chmod +x "$sib_stub"
-            _ok "Binstub: $sib_stub"
         fi
     done
 }
 
-# Remove binstubs for sibling plugins during uninstall.
+# Sibling plugin binstubs (e.g. agent-codespaces) are owned by their own
+# installer (~/.agent-codespaces), not by agent-bridge. Uninstall leaves them.
 _remove_sibling_binstubs() {
-    local siblings=(agent-codespaces)
-    for name in "${siblings[@]}"; do
-        local sib_stub="$LOCAL_BIN/$name"
-        if [[ -f "$sib_stub" ]]; then
-            rm -f "$sib_stub"
-            _ok "Sibling binstub removed: $name"
-        fi
-    done
+    _step "Leaving sibling CLI binstubs in place (owned by their own installers)"
 }
 
 _git_info() {
@@ -304,7 +291,7 @@ _migration_check() {
     [[ -f "$old_manifest" ]] || return 0
 
     if grep -q '"installer_path".*services/agent-bridge' "$old_manifest" 2>/dev/null; then
-        _step "Migrating from aperture-labs service installer"
+        _step "Migrating from legacy project-service installer"
         _step "  Preserving config, auth, and DB"
 
         # Stop old instance
@@ -315,12 +302,12 @@ _migration_check() {
             rm -f "$PID_FILE"
         fi
 
-        # Stop old systemd unit if managed by aperture-labs
+        # Stop old systemd unit if managed by the legacy installer
         if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
             systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
         fi
 
-        _ok "Migration from aperture-labs installer detected"
+        _ok "Migration from legacy project-service installer detected"
     fi
 }
 
@@ -367,7 +354,7 @@ do_install() {
     elif _ssh_manager_installed; then
         _step "ssh-manager already installed in venv (marketplace layout)"
     else
-        _fail "Cannot locate ssh-manager library. Clone copilot-extensions so libs/ssh-manager exists, then rerun: aperture-labs services agent-bridge update"
+        _fail "Cannot locate ssh-manager library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         exit 1
     fi
     if ! uv pip install --python "$VENV_DIR/bin/python" "$PLUGIN_DIR" --quiet; then
@@ -624,7 +611,7 @@ do_update() {
     elif _ssh_manager_installed; then
         _step "ssh-manager already installed in venv (marketplace layout)"
     else
-        _fail "Cannot locate ssh-manager library. Clone copilot-extensions so libs/ssh-manager exists, then rerun: aperture-labs services agent-bridge update"
+        _fail "Cannot locate ssh-manager library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         exit 1
     fi
     if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge \

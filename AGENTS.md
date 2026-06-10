@@ -1,7 +1,8 @@
 # Copilot Extensions -- Development Guide
 
-Source of truth for the **agent-worktrees** and **agent-bridge** Copilot
-CLI plugins. Both ship from this repo via the Copilot CLI marketplace.
+Source of truth for the **agent-worktrees**, **agent-bridge**, and
+**agent-codespaces** Copilot CLI plugins. All ship from this repo via the
+Copilot CLI marketplace.
 
 ---
 
@@ -25,8 +26,19 @@ copilot-extensions/
       src/agent_bridge/        # Python source
       tests/                   # Test suite
       docs/                    # Architecture, machine-config, getting-started
+      libs/ssh-manager/        # Vendored SSH multiplexing library
       plugin.json              # Plugin manifest
       pyproject.toml           # Python project config
+    agent-codespaces/          # GitHub Codespaces lifecycle + credential relay
+      scripts/                 # Installers (init.ps1/sh, install.ps1/sh)
+      skills/                  # codespaces-setup, codespaces-lifecycle
+      src/agent_codespaces/    # Python source (CLI, relay, bridge provider)
+      tests/                   # Test suite
+      plugin.json              # Plugin manifest
+      pyproject.toml           # Python project config
+  docs/
+    architecture.md            # Repo-level architecture overview
+    plans/                     # Rollout + validation plans
   .github/
     plugin/
       marketplace.json         # Marketplace catalog (versions live here too)
@@ -35,15 +47,19 @@ copilot-extensions/
 
 ---
 
-## Two Plugins, Two Lifecycles
+## Three Plugins, Three Lifecycles
 
-| Aspect | agent-worktrees | agent-bridge |
-|--------|----------------|-------------|
-| Type | Session plugin (hooks, skills) | Persistent HTTP service (port 9280) |
-| Lifecycle | Per-session via Copilot CLI | Per-machine daemon (systemd / scheduled task) |
-| Runtime dir | `~/.agent-worktrees/` | `~/.agent-bridge/` |
-| Binstub | `~/.local/bin/agent-worktrees[.cmd]` | `~/.local/bin/agent-bridge[.cmd]` |
-| Test suite | -- | `plugins/agent-bridge/tests/` (pytest) |
+| Aspect | agent-worktrees | agent-bridge | agent-codespaces |
+|--------|----------------|-------------|------------------|
+| Type | Session plugin (hooks, skills) | Persistent HTTP service (9280 Win / 9281 WSL) | CLI + credential relay (9857) |
+| Lifecycle | Per-session via Copilot CLI | Per-machine daemon (systemd / scheduled task) | On-demand CLI; relay runs in the bridge process |
+| Runtime dir | `~/.agent-worktrees/` | `~/.agent-bridge/` | `~/.agent-codespaces/` |
+| Binstub | `~/.local/bin/agent-worktrees[.cmd]` | `~/.local/bin/agent-bridge[.cmd]` | `~/.local/bin/agent-codespaces[.cmd]` |
+| Test suite | -- | `plugins/agent-bridge/tests/` (pytest) | `plugins/agent-codespaces/tests/` (pytest) |
+
+> The agent-bridge installer also imports the `agent_codespaces` package into
+> its venv (for the `codespace:` resolver + relay) but does **not** own the
+> `agent-codespaces` binstub — that belongs to `~/.agent-codespaces`.
 
 ---
 
@@ -78,6 +94,14 @@ Bump these files **in the same commit**, immediately before pushing:
 | `plugins/agent-bridge/pyproject.toml` | `version` under `[project]` |
 | `.github/plugin/marketplace.json` | `plugins[1].version` |
 
+**agent-codespaces:**
+
+| File | Field(s) |
+|------|----------|
+| `plugins/agent-codespaces/plugin.json` | `version` |
+| `plugins/agent-codespaces/pyproject.toml` | `version` under `[project]` |
+| `.github/plugin/marketplace.json` | `plugins[2].version` |
+
 Default bump: **patch with `-devN` suffix** (e.g., `1.3.1` -> `1.3.2-dev1`).
 Do not bump minor or major unless the maintainer explicitly requests it.
 See `CONTRIBUTING.md` for the full versioning scheme.
@@ -86,6 +110,8 @@ See `CONTRIBUTING.md` for the full versioning scheme.
 
 - **agent-bridge:** Run `pytest` from `plugins/agent-bridge/` before
   pushing. The test suite covers transport, sessions, config, and CLI.
+- **agent-codespaces:** Run `pytest` from `plugins/agent-codespaces/` before
+  pushing. Covers config, lifecycle, resolver, and the credential relay.
 - **agent-worktrees:** No automated test suite yet. Verify worktree
   operations work end-to-end (create, finalize, cleanup).
 
@@ -100,6 +126,11 @@ agent-worktrees update
 # agent-bridge -- via your project's service framework or the installer
 # directly from the local checkout:
 cd plugins/agent-bridge
+./scripts/install.sh update    # Linux/WSL
+.\scripts\install.ps1 update   # Windows
+
+# agent-codespaces -- via its installer
+cd plugins/agent-codespaces
 ./scripts/install.sh update    # Linux/WSL
 .\scripts\install.ps1 update   # Windows
 ```
@@ -167,10 +198,15 @@ cd plugins/agent-bridge
 | Marketplace catalog | `.github/plugin/marketplace.json` |
 | agent-worktrees manifest | `plugins/agent-worktrees/plugin.json` |
 | agent-bridge manifest | `plugins/agent-bridge/plugin.json` |
+| agent-codespaces manifest | `plugins/agent-codespaces/plugin.json` |
 | agent-worktrees Python source | `plugins/agent-worktrees/src/agent_worktrees/` |
 | agent-bridge Python source | `plugins/agent-bridge/src/agent_bridge/` |
+| agent-codespaces Python source | `plugins/agent-codespaces/src/agent_codespaces/` |
 | agent-bridge tests | `plugins/agent-bridge/tests/` |
+| agent-codespaces tests | `plugins/agent-codespaces/tests/` |
 | Skills (agent-worktrees) | `plugins/agent-worktrees/skills/` |
 | Skills (agent-bridge) | `plugins/agent-bridge/skills/` |
+| Skills (agent-codespaces) | `plugins/agent-codespaces/skills/` |
 | Hooks | `plugins/agent-worktrees/hooks.json` |
 | Installers | `plugins/*/scripts/init.ps1, init.sh, install.ps1, install.sh` |
+| Repo architecture overview | `docs/architecture.md` |

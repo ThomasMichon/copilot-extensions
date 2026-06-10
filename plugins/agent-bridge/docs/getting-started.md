@@ -11,8 +11,17 @@ If you haven't registered the marketplace yet:
 copilot plugin marketplace add ThomasMichon/copilot-extensions
 ```
 
-The agent-bridge plugin installs alongside agent-worktrees automatically
-when you install the marketplace. Both plugins ship from the same repo.
+Each plugin installs individually. For full functionality (including the
+`codespace:` resolver + credential relay) install all three — the bridge
+imports agent-codespaces at startup:
+
+```bash
+copilot plugin install agent-worktrees@copilot-extensions
+copilot plugin install agent-codespaces@copilot-extensions
+copilot plugin install agent-bridge@copilot-extensions
+```
+
+All three ship from the same repo.
 
 ## 2. Bootstrap the Service
 
@@ -103,7 +112,7 @@ This auto-discovers config files and creates a topology profile. See
 Edit `~/.agent-bridge/config.yaml` directly:
 
 ```yaml
-port: 9280
+port: 9280            # platform default: 9280 Windows / 9281 Linux-WSL (omit to auto-select)
 bind: 127.0.0.1
 log_level: info
 
@@ -133,8 +142,13 @@ agent-bridge start
 
 ```bash
 agent-bridge status
-curl http://localhost:9280/health
+curl http://localhost:9280/health   # 9281 on Linux/WSL
 ```
+
+> **Port note:** the bridge listens on a platform-specific default —
+> **9280 on Windows, 9281 on Linux/WSL**. This avoids a TCP collision when
+> WSL2 and Windows share the same host. `agent-bridge status` prints the
+> active port; use it (not a hardcoded number) when probing health.
 
 ## 5. Test It
 

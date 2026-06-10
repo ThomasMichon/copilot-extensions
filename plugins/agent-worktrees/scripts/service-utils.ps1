@@ -178,7 +178,7 @@ function Invoke-SelfElevated {
 
     # Pre-resolve paths in the caller's context (avoids $env:TEMP divergence
     # between non-elevated and elevated sessions -- see elevation skill).
-    $tmpDir = Join-Path $env:USERPROFILE '.aperture-labs\services\.tmp'
+    $tmpDir = Join-Path $env:USERPROFILE '.agent-worktrees\.tmp'
     if (-not (Test-Path $tmpDir)) {
         New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
     }

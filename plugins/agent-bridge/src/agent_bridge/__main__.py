@@ -898,7 +898,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     config_adopt_p.add_argument(
         "--profile", required=True,
-        help="Topology profile name (e.g. 'facility', 'aperture-labs')",
+        help="Topology profile name (e.g. 'facility', 'my-control-harness')",
     )
     config_adopt_p.add_argument(
         "--machines-yaml",

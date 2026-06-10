@@ -14,7 +14,7 @@
       pwsh -File plugins\agent-bridge\scripts\install.ps1 status
       pwsh -File plugins\agent-bridge\scripts\install.ps1 update
 
-    On first install, detects and migrates from the aperture-labs service
+    On first install, detects and migrates from a legacy project-service
     installer (services/agent-bridge/install.ps1) if present, preserving
     config, auth, and DB.
 
@@ -130,9 +130,12 @@ function Get-AgentBridgeBin {
     return $null
 }
 
-# Install sibling plugin packages (e.g. agent-codespaces) into the venv.
-# These provide optional namespace resolvers that agent-bridge discovers at
-# startup via try-import. Missing siblings are silently skipped.
+# Install sibling plugin packages (e.g. agent-codespaces) into the bridge venv.
+# This provides the `codespace:` namespace resolver and credential relay that
+# agent-bridge imports at startup. The package is installed for IMPORT ONLY --
+# the canonical agent-codespaces CLI binstub is owned by ~/.agent-codespaces via
+# its own installer. A missing sibling is non-fatal but WARNED loudly, because
+# it disables codespace support.
 function Install-SiblingPlugins {
     param(
         [switch]$Reinstall
@@ -145,6 +148,8 @@ function Install-SiblingPlugins {
             # Also check marketplace vendor layout
             $sibDir = Join-Path $PluginDir "plugins\$name"
             if (-not (Test-Path (Join-Path $sibDir 'pyproject.toml'))) {
+                Write-Warn "Sibling plugin '$name' not found -- codespace support (codespace: resolver + credential relay) will be UNAVAILABLE."
+                Write-Warn "  Install it from the marketplace: copilot plugin install $name@copilot-extensions"
                 continue
             }
         }
@@ -160,34 +165,19 @@ function Install-SiblingPlugins {
         $result = $LASTEXITCODE
         $ErrorActionPreference = $prevEAP
         if ($result -eq 0) {
-            Write-Ok "Sibling plugin: $name"
-            # Create binstub for sibling if it has a console_scripts entry point
-            $sibBin = Join-Path $VenvDir "Scripts\$name.exe"
-            if (-not (Test-Path $sibBin)) {
-                $sibBin = Join-Path $VenvDir "bin/$name"
-            }
-            if (Test-Path $sibBin) {
-                $sibStub = Join-Path $LocalBin "$name.cmd"
-                $sibContent = "@echo off`r`nset `"PYTHONUTF8=1`"`r`n`"$sibBin`" %*"
-                [System.IO.File]::WriteAllText($sibStub, $sibContent)
-                Write-Ok "Binstub: $sibStub"
-            }
+            Write-Ok "Sibling plugin (relay import): $name"
         } else {
-            Write-Warn "Sibling plugin $name install failed (non-fatal)"
+            Write-Warn "Sibling plugin $name install failed -- codespace support will be UNAVAILABLE."
+            if ($out) { Write-Host ($out | Out-String) }
         }
     }
 }
 
-# Remove binstubs for sibling plugins during uninstall.
+# Sibling plugin binstubs (e.g. agent-codespaces) are owned by their own
+# installer (~/.agent-codespaces), not by agent-bridge. Bridge uninstall must
+# leave them in place. Kept as a no-op for clarity / future siblings.
 function Remove-SiblingBinstubs {
-    $siblings = @('agent-codespaces')
-    foreach ($name in $siblings) {
-        $sibStub = Join-Path $LocalBin "$name.cmd"
-        if (Test-Path $sibStub) {
-            Remove-Item -Force $sibStub
-            Write-Ok "Sibling binstub removed: $name"
-        }
-    }
+    Write-Step "Leaving sibling CLI binstubs in place (owned by their own installers)"
 }
 
 function Get-RunningProcess {
@@ -350,14 +340,14 @@ Set-Content -Path `$pidFile -Value `$proc.Id
 }
 
 function Invoke-MigrationCheck {
-    <# Detect and handle migration from aperture-labs service installer. #>
+    <# Detect and handle migration from a legacy project-service installer. #>
     $oldManifest = Join-Path $InstallDir 'deploy-manifest.json'
     if (-not (Test-Path $oldManifest)) { return }
 
     try {
         $manifest = Get-Content $oldManifest -Raw | ConvertFrom-Json
         if ($manifest.installer_path -and $manifest.installer_path -like '*services/agent-bridge*') {
-            Write-Step "Migrating from aperture-labs service installer"
+            Write-Step "Migrating from legacy project-service installer"
             Write-Step "  Preserving config, auth, and DB"
 
             # Stop old instance if running
@@ -370,13 +360,13 @@ function Invoke-MigrationCheck {
             }
 
             # Remove old scheduled task if it exists (it may have been registered
-            # by the aperture-labs installer)
+            # by the legacy project-service installer)
             $oldTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
             if ($oldTask) {
                 Write-Step "  Re-registering scheduled task (plugin-owned)"
             }
 
-            Write-Ok "Migration from aperture-labs installer detected"
+            Write-Ok "Migration from legacy project-service installer detected"
         }
     } catch { }
 }
@@ -445,7 +435,7 @@ function Invoke-Install {
     } elseif (Test-SshManagerInstalled) {
         Write-Step 'ssh-manager already installed in venv (marketplace layout)'
     } else {
-        throw 'Cannot locate ssh-manager library. Clone copilot-extensions so libs/ssh-manager exists, then rerun: aperture-labs services agent-bridge update'
+        throw 'Cannot locate ssh-manager library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
     }
     $bridgeOut = & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1
     $installResult = $LASTEXITCODE
@@ -716,7 +706,7 @@ function Invoke-Update {
     } elseif (Test-SshManagerInstalled) {
         Write-Step 'ssh-manager already installed in venv (marketplace layout)'
     } else {
-        throw 'Cannot locate ssh-manager library. Clone copilot-extensions so libs/ssh-manager exists, then rerun: aperture-labs services agent-bridge update'
+        throw 'Cannot locate ssh-manager library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
     }
     $bridgeOut = & uv pip install --python $VenvPython --reinstall-package agent-bridge `
         "$PluginDir" --quiet 2>&1

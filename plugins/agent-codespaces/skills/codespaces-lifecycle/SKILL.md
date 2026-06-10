@@ -126,8 +126,17 @@ agent-codespaces version
 ## Creating and Deleting
 
 ```bash
+# Create a CodeSpace on a repo + run on_create provisioning from codespaces.yaml
+agent-codespaces create <owner/repo>
+agent-codespaces create <owner/repo> --branch <branch> --display-name <name>
+agent-codespaces create <owner/repo> --no-wait        # don't wait / skip provisioning
+
 agent-codespaces delete <codespace-name>
 agent-codespaces delete <codespace-name> --force
+
+# Remove stale local state (orphaned SSH configs, ControlMaster sockets)
+agent-codespaces cleanup
+agent-codespaces cleanup --dry-run
 ```
 
 CodeSpace creation uses `gh codespace create` with defaults from
@@ -165,15 +174,15 @@ agent-codespaces ssh <name> --no-relay --remote-cmd "bash /workspaces/.codespace
 
 ## Credential Relay
 
-The credential relay is a TCP server (default port 9847) that runs on
+The credential relay is a TCP server (default port 9857) that runs on
 the host machine. CodeSpaces connect to it via SSH reverse port
 forwarding. It proxies credential requests to local credential stores.
 
 ### How It Works
 
-1. Host runs the relay server on `127.0.0.1:9847`
-2. SSH connection includes `-R 9847:localhost:9847`
-3. CodeSpace sends git-credential-protocol requests to `localhost:9847`
+1. Host runs the relay server on `127.0.0.1:9857`
+2. SSH connection includes `-R 9857:localhost:9857`
+3. CodeSpace sends git-credential-protocol requests to `localhost:9857`
 4. Relay routes to matching source (GCM, gh-auth, az-login)
 5. Response flows back through the tunnel
 
@@ -226,7 +235,7 @@ chars). Use `agent-bridge agents` to see them after registration.
   Check `agent-bridge status` and `~/.agent-bridge/agent-bridge-err.log`.
 - **Session fails on start** -- check `~/.agent-bridge/agent-bridge-err.log`.
   Common cause: wrong `ssh_user` in `codespaces.yaml`.
-- **Credential relay not working** -- ensure relay port (9847) is not
+- **Credential relay not working** -- ensure relay port (9857) is not
   blocked. Check that `--no-relay` was not accidentally passed.
 - **Quota exceeded** -- `gh codespace start` returns HTTP 400 "too many
   codespaces running". Stop idle CodeSpaces first, then retry.
