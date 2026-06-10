@@ -55,6 +55,7 @@ $Binstub    = Join-Path $LocalBin 'agent-bridge.cmd'
 $PidFile    = Join-Path $InstallDir 'agent-bridge.pid'
 $TaskName   = 'Agent Bridge'
 $Port       = 9280
+$RelayPort  = 9857   # integrated credential relay (in-process with the bridge)
 
 if ($env:OS -eq 'Windows_NT') {
     $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
@@ -626,6 +627,16 @@ function Invoke-Stop {
         Write-Warn "Port $Port still in use after stop -- killing occupant (pid=$($portInUse.OwningProcess))"
         Stop-Process -Id $portInUse.OwningProcess -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
+    }
+
+    # Also ensure the integrated credential relay is down. It runs in-process
+    # with the bridge (so the kill above usually frees it), but free the port
+    # explicitly to catch an orphaned relay.
+    $relayInUse = Get-NetTCPConnection -LocalPort $RelayPort -ErrorAction SilentlyContinue |
+        Where-Object { $_.State -eq 'Listen' }
+    if ($relayInUse) {
+        Write-Warn "Credential relay port $RelayPort still in use -- killing occupant (pid=$($relayInUse.OwningProcess))"
+        Stop-Process -Id $relayInUse.OwningProcess -Force -ErrorAction SilentlyContinue
     }
 
     Remove-Item -Force $PidFile -ErrorAction SilentlyContinue

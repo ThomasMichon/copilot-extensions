@@ -269,8 +269,36 @@ function Invoke-Install {
     Write-ServiceOk "$ServiceName installed"
 }
 
+function Stop-ManagedSshConnections {
+    <# Stop SSH ControlMaster processes this plugin started. They multiplex
+       connections to CodeSpaces via sockets under ~/.agent-codespaces/sockets.
+       A separate uninstall process can't reach ssh-manager's in-memory state,
+       so close each master via `ssh -O exit` (best-effort) and then kill any
+       lingering ssh.exe bound to the socket dir. #>
+    $socketDir = Join-Path $InstallDir 'sockets'
+    if (Test-Path $socketDir) {
+        Get-ChildItem $socketDir -File -ErrorAction SilentlyContinue | ForEach-Object {
+            $sock = $_.FullName
+            # ssh -O exit needs a host arg; the socket already pins the target,
+            # so any placeholder works to address the existing master.
+            & ssh -o "ControlPath=$sock" -O exit placeholder *> $null 2>&1
+        }
+    }
+    # Kill any ssh process still referencing our socket dir (orphaned masters).
+    $needle = (Join-Path $InstallDir 'sockets') -replace '\\', '\\'
+    Get-CimInstance Win32_Process -Filter "Name = 'ssh.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine -match 'agent-codespaces' } |
+        ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            Write-ServiceChanged "Stopped SSH ControlMaster (pid=$($_.ProcessId))"
+        }
+}
+
 function Invoke-Uninstall {
     Write-ServiceHeader "$ServiceName Uninstall"
+
+    # Stop managed SSH ControlMaster connections before removing files.
+    Stop-ManagedSshConnections
 
     # Remove binstub
     $stubPath = Join-Path $LocalBin 'agent-codespaces.cmd'

@@ -208,6 +208,22 @@ do_install() {
 do_uninstall() {
     _header "$SERVICE_NAME Uninstall"
 
+    # Stop managed SSH ControlMaster connections before removing files. They
+    # multiplex connections to CodeSpaces via sockets under
+    # ~/.agent-codespaces/sockets. Close each via `ssh -O exit` (best-effort),
+    # then kill any lingering ssh master referencing the socket dir.
+    local socket_dir="$INSTALL_DIR/sockets"
+    if [[ -d "$socket_dir" ]]; then
+        for sock in "$socket_dir"/*; do
+            [[ -e "$sock" ]] || continue
+            ssh -o "ControlPath=$sock" -O exit placeholder >/dev/null 2>&1 || true
+        done
+    fi
+    if command -v pkill &>/dev/null; then
+        pkill -f "ControlPath=$INSTALL_DIR/sockets" 2>/dev/null && \
+            _changed "Stopped managed SSH ControlMaster processes" || true
+    fi
+
     # Remove binstub
     local stub_path="$LOCAL_BIN/agent-codespaces"
     if [[ -f "$stub_path" ]]; then
