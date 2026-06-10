@@ -47,7 +47,12 @@ LIB_DIR="$INSTALL_DIR/lib"
 VENV_DIR="$INSTALL_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
 PKG_SRC_DIR="$PLUGIN_DIR/src/agent_codespaces"
-SSH_MGR_DIR="$REPO_ROOT/libs/ssh-manager"
+# ssh-manager: prefer the plugin-vendored copy (marketplace layout), fall back
+# to the repo-root copy (git checkout layout).
+SSH_MGR_DIR="$PLUGIN_DIR/libs/ssh-manager"
+if [[ ! -d "$SSH_MGR_DIR/src/ssh_manager" ]]; then
+    SSH_MGR_DIR="$REPO_ROOT/libs/ssh-manager"
+fi
 SSH_MGR_SRC="$SSH_MGR_DIR/src/ssh_manager"
 
 DEPLOY_SOURCE_PATHS=("plugins/agent-codespaces/")

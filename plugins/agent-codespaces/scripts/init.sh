@@ -17,9 +17,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PKG_SRC_DIR="$PLUGIN_DIR/src/agent_codespaces"
 
-# ssh-manager lives at libs/ssh-manager relative to the repo root
+# ssh-manager: prefer the plugin-vendored copy (marketplace layout), fall back
+# to the repo-root copy (git checkout layout).
 REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
-SSH_MGR_DIR="$REPO_ROOT/libs/ssh-manager"
+SSH_MGR_DIR="$PLUGIN_DIR/libs/ssh-manager"
+if [[ ! -d "$SSH_MGR_DIR/src/ssh_manager" ]]; then
+    SSH_MGR_DIR="$REPO_ROOT/libs/ssh-manager"
+fi
 
 INSTALL_DIR="${1:-$HOME/.agent-codespaces}"
 LIB_DIR="$INSTALL_DIR/lib"
@@ -38,9 +42,10 @@ if [[ ! -d "$PKG_SRC_DIR" ]]; then
     exit 1
 fi
 
-if [[ ! -d "$SSH_MGR_DIR" ]]; then
-    fail "ssh-manager not found at $SSH_MGR_DIR"
-    echo "  Clone copilot-extensions so libs/ssh-manager exists."
+if [[ ! -d "$SSH_MGR_DIR/src/ssh_manager" ]]; then
+    fail "ssh-manager not found (looked in plugin libs/ and repo libs/)"
+    echo "  Reinstall the agent-codespaces plugin from the marketplace:"
+    echo "    copilot plugin install agent-codespaces@copilot-extensions"
     exit 1
 fi
 
