@@ -105,6 +105,10 @@ def main(argv: list[str] | None = None) -> int:
         "--branch", default=None, help="Branch to create the CodeSpace on",
     )
     create_parser.add_argument(
+        "--display-name", dest="display_name", default=None,
+        help="Display name for the CodeSpace",
+    )
+    create_parser.add_argument(
         "--no-wait", action="store_true",
         help="Don't wait for Available / run provisioning",
     )
@@ -604,7 +608,10 @@ def _cmd_create(args: argparse.Namespace) -> int:
 
     config = load_merged_config()
     print(f"Creating CodeSpace for {args.repo}...")
-    info = create_codespace(args.repo, config, branch=args.branch)
+    info = create_codespace(
+        args.repo, config, branch=args.branch,
+        display_name=getattr(args, "display_name", None),
+    )
     print(f"Created: {info.name}")
 
     if args.no_wait:
