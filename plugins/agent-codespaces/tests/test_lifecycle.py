@@ -83,8 +83,18 @@ class TestCreateCodespace:
         idx = call_args.index("--machine")
         assert call_args[idx + 1] == "huge"
 
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_no_dotfiles_flag_and_default_permissions(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="cs-name\n")
+        config = CodespacesConfig(dotfiles_repo="owner/dotfiles")
+        create_codespace("org/repo", config, display_name="my-cs")
 
-class TestDeleteCodespace:
+        call_args = mock_run.call_args[0][0]
+        # gh codespace create has no --dotfiles flag
+        assert "--dotfiles" not in call_args
+        assert "--default-permissions" in call_args
+        idx = call_args.index("--display-name")
+        assert call_args[idx + 1] == "my-cs"
     @patch("agent_codespaces.lifecycle.subprocess.run")
     def test_delete_success(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0)

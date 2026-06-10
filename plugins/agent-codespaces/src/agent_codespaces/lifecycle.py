@@ -72,8 +72,14 @@ def create_codespace(
     repo: str,
     config: CodespacesConfig,
     branch: str | None = None,
+    display_name: str | None = None,
 ) -> CodespaceInfo:
-    """Create a CodeSpace for the given repo using config defaults."""
+    """Create a CodeSpace for the given repo using config defaults.
+
+    Dotfiles are applied automatically by GitHub from the account-level
+    dotfiles setting -- there is no ``--dotfiles`` flag on ``gh codespace
+    create``. ``--default-permissions`` avoids an interactive prompt.
+    """
     repo_config = config.repos.get(repo, RepoConfig())
     machine_type = repo_config.machine_type or config.default_machine_type
     location = repo_config.location or config.default_location
@@ -83,11 +89,12 @@ def create_codespace(
         "--repo", repo,
         "--machine", machine_type,
         "--location", location,
+        "--default-permissions",
     ]
     if branch:
         args.extend(["--branch", branch])
-    if config.dotfiles_repo:
-        args.extend(["--dotfiles", config.dotfiles_repo])
+    if display_name:
+        args.extend(["--display-name", display_name])
 
     log.info("Creating codespace: %s", " ".join(args))
 
@@ -103,7 +110,7 @@ def create_codespace(
     name = result.stdout.strip()
     return CodespaceInfo(
         name=name,
-        display_name=name,
+        display_name=display_name or name,
         repository=repo,
         branch=branch or "",
         state="Available",
