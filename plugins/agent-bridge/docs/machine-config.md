@@ -317,7 +317,7 @@ the agent and go.
 Profiles live in `~/.agent-bridge/config.yaml` under the `topologies` key:
 
 ```yaml
-port: 9280
+port: 9280            # platform default: 9280 Windows / 9281 Linux-WSL (omit to auto-select)
 bind: 127.0.0.1
 log_level: info
 

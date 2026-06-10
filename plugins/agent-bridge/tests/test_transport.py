@@ -539,18 +539,18 @@ class TestWrapBatchForWindows:
 
     def test_which_resolves_bare_name_to_cmd(self):
         """A bare project name that resolves to .cmd should be wrapped."""
-        args = ["aperture-labs", "--no-mux", "--acp", "--stdio"]
+        args = ["my-control-harness", "--no-mux", "--acp", "--stdio"]
         env = {"PATH": "C:\\Users\\test\\.local\\bin"}
 
         with patch("agent_bridge.transport.sys") as mock_sys, \
              patch("agent_bridge.transport.shutil") as mock_shutil:
             mock_sys.platform = "win32"
-            mock_shutil.which.return_value = "C:\\Users\\test\\.local\\bin\\aperture-labs.cmd"
+            mock_shutil.which.return_value = "C:\\Users\\test\\.local\\bin\\my-control-harness.cmd"
 
             result = _wrap_batch_for_windows(args, env)
 
         assert result[0].endswith("cmd.exe")
-        assert result[4] == "C:\\Users\\test\\.local\\bin\\aperture-labs.cmd"
+        assert result[4] == "C:\\Users\\test\\.local\\bin\\my-control-harness.cmd"
         assert "--no-mux" in result
 
     def test_uses_comspec_env_var(self):

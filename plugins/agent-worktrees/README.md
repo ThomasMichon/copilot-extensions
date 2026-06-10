@@ -35,7 +35,7 @@ adoption, and session launch.
 |-------|-------------|
 | `worktree` | Worktree lifecycle -- creation, finalization, cleanup, safety rules |
 | `service-lifecycle` | Service installer patterns -- deploy, update, status |
-| `copilot-extensions-setup` | Install and adopt for both plugins |
+| `copilot-extensions-setup` | Install and adopt for all three plugins |
 | `agent-worktrees-wsl-provision` | Provision the current project in WSL |
 | `agent-worktrees-repos` | Repos registry -- known repos and source roots |
 | `create-setup-script` | Generate repo-specific session setup scripts |

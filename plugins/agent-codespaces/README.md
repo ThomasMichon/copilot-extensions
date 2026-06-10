@@ -56,10 +56,42 @@ repos:
 agent-codespaces ssh <name>           # SSH into a CodeSpace
 agent-codespaces ssh --stdio <name>   # Structured SSH for agent-bridge
 agent-codespaces list                 # List active CodeSpaces
+agent-codespaces create <owner/repo>  # Create a CodeSpace + run provisioning
+agent-codespaces delete <name>        # Delete a CodeSpace (--force to skip prompt)
 agent-codespaces config adopt         # Register repo for config
 agent-codespaces config show          # Show resolved config
+agent-codespaces bridge register      # Register CodeSpaces as bridge agents
+agent-codespaces cleanup              # Remove stale local state (SSH configs, sockets)
 agent-codespaces status               # Service + relay + tunnel state
+agent-codespaces version              # Show version
 ```
+
+### `create` options
+
+```bash
+agent-codespaces create <owner/repo> \
+  --branch <branch> \           # branch to create on (default: repo default)
+  --display-name <name> \       # CodeSpace display name
+  --timeout 300 \               # seconds to wait for Available (default 300)
+  --no-wait                     # don't wait / skip provisioning
+```
+
+Machine type and location come from `codespaces.yaml` (per-repo overrides
+apply). After the CodeSpace is Available, `on_create` provisioning hooks from
+`codespaces.yaml` run automatically.
+
+### `bridge` options
+
+```bash
+agent-codespaces bridge register   [--ttl 300] [--bridge-url <url>]
+agent-codespaces bridge refresh    [--ttl 300] [--bridge-url <url>]
+agent-codespaces bridge status     [--bridge-url <url>]
+agent-codespaces bridge unregister [--bridge-url <url>]
+```
+
+> **Linux/WSL:** the bridge defaults to port **9281**, but these commands
+> default `--bridge-url` to `http://127.0.0.1:9280`. On Linux/WSL pass
+> `--bridge-url http://127.0.0.1:9281` explicitly.
 
 ## Development
 

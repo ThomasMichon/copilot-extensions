@@ -4640,7 +4640,7 @@ def cmd_help_unrouted(requested: str | None = None) -> int:
     else:
         print(
             "No project context. You ran the generic 'agent-worktrees' "
-            "binstub rather than a project binstub (e.g. 'aperture-labs').",
+            "binstub rather than a project binstub (e.g. 'my-control-harness').",
             file=out,
         )
     print(file=out)

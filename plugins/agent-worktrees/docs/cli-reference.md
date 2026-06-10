@@ -12,11 +12,11 @@ next step rather than erroring. Target a project explicitly with
 `--project <name>` (or `-p <name>`):
 
 ```bash
-agent-worktrees --project aperture-labs worktree list
+agent-worktrees --project my-control-harness worktree list
 agent-worktrees -p copilot-extensions worktree create --json
 ```
 
-Running a project binstub bare (e.g. `aperture-labs`) still launches the
+Running a project binstub bare (e.g. `my-control-harness`) still launches the
 interactive picker.
 
 ## Headless projects (CLI-only)
@@ -42,7 +42,7 @@ copilot-extensions worktree finalize <id>
 
 This collapses the manual `git worktree add -> edit -> squash -> rebase ->
 push -> remove` ritual into the same lifecycle commands, driven from your
-existing (e.g. `aperture-labs`) session.
+existing (e.g. `my-control-harness`) session.
 
 ## Worktree namespace
 
