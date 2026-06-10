@@ -529,6 +529,15 @@ function Invoke-Uninstall {
     Write-Ok 'agent-bridge uninstalled'
 }
 
+function Get-PwshPath {
+    $pwshPath = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe'
+    if (-not (Test-Path $pwshPath)) {
+        $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+        $pwshPath = if ($pwshCmd) { $pwshCmd.Source } else { 'powershell.exe' }
+    }
+    return $pwshPath
+}
+
 function Invoke-Start {
     $agentBridge = Get-AgentBridgeBin
     if (-not $agentBridge) {
@@ -544,23 +553,43 @@ function Invoke-Start {
     }
 
     Write-Step 'Starting agent-bridge...'
-    $proc = Start-Process -FilePath $agentBridge -ArgumentList 'start' `
-        -NoNewWindow -PassThru `
-        -RedirectStandardOutput (Join-Path $InstallDir 'agent-bridge.log') `
-        -RedirectStandardError (Join-Path $InstallDir 'agent-bridge-err.log')
 
-    Set-Content -Path $PidFile -Value $proc.Id
-    Start-Sleep -Seconds 2
+    $logFile = Join-Path $InstallDir 'agent-bridge.log'
+    $errFile = Join-Path $InstallDir 'agent-bridge-err.log'
 
-    if (-not $proc.HasExited) {
+    # Start the service through a DETACHED, hidden pwsh launched via
+    # ShellExecute (no -NoNewWindow / no redirection on THIS call, so handles
+    # are NOT inherited from the installer). That inner pwsh does the redirected
+    # Start-Process and records the pid. Without this indirection the long-lived
+    # uvicorn server inherits the installer's std handles; when install.ps1 is
+    # run with its output redirected or piped, the server holds that handle open
+    # and the installer appears to hang after "Update complete".
+    $inner = @"
+`$p = Start-Process -FilePath '$($agentBridge -replace "'", "''")' -ArgumentList 'start' -NoNewWindow -PassThru -RedirectStandardOutput '$($logFile -replace "'", "''")' -RedirectStandardError '$($errFile -replace "'", "''")'
+Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
+"@
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
+
+    Start-Process -FilePath (Get-PwshPath) `
+        -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded) `
+        -WindowStyle Hidden | Out-Null
+
+    # The detached launcher writes the pid file once the service is spawned.
+    $rp = $null
+    for ($i = 0; $i -lt 20; $i++) {
+        Start-Sleep -Seconds 1
+        $rp = Get-RunningProcess
+        if ($rp) { break }
+    }
+
+    if ($rp) {
         if (Test-HealthCheck) {
-            Write-Ok "agent-bridge started (pid=$($proc.Id), port=$Port)"
+            Write-Ok "agent-bridge started (pid=$($rp.Id), port=$Port)"
         } else {
-            Write-Warn "agent-bridge started (pid=$($proc.Id)) but health check failed"
+            Write-Warn "agent-bridge started (pid=$($rp.Id)) but health check failed -- check agent-bridge.log"
         }
     } else {
-        Write-Fail "agent-bridge failed to start -- check agent-bridge.log"
-        Remove-Item -Force $PidFile -ErrorAction SilentlyContinue
+        Write-Fail 'agent-bridge failed to start -- check agent-bridge.log'
         exit 1
     }
 }
