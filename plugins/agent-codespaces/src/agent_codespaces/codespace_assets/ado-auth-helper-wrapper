@@ -1,0 +1,39 @@
+#!/bin/bash
+# ado-auth-helper — Smart wrapper that delegates to the right auth backend
+#
+# When SSH tunnel is active (LC_GIT_CREDENTIAL_RELAY set):
+#   → Uses the credential relay proxy (~/.local/bin/ado-auth-helper-relay)
+#
+# When no tunnel (VS Code session, post-start scripts, etc.):
+#   → Delegates to VS Code's original ado-auth-helper (~/.ado-auth-helper-vscode)
+#
+# This wrapper is deployed to ~/ado-auth-helper by agent-codespaces on SSH
+# connect. It preserves VS Code's version at ~/.ado-auth-helper-vscode so
+# post-start scripts and VS Code terminals continue to work after an SSH
+# session disconnects.
+
+DEFAULT_RELAY_PORT=9857
+RELAY_PORT="${LC_GIT_CREDENTIAL_RELAY:-}"
+
+# Fast path: env var explicitly set (SSH session via codespace-ssh)
+if [ -n "$RELAY_PORT" ] && [ -x "$HOME/.local/bin/ado-auth-helper-relay" ]; then
+    exec "$HOME/.local/bin/ado-auth-helper-relay" "$@"
+fi
+
+# Probe path: env var not set, but the SSH tunnel's RemoteForward may still
+# be active (e.g., postCreateCommand running while codespace-ssh holds the
+# tunnel open). Try connecting to the default relay port.
+if [ -z "$RELAY_PORT" ] && [ -x "$HOME/.local/bin/ado-auth-helper-relay" ]; then
+    if (echo >/dev/tcp/localhost/$DEFAULT_RELAY_PORT) 2>/dev/null; then
+        export LC_GIT_CREDENTIAL_RELAY="$DEFAULT_RELAY_PORT"
+        exec "$HOME/.local/bin/ado-auth-helper-relay" "$@"
+    fi
+fi
+
+# Fallback: VS Code's original helper (available in VS Code terminals)
+if [ -x "$HOME/.ado-auth-helper-vscode" ]; then
+    exec "$HOME/.ado-auth-helper-vscode" "$@"
+fi
+
+# Nothing available
+exit 1

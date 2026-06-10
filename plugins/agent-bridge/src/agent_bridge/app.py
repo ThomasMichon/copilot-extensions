@@ -52,8 +52,22 @@ async def lifespan(app: FastAPI):
             GitCredentialSource,
         )
 
-        relay_server = CredentialRelayServer(
-            sources=[GitCredentialSource()],
+        # Honor the configured relay_port from codespaces.yaml so the
+        # server binds the same port the SSH tunnel forwards. Falls back
+        # to the server default (9857) if agent-codespaces config is
+        # unavailable.
+        relay_port = None
+        try:
+            from agent_codespaces.config import load_merged_config
+
+            relay_port = load_merged_config().credentials.relay_port
+        except Exception:
+            relay_port = None
+
+        relay_server = (
+            CredentialRelayServer(port=relay_port, sources=[GitCredentialSource()])
+            if relay_port
+            else CredentialRelayServer(sources=[GitCredentialSource()])
         )
         await relay_server.start()
         app.state.credential_relay = relay_server

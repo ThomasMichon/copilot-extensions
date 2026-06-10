@@ -41,7 +41,7 @@ defaults:
   # dotfiles_repo: user/dotfiles      # Optional dotfiles repo
 
 credentials:
-  relay_port: 9847                     # TCP port for credential relay
+  relay_port: 9857                     # TCP port for credential relay
   sources:
     git-credential:
       enabled: true
@@ -131,7 +131,7 @@ defaults:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `relay_port` | int | `9847` | TCP port for credential relay server |
+| `relay_port` | int | `9857` | TCP port for credential relay server |
 | `sources` | dict | -- | Pluggable credential source configs |
 
 ### Credential Sources

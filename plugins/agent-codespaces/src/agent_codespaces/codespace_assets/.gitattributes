@@ -1,0 +1,4 @@
+# Relay helper scripts run inside Linux CodeSpaces -- force LF regardless
+# of the host platform's autocrlf setting.
+ado-auth-helper-relay text eol=lf
+ado-auth-helper-wrapper text eol=lf
