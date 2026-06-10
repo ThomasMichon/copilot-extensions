@@ -85,7 +85,7 @@ class TestBuildProvisionCommand:
         ])
         cmd = build_provision_command(prov)
         assert cmd is not None
-        assert "~/.bashrc.d/hook.sh" in cmd
+        assert "$HOME/.bashrc.d/hook.sh" in cmd
         assert "base64 -d" in cmd
         blob = re.search(r"printf %s (\S+) \| base64 -d", cmd).group(1)
         assert base64.b64decode(blob).decode() == "export FOO=bar\n"

@@ -54,8 +54,11 @@ def build_provision_command(provision: ProvisionConfig) -> str | None:
         # and the repo may be checked out on Windows with CRLF endings.
         raw = src.read_bytes().replace(b"\r\n", b"\n")
         payload = base64.b64encode(raw).decode("ascii")
+        # Expand a leading ~ to $HOME so the path resolves inside the
+        # double quotes below (bash does not expand ~ when quoted).
         dest = pf.dest
-        # Quote dest for the shell but leave ~ / $HOME expandable
+        if dest == "~" or dest.startswith("~/"):
+            dest = "$HOME" + dest[1:]
         q_dest = dest.replace('"', '\\"')
         parts.append(f'mkdir -p "$(dirname "{q_dest}")"')
         parts.append(f'printf %s {payload} | base64 -d > "{q_dest}"')
