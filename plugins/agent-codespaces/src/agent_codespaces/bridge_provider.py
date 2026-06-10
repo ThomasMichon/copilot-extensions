@@ -203,6 +203,10 @@ def unregister_from_bridge(
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as exc:
+        # Idempotent: a 404 means the provider is already gone (e.g. the TTL
+        # registration expired). Treat as success.
+        if exc.code == 404:
+            return {"status": "not_registered", "provider": PROVIDER_NAME}
         body = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(
             f"Bridge unregistration failed (HTTP {exc.code}): {body}"

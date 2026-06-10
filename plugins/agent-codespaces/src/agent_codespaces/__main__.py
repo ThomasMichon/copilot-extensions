@@ -724,6 +724,38 @@ def _render_codespaces_yaml(defaults: dict | None) -> str:
     )
 
 
+def _gh_auth_preflight() -> list[str]:
+    """Check gh auth + codespace scope. Returns a list of guidance messages
+    (empty if all good)."""
+    import subprocess as sp
+
+    msgs: list[str] = []
+    try:
+        result = sp.run(
+            ["gh", "auth", "status"],
+            capture_output=True, text=True, timeout=20,
+        )
+    except FileNotFoundError:
+        return ["gh CLI not found -- install from https://cli.github.com/ "
+                "then run: gh auth login"]
+    except sp.TimeoutExpired:
+        return ["gh auth status timed out -- check your network / gh install."]
+
+    combined = (result.stdout or "") + (result.stderr or "")
+    if result.returncode != 0 or "not logged" in combined.lower():
+        msgs.append("gh is not authenticated -- run: gh auth login")
+        return msgs
+
+    # gh prints "Token scopes: 'gist', 'repo', ..." -- the codespace scope is
+    # required for `gh codespace` operations.
+    if "codespace" not in combined.lower():
+        msgs.append(
+            "gh token is missing the 'codespace' scope (needed for CodeSpace "
+            "operations) -- run: gh auth refresh -h github.com -s codespace"
+        )
+    return msgs
+
+
 def _config_init(
     *, from_codespace: str | None, force: bool, also_adopt: bool
 ) -> int:
@@ -735,6 +767,12 @@ def _config_init(
         print(f"codespaces.yaml already exists at {config_file}")
         print("Use --force to overwrite, or edit it directly.")
         return 0
+
+    # Preflight: surface gh auth / scope problems explicitly, so an empty
+    # `gh codespace list` (auth failure) isn't mistaken for "no CodeSpaces".
+    gh_msgs = _gh_auth_preflight()
+    for m in gh_msgs:
+        print(f"[gh] {m}", file=sys.stderr)
 
     codespaces = _list_codespaces_for_init()
     defaults = _derive_codespaces_defaults(codespaces, from_codespace)

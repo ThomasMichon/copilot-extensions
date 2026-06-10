@@ -332,10 +332,10 @@ agent-bridge config adopt --repo ~/src/dotfiles --profile dotfiles
 Restart agent-bridge to load new topology:
 
 ```bash
-# Windows
-agent-bridge stop; agent-bridge start
+# Any platform
+agent-bridge service restart
 
-# Linux
+# Linux equivalent
 systemctl --user restart agent-bridge.service
 
 # Then verify

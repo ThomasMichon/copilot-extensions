@@ -176,6 +176,23 @@ for name in bootstrap-check.ps1 bootstrap-check.sh; do
     fi
 done
 
+# Deploy default session setup scripts to <install>/scripts/. The launch plan
+# emitted by `agent-worktrees resolve` references
+# ~/.agent-worktrees/scripts/default-setup.* when a repo has no setup script of
+# its own; without these the bridge cannot spawn a session.
+SCRIPTS_DST_DIR="$INSTALL_DIR/scripts"
+mkdir -p "$SCRIPTS_DST_DIR"
+for name in default-setup.ps1 default-setup.sh; do
+    src="$SCRIPT_DIR/$name"
+    if [[ -f "$src" ]]; then
+        cp "$src" "$SCRIPTS_DST_DIR/$name"
+        chmod +x "$SCRIPTS_DST_DIR/$name" 2>/dev/null || true
+        ok "Setup script: $name"
+    else
+        fail "Setup script not found: $src"
+    fi
+done
+
 # ── 6. Deploy binstub ─────────────────────────────────────────────────
 
 stub_path="$LOCAL_BIN/agent-worktrees"

@@ -277,11 +277,29 @@ foreach ($name in @('bootstrap-check.ps1', 'bootstrap-check.sh')) {
     }
 }
 
+# Deploy default session setup scripts to <install>/scripts/. The launch plan
+# emitted by `agent-worktrees resolve` references
+# ~/.agent-worktrees/scripts/default-setup.ps1 when a repo has no setup script
+# of its own; without these the bridge cannot spawn a session.
+$ScriptsDstDir = Join-Path $InstallDir 'scripts'
+if (-not (Test-Path $ScriptsDstDir)) {
+    New-Item -ItemType Directory -Path $ScriptsDstDir -Force | Out-Null
+}
+foreach ($name in @('default-setup.ps1', 'default-setup.sh')) {
+    $src = Join-Path $ScriptDir $name
+    if (Test-Path $src) {
+        Copy-Item $src (Join-Path $ScriptsDstDir $name) -Force
+        Write-Ok "Setup script: $name"
+    } else {
+        Write-Fail "Setup script not found: $src"
+    }
+}
+
 # -- 6. Deploy binstub -------------------------------------------------
 
 if ($env:OS -eq 'Windows_NT') {
     $stubPath = Join-Path $LocalBin 'agent-worktrees.cmd'
-    $stubContent = "@echo off`r`nset `"PYTHONUTF8=1`"`r`n`"%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe`" -m agent_worktrees %*"
+    $stubContent = "@echo off`r`nset `"PYTHONUTF8=1`"`r`nset `"PYTHONPATH=%USERPROFILE%\.agent-worktrees\lib;%PYTHONPATH%`"`r`n`"%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe`" -m agent_worktrees %*"
     [System.IO.File]::WriteAllText($stubPath, $stubContent)
     Write-Ok "Binstub: $stubPath"
 } else {

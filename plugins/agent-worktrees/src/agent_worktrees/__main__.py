@@ -338,17 +338,28 @@ def _create_worktree_core(
     worktree_id = f"{config.machine}-{plat_short}-{timestamp}-{suffix}"
     branch = f"worktree/{worktree_id}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
-    upstream = f"{repo.remote}/{repo.default_branch}"
 
     # Ensure root exists
     Path(repo.worktree_root).mkdir(parents=True, exist_ok=True)
 
-    # Fetch and create
+    # Fetch (best-effort) and pick a start point that actually resolves --
+    # a repo with no remote or no fetched default branch falls back to the
+    # local default branch or HEAD instead of failing on <remote>/<branch>.
     print(f"Fetching latest from {repo.remote}...", file=sys.stderr)
     git_ops.git("fetch", repo.remote, "--quiet", cwd=repo.anchor, check=False)
 
+    start_point = git_ops.resolve_start_point(
+        repo.remote, repo.default_branch, cwd=repo.anchor
+    )
+    if start_point != f"{repo.remote}/{repo.default_branch}":
+        print(
+            f"Note: '{repo.remote}/{repo.default_branch}' not found; "
+            f"branching from '{start_point}' instead.",
+            file=sys.stderr,
+        )
+
     print(f"Creating worktree on branch {branch}...", file=sys.stderr)
-    git_ops.create_worktree(repo.anchor, worktree_path, branch, upstream)
+    git_ops.create_worktree(repo.anchor, worktree_path, branch, start_point)
 
     # Write tracking YAML
     tracking_path = cfg.tracking_dir()
