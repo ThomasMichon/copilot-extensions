@@ -329,16 +329,18 @@ Write-Host ''
 $env:PYTHONPATH = "$LibDir;$env:PYTHONPATH"
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-# Retry the import: on Windows, antivirus may briefly lock freshly-copied
-# files, causing a transient first-import failure.
-$importCheck = $null
+# Verify by exit code, not stdout: Windows PowerShell 5.1 strips embedded
+# double-quotes when passing args to native processes, so `-c '... print("OK")'`
+# would run `print(OK)` and NameError. A bare import + $LASTEXITCODE avoids
+# quoting entirely. Retry briefly in case AV momentarily locks new files.
+$importOk = $false
 for ($i = 0; $i -lt 3; $i++) {
-    $importCheck = & $VenvPython -c 'import agent_codespaces; print("OK")' 2>$null
-    if ($importCheck -eq 'OK') { break }
+    & $VenvPython -c 'import agent_codespaces' 2>$null
+    if ($LASTEXITCODE -eq 0) { $importOk = $true; break }
     Start-Sleep -Seconds 1
 }
 $ErrorActionPreference = $prevEAP
-if ($importCheck -eq 'OK') {
+if ($importOk) {
     Write-Ok 'Verification: module imports successfully'
 } else {
     Write-Fail 'Verification: module import failed'
