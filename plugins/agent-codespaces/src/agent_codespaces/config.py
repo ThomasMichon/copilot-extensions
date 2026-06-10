@@ -45,12 +45,50 @@ class CredentialsConfig:
 
 @dataclass
 class RepoConfig:
-    """Per-target-repo CodeSpace settings."""
+    """Per-target-repo CodeSpace settings.
+
+    Keyed by the CodeSpace repository (e.g.
+    ``odsp-microsoft/odsp-web-codespaces``). ``provision`` hooks declared
+    here apply only to CodeSpaces of this repo.
+    """
 
     workspace_repo: str | None = None
     machine_type: str | None = None
     location: str | None = None
     bootstrap_post_create: str | None = None
+    provision: ProvisionConfig | None = None
+
+
+@dataclass
+class ProvisionFile:
+    """A file an adopting repo deploys into the CodeSpace on connect.
+
+    ``src`` is resolved relative to the repo that declares it (the dir
+    containing the ``codespaces.yaml``). ``dest`` is the remote path and
+    may start with ``~``.
+    """
+
+    src: str
+    dest: str
+    mode: str = "0644"
+    repo_dir: Path | None = None  # set during merge, for resolving src
+
+
+@dataclass
+class ProvisionConfig:
+    """By-convention provisioning hook declared in ``codespaces.yaml``.
+
+    Lets an adopting repo deploy its own files (e.g. shell env snippets)
+    and run setup commands on every ``agent-codespaces ssh`` connect,
+    without bespoke per-repo SSH tooling. Generic relay setup is handled
+    separately by the plugin; this is purely repo-specific extras.
+
+    Can be declared globally (applies to all CodeSpaces) or under
+    ``repos.<repo>.provision`` (applies only to that repo's CodeSpaces).
+    """
+
+    files: list[ProvisionFile] = field(default_factory=list)
+    on_connect: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -82,6 +120,9 @@ class CodespacesConfig:
     # Per-target-repo settings
     repos: dict[str, RepoConfig] = field(default_factory=dict)
 
+    # Global provisioning hooks (apply to every CodeSpace)
+    provision: ProvisionConfig = field(default_factory=lambda: ProvisionConfig())
+
     # Source tracking
     source_paths: list[Path] = field(default_factory=list)
 
@@ -100,6 +141,22 @@ class CodespacesConfig:
         if self.workspace_folder:
             return f"cd {self.workspace_folder} && copilot --acp --stdio"
         return "copilot --acp --stdio"
+
+    def provision_for_repo(self, repo: str | None) -> ProvisionConfig:
+        """Collect provisioning hooks that apply to a CodeSpace.
+
+        Returns the union of the global ``provision`` hooks and any
+        declared under ``repos.<repo>.provision`` for the CodeSpace's
+        repository. Global hooks run first.
+        """
+        files = list(self.provision.files)
+        on_connect = list(self.provision.on_connect)
+        if repo and repo in self.repos:
+            repo_prov = self.repos[repo].provision
+            if repo_prov:
+                files.extend(repo_prov.files)
+                on_connect.extend(repo_prov.on_connect)
+        return ProvisionConfig(files=files, on_connect=on_connect)
 
 
 @dataclass
@@ -160,14 +217,35 @@ def _parse_credential_source(raw: dict[str, Any]) -> CredentialSourceConfig:
     )
 
 
-def _parse_repo_config(raw: dict[str, Any]) -> RepoConfig:
+def _parse_provision(raw: dict[str, Any], repo_dir: Path | None) -> ProvisionConfig:
+    """Parse a ``provision`` block, tagging files with their repo dir."""
+    files: list[ProvisionFile] = []
+    for f in raw.get("files", []) or []:
+        if not isinstance(f, dict) or "src" not in f or "dest" not in f:
+            log.warning("Skipping invalid provision file entry: %r", f)
+            continue
+        files.append(ProvisionFile(
+            src=f["src"],
+            dest=f["dest"],
+            mode=str(f.get("mode", "0644")),
+            repo_dir=repo_dir,
+        ))
+    on_connect = [str(c) for c in (raw.get("on_connect", []) or [])]
+    return ProvisionConfig(files=files, on_connect=on_connect)
+
+
+def _parse_repo_config(raw: dict[str, Any], repo_dir: Path | None = None) -> RepoConfig:
     """Parse a per-target-repo config block."""
     bootstrap = raw.get("bootstrap", {})
+    provision_raw = raw.get("provision")
     return RepoConfig(
         workspace_repo=raw.get("workspace_repo"),
         machine_type=raw.get("machine_type"),
         location=raw.get("location"),
         bootstrap_post_create=bootstrap.get("post_create"),
+        provision=(
+            _parse_provision(provision_raw, repo_dir) if provision_raw else None
+        ),
     )
 
 
@@ -237,7 +315,14 @@ def load_merged_config() -> CodespacesConfig:
         # Repos (first wins on conflicts)
         for repo_key, repo_raw in raw.get("repos", {}).items():
             if repo_key not in merged.repos:
-                merged.repos[repo_key] = _parse_repo_config(repo_raw)
+                merged.repos[repo_key] = _parse_repo_config(repo_raw, entry.path)
+
+        # Global provisioning hooks (union across all adopted repos)
+        provision_raw = raw.get("provision")
+        if provision_raw:
+            parsed = _parse_provision(provision_raw, entry.path)
+            merged.provision.files.extend(parsed.files)
+            merged.provision.on_connect.extend(parsed.on_connect)
 
     return merged
 
