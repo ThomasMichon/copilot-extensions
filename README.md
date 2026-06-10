@@ -180,6 +180,34 @@ agent-worktrees update
 agent-worktrees also auto-updates its runtime on session launch. agent-bridge
 and agent-codespaces update via their installers (`scripts/install.* update`).
 
+## Uninstalling / baseline reset
+
+Each plugin's installer uninstall stops its **own managed processes** before
+removing files — agent-bridge stops the daemon + credential relay, and
+agent-codespaces closes its SSH ControlMaster connections — so no manual
+process-killing is needed:
+
+```bash
+scripts/install.sh uninstall          # per-plugin (add --purge / --remove-config to wipe config)
+```
+
+To return a machine to a clean baseline in one step (stops everything, removes
+all three runtimes, binstubs, the service/scheduled task, and config) use the
+repo-level reset tool — it's idempotent and works even if the CLIs are broken:
+
+```powershell
+# Windows
+pwsh -File tools\reset.ps1                       # prompts; add -Yes to skip
+pwsh -File tools\reset.ps1 -Yes -RemovePlugins   # also `copilot plugin uninstall`
+```
+```bash
+# Linux/WSL
+bash tools/reset.sh                              # prompts; add --yes to skip
+bash tools/reset.sh --yes --remove-plugins
+```
+
+Your source repos and their `.worktrees` content are never touched.
+
 ---
 
 ## Documentation

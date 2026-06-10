@@ -32,6 +32,7 @@ LOCAL_BIN="$HOME/.local/bin"
 BINSTUB="$LOCAL_BIN/agent-bridge"
 PID_FILE="$INSTALL_DIR/agent-bridge.pid"
 PORT=9281
+RELAY_PORT=9857   # integrated credential relay (in-process with the bridge)
 SYSTEMD_UNIT="agent-bridge.service"
 
 # Ensure ~/.local/bin is on PATH
@@ -514,6 +515,15 @@ do_stop() {
         else
             _skip "agent-bridge is not running"
         fi
+    fi
+
+    # Also ensure the integrated credential relay is down. It runs in-process
+    # with the bridge, but free its port explicitly to catch an orphaned relay.
+    local relay_pid
+    relay_pid="$(ss -tlnp 2>/dev/null | grep ":${RELAY_PORT} " | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1)"
+    if [[ -n "$relay_pid" ]]; then
+        _warn "Credential relay port $RELAY_PORT still in use -- killing (pid=$relay_pid)"
+        kill "$relay_pid" 2>/dev/null || true
     fi
 }
 
