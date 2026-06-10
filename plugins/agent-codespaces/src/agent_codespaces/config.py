@@ -135,15 +135,21 @@ class CodespacesConfig:
 
         Priority:
         1. Explicit ``acp_command`` if set.
-        2. ``cd <workspace_folder> && copilot --acp --stdio`` when
-           ``workspace_folder`` is configured.
-        3. Bare ``copilot --acp --stdio`` as last-resort fallback.
+        2. ``cd <workspace_folder> && copilot --acp --stdio --allow-all-tools``
+           when ``workspace_folder`` is configured.
+        3. ``copilot --acp --stdio --allow-all-tools`` as last-resort fallback.
+
+        ``--allow-all-tools`` is required for headless dispatch: there is no
+        human to answer interactive tool-permission prompts, so without it
+        the remote agent blocks the first time it runs a non-allowlisted
+        command (e.g. a test runner).
         """
         if self.acp_command:
             return self.acp_command
+        copilot = "copilot --acp --stdio --allow-all-tools"
         if self.workspace_folder:
-            return f"cd {self.workspace_folder} && copilot --acp --stdio"
-        return "copilot --acp --stdio"
+            return f"cd {self.workspace_folder} && {copilot}"
+        return copilot
 
     def provision_for_repo(self, repo: str | None) -> ProvisionConfig:
         """Collect provisioning hooks that apply to a CodeSpace.
