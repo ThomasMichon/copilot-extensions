@@ -250,7 +250,13 @@ function Invoke-Install {
     $env:PYTHONPATH = "$LibDir;$env:PYTHONPATH"
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $check = & $VenvPython -c 'import agent_codespaces; print("OK")' 2>$null
+    # Retry: on Windows, antivirus may briefly lock freshly-copied files.
+    $check = $null
+    for ($i = 0; $i -lt 3; $i++) {
+        $check = & $VenvPython -c 'import agent_codespaces; print("OK")' 2>$null
+        if ($check -eq 'OK') { break }
+        Start-Sleep -Seconds 1
+    }
     $ErrorActionPreference = $prevEAP
     if ($check -eq 'OK') {
         Write-ServiceOk 'Verification: module imports successfully'
