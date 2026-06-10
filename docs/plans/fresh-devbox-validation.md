@@ -15,8 +15,8 @@ from the written docs; each becomes a required fix.
   git repo with a README; this run adds `machines.yaml`, `acp-agents.json`,
   `codespaces.yaml`). It also serves as the CodeSpaces dotfiles repo.
 - Installed & authed: `copilot`, `git`, `gh` (`gh auth login`), Python 3.10+.
-- Access to `odsp-microsoft/odsp-web-codespaces` and read access to
-  `ThomasMichon/copilot-extensions`.
+- Access to your team's shared CodeSpaces repo (set in `codespaces.yaml`) and
+  read access to `ThomasMichon/copilot-extensions`.
 
 ## Phase 0 — Baseline
 ```powershell
@@ -81,9 +81,8 @@ Create topology files (templates: `plugins/agent-bridge/docs/machine-config.md`)
 - `machines.yaml` — this dev box (minimal/local is fine to start).
 - `acp-agents.json` — a `local` agent with `project: my-control-harness`.
 - `codespaces.yaml` — `defaults` (machine_type, location, `ssh_user: vscode`,
-  `workspace_folder: /workspaces/odsp-web`) + `credentials` sources
-  (`git-credential`, `gh-auth`) + the `odsp-microsoft/odsp-web-codespaces` repo
-  entry.
+  `workspace_folder: /workspaces/<your-repo>`) + `credentials` sources
+  (`git-credential`, `gh-auth`) + your team's shared CodeSpaces repo entry.
 ```powershell
 agent-bridge config adopt --repo <my-control-harness> --profile my-control-harness
 agent-bridge config validate
@@ -108,7 +107,7 @@ agent-codespaces create <args>
 agent-codespaces bridge register
 agent-codespaces bridge status
 agent-bridge agents            # expect codespace:<name> / cs-<name>
-agent-bridge send "codespace:<name>" "Run: pwd && git -C /workspaces/odsp-web rev-parse --abbrev-ref HEAD && gh auth status"
+agent-bridge send "codespace:<name>" "Run: pwd && git -C /workspaces/<your-repo> rev-parse --abbrev-ref HEAD && gh auth status"
 ```
 **GATE 1 (connectivity):** the CodeSpace agent responds (allow ~120–180s for a
 Shutdown CodeSpace to auto-start).

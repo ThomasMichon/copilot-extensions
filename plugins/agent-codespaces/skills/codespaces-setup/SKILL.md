@@ -37,11 +37,13 @@ defaults:
   machine_type: largePremiumLinux     # gh codespace machine type
   location: EastUs                     # Azure region
   ssh_user: vscode                     # SSH user (match CodeSpace user)
-  workspace_folder: /workspaces/odsp-web  # repo root on CodeSpace
-  # dotfiles_repo: user/dotfiles      # Optional dotfiles repo
+  workspace_folder: /workspaces/<your-repo>  # repo root on CodeSpace
+  # dotfiles_repo: <your-user>/<your-dotfiles>   # Optional dotfiles repo
 
 credentials:
   relay_port: 9857                     # TCP port for credential relay
+  # ado_host: <your-org>.visualstudio.com   # default host for bare
+  #                                          # get-access-token requests
   sources:
     git-credential:
       enabled: true
@@ -60,7 +62,7 @@ credentials:
     #     - "https://management.azure.com/"
 
 repos:
-  org/my-repo:
+  <your-org>/<your-repo>:
     machine_type: largePremiumLinux256gb
     location: EastUs
 ```
@@ -93,7 +95,7 @@ agent-codespaces config show
 | `location` | string | `EastUs` | Default Azure region |
 | `dotfiles_repo` | string | -- | Dotfiles repo for CodeSpace provisioning |
 | `ssh_user` | string | `vscode` | SSH user on CodeSpaces |
-| `workspace_folder` | string | -- | Workspace root on CodeSpace (e.g., `/workspaces/odsp-web`). Used to `cd` before launching Copilot, preventing CWD race conditions during cold starts. |
+| `workspace_folder` | string | -- | Workspace root on CodeSpace (e.g., `/workspaces/<your-repo>`). Used to `cd` before launching Copilot, preventing CWD race conditions during cold starts. |
 | `acp_command` | string | -- | Explicit override for the remote agent command. If omitted, built automatically from `workspace_folder`. |
 
 #### `workspace_folder`
@@ -106,7 +108,7 @@ the SSH login profile runs.
 
 ```yaml
 defaults:
-  workspace_folder: /workspaces/odsp-web
+  workspace_folder: /workspaces/<your-repo>
 ```
 
 **Why this matters:** CodeSpace profile scripts (`/etc/profile.d/codespaces.sh`)
@@ -132,6 +134,7 @@ defaults:
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `relay_port` | int | `9857` | TCP port for credential relay server |
+| `ado_host` | string | -- | Default Azure DevOps host (e.g. `<your-org>.visualstudio.com`) for bare `get-access-token` requests that carry no host (npm/nuget via ado-auth-helper). Unset = such requests are rejected. Can also be set via the `CODESPACES_ADO_HOST` env var on the relay host. |
 | `sources` | dict | -- | Pluggable credential source configs |
 
 ### Credential Sources
