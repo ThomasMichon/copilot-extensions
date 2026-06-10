@@ -62,6 +62,11 @@ def main(argv: list[str] | None = None) -> int:
         "--no-relay", action="store_true",
         help="Skip credential relay tunnel setup",
     )
+    ssh_parser.add_argument(
+        "--repo", dest="repo", default=None,
+        help="CodeSpace repository (owner/name) -- selects per-repo "
+             "provision hooks without an extra lookup",
+    )
 
     # --- list ---
     list_parser = sub.add_parser("list", help="List active CodeSpaces")
@@ -220,6 +225,12 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         if not args.no_relay:
             await _provision_relay_helpers(manager, args.name)
 
+        # Run repo-declared provision hooks (by-convention extras from the
+        # adopted repo's codespaces.yaml). Best-effort, idempotent.
+        await _provision_repo_hooks(
+            manager, args.name, config, getattr(args, "repo", None),
+        )
+
         if args.stdio and remote_cmd:
             # Structured stdio mode for agent-bridge
             proc = await manager.open_stdio_channel(args.name, remote_cmd)
@@ -269,6 +280,52 @@ async def _provision_relay_helpers(manager, name: str) -> None:
             )
     except Exception as exc:
         log.warning("Relay helper provisioning on %s failed: %s", name, exc)
+
+
+def _lookup_codespace_repo(name: str) -> str | None:
+    """Best-effort lookup of a CodeSpace's repository (owner/name)."""
+    try:
+        from .lifecycle import list_codespaces
+
+        for cs in list_codespaces():
+            if cs.name == name:
+                return cs.repository
+    except Exception as exc:
+        log.debug("Could not resolve repo for %s: %s", name, exc)
+    return None
+
+
+async def _provision_repo_hooks(manager, name: str, config, repo: str | None) -> None:
+    """Run repo-declared provision hooks for a CodeSpace over SSH.
+
+    Applies the adopted repo's ``provision`` block (global + per-repo,
+    selected by the CodeSpace's repository) from ``codespaces.yaml``.
+    The repo is taken from ``--repo`` when provided (hot path) and only
+    looked up when per-repo hooks actually exist. Best-effort and
+    idempotent.
+    """
+    from .provision import build_provision_command
+
+    try:
+        # Only pay for a repo lookup when per-repo hooks are declared.
+        if repo is None and any(rc.provision for rc in config.repos.values()):
+            repo = _lookup_codespace_repo(name)
+
+        provision = config.provision_for_repo(repo)
+        command = build_provision_command(provision)
+        if not command:
+            return
+
+        result = await manager.exec_command(name, command, timeout=30.0)
+        if result.exit_code == 0:
+            log.debug("Repo provision hooks applied on %s", name)
+        else:
+            log.warning(
+                "Repo provision hooks on %s exited %s: %s",
+                name, result.exit_code, result.stderr.strip(),
+            )
+    except Exception as exc:
+        log.warning("Repo provision hooks on %s failed: %s", name, exc)
 
 
 async def _pipe_stdio(proc) -> None:

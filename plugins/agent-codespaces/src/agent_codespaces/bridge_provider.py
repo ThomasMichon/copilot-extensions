@@ -98,12 +98,14 @@ def build_agent_configs(
             spawn_cmd = [
                 cmd_path, "-m", "agent_codespaces",
                 "ssh", "--stdio", cs.name,
+                "--repo", cs.repository,
                 "--remote-cmd", acp_command,
             ]
         else:
             spawn_cmd = [
                 cmd_path,
                 "ssh", "--stdio", cs.name,
+                "--repo", cs.repository,
                 "--remote-cmd", acp_command,
             ]
 
