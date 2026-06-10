@@ -59,6 +59,7 @@ agent-codespaces list                 # List active CodeSpaces
 agent-codespaces create <owner/repo>  # Create a CodeSpace + run provisioning
 agent-codespaces delete <name>        # Delete a CodeSpace (--force to skip prompt)
 agent-codespaces config adopt         # Register repo for config
+agent-codespaces config init          # Scaffold codespaces.yaml from your CodeSpaces
 agent-codespaces config show          # Show resolved config
 agent-codespaces bridge register      # Register CodeSpaces as bridge agents
 agent-codespaces cleanup              # Remove stale local state (SSH configs, sockets)
