@@ -1,0 +1,127 @@
+#!/bin/bash
+# ado-auth-helper — Credential helper proxy for SSH-tunneled auth
+#
+# Drop-in replacement for the VS Code extension's ~/ado-auth-helper when
+# connecting via SSH. Proxies requests through the SSH RemoteForward tunnel
+# back to the local machine's Git Credential Manager.
+#
+# Supports all hosts — ADO (onedrive.visualstudio.com, dev.azure.com) and
+# GitHub (github.com) — by relaying to the local GCM which has credentials
+# for both. This enables dotfiles repo operations over SSH without manual
+# token forwarding.
+#
+# Supports:
+#   get              — Git credential helper mode (reads git-credential-protocol from stdin)
+#   get-access-token — Returns a raw ADO access token for non-git tools (npm, nuget)
+#
+# The SSH session must set LC_GIT_CREDENTIAL_RELAY=<port> and forward
+# that port with -R <port>:localhost:<port>.
+#
+# If LC_GIT_CREDENTIAL_RELAY is not set (e.g., in a VS Code session),
+# this helper exits immediately, letting the VS Code extension handle auth.
+
+ACTION="${1:-}"
+DEFAULT_RELAY_PORT=9857
+RELAY_PORT="${LC_GIT_CREDENTIAL_RELAY:-}"
+
+# If env var is not set, probe the default port (SSH RemoteForward may be
+# active from a codespace-ssh session even though this shell doesn't have
+# the env var — e.g., postCreateCommand, cron, systemd, etc.)
+if [ -z "$RELAY_PORT" ]; then
+    if (echo >/dev/tcp/localhost/$DEFAULT_RELAY_PORT) 2>/dev/null; then
+        RELAY_PORT="$DEFAULT_RELAY_PORT"
+    else
+        exit 1
+    fi
+fi
+
+case "$ACTION" in
+    get)
+        # Git credential helper mode — read stdin, proxy through relay
+        exec python3 -c "
+import socket, sys
+
+port = int(sys.argv[1])
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(10)
+
+try:
+    s.connect(('localhost', port))
+
+    # Read stdin until blank line (git credential protocol terminator)
+    lines = []
+    for line in sys.stdin:
+        lines.append(line)
+        if line.strip() == '':
+            break
+    stdin_data = ''.join(lines)
+
+    # Send through relay (no action prefix — server defaults to 'get')
+    request = stdin_data
+    if not request.endswith('\n\n'):
+        request = request.rstrip('\n') + '\n\n'
+
+    s.sendall(request.encode('utf-8'))
+
+    # Read response until blank line or EOF
+    s.settimeout(30)
+    response = b''
+    while True:
+        chunk = s.recv(4096)
+        if not chunk:
+            break
+        response += chunk
+        if b'\n\n' in response:
+            break
+
+    sys.stdout.buffer.write(response)
+    sys.stdout.buffer.flush()
+except Exception:
+    sys.exit(1)
+finally:
+    s.close()
+" "$RELAY_PORT"
+        ;;
+
+    get-access-token)
+        # Direct token mode — return a raw ADO access token for npm, nuget, etc.
+        exec python3 -c "
+import socket, sys
+
+port = int(sys.argv[1])
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(10)
+
+try:
+    s.connect(('localhost', port))
+
+    request = 'get-access-token\n\n'
+    s.sendall(request.encode('utf-8'))
+
+    s.settimeout(30)
+    response = b''
+    while True:
+        chunk = s.recv(4096)
+        if not chunk:
+            break
+        response += chunk
+        if b'\n\n' in response:
+            break
+
+    token = response.decode('utf-8').strip()
+    if token:
+        print(token)
+    else:
+        sys.exit(1)
+except Exception:
+    sys.exit(1)
+finally:
+    s.close()
+" "$RELAY_PORT"
+        ;;
+
+    *)
+        # store/erase — acknowledge silently
+        exit 0
+        ;;
+esac

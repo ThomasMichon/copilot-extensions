@@ -214,6 +214,12 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     async def _run() -> int:
         await manager.ensure_connected(args.name, source, port_forwards)
 
+        # Deploy the CodeSpace-side relay helpers (ado-auth-helper-relay +
+        # smart wrapper) so ADO auth resolves over the tunnel. Idempotent;
+        # best-effort -- a failure here shouldn't block the SSH command.
+        if not args.no_relay:
+            await _provision_relay_helpers(manager, args.name)
+
         if args.stdio and remote_cmd:
             # Structured stdio mode for agent-bridge
             proc = await manager.open_stdio_channel(args.name, remote_cmd)
@@ -239,6 +245,30 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         )
 
     return asyncio.run(_run())
+
+
+async def _provision_relay_helpers(manager, name: str) -> None:
+    """Deploy the CodeSpace-side relay helper scripts over SSH.
+
+    Installs ``ado-auth-helper-relay`` and the smart ``ado-auth-helper``
+    wrapper into the CodeSpace so ADO auth resolves over the credential
+    relay tunnel. Idempotent and best-effort: logs a warning on failure
+    but never raises, since the SSH command itself should still proceed.
+    """
+    from .codespace_assets import build_provision_command
+
+    try:
+        command = build_provision_command()
+        result = await manager.exec_command(name, command, timeout=30.0)
+        if result.exit_code == 0:
+            log.debug("Relay helpers provisioned on %s", name)
+        else:
+            log.warning(
+                "Relay helper provisioning on %s exited %s: %s",
+                name, result.exit_code, result.stderr.strip(),
+            )
+    except Exception as exc:
+        log.warning("Relay helper provisioning on %s failed: %s", name, exc)
 
 
 async def _pipe_stdio(proc) -> None:

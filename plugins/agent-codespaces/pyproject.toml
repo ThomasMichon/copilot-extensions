@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-codespaces"
-version = "0.1.0-dev7"
+version = "0.1.0-dev8"
 description = "GitHub Codespaces lifecycle management, SSH transport, and credential relay"
 readme = "README.md"
 license = "MIT"
@@ -22,6 +22,9 @@ agent-codespaces = "agent_codespaces.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+agent_codespaces = ["codespace_assets/ado-auth-helper-relay", "codespace_assets/ado-auth-helper-wrapper"]
 
 [tool.ruff]
 target-version = "py310"
