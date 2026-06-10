@@ -4,6 +4,7 @@ Subcommands:
   ssh <name>            SSH into a CodeSpace (interactive or --stdio)
   list                  List active CodeSpaces
   config adopt          Register current repo for config
+  config init           Scaffold codespaces.yaml from existing CodeSpaces
   config show           Show resolved config
   config validate       Validate config
   status                Show service status
@@ -88,6 +89,23 @@ def main(argv: list[str] | None = None) -> int:
     config_sub.add_parser("adopt", help="Register current repo for config")
     config_sub.add_parser("show", help="Show resolved config")
     config_sub.add_parser("validate", help="Validate config")
+    config_init_p = config_sub.add_parser(
+        "init",
+        help="Scaffold codespaces.yaml in the current repo, deriving defaults "
+             "from your existing CodeSpaces (gh codespace list)",
+    )
+    config_init_p.add_argument(
+        "--from-codespace", dest="from_codespace", default=None,
+        help="Derive defaults from this CodeSpace name (default: auto-pick)",
+    )
+    config_init_p.add_argument(
+        "--force", action="store_true",
+        help="Overwrite an existing codespaces.yaml",
+    )
+    config_init_p.add_argument(
+        "--adopt", action="store_true",
+        help="Also register the repo (run adopt) after writing the file",
+    )
 
     # --- delete ---
     delete_parser = sub.add_parser("delete", help="Delete a CodeSpace")
@@ -490,18 +508,24 @@ def _cmd_config(args: argparse.Namespace) -> int:
         return _config_show()
     if args.config_command == "validate":
         return _config_validate()
-    print("Usage: agent-codespaces config {adopt|show|validate}", file=sys.stderr)
+    if args.config_command == "init":
+        return _config_init(
+            from_codespace=args.from_codespace,
+            force=args.force,
+            also_adopt=args.adopt,
+        )
+    print(
+        "Usage: agent-codespaces config {init|adopt|show|validate}",
+        file=sys.stderr,
+    )
     return 1
 
 
-def _config_adopt() -> int:
-    """Register the current repo for config."""
+def _resolve_repo_root() -> Path:
+    """Resolve the canonical repo root (worktree-safe), or cwd if not a repo."""
     import subprocess as sp
 
     cwd = Path.cwd()
-
-    # Resolve to canonical repo root — worktree paths are ephemeral and
-    # will go stale when the worktree is cleaned up.
     try:
         result = sp.run(
             ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -510,19 +534,268 @@ def _config_adopt() -> int:
             text=True,
         )
         if result.returncode == 0:
-            # git-common-dir returns the .git dir (or shared .git for
-            # worktrees).  Parent of that is the canonical repo root.
-            repo_root = Path(result.stdout.strip()).parent.resolve()
-        else:
-            repo_root = cwd
+            return Path(result.stdout.strip()).parent.resolve()
     except FileNotFoundError:
-        repo_root = cwd
+        pass
+    return cwd
+
+
+def _list_codespaces_for_init() -> list[dict]:
+    """Return `gh codespace list` entries, or [] on any failure."""
+    import subprocess as sp
+
+    try:
+        result = sp.run(
+            ["gh", "codespace", "list", "--json",
+             "name,repository,machineName,displayName,state,lastUsedAt"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (FileNotFoundError, sp.TimeoutExpired):
+        return []
+    if result.returncode != 0:
+        return []
+    try:
+        data = json.loads(result.stdout or "[]")
+        return data if isinstance(data, list) else []
+    except json.JSONDecodeError:
+        return []
+
+
+def _discover_workspace_folder(codespaces: list[dict], repository: str) -> str | None:
+    """Best-effort: read $WORKING_DIRECTORY from an already-Available CodeSpace.
+
+    Only targets CodeSpaces already in the ``Available`` state so we never pay
+    a cold-start. Returns None on any failure (no Available CodeSpace, SSH
+    error, timeout) -- callers must treat workspace_folder as unknown, not
+    guess it from the repo name (the CodeSpaces repo name often differs from
+    the checked-out workspace, e.g. ``odsp-web-codespaces`` vs ``odsp-web``).
+    """
+    import subprocess as sp
+
+    available = [
+        c for c in codespaces
+        if c.get("repository") == repository and c.get("state") == "Available"
+    ]
+    for c in available:
+        name = c.get("name")
+        if not name:
+            continue
+        try:
+            result = sp.run(
+                ["gh", "codespace", "ssh", "-c", name, "--",
+                 "printf %s \"$WORKING_DIRECTORY\""],
+                capture_output=True,
+                text=True,
+                timeout=45,
+            )
+        except (FileNotFoundError, sp.TimeoutExpired):
+            return None
+        if result.returncode == 0:
+            wd = (result.stdout or "").strip()
+            if wd.startswith("/"):
+                return wd
+    return None
+
+
+def _derive_codespaces_defaults(
+    codespaces: list[dict], from_codespace: str | None
+) -> dict | None:
+    """Pick a representative CodeSpace and derive scaffold defaults.
+
+    Returns a dict with keys: repository, machine_type, workspace_folder
+    (str or None if it could not be reliably discovered), source_name.
+    Returns None if no usable CodeSpace is found.
+    """
+    if not codespaces:
+        return None
+
+    chosen: dict | None = None
+    if from_codespace:
+        chosen = next(
+            (c for c in codespaces if c.get("name") == from_codespace), None
+        )
+        if chosen is None:
+            return None
+    else:
+        # Prefer the most-recently-used CodeSpace (lastUsedAt is ISO-8601, so
+        # lexical max works); fall back to the first.
+        chosen = max(
+            codespaces,
+            key=lambda c: c.get("lastUsedAt") or "",
+        )
+
+    repository = chosen.get("repository") or ""
+
+    # Use the most common machine type across CodeSpaces of the chosen repo
+    # (more representative than a single CodeSpace's machine).
+    same_repo = [c for c in codespaces if c.get("repository") == repository]
+    machine_counts: dict[str, int] = {}
+    for c in same_repo:
+        m = c.get("machineName")
+        if m:
+            machine_counts[m] = machine_counts.get(m, 0) + 1
+    machine_type = (
+        max(machine_counts, key=machine_counts.get)
+        if machine_counts
+        else "largePremiumLinux"
+    )
+
+    # Discover workspace_folder from a live CodeSpace -- NOT from the repo name,
+    # which is unreliable (the CodeSpaces repo often differs from the checkout).
+    workspace_folder = _discover_workspace_folder(codespaces, repository)
+
+    return {
+        "repository": repository,
+        "machine_type": machine_type,
+        "workspace_folder": workspace_folder,
+        "source_name": chosen.get("displayName") or chosen.get("name") or "",
+    }
+
+
+def _render_codespaces_yaml(defaults: dict | None) -> str:
+    """Render a codespaces.yaml. If defaults is None, emit a generic template."""
+    if defaults:
+        machine = defaults["machine_type"]
+        repo = defaults["repository"]
+        ws = defaults.get("workspace_folder")
+        if ws:
+            workspace_line = f"  workspace_folder: {ws}\n"
+        else:
+            # Could not discover it cheaply -- emit a TODO, never a wrong guess.
+            workspace_line = (
+                "  # workspace_folder: /workspaces/<your-checkout>   # TODO: set "
+                "to the repo\n  # checkout path INSIDE the CodeSpace. This is the "
+                "dir `cd $WORKING_DIRECTORY`\n  # lands in -- often NOT the "
+                "CodeSpaces repo name. Find it with:\n"
+                "  #   gh codespace ssh -c <name> -- 'echo $WORKING_DIRECTORY'\n"
+            )
+        repo_block = (
+            f"\nrepos:\n  {repo}:\n    machine_type: {machine}\n"
+            if repo else ""
+        )
+        ws_status = ws if ws else "UNKNOWN (left as a TODO -- set it manually)"
+        derived_note = (
+            f"# Derived from your existing CodeSpace "
+            f"'{defaults['source_name']}'.\n"
+            f"# workspace_folder: {ws_status}\n"
+        )
+    else:
+        machine = "largePremiumLinux"
+        workspace_line = "  workspace_folder: /workspaces/<your-repo>\n"
+        repo_block = (
+            "\n# repos:\n#   <your-org>/<your-repo>:\n"
+            "#     machine_type: largePremiumLinux256gb\n"
+        )
+        derived_note = (
+            "# No existing CodeSpaces found -- this is a generic template. "
+            "Fill in the\n# placeholders below.\n"
+        )
+
+    return (
+        "# codespaces.yaml -- agent-codespaces configuration\n"
+        "# All org/account/URL values live HERE, in your own repo -- never in\n"
+        "# the copilot-extensions plugin.\n"
+        f"{derived_note}\n"
+        "defaults:\n"
+        f"  machine_type: {machine}\n"
+        "  location: EastUs\n"
+        "  ssh_user: vscode\n"
+        f"{workspace_line}"
+        "  # dotfiles_repo: <your-user>/<your-dotfiles>\n"
+        "\n"
+        "credentials:\n"
+        "  relay_port: 9857\n"
+        "  # ado_host: <your-org>.visualstudio.com   # for bare get-access-token\n"
+        "  sources:\n"
+        "    git-credential:\n"
+        "      enabled: true\n"
+        "      allowed_hosts:\n"
+        '        - "github.com"\n'
+        '        - "*.github.com"\n'
+        '        - "dev.azure.com"\n'
+        '        - "*.visualstudio.com"\n'
+        "    gh-auth:\n"
+        "      enabled: true\n"
+        "      allowed_hosts:\n"
+        '        - "github.com"\n'
+        f"{repo_block}"
+    )
+
+
+def _config_init(
+    *, from_codespace: str | None, force: bool, also_adopt: bool
+) -> int:
+    """Scaffold codespaces.yaml, deriving defaults from existing CodeSpaces."""
+    repo_root = _resolve_repo_root()
+    config_file = repo_root / "codespaces.yaml"
+
+    if config_file.exists() and not force:
+        print(f"codespaces.yaml already exists at {config_file}")
+        print("Use --force to overwrite, or edit it directly.")
+        return 0
+
+    codespaces = _list_codespaces_for_init()
+    defaults = _derive_codespaces_defaults(codespaces, from_codespace)
+
+    if from_codespace and defaults is None:
+        print(
+            f"ERROR: CodeSpace '{from_codespace}' not found in "
+            "`gh codespace list`.",
+            file=sys.stderr,
+        )
+        return 1
+
+    content = _render_codespaces_yaml(defaults)
+    config_file.write_text(content, encoding="utf-8")
+
+    print(f"Wrote {config_file}")
+    if defaults:
+        print(f"  Derived from CodeSpace: {defaults['source_name']}")
+        print(f"  repository:        {defaults['repository']}")
+        print(f"  machine_type:      {defaults['machine_type']}")
+        ws = defaults.get("workspace_folder")
+        if ws:
+            print(f"  workspace_folder:  {ws}  (discovered from a live CodeSpace)")
+        else:
+            print(
+                "  workspace_folder:  NOT set -- no Available CodeSpace to read "
+                "$WORKING_DIRECTORY from."
+            )
+            print(
+                "                     Left as a TODO in the file. Set it to your "
+                "checkout path"
+            )
+            print(
+                "                     (often NOT the CodeSpaces repo name, e.g. "
+                "odsp-web vs odsp-web-codespaces)."
+            )
+    else:
+        print("  No existing CodeSpaces detected -- wrote a generic template.")
+        print("  Edit the placeholders before adopting.")
+
+    if also_adopt:
+        print()
+        return _config_adopt()
+    print("\nReview the file, then run: agent-codespaces config adopt")
+    return 0
+
+
+def _config_adopt() -> int:
+    """Register the current repo for config."""
+    repo_root = _resolve_repo_root()
 
     config_file = repo_root / "codespaces.yaml"
 
     if not config_file.exists():
         print(f"ERROR: No codespaces.yaml found in {repo_root}", file=sys.stderr)
-        print("Create one first, then re-run adopt.", file=sys.stderr)
+        print(
+            "Run `agent-codespaces config init` to scaffold one "
+            "(it derives defaults from your existing CodeSpaces), "
+            "then re-run adopt.",
+            file=sys.stderr,
+        )
         return 1
 
     repos = load_adopted_repos()

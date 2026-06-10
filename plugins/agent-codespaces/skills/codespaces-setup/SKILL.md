@@ -31,6 +31,33 @@ skill.
 
 ### 1. Create `codespaces.yaml` in your repo
 
+**Fastest path -- scaffold it from your existing CodeSpaces:**
+
+```bash
+cd /path/to/your/repo
+agent-codespaces config init
+```
+
+`config init` runs `gh codespace list` and, if you already have at least one
+CodeSpace, derives sensible defaults into a new `codespaces.yaml`:
+
+- **`machine_type`** -- the most common machine across your CodeSpaces.
+- **`repos:` entry** -- the CodeSpaces repository.
+- **`workspace_folder`** -- discovered from a live (Available) CodeSpace by
+  reading `$WORKING_DIRECTORY` over SSH. If no CodeSpace is Available it is
+  left as a clearly-marked **TODO** rather than guessed -- the CodeSpaces repo
+  name is often **not** the checkout path (e.g. a `*-codespaces` repo whose
+  workspace is `/workspaces/<app>`).
+
+Flags: `--from-codespace <name>` (derive from a specific one), `--force`
+(overwrite), `--adopt` (register immediately after writing). With no
+CodeSpaces, it writes a generic template to fill in.
+
+> All org/account/URL values live in **your** repo's `codespaces.yaml`, derived
+> at runtime from your own `gh` account -- never hardcoded in the plugin.
+
+**Or author it by hand:**
+
 ```yaml
 # codespaces.yaml -- CodeSpace defaults and credential relay config
 defaults:
