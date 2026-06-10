@@ -112,18 +112,257 @@ def _cmd_start(args: argparse.Namespace) -> None:
 def _cmd_status(args: argparse.Namespace) -> None:
     """Check if agent-bridge is running."""
     client = _get_client()
+    base = getattr(client, "_base", "")
     try:
         info = client.health()
-        print(f"[OK] agent-bridge is running -- {info.get('service', 'agent-bridge')}")
+        svc = info.get("service", "agent-bridge")
+        if base:
+            print(f"[OK] agent-bridge is running -- {svc} ({base})")
+        else:
+            print(f"[OK] agent-bridge is running -- {svc}")
     except SystemExit:
         raise
     except Exception:
-        print("[FAIL] agent-bridge is not responding")
+        suffix = f" at {base}" if base else ""
+        print(f"[FAIL] agent-bridge is not responding{suffix}")
         sys.exit(1)
 
 
 def _cmd_version(_args: argparse.Namespace) -> None:
     print(f"agent-bridge {__version__}")
+
+
+# ---------------------------------------------------------------------------
+# Service lifecycle (control the installer-managed daemon)
+# ---------------------------------------------------------------------------
+
+_INSTALL_DIR = os.path.expanduser(
+    os.environ.get("AGENT_BRIDGE_CONFIG_DIR", "~/.agent-bridge")
+)
+_PID_FILE = os.path.join(_INSTALL_DIR, "agent-bridge.pid")
+_WIN_TASK_NAME = "Agent Bridge"
+_SYSTEMD_UNIT = "agent-bridge.service"
+
+
+def _service_port() -> int:
+    """Resolved bridge port from config, else platform default."""
+    from .models import default_port
+
+    cfg_path = os.path.join(_INSTALL_DIR, "config.yaml")
+    if os.path.exists(cfg_path):
+        try:
+            import yaml
+
+            data = yaml.safe_load(open(cfg_path, encoding="utf-8")) or {}
+            return int(data.get("port", default_port()))
+        except Exception:
+            pass
+    return default_port()
+
+
+def _service_is_running() -> bool:
+    """Quiet health probe -- direct GET, no client error spam."""
+    import urllib.request
+
+    url = f"http://127.0.0.1:{_service_port()}/health"
+    try:
+        with urllib.request.urlopen(url, timeout=2) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+def _read_pid_file() -> int | None:
+    try:
+        with open(_PID_FILE, encoding="utf-8") as fh:
+            return int((fh.read() or "").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _pid_on_port(port: int) -> int | None:
+    """Best-effort: find the PID listening on *port* (cross-platform)."""
+    import subprocess as sp
+
+    if sys.platform == "win32":
+        ps = (
+            "(Get-NetTCPConnection -LocalPort {0} -State Listen "
+            "-ErrorAction SilentlyContinue | Select-Object -First 1)"
+            ".OwningProcess".format(port)
+        )
+        try:
+            out = sp.run(
+                ["powershell", "-NoProfile", "-Command", ps],
+                capture_output=True, text=True, timeout=15,
+            )
+            val = (out.stdout or "").strip()
+            return int(val) if val.isdigit() else None
+        except (OSError, sp.TimeoutExpired, ValueError):
+            return None
+    # POSIX
+    for cmd in (["ss", "-lptnH", f"sport = :{port}"], ["lsof", "-ti", f"tcp:{port}"]):
+        try:
+            out = sp.run(cmd, capture_output=True, text=True, timeout=15)
+        except (OSError, sp.TimeoutExpired):
+            continue
+        text = out.stdout or ""
+        if cmd[0] == "lsof":
+            line = text.strip().splitlines()
+            if line and line[0].isdigit():
+                return int(line[0])
+        else:
+            import re
+
+            m = re.search(r"pid=(\d+)", text)
+            if m:
+                return int(m.group(1))
+    return None
+
+
+def _kill_pid(pid: int) -> None:
+    import signal as _signal
+    import subprocess as sp
+
+    if sys.platform == "win32":
+        sp.run(["taskkill", "/PID", str(pid), "/F", "/T"],
+               capture_output=True, text=True)
+    else:
+        try:
+            os.kill(pid, _signal.SIGTERM)
+        except OSError:
+            pass
+
+
+def _systemd_available() -> bool:
+    import shutil
+
+    unit = os.path.expanduser(f"~/.config/systemd/user/{_SYSTEMD_UNIT}")
+    return (
+        sys.platform != "win32"
+        and shutil.which("systemctl") is not None
+        and os.path.exists(unit)
+    )
+
+
+def _win_task_exists() -> bool:
+    import subprocess as sp
+
+    try:
+        out = sp.run(
+            ["schtasks", "/Query", "/TN", _WIN_TASK_NAME],
+            capture_output=True, text=True, timeout=15,
+        )
+        return out.returncode == 0
+    except (OSError, sp.TimeoutExpired):
+        return False
+
+
+def _service_start() -> None:
+    import subprocess as sp
+
+    if _service_is_running():
+        print(f"[OK] agent-bridge already running (port {_service_port()})")
+        return
+
+    if _systemd_available():
+        sp.run(["systemctl", "--user", "start", _SYSTEMD_UNIT])
+    elif sys.platform == "win32" and _win_task_exists():
+        sp.run(["schtasks", "/Run", "/TN", _WIN_TASK_NAME],
+               capture_output=True, text=True)
+    else:
+        # Fallback (no systemd unit / scheduled task): spawn the foreground
+        # `agent-bridge start` as a detached background process.
+        import subprocess as _sp
+
+        if sys.platform == "win32":
+            # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            flags = 0x00000008 | 0x00000200
+            popen_kwargs: dict[str, Any] = {"creationflags": flags}
+        else:
+            popen_kwargs = {"start_new_session": True}
+
+        logf = open(os.path.join(_INSTALL_DIR, "agent-bridge.log"), "ab")
+        errf = open(os.path.join(_INSTALL_DIR, "agent-bridge-err.log"), "ab")
+        _sp.Popen(
+            ["agent-bridge", "start"],
+            stdout=logf, stderr=errf, stdin=_sp.DEVNULL, **popen_kwargs,
+        )
+
+    # Wait for health
+    import time
+
+    for _ in range(15):
+        time.sleep(1)
+        if _service_is_running():
+            print(f"[OK] agent-bridge started (port {_service_port()})")
+            return
+    print("[WARN] agent-bridge start issued but health check did not pass yet "
+          "-- check ~/.agent-bridge/agent-bridge-err.log", file=sys.stderr)
+
+
+def _service_stop() -> None:
+    import subprocess as sp
+    import time
+
+    stopped_any = False
+
+    if _systemd_available():
+        sp.run(["systemctl", "--user", "stop", _SYSTEMD_UNIT])
+        stopped_any = True
+    elif sys.platform == "win32" and _win_task_exists():
+        sp.run(["schtasks", "/End", "/TN", _WIN_TASK_NAME],
+               capture_output=True, text=True)
+        stopped_any = True
+
+    # The platform manager may not kill an already-detached worker, so also
+    # terminate the process by pid file / port binding.
+    pid = _read_pid_file() or _pid_on_port(_service_port())
+    if pid:
+        _kill_pid(pid)
+        stopped_any = True
+        try:
+            os.remove(_PID_FILE)
+        except OSError:
+            pass
+
+    if not stopped_any:
+        print("[SKIP] agent-bridge does not appear to be running")
+        return
+
+    # Confirm the port is released (TimeWait can linger briefly).
+    for _ in range(10):
+        if not _service_is_running():
+            print("[OK] agent-bridge stopped")
+            return
+        time.sleep(1)
+    print("[WARN] agent-bridge stop issued but still responding", file=sys.stderr)
+
+
+def _cmd_service(args: argparse.Namespace) -> None:
+    action = getattr(args, "service_action", None)
+    if action == "start":
+        _service_start()
+    elif action == "stop":
+        _service_stop()
+    elif action == "restart":
+        _service_stop()
+        # Give the OS a moment to release the port before rebinding.
+        import time
+
+        time.sleep(3)
+        _service_start()
+    elif action == "status":
+        _cmd_status(args)
+        pid = _read_pid_file() or _pid_on_port(_service_port())
+        if pid:
+            print(f"  PID:  {pid}")
+        print(f"  Port: {_service_port()}")
+    else:
+        print(
+            "Usage: agent-bridge service {start|stop|restart|status}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -813,6 +1052,20 @@ def main(argv: list[str] | None = None) -> None:
 
     status_p = sub.add_parser("status", help="Check if agent-bridge is running")
     status_p.set_defaults(func=_cmd_status)
+
+    service_p = sub.add_parser(
+        "service",
+        help="Control the agent-bridge daemon (start/stop/restart/status)",
+    )
+    service_sub = service_p.add_subparsers(dest="service_action")
+    for _act, _help in (
+        ("start", "Start the agent-bridge daemon"),
+        ("stop", "Stop the agent-bridge daemon"),
+        ("restart", "Restart the agent-bridge daemon"),
+        ("status", "Show daemon status, port, and PID"),
+    ):
+        service_sub.add_parser(_act, help=_help)
+    service_p.set_defaults(func=_cmd_service)
 
     ver_p = sub.add_parser("version", help="Print version")
     ver_p.set_defaults(func=_cmd_version)

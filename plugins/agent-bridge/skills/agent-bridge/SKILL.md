@@ -147,15 +147,36 @@ agent-bridge end <session-id>
 
 ### Service Control
 
-```bash
-# Start the service (uses platform default port: 9280 Windows, 9281 Linux/WSL)
-agent-bridge start
-agent-bridge start --port 9280 --bind 127.0.0.1  # explicit override
+Use the `service` subcommands to control the long-running daemon. These
+delegate to the platform service manager (Windows scheduled task / Linux
+systemd user unit) that the installer registered, so they control the **same**
+instance that auto-starts at logon -- and they fall back to a detached spawn if
+no service manager is registered.
 
-# Check service health
+```bash
+agent-bridge service start      # start the daemon (no-op if already running)
+agent-bridge service stop       # stop the daemon (kills the worker + releases the port)
+agent-bridge service restart    # stop, wait for the port to release, start
+agent-bridge service status     # running state + bound port + PID
+```
+
+> **Note:** plain `agent-bridge stop <session-id>` stops a *session*, not the
+> service. For the daemon, always use `agent-bridge service stop`.
+
+`agent-bridge start` (no `service`) runs the server in the **foreground** -- it
+is the entry point the service manager invokes, and is useful for debugging.
+Add `--port` / `--bind` to override the platform default (9280 Windows / 9281
+Linux/WSL).
+
+```bash
+# Foreground (debugging) -- blocks the terminal
+agent-bridge start
+agent-bridge start --port 9280 --bind 127.0.0.1
+
+# Health check (also shows the bound URL)
 agent-bridge status
 
-# Print version
+# Version
 agent-bridge version
 ```
 

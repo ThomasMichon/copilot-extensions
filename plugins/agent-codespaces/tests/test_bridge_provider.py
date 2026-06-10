@@ -71,8 +71,10 @@ class TestBuildAgentConfigs:
         assert "--stdio" in cmd
         assert "fuzzy-adventure-abc123" in cmd
         assert "--remote-cmd" in cmd
-        # Default (no workspace_folder, no acp_command) uses bare copilot
-        assert "copilot --acp --stdio" in cmd
+        # Default (no workspace_folder, no acp_command) uses bare copilot.
+        # acp_command is a single element of the arg list, so scan the joined
+        # command rather than expecting it to be its own element.
+        assert "copilot --acp --stdio" in " ".join(cmd)
 
     def test_spawn_command_with_workspace_folder(self):
         """workspace_folder produces a 'cd <path> && copilot' command."""
@@ -85,7 +87,7 @@ class TestBuildAgentConfigs:
         ):
             agents = build_agent_configs(SAMPLE_CODESPACES)
         cmd = agents[0]["spawn_command"]
-        assert "cd /workspaces/my-repo && copilot --acp --stdio" in cmd
+        assert "cd /workspaces/my-repo && copilot --acp --stdio" in " ".join(cmd)
 
     def test_spawn_command_with_explicit_acp_command(self):
         """Explicit acp_command overrides workspace_folder."""

@@ -23,7 +23,14 @@ skill.
 
 ## Prerequisites
 
-- **gh CLI** -- installed and authenticated (`gh auth login`)
+- **gh CLI** -- installed **and authenticated with the `codespace` scope**:
+  ```bash
+  gh auth login
+  gh auth refresh -h github.com -s codespace   # default login scopes omit this
+  ```
+  Without the `codespace` scope, CodeSpace operations fail with
+  `HTTP 403 ... needs the "codespace" scope`. `agent-codespaces config init`
+  runs a preflight that flags this with the exact fix.
 - **ssh-manager** -- installed via the copilot-extensions plugin
 - **agent-bridge** (optional) -- only needed for bridge provider features
 

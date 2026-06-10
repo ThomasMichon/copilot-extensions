@@ -487,9 +487,9 @@ agent-bridge agents
 Restart agent-bridge after modifying config:
 
 ```bash
-# Windows
-agent-bridge stop; agent-bridge start
+# Any platform (delegates to the scheduled task / systemd unit)
+agent-bridge service restart
 
-# Linux/WSL
+# Linux/WSL equivalent
 systemctl --user restart agent-bridge.service
 ```

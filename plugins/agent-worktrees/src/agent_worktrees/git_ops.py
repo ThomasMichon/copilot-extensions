@@ -372,6 +372,33 @@ def push(remote: str, branch: str, *, cwd: str | Path) -> bool:
     return result.returncode == 0
 
 
+def ref_exists(ref: str, *, cwd: str | Path) -> bool:
+    """Return True if a git ref/commit resolves in the repo."""
+    result = git(
+        "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}",
+        cwd=cwd, check=False,
+    )
+    return result.returncode == 0
+
+
+def resolve_start_point(
+    remote: str, default_branch: str, *, cwd: str | Path
+) -> str:
+    """Pick the best start point for a new worktree branch.
+
+    Prefers ``<remote>/<default_branch>`` (normal case), then a local
+    ``<default_branch>``, then ``HEAD`` -- so a repo with no remote (or no
+    fetched default branch) still works instead of failing with
+    ``fatal: invalid reference: <remote>/<default_branch>``.
+    """
+    upstream = f"{remote}/{default_branch}"
+    if ref_exists(upstream, cwd=cwd):
+        return upstream
+    if ref_exists(default_branch, cwd=cwd):
+        return default_branch
+    return "HEAD"
+
+
 def create_worktree(
     anchor: str | Path,
     worktree_path: str,
