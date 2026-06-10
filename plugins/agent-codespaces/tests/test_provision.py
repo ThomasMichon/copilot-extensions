@@ -101,3 +101,18 @@ class TestBuildProvisionCommand:
         cmd = build_provision_command(prov)
         assert cmd is not None
         assert "echo hello" in cmd
+
+    def test_on_create_excluded_by_default(self) -> None:
+        prov = ProvisionConfig(on_create=["bash install.sh"])
+        assert build_provision_command(prov) is None
+
+    def test_on_create_included_when_requested(self) -> None:
+        prov = ProvisionConfig(
+            on_connect=["echo connect"], on_create=["bash install.sh"],
+        )
+        cmd = build_provision_command(prov, include_on_create=True)
+        assert cmd is not None
+        assert "echo connect" in cmd
+        assert "bash install.sh" in cmd
+        # on_create runs after on_connect
+        assert cmd.index("echo connect") < cmd.index("bash install.sh")

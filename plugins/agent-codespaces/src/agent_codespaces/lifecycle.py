@@ -111,6 +111,26 @@ def create_codespace(
     )
 
 
+def wait_for_available(name: str, timeout: float = 300.0, interval: float = 10.0) -> bool:
+    """Poll until a CodeSpace reaches the ``Available`` state.
+
+    Returns True once Available, or False on timeout. Used after
+    ``create_codespace`` before provisioning over SSH.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            for cs in list_codespaces():
+                if cs.name == name and cs.state == "Available":
+                    return True
+        except RuntimeError as exc:
+            log.debug("list_codespaces during wait failed: %s", exc)
+        time.sleep(interval)
+    return False
+
+
 def delete_codespace(name: str, force: bool = False) -> None:
     """Delete a CodeSpace by name."""
     args = ["gh", "codespace", "delete", "-c", name]

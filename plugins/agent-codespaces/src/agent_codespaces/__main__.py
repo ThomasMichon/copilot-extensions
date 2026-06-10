@@ -31,7 +31,13 @@ from .config import (
     save_adopted_repos,
     validate_config,
 )
-from .lifecycle import cleanup_stale, delete_codespace, list_codespaces
+from .lifecycle import (
+    cleanup_stale,
+    create_codespace,
+    delete_codespace,
+    list_codespaces,
+    wait_for_available,
+)
 
 log = logging.getLogger("agent-codespaces")
 
@@ -88,6 +94,23 @@ def main(argv: list[str] | None = None) -> int:
     delete_parser.add_argument("name", help="CodeSpace name")
     delete_parser.add_argument(
         "--force", action="store_true", help="Force deletion",
+    )
+
+    # --- create ---
+    create_parser = sub.add_parser(
+        "create", help="Create a CodeSpace and run post-create provisioning",
+    )
+    create_parser.add_argument("repo", help="Repository (owner/name)")
+    create_parser.add_argument(
+        "--branch", default=None, help="Branch to create the CodeSpace on",
+    )
+    create_parser.add_argument(
+        "--no-wait", action="store_true",
+        help="Don't wait for Available / run provisioning",
+    )
+    create_parser.add_argument(
+        "--timeout", type=float, default=300.0,
+        help="Seconds to wait for the CodeSpace to become Available",
     )
 
     # --- bridge ---
@@ -169,6 +192,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_config(args)
         if args.command == "delete":
             return _cmd_delete(args)
+        if args.command == "create":
+            return _cmd_create(args)
         if args.command == "bridge":
             return _cmd_bridge(args)
         if args.command == "cleanup":
@@ -295,14 +320,18 @@ def _lookup_codespace_repo(name: str) -> str | None:
     return None
 
 
-async def _provision_repo_hooks(manager, name: str, config, repo: str | None) -> None:
+async def _provision_repo_hooks(
+    manager, name: str, config, repo: str | None, *,
+    include_on_create: bool = False,
+) -> None:
     """Run repo-declared provision hooks for a CodeSpace over SSH.
 
     Applies the adopted repo's ``provision`` block (global + per-repo,
     selected by the CodeSpace's repository) from ``codespaces.yaml``.
     The repo is taken from ``--repo`` when provided (hot path) and only
-    looked up when per-repo hooks actually exist. Best-effort and
-    idempotent.
+    looked up when per-repo hooks actually exist. When
+    ``include_on_create`` is set, ``on_create`` commands run too (used
+    once during ``agent-codespaces create``). Best-effort and idempotent.
     """
     from .provision import build_provision_command
 
@@ -312,11 +341,16 @@ async def _provision_repo_hooks(manager, name: str, config, repo: str | None) ->
             repo = _lookup_codespace_repo(name)
 
         provision = config.provision_for_repo(repo)
-        command = build_provision_command(provision)
+        command = build_provision_command(
+            provision, include_on_create=include_on_create,
+        )
         if not command:
             return
 
-        result = await manager.exec_command(name, command, timeout=30.0)
+        # on_create hooks (e.g. install scripts) can run long; give them
+        # a generous timeout. on_connect-only hooks stay snappy.
+        timeout = 900.0 if include_on_create else 30.0
+        result = await manager.exec_command(name, command, timeout=timeout)
         if result.exit_code == 0:
             log.debug("Repo provision hooks applied on %s", name)
         else:
@@ -562,6 +596,50 @@ def _cmd_delete(args: argparse.Namespace) -> int:
     delete_codespace(args.name, force=args.force)
     print(f"Deleted: {args.name}")
     return 0
+
+
+def _cmd_create(args: argparse.Namespace) -> int:
+    """Create a CodeSpace and run post-create provisioning hooks."""
+    from ssh_manager import ConnectionManager
+
+    config = load_merged_config()
+    print(f"Creating CodeSpace for {args.repo}...")
+    info = create_codespace(args.repo, config, branch=args.branch)
+    print(f"Created: {info.name}")
+
+    if args.no_wait:
+        return 0
+
+    print("Waiting for CodeSpace to become Available...")
+    if not wait_for_available(info.name, timeout=args.timeout):
+        print(
+            f"[WARN] {info.name} did not reach Available within "
+            f"{args.timeout:.0f}s -- run provisioning later with "
+            f"`agent-codespaces ssh {info.name}`",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Provision over SSH: relay helpers + repo hooks including on_create.
+    relay_port = config.credentials.relay_port
+    port_forwards = [f"-R {relay_port}:127.0.0.1:{relay_port}"]
+    source = CodespaceSource(info.name)
+    manager = ConnectionManager()
+
+    async def _run() -> int:
+        await manager.ensure_connected(info.name, source, port_forwards)
+        await _provision_relay_helpers(manager, info.name)
+        await _provision_repo_hooks(
+            manager, info.name, config, args.repo, include_on_create=True,
+        )
+        await manager.disconnect(info.name)
+        return 0
+
+    print("Running post-create provisioning...")
+    rc = asyncio.run(_run())
+    if rc == 0:
+        print(f"[OK] {info.name} created and provisioned")
+    return rc
 
 
 def _cmd_bridge(args: argparse.Namespace) -> int:
