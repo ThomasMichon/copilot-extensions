@@ -33,12 +33,15 @@ def _resolve_src(pf: ProvisionFile) -> Path | None:
     return src
 
 
-def build_provision_command(provision: ProvisionConfig) -> str | None:
+def build_provision_command(
+    provision: ProvisionConfig, *, include_on_create: bool = False,
+) -> str | None:
     """Build an idempotent bash command for a repo's provision hooks.
 
     Deploys each declared file (base64-encoded for safe transport) to its
-    remote ``dest``, then runs any ``on_connect`` commands. Returns None
-    if there is nothing to do.
+    remote ``dest``, then runs any ``on_connect`` commands. When
+    ``include_on_create`` is set, ``on_create`` commands run last (used
+    once, right after creation). Returns None if there is nothing to do.
 
     ``dest`` may start with ``~`` or ``$HOME``; parent directories are
     created. Missing source files are skipped with a warning.
@@ -68,7 +71,11 @@ def build_provision_command(provision: ProvisionConfig) -> str | None:
     for cmd in provision.on_connect:
         parts.append(cmd)
 
-    if deployed == 0 and not provision.on_connect:
+    on_create = provision.on_create if include_on_create else []
+    for cmd in on_create:
+        parts.append(cmd)
+
+    if deployed == 0 and not provision.on_connect and not on_create:
         return None
 
     return "; ".join(parts)

@@ -89,6 +89,9 @@ class ProvisionConfig:
 
     files: list[ProvisionFile] = field(default_factory=list)
     on_connect: list[str] = field(default_factory=list)
+    # Commands run once, right after creation (post-create injection).
+    # Use for one-time setup such as running an install script.
+    on_create: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -151,12 +154,16 @@ class CodespacesConfig:
         """
         files = list(self.provision.files)
         on_connect = list(self.provision.on_connect)
+        on_create = list(self.provision.on_create)
         if repo and repo in self.repos:
             repo_prov = self.repos[repo].provision
             if repo_prov:
                 files.extend(repo_prov.files)
                 on_connect.extend(repo_prov.on_connect)
-        return ProvisionConfig(files=files, on_connect=on_connect)
+                on_create.extend(repo_prov.on_create)
+        return ProvisionConfig(
+            files=files, on_connect=on_connect, on_create=on_create,
+        )
 
 
 @dataclass
@@ -231,7 +238,8 @@ def _parse_provision(raw: dict[str, Any], repo_dir: Path | None) -> ProvisionCon
             repo_dir=repo_dir,
         ))
     on_connect = [str(c) for c in (raw.get("on_connect", []) or [])]
-    return ProvisionConfig(files=files, on_connect=on_connect)
+    on_create = [str(c) for c in (raw.get("on_create", []) or [])]
+    return ProvisionConfig(files=files, on_connect=on_connect, on_create=on_create)
 
 
 def _parse_repo_config(raw: dict[str, Any], repo_dir: Path | None = None) -> RepoConfig:
@@ -323,6 +331,7 @@ def load_merged_config() -> CodespacesConfig:
             parsed = _parse_provision(provision_raw, entry.path)
             merged.provision.files.extend(parsed.files)
             merged.provision.on_connect.extend(parsed.on_connect)
+            merged.provision.on_create.extend(parsed.on_create)
 
     return merged
 
