@@ -176,13 +176,15 @@ class TestValidation:
 
 class TestEffectiveAcpCommand:
     def test_bare_default(self):
-        """No workspace_folder, no acp_command → bare copilot."""
+        """No workspace_folder, no acp_command → bare copilot with auto-approve."""
         config = CodespacesConfig()
-        assert config.effective_acp_command == "copilot --acp --stdio"
+        assert config.effective_acp_command == "copilot --acp --stdio --allow-all-tools"
 
     def test_workspace_folder_produces_cd_prefix(self):
         config = CodespacesConfig(workspace_folder="/workspaces/odsp-web")
-        assert config.effective_acp_command == "cd /workspaces/odsp-web && copilot --acp --stdio"
+        assert config.effective_acp_command == (
+            "cd /workspaces/odsp-web && copilot --acp --stdio --allow-all-tools"
+        )
 
     def test_explicit_acp_command_wins(self):
         config = CodespacesConfig(
