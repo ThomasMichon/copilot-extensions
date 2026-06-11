@@ -2133,8 +2133,10 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     print(f"{'Worktree ID':<50} {'State':<12} {'Age':<12} Path")
     print(f"{'─'*48:<50} {'─'*10:<12} {'─'*10:<12} {'─'*30}")
 
-    # Fetch once for accurate classification
-    git_ops.fetch(repo.remote, cwd=repo.anchor)
+    # Fetch once for accurate classification (skip gracefully if there is no
+    # remote -- a local-only repo must not crash cleanup).
+    if git_ops.has_remote(repo.remote, cwd=repo.anchor):
+        git_ops.fetch(repo.remote, cwd=repo.anchor)
     upstream = f"{repo.remote}/{repo.default_branch}"
 
     # Scan for live Copilot sessions and mux sessions

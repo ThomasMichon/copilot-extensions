@@ -132,3 +132,41 @@ class TestHeadlessConfig:
         self._write(cfgfile)
         conf = cfg.load_config(cfgfile)
         assert conf.headless is False
+
+
+# ---------------------------------------------------------------------------
+# find_machine_entry -- hostnames are case-insensitive
+# ---------------------------------------------------------------------------
+
+class TestFindMachineEntry:
+    def _entries(self):
+        return {
+            "CPC-tmich-OIXUI": cfg.MachineEntry(
+                key="CPC-tmich-OIXUI",
+                display_name="Dev Box",
+                environment="Windows 11",
+            ),
+        }
+
+    def test_exact_key(self):
+        e = self._entries()
+        assert cfg.find_machine_entry(e, "CPC-tmich-OIXUI") is not None
+
+    def test_lowercased_key_matches(self):
+        # register probes the hostname lowercased; it must still match a
+        # mixed-case machines.yaml key.
+        e = self._entries()
+        assert cfg.find_machine_entry(e, "cpc-tmich-oixui") is not None
+
+    def test_alias_case_insensitive(self):
+        e = {
+            "host1": cfg.MachineEntry(
+                key="host1", display_name="H1", environment="x",
+                alias="MyBox",
+            ),
+        }
+        assert cfg.find_machine_entry(e, "mybox") is not None
+
+    def test_no_match_returns_none(self):
+        assert cfg.find_machine_entry(self._entries(), "other") is None
+

@@ -14,6 +14,7 @@ import logging
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
@@ -106,14 +107,46 @@ class AgentProcess:
         return b""
 
     async def kill(self) -> None:
-        """Terminate the subprocess."""
-        if self.alive:
+        """Terminate the subprocess and its entire child tree.
+
+        ``proc.terminate()`` only reaps the direct child -- on Windows that is
+        the ``cmd.exe`` batch wrapper, which orphans the ``pwsh -> copilot`` (or
+        ``python -> ssh``) tree beneath it, leaving processes that hold the
+        worktree directory open. Kill the whole tree instead.
+        """
+        if not self.alive:
+            return
+        pid = self.proc.pid
+        if sys.platform == "win32":
             try:
-                self.proc.terminate()
-                with asyncio.timeout(5):
-                    await self.proc.wait()
-            except (TimeoutError, ProcessLookupError):
+                killer = await asyncio.create_subprocess_exec(
+                    "taskkill", "/PID", str(pid), "/T", "/F",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                async with asyncio.timeout(5):
+                    await killer.wait()
+            except (TimeoutError, OSError, ProcessLookupError):
+                pass
+        else:
+            # POSIX: the agent spawns use start_new_session, so the child is a
+            # process-group leader -- signal the whole group.
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                try:
+                    self.proc.terminate()
+                except ProcessLookupError:
+                    pass
+        # Reap the direct child handle.
+        try:
+            async with asyncio.timeout(5):
+                await self.proc.wait()
+        except (TimeoutError, ProcessLookupError):
+            try:
                 self.proc.kill()
+            except ProcessLookupError:
+                pass
 
 
 def _wrap_batch_for_windows(
@@ -296,6 +329,7 @@ async def spawn_local(target: SpawnTarget) -> AgentProcess:
         cwd=work_dir or None,
         env=env,
         creationflags=_creation_flags(),
+        start_new_session=(sys.platform != "win32"),
     )
 
     return AgentProcess(proc, target)
@@ -457,6 +491,7 @@ async def spawn_raw(target: SpawnTarget) -> AgentProcess:
         stderr=asyncio.subprocess.PIPE,
         env=env,
         creationflags=_creation_flags(),
+        start_new_session=(sys.platform != "win32"),
     )
 
     return AgentProcess(proc, target)
