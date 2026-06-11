@@ -1,7 +1,10 @@
 """Tests for the container: resolver spawn-command construction.
 
 Critical security property: the forwarded GH_TOKEN must NEVER appear in argv
-(it is passed by name via -e GH_TOKEN and supplied through the process env).
+or in the SpawnTarget agent-bridge persists. The resolver returns the
+``agent-containers exec --stdio <name>`` wrapper (no token); the wrapper fetches
+the token at spawn time. ``build_spawn_command`` (used inside the wrapper)
+references the token by name only (``-e GH_TOKEN``).
 """
 
 from __future__ import annotations
@@ -10,7 +13,11 @@ import asyncio
 import sys
 import types
 
-from agent_containers.resolver import ContainerResolver, build_spawn_command
+from agent_containers.resolver import (
+    ContainerResolver,
+    build_spawn_command,
+    build_wrapper_command,
+)
 
 
 def test_build_spawn_command_forwards_token_by_name():
@@ -29,6 +36,14 @@ def test_build_spawn_command_no_token():
     assert "-e" not in cmd
 
 
+def test_build_wrapper_command():
+    cmd = build_wrapper_command("odsp-web-1")
+    assert cmd[-3:] == ["exec", "--stdio", "odsp-web-1"]
+    # no docker / token details leak into the wrapper command
+    assert "docker" not in cmd
+    assert "GH_TOKEN" not in cmd
+
+
 def _stub_agent_bridge(monkeypatch):
     """Provide a minimal fake agent_bridge.transport.SpawnTarget."""
     mod = types.ModuleType("agent_bridge")
@@ -45,7 +60,7 @@ def _stub_agent_bridge(monkeypatch):
     return SpawnTarget
 
 
-def test_resolve_builds_command_target(monkeypatch):
+def test_resolve_returns_wrapper_without_token(monkeypatch):
     from agent_containers import resolver as r
 
     _stub_agent_bridge(monkeypatch)
@@ -55,13 +70,19 @@ def test_resolve_builds_command_target(monkeypatch):
         lambda config, name: types.SimpleNamespace(fleet=None),
     )
     monkeypatch.setattr(r, "get_lease", lambda name: None)
-    monkeypatch.setattr(r, "host_gh_token", lambda: "SECRET-TOKEN")
+    # If resolve() ever called host_gh_token, this would put a token in the
+    # target -- make it explode so the test fails loudly if that regresses.
+    monkeypatch.setattr(
+        r, "host_gh_token",
+        lambda: (_ for _ in ()).throw(AssertionError("resolve must not fetch token")),
+    )
 
     target = asyncio.run(ContainerResolver().resolve("odsp-web-1"))
     assert target.type == "command"
-    assert target.env.get("GH_TOKEN") == "SECRET-TOKEN"
-    # token only in env, never in the command args
-    assert not any("SECRET-TOKEN" in part for part in target.spawn_command)
+    # wrapper command, NOT docker directly
+    assert target.spawn_command[-3:] == ["exec", "--stdio", "odsp-web-1"]
+    # no token persisted anywhere on the target
+    assert not getattr(target, "env", {})
     assert "container" == ContainerResolver().prefix
 
 

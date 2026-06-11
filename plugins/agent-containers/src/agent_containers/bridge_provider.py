@@ -1,11 +1,10 @@
 """Bridge provider -- push fleet containers to agent-bridge as provider agents.
 
 This is the optional *push* model (parallel to agent-codespaces). The primary
-mechanism is the on-demand ``container:`` namespace resolver in ``resolver.py``,
-which fetches the host ``gh`` token at resolve time. The push model registers
-static ``cmd-…`` agents whose ``docker exec`` command forwards ``GH_TOKEN`` by
-name (``-e GH_TOKEN``); for that path to authenticate, the agent-bridge process
-must itself have ``GH_TOKEN`` in its environment.
+mechanism is the on-demand ``container:`` namespace resolver in ``resolver.py``.
+Both paths spawn the same ``agent-containers exec --stdio <name>`` transport
+wrapper, which fetches the host ``gh`` token at spawn time -- so the token is
+never embedded in a registration payload, a SpawnTarget, or a log.
 
 Usage:
     agent-containers bridge register
@@ -24,7 +23,7 @@ from typing import Any
 
 from .config import load_config
 from .lifecycle import list_containers
-from .resolver import build_spawn_command
+from .resolver import build_wrapper_command
 
 log = logging.getLogger("agent-containers")
 
@@ -54,16 +53,7 @@ def build_agent_configs() -> list[dict[str, Any]]:
     config = load_config()
     agents = []
     for c in list_containers(config):
-        fleet = config.fleets.get(c.fleet or "")
-        workspace = (fleet.workspace_folder if fleet else None) or config.workspace_folder
-        user = (fleet.exec_user if fleet else None) or config.exec_user
-        acp_command = config.effective_acp_command(
-            workspace_folder=workspace,
-            acp_command=(fleet.acp_command if fleet else None),
-        )
-        spawn_cmd = build_spawn_command(
-            c.name, user, acp_command, config.forward_gh_token
-        )
+        spawn_cmd = build_wrapper_command(c.name)
         agent_name = f"ctr-{c.name}".lower()[:64]
         repo = c.repo or (c.fleet or "")
         agents.append({

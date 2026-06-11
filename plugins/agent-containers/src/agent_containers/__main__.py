@@ -201,10 +201,37 @@ def _cmd_leases() -> int:
 
 
 def _cmd_exec(args: argparse.Namespace) -> int:
-    """Run the ACP launch command in a container (manual transport probe)."""
+    """Transport wrapper: exec a Copilot ACP agent into a container.
+
+    This is what agent-bridge spawns for a ``container:`` agent. It resolves the
+    container's per-fleet settings, fetches the host ``gh`` token at spawn time
+    (so it is never persisted in a SpawnTarget), and runs ``docker exec -i``
+    with the token injected via the process environment.
+
+    With ``--stdio`` the wrapper explicitly *pumps* bytes between its own
+    stdin/stdout and the child's pipes (threaded ``os.read``/``write``). We do
+    NOT rely on fd inheritance: under ``CREATE_NO_WINDOW`` on Windows a child
+    spawned with inherited pipe handles does not reliably receive them, which
+    silently breaks the ACP channel. Without ``--stdio`` the child inherits our
+    stdio for interactive/manual use.
+    """
+    from .lifecycle import get_container
+
     config = load_config()
-    user = config.exec_user
-    acp_command = config.effective_acp_command()
+    info = None
+    try:
+        info = get_container(config, args.name)
+    except RuntimeError as exc:
+        log.warning("Container lookup failed (%s); using global defaults", exc)
+    fleet = config.fleets.get(info.fleet or "") if info and info.fleet else None
+
+    user = (fleet.exec_user if fleet else None) or config.exec_user
+    workspace = (fleet.workspace_folder if fleet else None) or config.workspace_folder
+    acp_command = config.effective_acp_command(
+        workspace_folder=workspace,
+        acp_command=(fleet.acp_command if fleet else None),
+    )
+
     forward = config.forward_gh_token
     env = os.environ.copy()
     if forward:
@@ -213,10 +240,75 @@ def _cmd_exec(args: argparse.Namespace) -> int:
             env["GH_TOKEN"] = token
         else:
             forward = False
+            log.warning(
+                "forward_gh_token is on but `gh auth token` returned nothing; "
+                "the in-container Copilot CLI may be unauthenticated."
+            )
     spawn_cmd = build_spawn_command(args.name, user, acp_command, forward)
     log.info("exec: %s", " ".join(spawn_cmd))
-    proc = subprocess.run(spawn_cmd, env=env, creationflags=_creation_flags())
-    return proc.returncode
+
+    if not args.stdio:
+        # Interactive / manual: inherit our stdio directly.
+        proc = subprocess.run(spawn_cmd, env=env, creationflags=_creation_flags())
+        return proc.returncode
+
+    return _exec_stdio(spawn_cmd, env)
+
+
+def _exec_stdio(spawn_cmd: list[str], env: dict[str, str]) -> int:
+    """Run the docker exec command, pumping stdio over explicit pipes."""
+    import threading
+
+    proc = subprocess.Popen(
+        spawn_cmd,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        creationflags=_creation_flags(),
+    )
+
+    def _forward_in() -> None:
+        try:
+            in_fd = sys.stdin.buffer.fileno()
+            while True:
+                data = os.read(in_fd, 65536)
+                if not data:
+                    break
+                proc.stdin.write(data)
+                proc.stdin.flush()
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
+
+    def _forward(src, dst) -> None:
+        try:
+            src_fd = src.fileno()
+            while True:
+                data = os.read(src_fd, 65536)
+                if not data:
+                    break
+                dst.write(data)
+                dst.flush()
+        except (OSError, ValueError):
+            pass
+
+    threads = [
+        threading.Thread(target=_forward_in, daemon=True),
+        threading.Thread(target=_forward, args=(proc.stdout, sys.stdout.buffer), daemon=True),
+        threading.Thread(target=_forward, args=(proc.stderr, sys.stderr.buffer), daemon=True),
+    ]
+    for t in threads:
+        t.start()
+    rc = proc.wait()
+    # Let the output pumps drain anything buffered after exit.
+    for t in threads[1:]:
+        t.join(timeout=2)
+    return rc
 
 
 def _cmd_bridge(args: argparse.Namespace) -> int:

@@ -18,10 +18,12 @@ agent-bridge dispatch a Copilot agent into a container over `docker exec`.
   `release` or after a TTL (default 24h). Enforcement is **advisory** — the
   resolver logs but does not block cross-effort dispatch.
 - **`container:` resolver** — `agent-bridge send container:<name> "..."`
-  launches a Copilot ACP agent inside `<name>` via
-  `docker exec -i -e GH_TOKEN -u <user> <name> bash -lc "copilot --acp ..."`.
-  The host `gh auth token` is forwarded as `GH_TOKEN` through the process
-  environment (referenced by name in argv, so it is never logged).
+  spawns the `agent-containers exec --stdio <name>` transport wrapper, which
+  runs `docker exec -i -e GH_TOKEN -u <user> <name> bash -lc "copilot --acp ..."`.
+  The wrapper fetches the host `gh auth token` at spawn time and injects it via
+  the process environment (referenced by name in argv). Because the token is
+  fetched inside the wrapper, it is **never** placed in the SpawnTarget that
+  agent-bridge persists to its SQLite DB, nor in any log.
 
 ## CLI
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import subprocess
 import sys
 from typing import TYPE_CHECKING
@@ -62,7 +63,11 @@ def host_gh_token() -> str | None:
 def build_spawn_command(
     container: str, user: str, acp_command: str, forward_token: bool
 ) -> list[str]:
-    """Build the ``docker exec`` spawn command (token referenced by name)."""
+    """Build the ``docker exec`` spawn command (token referenced by name).
+
+    Used by the ``agent-containers exec`` transport wrapper (see __main__),
+    NOT returned directly to agent-bridge.
+    """
     cmd = ["docker", "exec", "-i"]
     if forward_token:
         # Reference by name only -- value comes from the process env, so it is
@@ -70,6 +75,25 @@ def build_spawn_command(
         cmd += ["-e", "GH_TOKEN"]
     cmd += ["-u", user, container, "bash", "-lc", acp_command]
     return cmd
+
+
+def _find_agent_containers_cmd() -> list[str]:
+    """Locate the agent-containers CLI used as the transport wrapper."""
+    which = shutil.which("agent-containers")
+    if which:
+        return [which]
+    return [sys.executable, "-m", "agent_containers"]
+
+
+def build_wrapper_command(name: str) -> list[str]:
+    """Build the spawn command agent-bridge runs for a ``container:`` agent.
+
+    Delegates to ``agent-containers exec --stdio <name>`` rather than docker
+    directly. The wrapper fetches the host ``gh`` token at spawn time and
+    injects it into the container's environment, so the token NEVER lands in
+    the SpawnTarget (which agent-bridge persists to its SQLite DB) or in any log.
+    """
+    return [*_find_agent_containers_cmd(), "exec", "--stdio", name]
 
 
 class ContainerResolver:
@@ -102,29 +126,13 @@ class ContainerResolver:
             )
 
         fleet = config.fleets.get(info.fleet or "")
-        workspace = (fleet.workspace_folder if fleet else None) or config.workspace_folder
         user = (fleet.exec_user if fleet else None) or config.exec_user
-        acp_command = config.effective_acp_command(
-            workspace_folder=workspace,
-            acp_command=(fleet.acp_command if fleet else None),
-        )
 
-        env: dict[str, str] = {}
-        forward = config.forward_gh_token
-        if forward:
-            token = await asyncio.to_thread(host_gh_token)
-            if token:
-                env["GH_TOKEN"] = token
-            else:
-                forward = False
-                log.warning(
-                    "forward_gh_token is on but `gh auth token` returned nothing; "
-                    "the in-container Copilot CLI may be unauthenticated."
-                )
-
-        spawn_cmd = build_spawn_command(name, user, acp_command, forward)
+        # Spawn the transport wrapper, not docker directly. The wrapper fetches
+        # the gh token at spawn time, keeping it out of the persisted SpawnTarget.
+        spawn_cmd = build_wrapper_command(name)
         log.info("Resolved container:%s -> %s", name, " ".join(spawn_cmd))
-        return SpawnTarget(type="command", spawn_command=spawn_cmd, env=env, user=user)
+        return SpawnTarget(type="command", spawn_command=spawn_cmd, user=user)
 
     async def list(self) -> list[NamespaceAgentInfo]:
         """List fleet containers as namespace agent info."""
