@@ -299,7 +299,11 @@ foreach ($name in @('default-setup.ps1', 'default-setup.sh')) {
 
 if ($env:OS -eq 'Windows_NT') {
     $stubPath = Join-Path $LocalBin 'agent-worktrees.cmd'
-    $stubContent = "@echo off`r`nset `"PYTHONUTF8=1`"`r`nset `"PYTHONPATH=%USERPROFILE%\.agent-worktrees\lib;%PYTHONPATH%`"`r`n`"%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe`" -m agent_worktrees %*"
+    # Must stay newline-normalized identical to installer.py deploy_binstubs
+    # wm_content and bin/agent-worktrees.cmd -- register/update run through this
+    # stub and then rewrite it via deploy_binstubs; divergent content corrupts
+    # cmd.exe's mid-run byte-offset read (issue #13).
+    $stubContent = "@echo off`r`nset `"PYTHONUTF8=1`"`r`nset `"PYTHON=%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe`"`r`nset `"PYTHONPATH=%USERPROFILE%\.agent-worktrees\lib`"`r`n`"%PYTHON%`" -m agent_worktrees %*`r`nexit /b %ERRORLEVEL%`r`n"
     [System.IO.File]::WriteAllText($stubPath, $stubContent)
     Write-Ok "Binstub: $stubPath"
 } else {

@@ -492,14 +492,14 @@ function Deploy-Binstub {
 
     $content = @"
 @echo off
+set "PYTHONUTF8=1"
 set "WORKTREE_PROJECT=$ProjectName"
 set "_PY=%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe"
-if exist "%_PY%" (
-    set "PYTHONPATH=%USERPROFILE%\.agent-worktrees\lib"
-    set "PYTHONUTF8=1"
-    "%_PY%" -m agent_worktrees %*
-    exit /b %ERRORLEVEL%
-)
+if not exist "%_PY%" goto :_aw_fallback
+set "PYTHONPATH=%USERPROFILE%\.agent-worktrees\lib"
+"%_PY%" -m agent_worktrees %*
+exit /b %ERRORLEVEL%
+:_aw_fallback
 rem Fallback: launch session directly (venv missing / recovery)
 "%USERPROFILE%\.agent-worktrees\bin\launch-session.cmd" %*
 exit /b %ERRORLEVEL%
@@ -1192,12 +1192,21 @@ function Deploy-Shortcuts {
 
     [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
 
-    # Deploy tool binstubs
+    # Deploy tool binstubs.
+    # Skip the copy when the on-disk content already matches (newline-normalized):
+    # register/adopt run `install.ps1 update` as a subprocess while the global
+    # agent-worktrees.cmd stub is executing. Overwriting the running stub with a
+    # different-length file corrupts cmd.exe's byte-offset read (issue #13). The
+    # stub content is unified across generators, so this copy is normally a no-op.
     foreach ($stub in @('agent-worktrees.cmd')) {
         $src = Join-Path $PluginDir "bin\$stub"
         $dst = Join-Path $LocalBin $stub
         if (Test-Path $src) {
-            Copy-Item $src $dst -Force
+            $srcNorm = ([System.IO.File]::ReadAllText($src)) -replace "`r`n", "`n" -replace "`r", "`n"
+            $dstNorm = if (Test-Path $dst) { ([System.IO.File]::ReadAllText($dst)) -replace "`r`n", "`n" -replace "`r", "`n" } else { $null }
+            if ($srcNorm -cne $dstNorm) {
+                Copy-Item $src $dst -Force
+            }
         }
     }
     Write-ServiceOk "Shortcuts deployed to $LocalBin (targeting wt.exe profiles)"
