@@ -167,6 +167,7 @@ agent name: "codespace:my-cs"
               v
     NamespaceResolver (ABC)
     +-- CodespaceResolver    (agent-codespaces package)
+    +-- ContainerResolver    (agent-containers package)
     +-- AdminResolver        (built-in)
 ```
 
@@ -175,6 +176,7 @@ agent name: "codespace:my-cs"
 | Prefix | Resolver | Source | Description |
 |--------|----------|--------|-------------|
 | `codespace:` | `CodespaceResolver` | `agent-codespaces` package | Queries `gh codespace list`, builds SpawnTargets via `agent-codespaces ssh --stdio` |
+| `container:` | `ContainerResolver` | `agent-containers` package | Queries `docker ps`, builds SpawnTargets via `docker exec -i` into local dev containers (GH_TOKEN forwarded by name) |
 | `admin:` | `AdminResolver` | Built-in (`admin_resolver.py`) | Wraps local agents in elevation (gsudo / sudo -A) |
 
 ### NamespaceResolver Interface
