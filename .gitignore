@@ -10,3 +10,9 @@ build/
 .venv/
 .pytest_cache/
 .ruff_cache/
+
+# uv materializes a lockfile on `uv run`/`uv sync`. Plugins that intentionally
+# do NOT pin a lockfile must ignore it so it never dirties a worktree and
+# blocks push-changes (#28). agent-bridge tracks its own uv.lock on purpose.
+/plugins/agent-codespaces/uv.lock
+/plugins/agent-worktrees/uv.lock

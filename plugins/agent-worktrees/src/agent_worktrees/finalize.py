@@ -159,9 +159,12 @@ def push_changes(
         # 2. Dirty check
         wt_exists = Path(worktree_path).exists()
         if wt_exists and not git_ops.is_clean(cwd=worktree_path):
+            dirty = git_ops.get_dirty_files(cwd=worktree_path)
+            detail = "\n".join(f"    {ln}" for ln in dirty)
             output.err(
                 "Working tree has uncommitted changes. "
-                "Commit or stash them before pushing."
+                "Commit or stash them before pushing:\n"
+                f"{detail}"
             )
             return False
 

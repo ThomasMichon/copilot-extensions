@@ -6,8 +6,12 @@ error handling, explicit cwd, and machine-readable output.
 
 from __future__ import annotations
 
+import base64
+import functools
 import os
 import platform
+import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from enum import Enum
@@ -60,14 +64,27 @@ def resolve_to_anchor(repo_path: Path) -> Path:
     return repo_path
 
 
+def _redact_args(cmd: list[str]) -> list[str]:
+    """Redact any injected credential header so tokens never reach logs/errors."""
+    out: list[str] = []
+    for a in cmd:
+        if a.startswith("http.extraheader="):
+            out.append("http.extraheader=<redacted>")
+        else:
+            out.append(a)
+    return out
+
+
 class GitError(Exception):
     """A git command failed."""
 
     def __init__(self, cmd: list[str], returncode: int, stderr: str) -> None:
-        self.cmd = cmd
+        self.cmd = _redact_args(cmd)
         self.returncode = returncode
         self.stderr = stderr
-        super().__init__(f"git {' '.join(cmd[1:])} failed (rc={returncode}): {stderr}")
+        super().__init__(
+            f"git {' '.join(self.cmd[1:])} failed (rc={returncode}): {stderr}"
+        )
 
 
 def git(
@@ -339,8 +356,8 @@ def has_remote(remote: str, *, cwd: str | Path) -> bool:
 
 
 def fetch(remote: str, *, cwd: str | Path) -> None:
-    """Fetch from a remote."""
-    git("fetch", remote, "--quiet", cwd=cwd)
+    """Fetch from a remote (auto-authenticating cross-account remotes; #29)."""
+    git(*_auth_config_args(remote, cwd=cwd), "fetch", remote, "--quiet", cwd=cwd)
 
 
 def rebase(onto: str, *, cwd: str | Path) -> bool:
@@ -376,9 +393,88 @@ def merge_squash(branch: str, worktree_id: str, *, cwd: str | Path) -> bool:
 
 
 def push(remote: str, branch: str, *, cwd: str | Path) -> bool:
-    """Push a branch to remote. Returns True on success."""
-    result = git("push", remote, branch, "--quiet", cwd=cwd, check=False)
+    """Push a branch to remote. Returns True on success.
+
+    Auto-authenticates when the remote is owned by a different ``gh`` account
+    than the active one, without persisting a token in ``.git/config`` (#29).
+    """
+    result = git(
+        *_auth_config_args(remote, cwd=cwd),
+        "push", remote, branch, "--quiet",
+        cwd=cwd, check=False,
+    )
     return result.returncode == 0
+
+
+# --- Cross-account authentication (#29) -------------------------------------
+#
+# push-changes / finalize run plain git push/fetch against ``origin``. When the
+# repo is owned by a *different* GitHub account than the active ``gh`` account
+# (e.g. a personal-account-owned repo while the active account is a work
+# account), a plain push 403s. We resolve the owner from the remote URL and, if
+# a ``gh`` account for that owner is authenticated, inject its token as a
+# one-shot HTTP auth header -- never writing the token to ``.git/config``.
+#
+# For org-owned repos the owner is not a ``gh`` *account*, so ``gh auth token
+# --user <org>`` fails and we transparently fall back to default git behavior.
+
+def _remote_url(remote: str, *, cwd: str | Path) -> str | None:
+    """Return the configured URL for *remote*, or None."""
+    result = git("remote", "get-url", remote, cwd=cwd, check=False)
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _parse_github_owner(url: str) -> str | None:
+    """Extract the owner from a github.com remote URL (https or ssh form)."""
+    url = url.strip()
+    m = re.match(r"https?://[^/]*github\.com/([^/]+)/", url)
+    if m:
+        return m.group(1)
+    m = re.match(r"(?:ssh://)?git@[^:/]*github\.com[:/]([^/]+)/", url)
+    if m:
+        return m.group(1)
+    return None
+
+
+@functools.cache
+def _gh_token_for_owner(owner: str) -> str | None:
+    """Return a ``gh`` token for the GitHub account *owner*, or None.
+
+    Cached per-owner so a push/fetch pair makes at most one ``gh`` call.
+    """
+    if not owner or shutil.which("gh") is None:
+        return None
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token", "--user", owner],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _auth_config_args(remote: str, *, cwd: str | Path) -> list[str]:
+    """Build ``-c http.extraheader=...`` args to auth as the remote's owner.
+
+    Returns ``[]`` when no override is needed or possible (non-GitHub remote,
+    ``gh`` unavailable, or owner is not an authenticated ``gh`` account).
+    """
+    url = _remote_url(remote, cwd=cwd)
+    if not url:
+        return []
+    owner = _parse_github_owner(url)
+    if not owner:
+        return []
+    token = _gh_token_for_owner(owner)
+    if not token:
+        return []
+    cred = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return ["-c", f"http.extraheader=AUTHORIZATION: basic {cred}"]
 
 
 def ref_exists(ref: str, *, cwd: str | Path) -> bool:
