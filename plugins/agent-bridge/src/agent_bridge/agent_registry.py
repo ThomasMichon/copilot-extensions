@@ -424,6 +424,20 @@ def _register_namespace_resolvers(resolver: AgentResolver) -> None:
             exc_info=True,
         )
 
+    # container: -- local Docker dev containers (agent-containers package)
+    try:
+        from agent_containers.resolver import ContainerResolver
+
+        resolver.register_namespace_resolver(ContainerResolver())
+        log.info("Registered container: namespace resolver (agent-containers)")
+    except ImportError:
+        log.debug("agent-containers not installed -- container: namespace unavailable")
+    except Exception:
+        log.warning(
+            "Failed to register container: namespace resolver",
+            exc_info=True,
+        )
+
     # admin: -- elevated execution (built-in)
     try:
         from .admin_resolver import AdminResolver

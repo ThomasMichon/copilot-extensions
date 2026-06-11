@@ -165,20 +165,20 @@ _ssh_manager_installed() {
 # agent-bridge imports at startup. Package is installed for IMPORT ONLY -- the
 # canonical agent-codespaces CLI binstub is owned by ~/.agent-codespaces via its
 # own installer. A missing sibling is non-fatal but WARNED loudly, because it
-# disables codespace support.
+# disables that sibling's namespace resolver / relay.
 #   $1 = "reinstall" to force reinstall, empty for fresh install
 _install_sibling_plugins() {
     local mode="${1:-}"
     local plugins_root
     plugins_root="$(cd "$PLUGIN_DIR/.." && pwd)"
-    local siblings=(agent-codespaces)
+    local siblings=(agent-codespaces agent-containers)
     for name in "${siblings[@]}"; do
         local sib_dir="$plugins_root/$name"
         if [[ ! -f "$sib_dir/pyproject.toml" ]]; then
             # Check marketplace vendor layout
             sib_dir="$PLUGIN_DIR/plugins/$name"
             if [[ ! -f "$sib_dir/pyproject.toml" ]]; then
-                _warn "Sibling plugin '$name' not found -- codespace support (codespace: resolver + credential relay) will be UNAVAILABLE."
+                _warn "Sibling plugin '$name' not found -- its namespace resolver / relay will be UNAVAILABLE."
                 _warn "  Install it from the marketplace: copilot plugin install $name@copilot-extensions"
                 continue
             fi
@@ -189,13 +189,13 @@ _install_sibling_plugins() {
                     "$sib_dir" --quiet 2>/dev/null; then
                 _ok "Sibling plugin (relay import): $name"
             else
-                _warn "Sibling plugin $name install failed -- codespace support will be UNAVAILABLE."
+                _warn "Sibling plugin $name install failed -- its namespace resolver / relay will be UNAVAILABLE."
             fi
         else
             if uv pip install --python "$VENV_DIR/bin/python" "$sib_dir" --quiet 2>/dev/null; then
                 _ok "Sibling plugin (relay import): $name"
             else
-                _warn "Sibling plugin $name install failed -- codespace support will be UNAVAILABLE."
+                _warn "Sibling plugin $name install failed -- its namespace resolver / relay will be UNAVAILABLE."
             fi
         fi
     done

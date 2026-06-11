@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-containers"
+version = "0.1.0"
+description = "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+agent-containers = "agent_containers.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.ruff.lint]
+# S603/S607: subprocess calls to docker/gh CLI are intentional.
+# S310: urllib.request.urlopen targets the fixed localhost agent-bridge URL
+#       via constructed Request objects (no untrusted scheme).
+ignore = ["S603", "S607", "S310"]
+select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]  # asserts are expected in tests
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

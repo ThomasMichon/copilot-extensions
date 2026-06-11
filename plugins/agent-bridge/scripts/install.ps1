@@ -142,14 +142,14 @@ function Install-SiblingPlugins {
         [switch]$Reinstall
     )
     $pluginsRoot = Split-Path $PluginDir
-    $siblings = @('agent-codespaces')
+    $siblings = @('agent-codespaces', 'agent-containers')
     foreach ($name in $siblings) {
         $sibDir = Join-Path $pluginsRoot $name
         if (-not (Test-Path (Join-Path $sibDir 'pyproject.toml'))) {
             # Also check marketplace vendor layout
             $sibDir = Join-Path $PluginDir "plugins\$name"
             if (-not (Test-Path (Join-Path $sibDir 'pyproject.toml'))) {
-                Write-Warn "Sibling plugin '$name' not found -- codespace support (codespace: resolver + credential relay) will be UNAVAILABLE."
+                Write-Warn "Sibling plugin '$name' not found -- its namespace resolver / relay will be UNAVAILABLE."
                 Write-Warn "  Install it from the marketplace: copilot plugin install $name@copilot-extensions"
                 continue
             }
@@ -168,7 +168,7 @@ function Install-SiblingPlugins {
         if ($result -eq 0) {
             Write-Ok "Sibling plugin (relay import): $name"
         } else {
-            Write-Warn "Sibling plugin $name install failed -- codespace support will be UNAVAILABLE."
+            Write-Warn "Sibling plugin $name install failed -- its namespace resolver / relay will be UNAVAILABLE."
             if ($out) { Write-Host ($out | Out-String) }
         }
     }
