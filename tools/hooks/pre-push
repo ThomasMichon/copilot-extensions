@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# pre-push hook: enforce the install contract before pushing.
+# Enable with:  git config core.hooksPath tools/hooks
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PY="$(command -v python3 || command -v python || true)"
+if [[ -z "$PY" ]]; then
+    echo "pre-push: python not found -- skipping install-contract check" >&2
+    exit 0
+fi
+exec "$PY" "$ROOT/tools/check-install-contract.py"

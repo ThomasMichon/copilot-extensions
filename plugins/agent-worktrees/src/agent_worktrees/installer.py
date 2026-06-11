@@ -93,26 +93,77 @@ def check_prereqs() -> list[str]:
 
 
 def deploy_package(repo_dir: str | Path) -> bool:
-    """Copy the agent_worktrees package from repo to install_dir/lib/.
+    """Install the agent_worktrees package into the managed venv via uv
+    (non-editable), then stamp build info into the installed site-packages copy.
 
-    Returns True on success.
+    Replaces the old file-copy-to-lib + PYTHONPATH model. The venv must already
+    exist (see ``create_venv``).  Returns True on success.
     """
     src = find_package_source(repo_dir)
     if not src.exists():
         output.err(f"Package source not found at {src}")
         return False
+    plugin_dir = src.parent.parent  # .../plugins/agent-worktrees
 
-    dst = lib_dir() / "agent_worktrees"
+    python = _venv_python(venv_dir())
+    if not python.exists():
+        output.err("Venv Python missing -- create the venv first")
+        return False
 
-    # Clean previous deployment
-    if dst.exists():
-        shutil.rmtree(dst)
+    try:
+        subprocess.run(
+            ["uv", "pip", "install", "--python", str(python),
+             "--reinstall-package", "agent-worktrees", str(plugin_dir), "--quiet"],
+            capture_output=True, text=True, check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        output.err(f"Package install failed: {e.stderr}")
+        return False
 
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(src, dst)
-    stamp_build_info(dst, repo_dir)
-    output.ok(f"Package deployed to {dst}")
+    # Retire the legacy file-copy package dir FIRST, so a stale ambient
+    # PYTHONPATH=.../lib cannot make the resolution below pick the old copy.
+    legacy = lib_dir()
+    if legacy.exists():
+        shutil.rmtree(legacy, ignore_errors=True)
+
+    pkg_dir = installed_package_dir(python)
+    if pkg_dir:
+        stamp_build_info(pkg_dir, repo_dir)
+    else:
+        output.warn("Could not locate installed agent_worktrees -- build info not stamped")
+
+    output.ok("Package installed into venv")
     return True
+
+
+def installed_package_dir(python: Path) -> Path | None:
+    """Return the site-packages dir of the installed agent_worktrees, or None.
+
+    Clears PYTHONPATH for the probe so a stale ``PYTHONPATH=.../lib`` cannot
+    make the import resolve to a retired file-copy package.
+    """
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    try:
+        r = subprocess.run(
+            [str(python), "-c",
+             "import agent_worktrees, os; print(os.path.dirname(agent_worktrees.__file__))"],
+            capture_output=True, text=True, check=True, env=env,
+        )
+        d = r.stdout.strip()
+        return Path(d) if d else None
+    except Exception:
+        return None
+
+
+def _source_kind(plugin_path: str) -> str:
+    """Infer the runtime footprint source from the installer's location.
+
+    Vendored under the Copilot CLI installed-plugins dir => marketplace;
+    anything else (a git checkout) => local.
+    """
+    if "/.copilot/installed-plugins/" in plugin_path.replace("\\", "/"):
+        return "marketplace"
+    return "local"
 
 
 def create_venv() -> bool:
@@ -139,16 +190,7 @@ def create_venv() -> bool:
             output.err(f"Failed to create venv: {e.stderr}")
             return False
 
-    # Install pyyaml into the venv
-    try:
-        subprocess.run(
-            ["uv", "pip", "install", "--python", str(_venv_python(venv)), "pyyaml"],
-            capture_output=True, text=True, check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        output.err(f"Failed to install pyyaml: {e.stderr}")
-        return False
-
+    # Dependencies (pyyaml, ...) are installed with the package from pyproject.
     output.ok(f"Venv created at {venv}")
     return True
 
@@ -388,10 +430,9 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
                 "@echo off\r\n"
                 'set "PYTHONUTF8=1"\r\n'
                 f'set "WORKTREE_PROJECT={project}"\r\n'
-                'set "_PY=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe"\r\n'
-                'if not exist "%_PY%" goto :_aw_fallback\r\n'
-                'set "PYTHONPATH=%USERPROFILE%\\.agent-worktrees\\lib"\r\n'
-                '"%_PY%" -m agent_worktrees %*\r\n'
+                'set "_AW=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\agent-worktrees.exe"\r\n'
+                'if not exist "%_AW%" goto :_aw_fallback\r\n'
+                '"%_AW%" %*\r\n'
                 'exit /b %ERRORLEVEL%\r\n'
                 ':_aw_fallback\r\n'
                 'rem Fallback: launch session directly (venv missing / recovery)\r\n'
@@ -404,10 +445,9 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
                 "#!/usr/bin/env bash\n"
                 "export PYTHONUTF8=1\n"
                 f'export WORKTREE_PROJECT="{project}"\n'
-                '_PY="$HOME/.agent-worktrees/.venv/bin/python"\n'
-                'if [[ -x "$_PY" ]]; then\n'
-                '    export PYTHONPATH="$HOME/.agent-worktrees/lib${PYTHONPATH:+:$PYTHONPATH}"\n'
-                '    exec "$_PY" -m agent_worktrees "$@"\n'
+                '_AW="$HOME/.agent-worktrees/.venv/bin/agent-worktrees"\n'
+                'if [[ -x "$_AW" ]]; then\n'
+                '    exec "$_AW" "$@"\n'
                 'fi\n'
                 '# Fallback: launch session directly (venv missing / recovery)\n'
                 'exec "$HOME/.agent-worktrees/bin/launch-session.sh" "$@"\n'
@@ -418,8 +458,8 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
             dst.chmod(0o755)
         output.ok(f"Binstub: {dst}")
 
-    # Unified agent-worktrees command (project-agnostic; routes straight to
-    # the Python CLI). It must NOT require WORKTREE_PROJECT -- global
+    # Unified agent-worktrees command (project-agnostic; routes straight to the
+    # venv console script). It must NOT require WORKTREE_PROJECT -- global
     # subcommands like `register <project>`, `update`, and `--version` run
     # without a project context. The project-specific launchers above are the
     # gating mechanism that sets WORKTREE_PROJECT; this stub stays unconditional.
@@ -434,9 +474,7 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
         wm_content = (
             "@echo off\r\n"
             'set "PYTHONUTF8=1"\r\n'
-            'set "PYTHON=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe"\r\n'
-            'set "PYTHONPATH=%USERPROFILE%\\.agent-worktrees\\lib"\r\n'
-            '"%PYTHON%" -m agent_worktrees %*\r\n'
+            '"%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\agent-worktrees.exe" %*\r\n'
             "exit /b %ERRORLEVEL%\r\n"
         )
         dst = lb / "agent-worktrees.cmd"
@@ -446,9 +484,7 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
         wm_content = (
             "#!/usr/bin/env bash\n"
             "export PYTHONUTF8=1\n"
-            'export PYTHONPATH="$HOME/.agent-worktrees/lib${PYTHONPATH:+:$PYTHONPATH}"\n'
-            'unset PYTHONHOME\n'
-            'exec "$HOME/.agent-worktrees/.venv/bin/python" -m agent_worktrees "$@"\n'
+            'exec "$HOME/.agent-worktrees/.venv/bin/agent-worktrees" "$@"\n'
         )
         dst = lb / "agent-worktrees"
         _write_binstub_if_changed(dst, wm_content)
@@ -459,65 +495,79 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
 
 
 def write_deploy_manifest(repo_dir: str | Path, machine: str) -> None:
-    """Write deploy-manifest.json for provenance tracking."""
-    manifest_path = install_dir() / "deploy-manifest.json"
+    """Write the unified schema_version 3 deploy-manifest.json (atomic).
 
+    Records the runtime source footprint (local checkout vs marketplace),
+    inferred from where this installer source lives.
+    """
+    manifest_path = install_dir() / "deploy-manifest.json"
+    plugin_dir = find_package_source(repo_dir).parent.parent
+    plugin_path = str(plugin_dir)
+    kind = _source_kind(plugin_path)
+
+    version = "0.0.0"
+    pyproject = plugin_dir / "pyproject.toml"
+    if pyproject.exists():
+        try:
+            for line in pyproject.read_text().splitlines():
+                if line.strip().startswith("version"):
+                    version = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+        except Exception:
+            pass
+
+    # Git provenance only applies to a local checkout.
     commit = None
     branch = None
     dirty = False
-    dirty_files: list[str] = []
-
-    try:
-        r = subprocess.run(
-            ["git", "-C", str(repo_dir), "rev-parse", "HEAD"],
-            capture_output=True, text=True,
-        )
-        if r.returncode == 0:
-            commit = r.stdout.strip()
-
-        r = subprocess.run(
-            ["git", "-C", str(repo_dir), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True,
-        )
-        if r.returncode == 0:
-            branch = r.stdout.strip()
-
-        r = subprocess.run(
-            ["git", "-C", str(repo_dir), "status", "--porcelain", "--",
-             "plugins/agent-worktrees/"],
-            capture_output=True, text=True,
-        )
-        if r.returncode == 0 and r.stdout.strip():
-            dirty = True
-            dirty_files = [ln[3:].strip() for ln in r.stdout.splitlines() if ln.strip()]
-    except Exception:
-        pass
+    if kind == "local":
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(repo_dir), "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True,
+            )
+            if r.returncode == 0:
+                commit = r.stdout.strip()
+            r = subprocess.run(
+                ["git", "-C", str(repo_dir), "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True, text=True,
+            )
+            if r.returncode == 0:
+                branch = r.stdout.strip()
+            r = subprocess.run(
+                ["git", "-C", str(repo_dir), "status", "--porcelain", "--",
+                 "plugins/agent-worktrees/"],
+                capture_output=True, text=True,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                dirty = True
+        except Exception:
+            pass
 
     plat = cfg.detect_platform()
-    env_id = f"{machine}-{plat}"
-
-    # Resolve the plugin root directory
-    plugin_source = str(find_package_source(repo_dir).parent.parent)
-
     manifest = {
-        "schema_version": 1,
+        "schema_version": 3,
         "service": "agent-worktrees",
-        "environment": env_id,
-        "commit": commit,
-        "branch": branch,
-        "dirty": dirty,
-        "dirty_files": dirty_files,
-        "git_available": commit is not None,
         "deployed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "deployed_by": env_id,
-        "source_paths": ["plugins/agent-worktrees/"],
-        "installer_path": "plugins/agent-worktrees/scripts/install.ps1",
+        "deployed_by": f"{machine}-{plat}",
+        "source": {
+            "kind": kind,
+            "path": plugin_path.replace("\\", "/"),
+            "repo": "copilot-extensions",
+            "plugin": "agent-worktrees",
+            "version": version,
+            "commit": commit,
+            "branch": branch,
+            "dirty": dirty,
+        },
+        "venv": str(venv_dir()).replace("\\", "/"),
         "runtime": "python",
-        "plugin_source": plugin_source,
     }
 
-    manifest_path.write_text(json.dumps(manifest, indent=2))
-    output.ok(f"Deploy manifest: {manifest_path}")
+    tmp = manifest_path.with_name(manifest_path.name + ".tmp")
+    tmp.write_text(json.dumps(manifest, indent=2))
+    tmp.replace(manifest_path)
+    output.ok(f"Deploy manifest: {manifest_path} (source: {kind})")
 
 
 def show_install_status() -> None:

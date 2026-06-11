@@ -352,43 +352,127 @@ function Test-ScriptSyntax {
     return $true
 }
 
-function Deploy-Package {
-    <# Copy the agent_worktrees Python package to ~/.agent-worktrees/lib/. #>
-    $src = Join-Path $PluginDir 'src\agent_worktrees'
-    $dst = Join-Path $LibDir 'agent_worktrees'
-
-    if (-not (Test-Path $src)) {
-        Write-ServiceErr "Package source not found: $src"
-        return $false
+# === install-contract:v3 source-kind -- keep byte-identical across plugins ===
+# A runtime footprint's source is inferred from where the installer runs.
+# Vendored under the Copilot CLI installed-plugins dir => marketplace;
+# anything else (a git checkout) => local.
+function Get-SourceKind {
+    param([string]$PluginPath)
+    if (($PluginPath -replace '\\', '/') -match '/\.copilot/installed-plugins/') {
+        return 'marketplace'
     }
+    return 'local'
+}
+# === end install-contract:v3 source-kind ===
 
-    # Clean previous deployment
-    if (Test-Path $dst) {
-        Remove-Item $dst -Recurse -Force
-    }
-
-    New-Item -ItemType Directory -Path (Split-Path $dst) -Force | Out-Null
-    Copy-Item $src $dst -Recurse
-
-    # Stamp build info so --version reflects this deployment
-    $buildInfoPath = Join-Path $dst '_build_info.py'
-    $ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    $commit = ''
-    $branch = ''
+function Get-GitInfo {
+    param([string]$Path)
     try {
-        $commit = (git -C (Split-Path $PluginDir -Parent | Split-Path -Parent) rev-parse HEAD 2>$null)
-        $branch = (git -C (Split-Path $PluginDir -Parent | Split-Path -Parent) rev-parse --abbrev-ref HEAD 2>$null)
-    } catch { }
-    if (-not $commit) { $commit = 'unknown' }
-    if (-not $branch) { $branch = 'unknown' }
-    $srcNorm = ($PluginDir -replace '\\', '/')
+        $commit = git -C $Path rev-parse --short HEAD 2>$null
+        $branch = git -C $Path rev-parse --abbrev-ref HEAD 2>$null
+        $dirty = $false
+        if (git -C $Path status --porcelain 2>$null) { $dirty = $true }
+        return @{
+            commit = $(if ($commit) { $commit } else { 'unknown' })
+            branch = $(if ($branch) { $branch } else { 'unknown' })
+            dirty  = $dirty
+        }
+    } catch {
+        return @{ commit = 'unknown'; branch = 'unknown'; dirty = $false }
+    }
+}
+
+function Write-V3Manifest {
+    <# Unified schema_version 3 manifest -- self-contained per plugin. Records
+       the source footprint (local vs marketplace); written atomically. #>
+    $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
+    $pluginPath = $PluginDir.ToString()
+    $kind = Get-SourceKind -PluginPath $pluginPath
     $ver = '0.0.0'
     $pyproj = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyproj) {
-        $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
-        if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*','$1') }
+        $vl = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
+        if ($vl) { $ver = ($vl.Line -replace '.*=\s*"([^"]+)".*','$1') }
     }
-    $buildContent = @"
+    $commit = $null; $branch = $null; $dirty = $false
+    if ($kind -eq 'local') {
+        $g = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $pluginPath))
+        $commit = $g.commit; $branch = $g.branch; $dirty = $g.dirty
+    }
+    $manifest = [ordered]@{
+        schema_version = 3
+        service        = 'agent-worktrees'
+        deployed_at    = (Get-Date -Format 'o')
+        deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
+        source         = [ordered]@{
+            kind    = $kind
+            path    = ($pluginPath -replace '\\', '/')
+            repo    = 'copilot-extensions'
+            plugin  = 'agent-worktrees'
+            version = $ver
+            commit  = $commit
+            branch  = $branch
+            dirty   = $dirty
+        }
+        venv           = ($VenvDir -replace '\\', '/')
+        runtime        = 'python'
+    }
+    $tmp = "$manifestPath.tmp"
+    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
+    Move-Item -Force -Path $tmp -Destination $manifestPath
+    Write-ServiceOk "Deploy manifest written (source: $kind)"
+}
+
+function Deploy-Package {
+    <# Install the agent_worktrees package into the venv via uv (non-editable),
+       then stamp build info into the INSTALLED site-packages copy. Replaces the
+       old file-copy-to-lib + PYTHONPATH model. Requires the venv to exist. #>
+    $pyproj = Join-Path $PluginDir 'pyproject.toml'
+    if (-not (Test-Path $pyproj)) {
+        Write-ServiceErr "Plugin source not found: $PluginDir"
+        return $false
+    }
+
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & uv pip install --python $VenvPython --reinstall-package agent-worktrees "$PluginDir" --quiet 2>&1 | Out-Null
+    $rc = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
+    if ($rc -ne 0) {
+        Write-ServiceErr "Package install failed (exit $rc)"
+        return $false
+    }
+
+    # Retire the legacy file-copy package dir FIRST, so a stale ambient
+    # PYTHONPATH=...\lib cannot make the import below resolve to the old copy
+    # (and so it can't shadow the venv copy at runtime).
+    if (Test-Path $LibDir) {
+        Remove-Item $LibDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    # Stamp build info into the installed copy so --version reflects this deploy.
+    # Clear PYTHONPATH for the resolution so the import resolves to site-packages.
+    $prevPP = $env:PYTHONPATH
+    $env:PYTHONPATH = ''
+    $pkgDir = (& $VenvPython -c "import agent_worktrees, os; print(os.path.dirname(agent_worktrees.__file__))" 2>$null | Out-String).Trim()
+    $env:PYTHONPATH = $prevPP
+    if ($pkgDir) {
+        $ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $repoRoot = Split-Path -Parent (Split-Path -Parent $PluginDir)
+        $commit = ''; $branch = ''
+        try {
+            $commit = (git -C $repoRoot rev-parse HEAD 2>$null)
+            $branch = (git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null)
+        } catch { }
+        if (-not $commit) { $commit = 'unknown' }
+        if (-not $branch) { $branch = 'unknown' }
+        $srcNorm = ($PluginDir -replace '\\', '/')
+        $ver = '0.0.0'
+        if (Test-Path $pyproj) {
+            $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
+            if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*','$1') }
+        }
+        $buildContent = @"
 `"`"`"Build provenance -- auto-generated at deploy time. Do not edit.`"`"`"
 
 from __future__ import annotations
@@ -401,10 +485,13 @@ BUILD_INFO: dict[str, str] = {
     "source": "$srcNorm",
 }
 "@
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($buildInfoPath, $buildContent, $utf8NoBom)
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText((Join-Path $pkgDir '_build_info.py'), $buildContent, $utf8NoBom)
+    } else {
+        Write-ServiceWarn "Could not locate installed agent_worktrees -- build info not stamped"
+    }
 
-    Write-ServiceOk "Package deployed to $dst"
+    Write-ServiceOk "Package installed into venv"
     return $true
 }
 
@@ -445,14 +532,7 @@ prompt = .venv
         }
     }
 
-    # Install pyyaml
-    $result = & uv pip install --python $VenvPython pyyaml 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-ServiceErr "Failed to install pyyaml: $result"
-        return $false
-    }
-
-    Write-ServiceOk "Venv packages OK"
+    Write-ServiceOk "Venv ready"
     return $true
 }
 
@@ -494,10 +574,9 @@ function Deploy-Binstub {
 @echo off
 set "PYTHONUTF8=1"
 set "WORKTREE_PROJECT=$ProjectName"
-set "_PY=%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe"
-if not exist "%_PY%" goto :_aw_fallback
-set "PYTHONPATH=%USERPROFILE%\.agent-worktrees\lib"
-"%_PY%" -m agent_worktrees %*
+set "_AW=%USERPROFILE%\.agent-worktrees\.venv\Scripts\agent-worktrees.exe"
+if not exist "%_AW%" goto :_aw_fallback
+"%_AW%" %*
 exit /b %ERRORLEVEL%
 :_aw_fallback
 rem Fallback: launch session directly (venv missing / recovery)
@@ -1418,9 +1497,9 @@ switch ($Action) {
             Ensure-InstallDir $dir
         }
 
-        # -- Shared runtime --
-        if (-not (Deploy-Package)) { exit 1 }
+        # -- Shared runtime (venv first: package install targets the venv) --
         if (-not (Deploy-Venv)) { exit 1 }
+        if (-not (Deploy-Package)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
         Deploy-CopilotPlugin
         Ensure-CopilotExperimental
@@ -1441,7 +1520,6 @@ switch ($Action) {
             if ($RepoDir) {
                 try {
                     $env:PYTHONUTF8 = '1'
-                    $env:PYTHONPATH = $LibDir
                     $env:WORKTREE_PROJECT = $ProjectName
                     & $VenvPython -m agent_worktrees deploy-instructions --machine $machine 2>&1 | ForEach-Object { Write-Host "  $_" }
                 } catch {
@@ -1450,15 +1528,7 @@ switch ($Action) {
             }
         }
 
-        Write-DeployManifest -InstallDir $InstallDir -ServiceName 'worktree-sessions' `
-            -SourcePaths $DeploySourcePaths -InstallerPath $InstallerRelPath
-
-        # Add runtime + plugin_source fields to manifest
-        $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-        $m = Get-Content $manifestPath -Raw | ConvertFrom-Json
-        $m | Add-Member -NotePropertyName 'runtime' -NotePropertyValue 'python' -Force
-        $m | Add-Member -NotePropertyName 'plugin_source' -NotePropertyValue $PluginDir.ToString() -Force
-        $m | ConvertTo-Json -Depth 4 | Set-Content $manifestPath -Encoding UTF8
+        Write-V3Manifest
 
         Write-Host ""
         Write-ServiceOk "Installation complete"
@@ -1558,13 +1628,16 @@ switch ($Action) {
             Write-ServiceErr "Venv Python missing: $VenvPython"
         }
 
-        # Package
-        $pkgDir = Join-Path $LibDir 'agent_worktrees'
-        if (Test-Path $pkgDir) {
-            Write-ServiceOk "Package deployed: $pkgDir"
+        # Package (installed in the venv)
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & $VenvPython -c 'import agent_worktrees' 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-ServiceOk "Package importable in venv"
         } else {
-            Write-ServiceErr "Package missing: $pkgDir"
+            Write-ServiceErr "Package not importable in venv"
         }
+        $ErrorActionPreference = $prevEAP
 
         # Wrapper
         foreach ($wrapper in @('launch-session.cmd', 'launch-session.ps1')) {
@@ -1687,9 +1760,9 @@ switch ($Action) {
             exit 1
         }
 
-        # -- Shared runtime --
-        if (-not (Deploy-Package)) { exit 1 }
+        # -- Shared runtime (venv first: package install targets the venv) --
         if (-not (Deploy-Venv)) { exit 1 }
+        if (-not (Deploy-Package)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
         Deploy-CopilotPlugin
         Ensure-CopilotExperimental
@@ -1717,7 +1790,6 @@ switch ($Action) {
             if ($RepoDir) {
                 try {
                     $env:PYTHONUTF8 = '1'
-                    $env:PYTHONPATH = $LibDir
                     $env:WORKTREE_PROJECT = $ProjectName
                     & $VenvPython -m agent_worktrees deploy-instructions --machine $updateMachine 2>&1 | ForEach-Object { Write-Host "  $_" }
                 } catch {
@@ -1726,15 +1798,7 @@ switch ($Action) {
             }
         }
 
-        Write-DeployManifest -InstallDir $InstallDir -ServiceName 'worktree-sessions' `
-            -SourcePaths $DeploySourcePaths -InstallerPath $InstallerRelPath
-
-        # Add runtime + plugin_source fields to manifest
-        $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-        $m = Get-Content $manifestPath -Raw | ConvertFrom-Json
-        $m | Add-Member -NotePropertyName 'runtime' -NotePropertyValue 'python' -Force
-        $m | Add-Member -NotePropertyName 'plugin_source' -NotePropertyValue $PluginDir.ToString() -Force
-        $m | ConvertTo-Json -Depth 4 | Set-Content $manifestPath -Encoding UTF8
+        Write-V3Manifest
 
         Write-ServiceOk "Update complete"
     }

@@ -7,3 +7,8 @@
 *.json text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
+
+# Extensionless bash binstubs/launchers must stay LF (run on Linux/WSL).
+plugins/agent-worktrees/bin/agent-worktrees text eol=lf
+plugins/*/scripts/launch-session.sh text eol=lf
+tools/hooks/* text eol=lf

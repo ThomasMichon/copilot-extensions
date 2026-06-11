@@ -9,7 +9,7 @@ if (-not $wt_id -or -not $session_id) { exit 0 }
 $python = "$env:USERPROFILE\.agent-worktrees\.venv\Scripts\python.exe"
 if (-not (Test-Path $python)) { exit 0 }
 
-$env:PYTHONPATH = "$env:USERPROFILE\.agent-worktrees\lib"
+$env:PYTHONPATH = ''  # package is installed in the venv (no lib/ shadow)
 try {
     & $python -m agent_worktrees deregister-session `
         --worktree-id $wt_id `
