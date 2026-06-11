@@ -692,6 +692,21 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             ]
             records = records + finalized_still_present
 
+            # Include pushed worktrees whose directories still exist.
+            # "pushed" is a transient finalization *condition* (content is on
+            # upstream) -- NOT a terminal/completed state.  The worktree may
+            # still have a live session and remains resumable, so it must
+            # appear in the picker.  Session-aware classification surfaces it
+            # as ACTIVE when a live session is detected; otherwise it falls
+            # into the completed bucket like any other fully-upstream tree.
+            pushed_records = tracking.list_records(
+                tracking_path, status_filter="pushed", platform_filter=current_platform,
+            )
+            pushed_still_present = [
+                r for r in pushed_records if Path(r.worktree_path).exists()
+            ]
+            records = records + pushed_still_present
+
             records = [
                 r for r in records
                 if Path(r.worktree_path).exists()
