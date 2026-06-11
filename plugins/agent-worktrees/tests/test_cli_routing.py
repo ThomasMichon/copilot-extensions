@@ -81,6 +81,36 @@ def test_project_flag_sets_env_and_bypasses_help(monkeypatch):
     assert os.environ.get("WORKTREE_PROJECT") == "demo"
 
 
+def test_project_flag_blanks_inherited_worktree_id(monkeypatch):
+    """#25: --project blanks the caller's inherited WORKTREE_ID so worktree
+    resolution falls back to CWD instead of the wrong (cross-project) id."""
+    import os
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setenv("WORKTREE_ID", "caller-session-wt")
+    monkeypatch.setenv("APERTURE_WORKTREE_ID", "caller-session-wt")
+    monkeypatch.setattr(m, "cmd_launch", lambda argv: 0)
+
+    rc = m.main(["--project", "demo", "status"])
+    assert rc == 0
+    assert os.environ.get("WORKTREE_PROJECT") == "demo"
+    assert os.environ.get("WORKTREE_ID") is None
+    assert os.environ.get("APERTURE_WORKTREE_ID") is None
+
+
+def test_bare_invocation_preserves_inherited_worktree_id(monkeypatch):
+    """#25: without --project, a bare invocation still inherits the session's
+    WORKTREE_ID -- the intended 'operate on my current worktree' path."""
+    import os
+    monkeypatch.setenv("WORKTREE_PROJECT", "demo")
+    monkeypatch.setenv("WORKTREE_ID", "keep-me")
+    monkeypatch.setattr(m, "_is_headless_project", lambda: False)
+    monkeypatch.setattr(m, "cmd_launch", lambda argv: 0)
+
+    rc = m.main([])
+    assert rc == 0
+    assert os.environ.get("WORKTREE_ID") == "keep-me"
+
+
 def test_version_works_without_project(monkeypatch, capsys):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     rc = m.main(["--version"])
