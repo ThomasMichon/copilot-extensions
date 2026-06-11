@@ -98,7 +98,7 @@ _install_package_into() {
         _fail "ssh-manager source not found at $SSH_MGR_DIR"
         return 1
     fi
-    uv pip install --python "$py" --reinstall-package ssh-manager "$SSH_MGR_DIR" --quiet || {
+    uv pip install --python "$py" --reinstall-package agent-ssh-manager "$SSH_MGR_DIR" --quiet || {
         _fail "ssh-manager install failed"; return 1; }
     uv pip install --python "$py" --reinstall-package agent-codespaces "$PLUGIN_DIR" --quiet || {
         _fail "agent-codespaces install failed"; return 1; }

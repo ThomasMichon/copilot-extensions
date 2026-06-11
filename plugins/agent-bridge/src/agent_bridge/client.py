@@ -25,13 +25,32 @@ class BridgeClientError(Exception):
         super().__init__(f"HTTP {status}: {detail}")
 
 
+class BridgeConnectionError(Exception):
+    """Raised when the service is unreachable (e.g. mid-restart).
+
+    Unlike the one-shot command path (which exits), the streaming engine
+    catches this and retries -- so a service restart mid-workflow is
+    survivable: the client reconnects and resumes from its acked cursor.
+    """
+
+
 class BridgeClient:
     """Sync HTTP client for the agent-bridge REST API."""
 
-    def __init__(self, base_url: str, token: str, *, timeout: int = 120) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        *,
+        timeout: int = 120,
+        connect_grace: float = 5.0,
+    ) -> None:
         self._base = base_url.rstrip("/")
         self._token = token
         self._timeout = timeout
+        # Grace window (seconds) to retry an initial connection refusal -- the
+        # service may be briefly down mid-restart (stage 1, transient).
+        self._connect_grace = max(0.0, connect_grace)
 
     # -- Factory -------------------------------------------------------------
 
@@ -132,29 +151,45 @@ class BridgeClient:
         if data:
             req.add_header("Content-Type", "application/json")
 
-        try:
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                if resp.status == 204:
-                    return None
-                return json.loads(resp.read().decode())
-        except urllib.error.HTTPError as exc:
+        import time as _time
+
+        deadline = _time.monotonic() + self._connect_grace
+        backoff = 0.25
+        while True:
             try:
-                detail = json.loads(exc.read().decode()).get("detail", str(exc))
-            except Exception:
-                detail = str(exc)
-            raise BridgeClientError(exc.code, detail) from exc
-        except urllib.error.URLError as exc:
-            print(
-                "[FAIL] Cannot connect to agent-bridge at %s\n"
-                "       Is it running? Start it with: agent-bridge start" % self._base,
-                file=sys.stderr,
-            )
-            sys.exit(1)
+                with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                    if resp.status == 204:
+                        return None
+                    return json.loads(resp.read().decode())
+            except urllib.error.HTTPError as exc:
+                try:
+                    detail = json.loads(exc.read().decode()).get("detail", str(exc))
+                except Exception:
+                    detail = str(exc)
+                raise BridgeClientError(exc.code, detail) from exc
+            except urllib.error.URLError:
+                # Stage 1 (CONNECT_BRIDGE): the service may be mid-restart.
+                # Retry within the grace window before giving up.
+                if _time.monotonic() + backoff < deadline:
+                    _time.sleep(backoff)
+                    backoff = min(backoff * 2, 1.0)
+                    continue
+                print(
+                    "[FAIL] Cannot connect to agent-bridge at %s\n"
+                    "       Is it running? Start it with: agent-bridge start"
+                    % self._base,
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
     def _stream_sse(
         self, path: str, *, params: dict[str, str] | None = None
     ) -> Iterator[dict[str, Any]]:
-        """Stream SSE events from an endpoint. Yields parsed event dicts."""
+        """Stream SSE events from an endpoint. Yields parsed event dicts.
+
+        Raises ``BridgeConnectionError`` if the service is unreachable so the
+        streaming engine can reconnect (rather than killing the process).
+        """
         url = f"{self._base}{path}"
         if params:
             qs = "&".join(f"{k}={v}" for k, v in params.items() if v is not None)
@@ -174,11 +209,9 @@ class BridgeClient:
                 detail = str(exc)
             raise BridgeClientError(exc.code, detail) from exc
         except urllib.error.URLError as exc:
-            print(
-                "[FAIL] Cannot connect to agent-bridge at %s" % self._base,
-                file=sys.stderr,
-            )
-            sys.exit(1)
+            raise BridgeConnectionError(
+                f"Cannot connect to agent-bridge at {self._base}: {exc}"
+            ) from exc
 
         try:
             event_type = ""
@@ -189,7 +222,10 @@ class BridgeClient:
                 line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
 
                 if line.startswith(":"):
-                    # Comment / heartbeat
+                    # Comment / heartbeat -- surface a sentinel so the
+                    # streaming engine can show progress and check for turn
+                    # completion during quiet periods.
+                    yield {"id": "", "event": "_heartbeat", "data": {}}
                     continue
                 elif line.startswith("id: "):
                     event_id = line[4:]
@@ -287,10 +323,64 @@ class BridgeClient:
         self._request("DELETE", f"/api/v1/sessions/{session_id}")
 
     def stream_events(
-        self, session_id: str, *, after: int = 0
+        self,
+        session_id: str,
+        *,
+        after: int | None = None,
+        caller_id: str | None = None,
     ) -> Iterator[dict[str, Any]]:
-        """GET /api/v1/sessions/{id}/events (SSE stream)"""
+        """GET /api/v1/sessions/{id}/events (SSE stream).
+
+        ``after=None`` + ``caller_id`` resumes from the caller's last-acked
+        delivery cursor (server-side). Pass an explicit ``after`` for a fixed
+        start point.
+        """
+        params: dict[str, str] = {}
+        if after is not None:
+            params["after"] = str(after)
+        if caller_id:
+            params["caller_id"] = caller_id
         return self._stream_sse(
             f"/api/v1/sessions/{session_id}/events",
-            params={"after": str(after)},
+            params=params or None,
         )
+
+    def get_cursor(
+        self, session_id: str, *, caller_id: str | None = None
+    ) -> int:
+        """GET /api/v1/sessions/{id}/cursor -- caller's last-acked event id."""
+        params = {"caller_id": caller_id} if caller_id else None
+        resp = self._request(
+            "GET", f"/api/v1/sessions/{session_id}/cursor", params=params
+        )
+        return resp.get("last_acked_id", 0) if resp else 0
+
+    def ack_cursor(
+        self, session_id: str, last_id: int, *, caller_id: str | None = None
+    ) -> int:
+        """POST /api/v1/sessions/{id}/cursor -- confirm delivery up to last_id.
+
+        Returns the effective (monotonic) cursor after the ack.
+        """
+        body: dict[str, Any] = {"last_id": last_id}
+        if caller_id:
+            body["caller_id"] = caller_id
+        resp = self._request(
+            "POST", f"/api/v1/sessions/{session_id}/cursor", body
+        )
+        return resp.get("last_acked_id", last_id) if resp else last_id
+
+    def read_range(
+        self, session_id: str, *, start: int = 0, end: int | None = None
+    ) -> list[dict[str, Any]]:
+        """GET /api/v1/sessions/{id}/events/range -- random-access read.
+
+        Does not move the delivery cursor.
+        """
+        params: dict[str, str] = {"start": str(start)}
+        if end is not None:
+            params["end"] = str(end)
+        resp = self._request(
+            "GET", f"/api/v1/sessions/{session_id}/events/range", params=params
+        )
+        return resp.get("events", []) if resp else []

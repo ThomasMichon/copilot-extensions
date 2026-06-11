@@ -17,10 +17,13 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from ssh_manager import SSHProfileSource, get_default_manager
+
+from .connect import ConnectError, ConnectStage, ConnectTracker
 
 log = logging.getLogger("agent-bridge")
 
@@ -257,7 +260,12 @@ async def _resolve_worktree(
     return plan
 
 
-async def spawn_local(target: SpawnTarget) -> AgentProcess:
+async def spawn_local(
+    target: SpawnTarget,
+    *,
+    tracker: ConnectTracker | None = None,
+    session_id: str = "",
+) -> AgentProcess:
     """Spawn a Copilot ACP agent as a local subprocess.
 
     When a ``project`` is configured, uses a two-step flow:
@@ -278,6 +286,7 @@ async def spawn_local(target: SpawnTarget) -> AgentProcess:
 
     Without ``project``, runs copilot directly (legacy behavior).
     """
+    tracker = tracker or ConnectTracker(session_id=session_id)
     env = os.environ.copy()
     # Strip bridge's venv vars so child processes use their own Python
     env.pop("VIRTUAL_ENV", None)
@@ -285,7 +294,9 @@ async def spawn_local(target: SpawnTarget) -> AgentProcess:
     env.update(target.env)
 
     if target.project:
-        plan = await _resolve_worktree(target, env)
+        # Stage 6: create/resume the worktree. Failures propagate (no retry).
+        with tracker.stage(ConnectStage.WORKTREE, f"project={target.project}"):
+            plan = await _resolve_worktree(target, env)
 
         launch = plan.get("launch", plan)
         work_dir = launch.get("work_dir")
@@ -335,15 +346,41 @@ async def spawn_local(target: SpawnTarget) -> AgentProcess:
     return AgentProcess(proc, target)
 
 
-def _build_remote_cmd(target: SpawnTarget) -> str:
+def _breadcrumb_prelude(session_id: str) -> str:
+    """A POSIX snippet that records arrival on the target device.
+
+    Appended (best-effort) to ``$AGENT_BRIDGE_CONNECT_LOG`` (default
+    ``$HOME/.agent-bridge/connect.log``) the moment the remote shell runs --
+    *before* the binstub/worktree/Copilot steps. If a later step hangs or
+    fails, a human can SSH in and confirm from this log that the connection
+    reached the device (and roughly when), distinguishing an unreachable host
+    from an on-device failure. Creates the log dir if needed and never aborts
+    the command (wrapped in ``( ... ) || true``).
+    """
+    sid = shlex.quote(session_id or "-")
+    log_expr = '"${AGENT_BRIDGE_CONNECT_LOG:-$HOME/.agent-bridge/connect.log}"'
+    ts = '"$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)"'
+    host = '"$(hostname 2>/dev/null || echo \\?)"'
+    return (
+        f'( mkdir -p "$(dirname {log_expr})" 2>/dev/null; '
+        f"printf '%s agent-bridge reached-device session=%s pid=%s host=%s\\n' "
+        f"{ts} {sid} \"$$\" {host} >> {log_expr} 2>/dev/null ) || true"
+    )
+
+
+def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
     """Build the POSIX remote command string for SSH execution.
 
     Two modes:
     - With ``project``: uses the project binstub (handles setup scripts,
       vault credentials, copilot resolution on the remote side).
     - Without ``project``: cd + export + exec copilot (legacy).
+
+    A device-arrival breadcrumb (see :func:`_breadcrumb_prelude`) is prepended
+    so a failed/hung launch can still be diagnosed as "reached the device".
     """
     copilot = target.copilot_path or "copilot"
+    breadcrumb = _breadcrumb_prelude(session_id)
 
     if target.project:
         if target.worktree_id:
@@ -368,12 +405,12 @@ def _build_remote_cmd(target: SpawnTarget) -> str:
             exports = " && ".join(
                 f"export {k}={shlex.quote(v)}" for k, v in target.env.items()
             )
-            return f"{exports} && {binstub_cmd}"
-        return binstub_cmd
+            return f"{breadcrumb} && {exports} && {binstub_cmd}"
+        return f"{breadcrumb} && {binstub_cmd}"
 
     if not target.cwd:
         raise ValueError("SSH agent without 'project' requires 'cwd'")
-    parts = [f"cd {shlex.quote(target.cwd)}"]
+    parts = [breadcrumb, f"cd {shlex.quote(target.cwd)}"]
     if target.env:
         for k, v in target.env.items():
             parts.append(f"export {k}={shlex.quote(v)}")
@@ -384,7 +421,13 @@ def _build_remote_cmd(target: SpawnTarget) -> str:
     return " && ".join(parts)
 
 
-async def spawn_ssh(target: SpawnTarget) -> AgentProcess:
+async def spawn_ssh(
+    target: SpawnTarget,
+    *,
+    tracker: ConnectTracker | None = None,
+    connect_timeout: float | None = None,
+    session_id: str = "",
+) -> AgentProcess:
     """Spawn a Copilot ACP agent on a remote machine via SSH.
 
     Uses ssh-manager's ConnectionManager for ControlMaster multiplexing.
@@ -399,19 +442,32 @@ async def spawn_ssh(target: SpawnTarget) -> AgentProcess:
 
     SSH hardening (BatchMode, -T, ConnectTimeout, ServerAliveInterval)
     is handled by ssh-manager's base args.
+
+    When ``connect_timeout`` is set, the SSH connect (stage SSH_TO_TARGET) is
+    retried with backoff until the deadline -- patience for a booting
+    codespace / wake-on-LAN / ProxyJump host. Without it, a single attempt is
+    made (fast fail), preserving legacy behavior. ``tracker`` records
+    per-stage checkpoints.
     """
     if not target.host:
         raise ValueError("SSH target requires a host (SSH alias)")
 
-    # Resolve auth hooks into port forwards and env vars
+    tracker = tracker or ConnectTracker(session_id=session_id)
+
+    # Stage 4 (prep side): resolve auth hooks into port forwards and env vars.
+    # The local auth-relay port liveness is the early-warning signal -- if it is
+    # down, remote auth cannot work.
+    tracker.started(ConnectStage.TARGET_AUTH_ENV, f"host={target.host}")
     port_forwards: list[str] = []
     auth_env: dict[str, str] = {}
+    dead_ports: list[int] = []
     for hook in target.auth_hooks:
         local_port = hook.get("local_port", 0)
         remote_port = hook.get("remote_port") or local_port
         hook_name = hook.get("name", "unknown")
         if local_port:
             if not _check_port_alive(local_port):
+                dead_ports.append(local_port)
                 log.warning(
                     "Auth hook '%s': local port %d is not listening -- "
                     "skipping port forward (auth may not work on remote)",
@@ -430,6 +486,17 @@ async def spawn_ssh(target: SpawnTarget) -> AgentProcess:
                 "Auth hook '%s': injecting env vars: %s",
                 hook_name, list(hook_env.keys()),
             )
+    if dead_ports:
+        tracker.failed(
+            ConnectStage.TARGET_AUTH_ENV,
+            f"auth relay local port(s) not listening: {dead_ports}",
+            retryable=False,
+        )
+    else:
+        tracker.reached(
+            ConnectStage.TARGET_AUTH_ENV,
+            f"forwards={len(port_forwards)} env={list(auth_env.keys())}",
+        )
 
     # Merge auth env into target env (auth hooks have lowest precedence)
     if auth_env:
@@ -440,32 +507,78 @@ async def spawn_ssh(target: SpawnTarget) -> AgentProcess:
     manager = get_default_manager()
     source = SSHProfileSource(host_alias=target.host, user=target.user)
 
-    try:
-        await manager.ensure_connected(
-            target.host, source, port_forwards=port_forwards or None,
-        )
-    except ConnectionError as exc:
-        raise RuntimeError(
-            f"Failed to establish SSH connection to {target.host}"
-        ) from exc
+    # Stage 3: establish the SSH connection -- patient (retry to deadline) when
+    # connect_timeout is set, else a single fast attempt.
+    tracker.started(ConnectStage.SSH_TO_TARGET, f"host={target.host}")
+    deadline = (time.monotonic() + connect_timeout) if connect_timeout else None
+    attempt = 0
+    backoff = 2.0
+    while True:
+        attempt += 1
+        try:
+            await manager.ensure_connected(
+                target.host, source, port_forwards=port_forwards or None,
+            )
+            tracker.reached(
+                ConnectStage.SSH_TO_TARGET, f"host={target.host} attempt={attempt}"
+            )
+            break
+        except (ConnectionError, TimeoutError) as exc:
+            # Transient: the host may still be booting / waking. Retry until the
+            # deadline, then fail fast with a staged, retryable error.
+            now = time.monotonic()
+            if deadline is None or now + backoff >= deadline:
+                tracker.failed(
+                    ConnectStage.SSH_TO_TARGET,
+                    f"Failed to establish SSH connection to {target.host}: {exc}",
+                    retryable=True,
+                )
+                raise ConnectError(
+                    ConnectStage.SSH_TO_TARGET,
+                    f"Failed to establish SSH connection to {target.host}: {exc}",
+                    retryable=True,
+                    cause=exc,
+                ) from exc
+            log.info(
+                "SSH connect to %s not ready (attempt %d): %s -- retrying in %.0fs",
+                target.host, attempt, exc, backoff,
+            )
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 1.5, 15.0)
 
-    remote_cmd = _build_remote_cmd(target)
+    # Stages 5-7 happen remotely inside the binstub; the device breadcrumb
+    # (in the remote command) is the on-device proof of arrival.
+    remote_cmd = _build_remote_cmd(target, session_id=session_id)
     log.info("Spawning SSH agent on %s: %s", target.host, remote_cmd)
 
     proc = await manager.open_stdio_channel(target.host, remote_cmd)
     return AgentProcess(proc, target)
 
 
-async def spawn(target: SpawnTarget) -> AgentProcess:
+async def spawn(
+    target: SpawnTarget,
+    *,
+    tracker: ConnectTracker | None = None,
+    connect_timeout: float | None = None,
+    session_id: str = "",
+) -> AgentProcess:
     """Spawn an ACP agent process (local, SSH, or command)."""
     if target.type == "command" or target.spawn_command:
-        return await spawn_raw(target)
+        return await spawn_raw(target, tracker=tracker, session_id=session_id)
     if target.type == "ssh":
-        return await spawn_ssh(target)
-    return await spawn_local(target)
+        return await spawn_ssh(
+            target, tracker=tracker, connect_timeout=connect_timeout,
+            session_id=session_id,
+        )
+    return await spawn_local(target, tracker=tracker, session_id=session_id)
 
 
-async def spawn_raw(target: SpawnTarget) -> AgentProcess:
+async def spawn_raw(
+    target: SpawnTarget,
+    *,
+    tracker: ConnectTracker | None = None,
+    session_id: str = "",
+) -> AgentProcess:
     """Spawn an ACP agent via a raw command.
 
     Used for provider agents that handle their own transport (e.g.

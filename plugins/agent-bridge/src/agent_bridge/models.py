@@ -136,6 +136,18 @@ class ResumeSessionRequest(BaseModel):
     pass
 
 
+class CursorAckRequest(BaseModel):
+    """Acknowledge delivery of events up to ``last_id`` for a caller.
+
+    The delivery cursor advances only on these acks (after the client has
+    flushed the content to its host), so an ungraceful client death never
+    advances the cursor past undelivered content.
+    """
+
+    caller_id: str | None = None
+    last_id: int = Field(ge=0)
+
+
 # -- API responses -----------------------------------------------------------
 
 
@@ -152,6 +164,14 @@ class SubmitPromptResponse(BaseModel):
 
 class SessionListResponse(BaseModel):
     sessions: list[SessionInfo]
+
+
+class CursorInfo(BaseModel):
+    """Current delivery-cursor position for a caller on a session."""
+
+    session_id: str
+    caller_id: str | None = None
+    last_acked_id: int = 0
 
 
 # -- SSE events --------------------------------------------------------------
@@ -176,6 +196,32 @@ class ContextThresholds(BaseModel):
     critical: int = 90
 
 
+class PhasedTimeouts(BaseModel):
+    """Separate timeouts (seconds) for the distinct phases of a ``send``.
+
+    A single coarse timeout cannot distinguish a slow codespace cold-start
+    from a hung turn. These let each phase be bounded independently.
+    """
+
+    codespace_boot: float = Field(
+        default=180.0,
+        description="Max seconds to wait for a Shutdown codespace to boot.",
+    )
+    ssh_connect: float = Field(
+        default=120.0,
+        description="Max seconds (with retry) to establish the SSH connection "
+        "to a target -- patient for wake-on-LAN / ProxyJump / slow boot.",
+    )
+    session_start: float = Field(
+        default=60.0,
+        description="Max seconds for a freshly spawned session to become idle.",
+    )
+    command: float = Field(
+        default=1800.0,
+        description="Max seconds to wait for a single turn/command to complete.",
+    )
+
+
 class TopologyProfile(BaseModel):
     """A topology profile pointing to external config files."""
 
@@ -192,6 +238,7 @@ class ServiceConfig(BaseModel):
     log_level: str = "info"
     topologies: dict[str, TopologyProfile] = Field(default_factory=dict)
     context_thresholds: ContextThresholds = Field(default_factory=ContextThresholds)
+    timeouts: PhasedTimeouts = Field(default_factory=PhasedTimeouts)
     worktree_discovery_interval: float = Field(
         default=0,
         description="Seconds between periodic worktree discovery sweeps. "

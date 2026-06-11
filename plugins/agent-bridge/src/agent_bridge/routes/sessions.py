@@ -9,6 +9,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ..models import (
+    CursorAckRequest,
+    CursorInfo,
     ResumeSessionRequest,
     SessionInfo,
     SessionListResponse,
@@ -25,6 +27,16 @@ if TYPE_CHECKING:
     from ..session_manager import SessionManager
 
 router = APIRouter(prefix="/api/v1/sessions", tags=["sessions"])
+
+# Sentinel cursor key for callers that supply no caller_id. Keeps the
+# delivery_cursors primary key non-null while still giving anonymous
+# callers a single shared resume point per session.
+_CURSOR_DEFAULT_KEY = "__default__"
+
+
+def _cursor_key(caller_id: str | None) -> str:
+    """Normalize a caller_id into a non-null delivery_cursors key."""
+    return caller_id if caller_id else _CURSOR_DEFAULT_KEY
 
 
 def _session_info(s) -> SessionInfo:  # noqa: ANN001
@@ -214,11 +226,27 @@ async def submit_prompt(
 
 
 @router.get("/{session_id}/events")
-async def get_events(session_id: str, request: Request, after: int = 0):
+async def get_events(
+    session_id: str,
+    request: Request,
+    after: int | None = None,
+    caller_id: str | None = None,
+):
     """SSE event stream with durable event IDs.
 
-    Clients reconnect with ?after=<last_seen_id> to resume without
-    missing events.
+    Resume semantics:
+
+    - ``?after=<id>`` -- explicit start point (back-compat). Streams events
+      with id > after.
+    - omitted ``after`` + ``caller_id`` -- resume from the caller's last
+      *acked* delivery cursor, so a reconnect picks up exactly where the
+      host left off (nothing skipped on ungraceful death).
+    - omitted ``after`` + no caller_id -- start from the beginning (0).
+
+    The stream never advances the delivery cursor itself; the client acks
+    delivered events via ``POST /{id}/cursor`` after flushing them, which
+    is what makes delivery confirmation (not server-side production) drive
+    the cursor.
     """
     mgr: SessionManager = request.app.state.session_manager
     session = mgr.get_session(session_id)
@@ -227,8 +255,13 @@ async def get_events(session_id: str, request: Request, after: int = 0):
     if not session.event_log:
         raise HTTPException(status_code=500, detail="No event log for session")
 
+    if after is None:
+        start = mgr.db.get_cursor(_cursor_key(caller_id), session_id)
+    else:
+        start = after
+
     async def event_stream():
-        cursor = after
+        cursor = start
         while True:
             events = await session.event_log.wait_for_events(cursor, timeout=30.0)
             if events:
@@ -252,6 +285,71 @@ async def get_events(session_id: str, request: Request, after: int = 0):
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@router.get("/{session_id}/events/range")
+async def get_events_range(
+    session_id: str, request: Request, start: int = 0, end: int | None = None
+):
+    """Random-access historical read of events by id range (inclusive).
+
+    Returns events with ``start <= id <= end``. Does NOT touch any
+    delivery cursor -- this is the only way to re-read already-consumed
+    content without disturbing the live resume point.
+    """
+    mgr: SessionManager = request.app.state.session_manager
+    session = mgr.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    rows = mgr.db.get_events_range(session_id, start, end)
+    return {
+        "session_id": session_id,
+        "events": [
+            {
+                "id": r["event_id"],
+                "event": r["event_type"],
+                "data": r["data"],
+                "timestamp": r["timestamp"],
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/{session_id}/cursor", response_model=CursorInfo)
+async def get_cursor(session_id: str, request: Request, caller_id: str | None = None):
+    """Return a caller's current delivery-cursor position for a session."""
+    mgr: SessionManager = request.app.state.session_manager
+    session = mgr.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    last = mgr.db.get_cursor(_cursor_key(caller_id), session_id)
+    return CursorInfo(
+        session_id=session_id, caller_id=caller_id, last_acked_id=last
+    )
+
+
+@router.post("/{session_id}/cursor", response_model=CursorInfo)
+async def ack_cursor(
+    session_id: str, req: CursorAckRequest, request: Request
+):
+    """Acknowledge delivery up to ``last_id`` for a caller (monotonic).
+
+    The stored cursor never regresses, so duplicate/out-of-order acks are
+    safe. The effective cursor after the ack is returned.
+    """
+    import time as _time
+
+    mgr: SessionManager = request.app.state.session_manager
+    session = mgr.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    effective = mgr.db.set_cursor(
+        _cursor_key(req.caller_id), session_id, req.last_id, _time.time()
+    )
+    return CursorInfo(
+        session_id=session_id, caller_id=req.caller_id, last_acked_id=effective
     )
 
 

@@ -19,6 +19,7 @@ import logging
 import os
 import shlex
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,6 +33,11 @@ from .config import (
     save_adopted_repos,
     validate_config,
 )
+from .connect import (
+    ConnectStage,
+    ConnectTracker,
+    breadcrumb_prelude,
+)
 from .lifecycle import (
     cleanup_stale,
     create_codespace,
@@ -41,6 +47,10 @@ from .lifecycle import (
 )
 
 log = logging.getLogger("agent-codespaces")
+
+# Patience budget for the SSH-to-CodeSpace stage -- a Shutdown CodeSpace boots
+# on connect, which can take well over a minute. Overridable via env.
+_SSH_BOOT_TIMEOUT = float(os.environ.get("AGENT_CODESPACES_BOOT_TIMEOUT", "180"))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -261,16 +271,53 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     # the tunnel port.
     remote_cmd = args.remote_cmd
     if remote_cmd:
-        remote_cmd = f"bash -l -c {shlex.quote(relay_env + remote_cmd)}"
+        # Prepend a device-arrival breadcrumb so a hung/failed launch can be
+        # diagnosed as "reached the CodeSpace" via ~/.agent-bridge-connect.log.
+        inner = relay_env + breadcrumb_prelude(args.name) + "; " + remote_cmd
+        remote_cmd = f"bash -l -c {shlex.quote(inner)}"
+
+    tracker = ConnectTracker(session_id=args.name)
 
     async def _run() -> int:
-        await manager.ensure_connected(args.name, source, port_forwards)
+        # Stage 3 (ssh-to-target): a Shutdown CodeSpace boots on connect, so be
+        # patient -- retry to the boot deadline, then fail fast with a clear,
+        # staged message (never an opaque provider death).
+        tracker.started(ConnectStage.SSH_TO_TARGET, f"codespace={args.name}")
+        deadline = time.monotonic() + _SSH_BOOT_TIMEOUT
+        backoff = 3.0
+        while True:
+            try:
+                await manager.ensure_connected(args.name, source, port_forwards)
+                tracker.reached(ConnectStage.SSH_TO_TARGET, f"codespace={args.name}")
+                break
+            except (ConnectionError, TimeoutError) as exc:
+                if time.monotonic() + backoff >= deadline:
+                    tracker.failed(
+                        ConnectStage.SSH_TO_TARGET,
+                        f"Failed to reach CodeSpace {args.name}: {exc}",
+                        retryable=True,
+                    )
+                    print(
+                        f"[FAIL] Could not establish SSH to CodeSpace "
+                        f"'{args.name}' within {_SSH_BOOT_TIMEOUT:.0f}s "
+                        f"(stage 3/ssh-to-target): {exc}",
+                        file=sys.stderr,
+                    )
+                    return 1
+                log.info(
+                    "CodeSpace %s not ready (booting?): %s -- retry in %.0fs",
+                    args.name, exc, backoff,
+                )
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 1.5, 20.0)
 
-        # Deploy the CodeSpace-side relay helpers (ado-auth-helper-relay +
-        # smart wrapper) so ADO auth resolves over the tunnel. Idempotent;
-        # best-effort -- a failure here shouldn't block the SSH command.
+        # Stage 4 (target-auth-env): deploy the CodeSpace-side relay helpers so
+        # ADO auth resolves over the tunnel. Idempotent; best-effort -- a
+        # failure here shouldn't block the SSH command.
         if not args.no_relay:
+            tracker.started(ConnectStage.TARGET_AUTH_ENV, "credential relay")
             await _provision_relay_helpers(manager, args.name)
+            tracker.reached(ConnectStage.TARGET_AUTH_ENV)
 
         # Run repo-declared provision hooks (by-convention extras from the
         # adopted repo's codespaces.yaml). Best-effort, idempotent.

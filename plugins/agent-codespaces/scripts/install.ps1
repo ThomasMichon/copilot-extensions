@@ -164,7 +164,7 @@ function Install-PackageInto {
     }
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & uv pip install --python $Python --reinstall-package ssh-manager "$SshMgrDir" --quiet 2>&1 | Out-Null
+    & uv pip install --python $Python --reinstall-package agent-ssh-manager "$SshMgrDir" --quiet 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         $ErrorActionPreference = $prevEAP
         Write-ServiceErr "ssh-manager install failed"

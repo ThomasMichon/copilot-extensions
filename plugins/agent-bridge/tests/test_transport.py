@@ -419,7 +419,8 @@ class TestSpawnDispatcher:
             mock_local.return_value = mock_proc
 
             result = await spawn(target)
-            mock_local.assert_called_once_with(target)
+            mock_local.assert_called_once()
+            assert mock_local.call_args[0][0] == target
             assert result == mock_proc
 
     @pytest.mark.asyncio
@@ -432,7 +433,8 @@ class TestSpawnDispatcher:
             mock_ssh.return_value = mock_proc
 
             result = await spawn(target)
-            mock_ssh.assert_called_once_with(target)
+            mock_ssh.assert_called_once()
+            assert mock_ssh.call_args[0][0] == target
             assert result == mock_proc
 
 
@@ -657,7 +659,8 @@ class TestSpawnDispatchCommand:
         with patch("agent_bridge.transport.spawn_raw", new_callable=AsyncMock) as mock_raw:
             mock_raw.return_value = MagicMock(spec=AgentProcess)
             await spawn(target)
-            mock_raw.assert_called_once_with(target)
+            mock_raw.assert_called_once()
+            assert mock_raw.call_args[0][0] == target
 
     @pytest.mark.asyncio
     async def test_spawn_dispatches_spawn_command_field(self):
@@ -669,5 +672,6 @@ class TestSpawnDispatchCommand:
         with patch("agent_bridge.transport.spawn_raw", new_callable=AsyncMock) as mock_raw:
             mock_raw.return_value = MagicMock(spec=AgentProcess)
             await spawn(target)
-            mock_raw.assert_called_once_with(target)
+            mock_raw.assert_called_once()
+            assert mock_raw.call_args[0][0] == target
 

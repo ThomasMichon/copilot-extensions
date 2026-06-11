@@ -11,7 +11,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -55,6 +55,15 @@ CREATE TABLE IF NOT EXISTS events (
     data_json TEXT NOT NULL,
     timestamp REAL NOT NULL,
     PRIMARY KEY (session_id, event_id),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS delivery_cursors (
+    caller_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    last_acked_id INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (caller_id, session_id),
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
@@ -176,6 +185,25 @@ class Database:
             )
             conn.commit()
             log.info("Schema migrated to version 4")
+
+        if from_version < 5:
+            # v4 -> v5: add per-caller delivery cursor table for the
+            # delivery-acked shared read cursor (streaming resume).
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS delivery_cursors (
+                    caller_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    last_acked_id INTEGER NOT NULL DEFAULT 0,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (caller_id, session_id),
+                    FOREIGN KEY (session_id) REFERENCES sessions(id)
+                )
+            """)
+            conn.execute(
+                "UPDATE schema_version SET version=?", (5,)
+            )
+            conn.commit()
+            log.info("Schema migrated to version 5: added delivery_cursors")
 
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
@@ -384,3 +412,69 @@ class Database:
         )
         val = rows[0]["max_id"] if rows else None
         return val or 0
+
+    def get_events_range(
+        self, session_id: str, start_id: int, end_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Return events with start_id <= event_id <= end_id (inclusive).
+
+        Used for random-access historical reads. Does not touch any
+        delivery cursor. ``end_id=None`` means "to the latest event".
+        """
+        if end_id is None:
+            rows = self.execute_read(
+                "SELECT * FROM events WHERE session_id=? AND event_id>=? "
+                "ORDER BY event_id",
+                (session_id, start_id),
+            )
+        else:
+            rows = self.execute_read(
+                "SELECT * FROM events WHERE session_id=? AND event_id>=? "
+                "AND event_id<=? ORDER BY event_id",
+                (session_id, start_id, end_id),
+            )
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["data"] = json.loads(d.pop("data_json"))
+            result.append(d)
+        return result
+
+    # -- Delivery cursors ----------------------------------------------------
+
+    def get_cursor(self, caller_id: str, session_id: str) -> int:
+        """Return the last-acked event id for a caller on a session (0 if none)."""
+        rows = self.execute_read(
+            "SELECT last_acked_id FROM delivery_cursors "
+            "WHERE caller_id=? AND session_id=?",
+            (caller_id, session_id),
+        )
+        return rows[0]["last_acked_id"] if rows else 0
+
+    def set_cursor(
+        self, caller_id: str, session_id: str, last_acked_id: int, timestamp: float
+    ) -> int:
+        """Advance a caller's delivery cursor, monotonically.
+
+        The stored value never regresses: a smaller or duplicate ack is
+        ignored. Returns the cursor value in effect after the call.
+        """
+        with self._write_lock:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT last_acked_id FROM delivery_cursors "
+                "WHERE caller_id=? AND session_id=?",
+                (caller_id, session_id),
+            ).fetchone()
+            current = row["last_acked_id"] if row else 0
+            new_val = max(current, last_acked_id)
+            conn.execute(
+                "INSERT INTO delivery_cursors "
+                "(caller_id, session_id, last_acked_id, updated_at) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(caller_id, session_id) DO UPDATE SET "
+                "last_acked_id=excluded.last_acked_id, updated_at=excluded.updated_at",
+                (caller_id, session_id, new_val, timestamp),
+            )
+            conn.commit()
+            return new_val

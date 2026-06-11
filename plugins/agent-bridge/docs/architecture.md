@@ -69,11 +69,22 @@ POST   /api/v1/sessions                  # Start new session
 GET    /api/v1/sessions                  # List sessions
 GET    /api/v1/sessions/{id}             # Get session info
 POST   /api/v1/sessions/{id}/turns       # Submit prompt
-GET    /api/v1/sessions/{id}/events      # SSE event stream
+GET    /api/v1/sessions/{id}/events      # SSE event stream (resume from cursor)
+GET    /api/v1/sessions/{id}/events/range # Random-access read by event id range
+GET    /api/v1/sessions/{id}/cursor      # Read caller's delivery cursor
+POST   /api/v1/sessions/{id}/cursor      # Ack delivery (advance cursor)
 POST   /api/v1/sessions/{id}/stop        # Stop (preserve state)
 POST   /api/v1/sessions/{id}/resume      # Resume stopped session
 DELETE /api/v1/sessions/{id}             # End (full cleanup)
 ```
+
+The SSE stream (`/events`) resumes from the caller's last-acked **delivery
+cursor** when `after` is omitted and `caller_id` is supplied; pass an explicit
+`?after=<id>` for a fixed start point. The cursor advances only via `POST
+/cursor` acks (confirmed delivery), never from server-side production -- so an
+ungraceful client death never skips output. `/events/range` is the only way to
+re-read already-consumed content and never moves the cursor. See
+[Streaming & the delivery cursor](#) in the README for the consumer model.
 
 ### Health
 

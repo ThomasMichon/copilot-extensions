@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-codespaces"
-version = "0.3.3-dev1"
+version = "0.3.4-dev1"
 description = "GitHub Codespaces lifecycle management, SSH transport, and credential relay"
 readme = "README.md"
 license = "MIT"
@@ -14,8 +14,15 @@ authors = [
 ]
 dependencies = [
     "pyyaml>=6.0",
-    "ssh-manager",
+    "agent-ssh-manager",
 ]
+
+[tool.uv.sources]
+# Always resolve the vendored lib from the local path, never an index.
+# The distribution is named agent-ssh-manager (not the squatted PyPI name
+# "ssh-manager") to prevent dependency-confusion; the import module stays
+# ``ssh_manager``.
+agent-ssh-manager = { path = "libs/ssh-manager" }
 
 [project.scripts]
 agent-codespaces = "agent_codespaces.__main__:main"
