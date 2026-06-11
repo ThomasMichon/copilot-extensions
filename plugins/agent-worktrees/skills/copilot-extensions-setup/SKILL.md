@@ -30,22 +30,24 @@ description: >
 
 # Copilot Extensions Setup
 
-Install and adopt flows for all **three** copilot-extensions plugins:
+Install and adopt flows for all **four** copilot-extensions plugins:
 
 | Plugin | Type | What It Does |
 |--------|------|-------------|
 | **agent-worktrees** | Session tool | Worktree isolation, launch sessions, finalize |
 | **agent-bridge** | Persistent service | Inter-agent sessions, machine mesh (port 9280 Win / 9281 WSL) |
 | **agent-codespaces** | CLI + relay | CodeSpace lifecycle, `codespace:` resolver, credential relay (port 9857) |
+| **agent-containers** | CLI + fleet | Local Docker dev-container fleet, lease broker, `container:` resolver |
 
-All three ship from the same `copilot-extensions` repo. Install order:
-agent-worktrees first (prerequisite), then agent-codespaces, then agent-bridge
-(the bridge installer imports agent-codespaces for its `codespace:` resolver +
-relay, so install codespaces before the bridge).
+All four ship from the same `copilot-extensions` repo. Install order:
+agent-worktrees first (prerequisite), then agent-codespaces and agent-containers,
+then agent-bridge (the bridge installer imports agent-codespaces and
+agent-containers for their `codespace:` / `container:` resolvers, so install
+them before the bridge).
 
 **End state:** every module installed from the marketplace and running from its
 local install path (`~/.agent-worktrees`, `~/.agent-codespaces`,
-`~/.agent-bridge`) with binstubs in `~/.local/bin`.
+`~/.agent-containers`, `~/.agent-bridge`) with binstubs in `~/.local/bin`.
 
 ---
 
@@ -58,18 +60,19 @@ example is not sufficient for codespace support.
 copilot plugin marketplace add ThomasMichon/copilot-extensions
 copilot plugin install agent-worktrees@copilot-extensions
 copilot plugin install agent-codespaces@copilot-extensions
+copilot plugin install agent-containers@copilot-extensions
 copilot plugin install agent-bridge@copilot-extensions
 ```
 
-Verify all three vendored:
+Verify all four vendored:
 
 ```powershell
 Get-ChildItem "$env:USERPROFILE\.copilot\installed-plugins\copilot-extensions"
-# expect: agent-worktrees, agent-bridge, agent-codespaces
+# expect: agent-worktrees, agent-bridge, agent-codespaces, agent-containers
 ```
 
-If agent-codespaces is missing here, the bridge installer will WARN that
-codespace support is unavailable.
+If agent-codespaces or agent-containers is missing here, the bridge installer
+will WARN that the corresponding namespace resolver is unavailable.
 
 ---
 
@@ -90,6 +93,10 @@ $abDir = Get-ChildItem -Recurse -Path "$env:USERPROFILE\.copilot\installed-plugi
 $acDir = Get-ChildItem -Recurse -Path "$env:USERPROFILE\.copilot\installed-plugins" -Filter "plugin.json" |
     Where-Object { (Get-Content $_.FullName -Raw) -match '"agent-codespaces"' } |
     Select-Object -First 1 -ExpandProperty DirectoryName
+
+$anDir = Get-ChildItem -Recurse -Path "$env:USERPROFILE\.copilot\installed-plugins" -Filter "plugin.json" |
+    Where-Object { (Get-Content $_.FullName -Raw) -match '"agent-containers"' } |
+    Select-Object -First 1 -ExpandProperty DirectoryName
 ```
 
 ```bash
@@ -97,6 +104,7 @@ $acDir = Get-ChildItem -Recurse -Path "$env:USERPROFILE\.copilot\installed-plugi
 aw_dir=$(find ~/.copilot/installed-plugins -name plugin.json -exec grep -l agent-worktrees {} \; | head -1 | xargs dirname)
 ab_dir=$(find ~/.copilot/installed-plugins -name plugin.json -exec grep -l agent-bridge {} \; | head -1 | xargs dirname)
 ac_dir=$(find ~/.copilot/installed-plugins -name plugin.json -exec grep -l agent-codespaces {} \; | head -1 | xargs dirname)
+an_dir=$(find ~/.copilot/installed-plugins -name plugin.json -exec grep -l agent-containers {} \; | head -1 | xargs dirname)
 ```
 
 ---
@@ -410,21 +418,65 @@ the agent-codespaces plugin is installed (section 0).
 
 ---
 
-## Full Machine Bootstrap
+## 7. Agent-Containers Init
 
-To set up a fresh machine with all **three** plugins:
+Install the agent-containers runtime (CLI binstub + `~/.agent-containers`
+home). The `container:` namespace resolver runs inside the agent-bridge
+service (installed as a sibling import); this step gives you the standalone
+`agent-containers` CLI for fleet/lease management and owns the
+`~/.local/bin/agent-containers` binstub.
+
+```powershell
+# Windows
+powershell -NoProfile -ExecutionPolicy Bypass -File "$anDir\scripts\init.ps1"
+```
 
 ```bash
-# 0. Install all three plugins from the marketplace (see section 0)
+# Linux/WSL
+bash "$an_dir/scripts/init.sh"
+```
+
+### What It Creates
+
+```
+~/.agent-containers/
+  .venv/                   Python venv with the agent_containers package
+  deploy-manifest.json
+
+~/.local/bin/
+  agent-containers[.cmd]   Binstub
+```
+
+### Verify
+
+```bash
+agent-containers version
+agent-containers fleet       # lists local dev containers + lease status
+```
+
+Docker (Docker Desktop WSL2 backend) must be running for fleet operations.
+The `container:` resolver in agent-bridge forwards the host `gh auth token`
+into containers, so `gh` must be authenticated for dispatched agents to work.
+
+---
+
+## Full Machine Bootstrap
+
+To set up a fresh machine with all **four** plugins:
+
+```bash
+# 0. Install all four plugins from the marketplace (see section 0)
 copilot plugin marketplace add ThomasMichon/copilot-extensions
 copilot plugin install agent-worktrees@copilot-extensions
 copilot plugin install agent-codespaces@copilot-extensions
+copilot plugin install agent-containers@copilot-extensions
 copilot plugin install agent-bridge@copilot-extensions
 
 # 1. Install agent-worktrees runtime      (section 1)
 # 2. Adopt the repo for worktree sessions  (section 2)
 # 3. Install agent-bridge service          (section 3)
-#    -> pulls in agent-codespaces for the codespace: resolver + relay
+#    -> pulls in agent-codespaces + agent-containers for the
+#       codespace: / container: resolvers
 # 4. Wire topology
 agent-bridge config adopt --repo /path/to/repo --profile my-control-harness
 
@@ -432,11 +484,14 @@ agent-bridge config adopt --repo /path/to/repo --profile my-control-harness
 # 6. Adopt the repo for codespaces         (section 6)
 cd /path/to/repo && agent-codespaces config adopt
 
-# 7. Start the service
+# 7. Install agent-containers runtime      (section 7)
+
+# 8. Start the service
 agent-bridge start  # or: install.ps1 start
 
-# 8. Verify everything
+# 9. Verify everything
 agent-worktrees --version && agent-worktrees status
 agent-bridge version && agent-bridge machines && agent-bridge agents
 agent-codespaces version && agent-codespaces status
+agent-containers version && agent-containers fleet
 ```

@@ -67,9 +67,16 @@ Containers are recognised as fleet members (in priority order) by:
 
 ## Installation
 
-Installed into the agent-bridge venv as a sibling plugin (for the resolver)
-and exposes its own `agent-containers` CLI binstub. See the agent-bridge
-installer and `_register_namespace_resolvers` in `agent_bridge.agent_registry`.
+Two parts:
+1. **Resolver** — installed into the agent-bridge venv as a sibling plugin by
+   the agent-bridge installer (provides the `container:` resolver). See
+   `_register_namespace_resolvers` in `agent_bridge.agent_registry`.
+2. **CLI binstub** — run this plugin's own `scripts/init.ps1` (Windows) or
+   `scripts/init.sh` (Linux/WSL) once per machine. It creates
+   `~/.agent-containers/.venv` (package installed via `uv pip install`) and the
+   `~/.local/bin/agent-containers` binstub. This is the canonical owner of the
+   binstub (parallel to agent-codespaces). See the `copilot-extensions-setup`
+   skill, section 7.
 
 ## Runtime state
 
