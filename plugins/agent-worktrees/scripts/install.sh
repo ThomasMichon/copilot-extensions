@@ -424,6 +424,9 @@ BINSTUB_HEAD
     cat >> "$tmp" <<BINSTUB_BODY
 export WORKTREE_PROJECT="$PROJECT_NAME"
 export PYTHONUTF8=1
+# #25: a project binstub is a cross-project entry point --
+# drop any inherited WORKTREE_ID so worktree resolution uses CWD.
+unset WORKTREE_ID APERTURE_WORKTREE_ID
 _AW="\$HOME/.agent-worktrees/.venv/bin/agent-worktrees"
 if [[ -x "\$_AW" ]]; then
     exec "\$_AW" "\$@"

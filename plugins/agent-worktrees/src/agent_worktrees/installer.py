@@ -430,7 +430,12 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
                 "@echo off\r\n"
                 'set "PYTHONUTF8=1"\r\n'
                 f'set "WORKTREE_PROJECT={project}"\r\n'
-                'set "_AW=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\agent-worktrees.exe"\r\n'
+                'rem #25: a project binstub is a cross-project entry point --\r\n'
+                'rem drop any inherited WORKTREE_ID so worktree resolution uses CWD.\r\n'
+                'set "WORKTREE_ID="\r\n'
+                'set "APERTURE_WORKTREE_ID="\r\n'
+                'set "_AW=%USERPROFILE%\\.agent-worktrees'
+                '\\.venv\\Scripts\\agent-worktrees.exe"\r\n'
                 'if not exist "%_AW%" goto :_aw_fallback\r\n'
                 '"%_AW%" %*\r\n'
                 'exit /b %ERRORLEVEL%\r\n'
@@ -445,6 +450,9 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
                 "#!/usr/bin/env bash\n"
                 "export PYTHONUTF8=1\n"
                 f'export WORKTREE_PROJECT="{project}"\n'
+                "# #25: a project binstub is a cross-project entry point --\n"
+                "# drop any inherited WORKTREE_ID so worktree resolution uses CWD.\n"
+                "unset WORKTREE_ID APERTURE_WORKTREE_ID\n"
                 '_AW="$HOME/.agent-worktrees/.venv/bin/agent-worktrees"\n'
                 'if [[ -x "$_AW" ]]; then\n'
                 '    exec "$_AW" "$@"\n'

@@ -574,6 +574,10 @@ function Deploy-Binstub {
 @echo off
 set "PYTHONUTF8=1"
 set "WORKTREE_PROJECT=$ProjectName"
+rem #25: a project binstub is a cross-project entry point --
+rem drop any inherited WORKTREE_ID so worktree resolution uses CWD.
+set "WORKTREE_ID="
+set "APERTURE_WORKTREE_ID="
 set "_AW=%USERPROFILE%\.agent-worktrees\.venv\Scripts\agent-worktrees.exe"
 if not exist "%_AW%" goto :_aw_fallback
 "%_AW%" %*
@@ -1092,6 +1096,9 @@ function Deploy-WslBinstub {
 # Thin binstub for $ProjectName - deployed by agent-worktrees (Windows)
 # Requires agent-worktrees to be installed in WSL via the copilot-extensions plugin.
 export WORKTREE_PROJECT="$ProjectName"
+# #25: a project binstub is a cross-project entry point --
+# drop any inherited WORKTREE_ID so worktree resolution uses CWD.
+unset WORKTREE_ID APERTURE_WORKTREE_ID
 _launcher="`$HOME/.agent-worktrees/bin/launch-session.sh"
 if [[ -x "`$_launcher" ]]; then
     exec "`$_launcher" "`$@"

@@ -4786,6 +4786,16 @@ def main(argv: list[str] | None = None) -> int:
     args_list, _proj = _extract_project_flag(args_list)
     if _proj:
         os.environ["WORKTREE_PROJECT"] = _proj
+        # #25: an explicit --project selects a project that is, in general,
+        # *different* from the worktree the caller's session is running in.
+        # The inherited WORKTREE_ID / APERTURE_WORKTREE_ID belong to that
+        # caller's session, not to this project, so blank them and let
+        # worktree-id resolution fall back to the current working directory.
+        # (Bare `agent-worktrees <cmd>` with no --project still inherits the
+        # session's WORKTREE_ID -- that is the intended "operate on my current
+        # worktree" path.)
+        os.environ.pop("WORKTREE_ID", None)
+        os.environ.pop("APERTURE_WORKTREE_ID", None)
 
     has_project = bool(os.environ.get("WORKTREE_PROJECT", "").strip())
 
