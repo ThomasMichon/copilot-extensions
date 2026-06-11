@@ -18,9 +18,10 @@ import uuid
 from typing import Any
 
 from .acp_client import AcpClient
+from .connect import ConnectError, ConnectStage, ConnectTracker
 from .db import Database
 from .events import EventLog
-from .models import ContextThresholds, SessionStatus
+from .models import ContextThresholds, PhasedTimeouts, SessionStatus
 from .transport import SpawnTarget, spawn
 
 log = logging.getLogger("agent-bridge")
@@ -227,11 +228,18 @@ class SessionManager:
         db: Database,
         *,
         context_thresholds: ContextThresholds | None = None,
+        timeouts: PhasedTimeouts | None = None,
     ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
         self._thresholds = context_thresholds or ContextThresholds()
+        self._timeouts = timeouts or PhasedTimeouts()
         self._rehydrate()
+
+    @property
+    def db(self) -> Database:
+        """The backing database (used by routes for cursor persistence)."""
+        return self._db
 
     def _rehydrate(self) -> None:
         """Reload session metadata from DB on startup.
@@ -386,24 +394,55 @@ class SessionManager:
         session.status = SessionStatus.STARTING
         self._sessions[session_id] = session
 
+        tracker = ConnectTracker(session.event_log.append, session_id=session_id)
+        # Stage 3 (SSH connect) is patient for codespace boot, else the
+        # general ssh_connect budget.
+        connect_timeout = (
+            self._timeouts.codespace_boot
+            if target.type == "command" or target.spawn_command
+            else self._timeouts.ssh_connect
+        )
+
         try:
-            # Spawn the subprocess (local or SSH)
-            agent_proc = await spawn(target)
-
-            # Initialize ACP protocol on the subprocess
-            client = AcpClient(
-                on_event=on_acp_event,
-                on_permission=permission_callback,
+            # Spawn the subprocess (local/SSH/command). Emits per-stage
+            # checkpoints (auth-env, ssh-connect, worktree) into the event log.
+            agent_proc = await spawn(
+                target,
+                tracker=tracker,
+                connect_timeout=connect_timeout,
+                session_id=session_id,
             )
-            if permission_callback:
-                client.auto_approve = False
-            await client.start(agent_proc.proc)
 
-            # Create ACP session -- binstub agents resolve CWD remotely,
-            # so target.cwd may be None.  The ACP spec requires an absolute
-            # path.  Derive a plausible home-dir default from the target.
-            session_cwd = target.cwd or _default_cwd(target)
-            acp_sid = await client.new_session(cwd=session_cwd)
+            # Stage 7: launch + initialize Copilot in ACP mode. Should be fast;
+            # bound it so a hung launch fails fast instead of hanging forever.
+            with tracker.stage(ConnectStage.LAUNCH_ACP):
+                client = AcpClient(
+                    on_event=on_acp_event,
+                    on_permission=permission_callback,
+                )
+                if permission_callback:
+                    client.auto_approve = False
+                try:
+                    await asyncio.wait_for(
+                        client.start(agent_proc.proc),
+                        timeout=self._timeouts.session_start,
+                    )
+                    # Create ACP session -- binstub agents resolve CWD remotely,
+                    # so target.cwd may be None.  The ACP spec requires an
+                    # absolute path.  Derive a plausible home-dir default.
+                    session_cwd = target.cwd or _default_cwd(target)
+                    acp_sid = await asyncio.wait_for(
+                        client.new_session(cwd=session_cwd),
+                        timeout=self._timeouts.session_start,
+                    )
+                except (TimeoutError, asyncio.TimeoutError) as exc:
+                    raise ConnectError(
+                        ConnectStage.LAUNCH_ACP,
+                        f"Copilot ACP launch timed out after "
+                        f"{self._timeouts.session_start}s",
+                        retryable=False,
+                        cause=exc,
+                    ) from exc
 
             session.client = client
             session.acp_session_id = acp_sid
@@ -423,6 +462,25 @@ class SessionManager:
             log.info(
                 "Session %s (%s) started, pid=%s, acp=%s",
                 session_id, name, session.pid, acp_sid,
+            )
+        except ConnectError as exc:
+            # Structured failure: we know exactly which stage failed and
+            # whether a retry could help -- never an opaque "agent died".
+            session.status = SessionStatus.FAILED
+            self._db.update_session_status(
+                session_id, SessionStatus.FAILED.value, time.time()
+            )
+            session.event_log.append("connect_failed", {
+                "stage": int(exc.stage),
+                "stage_name": exc.stage.name,
+                "retryable": exc.retryable,
+                "message": exc.detail,
+            })
+            session.event_log.append("error", {"message": str(exc)})
+            log.error(
+                "Session %s failed at stage %d/%s: %s",
+                session_id, int(exc.stage), exc.stage.name, exc.detail,
+                exc_info=True,
             )
         except Exception as exc:
             session.status = SessionStatus.FAILED

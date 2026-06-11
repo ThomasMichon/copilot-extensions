@@ -790,7 +790,7 @@ function Invoke-Update {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     if ($SshManagerDir) {
-        $sshOut = & uv pip install --python $VenvPython --reinstall-package ssh-manager `
+        $sshOut = & uv pip install --python $VenvPython --reinstall-package agent-ssh-manager `
             "$SshManagerDir" --quiet 2>&1
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP

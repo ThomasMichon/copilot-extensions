@@ -1,39 +1,115 @@
-#!/bin/bash
-# ado-auth-helper — Smart wrapper that delegates to the right auth backend
-#
-# When SSH tunnel is active (LC_GIT_CREDENTIAL_RELAY set):
-#   → Uses the credential relay proxy (~/.local/bin/ado-auth-helper-relay)
-#
-# When no tunnel (VS Code session, post-start scripts, etc.):
-#   → Delegates to VS Code's original ado-auth-helper (~/.ado-auth-helper-vscode)
-#
-# This wrapper is deployed to ~/ado-auth-helper by agent-codespaces on SSH
-# connect. It preserves VS Code's version at ~/.ado-auth-helper-vscode so
-# post-start scripts and VS Code terminals continue to work after an SSH
-# session disconnects.
+#!/usr/bin/env node
+/*
+ * ado/azure-auth-helper -- smart wrapper deployed by agent-codespaces.
+ *
+ * Relay-first: when the SSH credential relay is active (LC_GIT_CREDENTIAL_RELAY
+ * set, or the default relay port is reachable) this delegates to the relay
+ * client (~/.local/bin/ado-auth-helper-relay), so ADO auth resolves over the
+ * SSH RemoteForward tunnel back to the host Git Credential Manager.
+ *
+ * Otherwise it FALLS BACK by require()-ing the REAL VS Code extension auth
+ * helper (ms-codespaces-tools.ado-codespaces-auth, out/auth-helper.js),
+ * discovered at runtime. This mirrors how the extension's own shim works
+ * (a thin require() of out/auth-helper.js) so VS Code / post-start / terminal
+ * auth keeps working even after an SSH session disconnects -- instead of
+ * relying on a static backup copy that goes stale when the extension updates.
+ *
+ * Installed (by agent-codespaces, with the extension's node shebang) at both
+ * ~/ado-auth-helper and ~/azure-auth-helper. The real auth-helper.js branches
+ * on the invoked basename, which is preserved because this wrapper IS that
+ * path -- so requiring it yields the correct ADO vs Azure behavior.
+ *
+ * marker: ado-auth-helper-relay  (used by the provisioner to detect our own
+ * wrapper and avoid backing it up over the real native helper)
+ */
+"use strict";
 
-DEFAULT_RELAY_PORT=9857
-RELAY_PORT="${LC_GIT_CREDENTIAL_RELAY:-}"
+const cp = require("child_process");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 
-# Fast path: env var explicitly set (SSH session via codespace-ssh)
-if [ -n "$RELAY_PORT" ] && [ -x "$HOME/.local/bin/ado-auth-helper-relay" ]; then
-    exec "$HOME/.local/bin/ado-auth-helper-relay" "$@"
-fi
+const HOME = os.homedir();
+const DEFAULT_RELAY_PORT = 9857;
+const RELAY_CLIENT = path.join(HOME, ".local", "bin", "ado-auth-helper-relay");
+const EXT_PREFIX = "ms-codespaces-tools.ado-codespaces-auth";
 
-# Probe path: env var not set, but the SSH tunnel's RemoteForward may still
-# be active (e.g., postCreateCommand running while codespace-ssh holds the
-# tunnel open). Try connecting to the default relay port.
-if [ -z "$RELAY_PORT" ] && [ -x "$HOME/.local/bin/ado-auth-helper-relay" ]; then
-    if (echo >/dev/tcp/localhost/$DEFAULT_RELAY_PORT) 2>/dev/null; then
-        export LC_GIT_CREDENTIAL_RELAY="$DEFAULT_RELAY_PORT"
-        exec "$HOME/.local/bin/ado-auth-helper-relay" "$@"
-    fi
-fi
+function isExecutable(p) {
+  try { fs.accessSync(p, fs.constants.X_OK); return true; } catch (e) { return false; }
+}
 
-# Fallback: VS Code's original helper (available in VS Code terminals)
-if [ -x "$HOME/.ado-auth-helper-vscode" ]; then
-    exec "$HOME/.ado-auth-helper-vscode" "$@"
-fi
+// Resolve the active relay port: explicit env var, else probe the default
+// port (the tunnel may be up without this shell inheriting the env var, e.g.
+// postCreateCommand / cron). Returns "" when no relay is available.
+function relayPort() {
+  const env = process.env.LC_GIT_CREDENTIAL_RELAY;
+  if (env) return env;
+  const probe = cp.spawnSync(
+    "bash", ["-c", "exec 3<>/dev/tcp/127.0.0.1/" + DEFAULT_RELAY_PORT],
+    { stdio: "ignore" }
+  );
+  return probe.status === 0 ? String(DEFAULT_RELAY_PORT) : "";
+}
 
-# Nothing available
-exit 1
+// Delegate to the relay client, passing through argv/stdio and exit code.
+function useRelay(port) {
+  const env = Object.assign({}, process.env, { LC_GIT_CREDENTIAL_RELAY: port });
+  const r = cp.spawnSync(RELAY_CLIENT, process.argv.slice(2), {
+    stdio: "inherit", env,
+  });
+  process.exit(typeof r.status === "number" ? r.status : 1);
+}
+
+// Find the REAL extension auth-helper.js at runtime.
+function findRealHelper() {
+  // 1) Reuse the require() target recorded in a backed-up native shim, if it
+  //    still exists (fast path, exact match the extension last wrote).
+  const backups = [
+    path.join(HOME, ".ado-auth-helper-vscode"),
+    path.join(HOME, ".azure-auth-helper-vscode"),
+  ];
+  for (const b of backups) {
+    try {
+      const m = fs.readFileSync(b, "utf8").match(/require\(["'](.+?)["']\)/);
+      if (m && fs.existsSync(m[1])) return m[1];
+    } catch (e) { /* ignore */ }
+  }
+  // 2) Glob the VS Code Server extension roots for the live auth-helper.js,
+  //    preferring the highest (latest) version directory.
+  const roots = [
+    path.join(HOME, ".vscode-remote", "extensions"),
+    path.join(HOME, ".vscode-server", "extensions"),
+    path.join(HOME, ".vscode-server-insiders", "extensions"),
+  ];
+  let best = null;
+  for (const root of roots) {
+    let names;
+    try { names = fs.readdirSync(root); } catch (e) { continue; }
+    for (const name of names) {
+      if (name.indexOf(EXT_PREFIX) !== 0) continue;
+      const js = path.join(root, name, "out", "auth-helper.js");
+      if (fs.existsSync(js) && (!best || name > best.name)) {
+        best = { name: name, js: js };
+      }
+    }
+  }
+  return best ? best.js : null;
+}
+
+const port = relayPort();
+if (port && isExecutable(RELAY_CLIENT)) {
+  useRelay(port);
+}
+
+const real = findRealHelper();
+if (real) {
+  // Hand off to the real helper as the main module. process.argv[1] is this
+  // wrapper's path (~/ado-auth-helper or ~/azure-auth-helper), so the real
+  // helper sees the correct invoked name.
+  require(real);
+} else {
+  process.stderr.write(
+    "ado-auth-helper: relay unavailable and no VS Code auth-helper found\n"
+  );
+  process.exit(1);
+}

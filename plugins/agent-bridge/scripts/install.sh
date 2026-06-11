@@ -653,7 +653,7 @@ do_update() {
     _step "Updating agent-bridge package..."
     local ssh_manager_dir
     if ssh_manager_dir="$(_resolve_ssh_manager)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package ssh-manager \
+        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-ssh-manager \
                 "$ssh_manager_dir" --quiet; then
             _fail "ssh-manager update failed"
             exit 1

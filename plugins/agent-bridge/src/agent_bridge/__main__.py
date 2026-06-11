@@ -73,6 +73,24 @@ def _get_client():
     return BridgeClient.from_config()
 
 
+def _add_stream_args(p: argparse.ArgumentParser) -> None:
+    """Add the streaming/collapse flags shared by send / wait / read."""
+    p.add_argument(
+        "--caller", metavar="ID",
+        help="Caller identity keying the delivery cursor (defaults to "
+             "$WORKTREE_ID, else a shared per-session cursor)",
+    )
+    p.add_argument(
+        "--expand", action="append", choices=["thoughts", "tools", "all"],
+        help="Expand collapsed content in the feed (repeatable). By default "
+             "chain-of-thought and tool calls collapse to one-line markers.",
+    )
+    p.add_argument(
+        "--no-color", action="store_true",
+        help="Disable ANSI color/dim in the rendered feed",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Server commands
 # ---------------------------------------------------------------------------
@@ -469,22 +487,18 @@ def _cmd_sessions(args: argparse.Namespace) -> None:
 def _cmd_send(args: argparse.Namespace) -> None:
     """Send a prompt to an agent or existing session.
 
-    If *target* matches a registered agent name, starts a new session
-    and sends the prompt. If it matches an existing session ID, sends
-    to that session. Otherwise errors.
+    Streams the remote turn live by default (collapsed feed), resuming from
+    and advancing the caller's delivery cursor so the host ingests exactly
+    one contiguous, gap-free copy of the conversation.
     """
     client = _get_client()
     target = args.target
     prompt = args.prompt
+    caller_id = _caller_id_for(args)
 
     # Resolve: try agent name first, then session ID
     force_new = getattr(args, "new", False)
     session_id = _resolve_target(client, target, force_new=force_new)
-
-    # Get current session state to know where events start
-    session_info = client.get_session(session_id)
-    # We'll skip events from before the prompt by tracking turn_index
-    pre_turn_count = session_info.get("turn_count", 0)
 
     # Submit prompt
     result = client.submit_prompt(session_id, prompt)
@@ -500,8 +514,14 @@ def _cmd_send(args: argparse.Namespace) -> None:
         print("[>] Prompt submitted (--no-wait)")
         return
 
-    # Stream SSE events until turn completes
-    _stream_until_complete(client, session_id, turn_index)
+    timeouts = _phased_timeouts()
+    renderer = _make_renderer(args)
+    _stream_feed(
+        client, session_id,
+        caller_id=caller_id,
+        renderer=renderer,
+        command_timeout=timeouts.command,
+    )
 
 
 def _resolve_target(client, target: str, *, force_new: bool = False) -> str:
@@ -598,6 +618,71 @@ def _get_caller_id() -> str | None:
     return os.environ.get("WORKTREE_ID")
 
 
+def _caller_id_for(args: argparse.Namespace) -> str | None:
+    """Resolve the caller identity used to key the delivery cursor.
+
+    Precedence: explicit ``--caller`` > ``WORKTREE_ID`` env > None. A None
+    caller falls back to the session's shared default cursor server-side.
+    Because ``WORKTREE_ID`` is not always trustworthy across sessions,
+    ``--caller`` lets a host pin a stable cursor key.
+    """
+    explicit = getattr(args, "caller", None)
+    if explicit:
+        return explicit
+    return _get_caller_id()
+
+
+def _phased_timeouts():
+    """Load phased timeouts from local config (defaults on any failure)."""
+    from .models import PhasedTimeouts
+
+    try:
+        from .config import load_config
+
+        return load_config().timeouts
+    except Exception:
+        return PhasedTimeouts()
+
+
+def _make_renderer(args: argparse.Namespace):
+    """Build a StreamRenderer honoring --expand / color settings."""
+    from .render import StreamRenderer
+
+    expand = set(getattr(args, "expand", None) or [])
+    color = sys.stdout.isatty() and not getattr(args, "no_color", False)
+    return StreamRenderer(
+        expand_thoughts=("thoughts" in expand or "all" in expand),
+        expand_tools=("tools" in expand or "all" in expand),
+        color=color,
+    )
+
+
+# Seconds of stream silence before emitting a progress heartbeat line.
+_PROGRESS_INTERVAL = 20.0
+# Backoff between reconnect attempts (e.g. while the service restarts).
+_RECONNECT_BACKOFF = 1.0
+
+
+def _turn_settled(client, session_id: str, cursor: int) -> bool:
+    """True when the session is idle/terminal AND no events remain past cursor.
+
+    The drain check prevents declaring completion while backlog events are
+    still in flight.
+    """
+    try:
+        session = client.get_session(session_id)
+    except Exception:
+        return False
+    status = session.get("status", "")
+    if status not in ("idle", "stopped", "ended", "failed"):
+        return False
+    try:
+        remaining = client.read_range(session_id, start=cursor + 1)
+    except Exception:
+        remaining = []
+    return not remaining
+
+
 def _start_agent_session(client, agent_name: str, *, force_new: bool = False) -> str:
     """Start or reuse a session for a named agent.
 
@@ -649,7 +734,14 @@ def _start_agent_session(client, agent_name: str, *, force_new: bool = False) ->
     sid = resp.get("session_id", "")
     name = resp.get("name", "")
     print(f"[>] Session {sid} ({name}) created")
-    _wait_for_idle(client, sid)
+    # Phased timeout: a codespace may need to cold-boot (much longer than a
+    # local agent spawn), so use the boot timeout for codespace targets.
+    timeouts = _phased_timeouts()
+    if agent_name.startswith("codespace:"):
+        start_timeout = timeouts.codespace_boot
+    else:
+        start_timeout = timeouts.session_start
+    _wait_for_idle(client, sid, timeout=start_timeout)
     return sid
 
 
@@ -686,135 +778,128 @@ def _wait_for_idle(client, session_id: str, timeout: float = 30.0) -> None:
     sys.exit(1)
 
 
-def _stream_until_complete(
-    client, session_id: str, turn_index: int
-) -> None:
-    """Stream SSE events, printing output until the turn completes.
+def _stream_feed(
+    client,
+    session_id: str,
+    *,
+    caller_id: str | None,
+    renderer,
+    command_timeout: float = 0.0,
+) -> str:
+    """Stream the remote conversation as a collapsed live feed.
 
-    Maintains a cursor (last seen event ID) and reconnects
-    automatically on timeout or disconnect.  Only fetches events
-    after the cursor, so output is never duplicated.
+    Resumes from the caller's last-acked delivery cursor and renders each
+    event to stdout, then **acks the cursor only after the content is
+    flushed**. This is what makes the cursor advance on *confirmed delivery*
+    rather than server-side production: an ungraceful client death (SIGKILL)
+    before a flush leaves the cursor where it was, so a later ``read`` resumes
+    exactly where the host left off -- nothing skipped, nothing duplicated.
+
+    Reconnects (resuming from the acked cursor) across transient connection
+    loss -- e.g. a service restart mid-workflow. Terminates when the turn
+    settles (session idle + backlog drained), the command timeout elapses,
+    an error event arrives, or the user interrupts. Returns a status string.
     """
-    from .client import BridgeClientError
+    import time
 
-    cursor = 0
-    in_our_turn = turn_index == -1  # -1 means "any running turn" (wait)
-    max_retries = 120  # ~1 hour at 30s heartbeat interval
+    from .client import BridgeClientError, BridgeConnectionError
 
-    for attempt in range(max_retries):
+    try:
+        cursor = client.get_cursor(session_id, caller_id=caller_id)
+    except Exception:
+        cursor = 0
+
+    start = time.monotonic()
+    last_activity = start
+    deadline = (start + command_timeout) if command_timeout else None
+    max_attempts = 100000
+
+    def _ack(up_to: int) -> None:
+        # Best-effort: a failed ack just means a future read re-delivers
+        # (no data loss), never a skip.
         try:
-            for evt in client.stream_events(session_id, after=cursor):
-                # Advance cursor so reconnects resume from here
+            client.ack_cursor(session_id, up_to, caller_id=caller_id)
+        except Exception:
+            pass
+
+    for _attempt in range(max_attempts):
+        try:
+            for evt in client.stream_events(
+                session_id, after=cursor, caller_id=caller_id
+            ):
+                now = time.monotonic()
+                etype = evt.get("event", "")
+
+                if etype == "_heartbeat":
+                    if now - last_activity >= _PROGRESS_INTERVAL:
+                        sys.stdout.write(renderer.heartbeat_line(now - start))
+                        sys.stdout.flush()
+                        last_activity = now
+                    if deadline and now > deadline:
+                        print(
+                            "\n[>] Timed out waiting for turn "
+                            "(remote still running)", file=sys.stderr,
+                        )
+                        return "timeout"
+                    if _turn_settled(client, session_id, cursor):
+                        return "complete"
+                    continue
+
+                # Real event: render + flush BEFORE acking delivery.
                 evt_id = evt.get("id", "")
-                if evt_id:
-                    try:
-                        cursor = int(evt_id)
-                    except (ValueError, TypeError):
-                        pass
+                try:
+                    new_id = int(evt_id) if evt_id else cursor
+                except (ValueError, TypeError):
+                    new_id = cursor
 
-                event_type = evt.get("event", "")
-                data = evt.get("data", {})
+                text = renderer.render_event(etype, evt.get("data", {}))
+                if text:
+                    sys.stdout.write(text)
+                    sys.stdout.flush()
+                last_activity = now
 
-                # Wait for our turn to start before printing anything
-                if event_type == "session_state_changed":
-                    status = data.get("status", "")
-                    ti = data.get("turn_index")
-                    if status == "running" and (
-                        turn_index == -1 or ti == turn_index
-                    ):
-                        in_our_turn = True
-                    continue
+                if new_id > cursor:
+                    cursor = new_id
+                    _ack(cursor)
 
-                if not in_our_turn:
-                    continue
+                if etype == "error":
+                    return "error"
+                if deadline and now > deadline:
+                    print("\n[>] Timed out (remote still running)", file=sys.stderr)
+                    return "timeout"
 
-                if event_type == "agent_message":
-                    text = data.get("text", "")
-                    if text:
-                        print(text, end="", flush=True)
-
-                elif event_type == "agent_thought":
-                    text = data.get("text", "")
-                    if text:
-                        print(f"\033[2m{text}\033[0m", end="", flush=True)
-
-                elif event_type == "tool_call_start":
-                    title = data.get("title", "")
-                    if title:
-                        print(f"\n  >> {title}", flush=True)
-
-                elif event_type == "tool_call_update":
-                    status = data.get("status", "")
-                    if status and status not in ("pending", "running"):
-                        print(f"     [{status}]", flush=True)
-
-                elif event_type == "turn_complete":
-                    print()  # Final newline
-                    stop = data.get("stop_reason", "")
-                    if stop:
-                        print(f"[<] Turn complete ({stop})")
-                    else:
-                        print("[<] Turn complete")
-                    return
-
-                elif event_type == "error":
-                    msg = data.get("message", "Unknown error")
-                    print(f"\n[FAIL] {msg}", file=sys.stderr)
-                    return
-
+        except KeyboardInterrupt:
+            # Cursor reflects exactly what was flushed + acked; a later read
+            # resumes from here.
+            print(
+                f"\n[>] Interrupted -- delivered through event {cursor}",
+                file=sys.stderr,
+            )
+            return "interrupted"
+        except BridgeConnectionError:
+            pass  # service unreachable (restarting?) -- back off and resume
         except (OSError, urllib.error.URLError):
-            # Connection dropped -- reconnect from cursor
             pass
         except BridgeClientError as exc:
             if exc.status == 404:
                 print(f"\n[FAIL] Session {session_id} not found", file=sys.stderr)
-                return
-            # Transient server error -- retry
-            pass
-        except KeyboardInterrupt:
-            print("\n[>] Interrupted -- session still running")
-            return
+                return "error"
+            # transient -- retry
 
-        # Check if session is still running before reconnecting
-        try:
-            session = client.get_session(session_id)
-            status = session.get("status", "")
-            if status in ("idle", "ended", "stopped", "failed"):
-                # Drain remaining events from the last cursor
-                try:
-                    for evt in client.stream_events(session_id, after=cursor):
-                        evt_id = evt.get("id", "")
-                        if evt_id:
-                            try:
-                                cursor = int(evt_id)
-                            except (ValueError, TypeError):
-                                pass
-                        event_type = evt.get("event", "")
-                        data = evt.get("data", {})
-                        if event_type == "turn_complete":
-                            print()
-                            stop = data.get("stop_reason", "")
-                            if stop:
-                                print(f"[<] Turn complete ({stop})")
-                            else:
-                                print("[<] Turn complete")
-                            return
-                except Exception:
-                    pass
-                print(f"\n[<] Session is {status}")
-                return
-        except Exception:
-            pass  # Can't check -- try reconnecting anyway
+        now = time.monotonic()
+        if deadline and now > deadline:
+            return "timeout"
+        if _turn_settled(client, session_id, cursor):
+            return "complete"
+        time.sleep(_RECONNECT_BACKOFF)
 
-        import time
-        time.sleep(1)
-
-    print("\n[FAIL] Gave up reconnecting after too many retries", file=sys.stderr)
+    return "gaveup"
 
 
 def _cmd_wait(args: argparse.Namespace) -> None:
-    """Wait for the current turn on a session to complete."""
+    """Wait for the current turn on a session to complete (streaming)."""
     client = _get_client()
+    caller_id = _caller_id_for(args)
     session = client.get_session(args.session_id)
     status = session.get("status", "")
 
@@ -826,7 +911,87 @@ def _cmd_wait(args: argparse.Namespace) -> None:
         return
 
     print(f"[>] Waiting for session {args.session_id}...")
-    _stream_until_complete(client, args.session_id, turn_index=-1)
+    timeouts = _phased_timeouts()
+    renderer = _make_renderer(args)
+    _stream_feed(
+        client, args.session_id,
+        caller_id=caller_id,
+        renderer=renderer,
+        command_timeout=timeouts.command,
+    )
+
+
+def _cmd_read(args: argparse.Namespace) -> None:
+    """Read the remote conversation from the caller's delivery cursor.
+
+    Default: resume the live feed from the last-acked cursor and keep
+    streaming (acking as content is delivered) until the turn settles,
+    timeout, or interrupt.
+
+    ``--no-follow``: deliver everything pending since the cursor, then exit
+    (advances the cursor).
+
+    ``--range A:B`` / ``--event N``: random-access historical read by event
+    id. Does NOT move the delivery cursor -- the only way to re-read
+    already-consumed content.
+    """
+    client = _get_client()
+    caller_id = _caller_id_for(args)
+    session_id = args.session_id
+    renderer = _make_renderer(args)
+
+    # Random-access historical read (does not touch the cursor).
+    rng = getattr(args, "range", None)
+    evt = getattr(args, "event", None)
+    if rng or evt is not None:
+        if evt is not None:
+            start_id, end_id = evt, evt
+        else:
+            try:
+                lo, _, hi = rng.partition(":")
+                start_id = int(lo) if lo else 0
+                end_id = int(hi) if hi else None
+            except ValueError:
+                print(f"[FAIL] Invalid --range '{rng}' (use A:B)", file=sys.stderr)
+                sys.exit(1)
+        events = client.read_range(session_id, start=start_id, end=end_id)
+        if args.json:
+            _json_out({"session_id": session_id, "events": events})
+            return
+        out = renderer.render_events(events)
+        if out:
+            sys.stdout.write(out)
+            sys.stdout.flush()
+        if not out:
+            print("(no events in range)")
+        return
+
+    # Non-follow: drain everything pending since the cursor, advance, exit.
+    if getattr(args, "no_follow", False):
+        start_id = client.get_cursor(session_id, caller_id=caller_id)
+        events = client.read_range(session_id, start=start_id + 1)
+        if args.json:
+            _json_out({"session_id": session_id, "events": events})
+            return
+        out = renderer.render_events(events)
+        if out:
+            sys.stdout.write(out)
+            sys.stdout.flush()
+        if events:
+            last_id = events[-1].get("id", start_id)
+            client.ack_cursor(session_id, last_id, caller_id=caller_id)
+        else:
+            print("(caught up -- nothing new)")
+        return
+
+    # Follow: resume the live feed from the cursor.
+    timeouts = _phased_timeouts()
+    _stream_feed(
+        client, session_id,
+        caller_id=caller_id,
+        renderer=renderer,
+        command_timeout=timeouts.command,
+    )
 
 
 def _cmd_stop(args: argparse.Namespace) -> None:
@@ -1095,13 +1260,38 @@ def main(argv: list[str] | None = None) -> None:
         "--new", action="store_true",
         help="Force a new session even if an idle one exists for this agent",
     )
+    _add_stream_args(send_p)
     send_p.set_defaults(func=_cmd_send)
 
     wait_p = sub.add_parser(
         "wait", help="Wait for current turn to complete"
     )
     wait_p.add_argument("session_id", help="Session ID")
+    _add_stream_args(wait_p)
     wait_p.set_defaults(func=_cmd_wait)
+
+    read_p = sub.add_parser(
+        "read",
+        help="Read/resume a session's conversation from the delivery cursor",
+    )
+    read_p.add_argument("session_id", help="Session ID")
+    read_p.add_argument(
+        "--no-follow", action="store_true",
+        help="Deliver everything pending since the cursor, then exit "
+             "(do not wait for completion)",
+    )
+    read_p.add_argument(
+        "--range", metavar="A:B",
+        help="Random-access read of event ids A..B (inclusive). Does NOT "
+             "move the delivery cursor.",
+    )
+    read_p.add_argument(
+        "--event", type=int, metavar="N",
+        help="Random-access read of a single event id N. Does NOT move the "
+             "delivery cursor.",
+    )
+    _add_stream_args(read_p)
+    read_p.set_defaults(func=_cmd_read)
 
     stop_p = sub.add_parser("stop", help="Stop a session")
     stop_p.add_argument("session_id", help="Session ID")
