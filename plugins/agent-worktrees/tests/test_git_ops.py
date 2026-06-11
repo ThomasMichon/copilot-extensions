@@ -79,6 +79,59 @@ class TestPathHelpers:
 
 
 # ---------------------------------------------------------------------------
+# Cross-account authentication (#29)
+# ---------------------------------------------------------------------------
+
+from agent_worktrees import git_ops as go  # noqa: E402
+
+
+class TestCrossAccountAuth:
+    @pytest.mark.parametrize("url,owner", [
+        ("https://github.com/ThomasMichon/copilot-extensions.git", "ThomasMichon"),
+        ("https://github.com/octo-org/repo", "octo-org"),
+        ("git@github.com:ThomasMichon/copilot-extensions.git", "ThomasMichon"),
+        ("ssh://git@github.com/owner/repo.git", "owner"),
+        ("https://gitlab.com/owner/repo.git", None),
+        ("/local/path/repo", None),
+    ])
+    def test_parse_github_owner(self, url, owner):
+        assert go._parse_github_owner(url) == owner
+
+    def test_auth_args_empty_when_no_token(self, monkeypatch):
+        monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: "https://github.com/Owner/r.git")
+        monkeypatch.setattr(go, "_gh_token_for_owner", lambda owner: None)
+        assert go._auth_config_args("origin", cwd=".") == []
+
+    def test_auth_args_empty_for_non_github(self, monkeypatch):
+        monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: "https://gitlab.com/o/r.git")
+        assert go._auth_config_args("origin", cwd=".") == []
+
+    def test_auth_args_injects_header_with_token(self, monkeypatch):
+        import base64
+        monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: "https://github.com/Owner/r.git")
+        monkeypatch.setattr(go, "_gh_token_for_owner", lambda owner: "ghp_secret")
+        args = go._auth_config_args("origin", cwd=".")
+        assert args[0] == "-c"
+        expected = base64.b64encode(b"x-access-token:ghp_secret").decode()
+        assert args[1] == f"http.extraheader=AUTHORIZATION: basic {expected}"
+
+    def test_redact_args_strips_extraheader(self):
+        cmd = ["git", "-c", "http.extraheader=AUTHORIZATION: basic c2VjcmV0", "push"]
+        redacted = go._redact_args(cmd)
+        assert "http.extraheader=<redacted>" in redacted
+        assert not any("c2VjcmV0" in a for a in redacted)
+
+    def test_git_error_message_redacts_token(self):
+        err = GitError(
+            ["git", "-c", "http.extraheader=AUTHORIZATION: basic c2VjcmV0", "push"],
+            1, "denied",
+        )
+        assert "c2VjcmV0" not in str(err)
+        assert "<redacted>" in str(err)
+        assert all("c2VjcmV0" not in a for a in err.cmd)
+
+
+# ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
 
