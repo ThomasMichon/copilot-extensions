@@ -80,8 +80,9 @@ def test_release_missing_returns_false(fleet):
 
 def test_reclaim_after_ttl(fleet):
     lease_mod.borrow(fleet, "effort-a")  # leases odsp-web-1
-    # With a zero TTL, the lease is immediately considered expired.
-    assert lease_mod.list_leases(ttl=0) == []
+    # A negative TTL means any non-negative age is past expiry -- deterministic
+    # regardless of clock resolution.
+    assert lease_mod.list_leases(ttl=-1) == []
 
 
 def test_lease_survives_within_ttl(fleet):
