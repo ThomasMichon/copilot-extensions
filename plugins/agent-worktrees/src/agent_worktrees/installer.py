@@ -332,6 +332,38 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     return True
 
 
+def _write_binstub_if_changed(dst: Path, content: str) -> bool:
+    """Write *content* to *dst* only if the on-disk content differs.
+
+    Comparison is newline-normalized so that a stub written by a sibling
+    generator (init.ps1 / install.ps1 with CRLF, init.sh with LF) is treated
+    as unchanged when its logical content matches.
+
+    This is critical on Windows: ``register``/``adopt``/``update`` run *through*
+    the global ``agent-worktrees.cmd`` binstub, then call this function, which
+    would otherwise rewrite that very file mid-execution. cmd.exe resumes
+    reading a batch file by byte offset after a child process returns, so
+    rewriting the running stub to a different length corrupts the read (the
+    classic stray ``'b' is not recognized`` from ``exit /b`` plus a spurious
+    re-run). Skipping the write when nothing changed avoids the corruption.
+
+    Returns True if a write occurred, False if skipped.
+    """
+    def _norm(s: str) -> str:
+        return s.replace("\r\n", "\n").replace("\r", "\n")
+
+    if dst.exists():
+        try:
+            existing = dst.read_text(errors="replace")
+            if _norm(existing) == _norm(content):
+                return False
+        except OSError:
+            pass
+    # newline="" preserves the literal \r\n / \n already embedded in content
+    dst.write_text(content, newline="")
+    return True
+
+
 def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
     """Generate project-specific binstubs in ~/.local/bin/.
 
@@ -357,11 +389,11 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
                 'set "PYTHONUTF8=1"\r\n'
                 f'set "WORKTREE_PROJECT={project}"\r\n'
                 'set "_PY=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe"\r\n'
-                'if exist "%_PY%" (\r\n'
-                '    set "PYTHONPATH=%USERPROFILE%\\.agent-worktrees\\lib"\r\n'
-                '    "%_PY%" -m agent_worktrees %*\r\n'
-                '    exit /b %ERRORLEVEL%\r\n'
-                ')\r\n'
+                'if not exist "%_PY%" goto :_aw_fallback\r\n'
+                'set "PYTHONPATH=%USERPROFILE%\\.agent-worktrees\\lib"\r\n'
+                '"%_PY%" -m agent_worktrees %*\r\n'
+                'exit /b %ERRORLEVEL%\r\n'
+                ':_aw_fallback\r\n'
                 'rem Fallback: launch session directly (venv missing / recovery)\r\n'
                 '"%USERPROFILE%\\.agent-worktrees\\bin\\launch-session.cmd" %*\r\n'
                 'exit /b %ERRORLEVEL%\r\n'
@@ -381,7 +413,7 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
                 'exec "$HOME/.agent-worktrees/bin/launch-session.sh" "$@"\n'
             )
             dst = lb / project
-        dst.write_text(binstub_content)
+        _write_binstub_if_changed(dst, binstub_content)
         if not is_windows:
             dst.chmod(0o755)
         output.ok(f"Binstub: {dst}")
@@ -390,8 +422,14 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
     # the Python CLI). It must NOT require WORKTREE_PROJECT -- global
     # subcommands like `register <project>`, `update`, and `--version` run
     # without a project context. The project-specific launchers above are the
-    # gating mechanism that sets WORKTREE_PROJECT; this stub stays unconditional
-    # and matches the binstub written by init.sh.
+    # gating mechanism that sets WORKTREE_PROJECT; this stub stays unconditional.
+    #
+    # IMPORTANT: this content must stay byte-for-byte (newline-normalized)
+    # identical to the global stub written by the native installers
+    # (scripts/init.ps1, scripts/init.sh, and the static bin/agent-worktrees.cmd
+    # copied by install.ps1). register/adopt/update run *through* this stub and
+    # then call deploy_binstubs; if the content differs, _write_binstub_if_changed
+    # rewrites the executing file mid-run and corrupts cmd.exe's byte-offset read.
     if is_windows:
         wm_content = (
             "@echo off\r\n"
@@ -402,7 +440,7 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
             "exit /b %ERRORLEVEL%\r\n"
         )
         dst = lb / "agent-worktrees.cmd"
-        dst.write_text(wm_content)
+        _write_binstub_if_changed(dst, wm_content)
         output.ok(f"Binstub: {dst}")
     else:
         wm_content = (
@@ -413,7 +451,7 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
             'exec "$HOME/.agent-worktrees/.venv/bin/python" -m agent_worktrees "$@"\n'
         )
         dst = lb / "agent-worktrees"
-        dst.write_text(wm_content)
+        _write_binstub_if_changed(dst, wm_content)
         dst.chmod(0o755)
         output.ok(f"Binstub: {dst}")
 
