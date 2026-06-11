@@ -10,7 +10,7 @@ if [[ ! -x "$PYTHON" ]]; then
     exit 0
 fi
 
-export PYTHONPATH="$HOME/.agent-worktrees/lib"
+export PYTHONPATH=""  # package is installed in the venv (no lib/ shadow)
 "$PYTHON" -m agent_worktrees anchor-check --quiet 2>/dev/null || true
 
 exit 0

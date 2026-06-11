@@ -241,38 +241,78 @@ function Get-GitInfo {
     }
 }
 
-function Write-DeployManifest {
-    $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-    $repoRoot = Split-Path $PluginDir
-    $gitInfo = Get-GitInfo -Path $repoRoot
+# === install-contract:v3 source-kind -- keep byte-identical across plugins ===
+# A runtime footprint's source is inferred from where the installer runs.
+# Vendored under the Copilot CLI installed-plugins dir => marketplace;
+# anything else (a git checkout) => local. `update` re-installs from whatever
+# the recorded footprint is, because the same installer is invoked from the
+# same place.
+function Get-SourceKind {
+    param([string]$PluginPath)
+    if (($PluginPath -replace '\\', '/') -match '/\.copilot/installed-plugins/') {
+        return 'marketplace'
+    }
+    return 'local'
+}
+# === end install-contract:v3 source-kind ===
 
-    # Read version from pyproject.toml
+function Write-DeployManifest {
+    Write-DeployManifestFor -Service 'agent-bridge' -Plugin 'agent-bridge' `
+        -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $VenvDir
+}
+
+# Unified schema_version 3 manifest writer. Self-contained per plugin (no shared
+# module -- plugins are pulled independently from the marketplace). Records the
+# source footprint (local vs marketplace) and is written atomically (temp+move).
+function Write-DeployManifestFor {
+    param(
+        [string]$Service,
+        [string]$Plugin,
+        [string]$InstallPath,
+        [string]$PluginPath,
+        [string]$VenvPath
+    )
+    $manifestPath = Join-Path $InstallPath 'deploy-manifest.json'
+    $kind = Get-SourceKind -PluginPath $PluginPath
+
     $ver = '0.0.0'
-    $pyproj = Join-Path $PluginDir 'pyproject.toml'
+    $pyproj = Join-Path $PluginPath 'pyproject.toml'
     if (Test-Path $pyproj) {
         $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
         if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*','$1') }
     }
 
-    $manifest = [ordered]@{
-        schema_version = 2
-        service        = 'agent-bridge'
-        installer      = 'plugin'
-        deployed_at    = (Get-Date -Format 'o')
-        deployed_by    = $env:COMPUTERNAME.ToLower()
-        runtime_source = [ordered]@{
-            repo    = 'copilot-extensions'
-            plugin  = 'agent-bridge'
-            version = $ver
-            commit  = $gitInfo.commit
-            branch  = $gitInfo.branch
-            dirty   = $gitInfo.dirty
-            path    = ($PluginDir -replace '\\', '/')
-        }
+    # Git provenance only applies to a local checkout -- the marketplace vendor
+    # copy is not a git repo.
+    $commit = $null; $branch = $null; $dirty = $false
+    if ($kind -eq 'local') {
+        $gitInfo = Get-GitInfo -Path (Split-Path $PluginPath)
+        $commit = $gitInfo.commit; $branch = $gitInfo.branch; $dirty = $gitInfo.dirty
     }
 
-    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $manifestPath -Encoding UTF8
-    Write-Ok "Deploy manifest written"
+    $manifest = [ordered]@{
+        schema_version = 3
+        service        = $Service
+        deployed_at    = (Get-Date -Format 'o')
+        deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
+        source         = [ordered]@{
+            kind    = $kind
+            path    = ($PluginPath -replace '\\', '/')
+            repo    = 'copilot-extensions'
+            plugin  = $Plugin
+            version = $ver
+            commit  = $commit
+            branch  = $branch
+            dirty   = $dirty
+        }
+        venv           = ($VenvPath -replace '\\', '/')
+        runtime        = 'python'
+    }
+
+    $tmp = "$manifestPath.tmp"
+    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
+    Move-Item -Force -Path $tmp -Destination $manifestPath
+    Write-Ok "Deploy manifest written (source: $kind)"
 }
 
 function Register-ScheduledTask_ {
@@ -668,6 +708,21 @@ function Invoke-Status {
         Write-Ok "Installed: $version"
     } else {
         Write-Step 'Not installed'
+    }
+
+    # Show runtime source footprint (local checkout vs marketplace)
+    $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
+    if (Test-Path $manifestPath) {
+        try {
+            $m = Get-Content $manifestPath -Raw | ConvertFrom-Json
+            if ($m.source) {
+                $extra = ''
+                if ($m.source.kind -eq 'local' -and $m.source.commit) {
+                    $extra = " @ $($m.source.commit)$(if ($m.source.dirty) { '+dirty' })"
+                }
+                Write-Ok "Source: $($m.source.kind) ($($m.source.version))$extra"
+            }
+        } catch { }
     }
 
     # Show config summary

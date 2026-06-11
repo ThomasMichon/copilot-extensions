@@ -144,6 +144,7 @@ LEGACY_BINSTUBS=(
 LIB_DIR="$INSTALL_DIR/lib"
 VENV_DIR="$INSTALL_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
+VENV_BIN="$VENV_DIR/bin/agent-worktrees"
 
 # ── Status output helpers ────────────────────────────────────────────────
 
@@ -153,6 +154,15 @@ skipped() { echo "  ○ $*"; }
 warn()    { echo "  ! $*"; }
 err()     { echo "  ✗ $*"; }
 header()  { echo ""; echo "═══ $* $(printf '═%.0s' $(seq 1 $((56 - ${#1}))))"; }
+
+# === install-contract:v3 source-kind -- keep byte-identical across plugins ===
+_source_kind() {
+    case "$(printf '%s' "$1" | tr '\\' '/')" in
+        */.copilot/installed-plugins/*) printf 'marketplace' ;;
+        *) printf 'local' ;;
+    esac
+}
+# === end install-contract:v3 source-kind ===
 
 # ── Machine detection ────────────────────────────────────────────────────
 
@@ -269,33 +279,36 @@ projects_path.write_text(header + yaml.dump(data, default_flow_style=False, sort
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 deploy_package() {
-    local src="$PLUGIN_DIR/src/agent_worktrees"
-    local dst="$LIB_DIR/agent_worktrees"
-
-    if [[ ! -d "$src" ]]; then
-        err "Package source not found: $src"
+    if [[ ! -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+        err "Plugin source not found: $PLUGIN_DIR"
+        return 1
+    fi
+    if [[ ! -x "$VENV_PYTHON" ]]; then
+        err "Venv Python missing -- create the venv first"
         return 1
     fi
 
-    # Clean previous deployment
-    if [[ -d "$dst" ]]; then
-        rm -rf "$dst"
+    if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-worktrees "$PLUGIN_DIR" --quiet; then
+        err "Package install failed"
+        return 1
     fi
 
-    mkdir -p "$LIB_DIR"
-    cp -r "$src" "$dst"
+    # Retire the legacy file-copy dir FIRST so a stale PYTHONPATH=.../lib cannot
+    # make the probe resolve to the old copy (or shadow it at runtime).
+    rm -rf "$LIB_DIR"
 
-    # Stamp build info so --version reflects this deployment
-    local _repo_root
-    _repo_root="$(cd "$PLUGIN_DIR/../.." && pwd)"
-    local _commit _branch _ts _src_norm
-    _commit="$(git -C "$_repo_root" rev-parse HEAD 2>/dev/null || echo unknown)"
-    _branch="$(git -C "$_repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
-    _ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    _src_norm="$(echo "$PLUGIN_DIR" | tr '\\' '/')"
-    local _ver
-    _ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
-    cat > "$dst/_build_info.py" <<PYEOF
+    # Stamp build info into the installed copy (PYTHONPATH cleared for the probe).
+    local pkg_dir
+    pkg_dir="$(PYTHONPATH= "$VENV_PYTHON" -c 'import agent_worktrees, os; print(os.path.dirname(agent_worktrees.__file__))' 2>/dev/null || true)"
+    if [[ -n "$pkg_dir" ]]; then
+        local _repo_root _commit _branch _ts _src_norm _ver
+        _repo_root="$(cd "$PLUGIN_DIR/../.." && pwd)"
+        _commit="$(git -C "$_repo_root" rev-parse HEAD 2>/dev/null || echo unknown)"
+        _branch="$(git -C "$_repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+        _ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        _src_norm="$(echo "$PLUGIN_DIR" | tr '\\' '/')"
+        _ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+        cat > "$pkg_dir/_build_info.py" <<PYEOF
 """Build provenance -- auto-generated at deploy time. Do not edit."""
 
 from __future__ import annotations
@@ -308,25 +321,22 @@ BUILD_INFO: dict[str, str] = {
     "source": "$_src_norm",
 }
 PYEOF
+    else
+        warn "Could not locate installed agent_worktrees -- build info not stamped"
+    fi
 
-    ok "Package deployed to $dst"
+    ok "Package installed into venv"
 }
 
 deploy_venv() {
-    # Create venv via uv (--allow-existing handles re-install)
+    # Create venv via uv (--allow-existing handles re-install). Deps come from
+    # pyproject at package install time -- no ad-hoc pyyaml here.
     if ! uv venv "$VENV_DIR" --python 3.11 --allow-existing 2>/dev/null; then
         if ! uv venv "$VENV_DIR" --allow-existing 2>/dev/null; then
             err "Failed to create venv at $VENV_DIR"
             return 1
         fi
     fi
-
-    # Install pyyaml
-    if ! uv pip install --python "$VENV_PYTHON" pyyaml 2>/dev/null; then
-        err "Failed to install pyyaml into venv"
-        return 1
-    fi
-
     ok "Venv created at $VENV_DIR"
 }
 
@@ -413,11 +423,10 @@ deploy_binstub() {
 BINSTUB_HEAD
     cat >> "$tmp" <<BINSTUB_BODY
 export WORKTREE_PROJECT="$PROJECT_NAME"
-_PY="\$HOME/.agent-worktrees/.venv/bin/python"
-if [[ -x "\$_PY" ]]; then
-    export PYTHONPATH="\$HOME/.agent-worktrees/lib"
-    export PYTHONUTF8=1
-    exec "\$_PY" -m agent_worktrees "\$@"
+export PYTHONUTF8=1
+_AW="\$HOME/.agent-worktrees/.venv/bin/agent-worktrees"
+if [[ -x "\$_AW" ]]; then
+    exec "\$_AW" "\$@"
 fi
 # Fallback: launch session directly (venv missing / recovery)
 exec "\$HOME/.agent-worktrees/bin/launch-session.sh" "\$@"
@@ -480,52 +489,45 @@ EOF
 
 write_deploy_manifest() {
     local manifest_path="$INSTALL_DIR/deploy-manifest.json"
-    local env_id
-    local machine
+    local machine platform kind ver commit branch dirty
     machine="$(resolve_machine)"
-    local platform
     platform="$(detect_platform)"
-    env_id="${machine}-${platform}"
+    kind="$(_source_kind "$PLUGIN_DIR")"
+    ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
 
-    local commit branch dirty git_available dirty_files
-    git_available=true
-    if [[ -n "$REPO_DIR" ]]; then
-        commit="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null)" || git_available=false
-        branch="$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)" || true
-    else
-        git_available=false
-        commit=""
-        branch=""
+    commit="null"; branch="null"; dirty="false"
+    if [[ "$kind" == "local" ]]; then
+        local repo_root c b
+        repo_root="$(cd "$PLUGIN_DIR/../.." && pwd)"
+        c="$(git -C "$repo_root" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+        b="$(git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+        commit="\"$c\""; branch="\"$b\""
+        [[ -n "$(git -C "$repo_root" status --porcelain -- plugins/agent-worktrees/ 2>/dev/null)" ]] && dirty="true"
     fi
 
-    dirty=false
-    dirty_files="[]"
-    if $git_available; then
-        local status_output
-        status_output="$(git -C "$REPO_DIR" status --porcelain --untracked-files=all -- "${DEPLOY_SOURCE_PATHS[@]}" 2>/dev/null)" || true
-        if [[ -n "$status_output" ]]; then
-            dirty=true
-            dirty_files="$(echo "$status_output" | sed 's/^...//' | python3 -c 'import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')"
-        fi
-    fi
-
-    cat > "$manifest_path" <<EOF
+    local tmp="$manifest_path.tmp"
+    cat > "$tmp" <<EOF
 {
-  "schema_version": 1,
-  "service": "worktree-sessions",
-  "environment": "$env_id",
-  "commit": $(if $git_available; then echo "\"$commit\""; else echo "null"; fi),
-  "branch": $(if $git_available; then echo "\"$branch\""; else echo "null"; fi),
-  "dirty": $dirty,
-  "dirty_files": $dirty_files,
-  "git_available": $git_available,
+  "schema_version": 3,
+  "service": "agent-worktrees",
   "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "deployed_by": "$env_id",
-  "source_paths": ["tools/worktree/"],
-  "installer_path": "$INSTALLER_REL_PATH"
+  "deployed_by": "${machine}-${platform}",
+  "source": {
+    "kind": "$kind",
+    "path": "$PLUGIN_DIR",
+    "repo": "copilot-extensions",
+    "plugin": "agent-worktrees",
+    "version": "$ver",
+    "commit": $commit,
+    "branch": $branch,
+    "dirty": $dirty
+  },
+  "venv": "$VENV_DIR",
+  "runtime": "python"
 }
 EOF
-    ok "Deploy manifest written to $manifest_path"
+    mv -f "$tmp" "$manifest_path"
+    ok "Deploy manifest written (source: $kind)"
 }
 
 show_deploy_status() {
@@ -1071,9 +1073,9 @@ case "$ACTION" in
             mkdir -p "$PROJECT_DIR" "$WORKTREES_DIR"
         fi
 
-        # -- Shared runtime --
-        deploy_package || exit 1
+        # -- Shared runtime (venv first: package install targets the venv) --
         deploy_venv || exit 1
+        deploy_package || exit 1
         deploy_wrappers || exit 1
         remove_legacy_scripts
         remove_legacy_binstubs
@@ -1098,16 +1100,6 @@ case "$ACTION" in
         fi
 
         write_deploy_manifest
-
-        # Add runtime field to manifest
-        manifest_path="$INSTALL_DIR/deploy-manifest.json"
-        python3 -c "
-import json, pathlib
-p = pathlib.Path('$manifest_path')
-m = json.loads(p.read_text())
-m['runtime'] = 'python'
-p.write_text(json.dumps(m, indent=2))
-" 2>/dev/null || true
 
         echo ""
         ok "Installation complete"
@@ -1209,11 +1201,11 @@ p.write_text(json.dumps(m, indent=2))
             err "Venv Python missing: $VENV_PYTHON"
         fi
 
-        # Package
-        if [[ -d "$LIB_DIR/agent_worktrees" ]]; then
-            ok "Package deployed: $LIB_DIR/agent_worktrees"
+        # Package (installed in the venv)
+        if PYTHONPATH= "$VENV_PYTHON" -c 'import agent_worktrees' 2>/dev/null; then
+            ok "Package importable in venv"
         else
-            err "Package missing: $LIB_DIR/agent_worktrees"
+            err "Package not importable in venv"
         fi
 
         # Wrapper
@@ -1317,9 +1309,9 @@ p.write_text(json.dumps(m, indent=2))
             exit 1
         fi
 
-        # -- Shared runtime --
-        deploy_package || exit 1
+        # -- Shared runtime (venv first: package install targets the venv) --
         deploy_venv || exit 1
+        deploy_package || exit 1
         deploy_wrappers || exit 1
         remove_legacy_scripts
         remove_legacy_binstubs
@@ -1343,16 +1335,6 @@ p.write_text(json.dumps(m, indent=2))
         fi
 
         write_deploy_manifest
-
-        # Add runtime field to manifest
-        manifest_path="$INSTALL_DIR/deploy-manifest.json"
-        python3 -c "
-import json, pathlib
-p = pathlib.Path('$manifest_path')
-m = json.loads(p.read_text())
-m['runtime'] = 'python'
-p.write_text(json.dumps(m, indent=2))
-" 2>/dev/null || true
 
         ok "Update complete"
         ;;

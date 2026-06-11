@@ -25,7 +25,7 @@ if [[ ! -x "$PYTHON" ]]; then
     exit 0
 fi
 
-export PYTHONPATH="$HOME/.agent-worktrees/lib"
+export PYTHONPATH=""  # package is installed in the venv (no lib/ shadow)
 if "$PYTHON" -m agent_worktrees deregister-session \
     --worktree-id "$wt_id" \
     --session-id "$session_id" \

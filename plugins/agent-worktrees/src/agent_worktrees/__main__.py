@@ -2512,12 +2512,12 @@ def cmd_install(args: argparse.Namespace) -> int:
     else:
         _cleanup_stale_instructions(proj_dir)
 
-    # Deploy Python package (shared runtime)
-    if not inst.deploy_package(repo_dir):
+    # Create venv first (shared runtime) -- package install targets the venv
+    if not inst.create_venv():
         return 1
 
-    # Create venv (shared runtime)
-    if not inst.create_venv():
+    # Deploy Python package into the venv (shared runtime)
+    if not inst.deploy_package(repo_dir):
         return 1
 
     # Deploy wrappers (shared runtime)
@@ -4569,7 +4569,7 @@ def _print_boot_provenance() -> None:
     if manifest_path.is_file():
         try:
             m = json.loads(manifest_path.read_text())
-            m_commit = (m.get("commit") or "")[:10]
+            m_commit = ((m.get("source") or {}).get("commit") or m.get("commit") or "")[:10]
             try:
                 from ._build_info import BUILD_INFO
                 b_commit = (BUILD_INFO.get("commit") or "")[:10]

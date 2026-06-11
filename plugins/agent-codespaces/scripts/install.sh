@@ -43,17 +43,15 @@ done
 SERVICE_NAME="Agent Codespaces"
 INSTALL_DIR="$HOME/.agent-codespaces"
 LOCAL_BIN="$HOME/.local/bin"
-LIB_DIR="$INSTALL_DIR/lib"
 VENV_DIR="$INSTALL_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
-PKG_SRC_DIR="$PLUGIN_DIR/src/agent_codespaces"
-# ssh-manager: prefer the plugin-vendored copy (marketplace layout), fall back
-# to the repo-root copy (git checkout layout).
+VENV_BIN="$VENV_DIR/bin/agent-codespaces"
+# ssh-manager dir (contains pyproject.toml): plugin-vendored (marketplace
+# layout) or repo-root (git checkout layout).
 SSH_MGR_DIR="$PLUGIN_DIR/libs/ssh-manager"
-if [[ ! -d "$SSH_MGR_DIR/src/ssh_manager" ]]; then
+if [[ ! -f "$SSH_MGR_DIR/pyproject.toml" ]]; then
     SSH_MGR_DIR="$REPO_ROOT/libs/ssh-manager"
 fi
-SSH_MGR_SRC="$SSH_MGR_DIR/src/ssh_manager"
 
 DEPLOY_SOURCE_PATHS=("plugins/agent-codespaces/")
 INSTALLER_REL_PATH="plugins/agent-codespaces/scripts/install.sh"
@@ -70,74 +68,96 @@ _header()  { echo ""; echo "=== $* ==="; }
 
 # -- Helpers ---------------------------------------------------------------
 
-deploy_venv() {
-    mkdir -p "$VENV_DIR"
-    if command -v uv &>/dev/null; then
-        if ! uv venv "$VENV_DIR" --allow-existing 2>/dev/null; then
-            python3 -m venv "$VENV_DIR"
-        fi
-    else
-        python3 -m venv "$VENV_DIR"
-    fi
+# === install-contract:v3 source-kind -- keep byte-identical across plugins ===
+_source_kind() {
+    case "$(printf '%s' "$1" | tr '\\' '/')" in
+        */.copilot/installed-plugins/*) printf 'marketplace' ;;
+        *) printf 'local' ;;
+    esac
+}
+# === end install-contract:v3 source-kind ===
 
-    if [[ ! -f "$VENV_PYTHON" ]]; then
-        _fail "Venv creation failed"
-        return 1
-    fi
-
-    # Install pyyaml
-    if command -v uv &>/dev/null; then
-        uv pip install --python "$VENV_PYTHON" pyyaml 2>/dev/null
-    else
-        "$VENV_PYTHON" -m pip install --quiet pyyaml 2>/dev/null
-    fi
-
-    _ok "Venv ready at $VENV_DIR"
+_git_info() {
+    local path="$1" commit branch dirty
+    commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    dirty="false"
+    [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && dirty="true"
+    echo "$commit $branch $dirty"
 }
 
-deploy_package() {
-    local dst="$LIB_DIR/agent_codespaces"
-    if [[ ! -d "$PKG_SRC_DIR" ]]; then
-        _fail "Package source not found: $PKG_SRC_DIR"
+_assert_uv() {
+    command -v uv &>/dev/null || { _fail "uv is required but not found on PATH."; exit 1; }
+}
+
+# uv pip install ssh-manager (sibling lib) then agent-codespaces into the given
+# venv python. Non-editable; deps resolved from pyproject.toml.
+_install_package_into() {
+    local py="$1"
+    if [[ ! -f "$SSH_MGR_DIR/pyproject.toml" ]]; then
+        _fail "ssh-manager source not found at $SSH_MGR_DIR"
         return 1
     fi
+    uv pip install --python "$py" --reinstall-package ssh-manager "$SSH_MGR_DIR" --quiet || {
+        _fail "ssh-manager install failed"; return 1; }
+    uv pip install --python "$py" --reinstall-package agent-codespaces "$PLUGIN_DIR" --quiet || {
+        _fail "agent-codespaces install failed"; return 1; }
+}
 
-    rm -rf "$dst"
-    mkdir -p "$LIB_DIR"
-    cp -r "$PKG_SRC_DIR" "$dst"
-
-    # Deploy ssh-manager
-    local ssh_dst="$LIB_DIR/ssh_manager"
-    if [[ ! -d "$SSH_MGR_SRC" ]]; then
-        _fail "ssh-manager source not found: $SSH_MGR_SRC"
-        return 1
-    fi
-    rm -rf "$ssh_dst"
-    cp -r "$SSH_MGR_SRC" "$ssh_dst"
-    _ok "ssh-manager deployed"
-
-    # Stamp build info
-    local _commit _branch _ts _src_norm _ver
-    _commit="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
-    _branch="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
-    _ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    _src_norm="$(echo "$PLUGIN_DIR" | tr '\\' '/')"
-    _ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
-    cat > "$dst/_build_info.py" <<PYEOF
+# Stamp _build_info.py into the INSTALLED site-packages copy (post-install).
+_stamp_build_info() {
+    local py="$1" pkg_dir ts commit branch src_norm ver
+    pkg_dir="$("$py" -c 'import agent_codespaces, os; print(os.path.dirname(agent_codespaces.__file__))' 2>/dev/null || true)"
+    [[ -z "$pkg_dir" ]] && { _warn "Could not locate installed agent_codespaces -- build info not stamped"; return; }
+    ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    commit="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    branch="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+    src_norm="$(printf '%s' "$PLUGIN_DIR" | tr '\\' '/')"
+    ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+    cat > "$pkg_dir/_build_info.py" <<PYEOF
 """Build provenance -- auto-generated at deploy time. Do not edit."""
 
 from __future__ import annotations
 
 BUILD_INFO: dict[str, str] = {
-    "version": "$_ver",
-    "commit": "$_commit",
-    "branch": "$_branch",
-    "build_timestamp": "$_ts",
-    "source": "$_src_norm",
+    "version": "$ver",
+    "commit": "$commit",
+    "branch": "$branch",
+    "build_timestamp": "$ts",
+    "source": "$src_norm",
 }
 PYEOF
+}
 
-    _ok "Package deployed to $dst"
+deploy_venv() {
+    _assert_uv
+    mkdir -p "$VENV_DIR"
+    if ! uv venv "$VENV_DIR" --python 3.11 --allow-existing 2>/dev/null; then
+        uv venv "$VENV_DIR" --allow-existing 2>/dev/null || true
+    fi
+    if [[ ! -f "$VENV_PYTHON" ]]; then
+        _fail "Venv creation failed"
+        return 1
+    fi
+    _ok "Venv ready at $VENV_DIR"
+}
+
+deploy_package() {
+    _install_package_into "$VENV_PYTHON" || return 1
+    _stamp_build_info "$VENV_PYTHON"
+    _ok "Package installed into venv"
+
+    # Keep the agent-bridge venv's in-process resolver in sync (issue #14): the
+    # bridge imports agent_codespaces for the codespace: namespace + relay, so a
+    # standalone codespaces update must refresh that copy or it drifts stale.
+    local bridge_py="$HOME/.agent-bridge/venv/bin/python"
+    if [[ -x "$bridge_py" ]]; then
+        if _install_package_into "$bridge_py"; then
+            _ok "Refreshed agent-bridge venv resolver copy"
+        else
+            _warn "Could not refresh agent-bridge venv -- its codespace resolver may be stale"
+        fi
+    fi
 }
 
 deploy_binstub() {
@@ -146,29 +166,46 @@ deploy_binstub() {
     cat > "$stub_path" << 'STUB'
 #!/usr/bin/env bash
 export PYTHONUTF8=1
-export PYTHONPATH="$HOME/.agent-codespaces/lib${PYTHONPATH:+:$PYTHONPATH}"
-exec "$HOME/.agent-codespaces/.venv/bin/python" -m agent_codespaces "$@"
+exec "$HOME/.agent-codespaces/.venv/bin/agent-codespaces" "$@"
 STUB
     chmod +x "$stub_path"
     _ok "Binstub: $stub_path"
 }
 
 write_deploy_manifest() {
-    local _commit _ts
-    _commit="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
-    _ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     local manifest_path="$INSTALL_DIR/deploy-manifest.json"
-    cat > "$manifest_path" << MANIFEST
+    local kind ver commit branch dirty
+    kind="$(_source_kind "$PLUGIN_DIR")"
+    ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+    commit="null"; branch="null"; dirty="false"
+    if [[ "$kind" == "local" ]]; then
+        local c b d
+        read -r c b d <<< "$(_git_info "$REPO_ROOT")"
+        commit="\"$c\""; branch="\"$b\""; dirty="$d"
+    fi
+    local tmp="$manifest_path.tmp"
+    cat > "$tmp" << MANIFEST
 {
+  "schema_version": 3,
   "service": "agent-codespaces",
-  "commit": "$_commit",
-  "deployed_at": "$_ts",
-  "runtime": "python",
-  "plugin_source": "$PLUGIN_DIR",
-  "install_dir": "$INSTALL_DIR"
+  "deployed_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
+  "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
+  "source": {
+    "kind": "$kind",
+    "path": "$PLUGIN_DIR",
+    "repo": "copilot-extensions",
+    "plugin": "agent-codespaces",
+    "version": "$ver",
+    "commit": $commit,
+    "branch": $branch,
+    "dirty": $dirty
+  },
+  "venv": "$VENV_DIR",
+  "runtime": "python"
 }
 MANIFEST
-    _ok "Deploy manifest: $manifest_path"
+    mv -f "$tmp" "$manifest_path"
+    _ok "Deploy manifest written (source: $kind)"
 }
 
 # -- Actions ---------------------------------------------------------------
@@ -177,7 +214,7 @@ do_install() {
     _header "$SERVICE_NAME Install"
 
     # Create directories
-    mkdir -p "$INSTALL_DIR" "$LIB_DIR" "$LOCAL_BIN"
+    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 
     # Deploy venv
     deploy_venv || return 1
@@ -191,8 +228,7 @@ do_install() {
     # Write manifest
     write_deploy_manifest
 
-    # Verify
-    export PYTHONPATH="$LIB_DIR"
+    # Verify (import from the venv -- no PYTHONPATH)
     local check
     check="$("$VENV_PYTHON" -c 'import agent_codespaces; print("OK")' 2>/dev/null || true)"
     if [[ "$check" == "OK" ]]; then
@@ -262,18 +298,25 @@ do_status() {
         _fail "Venv missing"
     fi
 
-    # Package
-    if [[ -d "$LIB_DIR/agent_codespaces" ]]; then
-        _ok "Package: $LIB_DIR/agent_codespaces"
+    # Package (installed into the venv)
+    if "$VENV_PYTHON" -c 'import agent_codespaces' 2>/dev/null; then
+        _ok "Package: agent_codespaces importable in venv"
     else
-        _fail "Package missing"
+        _fail "Package not importable in venv"
     fi
 
     # ssh-manager
-    if [[ -d "$LIB_DIR/ssh_manager" ]]; then
-        _ok "ssh-manager: $LIB_DIR/ssh_manager"
+    if "$VENV_PYTHON" -c 'import ssh_manager' 2>/dev/null; then
+        _ok "ssh-manager: importable in venv"
     else
-        _fail "ssh-manager missing"
+        _fail "ssh-manager not importable in venv"
+    fi
+
+    # Console script
+    if [[ -x "$VENV_BIN" ]]; then
+        _ok "Console script: $VENV_BIN"
+    else
+        _fail "Console script missing: $VENV_BIN"
     fi
 
     # Binstub
@@ -284,28 +327,22 @@ do_status() {
         _warn "Binstub not found at $stub_path"
     fi
 
-    # Build info
-    local build_info="$LIB_DIR/agent_codespaces/_build_info.py"
-    if [[ -f "$build_info" ]]; then
-        export PYTHONPATH="$LIB_DIR"
+    # Version (from the installed package)
+    if [[ -x "$VENV_BIN" ]]; then
         local ver_info
-        ver_info="$("$VENV_PYTHON" -c "
-from agent_codespaces._build_info import BUILD_INFO
-print(f'v{BUILD_INFO[\"version\"]} ({BUILD_INFO[\"commit\"][:8]})')
-" 2>/dev/null || true)"
-        if [[ -n "$ver_info" ]]; then
-            _ok "Version: $ver_info"
-        fi
+        ver_info="$("$VENV_BIN" version 2>/dev/null || true)"
+        [[ -n "$ver_info" ]] && _ok "Version: $ver_info"
     fi
 
-    # Deploy manifest
+    # Deploy manifest + source footprint (local checkout vs marketplace)
     local manifest="$INSTALL_DIR/deploy-manifest.json"
     if [[ -f "$manifest" ]]; then
-        local deployed_at
-        deployed_at="$(python3 -c "import json; print(json.load(open('$manifest'))['deployed_at'])" 2>/dev/null || true)"
-        if [[ -n "$deployed_at" ]]; then
-            _ok "Deployed: $deployed_at"
-        fi
+        local _kind _ver _dep
+        _kind=$(grep -o '"kind": *"[^"]*"' "$manifest" | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+        _ver=$(grep -o '"version": *"[^"]*"' "$manifest" | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+        [[ -n "$_kind" ]] && _ok "Source: $_kind ($_ver)"
+        _dep=$(grep -o '"deployed_at": *"[^"]*"' "$manifest" | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+        [[ -n "$_dep" ]] && _ok "Deployed: $_dep"
     fi
 
     # gh CLI

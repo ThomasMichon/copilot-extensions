@@ -219,37 +219,69 @@ _git_info() {
     echo "$commit $branch $dirty"
 }
 
-_write_deploy_manifest() {
-    local manifest="$INSTALL_DIR/deploy-manifest.json"
-    local repo_root
-    repo_root="$(cd "$PLUGIN_DIR/.." && pwd)"
+# === install-contract:v3 source-kind -- keep byte-identical across plugins ===
+# A runtime footprint's source is inferred from where the installer runs.
+# Vendored under the Copilot CLI installed-plugins dir => marketplace;
+# anything else (a git checkout) => local.
+_source_kind() {
+    case "$(printf '%s' "$1" | tr '\\' '/')" in
+        */.copilot/installed-plugins/*) printf 'marketplace' ;;
+        *) printf 'local' ;;
+    esac
+}
+# === end install-contract:v3 source-kind ===
+
+# Unified schema_version 3 manifest writer. Self-contained per plugin (no shared
+# module -- plugins are pulled independently from the marketplace). Records the
+# source footprint (local vs marketplace) and is written atomically (temp+move).
+_write_deploy_manifest_for() {
+    local service="$1" plugin="$2" install_path="$3" plugin_path="$4" venv_path="$5"
+    local manifest="$install_path/deploy-manifest.json"
+    local kind
+    kind="$(_source_kind "$plugin_path")"
 
     local ver="0.0.0"
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
-        ver=$(grep -m1 '^version' "$PLUGIN_DIR/pyproject.toml" | sed 's/.*"\(.*\)".*/\1/' || echo "0.0.0")
+    if [[ -f "$plugin_path/pyproject.toml" ]]; then
+        ver=$(grep -m1 '^version' "$plugin_path/pyproject.toml" | sed 's/.*"\(.*\)".*/\1/' || echo "0.0.0")
     fi
 
-    read -r commit branch dirty <<< "$(_git_info "$repo_root")"
+    # Git provenance only applies to a local checkout.
+    local commit="null" branch="null" dirty="false"
+    if [[ "$kind" == "local" ]]; then
+        local repo_root c b d
+        repo_root="$(cd "$plugin_path/.." && pwd)"
+        read -r c b d <<< "$(_git_info "$repo_root")"
+        commit="\"$c\""; branch="\"$b\""; dirty="$d"
+    fi
 
-    cat > "$manifest" << EOF
+    local tmp="$manifest.tmp"
+    cat > "$tmp" << EOF
 {
-  "schema_version": 2,
-  "service": "agent-bridge",
-  "installer": "plugin",
+  "schema_version": 3,
+  "service": "$service",
   "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "deployed_by": "$(hostname)",
-  "runtime_source": {
+  "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
+  "source": {
+    "kind": "$kind",
+    "path": "$plugin_path",
     "repo": "copilot-extensions",
-    "plugin": "agent-bridge",
+    "plugin": "$plugin",
     "version": "$ver",
-    "commit": "$commit",
-    "branch": "$branch",
-    "dirty": $dirty,
-    "path": "$PLUGIN_DIR"
-  }
+    "commit": $commit,
+    "branch": $branch,
+    "dirty": $dirty
+  },
+  "venv": "$venv_path",
+  "runtime": "python"
 }
 EOF
-    _ok "Deploy manifest written"
+    mv -f "$tmp" "$manifest"
+    _ok "Deploy manifest written (source: $kind)"
+}
+
+_write_deploy_manifest() {
+    _write_deploy_manifest_for "agent-bridge" "agent-bridge" \
+        "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR"
 }
 
 _install_systemd_unit() {
@@ -556,6 +588,14 @@ do_status() {
         _ok "Installed: $version"
     else
         _step "Not installed"
+    fi
+
+    # Runtime source footprint (local checkout vs marketplace)
+    if [[ -f "$INSTALL_DIR/deploy-manifest.json" ]]; then
+        local _kind _ver
+        _kind=$(grep -o '"kind": *"[^"]*"' "$INSTALL_DIR/deploy-manifest.json" | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+        _ver=$(grep -o '"version": *"[^"]*"' "$INSTALL_DIR/deploy-manifest.json" | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+        [[ -n "$_kind" ]] && _ok "Source: $_kind ($_ver)"
     fi
 
     # Config
