@@ -163,15 +163,19 @@ def machine_name(entry: MachineEntry) -> str:
 def find_machine_entry(
     entries: dict[str, MachineEntry], name: str,
 ) -> MachineEntry | None:
-    """Look up a machine by key or alias.
+    """Look up a machine by key or alias (case-insensitive).
 
-    Checks exact key match first, then scans aliases.  Returns None
-    if no entry matches.
+    Hostnames are case-insensitive, so match keys and aliases without regard
+    to case (Windows reports COMPUTERNAME in mixed case but tooling often
+    lowercases it). Returns None if no entry matches.
     """
     if name in entries:
         return entries[name]
-    for entry in entries.values():
-        if entry.alias and entry.alias.lower() == name.lower():
+    name_lower = name.lower()
+    for key, entry in entries.items():
+        if key.lower() == name_lower:
+            return entry
+        if entry.alias and entry.alias.lower() == name_lower:
             return entry
     return None
 
@@ -189,9 +193,9 @@ def detect_machine(repo_dir: str | Path | None = None) -> str:
     if repo_dir is not None:
         try:
             entries = load_machines_yaml(repo_dir)
-            # Exact match on key (real hostname) first
+            # Exact match on key (real hostname) first -- case-insensitive
             for key, entry in entries.items():
-                if hostname == key:
+                if hostname == key.lower():
                     return machine_name(entry)
             # Then check aliases
             for entry in entries.values():

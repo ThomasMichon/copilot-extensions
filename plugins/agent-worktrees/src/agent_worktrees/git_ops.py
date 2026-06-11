@@ -329,6 +329,15 @@ def classify_worktree(
 # --- High-level git operations for finalization ---
 
 
+def has_remote(remote: str, *, cwd: str | Path) -> bool:
+    """Return True if *remote* is configured in the repo."""
+    result = git("remote", cwd=cwd, check=False)
+    if result.returncode != 0:
+        return False
+    remotes = (result.stdout or "").split()
+    return remote in remotes
+
+
 def fetch(remote: str, *, cwd: str | Path) -> None:
     """Fetch from a remote."""
     git("fetch", remote, "--quiet", cwd=cwd)

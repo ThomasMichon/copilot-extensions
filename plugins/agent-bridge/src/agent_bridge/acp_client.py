@@ -12,6 +12,8 @@ import asyncio
 import contextlib
 import logging
 import os
+import signal
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -47,6 +49,46 @@ from acp.schema import (
 from . import __version__
 
 log = logging.getLogger("agent-bridge")
+
+
+async def _terminate_process_tree(proc: asyncio.subprocess.Process) -> None:
+    """Terminate a spawned agent process **and its child tree**.
+
+    ``proc.terminate()`` only signals the direct child. On Windows that child
+    is the ``cmd.exe`` batch wrapper, which orphans the ``pwsh -> copilot`` (or
+    ``python -> ssh``) tree beneath it -- leaving processes that hold the
+    worktree directory open after a session ends. Kill the whole tree.
+    """
+    pid = proc.pid
+    if sys.platform == "win32":
+        try:
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill", "/PID", str(pid), "/T", "/F",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(killer.wait(), timeout=5.0)
+        except (TimeoutError, OSError, ProcessLookupError):
+            pass
+    else:
+        # POSIX: agent spawns use start_new_session, so the child leads its
+        # own process group -- signal the whole group, then escalate.
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            with contextlib.suppress(ProcessLookupError):
+                proc.terminate()
+    with contextlib.suppress(TimeoutError, ProcessLookupError):
+        await asyncio.wait_for(proc.wait(), timeout=5.0)
+        return
+    # Last resort if still alive.
+    with contextlib.suppress(ProcessLookupError):
+        if sys.platform != "win32":
+            with contextlib.suppress(ProcessLookupError, OSError):
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+        proc.kill()
+    with contextlib.suppress(Exception):
+        await asyncio.wait_for(proc.wait(), timeout=3.0)
 
 
 class _BridgeClientImpl(Client):
@@ -339,12 +381,7 @@ class AcpClient:
 
         proc = self._process
         if proc and proc.returncode is None:
-            proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=3.0)
-            except TimeoutError:
-                proc.kill()
-                await proc.wait()
+            await _terminate_process_tree(proc)
         self._process = None
 
     # -- Event emission ------------------------------------------------------
