@@ -128,6 +128,18 @@ LEGACY_SCRIPTS=(
     worktree-cleanup.ps1
 )
 
+# Legacy alias binstubs that earlier versions deployed into BIN_DIR and/or
+# LOCAL_BIN. They were removed from source (commit 688d74e) because they
+# collide with worktree-manager and duplicate `agent-worktrees <subcommand>`,
+# but already-deployed copies linger and cause confusion (e.g. invoking the
+# flag-only `mark-complete` alias instead of `push-changes`/`finalize`).
+# Pruned on every install/update. Bare name + .cmd/.ps1 variants are removed.
+LEGACY_BINSTUBS=(
+    mark-worktree-complete
+    cleanup-worktrees
+    mark-session-complete
+)
+
 # Python runtime paths (shared across projects)
 LIB_DIR="$INSTALL_DIR/lib"
 VENV_DIR="$INSTALL_DIR/.venv"
@@ -367,6 +379,25 @@ remove_legacy_scripts() {
     done
     if [[ $removed -gt 0 ]]; then
         changed "Removed $removed legacy script(s) from $BIN_DIR"
+    fi
+}
+
+remove_legacy_binstubs() {
+    # Sweep legacy alias binstubs from both runtime BIN_DIR and user LOCAL_BIN,
+    # covering bare (bash), .cmd (Windows) and .ps1 variants.
+    local removed=0
+    for name in "${LEGACY_BINSTUBS[@]}"; do
+        for dir in "$BIN_DIR" "$LOCAL_BIN"; do
+            for f in "$dir/$name" "$dir/$name.cmd" "$dir/$name.ps1"; do
+                if [[ -f "$f" ]]; then
+                    rm -f "$f"
+                    ((removed++)) || true
+                fi
+            done
+        done
+    done
+    if [[ $removed -gt 0 ]]; then
+        changed "Removed $removed legacy binstub(s)"
     fi
 }
 
@@ -1045,6 +1076,7 @@ case "$ACTION" in
         deploy_venv || exit 1
         deploy_wrappers || exit 1
         remove_legacy_scripts
+        remove_legacy_binstubs
         deploy_copilot_plugin
         ensure_copilot_experimental
         assert_path
@@ -1112,6 +1144,9 @@ p.write_text(json.dumps(m, indent=2))
                 changed "Removed binstub: $stub_path"
             fi
         done
+
+        # Sweep any lingering legacy alias binstubs
+        remove_legacy_binstubs
 
         # Remove Python runtime (venv + package)
         if [[ -d "$VENV_DIR" ]]; then
@@ -1287,6 +1322,7 @@ p.write_text(json.dumps(m, indent=2))
         deploy_venv || exit 1
         deploy_wrappers || exit 1
         remove_legacy_scripts
+        remove_legacy_binstubs
         deploy_copilot_plugin
         ensure_copilot_experimental
 

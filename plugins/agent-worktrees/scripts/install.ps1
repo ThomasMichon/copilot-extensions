@@ -57,6 +57,18 @@ $ScriptDir       = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginDir       = (Resolve-Path (Join-Path $ScriptDir '..'))
 $ServiceYamlPath = Join-Path $ScriptDir 'service.yaml'
 
+# Legacy alias binstubs that earlier versions deployed into BinDir and/or
+# LocalBin. Removed from source (commit 688d74e) because they collide with
+# worktree-manager and duplicate `agent-worktrees <subcommand>`, but already
+# deployed copies linger and cause confusion (e.g. invoking the flag-only
+# `mark-complete` alias instead of `push-changes`/`finalize`). Pruned on every
+# install/update; bare, .cmd and .ps1 variants are removed from both dirs.
+$LegacyBinstubs = @(
+    'mark-worktree-complete',
+    'cleanup-worktrees',
+    'mark-session-complete'
+)
+
 # RepoDir: detect from existing config, then CWD.
 $RepoDir = $null
 
@@ -1333,6 +1345,26 @@ function Remove-Binstub {
     }
 }
 
+function Remove-LegacyBinstubs {
+    # Sweep legacy alias binstubs from both BinDir and LocalBin, covering
+    # bare (bash), .cmd (Windows) and .ps1 variants.
+    $removed = 0
+    foreach ($name in $LegacyBinstubs) {
+        foreach ($dir in @($BinDir, $LocalBin)) {
+            foreach ($variant in @($name, "$name.cmd", "$name.ps1")) {
+                $path = Join-Path $dir $variant
+                if (Test-Path $path) {
+                    Remove-Item $path -Force -ErrorAction SilentlyContinue
+                    $removed++
+                }
+            }
+        }
+    }
+    if ($removed -gt 0) {
+        Write-ServiceChanged "Removed $removed legacy binstub(s)"
+    }
+}
+
 # -- Actions --------------------------------------------------------------
 
 switch ($Action) {
@@ -1384,6 +1416,7 @@ switch ($Action) {
         Deploy-CopilotPlugin
         Ensure-CopilotExperimental
         Assert-PathIncludes $LocalBin
+        Remove-LegacyBinstubs
 
         # -- Project-specific (only when adopting) --
         if ($HasProject) {
@@ -1432,6 +1465,7 @@ switch ($Action) {
         Write-ServiceHeader "Uninstalling $ServiceName"
 
         Remove-Binstub
+        Remove-LegacyBinstubs
 
         # Remove Windows Terminal fragment
         $fragDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\AgentWorktrees'
@@ -1650,6 +1684,7 @@ switch ($Action) {
         if (-not (Deploy-Wrappers)) { exit 1 }
         Deploy-CopilotPlugin
         Ensure-CopilotExperimental
+        Remove-LegacyBinstubs
 
         # -- Project-specific (only when a project is known) --
         if ($HasProject) {
