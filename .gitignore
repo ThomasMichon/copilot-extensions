@@ -16,3 +16,7 @@ build/
 # blocks push-changes (#28). agent-bridge tracks its own uv.lock on purpose.
 /plugins/agent-codespaces/uv.lock
 /plugins/agent-worktrees/uv.lock
+# The ssh-manager lib (and its vendored copies) does not pin a lockfile either.
+/libs/ssh-manager/uv.lock
+/plugins/agent-bridge/libs/ssh-manager/uv.lock
+/plugins/agent-codespaces/libs/ssh-manager/uv.lock

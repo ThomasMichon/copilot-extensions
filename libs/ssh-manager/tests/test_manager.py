@@ -153,6 +153,29 @@ class TestConnectionManagerIdentity:
         info2 = await manager.ensure_connected("test-host", source, ["-R 9999:localhost:9999"])
         assert info2.port_forwards == ["-R 9999:localhost:9999"]
 
+    @pytest.mark.asyncio
+    async def test_direct_mode_splits_port_forward_into_tokens(
+        self, win_platform, source
+    ):
+        """Direct-mode forwards must be split into separate argv tokens.
+
+        ``-R 9857:127.0.0.1:9857`` has to reach ssh as two args (``-R`` and the
+        spec), not a single ``"-R 9857:127.0.0.1:9857"`` token -- otherwise the
+        reverse forward (e.g. the credential relay) is malformed and silently
+        does not bind. Regression guard for the agent-codespaces relay forward.
+        """
+        manager = ConnectionManager(platform=win_platform)
+        info = await manager.ensure_connected(
+            "test-host", source, ["-R 9857:127.0.0.1:9857"]
+        )
+        args = manager._mux_ssh_args(info)
+        assert "-R" in args
+        assert "9857:127.0.0.1:9857" in args
+        # The unsplit single-token form must NOT be present.
+        assert "-R 9857:127.0.0.1:9857" not in args
+        # -R is immediately followed by its spec.
+        assert args[args.index("-R") + 1] == "9857:127.0.0.1:9857"
+
 
 class TestConnectionManagerExec:
     """Tests for exec_command and open_stdio_channel."""

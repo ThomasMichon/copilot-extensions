@@ -8,6 +8,7 @@ persisted to SQLite so sessions survive service restarts.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -735,6 +736,41 @@ class SessionManager:
                         "message": "Context window usage elevated -- prepare for handoff",
                     })
 
+    async def _quiesce_session(self, session: Session) -> None:
+        """Best-effort teardown of a session's in-flight prompt + ACP client.
+
+        Must be resilient to a *mid-turn* session: cancelling an in-flight
+        prompt or shutting down a busy ACP client must never raise out of
+        stop/end. (A raising shutdown here surfaced as HTTP 500 when ending a
+        mid-turn session -- see the credential-hang showcase report.) Errors
+        are logged and swallowed so teardown always completes.
+        """
+        task = session._prompt_task
+        if task and not task.done():
+            if session.client:
+                with contextlib.suppress(Exception):
+                    await session.client.cancel_prompt()
+            task.cancel()
+            with contextlib.suppress(BaseException):
+                await task
+        if session.client:
+            try:
+                await session.client.shutdown()
+            except Exception:
+                log.warning(
+                    "ACP client shutdown failed while tearing down session %s",
+                    session.session_id, exc_info=True,
+                )
+            session.client = None
+        # Clean up unused worktrees (0-turn sessions from crash-loops)
+        try:
+            await _cleanup_worktree(session.target, session.turn_count)
+        except Exception:
+            log.warning(
+                "worktree cleanup failed while tearing down session %s",
+                session.session_id, exc_info=True,
+            )
+
     async def stop_session(self, session_id: str) -> None:
         """Stop a session -- shut down ACP client, preserve state for resume."""
         session_id = self._resolve_ref(session_id) or session_id
@@ -742,18 +778,7 @@ class SessionManager:
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
-        # Cancel in-flight prompt if any
-        if session._prompt_task and not session._prompt_task.done():
-            if session.client:
-                await session.client.cancel_prompt()
-            session._prompt_task.cancel()
-
-        if session.client:
-            await session.client.shutdown()
-            session.client = None
-
-        # Clean up unused worktrees (0-turn sessions from crash-loops)
-        await _cleanup_worktree(session.target, session.turn_count)
+        await self._quiesce_session(session)
 
         session.status = SessionStatus.STOPPED
         now = time.time()
@@ -766,21 +791,17 @@ class SessionManager:
         log.info("Session %s (%s) stopped", session_id, session.name)
 
     async def end_session(self, session_id: str) -> None:
-        """End a session -- shut down client and clean up all state."""
+        """End a session -- shut down client and clean up all state.
+
+        Always removes the session (even mid-turn): teardown is best-effort so
+        ending never fails with a server error on a busy/hung session.
+        """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
-        if session._prompt_task and not session._prompt_task.done():
-            session._prompt_task.cancel()
-
-        if session.client:
-            await session.client.shutdown()
-            session.client = None
-
-        # Clean up unused worktrees (0-turn sessions from crash-loops)
-        await _cleanup_worktree(session.target, session.turn_count)
+        await self._quiesce_session(session)
 
         session.status = SessionStatus.ENDED
         self._db.delete_session(session_id)
