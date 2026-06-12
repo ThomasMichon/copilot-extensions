@@ -175,10 +175,15 @@ class TestValidation:
 
 
 class TestEffectiveAcpCommand:
-    def test_bare_default(self):
-        """No workspace_folder, no acp_command → bare copilot with auto-approve."""
+    def test_bare_default_resolves_workspace_on_remote(self):
+        """No workspace_folder / acp_command → cd into the remote-resolved
+        workspace (so the session lands in the checkout, not /home/vscode; #33)
+        then launch copilot with auto-approve."""
         config = CodespacesConfig()
-        assert config.effective_acp_command == "copilot --acp --stdio --allow-all-tools"
+        assert config.effective_acp_command == (
+            'cd "${CODESPACE_VSCODE_FOLDER:-${VM_REPO_PATH:-.}}" '
+            "&& copilot --acp --stdio --allow-all-tools"
+        )
 
     def test_workspace_folder_produces_cd_prefix(self):
         config = CodespacesConfig(workspace_folder="/workspaces/my-repo")
