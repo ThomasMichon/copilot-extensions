@@ -25,6 +25,15 @@ SOCKET_DIR = RUNTIME_DIR / "sockets"
 LOG_FILE = RUNTIME_DIR / "agent-codespaces.log"
 CONFIG_FILENAME = "codespaces.yaml"
 
+# Remote-resolved `cd` for a CodeSpace session when no explicit
+# ``workspace_folder`` is configured (#33). Expanded by the remote
+# ``bash -l -c`` at launch, so the agent lands in the repo checkout rather than
+# ``/home/vscode``. Order: ``$CODESPACE_VSCODE_FOLDER`` (the VS Code/Codespaces
+# convention, when exported to the shell) -> ``$VM_REPO_PATH`` (set by many
+# devcontainers, incl. odsp-web-codespaces) -> ``.`` (no-op: keep the SSH
+# default cwd, which Codespaces sets to the workspace -- never forces $HOME).
+_WORKSPACE_CD = 'cd "${CODESPACE_VSCODE_FOLDER:-${VM_REPO_PATH:-.}}"'
+
 
 @dataclass
 class CredentialSourceConfig:
@@ -142,7 +151,12 @@ class CodespacesConfig:
         1. Explicit ``acp_command`` if set.
         2. ``cd <workspace_folder> && copilot --acp --stdio --allow-all-tools``
            when ``workspace_folder`` is configured.
-        3. ``copilot --acp --stdio --allow-all-tools`` as last-resort fallback.
+        3. ``cd "<remote-resolved workspace>" && copilot ...`` otherwise -- the
+           directory is resolved *on the CodeSpace* at launch from a fallback
+           chain of env vars (see ``_WORKSPACE_CD``) so a session lands in the
+           repo checkout rather than ``/home/vscode`` without any pre-config
+           (#33). The final ``.`` keeps the SSH default cwd (which Codespaces
+           sets to the workspace) -- it never forces ``$HOME``.
 
         ``--allow-all-tools`` is required for headless dispatch: there is no
         human to answer interactive tool-permission prompts, so without it
@@ -154,7 +168,7 @@ class CodespacesConfig:
         copilot = "copilot --acp --stdio --allow-all-tools"
         if self.workspace_folder:
             return f"cd {self.workspace_folder} && {copilot}"
-        return copilot
+        return f"{_WORKSPACE_CD} && {copilot}"
 
     def provision_for_repo(self, repo: str | None) -> ProvisionConfig:
         """Collect provisioning hooks that apply to a CodeSpace.

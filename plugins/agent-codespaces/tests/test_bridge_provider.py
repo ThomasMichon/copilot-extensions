@@ -71,10 +71,12 @@ class TestBuildAgentConfigs:
         assert "--stdio" in cmd
         assert "fuzzy-adventure-abc123" in cmd
         assert "--remote-cmd" in cmd
-        # Default (no workspace_folder, no acp_command) uses bare copilot.
-        # acp_command is a single element of the arg list, so scan the joined
-        # command rather than expecting it to be its own element.
-        assert "copilot --acp --stdio" in " ".join(cmd)
+        # Default (no workspace_folder, no acp_command) resolves the workspace
+        # on the remote then launches copilot (#33). acp_command is a single
+        # element of the arg list, so scan the joined command.
+        joined = " ".join(cmd)
+        assert "copilot --acp --stdio" in joined
+        assert "CODESPACE_VSCODE_FOLDER" in joined and "VM_REPO_PATH" in joined
 
     def test_spawn_command_with_workspace_folder(self):
         """workspace_folder produces a 'cd <path> && copilot' command."""
