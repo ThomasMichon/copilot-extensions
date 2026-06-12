@@ -355,6 +355,21 @@ class BridgeClient:
         )
         return resp.get("last_acked_id", 0) if resp else 0
 
+    def get_cursor_info(
+        self, session_id: str, *, caller_id: str | None = None
+    ) -> dict[str, Any]:
+        """GET /api/v1/sessions/{id}/cursor -- full cursor info.
+
+        Returns ``{"last_acked_id", "head_id", ...}`` so a caller can tell
+        whether it is behind unseen history (``last_acked_id == 0 < head_id``)
+        without reading the whole backlog.
+        """
+        params = {"caller_id": caller_id} if caller_id else None
+        resp = self._request(
+            "GET", f"/api/v1/sessions/{session_id}/cursor", params=params
+        )
+        return resp or {"last_acked_id": 0, "head_id": 0}
+
     def ack_cursor(
         self, session_id: str, last_id: int, *, caller_id: str | None = None
     ) -> int:

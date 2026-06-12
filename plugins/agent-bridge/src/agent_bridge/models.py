@@ -172,6 +172,9 @@ class CursorInfo(BaseModel):
     session_id: str
     caller_id: str | None = None
     last_acked_id: int = 0
+    head_id: int = 0
+    """The session's current max event id (the live head). Lets a caller tell
+    whether it is behind unseen history without reading the whole backlog."""
 
 
 # -- SSE events --------------------------------------------------------------

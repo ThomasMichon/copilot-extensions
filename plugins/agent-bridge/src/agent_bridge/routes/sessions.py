@@ -326,7 +326,8 @@ async def get_cursor(session_id: str, request: Request, caller_id: str | None = 
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     last = mgr.db.get_cursor(_cursor_key(caller_id), session_id)
     return CursorInfo(
-        session_id=session_id, caller_id=caller_id, last_acked_id=last
+        session_id=session_id, caller_id=caller_id, last_acked_id=last,
+        head_id=mgr.db.get_max_event_id(session_id),
     )
 
 

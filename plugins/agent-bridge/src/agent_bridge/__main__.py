@@ -500,6 +500,15 @@ def _cmd_send(args: argparse.Namespace) -> None:
     force_new = getattr(args, "new", False)
     session_id = _resolve_target(client, target, force_new=force_new)
 
+    # Issue #25-of-bridge: don't dump a CodeSpace agent's entire prior
+    # conversation onto a fresh host. If this caller has never consumed from
+    # this session (cursor 0) but the session already has history, fast-forward
+    # the caller's cursor to the live head and print a marker instead of
+    # replaying the backlog. The host can pull history on demand with
+    # `read --range`, or pass --new to start a clean session.
+    if not getattr(args, "full_history", False):
+        _mark_resume_if_behind(client, session_id, caller_id=caller_id)
+
     # Submit prompt
     result = client.submit_prompt(session_id, prompt)
     turn_index = result.get("turn_index", 0)
@@ -606,6 +615,52 @@ def _resolve_target(client, target: str, *, force_new: bool = False) -> str:
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+def _mark_resume_if_behind(
+    client, session_id: str, *, caller_id: str | None
+) -> bool:
+    """Fast-forward a first-time caller past a session's prior history.
+
+    When a host attaches to a session it has never consumed from (delivery
+    cursor at 0) that already carries history (turns > 0 and a non-zero head),
+    replaying the whole backlog is jarring -- the host did not expect the
+    remote agent to be mid-conversation. Instead, advance the caller's cursor
+    to the current head and emit a one-line marker so the host can opt into the
+    history (``read --range``) only if it cares.
+
+    A brand-new session the caller just started (``turn_count == 0``) is left
+    untouched, so its opening turn streams normally. Returns True if a marker
+    was emitted.
+    """
+    try:
+        info = client.get_cursor_info(session_id, caller_id=caller_id)
+    except Exception:
+        return False
+    if info.get("last_acked_id", 0) != 0:
+        return False  # caller already mid-stream on this session -- continue
+
+    try:
+        session = client.get_session(session_id)
+    except Exception:
+        return False
+    turn_count = session.get("turn_count", 0) or 0
+    head = info.get("head_id", 0) or 0
+    if turn_count <= 0 or head <= 0:
+        return False  # nothing the caller is behind on
+
+    # Fast-forward past the backlog so the upcoming turn streams cleanly.
+    try:
+        client.ack_cursor(session_id, head, caller_id=caller_id)
+    except Exception:
+        return False
+    print(
+        f"[>] Resuming existing session {session_id} "
+        f"({turn_count} prior turn(s)) -- earlier conversation hidden. "
+        f"Run `agent-bridge read {session_id} --range 1-{head}` to view it, "
+        f"or re-send with --new for a clean session."
+    )
+    return True
 
 
 def _get_caller_id() -> str | None:
@@ -1259,6 +1314,12 @@ def main(argv: list[str] | None = None) -> None:
     send_p.add_argument(
         "--new", action="store_true",
         help="Force a new session even if an idle one exists for this agent",
+    )
+    send_p.add_argument(
+        "--full-history", action="store_true",
+        help="When resuming an existing session, replay its prior conversation "
+             "instead of fast-forwarding past it (default hides the backlog "
+             "and prints a marker)",
     )
     _add_stream_args(send_p)
     send_p.set_defaults(func=_cmd_send)
