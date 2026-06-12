@@ -91,6 +91,23 @@ class TestCursorEndpoints:
         resp = client.get("/api/v1/sessions/nope/cursor")
         assert resp.status_code == 404
 
+    def test_cursor_reports_head_id(self, client, app) -> None:
+        # head_id lets a fresh caller tell it is behind unseen history
+        # without reading the whole backlog (resume-marker, issue A).
+        _seed_session(app, events=[
+            {"id": 1, "event": "agent_message", "data": {"text": "a"}},
+            {"id": 2, "event": "agent_message", "data": {"text": "b"}},
+        ])
+        resp = client.get("/api/v1/sessions/sess-1/cursor", params={"caller_id": "a"})
+        body = resp.json()
+        assert body["last_acked_id"] == 0
+        assert body["head_id"] == 2
+
+    def test_cursor_head_id_zero_when_no_events(self, client, app) -> None:
+        _seed_session(app)
+        resp = client.get("/api/v1/sessions/sess-1/cursor", params={"caller_id": "a"})
+        assert resp.json()["head_id"] == 0
+
 
 class TestRangeEndpoint:
     def test_range_returns_events(self, client, app) -> None:
