@@ -94,6 +94,28 @@ agent-codespaces bridge unregister [--bridge-url <url>]
 > default `--bridge-url` to `http://127.0.0.1:9280`. On Linux/WSL pass
 > `--bridge-url http://127.0.0.1:9281` explicitly.
 
+## Credential relay: fail-fast & auth verification
+
+The relay forwards git-credential requests from a CodeSpace back to the host
+over the SSH tunnel, resolving them through the host's Git Credential Manager
+(GCM) — which serves **both** GitHub (`github.com`) and Azure DevOps
+(`*.visualstudio.com`, `dev.azure.com`) credentials.
+
+To avoid the failure mode where a missing/expired credential causes a CodeSpace
+`git fetch` to hang indefinitely on `git credential fill`:
+
+- **Host GCM runs non-interactively** (`GIT_TERMINAL_PROMPT=0`,
+  `GCM_INTERACTIVE=never`), so it errors fast instead of blocking on a prompt.
+- **The relay replies `quit=1`** when a git `get`/`fill` request can't be
+  resolved, which makes git in the CodeSpace abort immediately
+  (`fatal: credential helper ... told us to quit`) rather than dropping to an
+  interactive prompt. CodeSpace SSH sessions also export `GIT_TERMINAL_PROMPT=0`.
+- **On connect, remote-domain auth is verified up front:** the workspace's
+  `git remote -v` domains are probed against the host credential store, and any
+  domain lacking local auth is reported as a `[WARN]` so it can be fixed
+  (`az login` / GCM sign-in) before work begins, rather than discovered
+  mid-fetch.
+
 ## Development
 
 ```bash

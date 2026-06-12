@@ -256,7 +256,14 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     relay_env = ""
     if not args.no_relay:
         port_forwards.append(f"-R {relay_port}:127.0.0.1:{relay_port}")
-        relay_env = f"export LC_GIT_CREDENTIAL_RELAY={relay_port}; "
+        # GIT_TERMINAL_PROMPT=0 ensures git never blocks on an interactive
+        # prompt if a credential cannot be resolved over the relay -- it aborts
+        # with a prompt error instead of hanging (belt-and-suspenders alongside
+        # the relay's quit=1 fail-fast).
+        relay_env = (
+            f"export LC_GIT_CREDENTIAL_RELAY={relay_port}; "
+            "export GIT_TERMINAL_PROMPT=0; "
+        )
 
     manager = ConnectionManager()
 
@@ -325,6 +332,12 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             manager, args.name, config, getattr(args, "repo", None),
         )
 
+        # Verify the host has local auth for every domain the workspace's git
+        # remotes use (ADO + GitHub). Surfaces missing auth up front rather
+        # than letting it fail mid-fetch. Best-effort, warning-only.
+        if not args.no_relay:
+            await _verify_remote_auth(manager, args.name)
+
         if args.stdio and remote_cmd:
             # Structured stdio mode for agent-bridge
             proc = await manager.open_stdio_channel(args.name, remote_cmd)
@@ -374,6 +387,45 @@ async def _provision_relay_helpers(manager, name: str) -> None:
             )
     except Exception as exc:
         log.warning("Relay helper provisioning on %s failed: %s", name, exc)
+
+
+async def _verify_remote_auth(manager, name: str) -> None:
+    """Verify host-side auth for the CodeSpace's git remote domains.
+
+    Lists the remote workspace's git remotes, extracts their domains, and
+    probes the local credential store (the same source the relay uses) for
+    each. Missing domains are reported as a warning so the user can fix auth
+    (``az login`` / GCM sign-in) before work begins. Best-effort: never raises.
+    """
+    from .auth_preflight import verify_remote_auth
+
+    async def _run_remote(cmd: str) -> str:
+        wrapped = f"bash -l -c {shlex.quote(cmd)}"
+        result = await manager.exec_command(name, wrapped, timeout=30.0)
+        return result.stdout or ""
+
+    try:
+        hosts, missing = await verify_remote_auth(_run_remote)
+    except Exception as exc:
+        log.debug("Remote auth verification on %s failed: %s", name, exc)
+        return
+
+    if not hosts:
+        return
+
+    if missing:
+        msg = (
+            f"Missing local auth for remote domain(s): {', '.join(missing)}. "
+            f"Git operations against these in CodeSpace '{name}' will fail "
+            f"fast over the relay. Sign in on the host "
+            f"(az login / Git Credential Manager) for each domain."
+        )
+        log.warning(msg)
+        print(f"[WARN] {msg}", file=sys.stderr)
+    else:
+        log.info(
+            "Remote auth verified for %s: %s", name, ", ".join(hosts),
+        )
 
 
 def _lookup_codespace_repo(name: str) -> str | None:
@@ -505,7 +557,11 @@ def _interactive_ssh(
 
     env = None
     if relay_port is not None:
-        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY": str(relay_port)}
+        env = {
+            **os.environ,
+            "LC_GIT_CREDENTIAL_RELAY": str(relay_port),
+            "GIT_TERMINAL_PROMPT": "0",
+        }
 
     args = ["gh", "codespace", "ssh", "-c", codespace_name]
     for fwd in port_forwards:
