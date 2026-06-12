@@ -262,6 +262,33 @@ class TestGitCredentialSource:
         assert call_args[:3] == ("git", "credential", "fill")
 
     @pytest.mark.asyncio
+    async def test_resolve_fill_uses_noninteractive_env(self):
+        """Fill must run git with interactive prompts disabled (fail-fast)."""
+        source = GitCredentialSource()
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(
+            return_value=(b"password=tok\n", b""),
+        )
+
+        with patch(
+            "agent_codespaces.credential_relay.sources.git_credential"
+            ".asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ) as mock_exec:
+            await source.resolve("get", {
+                "protocol": "https", "host": "dev.azure.com",
+            })
+
+        env = mock_exec.call_args.kwargs["env"]
+        assert env["GIT_TERMINAL_PROMPT"] == "0"
+        assert env["GCM_INTERACTIVE"] == "never"
+        # Must preserve the rest of the environment (e.g. PATH), not replace it.
+        assert "PATH" in env or "Path" in env
+
+    @pytest.mark.asyncio
     async def test_resolve_caches_successful_fill(self):
         """Successful fill should be cached."""
         source = GitCredentialSource(cache_ttl=60.0)
@@ -588,3 +615,119 @@ class TestServerIntegration:
             writer.close()
         finally:
             await server.stop()
+
+
+# ---------------------------------------------------------------------------
+# Fail-fast Tests
+# ---------------------------------------------------------------------------
+async def _exchange(server, request: bytes, *, timeout: float = 2.0) -> bytes:
+    """Send a request to a running server and read the full response."""
+    port = server._server.sockets[0].getsockname()[1]
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(request)
+    await writer.drain()
+    data = b""
+    try:
+        while True:
+            chunk = await asyncio.wait_for(reader.read(4096), timeout=timeout)
+            if not chunk:
+                break
+            data += chunk
+            if b"\n\n" in data:
+                break
+    except (ConnectionResetError, asyncio.TimeoutError):
+        pass
+    finally:
+        writer.close()
+    # Let the server handler finish bookkeeping.
+    await asyncio.sleep(0.05)
+    return data
+
+
+class TestFailFast:
+    """Unresolved git `get` requests must return quit=1, never hang."""
+
+    @pytest.mark.asyncio
+    async def test_get_with_no_source_returns_quit(self):
+        """No source -> quit=1 so git aborts instead of prompting."""
+        server = CredentialRelayServer(port=0, sources=[])
+        await server.start()
+        try:
+            data = await _exchange(
+                server, b"protocol=https\nhost=onedrive.visualstudio.com\n\n",
+            )
+            assert b"quit=1" in data
+            assert server.stats.failfast_responses == 1
+        finally:
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_get_with_unresolving_source_returns_quit(self):
+        """Source returns None -> quit=1."""
+        source = MagicMock(spec=CredentialSource)
+        source.name = "test"
+        source.supports.return_value = True
+        source.resolve = AsyncMock(return_value=None)
+
+        server = CredentialRelayServer(port=0, sources=[source])
+        await server.start()
+        try:
+            data = await _exchange(
+                server, b"protocol=https\nhost=dev.azure.com\n\n",
+            )
+            assert b"quit=1" in data
+            assert server.stats.failfast_responses == 1
+        finally:
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_policy_rejection_returns_quit_for_get(self):
+        """A policy-rejected git `get` host still gets quit=1 (fail-fast)."""
+        source = MagicMock(spec=CredentialSource)
+        source.name = "test"
+        source.supports.return_value = True
+        source.resolve = AsyncMock(return_value="password=nope\n\n")
+
+        policy = RelayPolicy(allowed_hosts=["github.com"])
+        server = CredentialRelayServer(port=0, sources=[source], policy=policy)
+        await server.start()
+        try:
+            data = await _exchange(server, b"protocol=https\nhost=evil.com\n\n")
+            assert b"quit=1" in data
+            assert b"password=nope" not in data
+            assert server.stats.policy_rejections == 1
+            assert server.stats.failfast_responses == 1
+        finally:
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_get_access_token_failure_no_quit(self):
+        """get-access-token (non-git) must NOT emit quit=1 (callers exit non-zero)."""
+        server = CredentialRelayServer(port=0, sources=[], ado_host="x.visualstudio.com")
+        await server.start()
+        try:
+            data = await _exchange(server, b"get-access-token\n\n")
+            assert b"quit=1" not in data
+            assert server.stats.failfast_responses == 0
+        finally:
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_resolved_get_does_not_emit_quit(self):
+        """A successfully resolved get returns the credential, no quit sentinel."""
+        source = MagicMock(spec=CredentialSource)
+        source.name = "test"
+        source.supports.return_value = True
+        source.resolve = AsyncMock(
+            return_value="protocol=https\nhost=github.com\npassword=tok\n\n",
+        )
+        server = CredentialRelayServer(port=0, sources=[source])
+        await server.start()
+        try:
+            data = await _exchange(server, b"protocol=https\nhost=github.com\n\n")
+            assert b"password=tok" in data
+            assert b"quit=1" not in data
+            assert server.stats.failfast_responses == 0
+        finally:
+            await server.stop()
+

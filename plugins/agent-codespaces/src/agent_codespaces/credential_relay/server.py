@@ -40,6 +40,19 @@ _KNOWN_ACTIONS = frozenset({
     "get-access-token",
 })
 
+# git-credential "get" semantics -- a request asking for a username/password.
+# When one of these cannot be resolved we must FAIL FAST (see below) rather
+# than return nothing, because an empty response lets git fall through to an
+# interactive terminal prompt that blocks indefinitely.
+_GET_ACTIONS = frozenset({"get", "fill"})
+
+# Fail-fast sentinel. Per the git-credential protocol, a helper that returns
+# ``quit=1`` makes git abort the whole credential-helper chain immediately
+# (``fatal: credential helper ... told us to quit``, exit 128) instead of
+# prompting. This converts a silent ~52-min ``git credential fill`` hang into a
+# prompt, explicit auth failure surfaced to the Copilot caller.
+_FAILFAST_RESPONSE = "quit=1\n\n"
+
 
 @dataclass
 class RelayPolicy:
@@ -82,6 +95,7 @@ class RelayStats:
     policy_rejections: int = 0
     timeouts: int = 0
     cache_hits: int = 0
+    failfast_responses: int = 0
     start_time: float | None = None
     last_request_time: float | None = None
 
@@ -187,6 +201,9 @@ class CredentialRelayServer:
             if rejection:
                 log.warning("[%s] Policy rejected: %s", addr, rejection)
                 self.stats.policy_rejections += 1
+                # Fail fast for git `get`/`fill`: a policy-rejected host would
+                # otherwise leave git waiting on an interactive prompt.
+                await self._maybe_failfast(action, writer, addr, "policy rejected")
                 return
 
             # Handle get-access-token: synthesize a credential request for ADO
@@ -233,6 +250,9 @@ class CredentialRelayServer:
             else:
                 log.warning("[%s] No source could resolve request", addr)
                 self.stats.errors += 1
+                # Fail fast for git `get`/`fill` so git aborts immediately
+                # instead of dropping to an interactive prompt that hangs.
+                await self._maybe_failfast(action, writer, addr, "no source resolved")
 
         except (TimeoutError, asyncio.TimeoutError):
             log.error("[%s] Request timed out", addr)
@@ -247,6 +267,30 @@ class CredentialRelayServer:
                 await writer.wait_closed()
             except Exception:
                 pass
+
+    async def _maybe_failfast(
+        self,
+        action: str,
+        writer: asyncio.StreamWriter,
+        addr,
+        reason: str,
+    ) -> None:
+        """Send a ``quit=1`` fail-fast response for unresolved git get requests.
+
+        Only git-credential ``get``/``fill`` actions get the sentinel: those are
+        the ones git would otherwise satisfy with an interactive prompt that
+        blocks. Non-git actions (``get-access-token`` etc.) handle failure via a
+        non-zero exit on the CodeSpace side and need no sentinel.
+        """
+        if action not in _GET_ACTIONS:
+            return
+        try:
+            writer.write(_FAILFAST_RESPONSE.encode("utf-8"))
+            await writer.drain()
+            self.stats.failfast_responses += 1
+            log.info("[%s] Fail-fast quit=1 sent (%s)", addr, reason)
+        except Exception:
+            log.debug("[%s] Could not send fail-fast response", addr, exc_info=True)
 
     async def _read_request(
         self, reader: asyncio.StreamReader, timeout: float = 90.0,

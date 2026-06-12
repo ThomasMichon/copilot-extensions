@@ -36,6 +36,24 @@ _POWERSHELL = shutil.which("powershell.exe") if _IS_WSL else None
 # Subprocess flags (suppress console windows on Windows)
 _SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
+# Non-interactive environment for `git credential fill`. Without this, a host
+# Git Credential Manager with no cached/valid token may block on an interactive
+# prompt (browser/console) -- observed as a ~52-min `git credential fill` hang.
+# These force GCM/git to fail fast instead, so the relay can return quit=1 and
+# the CodeSpace caller gets a prompt auth error rather than an open-ended wait.
+_NONINTERACTIVE_ENV = {
+    "GIT_TERMINAL_PROMPT": "0",
+    "GCM_INTERACTIVE": "never",
+    "GCM_GUI_PROMPT": "false",
+}
+
+
+def _noninteractive_env() -> dict[str, str]:
+    """Return a copy of the process env with interactive prompts disabled."""
+    env = dict(os.environ)
+    env.update(_NONINTERACTIVE_ENV)
+    return env
+
 
 class GitCredentialSource:
     """Proxies git-credential requests to local Git Credential Manager.
@@ -180,6 +198,7 @@ class GitCredentialSource:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 creationflags=_SUBPROCESS_FLAGS,
+                env=_noninteractive_env(),
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(input=credential_input.encode()),
@@ -227,6 +246,7 @@ class GitCredentialSource:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_noninteractive_env(),
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout,
