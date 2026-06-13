@@ -1,14 +1,22 @@
 """Repos registry -- catalog of known repositories and source roots.
 
-Manages ``~/.agent-worktrees/repos.yaml``, a two-tier registry:
+Manages ``~/.agent-worktrees/repos.yaml``, the canonical multi-repo
+registry.  Each repo is tagged with a management *class* describing how
+the facility interacts with its local checkout:
 
-- **project** repos get full agent-worktrees management (binstubs,
-  worktrees, terminal profiles).  These are also in ``projects.yaml``.
-- **repo** entries are tracked locations only -- used for path lookup,
-  clone resolution, and future ACP bridge dispatch.
+- **reference** -- read-only; tracked only for path resolution, cloning,
+  and indexing.  Never edited locally.
+- **singleton** -- editable as a single anchor checkout, no worktree
+  isolation; one flow at a time.
+- **worktree** -- full agent-worktrees lifecycle; concurrent-flow safe,
+  with edits/stages/commits isolated in per-task worktrees until push.
+  These are also adopted as ``projects.yaml`` projects.
 
-The registry also stores per-platform source roots (``srcroot``) so
-that adopt, WSL provision, and clone operations know where to put repos.
+The registry also stores per-platform source roots (``srcroot``) so that
+adopt, WSL provision, and clone operations know where to put repos.
+
+This registry supersedes the legacy ``~/.git-repos`` file; use
+``repos migrate`` to import an existing ``~/.git-repos`` into it.
 """
 
 from __future__ import annotations
@@ -27,13 +35,48 @@ from . import output
 # Data model
 # ---------------------------------------------------------------------------
 
+# A repo's management class -- how the facility interacts with its checkout:
+#
+#   reference  Read-only.  Tracked only for path resolution, cloning, and
+#              indexing (e.g. VEI).  Never edited locally.  (= external-repos
+#              relationship "consumer".)
+#   singleton  Editable as a single anchor checkout, with no worktree
+#              isolation.  Use when only one flow edits at a time, or when
+#              worktrees are overkill or unsupported.
+#   worktree   Full agent-worktrees lifecycle: concurrent-flow safe; edits,
+#              stages, and commits stay isolated in per-task worktrees until
+#              the final push.  (= an adopted agent-worktrees "project".)
+VALID_CLASSES = ("reference", "singleton", "worktree")
+
+# Legacy ``type`` values mapped onto the new class taxonomy.
+_LEGACY_TYPE_MAP = {"project": "worktree", "repo": "reference"}
+
+
+def normalize_class(value: str | None) -> str:
+    """Coerce a raw class/type string to a valid management class.
+
+    Accepts the new class names (reference/singleton/worktree) and the
+    legacy ``type`` values (project/repo).  Unknown values fall back to
+    ``reference`` (the safest -- read-only) default.
+    """
+    if not value:
+        return "reference"
+    v = str(value).strip().lower()
+    if v in VALID_CLASSES:
+        return v
+    return _LEGACY_TYPE_MAP.get(v, "reference")
+
+
 @dataclass
 class RepoEntry:
     """A single repo in the registry."""
 
     name: str
-    type: str = "repo"  # "project" or "repo"
+    repo_class: str = "reference"  # reference | singleton | worktree
     remote: str = ""
+    default_branch: str = ""
+    tags: list[str] = field(default_factory=list)
+    contributing: str = ""
     paths: dict[str, str] = field(default_factory=dict)
     # paths keys: "windows", "wsl", "linux"
 
@@ -100,10 +143,17 @@ def read_registry() -> ReposRegistry:
                 for plat in ("windows", "wsl", "linux"):
                     if plat in entry:
                         paths[plat] = str(entry[plat])
+                raw_tags = entry.get("tags", [])
+                tags = [str(t) for t in raw_tags] if isinstance(raw_tags, list) else []
+                # Prefer the new "class" field; fall back to legacy "type".
+                raw_class = entry.get("class", entry.get("type"))
                 repos[name] = RepoEntry(
                     name=name,
-                    type=entry.get("type", "repo"),
+                    repo_class=normalize_class(raw_class),
                     remote=entry.get("remote", ""),
+                    default_branch=entry.get("default_branch", ""),
+                    tags=tags,
+                    contributing=entry.get("contributing", ""),
                     paths=paths,
                 )
 
@@ -137,9 +187,16 @@ def write_registry(registry: ReposRegistry) -> None:
         for name in sorted(registry.repos.keys()):
             entry = registry.repos[name]
             lines.append(f"  {name}:")
-            lines.append(f"    type: {entry.type}")
+            lines.append(f"    class: {entry.repo_class}")
             if entry.remote:
                 lines.append(f"    remote: {_quote(entry.remote)}")
+            if entry.default_branch:
+                lines.append(f"    default_branch: {_quote(entry.default_branch)}")
+            if entry.tags:
+                rendered = ", ".join(_quote(t) for t in entry.tags)
+                lines.append(f"    tags: [{rendered}]")
+            if entry.contributing:
+                lines.append(f"    contributing: {_quote(entry.contributing)}")
             for plat in ("windows", "wsl", "linux"):
                 if plat in entry.paths:
                     lines.append(f"    {plat}: {_quote(entry.paths[plat])}")
@@ -176,12 +233,17 @@ def set_srcroot(path: str, plat: str | None = None) -> None:
     output.ok(f"Source root for {plat} set to {path}")
 
 
-def list_repos(type_filter: str | None = None) -> list[RepoEntry]:
-    """Return all repos, optionally filtered by type."""
+def list_repos(class_filter: str | None = None) -> list[RepoEntry]:
+    """Return all repos, optionally filtered by management class.
+
+    The filter accepts new class names (reference/singleton/worktree) and
+    legacy type values (project/repo), normalizing both.
+    """
     registry = read_registry()
     entries = list(registry.repos.values())
-    if type_filter:
-        entries = [e for e in entries if e.type == type_filter]
+    if class_filter:
+        wanted = normalize_class(class_filter)
+        entries = [e for e in entries if e.repo_class == wanted]
     return sorted(entries, key=lambda e: e.name)
 
 
@@ -195,33 +257,49 @@ def add_repo(
     name: str,
     path: str,
     *,
-    type: str = "repo",
+    repo_class: str = "reference",
     remote: str = "",
+    default_branch: str = "",
+    tags: list[str] | None = None,
+    contributing: str = "",
     plat: str | None = None,
 ) -> RepoEntry:
     """Register a repo at a known path.  Merges with existing entry."""
     plat = plat or _current_platform()
     registry = read_registry()
+    repo_class = normalize_class(repo_class)
 
     existing = registry.repos.get(name)
     if existing:
         existing.paths[plat] = path
         if remote:
             existing.remote = remote
-        if type != "repo":
-            existing.type = type
+        # Only override class when explicitly upgraded away from the
+        # default; this lets `add` re-register a path without clobbering
+        # a deliberate classification.
+        if repo_class != "reference":
+            existing.repo_class = repo_class
+        if default_branch:
+            existing.default_branch = default_branch
+        if tags:
+            existing.tags = list(tags)
+        if contributing:
+            existing.contributing = contributing
         entry = existing
     else:
         entry = RepoEntry(
             name=name,
-            type=type,
+            repo_class=repo_class,
             remote=remote,
+            default_branch=default_branch,
+            tags=list(tags) if tags else [],
+            contributing=contributing,
             paths={plat: path},
         )
         registry.repos[name] = entry
 
     write_registry(registry)
-    output.ok(f"Repo '{name}' registered at {path} ({plat})")
+    output.ok(f"Repo '{name}' registered at {path} ({plat}) [{entry.repo_class}]")
     return entry
 
 
@@ -326,3 +404,275 @@ def resolve_path(name: str, plat: str | None = None) -> str | None:
             return str(candidate)
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Migration from the legacy ~/.git-repos registry
+# ---------------------------------------------------------------------------
+
+def _git_repos_path() -> Path:
+    """Path to the legacy ~/.git-repos registry file."""
+    return Path.home() / ".git-repos"
+
+
+def _adopted_project_names() -> set[str]:
+    """Names of repos adopted as agent-worktrees projects (projects.yaml).
+
+    Used by migration to classify adopted projects as ``worktree``.
+    """
+    projects_path = Path.home() / ".agent-worktrees" / "projects.yaml"
+    if not projects_path.exists():
+        return set()
+    try:
+        data = yaml.safe_load(projects_path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("projects"), dict):
+            return set(data["projects"].keys())
+    except Exception:
+        pass
+    return set()
+
+
+def migrate_git_repos(
+    *,
+    default_class: str = "singleton",
+    plat: str | None = None,
+) -> tuple[int, int]:
+    """Import the legacy ``~/.git-repos`` registry into ``repos.yaml``.
+
+    The legacy file uses a single ``srcroot`` string and per-repo
+    ``{remote, default_branch, tags, path, contributing}``.  Each entry is
+    mapped onto the current platform in ``repos.yaml``:
+
+    - ``srcroot`` -> ``srcroot[<platform>]``
+    - per-repo ``path`` (or ``srcroot/<name>``) -> ``paths[<platform>]``
+    - ``remote`` / ``default_branch`` / ``tags`` / ``contributing`` copied
+
+    Management class is inferred: repos adopted as agent-worktrees
+    projects become ``worktree``; everything else uses ``default_class``
+    (``singleton`` by default -- a tracked, editable anchor checkout).
+
+    Existing ``repos.yaml`` entries are merged, never clobbered: an
+    already-set class is preserved.  ``~/.git-repos`` itself is left
+    untouched.  Returns ``(migrated, skipped)`` counts.
+    """
+    plat = plat or _current_platform()
+    src = _git_repos_path()
+    if not src.exists():
+        output.warn(f"No legacy registry found at {src}")
+        return (0, 0)
+
+    try:
+        legacy = yaml.safe_load(src.read_text(encoding="utf-8"))
+    except Exception as e:
+        output.err(f"Could not parse {src}: {e}")
+        return (0, 0)
+    if not isinstance(legacy, dict):
+        output.err(f"{src} is not a valid registry")
+        return (0, 0)
+
+    registry = read_registry()
+    adopted = _adopted_project_names()
+
+    # Map the legacy single srcroot onto the current platform.
+    legacy_srcroot = legacy.get("srcroot")
+    if isinstance(legacy_srcroot, str) and legacy_srcroot:
+        registry.srcroot.setdefault(plat, legacy_srcroot)
+
+    migrated = 0
+    skipped = 0
+    raw_repos = legacy.get("repos", {})
+    if not isinstance(raw_repos, dict):
+        raw_repos = {}
+
+    for name, entry in raw_repos.items():
+        if not isinstance(entry, dict):
+            skipped += 1
+            continue
+
+        # Resolve the local path: explicit "path" wins, else srcroot/name.
+        path = entry.get("path")
+        if not path and isinstance(legacy_srcroot, str) and legacy_srcroot:
+            path = str(Path(legacy_srcroot) / name)
+        if not path:
+            skipped += 1
+            output.warn(f"  {name}: no path and no srcroot -- skipped")
+            continue
+
+        raw_tags = entry.get("tags", [])
+        tags = [str(t) for t in raw_tags] if isinstance(raw_tags, list) else []
+
+        # Infer class: adopted projects are worktree-managed; otherwise
+        # the caller-provided default (singleton).
+        inferred = "worktree" if name in adopted else default_class
+
+        existing = registry.repos.get(name)
+        if existing:
+            existing.paths.setdefault(plat, str(path))
+            if not existing.remote:
+                existing.remote = entry.get("remote", "")
+            if not existing.default_branch:
+                existing.default_branch = entry.get("default_branch", "")
+            if not existing.tags:
+                existing.tags = tags
+            if not existing.contributing:
+                existing.contributing = entry.get("contributing", "")
+            # Preserve an already-deliberate class; only fill if unset
+            # (defaults to reference on a bare entry).
+            if existing.repo_class == "reference" and inferred != "reference":
+                existing.repo_class = normalize_class(inferred)
+        else:
+            registry.repos[name] = RepoEntry(
+                name=name,
+                repo_class=normalize_class(inferred),
+                remote=entry.get("remote", ""),
+                default_branch=entry.get("default_branch", ""),
+                tags=tags,
+                contributing=entry.get("contributing", ""),
+                paths={plat: str(path)},
+            )
+        migrated += 1
+
+    write_registry(registry)
+    return (migrated, skipped)
+
+
+# ---------------------------------------------------------------------------
+# Multi-repo git hygiene (status / sync)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RepoStatus:
+    """Working-tree status for a single repo checkout."""
+
+    name: str
+    repo_class: str
+    path: str | None = None
+    present: bool = False
+    branch: str = ""
+    dirty: bool = False
+    ahead: int = 0
+    behind: int = 0
+    error: str = ""
+
+
+def _git(path: str, *args: str, timeout: int = 60) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", "-C", path, *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def repo_status(entry: RepoEntry, plat: str | None = None) -> RepoStatus:
+    """Compute working-tree status for one repo entry."""
+    plat = plat or _current_platform()
+    st = RepoStatus(name=entry.name, repo_class=entry.repo_class)
+    path = entry.local_path(plat)
+    st.path = path
+    if not path or not (Path(path) / ".git").exists():
+        return st
+    st.present = True
+    try:
+        st.branch = _git(path, "branch", "--show-current").stdout.strip()
+        st.dirty = bool(_git(path, "status", "--porcelain").stdout.strip())
+        branch = entry.default_branch or st.branch
+        if branch:
+            counts = _git(
+                path, "rev-list", "--left-right", "--count",
+                f"origin/{branch}...HEAD",
+            )
+            if counts.returncode == 0:
+                parts = counts.stdout.split()
+                if len(parts) == 2:
+                    st.behind, st.ahead = int(parts[0]), int(parts[1])
+    except Exception as e:  # pragma: no cover - defensive
+        st.error = str(e)
+    return st
+
+
+def _filter_repos(
+    entries: list[RepoEntry],
+    *,
+    tag: str | None,
+    class_filter: str | None,
+) -> list[RepoEntry]:
+    if class_filter:
+        wanted = normalize_class(class_filter)
+        entries = [e for e in entries if e.repo_class == wanted]
+    if tag:
+        entries = [e for e in entries if tag in e.tags]
+    return entries
+
+
+def status_all(
+    *,
+    tag: str | None = None,
+    class_filter: str | None = None,
+    plat: str | None = None,
+) -> list[RepoStatus]:
+    """Return status for all registered repos (optionally filtered)."""
+    entries = _filter_repos(
+        list(read_registry().repos.values()),
+        tag=tag, class_filter=class_filter,
+    )
+    entries.sort(key=lambda e: e.name)
+    return [repo_status(e, plat) for e in entries]
+
+
+def sync_repo(entry: RepoEntry, plat: str | None = None) -> tuple[str, str]:
+    """Fetch and fast-forward one repo's default branch.
+
+    Returns ``(state, detail)`` where state is one of: ``synced``,
+    ``skipped``, ``missing``, ``error``.  Dirty trees and detached/
+    non-default branches are skipped (never force-updated).
+    """
+    plat = plat or _current_platform()
+    path = entry.local_path(plat)
+    if not path or not (Path(path) / ".git").exists():
+        return ("missing", "not checked out")
+    branch = entry.default_branch
+    try:
+        if _git(path, "status", "--porcelain").stdout.strip():
+            return ("skipped", "working tree dirty")
+        current = _git(path, "branch", "--show-current").stdout.strip()
+        if not current:
+            # Detached HEAD (e.g. a reference repo pinned at a tag/commit):
+            # never fast-forward it.
+            return ("skipped", "detached HEAD")
+        if branch and current != branch:
+            return ("skipped", f"on '{current}', not '{branch}'")
+        target = branch or current
+        fetch = _git(path, "fetch", "origin", timeout=180)
+        if fetch.returncode != 0:
+            return ("error", fetch.stderr.strip() or "fetch failed")
+        if not target:
+            return ("skipped", "no branch to fast-forward")
+        ff = _git(path, "merge", "--ff-only", f"origin/{target}")
+        if ff.returncode != 0:
+            return ("skipped", "not fast-forwardable (diverged)")
+        return ("synced", target)
+    except Exception as e:
+        return ("error", str(e))
+
+
+def sync_all(
+    *,
+    tag: str | None = None,
+    class_filter: str | None = None,
+    plat: str | None = None,
+) -> list[tuple[str, str, str]]:
+    """Fetch + ff-merge all registered repos (optionally filtered).
+
+    Returns a list of ``(name, state, detail)`` tuples.
+    """
+    entries = _filter_repos(
+        list(read_registry().repos.values()),
+        tag=tag, class_filter=class_filter,
+    )
+    entries.sort(key=lambda e: e.name)
+    results = []
+    for e in entries:
+        state, detail = sync_repo(e, plat)
+        results.append((e.name, state, detail))
+    return results
