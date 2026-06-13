@@ -20,6 +20,17 @@ if TYPE_CHECKING:
     from .db import Database
 
 
+# Tool-call statuses (carried on tool_call_update events) that mean the call
+# has finished, one way or another. Mirrors render._TERMINAL_TOOL_STATUS but
+# kept local so the event log has no dependency on the display layer.
+_TERMINAL_TOOL_STATUSES = frozenset(
+    {
+        "completed", "complete", "success", "succeeded",
+        "failed", "error", "cancelled", "canceled",
+    }
+)
+
+
 @dataclass
 class SseEvent:
     """A single SSE-ready event with a monotonic ID."""
@@ -107,6 +118,49 @@ class EventLog:
         """The ID of the most recent event, or 0 if empty."""
         with self._lock:
             return self._events[-1].id if self._events else 0
+
+    def active_tool_call(self) -> dict[str, Any] | None:
+        """Return the most recent in-flight tool call, or ``None`` if idle.
+
+        A tool call is *in-flight* once a ``tool_call_start`` is seen and until
+        a later ``tool_call_update`` for the same ``tool_call_id`` carries a
+        terminal status. This is what lets a live feed say *"still running:
+        Build odsp-legacy — rush build … (17m)"* during a long, output-buffered
+        tool call instead of a contentless heartbeat -- so a watcher can tell a
+        busy agent from a hung one, and knows the last thing it was doing.
+
+        Derived purely from the in-memory log; never persisted and never
+        assigned an event id (so it cannot move a delivery cursor).
+        """
+        with self._lock:
+            events = list(self._events)
+
+        open_calls: dict[str, SseEvent] = {}
+        for e in events:
+            if e.event == "tool_call_start":
+                tid = e.data.get("tool_call_id") or ""
+                open_calls[tid] = e
+            elif e.event == "tool_call_update":
+                status = e.data.get("status")
+                if status and str(status).lower() in _TERMINAL_TOOL_STATUSES:
+                    open_calls.pop(e.data.get("tool_call_id") or "", None)
+
+        if not open_calls:
+            return None
+
+        start = max(open_calls.values(), key=lambda ev: ev.id)
+        raw = start.data.get("raw_input") or {}
+        command = raw.get("command") or raw.get("description")
+        return {
+            "tool_call_id": start.data.get("tool_call_id"),
+            "title": start.data.get("title")
+            or start.data.get("kind")
+            or "tool",
+            "kind": start.data.get("kind"),
+            "command": command,
+            "started_at": start.timestamp,
+            "started_id": start.id,
+        }
 
     async def wait_for_events(
         self, after: int, timeout: float = 30.0

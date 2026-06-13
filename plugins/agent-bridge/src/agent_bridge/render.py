@@ -53,6 +53,18 @@ def _is_terminal_status(status: str | None) -> bool:
     return bool(status) and status.lower() in _TERMINAL_TOOL_STATUS
 
 
+def _format_duration(seconds: float) -> str:
+    """Compact human duration: ``45s``, ``3m`` (rounded), ``1h12m``."""
+    secs = int(seconds)
+    if secs < 60:
+        return f"{secs}s"
+    minutes, secs = divmod(secs, 60)
+    if minutes < 60:
+        return f"{minutes}m" if secs == 0 else f"{minutes}m{secs}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h" if minutes == 0 else f"{hours}h{minutes}m"
+
+
 class StreamRenderer:
     """Stateful renderer converting events into a collapsed (or expanded) feed.
 
@@ -135,6 +147,28 @@ class StreamRenderer:
         """
         secs = int(elapsed_seconds)
         return self._dim(f"{_TOOL_MARKER} …still working ({secs}s)") + "\n"
+
+    def tool_progress_line(self, data: dict[str, Any]) -> str:
+        """A transient liveness line naming the in-flight tool call.
+
+        Emitted during quiet periods when the remote is blocked on a single
+        long-running tool call (e.g. a buffered ``rush build``). Names the tool
+        (and its command, when available) plus elapsed time so the watcher
+        knows *what* the remote is doing and that it is still alive. Render-only
+        -- never persisted, never moves the delivery cursor.
+        """
+        title = data.get("title") or "tool"
+        elapsed = _format_duration(data.get("elapsed_s") or 0)
+        line = f"{_TOOL_MARKER} still running: {title}"
+        command = data.get("command")
+        if command:
+            first = str(command).strip().splitlines()[0] if str(command).strip() else ""
+            if first:
+                if len(first) > 80:
+                    first = first[:77] + "…"
+                line += f" — {first}"
+        line += f" ({elapsed})"
+        return self._dim(line) + "\n"
 
     # -- per-event renderers -------------------------------------------------
 

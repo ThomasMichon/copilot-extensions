@@ -900,6 +900,25 @@ def _stream_feed(
                         return "complete"
                     continue
 
+                if etype == "tool_progress":
+                    # Quiet-period liveness naming the in-flight tool call.
+                    # Cursor-neutral (no id); throttled like the heartbeat.
+                    if now - last_activity >= _PROGRESS_INTERVAL:
+                        sys.stdout.write(
+                            renderer.tool_progress_line(evt.get("data", {}))
+                        )
+                        sys.stdout.flush()
+                        last_activity = now
+                    if deadline and now > deadline:
+                        print(
+                            "\n[>] Timed out waiting for turn "
+                            "(remote still running)", file=sys.stderr,
+                        )
+                        return "timeout"
+                    if _turn_settled(client, session_id, cursor):
+                        return "complete"
+                    continue
+
                 # Real event: render + flush BEFORE acking delivery.
                 evt_id = evt.get("id", "")
                 try:
