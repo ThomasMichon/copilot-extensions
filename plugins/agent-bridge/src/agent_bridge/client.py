@@ -222,10 +222,22 @@ class BridgeClient:
                 line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
 
                 if line.startswith(":"):
-                    # Comment / heartbeat -- surface a sentinel so the
-                    # streaming engine can show progress and check for turn
-                    # completion during quiet periods.
-                    yield {"id": "", "event": "_heartbeat", "data": {}}
+                    # SSE comment. ``: tool_progress <json>`` carries quiet-
+                    # period liveness (the in-flight tool call the remote is
+                    # blocked on); any other comment is a bare heartbeat. Both
+                    # are cursor-neutral (no id) -- they let the streaming
+                    # engine show progress and check for turn completion during
+                    # silence, without touching the durable event stream.
+                    body = line[1:].strip()
+                    if body.startswith("tool_progress"):
+                        raw = body[len("tool_progress"):].strip()
+                        try:
+                            data = json.loads(raw) if raw else {}
+                        except json.JSONDecodeError:
+                            data = {}
+                        yield {"id": "", "event": "tool_progress", "data": data}
+                    else:
+                        yield {"id": "", "event": "_heartbeat", "data": {}}
                     continue
                 elif line.startswith("id: "):
                     event_id = line[4:]

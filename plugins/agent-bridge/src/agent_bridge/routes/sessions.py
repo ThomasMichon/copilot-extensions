@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Request
@@ -40,20 +41,26 @@ def _cursor_key(caller_id: str | None) -> str:
 
 
 def _tool_progress_sse(active: dict, now: float) -> str:
-    """Frame an in-flight tool call as a cursor-neutral SSE liveness event.
+    """Frame an in-flight tool call as a cursor-neutral SSE *comment*.
 
-    ``active`` is :meth:`EventLog.active_tool_call`'s return value. The event
-    has no ``id:`` line, so a client never acks it and the delivery cursor is
-    untouched -- it is pure liveness, telling a watcher what the remote is
-    working on (and that it is still alive) during a quiet, output-buffered
-    tool call.
+    ``active`` is :meth:`EventLog.active_tool_call`'s return value. The line is
+    an SSE comment (``: tool_progress <json>``), not an ``event:``/``data:``
+    block -- so it is invisible to spec-compliant ``EventSource`` consumers
+    (which ignore ``:`` lines, like the existing ``: heartbeat``) and
+    structurally cannot carry an ``id:``. It is pure transport liveness: it
+    tells a watcher what the remote is working on (and that it is still alive)
+    during a quiet, output-buffered tool call, without injecting a synthetic,
+    non-relay event into the durable, replayable event stream or moving any
+    delivery cursor. Only the agent-bridge CLI renderer opts in to parsing it;
+    HTTP API consumers (e.g. Neuron Forge) ignore the comment for free.
     """
     progress = dict(active)
     started = progress.pop("started_at", None)
     if started is not None:
         progress["elapsed_s"] = max(0.0, now - started)
-    payload = json.dumps({"event": "tool_progress", "data": progress})
-    return f"event: tool_progress\ndata: {payload}\n\n"
+    # JSON is single-line (newlines escaped), so the comment stays one line.
+    payload = json.dumps(progress)
+    return f": tool_progress {payload}\n\n"
 
 
 def _session_info(s) -> SessionInfo:  # noqa: ANN001
@@ -297,7 +304,7 @@ async def get_events(
                 # a busy agent from a hung one. Otherwise, a bare heartbeat.
                 active = session.event_log.active_tool_call()
                 if active:
-                    yield _tool_progress_sse(active, _time.time())
+                    yield _tool_progress_sse(active, time.time())
                 else:
                     yield ": heartbeat\n\n"
 
@@ -364,14 +371,12 @@ async def ack_cursor(
     The stored cursor never regresses, so duplicate/out-of-order acks are
     safe. The effective cursor after the ack is returned.
     """
-    import time as _time
-
     mgr: SessionManager = request.app.state.session_manager
     session = mgr.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     effective = mgr.db.set_cursor(
-        _cursor_key(req.caller_id), session_id, req.last_id, _time.time()
+        _cursor_key(req.caller_id), session_id, req.last_id, time.time()
     )
     return CursorInfo(
         session_id=session_id, caller_id=req.caller_id, last_acked_id=effective
