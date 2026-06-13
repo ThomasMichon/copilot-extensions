@@ -352,9 +352,15 @@ Set-Content -Path `$pidFile -Value `$proc.Id
         $pwshPath = if ($pwshCmd) { $pwshCmd.Source } else { 'pwsh.exe' }
     }
 
+    # Use conhost --headless to prevent Windows Terminal from capturing the
+    # task's pwsh as a visible window/tab when Terminal is the default terminal
+    # app. -WindowStyle Hidden alone is ignored by Windows Terminal, so a bare
+    # `pwsh -WindowStyle Hidden` task surfaces a real console window -- and
+    # because the launcher spawns the long-lived agent-bridge.exe with
+    # -NoNewWindow, that window persists for the life of the service.
     $action = New-ScheduledTaskAction `
-        -Execute $pwshPath `
-        -Argument "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$launcherPath`""
+        -Execute 'conhost.exe' `
+        -Argument "--headless `"$pwshPath`" -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$launcherPath`""
 
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
     $trigger.Delay = 'PT15S'
@@ -611,8 +617,15 @@ Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
 "@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
 
-    Start-Process -FilePath (Get-PwshPath) `
-        -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded) `
+    # Launch the detached, hidden pwsh through conhost --headless so Windows
+    # Terminal (when configured as the default terminal app) cannot capture it
+    # as a visible window/tab -- -WindowStyle Hidden alone is ignored by the
+    # DefTerm handoff. ShellExecute (no -NoNewWindow / no redirection on THIS
+    # call) is preserved so the long-lived agent-bridge.exe does not inherit the
+    # installer's std handles; it inherits conhost's headless pseudoconsole.
+    $pwshForHeadless = Get-PwshPath
+    Start-Process -FilePath 'conhost.exe' `
+        -ArgumentList @('--headless', "`"$pwshForHeadless`"", '-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded) `
         -WindowStyle Hidden | Out-Null
 
     # The detached launcher writes the pid file once the service is spawned.
