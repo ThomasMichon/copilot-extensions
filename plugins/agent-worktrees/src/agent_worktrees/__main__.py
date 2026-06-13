@@ -3643,22 +3643,31 @@ def _repos_usage() -> None:
     print(f"Usage: {project} repos <command>")
     print()
     print("Commands:")
-    print("  list [--type project|repo]          List known repositories")
+    print("  list [--class reference|singleton|worktree]   List known repositories")
     print("  find <name>                         Resolve a repo to its local path")
-    print("  add <name> <path> [--type T]        Register a repo at a known path")
-    print("     [--remote URL]")
+    print("  add <name> <path>                   Register a repo at a known path")
+    print("     [--class C] [--remote URL] [--default-branch B]")
+    print("     [--tags a,b] [--contributing PATH]")
     print("  remove <name>                       Remove a repo from the registry")
     print("  clone <remote> [--name N]           Clone a repo to srcroot and register")
     print("     [--target PATH]")
     print("  srcroot [--set PATH]                Show or set the source root")
     print("     [--platform windows|wsl|linux]")
+    print("  migrate [--default-class C]         Import legacy ~/.git-repos")
+    print("  status [--tag T] [--class C]        Show branch/dirty/ahead-behind")
+    print("  sync [--tag T] [--class C]          Fetch + fast-forward (skips dirty)")
+    print()
+    print("Repo classes:")
+    print("  reference   read-only; resolve/clone/index only; never edited")
+    print("  singleton   single anchor checkout; no worktree isolation")
+    print("  worktree    full agent-worktrees lifecycle; concurrent-flow safe")
     print()
     print("Examples:")
     print(f"  {project} repos list")
+    print(f"  {project} repos migrate")
     print(f"  {project} repos find dotfiles")
-    print(f"  {project} repos add my-lib D:\\Src\\my-lib --type repo")
-    print(f"  {project} repos clone https://github.com/user/repo.git")
-    print(f"  {project} repos srcroot --set D:\\Src")
+    print(f"  {project} repos add my-lib D:\\Src\\my-lib --class reference")
+    print(f"  {project} repos sync --tag facility")
 
 
 def cmd_repos_dispatch(argv: list[str]) -> int:
@@ -3673,20 +3682,24 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
     rest = argv[1:]
 
     if sub == "list":
-        type_filter = None
-        if "--type" in rest:
-            idx = rest.index("--type")
-            if idx + 1 < len(rest):
-                type_filter = rest[idx + 1]
+        class_filter = None
+        for flag in ("--class", "--type"):
+            if flag in rest:
+                idx = rest.index(flag)
+                if idx + 1 < len(rest):
+                    class_filter = rest[idx + 1]
         json_out = "--json" in rest
-        entries = repos.list_repos(type_filter=type_filter)
+        entries = repos.list_repos(class_filter=class_filter)
         if json_out:
             _json_output({
                 "repos": [
                     {
                         "name": e.name,
-                        "type": e.type,
+                        "class": e.repo_class,
                         "remote": e.remote,
+                        "default_branch": e.default_branch,
+                        "tags": e.tags,
+                        "contributing": e.contributing,
                         "paths": e.paths,
                     }
                     for e in entries
@@ -3694,12 +3707,13 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             })
         elif not entries:
             print("No repos registered.")
-            print("Add one with: repos add <name> <path>")
+            print("Add one with: repos add <name> <path> --class <class>")
+            print("Or import the legacy registry with: repos migrate")
         else:
             plat = repos._current_platform()
             output.header("Repos Registry")
             for e in entries:
-                tag = f"[{e.type}]"
+                tag = f"[{e.repo_class}]"
                 local = e.local_path(plat) or "(no local path)"
                 print(f"  {e.name:<25} {tag:<12} {local}")
                 if e.remote:
@@ -3732,20 +3746,43 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
 
     if sub == "add":
         if len(rest) < 2:
-            output.err("Usage: repos add <name> <path> [--type T] [--remote URL]")
+            output.err(
+                "Usage: repos add <name> <path> "
+                "[--class reference|singleton|worktree] [--remote URL] "
+                "[--default-branch B] [--tags a,b] [--contributing PATH]"
+            )
             return 1
         name, path = rest[0], rest[1]
-        rtype = "repo"
+        rclass = "reference"
         remote = ""
-        if "--type" in rest:
-            idx = rest.index("--type")
-            if idx + 1 < len(rest):
-                rtype = rest[idx + 1]
-        if "--remote" in rest:
-            idx = rest.index("--remote")
-            if idx + 1 < len(rest):
-                remote = rest[idx + 1]
-        repos.add_repo(name, path, type=rtype, remote=remote)
+        default_branch = ""
+        tags: list[str] = []
+        contributing = ""
+
+        def _opt(flag: str) -> str | None:
+            if flag in rest:
+                idx = rest.index(flag)
+                if idx + 1 < len(rest):
+                    return rest[idx + 1]
+            return None
+
+        # --class is canonical; --type is a legacy alias.
+        rclass = _opt("--class") or _opt("--type") or rclass
+        remote = _opt("--remote") or remote
+        default_branch = _opt("--default-branch") or default_branch
+        contributing = _opt("--contributing") or contributing
+        raw_tags = _opt("--tags")
+        if raw_tags:
+            tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
+
+        repos.add_repo(
+            name, path,
+            repo_class=rclass,
+            remote=remote,
+            default_branch=default_branch,
+            tags=tags,
+            contributing=contributing,
+        )
         return 0
 
     if sub == "remove":
@@ -3798,6 +3835,95 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             print("No source roots configured.")
             print("Set one with: repos srcroot --set <path>")
         return 0
+
+    if sub == "migrate":
+        default_class = "singleton"
+        if "--default-class" in rest:
+            idx = rest.index("--default-class")
+            if idx + 1 < len(rest):
+                default_class = rest[idx + 1]
+        migrated, skipped = repos.migrate_git_repos(default_class=default_class)
+        if migrated == 0 and skipped == 0:
+            return 1
+        output.ok(f"Migrated {migrated} repo(s) from ~/.git-repos "
+                  f"({skipped} skipped) into repos.yaml")
+        output.info("~/.git-repos was left in place; remove it once you have "
+                    "verified the migration.")
+        return 0
+
+    if sub == "status":
+        tag = None
+        class_filter = None
+        if "--tag" in rest:
+            idx = rest.index("--tag")
+            if idx + 1 < len(rest):
+                tag = rest[idx + 1]
+        for flag in ("--class", "--type"):
+            if flag in rest:
+                idx = rest.index(flag)
+                if idx + 1 < len(rest):
+                    class_filter = rest[idx + 1]
+        json_out = "--json" in rest
+        statuses = repos.status_all(tag=tag, class_filter=class_filter)
+        if json_out:
+            _json_output({
+                "repos": [
+                    {
+                        "name": s.name, "class": s.repo_class,
+                        "present": s.present, "branch": s.branch,
+                        "dirty": s.dirty, "ahead": s.ahead,
+                        "behind": s.behind, "path": s.path, "error": s.error,
+                    }
+                    for s in statuses
+                ],
+            })
+            return 0
+        if not statuses:
+            print("No repos registered.")
+            return 0
+        output.header("Repos Status")
+        for s in statuses:
+            if not s.present:
+                print(f"  {s.name:<25} [{s.repo_class:<9}] MISSING")
+                continue
+            flags = []
+            if s.dirty:
+                flags.append("dirty")
+            if s.ahead:
+                flags.append(f"+{s.ahead}")
+            if s.behind:
+                flags.append(f"-{s.behind}")
+            state = ", ".join(flags) if flags else "clean"
+            print(f"  {s.name:<25} [{s.repo_class:<9}] {s.branch:<18} {state}")
+        return 0
+
+    if sub == "sync":
+        tag = None
+        class_filter = None
+        if "--tag" in rest:
+            idx = rest.index("--tag")
+            if idx + 1 < len(rest):
+                tag = rest[idx + 1]
+        for flag in ("--class", "--type"):
+            if flag in rest:
+                idx = rest.index(flag)
+                if idx + 1 < len(rest):
+                    class_filter = rest[idx + 1]
+        results = repos.sync_all(tag=tag, class_filter=class_filter)
+        if not results:
+            print("No repos registered.")
+            return 0
+        output.header("Repos Sync")
+        had_error = False
+        for name, state, detail in results:
+            if state == "synced":
+                output.ok(f"{name}: {detail}")
+            elif state in ("skipped", "missing"):
+                output.info(f"{name}: {state} ({detail})")
+            else:
+                had_error = True
+                output.err(f"{name}: {detail}")
+        return 1 if had_error else 0
 
     output.err(f"Unknown repos subcommand: {sub}")
     _repos_usage()
