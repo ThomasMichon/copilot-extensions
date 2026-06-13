@@ -142,3 +142,69 @@ class TestRenderEvents:
             {"event": "agent_message", "data": {"text": "B"}},
         ]
         assert r.render_events(events) == "AB"
+
+class TestToolProgressLiveness:
+    """Quiet-period liveness markers naming the in-flight tool call."""
+
+    def test_includes_title_command_and_elapsed(self) -> None:
+        r = _r()
+        out = r.tool_progress_line(
+            {
+                "title": "Build odsp-legacy",
+                "command": "rush build -t @ms/app-cores-odsp-legacy",
+                "elapsed_s": 1027,
+            }
+        )
+        assert "still running" in out
+        assert "Build odsp-legacy" in out
+        assert "rush build -t @ms/app-cores-odsp-legacy" in out
+        assert "17m" in out  # 1027s -> 17m7s
+        assert out.endswith("\n")
+
+    def test_only_first_command_line_shown(self) -> None:
+        r = _r()
+        out = r.tool_progress_line(
+            {"title": "X", "command": "line one\nline two\nline three", "elapsed_s": 5}
+        )
+        assert "line one" in out
+        assert "line two" not in out
+
+    def test_long_command_truncated(self) -> None:
+        r = _r()
+        out = r.tool_progress_line(
+            {"title": "X", "command": "z" * 200, "elapsed_s": 1}
+        )
+        assert "\u2026" in out  # ellipsis
+        assert "z" * 200 not in out
+
+    def test_missing_command_is_ok(self) -> None:
+        r = _r()
+        out = r.tool_progress_line({"title": "Some tool", "elapsed_s": 42})
+        assert "Some tool" in out
+        assert "42s" in out
+
+    def test_defaults_when_empty(self) -> None:
+        r = _r()
+        out = r.tool_progress_line({})
+        assert "tool" in out
+        assert "0s" in out
+
+
+class TestFormatDuration:
+    def test_seconds(self) -> None:
+        from agent_bridge.render import _format_duration
+
+        assert _format_duration(0) == "0s"
+        assert _format_duration(45) == "45s"
+
+    def test_minutes(self) -> None:
+        from agent_bridge.render import _format_duration
+
+        assert _format_duration(60) == "1m"
+        assert _format_duration(125) == "2m5s"
+
+    def test_hours(self) -> None:
+        from agent_bridge.render import _format_duration
+
+        assert _format_duration(3600) == "1h"
+        assert _format_duration(4320) == "1h12m"

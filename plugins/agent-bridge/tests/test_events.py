@@ -73,6 +73,70 @@ class TestEventLog:
         assert events == []
 
 
+class TestActiveToolCall:
+    """Deriving the in-flight tool call for liveness markers."""
+
+    def test_none_when_no_tool_calls(self, event_log: EventLog) -> None:
+        event_log.append("agent_message", {"text": "hi"})
+        assert event_log.active_tool_call() is None
+
+    def test_open_tool_call_is_active(self, event_log: EventLog) -> None:
+        event_log.append(
+            "tool_call_start",
+            {
+                "tool_call_id": "t1",
+                "title": "Build odsp-legacy",
+                "kind": "execute",
+                "raw_input": {"command": "rush build -t @ms/app-cores-odsp-legacy"},
+            },
+        )
+        active = event_log.active_tool_call()
+        assert active is not None
+        assert active["tool_call_id"] == "t1"
+        assert active["title"] == "Build odsp-legacy"
+        assert active["command"] == "rush build -t @ms/app-cores-odsp-legacy"
+        assert "started_at" in active
+
+    def test_completed_tool_call_clears_active(self, event_log: EventLog) -> None:
+        event_log.append("tool_call_start", {"tool_call_id": "t1", "title": "Read"})
+        event_log.append(
+            "tool_call_update", {"tool_call_id": "t1", "status": "completed"}
+        )
+        assert event_log.active_tool_call() is None
+
+    def test_non_terminal_update_keeps_active(self, event_log: EventLog) -> None:
+        event_log.append("tool_call_start", {"tool_call_id": "t1", "title": "Read"})
+        event_log.append("tool_call_update", {"tool_call_id": "t1", "status": None})
+        active = event_log.active_tool_call()
+        assert active is not None
+        assert active["tool_call_id"] == "t1"
+
+    def test_most_recent_open_call_wins(self, event_log: EventLog) -> None:
+        event_log.append("tool_call_start", {"tool_call_id": "t1", "title": "First"})
+        event_log.append(
+            "tool_call_update", {"tool_call_id": "t1", "status": "completed"}
+        )
+        event_log.append("tool_call_start", {"tool_call_id": "t2", "title": "Second"})
+        active = event_log.active_tool_call()
+        assert active is not None
+        assert active["title"] == "Second"
+
+    def test_falls_back_to_kind_for_title(self, event_log: EventLog) -> None:
+        event_log.append("tool_call_start", {"tool_call_id": "t1", "kind": "execute"})
+        active = event_log.active_tool_call()
+        assert active is not None
+        assert active["title"] == "execute"
+
+    def test_description_used_when_no_command(self, event_log: EventLog) -> None:
+        event_log.append(
+            "tool_call_start",
+            {"tool_call_id": "t1", "title": "X", "raw_input": {"description": "do X"}},
+        )
+        active = event_log.active_tool_call()
+        assert active is not None
+        assert active["command"] == "do X"
+
+
 class TestEventLogFromDB:
     """EventLog restoration from database."""
 

@@ -39,6 +39,23 @@ def _cursor_key(caller_id: str | None) -> str:
     return caller_id if caller_id else _CURSOR_DEFAULT_KEY
 
 
+def _tool_progress_sse(active: dict, now: float) -> str:
+    """Frame an in-flight tool call as a cursor-neutral SSE liveness event.
+
+    ``active`` is :meth:`EventLog.active_tool_call`'s return value. The event
+    has no ``id:`` line, so a client never acks it and the delivery cursor is
+    untouched -- it is pure liveness, telling a watcher what the remote is
+    working on (and that it is still alive) during a quiet, output-buffered
+    tool call.
+    """
+    progress = dict(active)
+    started = progress.pop("started_at", None)
+    if started is not None:
+        progress["elapsed_s"] = max(0.0, now - started)
+    payload = json.dumps({"event": "tool_progress", "data": progress})
+    return f"event: tool_progress\ndata: {payload}\n\n"
+
+
 def _session_info(s) -> SessionInfo:  # noqa: ANN001
     """Convert an internal Session to the public SessionInfo model."""
     from datetime import datetime, timezone
@@ -274,8 +291,15 @@ async def get_events(
                     yield f"id: {evt.id}\nevent: {evt.event}\ndata: {data}\n\n"
                     cursor = evt.id
             else:
-                # Heartbeat to keep connection alive
-                yield ": heartbeat\n\n"
+                # Quiet period. If a tool call is in flight, surface a
+                # cursor-neutral liveness event carrying what the remote is
+                # working on (title + command + elapsed) so a watcher can tell
+                # a busy agent from a hung one. Otherwise, a bare heartbeat.
+                active = session.event_log.active_tool_call()
+                if active:
+                    yield _tool_progress_sse(active, _time.time())
+                else:
+                    yield ": heartbeat\n\n"
 
     return StreamingResponse(
         event_stream(),

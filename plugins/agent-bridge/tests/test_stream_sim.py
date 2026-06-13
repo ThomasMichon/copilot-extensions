@@ -166,3 +166,70 @@ class TestEmptyAndSettled:
         status, _out = _run(bridge)
         assert status == "complete"
         assert bridge.streamed == []
+
+class _ToolProgressBridge:
+    """Fake bridge that emits a tool_progress liveness event while quiet.
+
+    Mimics the server behavior when the remote is blocked on a long, buffered
+    tool call: the tool_call_start is delivered, then the stream goes quiet and
+    the server injects a cursor-neutral ``tool_progress`` event (no id).
+    """
+
+    def __init__(self):
+        self.real = [
+            {"id": 1, "event": "tool_call_start",
+             "data": {"tool_call_id": "t1", "title": "Build odsp-legacy",
+                      "command": "rush build -t @ms/app-cores-odsp-legacy"}},
+        ]
+        self.cursors = {}
+        self.acks = []
+        self.streamed = []
+
+    def get_cursor(self, session_id, *, caller_id=None):
+        return self.cursors.get(caller_id, 0)
+
+    def ack_cursor(self, session_id, last_id, *, caller_id=None):
+        self.cursors[caller_id] = max(self.cursors.get(caller_id, 0), last_id)
+        self.acks.append((caller_id, last_id))
+        return self.cursors[caller_id]
+
+    def get_session(self, session_id):
+        # Settle only once the real event has been delivered + acked, so the
+        # tool_progress event is observed first.
+        return {"status": "idle" if self.acks else "running"}
+
+    def read_range(self, session_id, *, start=0, end=None):
+        return [e for e in self.real
+                if e["id"] >= start and (end is None or e["id"] <= end)]
+
+    def stream_events(self, session_id, *, after=0, caller_id=None):
+        for e in self.real:
+            if e["id"] > after:
+                self.streamed.append(e["id"])
+                yield e
+        # Quiet period: server surfaces what the remote is working on.
+        yield {"id": "", "event": "tool_progress",
+               "data": {"title": "Build odsp-legacy",
+                        "command": "rush build -t @ms/app-cores-odsp-legacy",
+                        "elapsed_s": 1027}}
+
+
+class TestToolProgressLiveness:
+    def test_engine_renders_in_flight_tool(self, monkeypatch) -> None:
+        # Render the liveness line immediately (no 20s throttle) for the test.
+        monkeypatch.setattr("agent_bridge.__main__._PROGRESS_INTERVAL", 0.0)
+        bridge = _ToolProgressBridge()
+        status, out = _run(bridge)
+        assert status == "complete"
+        # The watcher sees what the remote is stuck on, and that it's alive.
+        assert "still running: Build odsp-legacy" in out
+        assert "rush build -t @ms/app-cores-odsp-legacy" in out
+        assert "17m" in out
+
+    def test_tool_progress_does_not_move_cursor(self, monkeypatch) -> None:
+        monkeypatch.setattr("agent_bridge.__main__._PROGRESS_INTERVAL", 0.0)
+        bridge = _ToolProgressBridge()
+        _run(bridge)
+        # Only the real event (id 1) is acked; the liveness event never is.
+        assert [aid for (_c, aid) in bridge.acks] == [1]
+        assert bridge.get_cursor("sess-1", caller_id="wt-1") == 1
