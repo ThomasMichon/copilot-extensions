@@ -22,9 +22,16 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 
 1. **No file-copy of the package** into `~/.<runtime>/lib`. Install via
    `uv pip install <plugin_dir>` (non-editable). Retire any legacy `lib/`.
-2. **No `PYTHONPATH`.** Binstubs invoke the venv's generated **console script**
-   (`…/.venv/Scripts/<name>.exe` / `…/.venv/bin/<name>`). A binstub that sets
-   `PYTHONPATH=…/lib` and runs `python -m <pkg>` is forbidden.
+2. **No `PYTHONPATH` to a `lib/` dir.** A binstub that points `PYTHONPATH` at a
+   loose `…/lib` dir and runs `python -m <pkg>` is forbidden — the package must
+   be `uv pip install`ed into the venv's site-packages (rule 1), not imported
+   off a sidecar path. How the binstub launches differs by OS:
+   - **Linux/WSL:** `exec` the venv's console script (`…/.venv/bin/<name>`) — a
+     shebang script, no Smart App Control concern.
+   - **Windows:** launch `…\.venv\Scripts\python.exe -m <pkg>`, **never** the
+     generated `…\Scripts\<name>.exe` console-script trampoline. That trampoline
+     is an unsigned, zero-reputation PE that Smart App Control blocks
+     (CodeIntegrity 3077). See [SAC-safe launchers (Windows)](#sac-safe-launchers-windows).
 3. **Deps come from `pyproject.toml`**, not ad-hoc `uv pip install pyyaml`.
    Sibling libs not on PyPI (e.g. `ssh-manager`) are `uv pip install`ed from
    their vendored dir **before** the plugin.
@@ -35,6 +42,46 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
    install. Resolve the dir with `PYTHONPATH` cleared so a stale `…/lib` can't
    shadow it; retire `lib/` **before** the probe.
 6. **Create the venv before installing the package** (the install targets it).
+
+## SAC-safe launchers (Windows)
+
+Smart App Control (SAC), enforcing on Windows 11, hard-blocks two unsigned,
+zero-reputation binaries that a default `uv` install produces:
+
+1. the uv-managed venv `python.exe`, and
+2. the per-entry-point console-script trampoline `…\Scripts\<name>.exe`.
+
+Both fail with `CodeIntegrity` event **3077** ("did not meet the Enterprise
+signing level requirements"). Because these plugins ship publicly on GitHub, the
+fix must **not** require downloaders to disable SAC.
+
+### Rules (Windows `install.ps1` / `init.ps1`)
+
+1. **Build the venv from a PSF-signed base Python via `--copies`.** Resolve a
+   signed interpreter (`py -3.x` whose `Get-AuthenticodeSignature` reports
+   `Valid`) and run `& $signedBase -m venv --copies $VenvDir`. `--copies`
+   embeds a real copy of the signed `python.exe` in the venv (Authenticode
+   survives the copy), which SAC trusts. Rebuild an existing **unsigned** venv
+   the same way. Fall back to `uv venv` (unsigned) only when no signed Python
+   exists, with a loud warning — those hosts stay SAC-blocked until a signed
+   Python (python.org / Store) is installed.
+2. **Launch via the signed venv python, never the trampoline.** Every launch
+   path — the `~/.local/bin/<name>.cmd` binstub, the service start script, the
+   scheduled-task action, and any in-installer `version` / status probe — must
+   invoke `"<venv>\Scripts\python.exe" -m <package>`. Never invoke
+   `…\Scripts\<name>.exe`.
+3. **The legacy `<name>.exe` may still be *matched* for migration** (e.g. a
+   `Get-RunningProcess` PID/path lookup that also recognizes the old trampoline
+   process), but it must never be *launched*.
+4. **Reputable unsigned wheel `.pyd`s** (pydantic_core, etc.) pass SAC via ISG
+   reputation — only the locally generated, zero-reputation trampoline and the
+   uv-managed python are blocked, so dependencies need no signing.
+
+Reference implementation: `Get-SignedBasePython` + `New-SignedVenv` and the
+`"$VenvPython" -m <pkg>` launchers in
+`plugins/agent-bridge/scripts/install.ps1` (mirrored in `agent-worktrees`,
+`agent-codespaces`, and `agent-containers`). `tools/check-install-contract.py`
+flags any `install.ps1` that launches the `…\Scripts\<name>.exe` trampoline.
 
 ## Deploy manifest (schema_version 3)
 
@@ -95,6 +142,8 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 `tools/check-install-contract.py` verifies, per plugin:
 - `uv pip install` is used (no package file-copy),
 - no binstub sets `PYTHONPATH=…/lib`,
+- no `install.ps1` launches the `…\Scripts\<name>.exe` console-script trampoline
+  ([SAC-safe launchers](#sac-safe-launchers-windows)),
 - a `schema_version` 3 manifest with a `source` block is written,
 - the source-kind resolver is identical across plugins (per language).
 

@@ -22,6 +22,17 @@ PLUGINS_DIR = REPO / "plugins"
 # A binstub/install script must not point PYTHONPATH at a runtime lib/ dir.
 FORBIDDEN_PYTHONPATH = re.compile(r"PYTHONPATH[^\n]*\.agent-[a-z]+[\\/]lib", re.IGNORECASE)
 
+# A Windows install.ps1 must NOT launch the unsigned console-script trampoline
+# (…\Scripts\<name>.exe) -- Smart App Control blocks it (CodeIntegrity 3077).
+# Launch "<venv>\Scripts\python.exe -m <pkg>" instead. The legacy .exe may still
+# be *matched* (Get-RunningProcess) but never *launched*: launching shows up as
+# the trampoline followed by an argument list (`" %*`, `" start`, `" version`).
+# python.exe / pythonw.exe are explicitly allowed.
+FORBIDDEN_TRAMPOLINE = re.compile(
+    r"Scripts[\\/](?!python\.exe)(?!pythonw\.exe)[\w.-]+\.exe[\"']?\s+(?:%\*|start\b|version\b)",
+    re.IGNORECASE,
+)
+
 
 def _extract_block(text: str, start_marker: str, open_char: str, close_char: str) -> str | None:
     """Return the balanced {...} block beginning at the first start_marker line."""
@@ -81,6 +92,12 @@ def check() -> int:
                 violations.append(f"{name}/{script}: manifest is not schema_version 3")
 
             if script == "install.ps1":
+                if FORBIDDEN_TRAMPOLINE.search(text):
+                    violations.append(
+                        f"{name}/{script}: launches the unsigned console-script .exe "
+                        "trampoline (Smart App Control blocks it -- CodeIntegrity 3077); "
+                        "launch '<venv>\\Scripts\\python.exe -m <pkg>' instead"
+                    )
                 ps1_resolvers[name] = _norm(_extract_block(text, "function Get-SourceKind", "{", "}"))
             else:
                 sh_resolvers[name] = _norm(_extract_block(text, "_source_kind()", "{", "}"))
