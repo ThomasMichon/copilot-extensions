@@ -794,7 +794,7 @@ function Invoke-Status {
     }
 
     # Exit non-zero when not installed (used by module update orchestrator)
-    if (-not $agentBridge) {
+    if (-not (Test-Path $VenvPython)) {
         exit 1
     }
 }
