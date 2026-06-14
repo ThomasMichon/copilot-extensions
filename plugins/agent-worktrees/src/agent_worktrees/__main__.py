@@ -2728,10 +2728,22 @@ def cmd_register(args: argparse.Namespace) -> int:
         wsl_state = "adopted"
         wsl_distro = wsl_distro_name
         wsl_path = str(repo_dir)
+    # Resolve agent exposure: explicit flags win, else the repos.yaml
+    # classification, else default ON (adopting a repo means working in it).
+    if getattr(args, "no_agent", False):
+        expose_agent = False
+    elif getattr(args, "agent", False):
+        expose_agent = True
+    else:
+        from . import repos as _repos
+        _entry = _repos.find_repo(project)
+        expose_agent = _entry.agent if _entry else True
+
     inst.register_project(
         project,
         repo_dir=repo_dir,
         default_branch=default_branch,
+        expose_agent=expose_agent,
         wsl_state=wsl_state,
         wsl_distro=wsl_distro,
         wsl_path=wsl_path,
@@ -3647,7 +3659,7 @@ def _repos_usage() -> None:
     print("  find <name>                         Resolve a repo to its local path")
     print("  add <name> <path>                   Register a repo at a known path")
     print("     [--class C] [--remote URL] [--default-branch B]")
-    print("     [--tags a,b] [--contributing PATH]")
+    print("     [--tags a,b] [--contributing PATH] [--agent|--no-agent]")
     print("  remove <name>                       Remove a repo from the registry")
     print("  clone <remote> [--name N]           Clone a repo to srcroot and register")
     print("     [--target PATH]")
@@ -3700,6 +3712,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                         "default_branch": e.default_branch,
                         "tags": e.tags,
                         "contributing": e.contributing,
+                        "agent": e.agent,
                         "paths": e.paths,
                     }
                     for e in entries
@@ -3713,11 +3726,11 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             plat = repos._current_platform()
             output.header("Repos Registry")
             for e in entries:
-                tag = f"[{e.repo_class}]"
+                tag = f"[{e.repo_class}]" if e.agent else f"[{e.repo_class} no-agent]"
                 local = e.local_path(plat) or "(no local path)"
-                print(f"  {e.name:<25} {tag:<12} {local}")
+                print(f"  {e.name:<25} {tag:<20} {local}")
                 if e.remote:
-                    print(f"  {'':25} {'':12} {e.remote}")
+                    print(f"  {'':25} {'':20} {e.remote}")
         return 0
 
     if sub == "find":
@@ -3749,7 +3762,8 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             output.err(
                 "Usage: repos add <name> <path> "
                 "[--class reference|singleton|worktree] [--remote URL] "
-                "[--default-branch B] [--tags a,b] [--contributing PATH]"
+                "[--default-branch B] [--tags a,b] [--contributing PATH] "
+                "[--agent|--no-agent]"
             )
             return 1
         name, path = rest[0], rest[1]
@@ -3775,6 +3789,12 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         if raw_tags:
             tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
 
+        agent_flag: bool | None = None
+        if "--no-agent" in rest:
+            agent_flag = False
+        elif "--agent" in rest:
+            agent_flag = True
+
         repos.add_repo(
             name, path,
             repo_class=rclass,
@@ -3782,6 +3802,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             default_branch=default_branch,
             tags=tags,
             contributing=contributing,
+            agent=agent_flag,
         )
         return 0
 
@@ -4286,6 +4307,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--headless", action="store_true",
                    help="Adopt as a CLI-only project: the bare binstub lists "
                         "worktrees instead of launching an interactive session")
+    p.add_argument("--no-agent", action="store_true",
+                   help="Adopt without an agent-bridge agent (reference-style: "
+                        "worktree-managed but no agent). Default is to expose one.")
+    p.add_argument("--agent", action="store_true",
+                   help="Force exposing an agent-bridge agent (overrides a "
+                        "repos.yaml agent:false classification).")
 
     # uninstall
     p = sub.add_parser("uninstall", help="Remove worktree manager")

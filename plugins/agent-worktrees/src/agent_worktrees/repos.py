@@ -77,6 +77,10 @@ class RepoEntry:
     default_branch: str = ""
     tags: list[str] = field(default_factory=list)
     contributing: str = ""
+    # Whether this repo backs a same-machine agent in agent-bridge. Defaults
+    # ON for worktree/singleton repos (you adopt them to work in them); OFF for
+    # reference repos (read-only). `register`/`add --no-agent` forces it off.
+    agent: bool = True
     paths: dict[str, str] = field(default_factory=dict)
     # paths keys: "windows", "wsl", "linux"
 
@@ -147,13 +151,22 @@ def read_registry() -> ReposRegistry:
                 tags = [str(t) for t in raw_tags] if isinstance(raw_tags, list) else []
                 # Prefer the new "class" field; fall back to legacy "type".
                 raw_class = entry.get("class", entry.get("type"))
+                norm_class = normalize_class(raw_class)
+                # Agent exposure defaults ON for worktree/singleton, OFF for
+                # reference; an explicit `agent:` always wins.
+                raw_agent = entry.get("agent")
+                agent = (
+                    bool(raw_agent) if raw_agent is not None
+                    else norm_class != "reference"
+                )
                 repos[name] = RepoEntry(
                     name=name,
-                    repo_class=normalize_class(raw_class),
+                    repo_class=norm_class,
                     remote=entry.get("remote", ""),
                     default_branch=entry.get("default_branch", ""),
                     tags=tags,
                     contributing=entry.get("contributing", ""),
+                    agent=agent,
                     paths=paths,
                 )
 
@@ -188,6 +201,11 @@ def write_registry(registry: ReposRegistry) -> None:
             entry = registry.repos[name]
             lines.append(f"  {name}:")
             lines.append(f"    class: {entry.repo_class}")
+            # Emit `agent` only when it deviates from the class default
+            # (worktree/singleton => on, reference => off) to keep files minimal.
+            class_default_agent = entry.repo_class != "reference"
+            if entry.agent != class_default_agent:
+                lines.append(f"    agent: {'true' if entry.agent else 'false'}")
             if entry.remote:
                 lines.append(f"    remote: {_quote(entry.remote)}")
             if entry.default_branch:
@@ -262,6 +280,7 @@ def add_repo(
     default_branch: str = "",
     tags: list[str] | None = None,
     contributing: str = "",
+    agent: bool | None = None,
     plat: str | None = None,
 ) -> RepoEntry:
     """Register a repo at a known path.  Merges with existing entry."""
@@ -285,6 +304,8 @@ def add_repo(
             existing.tags = list(tags)
         if contributing:
             existing.contributing = contributing
+        if agent is not None:
+            existing.agent = agent
         entry = existing
     else:
         entry = RepoEntry(
@@ -294,12 +315,16 @@ def add_repo(
             default_branch=default_branch,
             tags=list(tags) if tags else [],
             contributing=contributing,
+            agent=agent if agent is not None else (repo_class != "reference"),
             paths={plat: path},
         )
         registry.repos[name] = entry
 
     write_registry(registry)
-    output.ok(f"Repo '{name}' registered at {path} ({plat}) [{entry.repo_class}]")
+    agent_note = "" if entry.agent else " no-agent"
+    output.ok(
+        f"Repo '{name}' registered at {path} ({plat}) [{entry.repo_class}{agent_note}]"
+    )
     return entry
 
 

@@ -183,6 +183,9 @@ def discover_local_agents() -> dict[str, AgentConfig]:
     the project binstub for spawning. This enables loopback communication
     (same-machine, cross-worktree) without explicit acp-agents.json entries.
 
+    Agent exposure defaults ON; a project adopted as reference-only carries
+    ``expose_agent: false`` in projects.yaml and is skipped here.
+
     Returns an empty dict if projects.yaml is missing or unparseable.
     """
     try:
@@ -211,8 +214,16 @@ def discover_local_agents() -> dict[str, AgentConfig]:
         return {}
 
     discovered: dict[str, AgentConfig] = {}
+    skipped: list[str] = []
     for project_name, project_data in projects.items():
         if not isinstance(project_data, dict):
+            continue
+        # Agent exposure defaults ON: an adopted project normally backs a local
+        # loopback agent. A project explicitly adopted as reference-only
+        # (agent-worktrees `register --no-agent` -> `expose_agent: false`) is
+        # managed for worktrees but exposes no agent. Absent key => on.
+        if not project_data.get("expose_agent", True):
+            skipped.append(project_name)
             continue
         anchor = project_data.get("anchor", "")
         discovered[project_name] = AgentConfig(
@@ -222,6 +233,12 @@ def discover_local_agents() -> dict[str, AgentConfig]:
             display_name=f"{project_name} (local)",
             description=f"Local agent for {project_name} (auto-discovered from projects.yaml)",
             auto_discovered=True,
+        )
+
+    if skipped:
+        log.debug(
+            "Skipped %d reference-only project(s) with expose_agent=false: %s",
+            len(skipped), skipped,
         )
 
     if discovered:
