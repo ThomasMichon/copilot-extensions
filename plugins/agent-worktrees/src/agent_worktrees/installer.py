@@ -434,10 +434,10 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
                 'rem drop any inherited WORKTREE_ID so worktree resolution uses CWD.\r\n'
                 'set "WORKTREE_ID="\r\n'
                 'set "APERTURE_WORKTREE_ID="\r\n'
-                'set "_AW=%USERPROFILE%\\.agent-worktrees'
-                '\\.venv\\Scripts\\agent-worktrees.exe"\r\n'
-                'if not exist "%_AW%" goto :_aw_fallback\r\n'
-                '"%_AW%" %*\r\n'
+                'set "_PY=%USERPROFILE%\\.agent-worktrees'
+                '\\.venv\\Scripts\\python.exe"\r\n'
+                'if not exist "%_PY%" goto :_aw_fallback\r\n'
+                '"%_PY%" -m agent_worktrees %*\r\n'
                 'exit /b %ERRORLEVEL%\r\n'
                 ':_aw_fallback\r\n'
                 'rem Fallback: launch session directly (venv missing / recovery)\r\n'
@@ -482,7 +482,7 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
         wm_content = (
             "@echo off\r\n"
             'set "PYTHONUTF8=1"\r\n'
-            '"%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\agent-worktrees.exe" %*\r\n'
+            '"%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe" -m agent_worktrees %*\r\n'
             "exit /b %ERRORLEVEL%\r\n"
         )
         dst = lb / "agent-worktrees.cmd"

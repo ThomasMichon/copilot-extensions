@@ -495,24 +495,78 @@ BUILD_INFO: dict[str, str] = {
     return $true
 }
 
+function Get-SignedBasePython {
+    <# Return the path to a SAC-trusted (Authenticode-signed) base Python
+       (>=3.11), or $null. Smart App Control blocks the unsigned uv-managed
+       Python and the console-script trampoline .exe; building the venv from a
+       signed base with `--copies` embeds a signed python.exe in the venv
+       (Authenticode survives the copy), which SAC allows. #>
+    $cands = @()
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        foreach ($v in '3.13', '3.12', '3.11') {
+            $p = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
+            if ($LASTEXITCODE -eq 0 -and $p) { $cands += $p }
+        }
+    }
+    foreach ($c in ($cands | Select-Object -Unique)) {
+        if (Test-Path $c) {
+            try {
+                if ((Get-AuthenticodeSignature $c).Status -eq 'Valid') { return $c }
+            } catch {}
+        }
+    }
+    return $null
+}
+
 function Deploy-Venv {
     <# Create venv and install pyyaml via uv. #>
 
-    # Skip venv creation if python.exe already exists (may be locked by
-    # a running session). Only create when missing.
-    if (-not (Test-Path $VenvPython)) {
-        $args_ = @('venv', $VenvDir, '--python', '3.11', '--allow-existing')
-        $result = & uv @args_ 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            # Fallback: try without version constraint
-            $args_ = @('venv', $VenvDir, '--allow-existing')
-            $result = & uv @args_ 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                Write-ServiceErr "Failed to create venv: $result"
-                return $false
+    # Rebuild an existing venv whose python.exe is unsigned (Smart App Control
+    # blocks it) when a signed base Python is available to rebuild from.
+    if (Test-Path $VenvPython) {
+        $sigStatus = try { (Get-AuthenticodeSignature $VenvPython).Status } catch { 'Unknown' }
+        if ($sigStatus -ne 'Valid' -and (Get-SignedBasePython)) {
+            Write-ServiceChanged "Existing venv python is unsigned (Smart App Control-incompatible) -- rebuilding from signed Python"
+            try {
+                Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop
+            } catch {
+                Write-ServiceWarn "Could not remove existing venv (in use?): $_ -- keeping it"
             }
         }
-        Write-ServiceOk "Venv created at $VenvDir"
+    }
+
+    # Create the venv. Prefer a SAC-trusted signed base Python via `--copies`
+    # (the signed python.exe is embedded in the venv); fall back to uv when no
+    # signed Python is present (fine on machines without Smart App Control).
+    if (-not (Test-Path $VenvPython)) {
+        $signedBase = Get-SignedBasePython
+        $created = $false
+        if ($signedBase) {
+            & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $VenvPython)) {
+                $created = $true
+                Write-ServiceOk "Venv created from signed Python ($signedBase)"
+            } else {
+                Write-ServiceWarn "Signed-Python venv creation failed -- falling back to uv"
+            }
+        }
+        if (-not $created) {
+            if (-not $signedBase) {
+                Write-ServiceWarn "No signed system Python found -- using uv (unsigned). On Smart App Control machines, install python.org Python 3.11+ and re-run update."
+            }
+            $args_ = @('venv', $VenvDir, '--python', '3.11', '--allow-existing')
+            $result = & uv @args_ 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                # Fallback: try without version constraint
+                $args_ = @('venv', $VenvDir, '--allow-existing')
+                $result = & uv @args_ 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    Write-ServiceErr "Failed to create venv: $result"
+                    return $false
+                }
+            }
+            Write-ServiceOk "Venv created at $VenvDir"
+        }
     } else {
         Write-ServiceSkipped "Venv already exists at $VenvDir"
     }
@@ -578,9 +632,9 @@ rem #25: a project binstub is a cross-project entry point --
 rem drop any inherited WORKTREE_ID so worktree resolution uses CWD.
 set "WORKTREE_ID="
 set "APERTURE_WORKTREE_ID="
-set "_AW=%USERPROFILE%\.agent-worktrees\.venv\Scripts\agent-worktrees.exe"
-if not exist "%_AW%" goto :_aw_fallback
-"%_AW%" %*
+set "_PY=%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe"
+if not exist "%_PY%" goto :_aw_fallback
+"%_PY%" -m agent_worktrees %*
 exit /b %ERRORLEVEL%
 :_aw_fallback
 rem Fallback: launch session directly (venv missing / recovery)
