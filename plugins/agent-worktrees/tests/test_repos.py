@@ -96,6 +96,48 @@ def test_legacy_type_field_is_mapped(home: Path):
 
 
 # ---------------------------------------------------------------------------
+# agent classification
+# ---------------------------------------------------------------------------
+
+def test_agent_defaults_by_class(home: Path):
+    repos.add_repo("wt", "/home/u/wt", repo_class="worktree", plat="wsl")
+    repos.add_repo("sg", "/home/u/sg", repo_class="singleton", plat="wsl")
+    repos.add_repo("ref", "/home/u/ref", repo_class="reference", plat="wsl")
+    reg = repos.read_registry()
+    # worktree/singleton expose an agent by default; reference does not.
+    assert reg.repos["wt"].agent is True
+    assert reg.repos["sg"].agent is True
+    assert reg.repos["ref"].agent is False
+
+
+def test_no_agent_flag_overrides_and_roundtrips(home: Path):
+    # A worktree repo can be adopted reference-style (no agent).
+    repos.add_repo("plugin-src", "/home/u/plugin-src",
+                   repo_class="worktree", agent=False, plat="wsl")
+    e = repos.read_registry().repos["plugin-src"]
+    assert e.repo_class == "worktree"
+    assert e.agent is False
+    # The deviation from the class default is persisted explicitly.
+    text = (home / ".agent-worktrees" / "repos.yaml").read_text()
+    assert "agent: false" in text
+
+
+def test_agent_true_persisted_for_reference(home: Path):
+    repos.add_repo("ref-agent", "/home/u/ref-agent",
+                   repo_class="reference", agent=True, plat="wsl")
+    text = (home / ".agent-worktrees" / "repos.yaml").read_text()
+    assert "agent: true" in text
+    assert repos.read_registry().repos["ref-agent"].agent is True
+
+
+def test_add_repo_no_agent_preserved_on_reregister(home: Path):
+    repos.add_repo("r", "/home/u/r", repo_class="worktree", agent=False, plat="wsl")
+    # Re-registering without an agent flag must preserve the deliberate choice.
+    repos.add_repo("r", "D:/Src/r", plat="windows")
+    assert repos.find_repo("r").agent is False
+
+
+# ---------------------------------------------------------------------------
 # add_repo merge semantics
 # ---------------------------------------------------------------------------
 

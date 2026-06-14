@@ -417,6 +417,27 @@ class TestDiscoverLocalAgents:
         assert agents["my-app"].auto_discovered is True
         assert agents["my-app"].cwd == "/home/user/src/my-app"
 
+    def test_reference_only_project_exposes_no_agent(self, tmp_path: Path, monkeypatch):
+        # expose_agent defaults ON; an explicit false (reference-only adoption,
+        # e.g. agent-worktrees `register --no-agent`) suppresses the agent while
+        # the project stays worktree-managed.
+        projects_yaml = tmp_path / "projects.yaml"
+        projects_yaml.write_text(
+            "projects:\n"
+            "  facility:\n"
+            '    anchor: "/home/user/src/facility"\n'
+            "    expose_agent: true\n"
+            "  plugin-src:\n"
+            '    anchor: "/home/user/src/plugin-src"\n'
+            "    expose_agent: false\n"
+            "  legacy:\n"  # no key -> defaults ON
+            '    anchor: "/home/user/src/legacy"\n'
+        )
+        monkeypatch.setenv("AGENT_WORKTREES_PROJECTS_YAML", str(projects_yaml))
+        agents = discover_local_agents()
+        assert set(agents) == {"facility", "legacy"}
+        assert "plugin-src" not in agents
+
     def test_missing_projects_yaml(self, tmp_path: Path, monkeypatch):
         monkeypatch.setenv(
             "AGENT_WORKTREES_PROJECTS_YAML",

@@ -784,6 +784,7 @@ def register_project(
     repo_dir: Path | str | None = None,
     default_branch: str = "master",
     *,
+    expose_agent: bool = True,
     wsl_state: str | None = None,
     wsl_distro: str | None = None,
     wsl_path: str | None = None,
@@ -792,6 +793,10 @@ def register_project(
 
     Parameters
     ----------
+    expose_agent
+        Whether agent-bridge should expose a same-machine agent for this
+        project. Defaults ``True``; pass ``False`` for a reference-only
+        adoption (worktree-managed but no agent).
     wsl_state
         WSL adoption state: ``"adopted"`` (full install exists in WSL),
         ``"bootstrap"`` (bootstrap stub deployed), or *None* (no WSL).
@@ -813,6 +818,7 @@ def register_project(
         "anchor": str(repo_path) if repo_path else "",
         "machines_yaml": machines_yaml,
         "default_branch": default_branch,
+        "expose_agent": expose_agent,
         "registered_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
