@@ -647,6 +647,31 @@ exit /b %ERRORLEVEL%
 }
 
 
+function Deploy-GlobalBinstub {
+    <# Deploy the project-agnostic ~/.local/bin/agent-worktrees.cmd from the
+       plugin's static bin/agent-worktrees.cmd. Runs as its own early step
+       (not buried in WT shortcut handling) so the SAC-safe launcher is always
+       refreshed on install/update.
+
+       Skip the copy when on-disk content already matches (newline-normalized):
+       running the global stub while overwriting it with a different-length
+       file corrupts cmd.exe's byte-offset read (issue #13). #>
+    Ensure-InstallDir $LocalBin
+    $src = Join-Path $PluginDir 'bin\agent-worktrees.cmd'
+    $dst = Join-Path $LocalBin 'agent-worktrees.cmd'
+    if (Test-Path $src) {
+        $srcNorm = ([System.IO.File]::ReadAllText($src)) -replace "`r`n", "`n" -replace "`r", "`n"
+        $dstNorm = if (Test-Path $dst) { ([System.IO.File]::ReadAllText($dst)) -replace "`r`n", "`n" -replace "`r", "`n" } else { $null }
+        if ($srcNorm -cne $dstNorm) {
+            Copy-Item $src $dst -Force
+            Write-ServiceOk "Global binstub: $dst"
+        } else {
+            Write-ServiceSkipped "Global binstub up to date"
+        }
+    }
+}
+
+
 function Deploy-Config {
     <# Write config.yaml to the project dir if missing (or Force). Returns $true if written. #>
     param([string]$Machine)
@@ -1332,23 +1357,10 @@ function Deploy-Shortcuts {
 
     [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
 
-    # Deploy tool binstubs.
-    # Skip the copy when the on-disk content already matches (newline-normalized):
-    # register/adopt run `install.ps1 update` as a subprocess while the global
-    # agent-worktrees.cmd stub is executing. Overwriting the running stub with a
-    # different-length file corrupts cmd.exe's byte-offset read (issue #13). The
-    # stub content is unified across generators, so this copy is normally a no-op.
-    foreach ($stub in @('agent-worktrees.cmd')) {
-        $src = Join-Path $PluginDir "bin\$stub"
-        $dst = Join-Path $LocalBin $stub
-        if (Test-Path $src) {
-            $srcNorm = ([System.IO.File]::ReadAllText($src)) -replace "`r`n", "`n" -replace "`r", "`n"
-            $dstNorm = if (Test-Path $dst) { ([System.IO.File]::ReadAllText($dst)) -replace "`r`n", "`n" -replace "`r", "`n" } else { $null }
-            if ($srcNorm -cne $dstNorm) {
-                Copy-Item $src $dst -Force
-            }
-        }
-    }
+    # Global binstub deploy now runs as its own early step (Deploy-GlobalBinstub)
+    # in the install/update paths, so it is no longer dependent on this WT-heavy
+    # function completing. Kept here as an idempotent safety net.
+    Deploy-GlobalBinstub
     Write-ServiceOk "Shortcuts deployed to $LocalBin (targeting wt.exe profiles)"
 }
 
@@ -1563,6 +1575,7 @@ switch ($Action) {
         if (-not (Deploy-Package)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
         Deploy-CopilotPlugin
+        Deploy-GlobalBinstub
         Ensure-CopilotExperimental
         Assert-PathIncludes $LocalBin
         Remove-LegacyBinstubs
@@ -1826,6 +1839,7 @@ switch ($Action) {
         if (-not (Deploy-Package)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
         Deploy-CopilotPlugin
+        Deploy-GlobalBinstub
         Ensure-CopilotExperimental
         Remove-LegacyBinstubs
 
