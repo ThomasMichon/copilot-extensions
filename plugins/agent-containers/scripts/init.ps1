@@ -122,16 +122,36 @@ Write-Ok "Directories: $InstallDir"
 if ($Force -or -not (Test-Path $VenvPython)) {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    if (Get-Command uv -ErrorAction SilentlyContinue) {
-        Write-Step 'Creating venv via uv...'
-        & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Step 'uv venv failed -- falling back to python -m venv'
+    # Prefer a SAC-trusted signed base Python via `--copies` so the venv
+    # python.exe is signed (Smart App Control blocks the unsigned uv-managed
+    # python); then uv; then plain python -m venv.
+    $signedBase = $null
+    if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
+        foreach ($v in '3.13', '3.12', '3.11') {
+            $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
+            if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
+                try { if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break } } catch {}
+            }
+        }
+    }
+    if ($signedBase -and (Test-Path $VenvPython)) {
+        try { if ((Get-AuthenticodeSignature $VenvPython).Status -ne 'Valid') { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } } catch {}
+    }
+    if ($signedBase -and -not (Test-Path $VenvPython)) {
+        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
+    }
+    if (-not (Test-Path $VenvPython)) {
+        if (Get-Command uv -ErrorAction SilentlyContinue) {
+            Write-Step 'Creating venv via uv...'
+            & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Step 'uv venv failed -- falling back to python -m venv'
+                & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
+            }
+        } else {
+            Write-Step 'Creating venv via python -m venv...'
             & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
         }
-    } else {
-        Write-Step 'Creating venv via python -m venv...'
-        & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
     }
     $ErrorActionPreference = $prevEAP
     if (-not (Test-Path $VenvPython)) {

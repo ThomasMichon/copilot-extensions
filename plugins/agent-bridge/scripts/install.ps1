@@ -131,6 +131,61 @@ function Get-AgentBridgeBin {
     return $null
 }
 
+function Get-SignedBasePython {
+    <# Return a SAC-trusted (Authenticode-signed) base Python (>=3.10), or $null.
+       Smart App Control blocks the unsigned uv-managed Python and console-script
+       trampoline; a venv built from a signed base with `--copies` has a signed
+       python.exe that SAC allows. #>
+    if ($env:OS -ne 'Windows_NT') { return $null }
+    $cands = @()
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        foreach ($v in '3.13', '3.12', '3.11', '3.10') {
+            $p = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
+            if ($LASTEXITCODE -eq 0 -and $p) { $cands += $p }
+        }
+    }
+    foreach ($c in ($cands | Select-Object -Unique)) {
+        if (Test-Path $c) {
+            try { if ((Get-AuthenticodeSignature $c).Status -eq 'Valid') { return $c } } catch {}
+        }
+    }
+    return $null
+}
+
+function New-SignedVenv {
+    <# Create or rebuild $VenvDir so its python.exe is SAC-trusted. Prefers a
+       signed base Python via `--copies`; rebuilds an existing unsigned venv;
+       falls back to uv (unsigned) when no signed Python exists. Returns $true
+       if $VenvPython is present afterward. #>
+    if ((Test-Path $VenvPython) -and ($env:OS -eq 'Windows_NT')) {
+        $sig = try { (Get-AuthenticodeSignature $VenvPython).Status } catch { 'Unknown' }
+        if ($sig -ne 'Valid' -and (Get-SignedBasePython)) {
+            Write-Step 'Existing venv python is unsigned (Smart App Control-incompatible) -- rebuilding from signed Python'
+            try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop }
+            catch { Write-Warn "Could not remove existing venv (in use?): $_" }
+        }
+    }
+    if (Test-Path $VenvPython) { return $true }
+
+    $signedBase = Get-SignedBasePython
+    if ($signedBase) {
+        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
+        if (Test-Path $VenvPython) {
+            Write-Ok "Venv created from signed Python ($signedBase)"
+            return $true
+        }
+        Write-Warn 'Signed-Python venv creation failed -- falling back to uv'
+    } elseif ($env:OS -eq 'Windows_NT') {
+        Write-Warn 'No signed system Python found -- using uv (unsigned). On Smart App Control machines, install python.org Python 3.10+ and re-run.'
+    }
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & uv venv $VenvDir --python 3.10 --allow-existing 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { & uv venv $VenvDir --allow-existing 2>&1 | Out-Null }
+    $ErrorActionPreference = $prevEAP
+    return (Test-Path $VenvPython)
+}
+
 # Install sibling plugin packages (e.g. agent-codespaces) into the bridge venv.
 # This provides the `codespace:` namespace resolver and credential relay that
 # agent-bridge imports at startup. The package is installed for IMPORT ONLY --
@@ -191,11 +246,14 @@ function Get-RunningProcess {
             Remove-Item -Force $PidFile -ErrorAction SilentlyContinue
         }
     }
-    # Fallback: find by executable path
-    $exe = Join-Path $VenvDir 'Scripts\agent-bridge.exe'
-    if (Test-Path $exe) {
-        $proc = Get-Process | Where-Object { $_.Path -eq $exe } | Select-Object -First 1
-        if ($proc) { return $proc }
+    # Fallback: find by executable path. The service now runs as the venv's
+    # python.exe (`-m agent_bridge`); match that. Legacy installs that still ran
+    # the agent-bridge.exe trampoline are also matched for clean migration.
+    foreach ($exe in @($VenvPython, (Join-Path $VenvDir 'Scripts\agent-bridge.exe'))) {
+        if ($exe -and (Test-Path $exe)) {
+            $proc = Get-Process | Where-Object { $_.Path -eq $exe } | Select-Object -First 1
+            if ($proc) { return $proc }
+        }
     }
     # Last resort: find by port binding (catches orphaned processes
     # whose PID file was lost or exe path changed during update)
@@ -326,7 +384,9 @@ function Register-ScheduledTask_ {
     $launcherPath = Join-Path $InstallDir 'start-agent-bridge.ps1'
     @"
 # Start agent-bridge service -- called by scheduled task at logon.
-`$agentBridge = '$($agentBridge -replace "'", "''")'
+# Launch via the venv's signed python (-m), never the unsigned console-script
+# trampoline .exe -- Smart App Control blocks unsigned, zero-reputation exes.
+`$launchPy = '$($VenvPython -replace "'", "''")'
 `$pidFile = '$($PidFile -replace "'", "''")'
 `$logFile = Join-Path (Split-Path `$pidFile) 'agent-bridge.log'
 `$errFile = Join-Path (Split-Path `$pidFile) 'agent-bridge-err.log'
@@ -339,7 +399,7 @@ if (Test-Path `$pidFile) {
     }
 }
 
-`$proc = Start-Process -FilePath `$agentBridge -ArgumentList 'start' ``
+`$proc = Start-Process -FilePath `$launchPy -ArgumentList '-m','agent_bridge','start' ``
     -NoNewWindow -PassThru ``
     -RedirectStandardOutput `$logFile ``
     -RedirectStandardError `$errFile
@@ -442,28 +502,21 @@ function Invoke-Install {
         }
     }
 
-    # Create venv via uv
+    # Create venv (signed base python where available, so it is SAC-trusted)
     if (-not (Test-Path $VenvPython)) {
-        Write-Step 'Creating venv via uv...'
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        & uv venv $VenvDir --python 3.10 --allow-existing 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Fail "Failed to create venv at $VenvDir"
-                exit 1
-            }
-        }
-        $ErrorActionPreference = $prevEAP
-
-        if (-not (Test-Path $VenvPython)) {
-            Write-Fail "Venv creation failed -- $VenvPython not found"
+        Write-Step 'Creating venv...'
+        if (-not (New-SignedVenv)) {
+            Write-Fail "Failed to create venv at $VenvDir"
             exit 1
         }
         Write-Ok 'Venv created'
     } else {
-        Write-Skip 'Venv already exists'
+        # Rebuild in place if the existing venv python is unsigned (SAC).
+        if (-not (New-SignedVenv)) {
+            Write-Fail "Venv unavailable at $VenvDir"
+            exit 1
+        }
+        Write-Skip 'Venv ready'
     }
 
     # Install package via uv (ssh-manager library first, then agent-bridge)
@@ -612,7 +665,7 @@ function Invoke-Start {
     # run with its output redirected or piped, the server holds that handle open
     # and the installer appears to hang after "Update complete".
     $inner = @"
-`$p = Start-Process -FilePath '$($agentBridge -replace "'", "''")' -ArgumentList 'start' -NoNewWindow -PassThru -RedirectStandardOutput '$($logFile -replace "'", "''")' -RedirectStandardError '$($errFile -replace "'", "''")'
+`$p = Start-Process -FilePath '$($VenvPython -replace "'", "''")' -ArgumentList '-m','agent_bridge','start' -NoNewWindow -PassThru -RedirectStandardOutput '$($logFile -replace "'", "''")' -RedirectStandardError '$($errFile -replace "'", "''")'
 Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
 "@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
@@ -769,17 +822,21 @@ function Invoke-Update {
         exit 1
     }
 
-    # Repair venv if python binary is missing
-    if (-not (Test-Path $VenvPython)) {
-        if (Test-Path $VenvDir) {
-            Write-Step 'Repairing venv (python binary missing)...'
-            $prevEAP = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
-            & uv venv $VenvDir --python 3.10 --allow-existing 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
+    # Stop running instance first -- a rebuild/repair of the venv (below) must
+    # not race a live bridge holding python.exe open.
+    $wasRunning = $null -ne (Get-RunningProcess)
+    if ($wasRunning) {
+        Invoke-Stop
+    }
+
+    # Repair venv if python binary is missing (or rebuild if unsigned for SAC)
+    if ((-not (Test-Path $VenvPython)) -or ($env:OS -eq 'Windows_NT')) {
+        if ((Test-Path $VenvDir) -or (Get-SignedBasePython)) {
+            if (-not (Test-Path $VenvPython)) { Write-Step 'Repairing venv (python binary missing)...' }
+            if (-not (New-SignedVenv)) {
+                Write-Fail 'Venv repair failed'
+                exit 1
             }
-            $ErrorActionPreference = $prevEAP
             if (-not (Test-Path $VenvPython)) {
                 Write-Fail 'Venv repair failed'
                 exit 1
@@ -789,12 +846,6 @@ function Invoke-Update {
             Write-Fail 'agent-bridge not installed. Run: install.ps1 install'
             exit 1
         }
-    }
-
-    # Stop running instance to avoid file locks
-    $wasRunning = $null -ne (Get-RunningProcess)
-    if ($wasRunning) {
-        Invoke-Stop
     }
 
     # Reinstall package via uv (ssh-manager + agent-bridge)
