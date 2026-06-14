@@ -210,9 +210,29 @@ function Deploy-Venv {
     }
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & uv venv $VenvDir --python 3.11 --allow-existing 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
+    # Prefer a SAC-trusted signed base Python via `--copies` so the venv
+    # python.exe is itself signed (Smart App Control blocks the unsigned
+    # uv-managed python + console-script trampoline). Fall back to uv.
+    $signedBase = $null
+    if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
+        foreach ($v in '3.13', '3.12', '3.11') {
+            $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
+            if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
+                try { if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break } } catch {}
+            }
+        }
+    }
+    if ($signedBase -and (Test-Path $VenvPython)) {
+        try { if ((Get-AuthenticodeSignature $VenvPython).Status -ne 'Valid') { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } } catch {}
+    }
+    if ($signedBase -and -not (Test-Path $VenvPython)) {
+        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
+    }
+    if (-not (Test-Path $VenvPython)) {
+        & uv venv $VenvDir --python 3.11 --allow-existing 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
+        }
     }
     $ErrorActionPreference = $prevEAP
 
@@ -234,7 +254,7 @@ function Deploy-Binstub {
     $stubContent = @"
 @echo off
 set "PYTHONUTF8=1"
-"%USERPROFILE%\.agent-codespaces\.venv\Scripts\agent-codespaces.exe" %*
+"%USERPROFILE%\.agent-codespaces\.venv\Scripts\python.exe" -m agent_codespaces %*
 "@
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
