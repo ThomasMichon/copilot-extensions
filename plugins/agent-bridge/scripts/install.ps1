@@ -123,14 +123,6 @@ function Test-SshManagerInstalled {
     return $LASTEXITCODE -eq 0
 }
 
-function Get-AgentBridgeBin {
-    $p = Join-Path $VenvDir 'Scripts\agent-bridge.exe'
-    if (Test-Path $p) { return $p }
-    $p = Join-Path $VenvDir 'bin/agent-bridge'
-    if (Test-Path $p) { return $p }
-    return $null
-}
-
 function Get-SignedBasePython {
     <# Return a SAC-trusted (Authenticode-signed) base Python (>=3.10), or $null.
        Smart App Control blocks the unsigned uv-managed Python and console-script
@@ -374,9 +366,8 @@ function Write-DeployManifestFor {
 }
 
 function Register-ScheduledTask_ {
-    $agentBridge = Get-AgentBridgeBin
-    if (-not $agentBridge) {
-        Write-Warn "agent-bridge binary not found -- skipping scheduled task"
+    if (-not (Test-Path $VenvPython)) {
+        Write-Warn "agent-bridge venv not found -- skipping scheduled task"
         return
     }
 
@@ -416,8 +407,8 @@ Set-Content -Path `$pidFile -Value `$proc.Id
     # task's pwsh as a visible window/tab when Terminal is the default terminal
     # app. -WindowStyle Hidden alone is ignored by Windows Terminal, so a bare
     # `pwsh -WindowStyle Hidden` task surfaces a real console window -- and
-    # because the launcher spawns the long-lived agent-bridge.exe with
-    # -NoNewWindow, that window persists for the life of the service.
+    # because the launcher spawns the long-lived python.exe (-m agent_bridge)
+    # with -NoNewWindow, that window persists for the life of the service.
     $action = New-ScheduledTaskAction `
         -Execute 'conhost.exe' `
         -Argument "--headless `"$pwshPath`" -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$launcherPath`""
@@ -550,10 +541,10 @@ function Invoke-Install {
     # Install sibling plugins (e.g. agent-codespaces for codespace: namespace)
     Install-SiblingPlugins
 
-    # Create binstub
-    $agentBridge = Get-AgentBridgeBin
-    if ($agentBridge) {
-        $stubContent = "@echo off`r`nset `"PYTHONUTF8=1`"`r`n`"$agentBridge`" %*"
+    # Create binstub -- launch via the venv's signed python (`-m`), never the
+    # unsigned console-script trampoline .exe (Smart App Control blocks it).
+    if (Test-Path $VenvPython) {
+        $stubContent = "@echo off`r`nset `"PYTHONUTF8=1`"`r`n`"$VenvPython`" -m agent_bridge %*"
         [System.IO.File]::WriteAllText($Binstub, $stubContent)
         Write-Ok "Binstub: $Binstub"
     }
@@ -639,8 +630,7 @@ function Get-PwshPath {
 }
 
 function Invoke-Start {
-    $agentBridge = Get-AgentBridgeBin
-    if (-not $agentBridge) {
+    if (-not (Test-Path $VenvPython)) {
         Write-Fail 'agent-bridge not installed. Run: install.ps1 install'
         exit 1
     }
@@ -674,8 +664,8 @@ Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
     # Terminal (when configured as the default terminal app) cannot capture it
     # as a visible window/tab -- -WindowStyle Hidden alone is ignored by the
     # DefTerm handoff. ShellExecute (no -NoNewWindow / no redirection on THIS
-    # call) is preserved so the long-lived agent-bridge.exe does not inherit the
-    # installer's std handles; it inherits conhost's headless pseudoconsole.
+    # call) is preserved so the long-lived python.exe (-m agent_bridge) does not
+    # inherit the installer's std handles; it inherits conhost's headless pseudoconsole.
     $pwshForHeadless = Get-PwshPath
     Start-Process -FilePath 'conhost.exe' `
         -ArgumentList @('--headless', "`"$pwshForHeadless`"", '-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded) `
@@ -765,11 +755,10 @@ function Invoke-Status {
         Write-Step 'agent-bridge is not running'
     }
 
-    $agentBridge = Get-AgentBridgeBin
-    if ($agentBridge) {
+    if (Test-Path $VenvPython) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        $version = & $agentBridge version 2>$null
+        $version = & $VenvPython -m agent_bridge version 2>$null
         $ErrorActionPreference = $prevEAP
         Write-Ok "Installed: $version"
     } else {
@@ -881,10 +870,10 @@ function Invoke-Update {
     # Update sibling plugins (e.g. agent-codespaces for codespace: namespace)
     Install-SiblingPlugins -Reinstall
 
-    # Update binstub
-    $agentBridge = Get-AgentBridgeBin
-    if ($agentBridge) {
-        $stubContent = "@echo off`r`nset `"PYTHONUTF8=1`"`r`n`"$agentBridge`" %*"
+    # Update binstub -- launch via the venv's signed python (`-m`), never the
+    # unsigned console-script trampoline .exe (Smart App Control blocks it).
+    if (Test-Path $VenvPython) {
+        $stubContent = "@echo off`r`nset `"PYTHONUTF8=1`"`r`n`"$VenvPython`" -m agent_bridge %*"
         [System.IO.File]::WriteAllText($Binstub, $stubContent)
     }
 
