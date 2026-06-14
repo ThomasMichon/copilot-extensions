@@ -41,3 +41,22 @@ def test_global_stub_does_not_clear_worktree_id(monkeypatch, tmp_path: Path):
     name = "agent-worktrees.cmd" if platform.system() == "Windows" else "agent-worktrees"
     global_stub = (lb / name).read_text()
     assert "WORKTREE_ID" not in global_stub
+
+
+def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path):
+    """Smart App Control hard-blocks the unsigned uv console-script trampoline
+    (`agent-worktrees.exe`). On Windows the binstubs must launch via the venv's
+    signed python.exe with `-m agent_worktrees`, never the .exe trampoline."""
+    if platform.system() != "Windows":
+        import pytest
+        pytest.skip("Windows-only binstub content")
+    lb = tmp_path / "bin"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+
+    assert inst.deploy_binstubs(repo_dir=tmp_path, project="demoproj") is True
+
+    for name in ("agent-worktrees.cmd", "demoproj.cmd"):
+        content = (lb / name).read_text()
+        assert "\\Scripts\\python.exe" in content
+        assert "-m agent_worktrees" in content
+        assert "agent-worktrees.exe" not in content
