@@ -15,9 +15,23 @@ Phase 1 -- push_changes():
 
 Phase 2 -- validate_and_finalize():
   1. Non-mutating check: is the branch content already on origin/master?
-  2. If yes: remove worktree and branch, merge permissions, update
-     tracking to "finalized"
+     The worktree's commit must be in origin/master's history (or be
+     equal to origin/master) for the worktree to be considered safe to
+     prune.
+  2. If yes: the worktree is finalized. Merge permissions and update
+     tracking to "finalized". The worktree's branch and directory are
+     removed *only* when nothing is using them -- i.e. no live Copilot
+     session and the current shell is not inside the worktree. When a
+     session is still live (the common case, since users typically run
+     "finalize" from inside their session), the git branch and the
+     folder are intentionally left in place for a later cleanup; this is
+     normal, not an error.
   3. If no: error with guidance to run push-changes first
+
+"finalize" never deletes a worktree out from under a running session and
+never force-removes the directory. Its job is to guarantee the branch's
+work is merged to master; directory/branch pruning is a separate,
+deferred concern handled by cleanup once the worktree is idle.
 """
 
 from __future__ import annotations
@@ -522,13 +536,21 @@ def validate_and_finalize(
 
         if inside_worktree or has_live_session:
             reason = (
-                "running inside this worktree" if inside_worktree
-                else "live Copilot session detected"
+                "this shell is running inside the worktree" if inside_worktree
+                else "a live Copilot session is still using the worktree"
             )
-            output.warn(
-                f"Skipping worktree/branch removal ({reason}). "
-                f"Content is already on {repo.remote}/{repo.default_branch}. "
-                f"Run cleanup after the session ends to remove the directory and branch."
+            output.ok(
+                f"Finalized: all content from {branch} is on "
+                f"{repo.remote}/{repo.default_branch}, so this worktree is "
+                f"safe to prune."
+            )
+            output.info(
+                f"Leaving the worktree directory and branch in place because "
+                f"{reason}. Finalize never deletes the git branch or the "
+                f"folder of an active worktree -- that's expected, not a "
+                f"failure. They'll be removed by 'agent-worktrees cleanup' "
+                f"once the session ends (this is the normal outcome when you "
+                f"finalize from inside the session)."
             )
             activity.log_event(
                 "finalize_skipped_removal",
@@ -655,8 +677,10 @@ def _dry_run_finalize_preview(
     print(f"Finalization plan for worktree {worktree_id}:")
     output.dry_run(f"Would fetch from {repo.remote}")
     output.dry_run(f"Would validate that {branch} content is on {upstream}")
-    output.dry_run(f"Would remove worktree: {worktree_path}")
-    output.dry_run(f"Would delete branch: {branch}")
+    output.dry_run(
+        f"Would remove worktree directory and branch ONLY if idle "
+        f"(no live session / not inside it): {worktree_path}"
+    )
     output.dry_run("Would merge worktree permissions back to anchor")
     output.dry_run("Would remove worktree path from trusted_folders")
     output.dry_run("Would update worktree YAML status: finalized")

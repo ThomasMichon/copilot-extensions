@@ -4225,7 +4225,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("worktree_id", nargs="?", default=None)
 
     # finalize
-    p = sub.add_parser("finalize", help="Validate content is on upstream and clean up worktree")
+    p = sub.add_parser("finalize", help="Validate the branch's content is on upstream; prune the worktree only when idle")
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true",
