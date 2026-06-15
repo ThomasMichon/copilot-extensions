@@ -19,6 +19,7 @@ dependencies = [
     "pydantic>=2.0",
     "agent-client-protocol>=0.9,<1",
     "agent-ssh-manager",
+    "agent-credential-relay",
 ]
 
 [tool.uv.sources]
@@ -27,6 +28,8 @@ dependencies = [
 # "ssh-manager") to prevent dependency-confusion; the import module stays
 # ``ssh_manager``.
 agent-ssh-manager = { path = "libs/ssh-manager" }
+# credential-relay framework + host-credential sources (module ``credential_relay``).
+agent-credential-relay = { path = "libs/credential-relay" }
 
 [project.scripts]
 agent-bridge = "agent_bridge.__main__:main"

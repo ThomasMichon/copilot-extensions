@@ -19,7 +19,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from urllib.parse import urlsplit
 
-from .credential_relay.sources.git_credential import GitCredentialSource
+from credential_relay.sources.git_credential import GitCredentialSource
 
 log = logging.getLogger("agent-codespaces.auth-preflight")
 

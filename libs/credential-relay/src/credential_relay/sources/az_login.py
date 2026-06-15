@@ -15,16 +15,33 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
 import subprocess
 import sys
 import time
 
-log = logging.getLogger("agent-codespaces.relay.az-login")
+log = logging.getLogger("credential-relay.az-login")
 
 _SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 # Safety margin: expire cached tokens 5 minutes early
 _EXPIRY_SAFETY_MARGIN = 300
+
+
+def _az_argv(rest: list[str]) -> list[str] | None:
+    """Build an argv that can launch the Azure CLI cross-platform.
+
+    On Windows ``az`` is ``az.cmd``; ``create_subprocess_exec`` cannot launch a
+    ``.cmd``/``.bat`` directly (CreateProcess needs ``cmd.exe``), so resolve the
+    real path via ``shutil.which`` and route batch wrappers through ``cmd /c``.
+    Returns None if the CLI is not found.
+    """
+    az = shutil.which("az")
+    if not az:
+        return None
+    if sys.platform == "win32" and az.lower().endswith((".cmd", ".bat")):
+        return ["cmd", "/c", az, *rest]
+    return [az, *rest]
 
 
 class AzLoginSource:
@@ -160,13 +177,15 @@ class AzLoginSource:
         timeout: float = 30.0,
     ) -> tuple[dict, str] | None:
         """Run ``az account get-access-token`` and return (parsed_json, response_text)."""
-        args = [
-            "az", "account", "get-access-token",
+        args = _az_argv([
+            "account", "get-access-token",
             "--resource", resource,
             "--output", "json",
-        ]
-        if tenant:
-            args.extend(["--tenant", tenant])
+            *(["--tenant", tenant] if tenant else []),
+        ])
+        if args is None:
+            log.error("az CLI not found on PATH")
+            return None
 
         log.info(
             "Requesting Azure token for resource=%s tenant=%s",

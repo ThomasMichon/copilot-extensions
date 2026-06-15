@@ -47,37 +47,31 @@ async def lifespan(app: FastAPI):
         wt_cache.configure(interval=cfg.worktree_discovery_interval)
         wt_cache.start(resolver)
 
-    # Start credential relay server for auth forwarding over SSH tunnels.
-    # Uses agent-codespaces' relay (GitCredentialSource proxies to local GCM).
+    # Start credential relay server for auth forwarding over SSH tunnels and
+    # container connections. agent-bridge owns/runs the relay; provider plugins
+    # inject their per-target source profiles (see register_credential_sources).
     relay_server = None
     try:
-        from agent_codespaces.credential_relay import CredentialRelayServer
-        from agent_codespaces.credential_relay.sources.git_credential import (
-            GitCredentialSource,
-        )
+        from credential_relay import RelayBuilder
 
-        # Honor the configured relay_port from codespaces.yaml so the
-        # server binds the same port the SSH tunnel forwards. Falls back
-        # to the server default (9857) if agent-codespaces config is
-        # unavailable.
-        relay_port = None
-        try:
-            from agent_codespaces.config import load_merged_config
+        from .agent_registry import register_credential_sources
 
-            relay_port = load_merged_config().credentials.relay_port
-        except Exception:
-            relay_port = None
+        builder = RelayBuilder()
+        register_credential_sources(builder)
 
-        relay_server = (
-            CredentialRelayServer(port=relay_port, sources=[GitCredentialSource()])
-            if relay_port
-            else CredentialRelayServer(sources=[GitCredentialSource()])
-        )
-        await relay_server.start()
-        app.state.credential_relay = relay_server
-        log.info("Credential relay started on port %d", relay_server.port)
+        if not builder.empty:
+            relay_server = builder.build()
+            await relay_server.start()
+            app.state.credential_relay = relay_server
+            log.info(
+                "Credential relay started on port %d (%d sources)",
+                relay_server.port,
+                len(builder.sources),
+            )
+        else:
+            log.debug("No credential-relay sources registered -- relay disabled")
     except ImportError:
-        log.debug("agent-codespaces not installed -- credential relay disabled")
+        log.debug("credential-relay lib not installed -- credential relay disabled")
     except OSError as exc:
         log.warning("Credential relay failed to start: %s", exc)
 

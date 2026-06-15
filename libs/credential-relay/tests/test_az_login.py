@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent_codespaces.credential_relay.sources.az_login import (
+from credential_relay.sources.az_login import (
     AzLoginSource,
     _EXPIRY_SAFETY_MARGIN,
 )

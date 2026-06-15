@@ -61,18 +61,26 @@ def host_gh_token() -> str | None:
 
 
 def build_spawn_command(
-    container: str, user: str, acp_command: str, forward_token: bool
+    container: str,
+    user: str,
+    acp_command: str,
+    forward_token: bool,
+    relay_env: list[str] | None = None,
 ) -> list[str]:
     """Build the ``docker exec`` spawn command (token referenced by name).
 
     Used by the ``agent-containers exec`` transport wrapper (see __main__),
-    NOT returned directly to agent-bridge.
+    NOT returned directly to agent-bridge. ``relay_env`` names additional env
+    vars (e.g. LC_GIT_CREDENTIAL_RELAY*) to forward by name from the wrapper's
+    process env, so their secret values never land in argv or logs.
     """
     cmd = ["docker", "exec", "-i"]
     if forward_token:
         # Reference by name only -- value comes from the process env, so it is
         # never written to argv or the agent-bridge log.
         cmd += ["-e", "GH_TOKEN"]
+    for name in relay_env or []:
+        cmd += ["-e", name]
     cmd += ["-u", user, container, "bash", "-lc", acp_command]
     return cmd
 
