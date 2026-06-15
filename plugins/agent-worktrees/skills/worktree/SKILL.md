@@ -125,14 +125,25 @@ agent-worktrees finalize
 This command:
 1. **Validates** (non-mutating) that the branch's content is on
    origin/master -- using ancestor checks, patch-id comparison, and
-   blob comparison
-2. If content IS on master -- removes worktree/branch, merges
-   permissions, marks tracking as `finalized`
+   blob comparison. The worktree's commit must be in origin/master's
+   history (or be equal to origin/master) to be considered safe to prune.
+2. If content IS on master -- the worktree is **finalized**: permissions
+   are merged and tracking is marked `finalized`. The git branch and the
+   worktree folder are removed **only when the worktree is idle** (no live
+   Copilot session and your shell is not inside it). When you run
+   `finalize` from inside the session (the >90% case), the branch and
+   folder are **intentionally left in place** and cleaned up later -- this
+   is the normal, expected outcome, not a failure.
 3. If content is NOT on master -- **fails with an error** telling you
    to run `push-changes` first
 
-`finalize` never squashes, rebases, or pushes. It is always safe to
-call -- the worst it can do is say "not ready yet."
+**`finalize` does not delete the worktree out from under a running
+session, and it never force-removes the folder or the git branch.** Its
+only job is to guarantee the branch's work is merged to master. Deleting
+the git worktree and folder is a separate, deferred concern handled by
+`cleanup` once the worktree is idle. `finalize` never squashes, rebases,
+or pushes, and is always safe to call -- the worst it can do is say "not
+ready yet."
 
 ### Decision table
 
@@ -163,8 +174,13 @@ After running `push-changes`, **read the output carefully**:
   the user. Do not manually recover.
 - If it succeeds, proceed to `agent-worktrees finalize`.
 
-After running `finalize`, if it says content is not on master, the push
-did not succeed or was not run. Retry `push-changes` first.
+After running `finalize`, **read the output as success unless it errors.**
+If it reports that content is on master, finalize succeeded -- even when it
+also says the branch/folder were left in place because a session is still
+live. That deferral is the normal outcome of finalizing from inside the
+session; **do not present it as a bug or as cleanup having failed.** Only if
+it says content is *not* on master did something go wrong -- in that case the
+push did not succeed or was not run, so retry `push-changes` first.
 
 ## Committing and Pushing
 
@@ -330,8 +346,12 @@ session means:
 
 - **Cleanup will skip it** — never removes directories or branches for
   active worktrees.
-- **Finalization defers destruction** — rebase, merge, and push proceed
-  normally, but the worktree directory and branch are preserved.
+- **Finalization defers destruction** — validation, permission merge, and
+  tracking update proceed normally, but the worktree directory and branch
+  are intentionally preserved. This is expected, not a failure: `finalize`
+  guarantees the work is on master; it does not delete an active worktree
+  in git or remove its folder. Cleanup handles that once the worktree is
+  idle.
 - **Status shows `active`** — never `completed`, `unused`, or `wip` while
   a session is running.
 

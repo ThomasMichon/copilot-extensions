@@ -73,7 +73,7 @@ continue to work unchanged.
 | `resolve` | Interactive picker -- select or create a worktree, emit JSON launch plan |
 | `create` | Create a new worktree non-interactively |
 | `push-changes` | Push worktree changes to remote default branch (squash, rebase, push) |
-| `finalize` | Validate content is on upstream and clean up worktree/branch |
+| `finalize` | Validate the branch's content is on upstream; prune the worktree/branch only when idle (deferred while a session is live) |
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
 | `cleanup` | List and remove orphaned or finalized worktrees |
 | `status` | Show worktree git status |
