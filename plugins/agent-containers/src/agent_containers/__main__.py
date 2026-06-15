@@ -244,7 +244,29 @@ def _cmd_exec(args: argparse.Namespace) -> int:
                 "forward_gh_token is on but `gh auth token` returned nothing; "
                 "the in-container Copilot CLI may be unauthenticated."
             )
-    spawn_cmd = build_spawn_command(args.name, user, acp_command, forward)
+
+    # On-demand credential relay: deploy shims + inject the relay endpoint/token
+    # so in-container auth (Azure storage for rush dev-deploy) is fetched from the
+    # host relay over host.docker.internal.
+    relay_env: list[str] = []
+    if config.relay_enabled:
+        try:
+            from .container_shims import deploy as deploy_shims
+            from .relay_provider import token_for
+
+            deploy_shims(args.name, ado=config.relay_deploy_ado)
+            env["LC_GIT_CREDENTIAL_RELAY_HOST"] = config.relay_host
+            env["LC_GIT_CREDENTIAL_RELAY"] = str(config.relay_port)
+            env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = token_for(args.name)
+            relay_env = [
+                "LC_GIT_CREDENTIAL_RELAY_HOST",
+                "LC_GIT_CREDENTIAL_RELAY",
+                "LC_GIT_CREDENTIAL_RELAY_TOKEN",
+            ]
+        except Exception as exc:
+            log.warning("Credential relay setup failed for %s: %s", args.name, exc)
+
+    spawn_cmd = build_spawn_command(args.name, user, acp_command, forward, relay_env)
     log.info("exec: %s", " ".join(spawn_cmd))
 
     if not args.stdio:

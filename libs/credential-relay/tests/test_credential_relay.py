@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent_codespaces.credential_relay.server import (
+from credential_relay.server import (
     CredentialRelayServer,
     RelayPolicy,
 )
-from agent_codespaces.credential_relay.sources import CredentialSource
-from agent_codespaces.credential_relay.sources.gh_auth import GhAuthSource
-from agent_codespaces.credential_relay.sources.git_credential import (
+from credential_relay.sources import CredentialSource
+from credential_relay.sources.gh_auth import GhAuthSource
+from credential_relay.sources.git_credential import (
     GitCredentialSource,
 )
 
@@ -247,7 +247,7 @@ class TestGitCredentialSource:
         )
 
         with patch(
-            "agent_codespaces.credential_relay.sources.git_credential"
+            "credential_relay.sources.git_credential"
             ".asyncio.create_subprocess_exec",
             new_callable=AsyncMock,
             return_value=mock_proc,
@@ -273,7 +273,7 @@ class TestGitCredentialSource:
         )
 
         with patch(
-            "agent_codespaces.credential_relay.sources.git_credential"
+            "credential_relay.sources.git_credential"
             ".asyncio.create_subprocess_exec",
             new_callable=AsyncMock,
             return_value=mock_proc,
@@ -303,7 +303,7 @@ class TestGitCredentialSource:
         )
 
         with patch(
-            "agent_codespaces.credential_relay.sources.git_credential"
+            "credential_relay.sources.git_credential"
             ".asyncio.create_subprocess_exec",
             new_callable=AsyncMock,
             return_value=mock_proc,
@@ -354,7 +354,7 @@ class TestGitCredentialSource:
             return proc
 
         with patch(
-            "agent_codespaces.credential_relay.sources.git_credential"
+            "credential_relay.sources.git_credential"
             ".asyncio.create_subprocess_exec",
             side_effect=make_proc,
         ):
@@ -390,7 +390,7 @@ class TestGitCredentialSource:
         mock_proc.communicate = slow_communicate
 
         with patch(
-            "agent_codespaces.credential_relay.sources.git_credential"
+            "credential_relay.sources.git_credential"
             ".asyncio.create_subprocess_exec",
             new_callable=AsyncMock,
             return_value=mock_proc,
@@ -407,7 +407,7 @@ class TestGitCredentialSource:
         source = GitCredentialSource()
 
         with patch(
-            "agent_codespaces.credential_relay.sources.git_credential"
+            "credential_relay.sources.git_credential"
             ".asyncio.create_subprocess_exec",
             new_callable=AsyncMock,
             side_effect=FileNotFoundError("git not found"),
@@ -444,7 +444,7 @@ class TestGhAuthSource:
         )
 
         with patch(
-            "agent_codespaces.credential_relay.sources.gh_auth"
+            "credential_relay.sources.gh_auth"
             ".asyncio.create_subprocess_exec",
             new_callable=AsyncMock,
             return_value=mock_proc,
@@ -464,7 +464,7 @@ class TestGhAuthSource:
         source = GhAuthSource()
 
         with patch(
-            "agent_codespaces.credential_relay.sources.gh_auth"
+            "credential_relay.sources.gh_auth"
             ".asyncio.create_subprocess_exec",
             new_callable=AsyncMock,
             side_effect=FileNotFoundError("gh not found"),
@@ -484,7 +484,7 @@ class TestGhAuthSource:
         )
 
         with patch(
-            "agent_codespaces.credential_relay.sources.gh_auth"
+            "credential_relay.sources.gh_auth"
             ".asyncio.create_subprocess_exec",
             new_callable=AsyncMock,
             return_value=mock_proc,

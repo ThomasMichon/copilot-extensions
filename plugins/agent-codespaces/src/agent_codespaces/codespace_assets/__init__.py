@@ -22,7 +22,8 @@ The generic git-credential proxy that used to live alongside these is no
 longer needed: the CodeSpace's native Git Credential Helper stack already
 includes ``ado-auth-helper``, so git credentials resolve through it.
 
-The host-side relay server lives in :mod:`agent_codespaces.credential_relay`.
+The host-side relay server lives in the ``credential_relay`` lib (run by
+agent-bridge; sources injected by agent-codespaces ``relay_provider``).
 """
 
 from __future__ import annotations

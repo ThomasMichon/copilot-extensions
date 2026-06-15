@@ -15,6 +15,7 @@ authors = [
 dependencies = [
     "pyyaml>=6.0",
     "agent-ssh-manager",
+    "agent-credential-relay",
 ]
 
 [tool.uv.sources]
@@ -23,6 +24,8 @@ dependencies = [
 # "ssh-manager") to prevent dependency-confusion; the import module stays
 # ``ssh_manager``.
 agent-ssh-manager = { path = "libs/ssh-manager" }
+# credential-relay framework + host-credential sources (module ``credential_relay``).
+agent-credential-relay = { path = "libs/credential-relay" }
 
 [project.scripts]
 agent-codespaces = "agent_codespaces.__main__:main"

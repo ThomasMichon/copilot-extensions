@@ -468,6 +468,40 @@ def _register_namespace_resolvers(resolver: AgentResolver) -> None:
         )
 
 
+def register_credential_sources(builder) -> None:
+    """Auto-discover and inject credential-relay sources from optional providers.
+
+    Twin of :func:`_register_namespace_resolvers`: each provider plugin exposes a
+    ``relay_provider.register_relay(builder)`` hook that contributes the
+    credential sources (and policy/port) its targets need. agent-bridge owns and
+    runs the relay; providers only inject their per-target profile. Import
+    failures are logged and skipped -- providers are optional.
+
+    ``builder`` is a :class:`credential_relay.registry.RelayBuilder`.
+    """
+    # codespace targets -- GitHub Codespaces (agent-codespaces package)
+    try:
+        from agent_codespaces.relay_provider import register_relay
+
+        register_relay(builder)
+        log.info("Registered credential-relay sources (agent-codespaces)")
+    except ImportError:
+        log.debug("agent-codespaces not installed -- no codespace relay sources")
+    except Exception:
+        log.warning("Failed to register agent-codespaces relay sources", exc_info=True)
+
+    # container targets -- local Docker dev containers (agent-containers package)
+    try:
+        from agent_containers.relay_provider import register_relay as register_containers
+
+        register_containers(builder)
+        log.info("Registered credential-relay sources (agent-containers)")
+    except ImportError:
+        log.debug("agent-containers not installed -- no container relay sources")
+    except Exception:
+        log.warning("Failed to register agent-containers relay sources", exc_info=True)
+
+
 class AgentResolver:
     """Resolves agent names to SpawnTargets using topology + registry.
 

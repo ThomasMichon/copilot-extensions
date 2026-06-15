@@ -76,6 +76,18 @@ class ContainersConfig:
     # Forward the host `gh auth token` into the container as GH_TOKEN so the
     # in-container Copilot CLI is authenticated headlessly.
     forward_gh_token: bool = True
+    # On-demand credential relay: deploy in-container shims at connect that fetch
+    # tokens from the host relay (over host.docker.internal). Fixes rush
+    # dev-deploy (Azure storage) by serving the host az-login identity.
+    relay_enabled: bool = True
+    relay_host: str = "host.docker.internal"
+    relay_port: int = 9857
+    # Also deploy ado-auth-helper (ADO PAT / git credential relay). Off by
+    # default to avoid disturbing already-working in-container ADO auth.
+    relay_deploy_ado: bool = False
+    relay_azure_resources: list[str] = field(
+        default_factory=lambda: ["https://storage.azure.com/"]
+    )
     # Image-name prefixes used as a discovery fallback when a container lacks
     # the devcontainer.local_folder / FLEET_LABEL labels.
     image_prefixes: list[str] = field(
@@ -135,6 +147,14 @@ def load_config() -> ContainersConfig:
     config.forward_gh_token = bool(
         data.get("forward_gh_token", config.forward_gh_token)
     )
+    relay = data.get("relay", {}) or {}
+    if isinstance(relay, dict):
+        config.relay_enabled = bool(relay.get("enabled", config.relay_enabled))
+        config.relay_host = relay.get("host", config.relay_host)
+        config.relay_port = int(relay.get("port", config.relay_port))
+        config.relay_deploy_ado = bool(relay.get("deploy_ado", config.relay_deploy_ado))
+        if isinstance(relay.get("azure_resources"), list):
+            config.relay_azure_resources = [str(r) for r in relay["azure_resources"]]
     if "image_prefixes" in data and isinstance(data["image_prefixes"], list):
         config.image_prefixes = [str(p) for p in data["image_prefixes"]]
 

@@ -20,3 +20,9 @@ build/
 /libs/ssh-manager/uv.lock
 /plugins/agent-bridge/libs/ssh-manager/uv.lock
 /plugins/agent-codespaces/libs/ssh-manager/uv.lock
+# The credential-relay lib (and its vendored copies) likewise pins no lockfile.
+/libs/credential-relay/uv.lock
+/libs/credential-relay/.testvenv/
+/plugins/agent-bridge/libs/credential-relay/uv.lock
+/plugins/agent-codespaces/libs/credential-relay/uv.lock
+/plugins/agent-containers/libs/credential-relay/uv.lock

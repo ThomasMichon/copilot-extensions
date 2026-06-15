@@ -23,6 +23,7 @@ import fnmatch
 import logging
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .sources import CredentialSource
@@ -96,6 +97,7 @@ class RelayStats:
     timeouts: int = 0
     cache_hits: int = 0
     failfast_responses: int = 0
+    token_rejections: int = 0
     start_time: float | None = None
     last_request_time: float | None = None
 
@@ -130,12 +132,23 @@ class CredentialRelayServer:
         sources: list[CredentialSource] | None = None,
         policy: RelayPolicy | None = None,
         ado_host: str | None = None,
+        token_validator: Callable[[str], bool] | None = None,
+        token_required_actions: frozenset[str] | None = None,
     ) -> None:
         self.port = port
         self.sources = sources or []
         self.policy = policy or RelayPolicy()
         self.stats = RelayStats()
         self._server: asyncio.Server | None = None
+        # Optional per-connection shared-secret gate. When set, requests whose
+        # action is in ``token_required_actions`` must carry a matching
+        # ``auth=<token>`` field (validated by ``token_validator``) or they are
+        # denied. Used by container targets reached over host.docker.internal,
+        # which -- unlike the SSH-tunnel-isolated codespace path -- are network
+        # reachable. Open actions (git get/fill, get-github-token) are never
+        # gated, so the codespace relay behavior is unchanged.
+        self.token_validator = token_validator
+        self.token_required_actions = token_required_actions or frozenset()
         # Default ADO host for bare `get-access-token` requests that carry no
         # host (e.g. npm/nuget via ado-auth-helper). Resolved from the explicit
         # arg or the CODESPACES_ADO_HOST env var; never hardcoded to a specific
@@ -205,6 +218,20 @@ class CredentialRelayServer:
                 # otherwise leave git waiting on an interactive prompt.
                 await self._maybe_failfast(action, writer, addr, "policy rejected")
                 return
+
+            # Token gate: actions that require a shared-secret must present a
+            # valid ``auth=<token>``. Never logged. Stripped before routing so
+            # it can't leak into a source response or confuse a source.
+            token = fields.pop("auth", "")
+            if action in self.token_required_actions:
+                if not self.token_validator or not self.token_validator(token):
+                    log.warning(
+                        "[%s] Token gate denied action=%s (missing/invalid token)",
+                        addr, action,
+                    )
+                    self.stats.token_rejections += 1
+                    await self._maybe_failfast(action, writer, addr, "token rejected")
+                    return
 
             # Handle get-access-token: synthesize a credential request for ADO
             # and return just the raw token (password). Used by ado-auth-helper

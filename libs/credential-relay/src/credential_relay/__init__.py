@@ -6,11 +6,14 @@ etc.). Used by CodeSpaces via SSH ``-R`` port forwarding.
 """
 
 from .server import CredentialRelayServer, RelayPolicy, RelayStats
+from .registry import RelayBuilder, TokenRegistry
 from .sources import CredentialSource
 
 __all__ = [
     "CredentialRelayServer",
     "CredentialSource",
+    "RelayBuilder",
     "RelayPolicy",
     "RelayStats",
+    "TokenRegistry",
 ]

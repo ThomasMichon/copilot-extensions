@@ -14,7 +14,13 @@ authors = [
 ]
 dependencies = [
     "pyyaml>=6.0",
+    "agent-credential-relay",
 ]
+
+[tool.uv.sources]
+# credential-relay framework + host-credential sources (module ``credential_relay``).
+# Vendored locally; resolved from the path, never an index.
+agent-credential-relay = { path = "libs/credential-relay" }
 
 [project.scripts]
 agent-containers = "agent_containers.__main__:main"
