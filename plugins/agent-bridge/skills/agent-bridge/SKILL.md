@@ -108,19 +108,67 @@ details.
 ### Send a Prompt to an Agent
 
 ```bash
-# Start a new session and send a prompt (streams response)
+# Reuse this caller's session for the agent (resumes it if stopped),
+# or start one if none exists, then send a prompt (streams response)
 agent-bridge send <agent-name> "your prompt here"
 
-# Send to an existing session
+# Send to a specific existing session
 agent-bridge send <session-id> "follow-up prompt"
 
 # Fire-and-forget (don't wait for response)
 agent-bridge send <agent-name> "do this" --no-wait
 ```
 
-The `send` command auto-detects whether the target is an agent name (starts
-a new session) or a session ID (sends to existing session). Output streams
-in real-time: response text, thought blocks, and tool call summaries.
+`send` auto-detects whether the target is an agent name or a session ID.
+When given an **agent name**, it never starts a *fresh* session on top of an
+existing one: it reuses this caller's session for that agent — keyed by
+`(agent, caller)`, where the caller is `$WORKTREE_ID` (or `--caller`) — and
+**resumes it if stopped**. Only when this caller has no session for the agent
+is a new one started. Output streams in real-time: response text, thought
+blocks, and tool call summaries.
+
+> **There is no `send --new`.** It was removed because it silently reused a
+> pre-existing (often stopped, stale) session instead of creating a fresh one.
+> To force a brand-new session, use `agent-bridge create` (below).
+
+### Create a Fresh Session
+
+```bash
+# Force a brand-new session for an agent (no reuse)
+agent-bridge create <agent-name>
+
+# ...and send a first prompt in one step
+agent-bridge create <agent-name> "your first prompt"
+```
+
+`create` always spawns a fresh session, bypassing caller reuse. For agents
+that allow only **one session at a time** — CodeSpaces share a single
+checkout — `create` **refuses** if a session already exists rather than
+silently latching onto it, and tells you to end the existing one first:
+
+```bash
+agent-bridge end <existing-session-id>   # free the CodeSpace
+agent-bridge create <agent-name> "..."   # then start clean
+```
+
+### Choosing send vs create — check for an outstanding session first
+
+Before dispatching work to an agent, **check whether it already has a
+session and whether that session's state is relevant to the work**:
+
+```bash
+agent-bridge sessions          # is there a session for this agent/caller?
+agent-bridge session-usage <session-id>   # how full is its context?
+```
+
+- **Relevant & healthy** (same effort, context well under ~70%) → `send`
+  to continue it (it resumes automatically if stopped).
+- **Stale / unrelated / context-heavy** (different effort, near the context
+  limit, or known-bad state) → `agent-bridge end <session-id>` then
+  `agent-bridge create` for a clean start.
+
+`send` is the safe default (it reuses/resumes); reach for `create` only when
+you have decided the existing session must be discarded.
 
 ### Session Management
 
@@ -298,12 +346,14 @@ agent-bridge send <session-id> \
 
 # 3. Capture the response -- that IS the handoff payload
 
-# 4. Stop the old session
-agent-bridge stop <session-id>
-# or: agent-bridge end <session-id>  (if no resume needed)
+# 4. End the old session (its handoff payload is captured). Ending it also
+#    frees a one-session-per-CodeSpace agent so a fresh one can be created.
+agent-bridge end <session-id>
 
-# 5. Start a new session with the handoff as the first prompt
-agent-bridge send <agent-name> "Resume: <captured handoff payload>"
+# 5. Create a fresh session with the handoff as the first prompt. Use
+#    `create` (not `send`) -- `send` would resume the old session instead
+#    of giving the new context window a clean start.
+agent-bridge create <agent-name> "Resume: <captured handoff payload>"
 ```
 
 **Key points:**

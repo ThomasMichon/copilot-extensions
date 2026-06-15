@@ -305,6 +305,7 @@ class BridgeClient:
         agent: str | None = None,
         target_dir: str | None = None,
         caller_id: str | None = None,
+        force_new: bool = False,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions"""
         body: dict[str, Any] = {}
@@ -314,6 +315,8 @@ class BridgeClient:
             body["target_dir"] = target_dir
         if caller_id:
             body["caller_id"] = caller_id
+        if force_new:
+            body["force_new"] = True
         return self._request("POST", "/api/v1/sessions", body) or {}
 
     def submit_prompt(self, session_id: str, prompt: str) -> dict[str, Any]:

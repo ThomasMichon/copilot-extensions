@@ -490,26 +490,52 @@ def _cmd_send(args: argparse.Namespace) -> None:
     Streams the remote turn live by default (collapsed feed), resuming from
     and advancing the caller's delivery cursor so the host ingests exactly
     one contiguous, gap-free copy of the conversation.
+
+    ``send`` never starts a *fresh* session over an existing one: when this
+    caller already has a session for the target agent it is reused (and
+    resumed if stopped). To force a brand-new session, use
+    ``agent-bridge create`` instead.
     """
+    if getattr(args, "new", False):
+        print(
+            "[FAIL] `agent-bridge send --new` has been removed. `send` always "
+            "reuses (and resumes) this caller's existing session.\n"
+            "       For a brand-new session, use:\n"
+            f"         agent-bridge create {args.target} \"<prompt>\"",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     client = _get_client()
     target = args.target
     prompt = args.prompt
     caller_id = _caller_id_for(args)
 
-    # Resolve: try agent name first, then session ID
-    force_new = getattr(args, "new", False)
-    session_id = _resolve_target(client, target, force_new=force_new)
+    # Resolve: existing session id, else reuse-or-start this caller's session
+    # for the named agent (never force-new -- that is `create`'s job).
+    session_id = _resolve_target(client, target)
 
     # Issue #25-of-bridge: don't dump a CodeSpace agent's entire prior
     # conversation onto a fresh host. If this caller has never consumed from
     # this session (cursor 0) but the session already has history, fast-forward
     # the caller's cursor to the live head and print a marker instead of
     # replaying the backlog. The host can pull history on demand with
-    # `read --range`, or pass --new to start a clean session.
+    # `read --range`, or pass --full-history to replay it.
     if not getattr(args, "full_history", False):
         _mark_resume_if_behind(client, session_id, caller_id=caller_id)
 
-    # Submit prompt
+    _submit_and_stream(client, args, session_id, prompt, caller_id=caller_id)
+
+
+def _submit_and_stream(
+    client,
+    args: argparse.Namespace,
+    session_id: str,
+    prompt: str,
+    *,
+    caller_id: str | None,
+) -> None:
+    """Submit *prompt* to *session_id* and stream the turn (shared by send/create)."""
     result = client.submit_prompt(session_id, prompt)
     turn_index = result.get("turn_index", 0)
 
@@ -533,7 +559,31 @@ def _cmd_send(args: argparse.Namespace) -> None:
     )
 
 
-def _resolve_target(client, target: str, *, force_new: bool = False) -> str:
+class _AgentSessionConflict(Exception):
+    """A force-new request hit an agent that already has an active session.
+
+    Raised (rather than reused) when ``refuse_on_conflict`` is set -- i.e.
+    from ``agent-bridge create`` -- so the caller can surface a clear
+    "end it first" refusal instead of silently latching onto the existing
+    session. Carries the agent name and the existing session id.
+    """
+
+    def __init__(self, agent_name: str, existing_session_id: str) -> None:
+        self.agent_name = agent_name
+        self.existing_session_id = existing_session_id
+        super().__init__(
+            f"Agent '{agent_name}' already has an active session "
+            f"{existing_session_id}"
+        )
+
+
+def _resolve_target(
+    client,
+    target: str,
+    *,
+    force_new: bool = False,
+    refuse_on_conflict: bool = False,
+) -> str:
     """Resolve a target string to a session ID.
 
     Resolution order:
@@ -543,6 +593,11 @@ def _resolve_target(client, target: str, *, force_new: bool = False) -> str:
        exact agent match, try ``<prefix>:<target>`` for each registered
        namespace resolver.  This lets users type bare codespace names
        instead of ``codespace:<name>``.
+
+    ``force_new`` (``create``) skips caller-affinity reuse and always asks
+    the server for a fresh session; ``refuse_on_conflict`` turns the
+    one-session-per-CodeSpace guard into an ``_AgentSessionConflict`` raise
+    instead of reusing the existing session.
     """
     from .client import BridgeClientError
 
@@ -567,12 +622,16 @@ def _resolve_target(client, target: str, *, force_new: bool = False) -> str:
         if exc.status != 404:
             raise
 
-    # Try as agent name -- start a new session
+    # Try as agent name -- reuse or start a session
     try:
         agents = client.list_agents()
         agent_names = [a.get("name", "") for a in agents]
         if target in agent_names:
-            return _start_agent_session(client, target, force_new=force_new)
+            return _start_agent_session(
+                client, target,
+                force_new=force_new,
+                refuse_on_conflict=refuse_on_conflict,
+            )
     except BridgeClientError:
         pass
 
@@ -594,17 +653,27 @@ def _resolve_target(client, target: str, *, force_new: bool = False) -> str:
                     print(
                         f"[>] Resolved '{target}' as '{candidate}'",
                     )
-                    return _start_agent_session(client, candidate, force_new=force_new)
+                    return _start_agent_session(
+                        client, candidate,
+                        force_new=force_new,
+                        refuse_on_conflict=refuse_on_conflict,
+                    )
             # No exact match even with prefix -- try start_session
             # directly and let the server's resolve_async try namespace
-            # resolvers (which may do on-demand lookup).
+            # resolvers (which may do on-demand lookup). A conflict refusal
+            # (_AgentSessionConflict) propagates -- only transient failures
+            # advance to the next candidate.
             for prefix in prefixes:
                 candidate = f"{prefix}:{target}"
                 try:
                     print(
                         f"[>] Trying '{candidate}'...",
                     )
-                    return _start_agent_session(client, candidate, force_new=force_new)
+                    return _start_agent_session(
+                        client, candidate,
+                        force_new=force_new,
+                        refuse_on_conflict=refuse_on_conflict,
+                    )
                 except (BridgeClientError, SystemExit):
                     continue
         except BridgeClientError:
@@ -615,6 +684,67 @@ def _resolve_target(client, target: str, *, force_new: bool = False) -> str:
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+def _cmd_create(args: argparse.Namespace) -> None:
+    """Create a brand-new session for an agent (optionally send a first prompt).
+
+    Unlike ``send`` -- which reuses this caller's existing session -- ``create``
+    always spawns a fresh session. For agents that allow only one session at a
+    time (CodeSpaces share a single checkout), it refuses with guidance to end
+    the existing session first rather than silently reusing it.
+    """
+    client = _get_client()
+    target = args.target
+    caller_id = _caller_id_for(args)
+
+    # `create` is agent-only: an existing session id is a misuse (use `send`
+    # or `resume` to continue it).
+    from .client import BridgeClientError
+
+    try:
+        existing = client.get_session(target)
+    except BridgeClientError as exc:
+        if exc.status != 404:
+            raise
+        existing = None
+    if existing:
+        print(
+            f"[FAIL] '{target}' is an existing session, not an agent. "
+            f"`create` starts a fresh session.\n"
+            f"       Continue it with:  agent-bridge send {target} \"<prompt>\"",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    try:
+        session_id = _resolve_target(
+            client, target, force_new=True, refuse_on_conflict=True,
+        )
+    except _AgentSessionConflict as conflict:
+        sid = conflict.existing_session_id
+        print(
+            f"[FAIL] Agent '{conflict.agent_name}' already has an active "
+            f"session {sid}. Only one session per CodeSpace is allowed.\n"
+            f"       End it first:   agent-bridge end {sid}\n"
+            f"       Then re-create: agent-bridge create {target} ...\n"
+            f"       Or continue it: agent-bridge send {sid} \"<prompt>\"",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    prompt = getattr(args, "prompt", None)
+    if not prompt:
+        if args.json:
+            _json_out({"session_id": session_id})
+        else:
+            print(
+                f"[OK] Session {session_id} created -- send work with: "
+                f"agent-bridge send {session_id} \"<prompt>\""
+            )
+        return
+
+    _submit_and_stream(client, args, session_id, prompt, caller_id=caller_id)
 
 
 def _mark_resume_if_behind(
@@ -658,7 +788,8 @@ def _mark_resume_if_behind(
         f"[>] Resuming existing session {session_id} "
         f"({turn_count} prior turn(s)) -- earlier conversation hidden. "
         f"Run `agent-bridge read {session_id} --range 1-{head}` to view it, "
-        f"or re-send with --new for a clean session."
+        f"or `agent-bridge send --full-history` to replay it. For a clean "
+        f"session, end this one and use `agent-bridge create`."
     )
     return True
 
@@ -738,53 +869,105 @@ def _turn_settled(client, session_id: str, cursor: int) -> bool:
     return not remaining
 
 
-def _start_agent_session(client, agent_name: str, *, force_new: bool = False) -> str:
+_REUSABLE_SESSION_STATES = ("created", "starting", "running", "idle", "stopped")
+
+
+def _reuse_existing(client, session: dict, agent_name: str) -> str:
+    """Adopt an existing session, resuming it first if it is stopped.
+
+    Returns the session id ready to receive a prompt. A stopped session is
+    resumed (its ACP process re-spawns) so the upcoming ``submit_prompt``
+    lands on a live agent rather than failing.
+    """
+    sid = session.get("session_id", "")
+    name = session.get("name", "")
+    turns = session.get("turn_count", 0)
+    status = session.get("status", "")
+    if status == "stopped":
+        print(f"[>] Resuming stopped session {sid} ({name})...")
+        try:
+            client.resume_session(sid)
+        except Exception:
+            pass  # submit_prompt will surface a hard failure if it persists
+    print(
+        f"[>] Reusing session {sid} ({name}) for '{agent_name}' "
+        f"({turns} prior turn(s))",
+    )
+    return sid
+
+
+def _find_caller_session(client, agent_name: str, caller_id: str | None) -> dict | None:
+    """Return this caller's newest reusable session for *agent_name*, or None.
+
+    Scans all sessions (newest-first) for a match on (agent_name, caller_id)
+    in any reusable state -- crucially **including ``stopped``**, so ``send``
+    resumes a caller's prior session instead of orphaning it behind a fresh
+    spawn. A caller with no matching session yields None (start a new one).
+    """
+    try:
+        sessions = client.list_sessions()
+    except Exception:
+        return None
+    for s in sessions:
+        if (
+            s.get("agent_name") == agent_name
+            and s.get("caller_id") == caller_id
+            and s.get("status", "") in _REUSABLE_SESSION_STATES
+        ):
+            return s
+    return None
+
+
+def _start_agent_session(
+    client,
+    agent_name: str,
+    *,
+    force_new: bool = False,
+    refuse_on_conflict: bool = False,
+) -> str:
     """Start or reuse a session for a named agent.
 
-    Checks for an existing idle session with matching (agent_name,
-    caller_id) first.  If found, reuses it instead of creating a new
-    one (avoids session pollution).  Different worktrees calling the
-    same agent get separate sessions because their caller_id differs.
+    Default (``send``): reuse this caller's existing session for the agent --
+    idle, running, *or* stopped (stopped sessions are resumed) -- keyed by
+    (agent_name, caller_id) so different worktrees get separate sessions.
+    Only when the caller has no such session is a fresh one started.
 
-    Pass ``force_new=True`` (``--new`` flag) to skip reuse and always
-    create a fresh session.
+    ``force_new=True`` (``create``) skips caller reuse and asks the server for
+    a brand-new session. For agents that allow only one session at a time
+    (CodeSpaces), the server returns a 409 conflict; with
+    ``refuse_on_conflict=True`` this raises ``_AgentSessionConflict`` (so
+    ``create`` can tell the user to end the existing session first) instead of
+    silently reusing it.
     """
     from .client import BridgeClientError
 
     caller_id = _get_caller_id()
 
     if not force_new:
-        try:
-            sessions = client.list_sessions(status="idle")
-            for s in sessions:
-                if (
-                    s.get("agent_name") == agent_name
-                    and s.get("caller_id") == caller_id
-                ):
-                    sid = s.get("session_id", "")
-                    name = s.get("name", "")
-                    turns = s.get("turn_count", 0)
-                    print(
-                        f"[>] Reusing session {sid} ({name}) "
-                        f"for '{agent_name}' ({turns} prior turn(s))",
-                    )
-                    return sid
-        except Exception:
-            pass  # Fall through to create new
+        existing = _find_caller_session(client, agent_name, caller_id)
+        if existing is not None:
+            return _reuse_existing(client, existing, agent_name)
 
     print(f"[>] Starting session for agent '{agent_name}'...")
     try:
-        resp = client.start_session(agent=agent_name, caller_id=caller_id)
+        resp = client.start_session(
+            agent=agent_name, caller_id=caller_id, force_new=force_new,
+        )
     except BridgeClientError as exc:
-        # Server-side concurrency guard: this agent (e.g. a CodeSpace)
-        # already has an active session. Reuse it instead of failing.
+        # Server-side concurrency guard: this agent (e.g. a CodeSpace) already
+        # has an active session under a different caller. CodeSpaces share one
+        # checkout, so a second concurrent session is impossible.
         existing_sid = _conflict_session_id(exc)
         if existing_sid:
-            print(
-                f"[>] Agent '{agent_name}' already has an active session "
-                f"{existing_sid} -- reusing it",
-            )
-            return existing_sid
+            if refuse_on_conflict:
+                raise _AgentSessionConflict(agent_name, existing_sid) from exc
+            # send path: adopt the single existing session (resume if stopped).
+            try:
+                session = client.get_session(existing_sid)
+            except Exception:
+                session = {"session_id": existing_sid}
+            session.setdefault("session_id", existing_sid)
+            return _reuse_existing(client, session, agent_name)
         raise
     sid = resp.get("session_id", "")
     name = resp.get("name", "")
@@ -1322,7 +1505,8 @@ def main(argv: list[str] | None = None) -> None:
     sessions_p.set_defaults(func=_cmd_sessions)
 
     send_p = sub.add_parser(
-        "send", help="Send a prompt to an agent or session"
+        "send", help="Send a prompt to an agent or session (reuses/resumes "
+        "this caller's existing session)"
     )
     send_p.add_argument("target", help="Agent name or session ID")
     send_p.add_argument("prompt", help="Prompt text to send")
@@ -1332,7 +1516,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     send_p.add_argument(
         "--new", action="store_true",
-        help="Force a new session even if an idle one exists for this agent",
+        help="(removed) use `agent-bridge create` for a fresh session",
     )
     send_p.add_argument(
         "--full-history", action="store_true",
@@ -1342,6 +1526,23 @@ def main(argv: list[str] | None = None) -> None:
     )
     _add_stream_args(send_p)
     send_p.set_defaults(func=_cmd_send)
+
+    create_p = sub.add_parser(
+        "create",
+        help="Create a fresh session for an agent (optionally send a first "
+             "prompt). Refuses if a one-session-per-CodeSpace agent is busy.",
+    )
+    create_p.add_argument("target", help="Agent name (not a session ID)")
+    create_p.add_argument(
+        "prompt", nargs="?", default=None,
+        help="Optional first prompt to send to the new session",
+    )
+    create_p.add_argument(
+        "--no-wait", action="store_true",
+        help="Return immediately without waiting for response",
+    )
+    _add_stream_args(create_p)
+    create_p.set_defaults(func=_cmd_create)
 
     wait_p = sub.add_parser(
         "wait", help="Wait for current turn to complete"
