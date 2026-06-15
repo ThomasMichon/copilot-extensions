@@ -65,6 +65,31 @@ if ($env:OS -eq 'Windows_NT') {
 
 # -- Helpers -----------------------------------------------------------------
 
+# === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
+function Remove-ConsoleTrampolines {
+    <# Strip the uv-regenerated Scripts\<name>.exe console-script trampolines from
+       the venv after install. They are unsigned, zero-reputation PEs that Smart
+       App Control blocks (CodeIntegrity 3077); nothing launches them (binstubs,
+       services, and probes all use "python.exe -m <pkg>"), so remove every
+       agent-*.exe. Best-effort -- rename a locked copy aside, then sweep stale
+       stashes. Windows-only: POSIX console scripts are the sanctioned launch
+       path and must be preserved. #>
+    param([Parameter(Mandatory)][string]$VenvDir)
+    if ($env:OS -ne 'Windows_NT') { return }
+    $scriptsDir = Join-Path $VenvDir 'Scripts'
+    if (-not (Test-Path $scriptsDir)) { return }
+    Get-ChildItem (Join-Path $scriptsDir 'agent-*.exe') -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            Remove-Item $_.FullName -Force -ErrorAction Stop
+        } catch {
+            try { Rename-Item $_.FullName "$($_.FullName).old-$(Get-Date -Format yyyyMMddHHmmss)" -ErrorAction Stop } catch {}
+        }
+    }
+    Get-ChildItem (Join-Path $scriptsDir 'agent-*.exe.old-*') -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
+}
+# === end install-contract:v3 strip-trampolines ===
+
 # Resolve ssh-manager library path across multiple layouts.
 # Returns the path string, or $null if not found.
 function Resolve-SshManager {
@@ -541,6 +566,10 @@ function Invoke-Install {
     # Install sibling plugins (e.g. agent-codespaces for codespace: namespace)
     Install-SiblingPlugins
 
+    # Strip the uv-regenerated console-script trampoline(s) (SAC-blocked, unused);
+    # also clears sibling agent-*.exe pulled into this venv by Install-SiblingPlugins.
+    Remove-ConsoleTrampolines -VenvDir $VenvDir
+
     # Create binstub -- launch via the venv's signed python (`-m`), never the
     # unsigned console-script trampoline .exe (Smart App Control blocks it).
     if (Test-Path $VenvPython) {
@@ -869,6 +898,10 @@ function Invoke-Update {
 
     # Update sibling plugins (e.g. agent-codespaces for codespace: namespace)
     Install-SiblingPlugins -Reinstall
+
+    # Strip the uv-regenerated console-script trampoline(s) (SAC-blocked, unused);
+    # also clears sibling agent-*.exe pulled into this venv by Install-SiblingPlugins.
+    Remove-ConsoleTrampolines -VenvDir $VenvDir
 
     # Update binstub -- launch via the venv's signed python (`-m`), never the
     # unsigned console-script trampoline .exe (Smart App Control blocks it).

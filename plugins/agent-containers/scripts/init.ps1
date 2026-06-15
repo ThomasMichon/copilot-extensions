@@ -49,6 +49,31 @@ if ($env:OS -eq 'Windows_NT') {
 }
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
+# === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
+function Remove-ConsoleTrampolines {
+    <# Strip the uv-regenerated Scripts\<name>.exe console-script trampolines from
+       the venv after install. They are unsigned, zero-reputation PEs that Smart
+       App Control blocks (CodeIntegrity 3077); nothing launches them (binstubs,
+       services, and probes all use "python.exe -m <pkg>"), so remove every
+       agent-*.exe. Best-effort -- rename a locked copy aside, then sweep stale
+       stashes. Windows-only: POSIX console scripts are the sanctioned launch
+       path and must be preserved. #>
+    param([Parameter(Mandatory)][string]$VenvDir)
+    if ($env:OS -ne 'Windows_NT') { return }
+    $scriptsDir = Join-Path $VenvDir 'Scripts'
+    if (-not (Test-Path $scriptsDir)) { return }
+    Get-ChildItem (Join-Path $scriptsDir 'agent-*.exe') -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            Remove-Item $_.FullName -Force -ErrorAction Stop
+        } catch {
+            try { Rename-Item $_.FullName "$($_.FullName).old-$(Get-Date -Format yyyyMMddHHmmss)" -ErrorAction Stop } catch {}
+        }
+    }
+    Get-ChildItem (Join-Path $scriptsDir 'agent-*.exe.old-*') -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
+}
+# === end install-contract:v3 strip-trampolines ===
+
 # -- Preflight checks --------------------------------------------------
 
 Write-Host ''
@@ -178,6 +203,9 @@ if ($pkgResult -ne 0) {
     Write-Fail 'Failed to install agent-containers package into venv'
     exit 1
 }
+
+# Strip the uv-regenerated console-script trampoline(s) (SAC-blocked, unused).
+Remove-ConsoleTrampolines -VenvDir $VenvDir
 Write-Ok 'Package installed: agent-containers'
 
 # -- 4. Deploy binstub -------------------------------------------------
