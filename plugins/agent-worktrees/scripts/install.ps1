@@ -435,11 +435,39 @@ function Deploy-Package {
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & uv pip install --python $VenvPython --reinstall-package agent-worktrees "$PluginDir" --quiet 2>&1 | Out-Null
+
+    # On Windows, the console-script exe (Scripts\agent-worktrees.exe) may be
+    # held open by a running invocation -- most commonly the bare launcher/
+    # picker process that hosts the current session. uv does remove-then-write,
+    # and Windows denies *deleting* an in-use exe (os error 5) even though it
+    # *allows renaming* it. So pre-emptively move any locked console script
+    # aside; uv then writes a fresh one and the old process keeps its renamed
+    # handle until it exits. Best-effort cleanup of prior stashes too.
+    $scriptsDir = Join-Path $VenvDir 'Scripts'
+    $consoleExe = Join-Path $scriptsDir 'agent-worktrees.exe'
+    if (Test-Path $consoleExe) {
+        try {
+            Remove-Item $consoleExe -Force -ErrorAction Stop
+        } catch {
+            $stash = "$consoleExe.old-$(Get-Date -Format yyyyMMddHHmmss)"
+            try {
+                Rename-Item $consoleExe $stash -ErrorAction Stop
+            } catch {
+                Write-ServiceErr "Console script is locked and could not be moved aside: $consoleExe"
+                $ErrorActionPreference = $prevEAP
+                return $false
+            }
+        }
+    }
+    Get-ChildItem (Join-Path $scriptsDir 'agent-worktrees.exe.old-*') -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
+
+    $installOut = & uv pip install --python $VenvPython --reinstall-package agent-worktrees "$PluginDir" --quiet 2>&1 | Out-String
     $rc = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
     if ($rc -ne 0) {
         Write-ServiceErr "Package install failed (exit $rc)"
+        if ($installOut.Trim()) { Write-ServiceErr ("uv: " + $installOut.Trim()) }
         return $false
     }
 
