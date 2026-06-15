@@ -192,6 +192,8 @@ if ($Force -or -not (Test-Path $VenvPython)) {
 
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
+# Pre-strip any locked console-script trampoline so uv can overwrite it (os err 5).
+Remove-ConsoleTrampolines -VenvDir $VenvDir
 if (Get-Command uv -ErrorAction SilentlyContinue) {
     & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
 } else {

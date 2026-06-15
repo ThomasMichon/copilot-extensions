@@ -187,6 +187,10 @@ function Install-PackageInto {
         Write-ServiceErr "ssh-manager source not found at $SshMgrDir"
         return $false
     }
+    # Pre-strip: rename any locked console-script trampoline aside so uv can write
+    # a fresh one (Windows denies overwriting an in-use .exe -- os error 5; the
+    # stale binstub or a live `agent-codespaces ssh` session may hold it open).
+    Remove-ConsoleTrampolines -VenvDir (Split-Path -Parent (Split-Path -Parent $Python))
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     & uv pip install --python $Python --reinstall-package agent-ssh-manager "$SshMgrDir" --quiet 2>&1 | Out-Null

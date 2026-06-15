@@ -1,7 +1,7 @@
 {
   "name": "agent-containers",
   "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver -- borrow/release warm dev containers and dispatch Copilot agents into them via docker exec",
-  "version": "0.1.2-dev3",
+  "version": "0.1.2-dev4",
   "author": {
     "name": "Thomas Michon"
   },
