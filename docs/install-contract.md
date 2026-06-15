@@ -76,6 +76,15 @@ fix must **not** require downloaders to disable SAC.
 4. **Reputable unsigned wheel `.pyd`s** (pydantic_core, etc.) pass SAC via ISG
    reputation — only the locally generated, zero-reputation trampoline and the
    uv-managed python are blocked, so dependencies need no signing.
+5. **Strip the trampolines after install.** `uv pip install` regenerates the
+   `…\Scripts\<name>.exe` console scripts every time, so each installer removes
+   them (every `agent-*.exe`, incl. sibling provider trampolines pulled into a
+   shared venv) right after the package install via the shared
+   `Remove-ConsoleTrampolines` helper (`# install-contract:v3 strip-trampolines`
+   block, byte-identical across plugins). Nothing launches them — binstubs,
+   services, and probes all use `python.exe -m <pkg>` — so removal is safe and
+   keeps the venv free of SAC-blocked PEs. POSIX console scripts are the
+   sanctioned launch path and are **not** stripped.
 
 Reference implementation: `Get-SignedBasePython` + `New-SignedVenv` and the
 `"$VenvPython" -m <pkg>` launchers in
