@@ -10,6 +10,7 @@ from conftest import make_session_dir
 
 from agent_worktrees.sessions import (
     _normalize_path,
+    backfill_sessions,
     find_latest_session_id,
     find_latest_session_id_fast,
     scan_sessions,
@@ -437,3 +438,170 @@ class TestFindLatestSessionIdFast:
             result = find_latest_session_id_fast("/tmp/wt", sessions)
 
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Detached parent-continuation sessions (subconscious / rem-agent runs)
+# ---------------------------------------------------------------------------
+
+def _mark_detached(session_dir: Path) -> None:
+    """Write the ``.detached`` marker Copilot CLI uses for detached children."""
+    (session_dir / ".detached").write_text("")
+
+
+def _make_record(wt_id: str, wt_path: str, sessions=None) -> WorktreeRecord:
+    return WorktreeRecord(
+        worktree_id=wt_id,
+        branch=f"worktree/{wt_id}",
+        worktree_path=wt_path,
+        repo="test",
+        machine="test",
+        platform="wsl",
+        started_at="2026-06-01T10:00:00",
+        last_resumed_at="2026-06-01T10:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        handoff_prompt=None,
+        sessions=sessions,
+    )
+
+
+class TestDetachedSessionsExcluded:
+    """Detached parent-continuation sessions must not be attributed to a
+    worktree.
+
+    The Copilot CLI's subconscious / rem-agent consolidation runs are
+    spawned detached from a parent session and inherit that parent's cwd --
+    which, for an old session, is an already-finalized worktree path. Such
+    sessions carry a ``.detached`` marker file and must be skipped so they
+    don't re-activate finalized worktrees or pollute their summaries.
+    """
+
+    def test_scan_sessions_skips_detached_live_session(
+        self, tmp_session_state_dir: Path
+    ):
+        """A detached session with a live lock must NOT mark the worktree active."""
+        wt_path = "/tmp/wt-detached-live"
+        sdir = make_session_dir(
+            tmp_session_state_dir, "detached-sess", wt_path,
+            summary="Apply context_board add/prune updates",
+            lock_pid=os.getpid(),
+        )
+        _mark_detached(sdir)
+
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            with patch(
+                "agent_worktrees.sessions._is_copilot_process", return_value=True
+            ):
+                ctx = scan_sessions([wt_path])
+
+        norm = _normalize_path(wt_path)
+        assert norm not in ctx.active_sessions
+        assert norm not in ctx.session_count
+        # The consolidation prompt must not become the worktree's summary.
+        assert norm not in ctx.latest_summary
+
+    def test_scan_sessions_keeps_normal_live_session(
+        self, tmp_session_state_dir: Path
+    ):
+        """Control: a non-detached live session in the same worktree counts."""
+        wt_path = "/tmp/wt-mixed-live"
+        detached = make_session_dir(
+            tmp_session_state_dir, "detached-sess", wt_path,
+            summary="Apply context_board add/prune updates",
+            lock_pid=os.getpid(),
+        )
+        _mark_detached(detached)
+        make_session_dir(
+            tmp_session_state_dir, "real-sess", wt_path,
+            summary="Real interactive work",
+            lock_pid=os.getpid(),
+        )
+
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            with patch(
+                "agent_worktrees.sessions._is_copilot_process", return_value=True
+            ):
+                ctx = scan_sessions([wt_path])
+
+        norm = _normalize_path(wt_path)
+        assert ctx.active_sessions.get(norm) == ["real-sess"]
+        assert ctx.session_count[norm] == 1
+        assert "Real interactive work" in ctx.latest_summary[norm]
+
+    def test_find_latest_skips_detached(self, tmp_session_state_dir: Path):
+        """A newer detached session must not be chosen as the resume target."""
+        wt_path = "/tmp/wt-latest-detached"
+        make_session_dir(
+            tmp_session_state_dir, "real-sess", wt_path,
+            updated_at="2026-06-01T10:00:00.000Z",
+        )
+        detached = make_session_dir(
+            tmp_session_state_dir, "detached-sess", wt_path,
+            updated_at="2026-06-01T12:00:00.000Z",
+        )
+        _mark_detached(detached)
+
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            result = find_latest_session_id(wt_path)
+
+        assert result == "real-sess"
+
+    def test_scan_fast_skips_detached(self, tmp_session_state_dir: Path):
+        """Registry fast-path enrichment must skip detached sessions."""
+        wt_path = "/tmp/wt-fast-detached"
+        sdir = make_session_dir(
+            tmp_session_state_dir, "detached-sess", wt_path,
+            summary="Apply context_board add/prune updates",
+            lock_pid=os.getpid(),
+        )
+        _mark_detached(sdir)
+
+        rec = _make_record("fast-detached-wt", wt_path, sessions=[
+            SessionEntry("detached-sess", "2026-06-01T10:00:00"),
+        ])
+
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            with patch(
+                "agent_worktrees.sessions._is_copilot_process", return_value=True
+            ):
+                ctx = scan_sessions_fast([rec])
+
+        norm = _normalize_path(wt_path)
+        assert norm not in ctx.active_sessions
+        assert norm not in ctx.session_count
+
+    def test_backfill_skips_detached(self, tmp_session_state_dir: Path):
+        """Backfill must not register a detached session against a worktree."""
+        wt_path = "/tmp/wt-backfill-detached"
+        make_session_dir(
+            tmp_session_state_dir, "real-sess", wt_path,
+        )
+        detached = make_session_dir(
+            tmp_session_state_dir, "detached-sess", wt_path,
+        )
+        _mark_detached(detached)
+
+        rec = _make_record("backfill-wt", wt_path, sessions=[])
+
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            discovered = backfill_sessions([rec])
+
+        assert discovered.get("backfill-wt") == ["real-sess"]

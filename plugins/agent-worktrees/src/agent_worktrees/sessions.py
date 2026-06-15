@@ -54,6 +54,36 @@ def _session_state_dir() -> Path:
     return Path(home) / ".copilot" / "session-state"
 
 
+# Marker file Copilot CLI writes into a session-state directory when the
+# session is a *detached child of a spawning parent* -- i.e. its
+# ``detachedFromSpawningParentSessionId`` is set. Per the CLI's own schema,
+# this is "a detached headless rem-agent run launched on the parent's
+# interactive shutdown" (the subconscious / memory-consolidation pass).
+#
+# Such a session inherits the parent session's ``cwd`` -- which, when an
+# *old* session is consolidated, is an already-finalized worktree path. The
+# CLI is not worktree-aware and reuses that cwd, so without this guard the
+# detached run's live ``copilot`` process makes a finalized worktree look
+# active again (blocking cleanup) and pollutes its display summary. These
+# background continuation runs must never be attributed to a worktree.
+_DETACHED_MARKER = ".detached"
+
+
+def _is_detached_session(entry: Path) -> bool:
+    """Whether *entry* is a detached parent-continuation session dir.
+
+    Detected via the ``.detached`` marker file the Copilot CLI writes for
+    sessions whose context continues a spawning parent (e.g. a headless
+    rem-agent / subconscious consolidation run). Such sessions reuse the
+    parent's cwd and must be excluded from worktree liveness/attribution.
+    Never raises -- treats any error as "not detached".
+    """
+    try:
+        return (entry / _DETACHED_MARKER).exists()
+    except OSError:
+        return False
+
+
 def _is_process_alive(pid: int) -> bool:
     """Check if a process is running."""
     if platform.system() == "Windows":
@@ -153,6 +183,12 @@ def scan_sessions(worktree_paths: list[str]) -> SessionContext:
 
     for entry in session_dir.iterdir():
         if not entry.is_dir():
+            continue
+
+        # Skip detached parent-continuation sessions (e.g. headless
+        # rem-agent / subconscious runs). They reuse the parent's cwd and
+        # must not be attributed to a worktree.
+        if _is_detached_session(entry):
             continue
 
         ws_file = entry / "workspace.yaml"
@@ -257,6 +293,12 @@ def _enrich_session_dir(
     """
     entry = session_dir / session_id
     if not entry.is_dir():
+        return
+
+    # Skip detached parent-continuation sessions (e.g. headless rem-agent /
+    # subconscious runs); they reuse the parent's cwd and must not be
+    # attributed to this worktree.
+    if _is_detached_session(entry):
         return
 
     norm_path = _normalize_path(worktree_path)
@@ -454,6 +496,12 @@ def find_latest_session_id(worktree_path: str) -> str | None:
         if not entry.is_dir():
             continue
 
+        # Skip detached parent-continuation sessions (subconscious /
+        # rem-agent runs) -- they reuse the parent's cwd and are not a real
+        # resume target for this worktree.
+        if _is_detached_session(entry):
+            continue
+
         ws_file = entry / "workspace.yaml"
         if not ws_file.exists():
             continue
@@ -523,6 +571,12 @@ def backfill_sessions(records: list) -> dict[str, list[str]]:
 
     for entry in session_dir.iterdir():
         if not entry.is_dir():
+            continue
+
+        # Skip detached parent-continuation sessions (subconscious /
+        # rem-agent runs); they reuse the parent's cwd and must not be
+        # backfilled into a worktree's session registry.
+        if _is_detached_session(entry):
             continue
 
         ws_file = entry / "workspace.yaml"
