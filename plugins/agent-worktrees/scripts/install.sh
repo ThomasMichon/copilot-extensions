@@ -690,8 +690,8 @@ if Path(machines_path).exists():
                 'color': '#F6A821',
                 'isBuiltin': False,
                 'options': {
-                    'command': f'ssh {alias}',
-                    'args': [],
+                    'command': 'ssh',
+                    'args': [alias],
                     'cwd': '',
                     'env': {},
                 },
@@ -713,8 +713,8 @@ if Path(machines_path).exists():
                 'color': '#F6A821',
                 'isBuiltin': False,
                 'options': {
-                    'command': f'ssh -t {alias} {binstub}',
-                    'args': [],
+                    'command': 'ssh',
+                    'args': ['-t', alias, binstub],
                     'cwd': '',
                     'env': {},
                 },
