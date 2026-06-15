@@ -537,6 +537,9 @@ function Invoke-Install {
 
     # Install package via uv (ssh-manager library first, then agent-bridge)
     Write-Step 'Installing agent-bridge package...'
+    # Pre-strip any locked console-script trampoline so uv can overwrite it
+    # (Windows denies overwriting an in-use .exe -- os error 5).
+    Remove-ConsoleTrampolines -VenvDir $VenvDir
     $SshManagerDir = Resolve-SshManager
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -868,6 +871,9 @@ function Invoke-Update {
 
     # Reinstall package via uv (ssh-manager + agent-bridge)
     Write-Step 'Updating agent-bridge package...'
+    # Pre-strip any locked console-script trampoline so uv can overwrite it
+    # (Windows denies overwriting an in-use .exe -- os error 5).
+    Remove-ConsoleTrampolines -VenvDir $VenvDir
     $SshManagerDir = Resolve-SshManager
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
