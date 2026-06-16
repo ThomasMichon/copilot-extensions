@@ -195,6 +195,29 @@ class TestConnectionManagerExec:
             await manager.open_stdio_channel("no-host", "bash")
 
     @pytest.mark.asyncio
+    async def test_open_stdio_uses_large_frame_limit(self, win_platform, source):
+        """open_stdio_channel must raise the StreamReader frame limit.
+
+        ACP session/update frames carrying a large tool result can exceed
+        asyncio's 64 KiB default per-line limit, overflowing readline() and
+        tearing down the channel ("Connection closed"). The channel must use
+        the large limit so remote ACP sessions behave like local ones.
+        """
+        from ssh_manager.manager import _STDIO_CHANNEL_LIMIT_BYTES
+
+        manager = ConnectionManager(platform=win_platform)
+        await manager.ensure_connected("test-host", source)
+
+        mock_proc = AsyncMock()
+        with patch("ssh_manager.manager.asyncio.create_subprocess_exec",
+                    return_value=mock_proc) as mock_exec:
+            result = await manager.open_stdio_channel("test-host", "copilot --acp --stdio")
+
+        assert result is mock_proc
+        assert mock_exec.call_args[1]["limit"] == _STDIO_CHANNEL_LIMIT_BYTES
+        assert _STDIO_CHANNEL_LIMIT_BYTES > 65536
+
+    @pytest.mark.asyncio
     async def test_exec_command_builds_correct_args(self, win_platform, source):
         """Verify SSH args are constructed correctly for exec_command."""
         manager = ConnectionManager(platform=win_platform)
