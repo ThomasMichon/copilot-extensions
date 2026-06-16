@@ -448,9 +448,18 @@ $pyb = "$env:USERPROFILE\.agent-bridge\venv\Scripts\python.exe"
 
 ### 4. Resume on drop is routine, not exceptional
 
-Long sessions (especially CodeSpace) can drop — tunnel/relay TTL, idle timeout, a
-daemon restart from a plugin self-update. When `agent-bridge sessions` shows the
-session `stopped`/gone:
+A **service (daemon) restart mid-dispatch is now survivable**: a streaming
+`send`/`read`/`wait` detects the disconnect and **reconnects automatically**,
+resuming from the caller's acked delivery cursor — it no longer hard-fails with
+`Cannot connect`. On the bridge side, the session is rehydrated from SQLite
+(an interrupted turn is marked as such), and the next `send` to that session
+**auto-resumes** the remote agent (`load_session` re-attaches to the persisted
+ACP/Copilot session) before delivering the prompt.
+
+Longer/other drops (especially CodeSpace) can still strand a session —
+`gh cs ssh` tunnel lifetime, relay credential TTL, CodeSpace idle timeout. When
+`agent-bridge sessions` / `agent-bridge status <sid>` shows the session
+`stopped`/gone:
 
 ```bash
 agent-bridge end <sid>          # a daemon restart can also resurrect an old session as "active" — end that too

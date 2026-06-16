@@ -168,19 +168,23 @@ class BridgeClient:
                     detail = str(exc)
                 raise BridgeClientError(exc.code, detail) from exc
             except urllib.error.URLError:
-                # Stage 1 (CONNECT_BRIDGE): the service may be mid-restart.
-                # Retry within the grace window before giving up.
+                # Stage 1 (CONNECT_BRIDGE): the service may be mid-restart
+                # (e.g. a plugin self-update bounced the daemon). Retry within
+                # the grace window, then raise BridgeConnectionError -- never
+                # sys.exit. A hard exit here was a BaseException that tunneled
+                # straight through the streaming engine's `except Exception`
+                # reconnect guards (_turn_settled / _ack), killing a live
+                # dispatch on a brief restart instead of reconnecting (#23).
+                # One-shot command handlers surface this as a clean message via
+                # the top-level guard in main(); the streaming engine catches it
+                # and resumes from the caller's acked cursor.
                 if _time.monotonic() + backoff < deadline:
                     _time.sleep(backoff)
                     backoff = min(backoff * 2, 1.0)
                     continue
-                print(
-                    "[FAIL] Cannot connect to agent-bridge at %s\n"
-                    "       Is it running? Start it with: agent-bridge start"
-                    % self._base,
-                    file=sys.stderr,
+                raise BridgeConnectionError(
+                    f"Cannot connect to agent-bridge at {self._base}"
                 )
-                sys.exit(1)
 
     def _stream_sse(
         self, path: str, *, params: dict[str, str] | None = None
