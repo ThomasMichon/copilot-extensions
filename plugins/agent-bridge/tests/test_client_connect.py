@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agent_bridge.client import BridgeClient
+from agent_bridge.client import BridgeClient, BridgeConnectionError
 
 
 class _FakeResp:
@@ -46,7 +46,13 @@ class TestConnectGrace:
         assert calls["n"] == 3  # two failures, then success
 
     def test_gives_up_after_grace(self) -> None:
-        """Persistent refusal past the grace window exits non-zero."""
+        """Persistent refusal past the grace window raises BridgeConnectionError.
+
+        #23: it must NOT sys.exit -- a SystemExit (BaseException) tunnels
+        through the streaming engine's `except Exception` reconnect guards and
+        kills a live dispatch. Raising a catchable Exception lets the engine
+        reconnect, and one-shot commands surface it via main()'s top-level guard.
+        """
         client = BridgeClient("http://127.0.0.1:0", "tok", connect_grace=0.3)
 
         def always_fail(_req, timeout=None):
@@ -55,8 +61,9 @@ class TestConnectGrace:
         with patch(
             "agent_bridge.client.urllib.request.urlopen", side_effect=always_fail
         ):
-            with pytest.raises(SystemExit):
+            with pytest.raises(BridgeConnectionError) as ei:
                 client._request("GET", "/health")
+        assert "127.0.0.1:0" in str(ei.value)
 
     def test_no_grace_fails_immediately(self) -> None:
         client = BridgeClient("http://127.0.0.1:0", "tok", connect_grace=0.0)
@@ -69,6 +76,6 @@ class TestConnectGrace:
         with patch(
             "agent_bridge.client.urllib.request.urlopen", side_effect=always_fail
         ):
-            with pytest.raises(SystemExit):
+            with pytest.raises(BridgeConnectionError):
                 client._request("GET", "/health")
         assert calls["n"] == 1

@@ -1778,7 +1778,21 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     if hasattr(args, "func"):
-        args.func(args)
+        from .client import BridgeConnectionError
+
+        try:
+            args.func(args)
+        except BridgeConnectionError as exc:
+            # The service is unreachable (e.g. mid-restart) and this command
+            # could not ride it out. Surface a clean one-line message instead of
+            # a traceback. Streaming commands (send/read/wait) handle this
+            # internally by reconnecting from the caller's acked cursor.
+            print(
+                f"[FAIL] {exc}\n"
+                "       Is it running? Start it with: agent-bridge service start",
+                file=sys.stderr,
+            )
+            sys.exit(1)
     else:
         parser.print_help()
 
