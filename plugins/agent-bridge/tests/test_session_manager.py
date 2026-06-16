@@ -358,6 +358,105 @@ class TestResumeSession:
             await session_manager.resume_session("nonexistent")
 
 
+class TestResyncSession:
+    """Session resync -- rebuild the event log from the agent's replay."""
+
+    @staticmethod
+    def _replay_acp_factory(replay_events):
+        """Build a patch factory whose load_session emits ``replay_events``.
+
+        When the SessionManager constructs ``AcpClient(on_event=cb)`` and then
+        calls ``load_session(..., suppress_replay=False)``, the mock invokes
+        ``cb`` with each replayed event -- emulating the agent streaming its
+        full history back during load.
+        """
+        def factory(*args, on_event=None, **kwargs):
+            client = MagicMock()
+            client.is_running = True
+            client.pid = 222
+            client.acp_session_id = "acp-test-123"
+            client.start = AsyncMock()
+            client.shutdown = AsyncMock()
+            client.cancel_prompt = AsyncMock()
+
+            async def _load(cwd, session_id, suppress_replay=True):
+                if not suppress_replay and on_event:
+                    for etype, data in replay_events:
+                        on_event(etype, data)
+
+            client.load_session = AsyncMock(side_effect=_load)
+            return client
+        return factory
+
+    @pytest.mark.asyncio
+    async def test_resync_rebuilds_log_from_replay(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        sid = session.session_id
+        # Simulate a truncated log: only a couple of events were captured live.
+        session.event_log.append("agent_message", {"text": "partial"})
+        session.event_log.append("error", {"message": "Connection closed"})
+
+        replay = [
+            ("agent_message", {"text": "Let's add a pride theme"}),
+            ("tool_call_start", {"tool_call_id": "t1", "title": "hue-hue_export_scenes"}),
+            ("tool_call_update", {"tool_call_id": "t1", "status": "completed",
+                                  "content": ["Exported 46 scenes."]}),
+            ("agent_message", {"text": "Here are the front-yard lights."}),
+        ]
+        with patch("agent_bridge.session_manager.AcpClient",
+                   side_effect=self._replay_acp_factory(replay)):
+            count = await session_manager.resync_session(sid)
+
+        assert count == len(replay)
+        events = session.event_log.get_events()
+        # Rebuilt replay (IDs from 1) + a trailing resync state event.
+        types = [e.event for e in events]
+        assert types[:len(replay)] == [
+            "agent_message", "tool_call_start", "tool_call_update", "agent_message",
+        ]
+        assert types[-1] == "session_state_changed"
+        assert events[-1].data.get("resynced") is True
+        # The old truncated "Connection closed" error is gone.
+        assert all(e.data.get("message") != "Connection closed" for e in events)
+        assert session.status == SessionStatus.IDLE
+        assert session.client is not None
+
+    @pytest.mark.asyncio
+    async def test_resync_is_idempotent(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        sid = session.session_id
+        replay = [("agent_message", {"text": "hi"})]
+        factory = self._replay_acp_factory(replay)
+
+        with patch("agent_bridge.session_manager.AcpClient", side_effect=factory):
+            first = await session_manager.resync_session(sid)
+        with patch("agent_bridge.session_manager.AcpClient", side_effect=factory):
+            second = await session_manager.resync_session(sid)
+
+        assert first == second == len(replay)
+        # Log reflects exactly the replay (+ trailing state event), no growth.
+        types = [e.event for e in session.event_log.get_events()]
+        assert types == ["agent_message", "session_state_changed"]
+
+    @pytest.mark.asyncio
+    async def test_resync_rejects_missing_acp_id(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        session.acp_session_id = None
+        with pytest.raises(RuntimeError, match="no ACP session ID"):
+            await session_manager.resync_session(session.session_id)
+
+    @pytest.mark.asyncio
+    async def test_resync_unknown_session(self, session_manager) -> None:
+        with pytest.raises(KeyError):
+            await session_manager.resync_session("nonexistent")
+
+
 class TestRehydrate:
     """Session rehydration on restart."""
 

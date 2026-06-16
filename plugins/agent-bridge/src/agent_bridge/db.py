@@ -313,6 +313,17 @@ class Database:
             conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
             conn.commit()
 
+    def delete_events(self, session_id: str) -> None:
+        """Delete all persisted events for a session (keeps the session row).
+
+        Used by the resync flow, which rebuilds the event log from the
+        agent's authoritative load-time replay.
+        """
+        with self._write_lock:
+            conn = self._get_conn()
+            conn.execute("DELETE FROM events WHERE session_id=?", (session_id,))
+            conn.commit()
+
     # -- Turn CRUD -----------------------------------------------------------
 
     def create_turn(

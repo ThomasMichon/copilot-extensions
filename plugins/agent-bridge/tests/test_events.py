@@ -49,6 +49,40 @@ class TestEventLog:
         event_log.append("b", {})
         assert event_log.latest_id == 2
 
+    def test_rebuild_replaces_log(self, event_log: EventLog) -> None:
+        event_log.append("old1", {"n": 1})
+        event_log.append("old2", {"n": 2})
+
+        count = event_log.rebuild([
+            ("a", {"x": 1}),
+            ("b", {"x": 2}),
+            ("c", {"x": 3}),
+        ])
+
+        assert count == 3
+        events = event_log.get_events()
+        assert [e.event for e in events] == ["a", "b", "c"]
+        # IDs restart from 1 after a rebuild.
+        assert [e.id for e in events] == [1, 2, 3]
+        assert event_log.latest_id == 3
+        # A subsequent append continues from the rebuilt sequence.
+        nxt = event_log.append("d", {})
+        assert nxt.id == 4
+
+    def test_rebuild_persists_to_db(self, event_log: EventLog, tmp_db: Database) -> None:
+        event_log.append("stale", {})
+        event_log.rebuild([("only", {"k": "v"})])
+        rows = tmp_db.get_events("test-session", after=0)
+        assert [r["event_type"] for r in rows] == ["only"]
+        assert rows[0]["event_id"] == 1
+
+    def test_rebuild_empty_clears_log(self, event_log: EventLog) -> None:
+        event_log.append("x", {})
+        count = event_log.rebuild([])
+        assert count == 0
+        assert event_log.get_events() == []
+        assert event_log.latest_id == 0
+
     @pytest.mark.asyncio
     async def test_wait_for_events_immediate(self, event_log: EventLog) -> None:
         event_log.append("a", {"x": 1})

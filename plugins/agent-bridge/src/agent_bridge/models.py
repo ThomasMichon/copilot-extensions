@@ -162,6 +162,14 @@ class SubmitPromptResponse(BaseModel):
     status: SessionStatus
 
 
+class ResyncSessionResponse(BaseModel):
+    """Result of rebuilding a session's event log from the agent replay."""
+
+    event_count: int
+    latest_id: int
+    status: SessionStatus
+
+
 class SessionListResponse(BaseModel):
     sessions: list[SessionInfo]
 

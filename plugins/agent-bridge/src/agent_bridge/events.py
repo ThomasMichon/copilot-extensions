@@ -113,6 +113,36 @@ class EventLog:
                 return list(self._events)
             return [e for e in self._events if e.id > after]
 
+    def rebuild(self, events: list[tuple[str, dict[str, Any]]]) -> int:
+        """Replace the entire log with ``events`` (event_type, data) pairs.
+
+        Clears both the persisted and in-memory events for this session and
+        re-appends the supplied sequence from ID 1. Used by the resync flow,
+        which treats the agent's load-time replay as the authoritative
+        conversation history -- healing logs truncated by a mid-session
+        disconnect. Returns the number of events written.
+        """
+        with self._lock:
+            if self._db is not None and self._session_id is not None:
+                self._db.delete_events(self._session_id)
+            self._events = []
+            self._next_id = 1
+            ts = time.time()
+            for event_type, data in events:
+                event_id = self._next_id
+                self._next_id += 1
+                if self._db is not None and self._session_id is not None:
+                    self._db.append_event(
+                        self._session_id, event_id, event_type, data, ts,
+                    )
+                self._events.append(
+                    SseEvent(id=event_id, event=event_type, data=data, timestamp=ts)
+                )
+            count = len(self._events)
+        for waiter in self._waiters:
+            waiter.set()
+        return count
+
     @property
     def latest_id(self) -> int:
         """The ID of the most recent event, or 0 if empty."""

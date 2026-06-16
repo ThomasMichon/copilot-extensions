@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from ..models import (
     CursorAckRequest,
     CursorInfo,
-    ResumeSessionRequest,
+    ResyncSessionResponse,
     SessionInfo,
     SessionListResponse,
     SessionStatus,
@@ -292,6 +292,36 @@ async def submit_prompt(
     session = mgr.get_session(session_id)
     return SubmitPromptResponse(
         turn_index=turn_index,
+        status=session.status if session else SessionStatus.IDLE,
+    )
+
+
+@router.post("/{session_id}/resync", response_model=ResyncSessionResponse)
+async def resync_session(session_id: str, request: Request):
+    """Rebuild a session's event log from the agent's authoritative replay.
+
+    Heals logs truncated by a mid-session disconnect. Reattaches the ACP
+    session and leaves it IDLE, ready for prompts.
+    """
+    mgr: SessionManager = request.app.state.session_manager
+    try:
+        count = await mgr.resync_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    session = mgr.get_session(session_id)
+    latest_id = (
+        session.event_log.latest_id
+        if session and session.event_log
+        else count
+    )
+    return ResyncSessionResponse(
+        event_count=count,
+        latest_id=latest_id,
         status=session.status if session else SessionStatus.IDLE,
     )
 
