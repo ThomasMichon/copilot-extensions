@@ -25,6 +25,7 @@ class FakeClient:
         self._conflict_sid = conflict_sid
         self.resumed: list[str] = []
         self.started: list[dict] = []
+        self.ended: list[str] = []
 
     def list_agents(self):
         return [{"name": n} for n in self._agents]
@@ -46,6 +47,30 @@ class FakeClient:
             if s.get("session_id") == sid:
                 s["status"] = "idle"
         return {"status": "idle"}
+
+    def end_session(self, sid):
+        self.ended.append(sid)
+        self.sessions = [
+            s for s in self.sessions if s.get("session_id") != sid
+        ]
+
+    def get_session_status(self, sid, *, caller_id=None):
+        for s in self.sessions:
+            if s.get("session_id") == sid:
+                return {
+                    "name": s.get("name", ""),
+                    "status": s.get("status", ""),
+                    "agent_name": s.get("agent_name"),
+                    "caller_id": s.get("caller_id"),
+                    "turn_count": s.get("turn_count", 0),
+                    "behind": 0,
+                    "active_tool": {
+                        "title": "rush build",
+                        "elapsed_s": 42,
+                        "command": "rush build -t @ms/app",
+                    },
+                }
+        raise BridgeClientError(404, "not found")
 
     def start_session(self, *, agent=None, caller_id=None, force_new=False):
         self.started.append(
@@ -223,3 +248,85 @@ def test_cmd_end_reports_error_without_traceback(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "[FAIL]" in out
     assert "boom" in out
+
+
+# -- send concurrent-dispatch guard (#21) ------------------------------------
+
+
+def test_send_busy_running_session_rejected(fixed_caller, capsys):
+    # Caller's own session is mid-turn -- send must fail fast, not adopt+block.
+    client = FakeClient(sessions=[
+        _sess("s1", agent="codespace:cs", caller="host-A", status="running"),
+    ])
+    with pytest.raises(SystemExit) as ei:
+        m._start_agent_session(client, "codespace:cs")
+    assert ei.value.code == m._SEND_BUSY_EXIT
+    assert client.started == []   # did not spawn over the busy one
+    assert client.ended == []     # did not terminate it (no --force)
+    err = capsys.readouterr().err
+    assert "BUSY" in err
+    assert "s1" in err
+    assert "--force" in err       # take-over guidance
+    assert "wait" in err.lower()  # wait/observe guidance
+
+
+def test_send_force_takes_over_busy_session(fixed_caller, monkeypatch):
+    monkeypatch.setattr(m, "_wait_for_idle", lambda *a, **k: None)
+    client = FakeClient(sessions=[
+        _sess("s1", agent="codespace:cs", caller="host-A", status="running"),
+    ])
+    sid = m._start_agent_session(client, "codespace:cs", force=True)
+    assert client.ended == ["s1"]          # in-flight turn terminated
+    assert sid == "fresh-sid"              # fresh session started
+    assert client.started and client.started[0]["force_new"] is False
+
+
+def test_send_conflict_busy_other_caller_rejected(fixed_caller, capsys):
+    # Another caller holds the single codespace session and it is mid-turn.
+    other = _sess("s9", agent="codespace:cs", caller="host-B", status="running")
+    client = FakeClient(sessions=[other], conflict_sid="s9")
+    with pytest.raises(SystemExit) as ei:
+        m._start_agent_session(client, "codespace:cs")
+    assert ei.value.code == m._SEND_BUSY_EXIT
+    assert client.ended == []
+    assert "BUSY" in capsys.readouterr().err
+
+
+def test_send_conflict_busy_other_caller_force(fixed_caller, monkeypatch):
+    monkeypatch.setattr(m, "_wait_for_idle", lambda *a, **k: None)
+    other = _sess("s9", agent="codespace:cs", caller="host-B", status="running")
+    # First start 409s (conflict); after we end s9 the retry must succeed, so
+    # clear the conflict once s9 is gone.
+    client = FakeClient(sessions=[other], conflict_sid="s9")
+    orig_start = client.start_session
+
+    def start_session(**kw):
+        # Once s9 is ended, drop the conflict so the retry spawns fresh.
+        if "s9" in client.ended:
+            client._conflict_sid = None
+        return orig_start(**kw)
+
+    client.start_session = start_session
+    sid = m._start_agent_session(client, "codespace:cs", force=True)
+    assert client.ended == ["s9"]
+    assert sid == "fresh-sid"
+
+
+def test_resolve_target_busy_session_id_rejected(fixed_caller, capsys):
+    client = FakeClient(sessions=[
+        _sess("s1", agent="codespace:cs", caller="host-A", status="running"),
+    ])
+    with pytest.raises(SystemExit) as ei:
+        m._resolve_target(client, "s1")
+    assert ei.value.code == m._SEND_BUSY_EXIT
+    assert "BUSY" in capsys.readouterr().err
+
+
+def test_resolve_target_busy_session_id_force_takes_over(fixed_caller, monkeypatch):
+    monkeypatch.setattr(m, "_wait_for_idle", lambda *a, **k: None)
+    client = FakeClient(sessions=[
+        _sess("s1", agent="codespace:cs", caller="host-A", status="running"),
+    ])
+    sid = m._resolve_target(client, "s1", force=True)
+    assert client.ended == ["s1"]
+    assert sid == "fresh-sid"

@@ -591,7 +591,7 @@ def _cmd_send(args: argparse.Namespace) -> None:
 
     # Resolve: existing session id, else reuse-or-start this caller's session
     # for the named agent (never force-new -- that is `create`'s job).
-    session_id = _resolve_target(client, target)
+    session_id = _resolve_target(client, target, force=getattr(args, "force", False))
 
     # Issue #25-of-bridge: don't dump a CodeSpace agent's entire prior
     # conversation onto a fresh host. If this caller has never consumed from
@@ -655,12 +655,62 @@ class _AgentSessionConflict(Exception):
         )
 
 
+# Exit code when `send` is rejected because the target's session is busy
+# running a turn (the bridge cannot deliver a second prompt mid-turn). Distinct
+# from generic failures (1) and arg errors (2) so a caller can react.
+_SEND_BUSY_EXIT = 75
+
+
+def _busy_session_message(
+    client, session_id: str, agent_name: str, caller_id: str | None
+) -> str:
+    """An actionable, LLM-judgement-friendly message for a busy target (#21).
+
+    Names the in-flight session (what it appears to be doing, for how long) and
+    frames the decision: wait/observe the live turn (it may already be doing the
+    work) versus deliberately terminating it to take over.
+    """
+    st: dict[str, Any] = {}
+    try:
+        st = client.get_session_status(session_id, caller_id=caller_id)
+    except Exception:
+        pass
+    name = st.get("name", "")
+    turns = st.get("turn_count", 0)
+    behind = st.get("behind", 0)
+    active = st.get("active_tool") or {}
+    lines = [
+        f"[BUSY] Agent '{agent_name}' session {session_id}"
+        f"{f' ({name})' if name else ''} is running a turn -- the bridge cannot "
+        "deliver a second prompt mid-turn.",
+    ]
+    if active:
+        el = active.get("elapsed_s")
+        elapsed = f" ({round(el)}s)" if el is not None else ""
+        lines.append(f"  in flight: {active.get('title') or 'a tool call'}{elapsed}")
+        if active.get("command"):
+            lines.append(f"             {active['command']}")
+    else:
+        lines.append("  in flight: (between tool calls)")
+    tail = f", {behind} new event(s) for you" if behind else ""
+    lines.append(f"  turns so far: {turns}{tail}")
+    lines.append("  Decide -- it may already be doing what you need:")
+    lines.append(f"    - WAIT / OBSERVE:  agent-bridge wait {session_id}     "
+                 "(block until the turn settles, then re-send)")
+    lines.append(f"                       agent-bridge read {session_id} --tail 30   "
+                 "(peek without consuming)")
+    lines.append(f"    - TAKE OVER:       agent-bridge end {session_id}, then re-send "
+                 "-- or re-run with --force (discards the in-flight turn's work)")
+    return "\n".join(lines)
+
+
 def _resolve_target(
     client,
     target: str,
     *,
     force_new: bool = False,
     refuse_on_conflict: bool = False,
+    force: bool = False,
 ) -> str:
     """Resolve a target string to a session ID.
 
@@ -691,8 +741,35 @@ def _resolve_target(
                 client.resume_session(target)
                 return target
             else:
+                # Busy (running/created/starting): the bridge can't accept a
+                # second prompt mid-turn. Fail fast with an actionable error
+                # rather than the terse "cannot send prompt" -- or, with
+                # --force, terminate the in-flight turn and start fresh for the
+                # session's agent.
+                agent = session.get("agent_name") or ""
+                if not force:
+                    print(
+                        _busy_session_message(
+                            client, target, agent or target,
+                            session.get("caller_id"),
+                        ),
+                        file=sys.stderr,
+                    )
+                    sys.exit(_SEND_BUSY_EXIT)
                 print(
-                    f"[FAIL] Session {target} is {status} -- cannot send prompt",
+                    f"[>] --force: ending busy session {target} to take over...",
+                )
+                try:
+                    client.end_session(target)
+                except Exception:
+                    pass
+                if agent:
+                    # Restart for the agent. force=False bounds any re-conflict
+                    # to a clean busy message instead of a takeover loop.
+                    return _start_agent_session(client, agent, force=False)
+                print(
+                    f"[FAIL] Session {target} ended; no agent recorded -- "
+                    "re-send to the agent name to start a fresh session.",
                     file=sys.stderr,
                 )
                 sys.exit(1)
@@ -725,6 +802,7 @@ def _resolve_target(
             client, matches[0],
             force_new=force_new,
             refuse_on_conflict=refuse_on_conflict,
+            force=force,
         )
 
     # Not in the cached agent list -- hand the target to the server as-is so its
@@ -735,6 +813,7 @@ def _resolve_target(
             client, target,
             force_new=force_new,
             refuse_on_conflict=refuse_on_conflict,
+            force=force,
         )
     except BridgeClientError as exc:
         if exc.status != 404:
@@ -1013,6 +1092,7 @@ def _start_agent_session(
     *,
     force_new: bool = False,
     refuse_on_conflict: bool = False,
+    force: bool = False,
 ) -> str:
     """Start or reuse a session for a named agent.
 
@@ -1035,7 +1115,27 @@ def _start_agent_session(
     if not force_new:
         existing = _find_caller_session(client, agent_name, caller_id)
         if existing is not None:
-            return _reuse_existing(client, existing, agent_name)
+            # Concurrent-dispatch guard (#21): never pile a second prompt onto a
+            # session that is mid-turn -- the bridge would reject it (or, worse,
+            # the caller would block on an idle-wait timeout). Fail fast with an
+            # actionable wait-vs-take-over message, or honor --force by ending
+            # the in-flight turn and starting fresh.
+            if existing.get("status", "") == "running":
+                sid = existing.get("session_id", "")
+                if not force:
+                    print(
+                        _busy_session_message(client, sid, agent_name, caller_id),
+                        file=sys.stderr,
+                    )
+                    sys.exit(_SEND_BUSY_EXIT)
+                print(f"[>] --force: ending busy session {sid} to take over...")
+                try:
+                    client.end_session(sid)
+                except Exception:
+                    pass
+                # Fall through to start a fresh session below.
+            else:
+                return _reuse_existing(client, existing, agent_name)
 
     print(f"[>] Starting session for agent '{agent_name}'...")
     try:
@@ -1056,6 +1156,32 @@ def _start_agent_session(
             except Exception:
                 session = {"session_id": existing_sid}
             session.setdefault("session_id", existing_sid)
+            # Same #21 guard for a session held by *another* caller: if it is
+            # mid-turn, don't silently adopt-and-block -- fail fast (or take
+            # over with --force).
+            if session.get("status", "") == "running":
+                if not force:
+                    print(
+                        _busy_session_message(
+                            client, existing_sid, agent_name, caller_id
+                        ),
+                        file=sys.stderr,
+                    )
+                    sys.exit(_SEND_BUSY_EXIT)
+                print(
+                    f"[>] --force: ending busy session {existing_sid} to take "
+                    "over...",
+                )
+                try:
+                    client.end_session(existing_sid)
+                except Exception:
+                    pass
+                # Retry a fresh start now that the conflict is cleared. force=
+                # False bounds any re-conflict to a clean busy message.
+                return _start_agent_session(
+                    client, agent_name, force_new=force_new,
+                    refuse_on_conflict=refuse_on_conflict, force=False,
+                )
             return _reuse_existing(client, session, agent_name)
         raise
     sid = resp.get("session_id", "")
@@ -1654,6 +1780,13 @@ def main(argv: list[str] | None = None) -> None:
         help="When resuming an existing session, replay its prior conversation "
              "instead of fast-forwarding past it (default hides the backlog "
              "and prints a marker)",
+    )
+    send_p.add_argument(
+        "--force", action="store_true",
+        help="If the target's session is busy running a turn, terminate that "
+             "in-flight turn and start a fresh session to deliver this prompt "
+             "(discards the in-flight turn's work). Without --force, a busy "
+             "target is rejected with guidance to wait/observe or end it.",
     )
     _add_stream_args(send_p)
     send_p.set_defaults(func=_cmd_send)
