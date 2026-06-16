@@ -294,7 +294,16 @@ class SessionManager:
             status = row["status"]
 
             if status == SessionStatus.ENDED.value:
-                self._db.delete_session(sid)
+                # Defense-in-depth: a single session's cleanup must never brick
+                # daemon startup -- log and skip on failure rather than aborting
+                # rehydrate (and thus the whole service).
+                try:
+                    self._db.delete_session(sid)
+                except Exception:
+                    log.warning(
+                        "Failed to clean up ENDED session %s on startup",
+                        sid, exc_info=True,
+                    )
                 continue
 
             target_json = row.get("target_json")

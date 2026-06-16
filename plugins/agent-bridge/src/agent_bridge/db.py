@@ -308,8 +308,16 @@ class Database:
     def delete_session(self, session_id: str) -> None:
         with self._write_lock:
             conn = self._get_conn()
+            # Clear every child table that has a FK to sessions BEFORE the
+            # session row, or `PRAGMA foreign_keys=ON` rejects the parent delete
+            # (FOREIGN KEY constraint failed). delivery_cursors was easy to miss
+            # here -- omitting it left ENDED sessions undeletable, which crashed
+            # _rehydrate's ENDED-cleanup on the next startup.
             conn.execute("DELETE FROM events WHERE session_id=?", (session_id,))
             conn.execute("DELETE FROM turns WHERE session_id=?", (session_id,))
+            conn.execute(
+                "DELETE FROM delivery_cursors WHERE session_id=?", (session_id,)
+            )
             conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
             conn.commit()
 
