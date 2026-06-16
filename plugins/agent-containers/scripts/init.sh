@@ -120,19 +120,57 @@ chmod +x "$STUB"
 _ok "Binstub: $STUB"
 
 # -- 5. Deploy manifest ------------------------------------------------
-COMMIT="$(git -C "$PLUGIN_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-cat > "$INSTALL_DIR/deploy-manifest.json" << EOF
+# === install-contract:v3 source-kind -- keep byte-identical across plugins ===
+_source_kind() {
+    case "$(printf '%s' "$1" | tr '\\' '/')" in
+        */.copilot/installed-plugins/*) printf 'marketplace' ;;
+        *) printf 'local' ;;
+    esac
+}
+# === end install-contract:v3 source-kind ===
+_git_info() {
+    local path="$1" commit branch dirty
+    commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    dirty="false"
+    [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && dirty="true"
+    echo "$commit $branch $dirty"
+}
+
+# Unified schema_version 3 manifest (install-contract): records the source
+# footprint (marketplace vs local) so deploys are auditable like the siblings.
+MANIFEST_PATH="$INSTALL_DIR/deploy-manifest.json"
+KIND="$(_source_kind "$PLUGIN_DIR")"
+VER="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+COMMIT="null"; BRANCH="null"; DIRTY="false"
+if [[ "$KIND" == "local" ]]; then
+    REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
+    read -r _c _b _d <<< "$(_git_info "$REPO_ROOT")"
+    COMMIT="\"$_c\""; BRANCH="\"$_b\""; DIRTY="$_d"
+fi
+TMP="$MANIFEST_PATH.tmp"
+cat > "$TMP" << EOF
 {
+  "schema_version": 3,
   "service": "agent-containers",
-  "commit": "$COMMIT",
-  "deployed_at": "$TS",
-  "runtime": "python",
-  "plugin_source": "$PLUGIN_DIR",
-  "install_dir": "$INSTALL_DIR"
+  "deployed_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
+  "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
+  "source": {
+    "kind": "$KIND",
+    "path": "$PLUGIN_DIR",
+    "repo": "copilot-extensions",
+    "plugin": "agent-containers",
+    "version": "$VER",
+    "commit": $COMMIT,
+    "branch": $BRANCH,
+    "dirty": $DIRTY
+  },
+  "venv": "$VENV_DIR",
+  "runtime": "python"
 }
 EOF
-_ok "Manifest: $INSTALL_DIR/deploy-manifest.json"
+mv -f "$TMP" "$MANIFEST_PATH"
+_ok "Deploy manifest written (source: $KIND)"
 
 # -- 6. Verify ---------------------------------------------------------
 echo ''
