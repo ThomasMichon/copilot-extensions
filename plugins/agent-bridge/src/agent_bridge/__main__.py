@@ -208,6 +208,11 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
     else:
         print("    Running: (idle -- no tool in flight)")
 
+    progress = st.get("progress") or {}
+    if progress:
+        markers = "  ".join(f"{k}={v}" for k, v in progress.items())
+        print(f"    Progress: {markers}")
+
     # Last K collapsed steps (cursor-neutral tail read; --steps 0 disables).
     k = getattr(args, "steps", 0) or 0
     if k > 0 and head:

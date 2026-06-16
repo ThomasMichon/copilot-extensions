@@ -424,7 +424,10 @@ $pyb = "$env:USERPROFILE\.agent-bridge\venv\Scripts\python.exe"
 - Tell the agent to **push early and often** (after build, after tests) so
   progress survives a drop, and to emit **structured progress markers** —
   `PROGRESS build=ok`, `PROGRESS tests=ok n=<count>`, `PROGRESS commit=<sha>`,
-  `PROGRESS pr=<id>` — so you can track milestones from the feed.
+  `PROGRESS pr=<id>` — which the bridge captures (latest value per key) and
+  surfaces in `agent-bridge status <sid>` under **Progress:**, so you get
+  ground-truth milestones (did it build? push? open a PR?) without grepping the
+  feed or shelling into the host.
 
 ### 3. Monitor cheaply — through the bridge, at phase boundaries
 

@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import random
+import re
 import sys
 import time
 import uuid
@@ -92,6 +93,30 @@ _NOUNS = [
 
 def _generate_name() -> str:
     return f"{random.choice(_ADJECTIVES)}-{random.choice(_NOUNS)}"  # noqa: S311
+
+
+# Structured milestone markers: a dispatched agent reports progress with lines
+# like ``PROGRESS: build=ok`` or ``PROGRESS commit=<sha> pr=123`` (the colon is
+# optional, matching the dispatch skill's documented convention). The bridge
+# captures the latest value per key and exposes it in status, so a watcher gets
+# ground-truth milestones (did it build? push? open a PR?) without grepping the
+# free-text feed or shelling into the host (#46.3 / #46.4).
+_PROGRESS_LINE_RE = re.compile(r"\bPROGRESS:?\s+(.+)")
+_PROGRESS_KV_RE = re.compile(r"(\w+)=(\S+)")
+
+
+def _parse_progress_markers(text: str) -> dict[str, str]:
+    """Extract ``PROGRESS: key=value`` milestone markers from agent text."""
+    found: dict[str, str] = {}
+    if not text or "PROGRESS" not in text:
+        return found
+    for line in text.splitlines():
+        m = _PROGRESS_LINE_RE.search(line)
+        if not m:
+            continue
+        for key, value in _PROGRESS_KV_RE.findall(m.group(1)):
+            found[key] = value
+    return found
 
 
 async def _cleanup_worktree(target: SpawnTarget, turn_count: int) -> None:
@@ -199,6 +224,10 @@ class Session:
         self.updated_at = self.created_at
         self.event_log: EventLog | None = None
         self.acp_session_id: str | None = None
+        # Structured milestone markers the dispatched agent has reported via
+        # `PROGRESS: key=value` lines (e.g. build=ok, commit=<sha>, pr=<id>) --
+        # captured from agent_message text and surfaced in status (#46.3).
+        self.progress: dict[str, str] = {}
         self._prompt_task: asyncio.Task | None = None
         self._lifecycle_lock = asyncio.Lock()
 
@@ -241,6 +270,14 @@ class SessionManager:
     def db(self) -> Database:
         """The backing database (used by routes for cursor persistence)."""
         return self._db
+
+    @staticmethod
+    def _capture_progress(session: Session, event_type: str, data: dict) -> None:
+        """Update a session's structured progress from a captured event (#46.3)."""
+        if event_type == "agent_message":
+            markers = _parse_progress_markers(data.get("text", ""))
+            if markers:
+                session.progress.update(markers)
 
     def _rehydrate(self) -> None:
         """Reload session metadata from DB on startup.
@@ -304,6 +341,11 @@ class SessionManager:
             # Restore event log from DB
             session.event_log = EventLog.from_db(self._db, sid)
             session.turn_count = len(self._db.get_turns(sid))
+
+            # Rebuild structured progress from the restored agent messages so a
+            # daemon restart preserves reported milestones (#46.3).
+            for ev in session.event_log.get_events(0):
+                self._capture_progress(session, ev.event, ev.data)
 
             # Restore context usage from DB
             session.context_size = row.get("context_size")
@@ -376,6 +418,7 @@ class SessionManager:
         def on_acp_event(event_type: str, data: dict[str, Any]) -> None:
             if session.event_log:
                 session.event_log.append(event_type, data)
+            self._capture_progress(session, event_type, data)
             if event_type == "usage_update":
                 self._handle_usage_update(session, data)
 
@@ -527,6 +570,7 @@ class SessionManager:
             def on_acp_event(event_type: str, data: dict[str, Any]) -> None:
                 if session.event_log:
                     session.event_log.append(event_type, data)
+                self._capture_progress(session, event_type, data)
                 if event_type == "usage_update":
                     self._handle_usage_update(session, data)
 
