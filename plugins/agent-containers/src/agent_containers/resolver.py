@@ -20,11 +20,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import shutil
 import subprocess
 import sys
 from typing import TYPE_CHECKING
 
+from ._invoke import module_argv
 from .config import load_config
 from .lease import get_lease
 from .lifecycle import get_container, inspect_state, list_containers, start_container
@@ -85,14 +85,6 @@ def build_spawn_command(
     return cmd
 
 
-def _find_agent_containers_cmd() -> list[str]:
-    """Locate the agent-containers CLI used as the transport wrapper."""
-    which = shutil.which("agent-containers")
-    if which:
-        return [which]
-    return [sys.executable, "-m", "agent_containers"]
-
-
 def build_wrapper_command(name: str) -> list[str]:
     """Build the spawn command agent-bridge runs for a ``container:`` agent.
 
@@ -100,8 +92,12 @@ def build_wrapper_command(name: str) -> list[str]:
     directly. The wrapper fetches the host ``gh`` token at spawn time and
     injects it into the container's environment, so the token NEVER lands in
     the SpawnTarget (which agent-bridge persists to its SQLite DB) or in any log.
+
+    Invokes the module directly (``python -m agent_containers``), never the
+    ``.cmd`` binstub, so agent-bridge does not route the spawn through
+    cmd.exe and mangle forwarded arguments (see ``._invoke``).
     """
-    return [*_find_agent_containers_cmd(), "exec", "--stdio", name]
+    return [*module_argv(), "exec", "--stdio", name]
 
 
 class ContainerResolver:

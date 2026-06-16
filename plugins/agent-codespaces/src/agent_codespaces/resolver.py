@@ -18,10 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import shutil
-import sys
 from typing import TYPE_CHECKING
 
+from ._invoke import module_argv
 from .config import load_merged_config
 from .lifecycle import list_codespaces
 
@@ -32,29 +31,19 @@ if TYPE_CHECKING:
 log = logging.getLogger("agent-codespaces")
 
 
-def _find_agent_codespaces_cmd() -> str:
-    """Find the agent-codespaces CLI command path."""
-    which = shutil.which("agent-codespaces")
-    if which:
-        return which
-    return sys.executable
-
-
 def _build_spawn_command(codespace_name: str, acp_command: str) -> list[str]:
     """Build the spawn command for a codespace agent.
 
     The ``acp_command`` is read from ``codespaces.yaml`` defaults and
     passed as ``--remote-cmd`` to ``agent-codespaces ssh --stdio``.
+
+    Invokes the module directly (``python -m agent_codespaces``) rather
+    than the ``.cmd`` binstub so agent-bridge does not route the spawn
+    through cmd.exe, which would expand ``%VAR%`` tokens in the
+    ``--remote-cmd`` payload and mangle it (see ``._invoke``).
     """
-    cmd_path = _find_agent_codespaces_cmd()
-    if cmd_path == sys.executable:
-        return [
-            cmd_path, "-m", "agent_codespaces",
-            "ssh", codespace_name, "--stdio",
-            "--remote-cmd", acp_command,
-        ]
     return [
-        cmd_path,
+        *module_argv(),
         "ssh", codespace_name, "--stdio",
         "--remote-cmd", acp_command,
     ]

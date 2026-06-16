@@ -14,13 +14,12 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
-import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
 
+from ._invoke import module_argv
 from .lifecycle import CodespaceInfo, list_codespaces
 
 log = logging.getLogger("agent-codespaces")
@@ -55,16 +54,6 @@ def _load_bridge_token() -> str | None:
     return None
 
 
-def _find_agent_codespaces_cmd() -> str:
-    """Find the agent-codespaces CLI command path."""
-    # Check if we're running as an installed command
-    which = shutil.which("agent-codespaces")
-    if which:
-        return which
-    # Fallback: use python -m
-    return sys.executable
-
-
 def build_agent_configs(
     codespaces: list[CodespaceInfo] | None = None,
 ) -> list[dict[str, Any]]:
@@ -92,22 +81,16 @@ def build_agent_configs(
             )
             continue
 
-        # Build the spawn command
-        cmd_path = _find_agent_codespaces_cmd()
-        if cmd_path == sys.executable:
-            spawn_cmd = [
-                cmd_path, "-m", "agent_codespaces",
-                "ssh", "--stdio", cs.name,
-                "--repo", cs.repository,
-                "--remote-cmd", acp_command,
-            ]
-        else:
-            spawn_cmd = [
-                cmd_path,
-                "ssh", "--stdio", cs.name,
-                "--repo", cs.repository,
-                "--remote-cmd", acp_command,
-            ]
+        # Build the spawn command. Invoke the module directly
+        # (python -m agent_codespaces), never the .cmd binstub, so
+        # agent-bridge does not route the spawn through cmd.exe and mangle
+        # %VAR% tokens in the --remote-cmd payload (see ._invoke).
+        spawn_cmd = [
+            *module_argv(),
+            "ssh", "--stdio", cs.name,
+            "--repo", cs.repository,
+            "--remote-cmd", acp_command,
+        ]
 
         # Sanitize name for agent-bridge (lowercase, alphanumeric + dash)
         agent_name = f"cs-{cs.name}".lower()

@@ -107,6 +107,31 @@ class TestBuildAgentConfigs:
         cmd = agents[0]["spawn_command"]
         assert "custom-copilot --acp --stdio" in cmd
 
+    def test_spawn_command_uses_module_not_binstub(self):
+        """Spawn via ``python -m agent_codespaces``, never the .cmd binstub,
+        so agent-bridge does not route the spawn through cmd.exe (which would
+        expand %VAR% tokens in --remote-cmd and mangle the payload)."""
+        agents = build_agent_configs(SAMPLE_CODESPACES)
+        cmd = agents[0]["spawn_command"]
+        assert cmd[1:3] == ["-m", "agent_codespaces"]
+        assert not cmd[0].lower().endswith((".cmd", ".bat"))
+
+    def test_spawn_command_preserves_percent_var(self):
+        """A %VAR% token in acp_command stays one intact argv element
+        (regression: the .cmd binstub + cmd.exe would expand/mangle it)."""
+        from agent_codespaces.config import CodespacesConfig
+
+        payload = 'cd "%WORKSPACE%" && copilot --acp --stdio'
+        mock_config = CodespacesConfig(acp_command=payload)
+        with patch(
+            "agent_codespaces.config.load_merged_config",
+            return_value=mock_config,
+        ):
+            agents = build_agent_configs(SAMPLE_CODESPACES)
+        cmd = agents[0]["spawn_command"]
+        assert payload in cmd
+        assert cmd[cmd.index("--remote-cmd") + 1] == payload
+
     def test_empty_codespace_list(self):
         agents = build_agent_configs([])
         assert agents == []
