@@ -700,68 +700,79 @@ def _resolve_target(
         if exc.status != 404:
             raise
 
-    # Try as agent name -- reuse or start a session
+    # Try as agent name -- match against listed names AND aliases, resolving to
+    # the canonical (raw) agent name so the friendly name an effort spec stores
+    # (e.g. ``codespace:type-filters-adoption``, or the bare ``type-filters-
+    # adoption``) works and still keys the one-session-per-CodeSpace guard by the
+    # raw name. A bare name that matches more than one agent balks (#50).
     try:
         agents = client.list_agents()
-        agent_names = [a.get("name", "") for a in agents]
-        if target in agent_names:
-            return _start_agent_session(
-                client, target,
-                force_new=force_new,
-                refuse_on_conflict=refuse_on_conflict,
-            )
     except BridgeClientError:
-        pass
+        agents = []
 
-    # Namespace fallback: if target has no ":" prefix, try each
-    # registered namespace (e.g. "codespace:<target>").
-    if ":" not in target:
-        try:
-            agents = client.list_agents()
-            agent_names = [a.get("name", "") for a in agents]
-            # Collect unique namespace prefixes from agent names
-            prefixes = sorted({
-                n.split(":")[0]
-                for n in agent_names
-                if ":" in n
-            })
-            for prefix in prefixes:
-                candidate = f"{prefix}:{target}"
-                if candidate in agent_names:
-                    print(
-                        f"[>] Resolved '{target}' as '{candidate}'",
-                    )
-                    return _start_agent_session(
-                        client, candidate,
-                        force_new=force_new,
-                        refuse_on_conflict=refuse_on_conflict,
-                    )
-            # No exact match even with prefix -- try start_session
-            # directly and let the server's resolve_async try namespace
-            # resolvers (which may do on-demand lookup). A conflict refusal
-            # (_AgentSessionConflict) propagates -- only transient failures
-            # advance to the next candidate.
-            for prefix in prefixes:
-                candidate = f"{prefix}:{target}"
-                try:
-                    print(
-                        f"[>] Trying '{candidate}'...",
-                    )
-                    return _start_agent_session(
-                        client, candidate,
-                        force_new=force_new,
-                        refuse_on_conflict=refuse_on_conflict,
-                    )
-                except (BridgeClientError, SystemExit):
-                    continue
-        except BridgeClientError:
-            pass
+    matches = _match_agents(target, agents)
+    if len(matches) > 1:
+        print(
+            f"[FAIL] Agent name '{target}' is ambiguous -- it matches "
+            f"{len(matches)} agents: {', '.join(matches)}.\n"
+            "       Qualify it with a namespace (e.g. 'codespace:<name>') or "
+            "use the exact name to disambiguate.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if len(matches) == 1:
+        return _start_agent_session(
+            client, matches[0],
+            force_new=force_new,
+            refuse_on_conflict=refuse_on_conflict,
+        )
+
+    # Not in the cached agent list -- hand the target to the server as-is so its
+    # resolver can do an on-demand lookup (a brand-new codespace) and apply its
+    # own friendly/bare resolution + ambiguity balk.
+    try:
+        return _start_agent_session(
+            client, target,
+            force_new=force_new,
+            refuse_on_conflict=refuse_on_conflict,
+        )
+    except BridgeClientError as exc:
+        if exc.status != 404:
+            print(f"[FAIL] {exc.detail}", file=sys.stderr)
+            sys.exit(1)
 
     print(
         f"[FAIL] '{target}' is not a known agent name or session ID",
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+def _match_agents(target: str, agents: list[dict]) -> list[str]:
+    """Return the canonical names of agents a target matches (#50).
+
+    An agent matches if ``target`` equals its name or any alias, or -- when
+    ``target`` is bare (no namespace prefix) -- the unprefixed form of its name
+    or any alias. Returns the canonical ``name`` of each distinct match so the
+    caller can resolve to the raw agent name (conflict-safe) and detect
+    collisions across namespaces.
+    """
+    matches: list[str] = []
+    bare = ":" not in target
+    for a in agents:
+        name = a.get("name", "")
+        if not name:
+            continue
+        forms = {name, *(a.get("aliases") or [])}
+        if target in forms:
+            if name not in matches:
+                matches.append(name)
+            continue
+        if bare:
+            bare_forms = {f.split(":", 1)[1] for f in forms if ":" in f}
+            if target in bare_forms and name not in matches:
+                matches.append(name)
+    return matches
 
 
 def _cmd_create(args: argparse.Namespace) -> None:
