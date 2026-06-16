@@ -299,6 +299,20 @@ class BridgeClient:
         """GET /api/v1/sessions/{id}/usage"""
         return self._request("GET", f"/api/v1/sessions/{session_id}/usage") or {}
 
+    def get_session_status(
+        self, session_id: str, *, caller_id: str | None = None
+    ) -> dict[str, Any]:
+        """GET /api/v1/sessions/{id}/status -- compact dispatch status.
+
+        Includes the in-flight tool (with ``elapsed_s``) and the caller's
+        cursor position vs head, so a watcher can check progress without
+        dumping the whole feed.
+        """
+        params = {"caller_id": caller_id} if caller_id else None
+        return self._request(
+            "GET", f"/api/v1/sessions/{session_id}/status", params=params
+        ) or {}
+
     def start_session(
         self,
         *,

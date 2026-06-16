@@ -180,6 +180,11 @@ agent-bridge sessions --status idle
 # Check context window usage for a session
 agent-bridge session-usage <session-id>
 
+# Compact one-screen status: state, in-flight tool + elapsed, and how far
+# behind your delivery cursor is (head/acked) -- without dumping the feed.
+agent-bridge status <session-id>
+agent-bridge status <session-id> --steps 5   # also show the last 5 collapsed steps
+
 # Wait for a running session's current turn
 agent-bridge wait <session-id>
 
@@ -423,9 +428,15 @@ $pyb = "$env:USERPROFILE\.agent-bridge\venv\Scripts\python.exe"
 
 ### 3. Monitor cheaply — through the bridge, at phase boundaries
 
-- One `agent-bridge sessions` (state) + one cursor-neutral
-  `agent-bridge read <sid> --range A:B` (slice the tail / grep `PROGRESS`) per
-  check, at the *expected* phase boundaries (after setup, build ETA, test ETA) —
+- Prefer `agent-bridge status <sid>` — one compact screen with the session
+  state, the **in-flight tool + elapsed** (so you can tell a busy agent from a
+  hung one), and your cursor lag (`behind` N events). It surfaces the
+  tool-progress liveness that a plain `read` cannot see.
+- To peek at recent output without disturbing the live cursor, use a
+  cursor-neutral incremental read: `agent-bridge read <sid> --tail N` (last N
+  events) or `--since <id>` (only-new after an id). These replace the old
+  `--range A:B | tail` slice-the-whole-feed workaround.
+- Do this at the *expected* phase boundaries (after setup, build ETA, test ETA) —
   **not** continuously, and **never** dump the whole feed into your context.
 - The `CONTEXT` % column is a coarse progress signal (see Context Window
   Monitoring).

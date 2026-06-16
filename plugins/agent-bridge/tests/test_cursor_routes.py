@@ -131,3 +131,50 @@ class TestRangeEndpoint:
         client.get("/api/v1/sessions/sess-1/events/range", params={"start": 1})
         cur = client.get("/api/v1/sessions/sess-1/cursor")
         assert cur.json()["last_acked_id"] == 0
+
+
+class TestStatusEndpoint:
+    """GET /api/v1/sessions/{id}/status -- compact dispatch status (#46.1)."""
+
+    def test_status_nonexistent(self, client) -> None:
+        resp = client.get("/api/v1/sessions/nope/status")
+        assert resp.status_code == 404
+
+    def test_status_reports_head_and_cursor_lag(self, client, app) -> None:
+        _seed_session(app, events=[
+            {"id": 1, "event": "agent_message", "data": {"text": "a"}},
+            {"id": 2, "event": "agent_message", "data": {"text": "b"}},
+            {"id": 3, "event": "agent_message", "data": {"text": "c"}},
+        ])
+        # Ack up to event 1 for caller "a"; status should report behind=2.
+        client.post("/api/v1/sessions/sess-1/cursor",
+                    json={"last_id": 1, "caller_id": "a"})
+        resp = client.get("/api/v1/sessions/sess-1/status",
+                          params={"caller_id": "a"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "idle"
+        assert body["head_id"] == 3
+        assert body["last_acked_id"] == 1
+        assert body["behind"] == 2
+        assert body["active_tool"] is None
+
+    def test_status_surfaces_in_flight_tool(self, client, app) -> None:
+        from agent_bridge.events import EventLog
+
+        mgr = _seed_session(app)
+        # An in-flight tool lives only in the in-memory event log; the status
+        # endpoint surfaces it (with elapsed) where `read` cannot see it.
+        log = EventLog()
+        log.append("tool_call_start", {
+            "tool_call_id": "t1", "title": "Build",
+            "raw_input": {"command": "rush build"},
+        })
+        mgr._sessions["sess-1"].event_log = log
+        resp = client.get("/api/v1/sessions/sess-1/status")
+        assert resp.status_code == 200
+        active = resp.json()["active_tool"]
+        assert active is not None
+        assert active["title"] == "Build"
+        assert active["command"] == "rush build"
+        assert active["elapsed_s"] >= 0.0
