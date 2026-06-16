@@ -269,6 +269,7 @@ async def get_session_status(
         "last_acked_id": last_acked,
         "behind": max(0, head_id - last_acked),
         "active_tool": active,
+        "progress": dict(session.progress),
         "updated_at": datetime.fromtimestamp(
             session.updated_at, tz=timezone.utc
         ).isoformat(),

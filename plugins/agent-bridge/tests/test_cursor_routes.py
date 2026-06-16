@@ -178,3 +178,11 @@ class TestStatusEndpoint:
         assert active["title"] == "Build"
         assert active["command"] == "rush build"
         assert active["elapsed_s"] >= 0.0
+
+    def test_status_surfaces_progress_markers(self, client, app) -> None:
+        # #46.3: structured PROGRESS markers the agent reported are exposed.
+        mgr = _seed_session(app)
+        mgr._sessions["sess-1"].progress = {"build": "ok", "pr": "42"}
+        resp = client.get("/api/v1/sessions/sess-1/status")
+        assert resp.status_code == 200
+        assert resp.json()["progress"] == {"build": "ok", "pr": "42"}
