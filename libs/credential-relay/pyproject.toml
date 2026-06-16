@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-credential-relay"
-version = "0.1.0-dev1"
+version = "0.1.0-dev2"
 description = "Shared credential relay framework + host-credential sources for Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"
