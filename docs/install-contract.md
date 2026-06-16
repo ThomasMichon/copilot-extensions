@@ -14,7 +14,7 @@ uv venv  ~/.<runtime>/.venv
 uv pip install [--reinstall-package <pkg>] "<plugin_dir>"   # NON-editable
             └─ resolves deps from pyproject.toml (pyyaml, ssh-manager, …)
 stamp _build_info.py  →  INTO the installed site-packages copy (after install)
-binstub  ~/.local/bin/<name>(.cmd)  →  the venv console script
+binstub  ~/.local/bin/<name>.ps1 (+ .cmd fallback)  →  signed venv python -m
 write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 ```
 
@@ -32,6 +32,8 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
      generated `…\Scripts\<name>.exe` console-script trampoline. That trampoline
      is an unsigned, zero-reputation PE that Smart App Control blocks
      (CodeIntegrity 3077). See [SAC-safe launchers (Windows)](#sac-safe-launchers-windows).
+     The binstub itself is a `.ps1` (primary) plus a `.cmd` (fallback) — see
+     [Binstub format (Windows)](#binstub-format-windows).
 3. **Deps come from `pyproject.toml`**, not ad-hoc `uv pip install pyyaml`.
    Sibling libs not on PyPI (e.g. `ssh-manager`) are `uv pip install`ed from
    their vendored dir **before** the plugin.
@@ -91,6 +93,66 @@ Reference implementation: `Get-SignedBasePython` + `New-SignedVenv` and the
 `plugins/agent-bridge/scripts/install.ps1` (mirrored in `agent-worktrees`,
 `agent-codespaces`, and `agent-containers`). `tools/check-install-contract.py`
 flags any `install.ps1` that launches the `…\Scripts\<name>.exe` trampoline.
+
+## Binstub format (Windows)
+
+The SAC rule above fixes *what the binstub launches* (`python.exe -m <pkg>`).
+This rule fixes *what the binstub is*. Each Windows entry point in
+`~/.local/bin` is deployed as **two files**:
+
+- **`<name>.ps1` — the primary.** PowerShell's command resolution ranks an
+  ExternalScript (`.ps1`) above an Application (`.cmd`/`.exe`) **within the same
+  directory**, so a bare `<name>` typed (or spawned) in pwsh resolves to the
+  `.ps1` — no `PATHEXT` change required. The body forwards the argument array
+  verbatim with `@args`:
+
+  ```powershell
+  $env:PYTHONUTF8 = '1'
+  & "<venv>\Scripts\python.exe" -m <pkg> @args
+  exit $LASTEXITCODE
+  ```
+
+- **`<name>.cmd` — the fallback.** Kept for non-PowerShell callers (cmd.exe, a
+  bare `CreateProcess`/`PATHEXT` spawn, `cmd /c` Windows Terminal profiles, ssh
+  launchers) that cannot resolve a `.ps1`. Forwards with `%*`.
+
+### Why `.ps1` is primary, not `.cmd`
+
+A `.cmd` forwarding `%*` **re-tokenizes** the command line through cmd.exe's
+parser, which mangles — and can *inject* — shell metacharacters. For a payload
+like `agent-bridge send peer 'echo "x" && ls | grep $HOME'`, cmd strips the
+quotes, splits the argument, and executes `ls`/`grep` as separate commands
+(operator injection). `setlocal enabledelayedexpansion` + `!args!` does **not**
+fix this (embedded `"` still breaks it, and `!` is corrupted as the expansion
+sigil). PowerShell hands the script an already-parsed argv array and `@args`
+splats it to the child with correct Windows quoting — one parse, no injection.
+Validated against quotes, `&&`, `|`, `;`, `!`, `$`, and globs. This matters
+most for `agent-bridge send … '<cmd>'` and `agent-codespaces ssh … --remote-cmd
+'<cmd>'`, whose payloads are themselves shell commands.
+
+### The earlier-PATH-shadow gotcha
+
+PowerShell prefers `.ps1` over `.cmd` **only within one directory**. Resolution
+is still PATH-order first: a same-named stub in an *earlier* PATH directory
+wins regardless of extension. A stray `pip install`'d `<name>.exe` in a system
+`Python3xx\Scripts` that precedes `~/.local/bin` will shadow the binstub (both
+`.ps1` and `.cmd`) and silently re-introduce SAC blocks and arg mangling. When
+diagnosing, check `Get-Command <name> -All` resolves to `~/.local/bin` first;
+if not, uninstall the shadowing package from the offending Python.
+
+### Rules
+
+1. Deploy **both** `<name>.ps1` and `<name>.cmd`; the `.ps1` body uses `@args`,
+   the `.cmd` body uses `%*`. Both launch `python.exe -m <pkg>` (SAC rule).
+2. Write the `.ps1` **after** (or alongside) the `.cmd` in the same dir so it is
+   the preferred resolution; never deploy a `.cmd` without its `.ps1` sibling.
+3. `uninstall` removes **both** files; `status` reports the `.ps1` as primary
+   and warns if only the `.cmd` is present.
+
+Reference: `Write-Binstubs` in `plugins/agent-bridge/scripts/install.ps1`,
+`Deploy-Binstub` in `agent-codespaces`, and `Deploy-Binstub` /
+`Deploy-GlobalBinstub` (+ static `bin/agent-worktrees.ps1`) in
+`agent-worktrees`.
 
 ## Deploy manifest (schema_version 3)
 

@@ -278,20 +278,37 @@ function Deploy-Venv {
 }
 
 function Deploy-Binstub {
-    <# Create the agent-codespaces binstub pointing at the venv console script
-       (no PYTHONPATH). #>
+    <# Deploy the agent-codespaces CLI binstubs into ~/.local/bin.
+
+       Primary agent-codespaces.ps1 + agent-codespaces.cmd fallback. PowerShell
+       resolves a .ps1 (ExternalScript) ahead of a .cmd (Application) in the
+       same dir and forwards argv verbatim via @args, so quoting, &&, |, ;, and
+       ! in `ssh --remote-cmd` payloads survive intact. A .cmd forwarding %*
+       re-tokenizes the command line and mangles (and can inject) those; the
+       .cmd is kept only as a fallback for non-PowerShell callers (cmd.exe or a
+       bare CreateProcess/PATHEXT spawn). Both launch the signed venv python via
+       -m, never the SAC-blocked console-script trampoline .exe. #>
     if (-not (Test-Path $LocalBin)) {
         New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null
     }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+    $ps1Path = Join-Path $LocalBin 'agent-codespaces.ps1'
+    $ps1Content = @'
+$env:PYTHONUTF8 = '1'
+& "$env:USERPROFILE\.agent-codespaces\.venv\Scripts\python.exe" -m agent_codespaces @args
+exit $LASTEXITCODE
+'@
+    [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
+
     $stubPath = Join-Path $LocalBin 'agent-codespaces.cmd'
     $stubContent = @"
 @echo off
 set "PYTHONUTF8=1"
 "%USERPROFILE%\.agent-codespaces\.venv\Scripts\python.exe" -m agent_codespaces %*
 "@
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
-    Write-ServiceOk "Binstub: $stubPath"
+    Write-ServiceOk "Binstub: $ps1Path (+ .cmd fallback)"
 
     # Ensure ~/.local/bin is on User PATH
     $currentUserPath = [System.Environment]::GetEnvironmentVariable('PATH', 'User')
@@ -419,11 +436,16 @@ function Invoke-Uninstall {
     Stop-ManagedSshConnections
 
     # Remove binstub
-    $stubPath = Join-Path $LocalBin 'agent-codespaces.cmd'
-    if (Test-Path $stubPath) {
-        Remove-Item $stubPath -Force
-        Write-ServiceChanged "Removed binstub: $stubPath"
-    } else {
+    $removedStub = $false
+    foreach ($stub in @('agent-codespaces.ps1', 'agent-codespaces.cmd')) {
+        $stubPath = Join-Path $LocalBin $stub
+        if (Test-Path $stubPath) {
+            Remove-Item $stubPath -Force
+            Write-ServiceChanged "Removed binstub: $stubPath"
+            $removedStub = $true
+        }
+    }
+    if (-not $removedStub) {
         Write-ServiceSkipped "Binstub not found"
     }
 
@@ -492,11 +514,15 @@ function Invoke-Status {
     }
 
     # Binstub
-    $stubPath = Join-Path $LocalBin 'agent-codespaces.cmd'
-    if (Test-Path $stubPath) {
-        Write-ServiceOk "Binstub: $stubPath"
+    $ps1Path = Join-Path $LocalBin 'agent-codespaces.ps1'
+    $cmdPath = Join-Path $LocalBin 'agent-codespaces.cmd'
+    if (Test-Path $ps1Path) {
+        $suffix = if (Test-Path $cmdPath) { ' (+ .cmd fallback)' } else { '' }
+        Write-ServiceOk "Binstub: $ps1Path$suffix"
+    } elseif (Test-Path $cmdPath) {
+        Write-ServiceWarn "Only .cmd fallback present: $cmdPath (no .ps1 -- args may mangle in PowerShell)"
     } else {
-        Write-ServiceWarn "Binstub not found at $stubPath"
+        Write-ServiceWarn "Binstub not found at $ps1Path"
     }
 
     # Version (from the installed package, via the SAC-safe launch path)

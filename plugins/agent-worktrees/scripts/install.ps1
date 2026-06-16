@@ -699,30 +699,74 @@ exit /b %ERRORLEVEL%
 "@
     $dst = Join-Path $LocalBin "$ProjectName.cmd"
     Set-Content -Path $dst -Value $content -NoNewline
-    Write-ServiceOk "Binstub: $dst"
+
+    # Primary .ps1 (PowerShell prefers it over the .cmd in the same dir; @args
+    # forwards argv verbatim so quoting/&&/|/;/! survive). The .cmd above stays
+    # as a fallback for cmd.exe, `cmd /c` Windows Terminal profiles, and ssh
+    # launchers. Both route through the signed venv python via -m, falling back
+    # to launch-session when the venv is missing (recovery).
+    $ps1Content = (@'
+$env:PYTHONUTF8 = '1'
+# This .ps1 is the primary resolution for a bare `<project>` in pwsh and runs
+# in-process in the caller's session (unlike the .cmd, which got isolation via
+# a child cmd.exe). Save+restore the worktree env so it is scoped to the child
+# python only and never mutates the caller's live session. Drop inherited
+# WORKTREE_ID so resolution uses CWD (issue #25).
+$_savedProj = $env:WORKTREE_PROJECT
+$_savedWid  = $env:WORKTREE_ID
+$_savedAwid = $env:APERTURE_WORKTREE_ID
+$env:WORKTREE_PROJECT = '%%PROJECT%%'
+Remove-Item Env:WORKTREE_ID -ErrorAction SilentlyContinue
+Remove-Item Env:APERTURE_WORKTREE_ID -ErrorAction SilentlyContinue
+try {
+    $_py = "$env:USERPROFILE\.agent-worktrees\.venv\Scripts\python.exe"
+    if (Test-Path $_py) {
+        & $_py -m agent_worktrees @args
+    } else {
+        & "$env:USERPROFILE\.agent-worktrees\bin\launch-session.cmd" @args
+    }
+    $_rc = $LASTEXITCODE
+} finally {
+    if ($null -eq $_savedProj) { Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue } else { $env:WORKTREE_PROJECT = $_savedProj }
+    if ($null -eq $_savedWid)  { Remove-Item Env:WORKTREE_ID -ErrorAction SilentlyContinue }       else { $env:WORKTREE_ID = $_savedWid }
+    if ($null -eq $_savedAwid) { Remove-Item Env:APERTURE_WORKTREE_ID -ErrorAction SilentlyContinue } else { $env:APERTURE_WORKTREE_ID = $_savedAwid }
+}
+exit $_rc
+'@).Replace('%%PROJECT%%', $ProjectName)
+    $ps1Dst = Join-Path $LocalBin "$ProjectName.ps1"
+    [System.IO.File]::WriteAllText($ps1Dst, $ps1Content, (New-Object System.Text.UTF8Encoding($false)))
+    Write-ServiceOk "Binstub: $ps1Dst (+ .cmd fallback)"
 }
 
 
 function Deploy-GlobalBinstub {
-    <# Deploy the project-agnostic ~/.local/bin/agent-worktrees.cmd from the
-       plugin's static bin/agent-worktrees.cmd. Runs as its own early step
-       (not buried in WT shortcut handling) so the SAC-safe launcher is always
-       refreshed on install/update.
+    <# Deploy the project-agnostic ~/.local/bin/agent-worktrees.{ps1,cmd} from
+       the plugin's static bin/agent-worktrees.{ps1,cmd}. Runs as its own early
+       step (not buried in WT shortcut handling) so the SAC-safe launcher is
+       always refreshed on install/update.
+
+       The .ps1 is the primary entry point: PowerShell resolves a .ps1
+       (ExternalScript) ahead of a .cmd (Application) in the same dir, and
+       @args forwards argv verbatim. The .cmd is kept as a fallback for callers
+       that cannot resolve a .ps1 (cmd.exe, `cmd /c` Windows Terminal profiles,
+       ssh launchers).
 
        Skip the copy when on-disk content already matches (newline-normalized):
        running the global stub while overwriting it with a different-length
        file corrupts cmd.exe's byte-offset read (issue #13). #>
     Ensure-InstallDir $LocalBin
-    $src = Join-Path $PluginDir 'bin\agent-worktrees.cmd'
-    $dst = Join-Path $LocalBin 'agent-worktrees.cmd'
-    if (Test-Path $src) {
-        $srcNorm = ([System.IO.File]::ReadAllText($src)) -replace "`r`n", "`n" -replace "`r", "`n"
-        $dstNorm = if (Test-Path $dst) { ([System.IO.File]::ReadAllText($dst)) -replace "`r`n", "`n" -replace "`r", "`n" } else { $null }
-        if ($srcNorm -cne $dstNorm) {
-            Copy-Item $src $dst -Force
-            Write-ServiceOk "Global binstub: $dst"
-        } else {
-            Write-ServiceSkipped "Global binstub up to date"
+    foreach ($name in @('agent-worktrees.ps1', 'agent-worktrees.cmd')) {
+        $src = Join-Path $PluginDir "bin\$name"
+        $dst = Join-Path $LocalBin $name
+        if (Test-Path $src) {
+            $srcNorm = ([System.IO.File]::ReadAllText($src)) -replace "`r`n", "`n" -replace "`r", "`n"
+            $dstNorm = if (Test-Path $dst) { ([System.IO.File]::ReadAllText($dst)) -replace "`r`n", "`n" -replace "`r", "`n" } else { $null }
+            if ($srcNorm -cne $dstNorm) {
+                Copy-Item $src $dst -Force
+                Write-ServiceOk "Global binstub: $dst"
+            } else {
+                Write-ServiceSkipped "Global binstub up to date: $dst"
+            }
         }
     }
 }
@@ -1553,7 +1597,7 @@ function Assert-PathIncludes {
 }
 
 function Remove-Binstub {
-    foreach ($stub in @("$ProjectName.cmd", 'mark-session-complete.cmd', 'agent-worktrees.cmd')) {
+    foreach ($stub in @("$ProjectName.cmd", "$ProjectName.ps1", 'mark-session-complete.cmd', 'mark-session-complete.ps1', 'agent-worktrees.cmd', 'agent-worktrees.ps1')) {
         $path = Join-Path $LocalBin $stub
         if (Test-Path $path) {
             Remove-Item $path -Force
@@ -1779,12 +1823,16 @@ switch ($Action) {
             }
         }
 
-        # Binstub
-        $binstub = Join-Path $LocalBin "$ProjectName.cmd"
-        if (Test-Path $binstub) {
-            Write-ServiceOk "Binstub installed at $binstub"
+        # Binstub (.ps1 primary, .cmd fallback)
+        $binstubPs1 = Join-Path $LocalBin "$ProjectName.ps1"
+        $binstubCmd = Join-Path $LocalBin "$ProjectName.cmd"
+        if (Test-Path $binstubPs1) {
+            $sfx = if (Test-Path $binstubCmd) { ' (+ .cmd fallback)' } else { '' }
+            Write-ServiceOk "Binstub installed at $binstubPs1$sfx"
+        } elseif (Test-Path $binstubCmd) {
+            Write-ServiceWarn "Only .cmd fallback at $binstubCmd (no .ps1 -- args may mangle in PowerShell)"
         } else {
-            Write-ServiceErr "Binstub missing at $binstub"
+            Write-ServiceErr "Binstub missing at $binstubPs1"
         }
 
         # Config (project dir)
