@@ -23,6 +23,14 @@ from .platform import (
 
 log = logging.getLogger("ssh-manager")
 
+# Max bytes for a single newline-delimited frame read from a multiplexed stdio
+# channel. asyncio's StreamReader defaults to 64 KiB per line; ACP
+# `session/update` frames carrying a large tool result can exceed that in one
+# frame, overflowing readline() and tearing down the channel ("Connection
+# closed"). Mirror the acp library's 50 MB default so remote ACP sessions match
+# local ones.
+_STDIO_CHANNEL_LIMIT_BYTES = 50 * 1024 * 1024
+
 # Module-level default instance (lazy-initialized)
 _default_manager: ConnectionManager | None = None
 
@@ -384,6 +392,7 @@ class ConnectionManager:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=_creation_flags(),
+            limit=_STDIO_CHANNEL_LIMIT_BYTES,
         )
 
         return proc
