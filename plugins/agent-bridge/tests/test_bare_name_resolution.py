@@ -124,3 +124,48 @@ async def test_failing_resolver_does_not_break_resolution():
     # The codespace resolver's list() blows up but resolution still finds foo.
     target = await r.resolve_async("foo")
     assert target.spawn_command == ["echo", "container:foo"]
+
+
+# -- CLI-side target matching (_match_agents) --------------------------------
+
+from agent_bridge import __main__ as m  # noqa: E402
+
+
+def _agent(name, aliases=None):
+    return {"name": name, "aliases": aliases or []}
+
+
+def test_match_prefixed_friendly_alias_to_canonical():
+    agents = [_agent("codespace:type-filters-adoption-7qv",
+                     aliases=["codespace:type-filters-adoption"])]
+    # Prefixed friendly name resolves to the raw canonical name.
+    assert m._match_agents("codespace:type-filters-adoption", agents) == [
+        "codespace:type-filters-adoption-7qv"
+    ]
+
+
+def test_match_bare_friendly_via_alias_bare_form():
+    agents = [_agent("codespace:type-filters-adoption-7qv",
+                     aliases=["codespace:type-filters-adoption"])]
+    assert m._match_agents("type-filters-adoption", agents) == [
+        "codespace:type-filters-adoption-7qv"
+    ]
+
+
+def test_match_exact_raw_name():
+    agents = [_agent("codespace:foo-aaa", aliases=["codespace:foo"])]
+    assert m._match_agents("codespace:foo-aaa", agents) == ["codespace:foo-aaa"]
+
+
+def test_match_bare_collision_returns_all():
+    agents = [
+        _agent("codespace:foo-aaa", aliases=["codespace:foo"]),
+        _agent("container:foo"),
+    ]
+    matches = m._match_agents("foo", agents)
+    assert set(matches) == {"codespace:foo-aaa", "container:foo"}
+
+
+def test_match_none():
+    agents = [_agent("codespace:foo-aaa", aliases=["codespace:foo"])]
+    assert m._match_agents("nope", agents) == []
