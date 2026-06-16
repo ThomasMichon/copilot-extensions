@@ -125,7 +125,8 @@ flowchart TB
   worktree via the agent's `project`).
 - **Remote** — SSH to a machine declared in `machines.yaml` with
   `ssh.ready: true`.
-- **CodeSpace** — agent-codespaces resolves `codespace:<name>`, auto-starts a
+- **CodeSpace** — agent-codespaces resolves `codespace:<name>` (by raw **or**
+  friendly/display name; the `codespace:` prefix is optional), auto-starts a
   Shutdown CodeSpace, opens SSH with the relay tunnel, and the bridge spawns
   `copilot --acp` inside it.
 

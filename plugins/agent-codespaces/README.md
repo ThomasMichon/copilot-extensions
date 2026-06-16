@@ -83,6 +83,13 @@ apply). After the CodeSpace is Available, `on_create` provisioning hooks from
 
 ### `bridge` options
 
+> **Usually unnecessary.** Once agent-codespaces is installed, agent-bridge
+> auto-registers the live `codespace:` namespace resolver, so CodeSpaces are
+> addressable as `codespace:<name>` (raw or friendly) with no registration.
+> `bridge register` only POSTs a static `cs-<name>` snapshot (with a TTL) for
+> HTTP consumers that prefer a pre-registered provider list; it is optional and
+> superseded by the resolver.
+
 ```bash
 agent-codespaces bridge register   [--ttl 300] [--bridge-url <url>]
 agent-codespaces bridge refresh    [--ttl 300] [--bridge-url <url>]

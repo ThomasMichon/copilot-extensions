@@ -25,9 +25,20 @@ first-time setup and config changes, see the `codespaces-setup` skill.
 ## Connecting to CodeSpaces
 
 All CodeSpace interaction should go through **agent-bridge**, not raw SSH.
-CodeSpace agents are discovered automatically via the agent-codespaces
-namespace resolver — any CodeSpace (running or stopped) is addressable
-as `codespace:<name>`.
+CodeSpace agents are discovered **automatically** via the agent-codespaces
+namespace resolver — **no manual registration is needed past installation**
+(see *Agent-Bridge Integration* below). Any CodeSpace (running or stopped) is
+addressable as `codespace:<name>`, by either its **raw** name or its **friendly**
+(display) name. The `codespace:` prefix is optional — a bare name resolves too,
+and constrains nothing; use the prefix to force CodeSpace-only resolution. A
+bare name that collides with another agent makes the bridge **balk** and list
+the candidates.
+
+```bash
+agent-bridge send codespace:my-feature-branch "<prompt>"   # friendly, prefixed
+agent-bridge send my-feature-branch "<prompt>"             # friendly, bare
+agent-bridge send codespace:my-feature-branch-7qv4rv "..." # raw name also works
+```
 
 ### Agent-Bridge CLI
 
@@ -103,12 +114,16 @@ the bridge connection instead.
 > remote / PR API) — not by shelling into the CodeSpace. Reserve host SSH for a
 > CodeSpace whose dispatch is **stopped/idle**.
 
-> **CodeSpace dispatch sessions can drop on their own** (~10–15 min is common:
-> SSH idle/keepalive, the credential-relay TTL — see below, default 300 s — or a
-> bridge daemon restart). Design long jobs to survive it: dispatch an
-> **idempotent** prompt and have the agent **push early and often**, then
-> **resume on drop** (`agent-bridge end <sid>` → `agent-bridge create …`). See
-> the agent-bridge skill's *Dispatching Long Autonomous Work* flow.
+> **CodeSpace dispatch sessions are now resilient to the failures that used to
+> collapse them ~every 10–15 min.** The main culprit — the ACP stdio relay
+> giving up after 30 s of a quiet (output-buffered) remote tool call — is fixed,
+> and a bridge **daemon restart is survived** (a streaming `send`/`read`/`wait`
+> reconnects from its delivery cursor, and the next `send` auto-resumes the
+> session). Genuine drops are now rare but still possible (a CodeSpace idle
+> timeout, a network partition). Long jobs should still be **idempotent** and
+> **push early and often**, and you can **resume on drop**
+> (`agent-bridge end <sid>` → `agent-bridge create …`). See the agent-bridge
+> skill's *Dispatching Long Autonomous Work* flow.
 
 > **Always use `agent-codespaces ssh`**, not bare `gh codespace ssh`.
 > Raw `gh codespace ssh` bypasses ssh-manager and can conflict with
@@ -218,26 +233,32 @@ All requests pass through a policy gate before reaching any source:
 
 ## Agent-Bridge Integration
 
-Register active CodeSpaces as dynamic agents with agent-bridge. Both
-Available and Shutdown CodeSpaces are included (Shutdown ones auto-start
-on connection).
+**No manual registration is required.** When agent-codespaces is installed, its
+package is also imported into the agent-bridge service venv, and the bridge
+auto-registers the `codespace:` **namespace resolver** at startup. That resolver
+lists and resolves your CodeSpaces **live** (via `gh codespace list`) on demand —
+so `agent-bridge agents` shows them and `agent-bridge send codespace:<name>`
+works immediately, with no expiry, including newly-created CodeSpaces. This is
+the recommended path.
+
+### `bridge register` (optional / legacy)
+
+`agent-codespaces bridge register` POSTs a **static snapshot** of your current
+CodeSpaces to the bridge as `cs-<name>` provider agents with a TTL. The live
+namespace resolver supersedes it (live, no TTL, friendly names), so you rarely
+need this. It remains for HTTP consumers that prefer a pre-registered provider
+list over on-demand resolution.
 
 ```bash
-agent-codespaces bridge register
+agent-codespaces bridge register          # static cs-* snapshot (TTL 300s)
 agent-codespaces bridge register --ttl 600
 agent-codespaces bridge status
 agent-codespaces bridge unregister
 ```
 
-### TTL and Refresh
-
-Registrations expire after the TTL (default: 300s). For long sessions,
-either increase the TTL or re-register periodically.
-
-### Agent Naming
-
-CodeSpaces are registered as `cs-<codespace-name>` (lowercase, max 64
-chars). Use `agent-bridge agents` to see them after registration.
+Snapshot agents expire after the TTL (default 300s) and are named
+`cs-<codespace-name>` — distinct from the live `codespace:<name>` resolver
+targets. For day-to-day dispatch, prefer `codespace:<name>`.
 
 ## Troubleshooting
 
