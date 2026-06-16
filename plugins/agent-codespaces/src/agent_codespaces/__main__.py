@@ -52,6 +52,11 @@ log = logging.getLogger("agent-codespaces")
 # on connect, which can take well over a minute. Overridable via env.
 _SSH_BOOT_TIMEOUT = float(os.environ.get("AGENT_CODESPACES_BOOT_TIMEOUT", "180"))
 
+# Exit code when an SSH operation is rejected because the target is already in
+# use by another live process (see ssh_manager.TargetBusyError). Distinct from
+# generic failures (1) and the --remote-cmd timeout (124) so callers can react.
+_BUSY_EXIT = 75
+
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
@@ -92,6 +97,13 @@ def main(argv: list[str] | None = None) -> int:
         "--repo", dest="repo", default=None,
         help="CodeSpace repository (owner/name) -- selects per-repo "
              "provision hooks without an extra lookup",
+    )
+    ssh_parser.add_argument(
+        "--force", action="store_true",
+        help="Take over the target if another SSH operation is already in "
+             "progress against it: terminates the in-flight connection and "
+             "reclaims the target (discards its in-progress work). Without "
+             "this, a busy target is rejected with an explanatory error.",
     )
 
     # --- list ---
@@ -254,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _cmd_ssh(args: argparse.Namespace) -> int:
     """SSH into a CodeSpace using ssh-manager."""
-    from ssh_manager import ConnectionManager
+    from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
 
     source = CodespaceSource(args.name)
     config = load_merged_config()
@@ -369,7 +381,23 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             relay_port=relay_port if not args.no_relay else None,
         )
 
-    return asyncio.run(_run())
+    # Serialize SSH access to this CodeSpace across processes. All access funnels
+    # through one credential-relay reverse-forward (one relay port per host), so
+    # a second concurrent connection collides on that port and can collapse a
+    # live agent-bridge dispatch. Hold a per-target lock for the operation's
+    # lifetime; reject a busy target (or take over with --force).
+    op = "stdio" if args.stdio else ("remote-cmd" if args.remote_cmd else "interactive")
+    target_lock = TargetLock(args.name, op=op)
+    try:
+        target_lock.acquire(force=getattr(args, "force", False))
+    except TargetBusyError as busy:
+        print(busy.user_message(), file=sys.stderr)
+        return _BUSY_EXIT
+
+    try:
+        return asyncio.run(_run())
+    finally:
+        target_lock.release()
 
 
 async def _provision_relay_helpers(manager, name: str) -> None:

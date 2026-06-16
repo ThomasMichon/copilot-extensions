@@ -20,6 +20,7 @@ Usage::
 
 from .config_sources import ConfigSource, SSHConfig, SSHProfileSource
 from .health import HealthStatus, check_health, ensure_healthy
+from .locks import LockHolder, TargetBusyError, TargetLock, locks_dir, pid_alive
 from .manager import (
     CommandResult,
     ConnectionInfo,
@@ -34,12 +35,17 @@ __all__ = [
     "ConnectionInfo",
     "ConnectionManager",
     "HealthStatus",
+    "LockHolder",
     "MultiplexMode",
     "PlatformInfo",
     "SSHConfig",
     "SSHProfileSource",
+    "TargetBusyError",
+    "TargetLock",
     "check_health",
     "detect_platform",
     "ensure_healthy",
     "get_default_manager",
+    "locks_dir",
+    "pid_alive",
 ]

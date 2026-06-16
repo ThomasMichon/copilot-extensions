@@ -1,7 +1,7 @@
 {
   "name": "agent-codespaces",
   "description": "GitHub Codespaces lifecycle management, SSH transport, and credential relay -- persistent service for CodeSpace creation, deletion, SSH multiplexing, and credential forwarding",
-  "version": "0.3.4-dev15",
+  "version": "0.3.4-dev16",
   "author": {
     "name": "Thomas Michon"
   },

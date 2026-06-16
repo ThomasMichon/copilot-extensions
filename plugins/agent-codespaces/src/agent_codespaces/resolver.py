@@ -103,6 +103,12 @@ def _build_spawn_command(codespace_name: str, acp_command: str) -> list[str]:
     return [
         *module_argv(),
         "ssh", codespace_name, "--stdio",
+        # The bridge dispatch is the authoritative transport for this CodeSpace
+        # and must succeed even when a stale incumbent (e.g. a prior dispatch
+        # child that has not fully exited) still holds the per-target SSH lock.
+        # --force lets it reclaim the target; ad-hoc CLI calls omit it and are
+        # rejected against a busy target instead.
+        "--force",
         "--remote-cmd", acp_command,
     ]
 
