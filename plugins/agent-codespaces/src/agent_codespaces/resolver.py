@@ -31,6 +31,64 @@ if TYPE_CHECKING:
 log = logging.getLogger("agent-codespaces")
 
 
+class AmbiguousCodespaceError(ValueError):
+    """A friendly codespace name matched more than one codespace.
+
+    Carries the raw candidate names so the caller can disambiguate by raw
+    name. Subclasses ValueError so agent-bridge surfaces it as a 400 with the
+    enumerated candidates.
+    """
+
+    def __init__(self, name: str, raw_candidates: list[str]) -> None:
+        self.name = name
+        self.raw_candidates = raw_candidates
+        listed = ", ".join(f"codespace:{c}" for c in raw_candidates)
+        super().__init__(
+            f"Codespace name '{name}' is ambiguous -- it matches "
+            f"{len(raw_candidates)} codespaces: {listed}. "
+            "Use the full (raw) name to disambiguate."
+        )
+
+
+def _find_codespace(codespaces, name: str):
+    """Find a codespace by raw name or friendly (display) name.
+
+    An exact raw-name match always wins (unambiguous). Otherwise the friendly
+    display name is matched (exact, then case-insensitive). Raises
+    ``AmbiguousCodespaceError`` if a friendly name matches more than one
+    codespace, or ``KeyError`` if nothing matches.
+    """
+    # 1. Exact raw name -- authoritative and unambiguous.
+    for c in codespaces:
+        if c.name == name:
+            return c
+    # 2. Friendly (display) name -- exact, then case-insensitive.
+    lname = name.lower()
+    friendly = [
+        c for c in codespaces
+        if c.display_name and (
+            c.display_name == name or c.display_name.lower() == lname
+        )
+    ]
+    if len(friendly) == 1:
+        return friendly[0]
+    if len(friendly) > 1:
+        raise AmbiguousCodespaceError(name, [c.name for c in friendly])
+    # 3. Case-insensitive raw name.
+    for c in codespaces:
+        if c.name.lower() == lname:
+            return c
+    raise KeyError(name)
+
+
+def _friendly_aliases(cs) -> list[str]:
+    """Alternate names a codespace also answers to (its friendly display name)."""
+    aliases: list[str] = []
+    if cs.display_name and cs.display_name != cs.name:
+        aliases.append(cs.display_name)
+    return aliases
+
+
 def _build_spawn_command(codespace_name: str, acp_command: str) -> list[str]:
     """Build the spawn command for a codespace agent.
 
@@ -64,6 +122,7 @@ class CodespaceResolver:
     async def resolve(self, name: str) -> "SpawnTarget":
         """Resolve a codespace name to a SpawnTarget.
 
+        Accepts either the raw codespace name or its friendly (display) name.
         Accepts CodeSpaces in Available or Shutdown state.  Shutdown
         CodeSpaces will be started automatically by ``gh`` during the
         SSH connection (``gh codespace ssh --config`` triggers startup).
@@ -71,22 +130,21 @@ class CodespaceResolver:
         from agent_bridge.transport import SpawnTarget
 
         codespaces = await asyncio.to_thread(list_codespaces)
-        cs = None
-        for c in codespaces:
-            if c.name == name:
-                cs = c
-                break
-
-        if cs is None:
+        try:
+            cs = _find_codespace(codespaces, name)
+        except KeyError:
+            connectable = [
+                c.name for c in codespaces
+                if c.state in ("Available", "Shutdown")
+            ]
             raise KeyError(
-                f"Codespace '{name}' not found. "
-                f"Available: {[c.name for c in codespaces if c.state in ('Available', 'Shutdown')]}"
-            )
+                f"Codespace '{name}' not found. Available: {connectable}"
+            ) from None
 
         _CONNECTABLE_STATES = {"Available", "Shutdown"}
         if cs.state not in _CONNECTABLE_STATES:
             raise ValueError(
-                f"Codespace '{name}' is in state '{cs.state}' "
+                f"Codespace '{cs.name}' is in state '{cs.state}' "
                 f"(must be one of {_CONNECTABLE_STATES} to spawn an agent)"
             )
 
@@ -94,12 +152,14 @@ class CodespaceResolver:
             log.info(
                 "Codespace '%s' is Shutdown — will auto-start during SSH "
                 "connection (may take 60-120 s)",
-                name,
+                cs.name,
             )
 
         config = load_merged_config()
-        spawn_cmd = _build_spawn_command(name, config.effective_acp_command)
-        log.info("Resolved codespace:%s -> %s", name, " ".join(spawn_cmd))
+        # Always spawn against the RAW codespace name (gh requires it), even if
+        # the caller addressed it by friendly name.
+        spawn_cmd = _build_spawn_command(cs.name, config.effective_acp_command)
+        log.info("Resolved codespace:%s -> %s", cs.name, " ".join(spawn_cmd))
 
         return SpawnTarget(
             type="command",
@@ -131,6 +191,7 @@ class CodespaceResolver:
                 description=description,
                 icon="codespace",
                 state=state,
+                aliases=_friendly_aliases(cs),
             ))
 
         return agents
@@ -138,17 +199,17 @@ class CodespaceResolver:
     async def ensure_ready(self, name: str) -> None:
         """Verify codespace is reachable (or can be auto-started).
 
-        Accepts Available and Shutdown states.  Shutdown CodeSpaces are
-        auto-started by ``gh`` when the SSH connection is established,
-        so they are considered "ready" from the resolver's perspective.
+        Accepts the raw or friendly name, and Available/Shutdown states.
+        Shutdown CodeSpaces are auto-started by ``gh`` when the SSH connection
+        is established, so they are considered "ready" here.
         """
         codespaces = await asyncio.to_thread(list_codespaces)
-        for cs in codespaces:
-            if cs.name == name:
-                if cs.state in ("Available", "Shutdown"):
-                    return
-                raise RuntimeError(
-                    f"Codespace '{name}' is '{cs.state}' "
-                    f"(not in a connectable state)."
-                )
-        raise RuntimeError(f"Codespace '{name}' not found")
+        try:
+            cs = _find_codespace(codespaces, name)
+        except KeyError:
+            raise RuntimeError(f"Codespace '{name}' not found") from None
+        if cs.state in ("Available", "Shutdown"):
+            return
+        raise RuntimeError(
+            f"Codespace '{cs.name}' is '{cs.state}' (not in a connectable state)."
+        )
