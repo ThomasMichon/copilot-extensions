@@ -243,6 +243,18 @@ Write-Ok 'Package installed: agent-containers'
 
 $stubName = 'agent-containers'
 if ($env:OS -eq 'Windows_NT') {
+    # Primary .ps1 (PowerShell prefers it over the .cmd in the same dir; @args
+    # forwards argv verbatim so quoting/&&/|/;/! survive). The .cmd is kept as a
+    # fallback for non-PowerShell callers. Both launch the signed venv python
+    # via -m, never the SAC-blocked console-script trampoline .exe.
+    $ps1Path = Join-Path $LocalBin "$stubName.ps1"
+    $ps1Content = @'
+$env:PYTHONUTF8 = '1'
+& "$env:USERPROFILE\.agent-containers\.venv\Scripts\python.exe" -m agent_containers @args
+exit $LASTEXITCODE
+'@
+    [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
+
     $stubPath = Join-Path $LocalBin "$stubName.cmd"
     $stubContent = @"
 @echo off
@@ -250,6 +262,7 @@ set "PYTHONUTF8=1"
 "%USERPROFILE%\.agent-containers\.venv\Scripts\python.exe" -m agent_containers %*
 "@
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
+    $stubPath = "$ps1Path (+ .cmd fallback)"
 } else {
     $stubPath = Join-Path $LocalBin $stubName
     $stubContent = @"

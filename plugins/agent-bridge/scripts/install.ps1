@@ -51,7 +51,9 @@ $PluginDir  = (Resolve-Path (Join-Path $ScriptDir '..')).Path
 $InstallDir = Join-Path $env:USERPROFILE '.agent-bridge'
 $VenvDir    = Join-Path $InstallDir 'venv'
 $LocalBin   = Join-Path $env:USERPROFILE '.local\bin'
-$Binstub    = Join-Path $LocalBin 'agent-bridge.cmd'
+$BinstubCmd = Join-Path $LocalBin 'agent-bridge.cmd'
+$BinstubPs1 = Join-Path $LocalBin 'agent-bridge.ps1'
+$Binstub    = $BinstubPs1   # primary entry point (shown in summaries)
 $PidFile    = Join-Path $InstallDir 'agent-bridge.pid'
 $TaskName   = 'Agent Bridge'
 $Port       = 9280
@@ -496,6 +498,33 @@ function Invoke-MigrationCheck {
 
 # -- Actions -----------------------------------------------------------------
 
+function Write-Binstubs {
+    <# Deploy the agent-bridge CLI binstubs into ~/.local/bin.
+
+       Primary: agent-bridge.ps1. PowerShell resolves a .ps1 (ExternalScript)
+       ahead of a .cmd (Application) in the same directory, and `@args`
+       forwards the argument array to python verbatim -- quotes, &&, |, ;, and
+       ! in `send` / `--remote-cmd` payloads arrive intact. A .cmd forwarding
+       %* re-tokenizes the command line and mangles (and can inject) those
+       metacharacters; setlocal/enabledelayedexpansion does not fix it.
+
+       Fallback: agent-bridge.cmd, for non-PowerShell callers (cmd.exe or a
+       bare CreateProcess/PATHEXT spawn) that cannot resolve a .ps1. It never
+       shadows the .ps1 for PowerShell callers when both sit in the same dir.
+
+       Both launch the venv's PSF-signed python via `-m`, never the unsigned
+       console-script trampoline .exe that Smart App Control blocks (3077). #>
+    param([Parameter(Mandatory)][string]$PythonExe)
+
+    $ps1 = "`$env:PYTHONUTF8 = '1'`r`n& `"$PythonExe`" -m agent_bridge @args`r`nexit `$LASTEXITCODE"
+    [System.IO.File]::WriteAllText($BinstubPs1, $ps1, (New-Object System.Text.UTF8Encoding($false)))
+
+    $cmd = "@echo off`r`nset `"PYTHONUTF8=1`"`r`n`"$PythonExe`" -m agent_bridge %*"
+    [System.IO.File]::WriteAllText($BinstubCmd, $cmd)
+
+    Write-Ok "Binstub: $BinstubPs1 (+ .cmd fallback)"
+}
+
 function Invoke-Install {
     Write-Host ''
     Write-Host '=== agent-bridge install ===' -ForegroundColor Cyan
@@ -576,9 +605,7 @@ function Invoke-Install {
     # Create binstub -- launch via the venv's signed python (`-m`), never the
     # unsigned console-script trampoline .exe (Smart App Control blocks it).
     if (Test-Path $VenvPython) {
-        $stubContent = "@echo off`r`nset `"PYTHONUTF8=1`"`r`n`"$VenvPython`" -m agent_bridge %*"
-        [System.IO.File]::WriteAllText($Binstub, $stubContent)
-        Write-Ok "Binstub: $Binstub"
+        Write-Binstubs -PythonExe $VenvPython
     }
 
     # Generate default config
@@ -630,9 +657,11 @@ function Invoke-Uninstall {
         Write-Ok 'Scheduled task removed'
     }
 
-    if (Test-Path $Binstub) {
-        Remove-Item -Force $Binstub
-        Write-Ok 'Binstub removed'
+    foreach ($stub in @($BinstubPs1, $BinstubCmd)) {
+        if (Test-Path $stub) {
+            Remove-Item -Force $stub
+            Write-Ok "Binstub removed: $stub"
+        }
     }
 
     Remove-SiblingBinstubs
@@ -912,8 +941,7 @@ function Invoke-Update {
     # Update binstub -- launch via the venv's signed python (`-m`), never the
     # unsigned console-script trampoline .exe (Smart App Control blocks it).
     if (Test-Path $VenvPython) {
-        $stubContent = "@echo off`r`nset `"PYTHONUTF8=1`"`r`n`"$VenvPython`" -m agent_bridge %*"
-        [System.IO.File]::WriteAllText($Binstub, $stubContent)
+        Write-Binstubs -PythonExe $VenvPython
     }
 
     # Update scheduled task
