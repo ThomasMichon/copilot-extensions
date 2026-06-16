@@ -44,6 +44,14 @@ def test_build_wrapper_command():
     assert "GH_TOKEN" not in cmd
 
 
+def test_build_wrapper_command_uses_module_not_binstub():
+    """Spawn via ``python -m agent_containers``, never the .cmd binstub, so
+    agent-bridge does not route the spawn through cmd.exe and mangle args."""
+    cmd = build_wrapper_command("odsp-web-1")
+    assert cmd[1:3] == ["-m", "agent_containers"]
+    assert not cmd[0].lower().endswith((".cmd", ".bat"))
+
+
 def _stub_agent_bridge(monkeypatch):
     """Provide a minimal fake agent_bridge.transport.SpawnTarget."""
     mod = types.ModuleType("agent_bridge")
