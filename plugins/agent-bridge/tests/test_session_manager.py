@@ -256,6 +256,24 @@ class TestEndSession:
         assert session_manager.get_session(sid) is None
 
     @pytest.mark.asyncio
+    async def test_end_succeeds_when_db_delete_raises(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        # #48: a transient DB error during teardown (e.g. a locked SQLite file)
+        # must not surface as HTTP 500. The session is still removed from memory,
+        # and the row is marked ENDED *before* the delete so a later restart
+        # rehydrate purges it instead of resurrecting it as active.
+        session = await session_manager.start_session(spawn_target)
+        sid = session.session_id
+        session_manager._db.delete_session = MagicMock(
+            side_effect=RuntimeError("database is locked")
+        )
+        await session_manager.end_session(sid)
+        assert session_manager.get_session(sid) is None
+        rows = {r["id"]: r["status"] for r in session_manager._db.list_sessions()}
+        assert rows.get(sid) == SessionStatus.ENDED.value
+
+    @pytest.mark.asyncio
     async def test_stop_succeeds_when_shutdown_raises(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
     ) -> None:

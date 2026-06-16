@@ -794,7 +794,12 @@ class SessionManager:
         """End a session -- shut down client and clean up all state.
 
         Always removes the session (even mid-turn): teardown is best-effort so
-        ending never fails with a server error on a busy/hung session.
+        ending never fails with a server error on a busy/hung session (#48).
+        Both the persisted-status update and the row delete are suppressed so a
+        transient DB error (e.g. a locked SQLite file) can't surface as HTTP
+        500. The ENDED status is written *before* the delete so that even if the
+        row is not removed, a later restart rehydrate cleans it up rather than
+        resurrecting the session as STOPPED/active.
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
@@ -804,8 +809,13 @@ class SessionManager:
         await self._quiesce_session(session)
 
         session.status = SessionStatus.ENDED
-        self._db.delete_session(session_id)
-        del self._sessions[session_id]
+        with contextlib.suppress(Exception):
+            self._db.update_session_status(
+                session_id, SessionStatus.ENDED.value, time.time()
+            )
+        with contextlib.suppress(Exception):
+            self._db.delete_session(session_id)
+        self._sessions.pop(session_id, None)
         log.info("Session %s (%s) ended and cleaned up", session_id, session.name)
 
     def _resolve_ref(self, ref: str) -> str | None:
