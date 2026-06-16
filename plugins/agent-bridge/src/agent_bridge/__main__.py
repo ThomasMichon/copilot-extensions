@@ -128,7 +128,15 @@ def _cmd_start(args: argparse.Namespace) -> None:
 
 
 def _cmd_status(args: argparse.Namespace) -> None:
-    """Check if agent-bridge is running."""
+    """Check if agent-bridge is running, or show a session's compact status.
+
+    With a ``session_id`` argument, render that dispatch's one-screen status
+    (state, in-flight tool + elapsed, cursor lag) instead of the service health
+    check (#46.1).
+    """
+    if getattr(args, "session_id", None):
+        _cmd_session_status(args)
+        return
     client = _get_client()
     base = getattr(client, "_base", "")
     try:
@@ -144,6 +152,71 @@ def _cmd_status(args: argparse.Namespace) -> None:
         suffix = f" at {base}" if base else ""
         print(f"[FAIL] agent-bridge is not responding{suffix}")
         sys.exit(1)
+
+
+def _cmd_session_status(args: argparse.Namespace) -> None:
+    """Render a single session's compact, low-context dispatch status."""
+    from .client import BridgeClientError
+
+    client = _get_client()
+    caller_id = _caller_id_for(args)
+    sid = args.session_id
+    try:
+        st = client.get_session_status(sid, caller_id=caller_id)
+    except BridgeClientError as exc:
+        if exc.status == 404:
+            print(f"[FAIL] Session {sid} not found", file=sys.stderr)
+        else:
+            print(f"[FAIL] {exc.detail}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.json:
+        _json_out(st)
+        return
+
+    print(f"  {sid}  ({st.get('name', '')})  [{st.get('status', '')}]")
+    print(f"    Agent:   {st.get('agent_name') or '(none)'}")
+    if st.get("caller_id"):
+        print(f"    Caller:  {st['caller_id']}")
+    print(
+        f"    Turns:   {st.get('turn_count', 0)}"
+        f"    Updated: {_short_dt(st.get('updated_at'))}"
+    )
+    pct = st.get("context_pct")
+    if pct is not None:
+        print(f"    Context: {round(pct)}%")
+
+    head = st.get("head_id", 0)
+    acked = st.get("last_acked_id", 0)
+    behind = st.get("behind", 0)
+    if behind:
+        hint = min(behind, 50)
+        print(
+            f"    Cursor:  {acked}/{head}  ({behind} new -- "
+            f"`read {sid} --tail {hint}` to view, `read {sid}` to consume)"
+        )
+    else:
+        print(f"    Cursor:  {acked}/{head}  (caught up)")
+
+    active = st.get("active_tool")
+    if active:
+        elapsed = active.get("elapsed_s")
+        el = f" ({round(elapsed)}s)" if elapsed is not None else ""
+        print(f"    Running: {active.get('title') or 'tool'}{el}")
+        if active.get("command"):
+            print(f"             {active['command']}")
+    else:
+        print("    Running: (idle -- no tool in flight)")
+
+    # Last K collapsed steps (cursor-neutral tail read; --steps 0 disables).
+    k = getattr(args, "steps", 0) or 0
+    if k > 0 and head:
+        events = client.read_range(sid, start=max(1, head - k + 1), end=head)
+        out = _make_renderer(args).render_events(events)
+        if out and out.strip():
+            print("    Recent:")
+            for line in out.rstrip().splitlines():
+                print(f"      {line}")
 
 
 def _cmd_version(_args: argparse.Namespace) -> None:
@@ -1197,12 +1270,24 @@ def _cmd_read(args: argparse.Namespace) -> None:
     session_id = args.session_id
     renderer = _make_renderer(args)
 
-    # Random-access historical read (does not touch the cursor).
+    # Random-access historical read (does not touch the cursor). Supports
+    # --event N, --tail N, --since ID, and --range A:B (precedence in that
+    # order). All are cursor-neutral so a watcher can peek without disturbing
+    # the live resume point (#46.2).
     rng = getattr(args, "range", None)
     evt = getattr(args, "event", None)
-    if rng or evt is not None:
+    tail = getattr(args, "tail", None)
+    since = getattr(args, "since", None)
+    if rng or evt is not None or tail is not None or since is not None:
         if evt is not None:
             start_id, end_id = evt, evt
+        elif tail is not None:
+            head = client.get_cursor_info(
+                session_id, caller_id=caller_id
+            ).get("head_id", 0)
+            start_id, end_id = max(1, head - tail + 1), head
+        elif since is not None:
+            start_id, end_id = since + 1, None
         else:
             try:
                 lo, _, hi = rng.partition(":")
@@ -1489,7 +1574,20 @@ def main(argv: list[str] | None = None) -> None:
     start_p.add_argument("--bind", type=str, help="Address to bind to")
     start_p.set_defaults(func=_cmd_start)
 
-    status_p = sub.add_parser("status", help="Check if agent-bridge is running")
+    status_p = sub.add_parser(
+        "status",
+        help="Check if agent-bridge is running, or show a session's status",
+    )
+    status_p.add_argument(
+        "session_id", nargs="?",
+        help="Session ID -- show that dispatch's compact status (state, "
+             "in-flight tool + elapsed, cursor lag) instead of service health",
+    )
+    status_p.add_argument(
+        "--steps", type=int, default=0, metavar="K",
+        help="Also show the last K collapsed steps (cursor-neutral; default 0)",
+    )
+    _add_stream_args(status_p)
     status_p.set_defaults(func=_cmd_status)
 
     service_p = sub.add_parser(
@@ -1587,6 +1685,16 @@ def main(argv: list[str] | None = None) -> None:
         "--event", type=int, metavar="N",
         help="Random-access read of a single event id N. Does NOT move the "
              "delivery cursor.",
+    )
+    read_p.add_argument(
+        "--tail", type=int, metavar="N",
+        help="Random-access read of the last N events. Does NOT move the "
+             "delivery cursor.",
+    )
+    read_p.add_argument(
+        "--since", type=int, metavar="ID",
+        help="Random-access read of events after event id ID (incremental "
+             "only-new). Does NOT move the delivery cursor.",
     )
     _add_stream_args(read_p)
     read_p.set_defaults(func=_cmd_read)

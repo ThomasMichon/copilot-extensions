@@ -228,6 +228,53 @@ async def get_session_usage(session_id: str, request: Request):
     }
 
 
+@router.get("/{session_id}/status")
+async def get_session_status(
+    session_id: str, request: Request, caller_id: str | None = None
+):
+    """Compact, single-screen status for a dispatch.
+
+    Returns session state, turn count, the caller's delivery-cursor position
+    vs the head (so a watcher knows how far behind it is), and -- crucially --
+    the *in-flight tool call with elapsed time*. That liveness is otherwise
+    only emitted as a cursor-neutral SSE ``: tool_progress`` comment (invisible
+    to ``read``), so a watcher could not previously tell a busy agent from a
+    hung one without dumping the whole feed. This endpoint surfaces it cheaply
+    (#46.1).
+    """
+    import time as _time
+    from datetime import datetime, timezone
+
+    mgr: SessionManager = request.app.state.session_manager
+    session = mgr.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    active = session.event_log.active_tool_call() if session.event_log else None
+    if active and active.get("started_at") is not None:
+        active = {**active, "elapsed_s": max(0.0, _time.time() - active["started_at"])}
+
+    head_id = mgr.db.get_max_event_id(session_id)
+    last_acked = mgr.db.get_cursor(_cursor_key(caller_id), session_id)
+
+    return {
+        "session_id": session.session_id,
+        "name": session.name,
+        "agent_name": session.agent_name,
+        "caller_id": session.caller_id,
+        "status": session.status.value,
+        "turn_count": session.turn_count,
+        "context_pct": session.context_pct,
+        "head_id": head_id,
+        "last_acked_id": last_acked,
+        "behind": max(0, head_id - last_acked),
+        "active_tool": active,
+        "updated_at": datetime.fromtimestamp(
+            session.updated_at, tz=timezone.utc
+        ).isoformat(),
+    }
+
+
 @router.post("/{session_id}/turns", response_model=SubmitPromptResponse)
 async def submit_prompt(
     session_id: str, req: SubmitPromptRequest, request: Request
