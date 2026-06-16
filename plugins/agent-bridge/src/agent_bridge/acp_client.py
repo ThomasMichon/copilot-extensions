@@ -425,6 +425,19 @@ class AcpClient:
                 self._response_chunks.append(content.text)
                 self._emit("agent_message", {"text": content.text})
 
+        elif isinstance(update, UserMessageChunk):
+            # User prompts are normally tracked by the client (the bridge
+            # sends them via prompt()), so they are NOT emitted during a live
+            # turn -- that would duplicate the consumer's own record. But on a
+            # load replay (resync), the agent re-streams the user's turns as
+            # the only source of them, so capture them there to preserve the
+            # user's messages in the rebuilt log. ``content`` is the v2 user
+            # message field the chat UX renders.
+            if self._loading_session:
+                content = update.content
+                if isinstance(content, TextContentBlock):
+                    self._emit("user_message", {"content": content.text})
+
         elif isinstance(update, AgentThoughtChunk):
             content = update.content
             if isinstance(content, TextContentBlock):
