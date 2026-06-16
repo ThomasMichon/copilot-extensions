@@ -508,9 +508,13 @@ async def _pipe_stdio(proc) -> None:
                     break
                 if proc.stdin:
                     proc.stdin.write(data)
+                    # Block until drained -- never time out. A drain timeout
+                    # here would close the agent's stdin under backpressure and
+                    # wedge the ACP channel (see _forward_out for the symmetric
+                    # stdout hazard, #46.6).
                     asyncio.run_coroutine_threadsafe(
                         proc.stdin.drain(), loop
-                    ).result(timeout=10)
+                    ).result()
         except (OSError, ValueError):
             pass
         finally:
@@ -518,7 +522,21 @@ async def _pipe_stdio(proc) -> None:
                 proc.stdin.close()
 
     def _forward_out() -> None:
-        """Read from subprocess stdout, write to our stdout (blocking)."""
+        """Read from subprocess stdout, write to our stdout (blocking).
+
+        Blocks indefinitely on each read -- it must NEVER give up on a merely
+        *quiet* channel. A long, output-buffered remote tool call (a multi-
+        minute ``rush build``/test, or the agent thinking) emits no ACP stdout
+        for well over a minute; a read timeout here would terminate this pump
+        thread mid-dispatch and silently collapse the session. On Python 3.11+
+        the prior ``fut.result(timeout=30)`` made this worse: the resulting
+        ``TimeoutError`` is an ``OSError`` subclass, so it was swallowed by the
+        ``except`` below and the relay exited cleanly after 30s of silence --
+        the root cause of the ~10-15 min dispatch collapse (#46.6). A genuinely
+        dead connection still terminates the relay correctly: SSH's
+        ``ServerAliveInterval`` kills the ssh process, closing stdout (EOF),
+        which returns empty and breaks the loop.
+        """
         try:
             while True:
                 # read1 is not available on asyncio streams; use the
@@ -526,7 +544,7 @@ async def _pipe_stdio(proc) -> None:
                 fut = asyncio.run_coroutine_threadsafe(
                     proc.stdout.read(4096), loop
                 )
-                data = fut.result(timeout=30)
+                data = fut.result()  # block until data or EOF -- no timeout
                 if not data:
                     break
                 sys.stdout.buffer.write(data)
