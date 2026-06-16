@@ -74,6 +74,35 @@ function Remove-ConsoleTrampolines {
 }
 # === end install-contract:v3 strip-trampolines ===
 
+# === install-contract:v3 source-kind -- keep byte-identical across plugins ===
+# Vendored under the Copilot CLI installed-plugins dir => marketplace;
+# anything else (a git checkout) => local.
+function Get-SourceKind {
+    param([string]$PluginPath)
+    if (($PluginPath -replace '\\', '/') -match '/\.copilot/installed-plugins/') {
+        return 'marketplace'
+    }
+    return 'local'
+}
+# === end install-contract:v3 source-kind ===
+
+function Get-GitInfo {
+    param([string]$Path)
+    try {
+        $commit = git -C $Path rev-parse --short HEAD 2>$null
+        $branch = git -C $Path rev-parse --abbrev-ref HEAD 2>$null
+        $dirty = $false
+        if (git -C $Path status --porcelain 2>$null) { $dirty = $true }
+        return @{
+            commit = $(if ($commit) { $commit } else { 'unknown' })
+            branch = $(if ($branch) { $branch } else { 'unknown' })
+            dirty  = $dirty
+        }
+    } catch {
+        return @{ commit = 'unknown'; branch = 'unknown'; dirty = $false }
+    }
+}
+
 # -- Preflight checks --------------------------------------------------
 
 Write-Host ''
@@ -234,23 +263,44 @@ Write-Ok "Binstub: $stubPath"
 
 # -- 5. Write deploy manifest ------------------------------------------
 
-$commit = (git -C $PluginDir rev-parse --short HEAD 2>$null)
-if ($LASTEXITCODE -ne 0) { $commit = 'unknown' }
-$ts = (Get-Date).ToUniversalTime().ToString('o')
-$srcNorm = $PluginDir -replace '\\', '/'
+# Unified schema_version 3 manifest (install-contract): records the source
+# footprint (marketplace vs local) so deploys are auditable like the siblings.
 $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-$manifestContent = @"
-{
-  "service": "agent-containers",
-  "commit": "$commit",
-  "deployed_at": "$ts",
-  "runtime": "python",
-  "plugin_source": "$srcNorm",
-  "install_dir": "$($InstallDir -replace '\\', '/')"
+$kind = Get-SourceKind -PluginPath $PluginDir
+$ver = '0.0.0'
+$pyproj = Join-Path $PluginDir 'pyproject.toml'
+if (Test-Path $pyproj) {
+    $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
+    if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*', '$1') }
 }
-"@
-[System.IO.File]::WriteAllText($manifestPath, $manifestContent, $utf8NoBom)
-Write-Ok "Manifest: $manifestPath"
+$commit = $null; $branch = $null; $dirty = $false
+if ($kind -eq 'local') {
+    $repoRoot = Split-Path -Parent (Split-Path -Parent $PluginDir)
+    $git = Get-GitInfo -Path $repoRoot
+    $commit = $git.commit; $branch = $git.branch; $dirty = $git.dirty
+}
+$manifest = [ordered]@{
+    schema_version = 3
+    service        = 'agent-containers'
+    deployed_at    = (Get-Date -Format 'o')
+    deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
+    source         = [ordered]@{
+        kind    = $kind
+        path    = ($PluginDir -replace '\\', '/')
+        repo    = 'copilot-extensions'
+        plugin  = 'agent-containers'
+        version = $ver
+        commit  = $commit
+        branch  = $branch
+        dirty   = $dirty
+    }
+    venv           = ($VenvDir -replace '\\', '/')
+    runtime        = 'python'
+}
+$tmp = "$manifestPath.tmp"
+$manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
+Move-Item -Force -Path $tmp -Destination $manifestPath
+Write-Ok "Deploy manifest written (source: $kind)"
 
 # -- 6. Verify ----------------------------------------------------------
 
