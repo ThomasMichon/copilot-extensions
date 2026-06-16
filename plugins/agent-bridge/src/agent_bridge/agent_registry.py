@@ -79,6 +79,30 @@ class NamespaceAgentInfo:
     description: str = ""
     icon: str | None = None
     state: str = "available"  # resolver-defined (e.g. "available", "shutdown")
+    # Alternate names this agent also answers to (e.g. a codespace's friendly
+    # display name in addition to its raw GUID name). Used for bare-name and
+    # prefixed resolution so a caller need not know the raw name (#50).
+    aliases: list[str] = field(default_factory=list)
+
+
+class AmbiguousAgentError(Exception):
+    """A bare agent name matched more than one agent across namespaces.
+
+    Carries the fully-qualified candidates (``namespace:name`` plus a bare
+    label for non-namespaced/static agents) so the message can enumerate every
+    colliding target and tell the caller how to disambiguate.
+    """
+
+    def __init__(self, name: str, candidates: list[str]) -> None:
+        self.name = name
+        self.candidates = candidates
+        listed = ", ".join(candidates)
+        super().__init__(
+            f"Agent name '{name}' is ambiguous -- it matches "
+            f"{len(candidates)} agents: {listed}. "
+            "Qualify it with a namespace (e.g. 'codespace:<name>') or use the "
+            "exact name to disambiguate."
+        )
 
 
 class NamespaceResolver(ABC):
@@ -763,7 +787,60 @@ class AgentResolver:
             await resolver.ensure_ready(name)
             return await resolver.resolve(name)
 
+        # Bare name (no prefix): search static/provider agents AND every
+        # namespace (codespaces, containers, ...) for a match by name or alias.
+        # A single match resolves; multiple matches across namespaces are a
+        # collision the caller must disambiguate (#50).
+        candidates = await self._gather_bare_candidates(agent_name)
+        if len(candidates) > 1:
+            raise AmbiguousAgentError(
+                agent_name, [qualified for qualified, _, _ in candidates]
+            )
+        if len(candidates) == 1:
+            _, resolver, resolve_name = candidates[0]
+            if resolver is None:
+                return self._resolve_static(agent_name)
+            await resolver.ensure_ready(resolve_name)
+            return await resolver.resolve(resolve_name)
+
+        # No match anywhere -- defer to static resolution for its precise
+        # "not found in registry" error.
         return self._resolve_static(agent_name)
+
+    async def _gather_bare_candidates(
+        self, name: str
+    ) -> list[tuple[str, "NamespaceResolver | None", str]]:
+        """Find every agent a bare name matches, across static + namespaces.
+
+        Returns ``(qualified_name, resolver_or_None, resolve_name)`` tuples:
+        ``resolver`` is None for static/provider agents (resolved via
+        :meth:`_resolve_static`); otherwise it is the namespace resolver and
+        ``resolve_name`` is the raw name to hand it. ``qualified_name`` is what
+        the collision message enumerates (``prefix:name`` for namespace agents,
+        the bare name for static ones).
+        """
+        candidates: list[tuple[str, "NamespaceResolver | None", str]] = []
+
+        # Static / provider agents have no namespace prefix.
+        if name in self._agents or name in self._live_provider_agents():
+            candidates.append((name, None, name))
+
+        lname = name.lower()
+        for prefix, resolver in self._namespace_resolvers.items():
+            try:
+                infos = await resolver.list()
+            except Exception:
+                log.warning(
+                    "Namespace resolver '%s' failed to list during bare-name "
+                    "resolution of '%s'", prefix, name, exc_info=True,
+                )
+                continue
+            for info in infos:
+                names = [info.name, *getattr(info, "aliases", [])]
+                if any(n and n.lower() == lname for n in names):
+                    candidates.append((f"{prefix}:{info.name}", resolver, info.name))
+
+        return candidates
 
     def _resolve_static(self, agent_name: str) -> SpawnTarget:
         """Resolve via static/auto-discovered/provider registries."""
@@ -961,6 +1038,9 @@ class AgentResolver:
                         "display_name": agent.display_name or agent.name,
                         "description": agent.description,
                         "icon": agent.icon,
+                        "aliases": [
+                            f"{prefix}:{a}" for a in getattr(agent, "aliases", [])
+                        ],
                         "managed": False,
                         "spawnable": True,
                         "target_type": "command",

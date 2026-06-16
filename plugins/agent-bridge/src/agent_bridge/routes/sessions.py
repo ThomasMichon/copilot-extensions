@@ -153,6 +153,14 @@ async def start_session(req: StartSessionRequest, request: Request):
             raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            # Ambiguous bare name (collision across namespaces): balk with the
+            # enumerated candidates so the caller can disambiguate (#50).
+            from ..agent_registry import AmbiguousAgentError
+
+            if isinstance(exc, AmbiguousAgentError):
+                raise HTTPException(status_code=409, detail=str(exc))
+            raise
         # Session roll: reuse existing worktree instead of creating a new one
         if req.worktree_id:
             target.worktree_id = req.worktree_id
