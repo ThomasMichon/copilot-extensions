@@ -87,6 +87,39 @@ def test_load_session_replay_is_suppressed() -> None:
     assert events == [("agent_message", {"text": "DONE"})]
 
 
+def test_user_message_emitted_only_during_replay() -> None:
+    """User prompts are captured on resync replay, not during a live turn.
+
+    During a live turn the client already records the user message, so the
+    agent's echo must not be re-emitted (it would duplicate). During a load
+    replay (resync) the agent is the only source of the user's turns, so
+    capture them to preserve user messages in the rebuilt log.
+    """
+    from acp.schema import TextContentBlock, UserMessageChunk
+
+    client, events = _client_with_recorder()
+
+    # Live turn: not loading -> user message chunk is NOT emitted.
+    client._handle_session_update(
+        UserMessageChunk(
+            session_update="user_message_chunk",
+            content=TextContentBlock(type="text", text="hello"),
+        )
+    )
+    assert events == []
+
+    # Resync replay: loading with suppression cleared -> emitted as user_message.
+    client._loading_session = True
+    client._suppress_replay = False
+    client._handle_session_update(
+        UserMessageChunk(
+            session_update="user_message_chunk",
+            content=TextContentBlock(type="text", text="add a pride theme"),
+        )
+    )
+    assert events == [("user_message", {"content": "add a pride theme"})]
+
+
 def test_child_exit_without_prompt_is_not_an_error() -> None:
     """An idle/just-resumed child exiting must not emit an error (#706)."""
     client, events = _client_with_recorder()
