@@ -73,7 +73,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     ssh_parser.add_argument(
         "--remote-cmd", dest="remote_cmd",
-        help="Remote command to execute (non-interactive)",
+        help="Remote command to execute (non-interactive, no PTY). Interactive "
+             "prompts (e.g. a sudo password) will hang -- use `sudo -n`. A "
+             "backgrounded process must fully detach its stdio "
+             "(`nohup <cmd> >/tmp/out 2>&1 </dev/null & disown`) or it holds "
+             "the channel open until --timeout.",
+    )
+    ssh_parser.add_argument(
+        "--timeout", dest="timeout", type=float, default=60.0, metavar="SECS",
+        help="Timeout in seconds for --remote-cmd execution (default: 60). On "
+             "expiry the command is terminated and the CLI exits 124.",
     )
     ssh_parser.add_argument(
         "--no-relay", action="store_true",
@@ -347,12 +356,10 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
 
         if remote_cmd:
             # Non-interactive command execution
-            result = await manager.exec_command(args.name, remote_cmd)
-            if result.stdout:
-                print(result.stdout)
-            if result.stderr:
-                print(result.stderr, file=sys.stderr)
-            return result.exit_code
+            result = await manager.exec_command(
+                args.name, remote_cmd, timeout=args.timeout
+            )
+            return _emit_remote_cmd_result(result, args.timeout)
 
         # Interactive SSH -- fall through to gh codespace ssh
         await manager.disconnect(args.name)
@@ -481,6 +488,34 @@ async def _provision_repo_hooks(
             )
     except Exception as exc:
         log.warning("Repo provision hooks on %s failed: %s", name, exc)
+
+
+def _emit_remote_cmd_result(result, timeout: float) -> int:  # noqa: ANN001
+    """Print a remote command's output and return its exit code.
+
+    Surfaces partial output and a loud, cause-hinting error when the command
+    was terminated for exceeding the timeout, instead of returning a silent
+    ``-1`` with swallowed output (#47). The remote command runs without a PTY
+    (``-T``), so the usual causes of a hang are a backgrounded process that
+    keeps the stdout/stderr channel open, or a command waiting for input the
+    session cannot provide (e.g. a ``sudo`` password prompt).
+    """
+    if result.stdout:
+        print(result.stdout)
+    if result.stderr:
+        print(result.stderr, file=sys.stderr)
+    if result.timed_out:
+        print(
+            f"[FAIL] Remote command did not finish within {timeout:.0f}s and "
+            f"was terminated (no PTY).\n"
+            f"       - Backgrounded work must fully detach its stdio, e.g. "
+            f"`nohup <cmd> >/tmp/out 2>&1 </dev/null & disown`.\n"
+            f"       - sudo cannot prompt here; use passwordless `sudo -n`.\n"
+            f"       - For a legitimately long command, raise `--timeout <secs>`.",
+            file=sys.stderr,
+        )
+        return 124
+    return result.exit_code
 
 
 async def _pipe_stdio(proc) -> None:
