@@ -583,6 +583,99 @@ class SessionManager:
         session.touch()
         return session
 
+    async def resync_session(self, session_id: str) -> int:
+        """Rebuild a session's event log from the agent's authoritative replay.
+
+        Reattaches to the persisted ACP session and captures the full
+        conversation history the agent streams back during load (per the ACP
+        spec), then replaces the event log with it. This heals logs that were
+        truncated by a mid-session disconnect (e.g. an oversized ACP frame
+        that crashed the read loop): the agent always holds the complete
+        history, so its replay is the source of truth.
+
+        Idempotent: resyncing an already-complete session rebuilds the same
+        log. Leaves the session IDLE with a live client, ready for prompts.
+        Returns the number of events in the rebuilt log.
+        """
+        session_id = self._resolve_ref(session_id) or session_id
+        session = self._sessions.get(session_id)
+        if not session:
+            raise KeyError(f"Session {session_id} not found")
+        if not session.acp_session_id:
+            raise RuntimeError(
+                f"Session {session_id} has no ACP session ID -- cannot resync"
+            )
+
+        async with session._lifecycle_lock:
+            if session.status == SessionStatus.RUNNING:
+                raise ValueError(
+                    f"Session {session_id} is running a turn -- cannot resync"
+                )
+
+            # Tear down any live client so we can reattach cleanly.
+            if session.client:
+                with contextlib.suppress(Exception):
+                    await session.client.shutdown()
+                session.client = None
+
+            session.status = SessionStatus.STARTING
+            self._db.update_session_status(
+                session_id, SessionStatus.STARTING.value, time.time()
+            )
+
+            captured: list[tuple[str, dict[str, Any]]] = []
+
+            def on_capture(event_type: str, data: dict[str, Any]) -> None:
+                captured.append((event_type, data))
+                if event_type == "usage_update":
+                    self._handle_usage_update(session, data)
+
+            client: AcpClient | None = None
+            try:
+                agent_proc = await spawn(session.target)
+                client = AcpClient(on_event=on_capture)
+                await client.start(agent_proc.proc)
+                # suppress_replay=False -> the replayed history is captured.
+                await client.load_session(
+                    cwd=session.target.cwd or _default_cwd(session.target),
+                    session_id=session.acp_session_id,
+                    suppress_replay=False,
+                )
+
+                count = 0
+                if session.event_log:
+                    count = session.event_log.rebuild(captured)
+                    session.event_log.append("session_state_changed", {
+                        "status": SessionStatus.IDLE.value,
+                        "resynced": True,
+                        "acp_session_id": session.acp_session_id,
+                    })
+
+                session.client = client
+                session.status = SessionStatus.IDLE
+                self._db.update_session_status(
+                    session_id, SessionStatus.IDLE.value, time.time(),
+                    pid=session.pid,
+                )
+                log.info(
+                    "Session %s (%s) resynced: rebuilt %d events",
+                    session_id, session.name, count,
+                )
+            except Exception as exc:
+                if client:
+                    with contextlib.suppress(Exception):
+                        await client.shutdown()
+                session.client = None
+                session.status = SessionStatus.STOPPED
+                self._db.update_session_status(
+                    session_id, SessionStatus.STOPPED.value, time.time()
+                )
+                log.error("Failed to resync session %s: %s", session_id, exc)
+                raise
+
+        session.touch()
+        return count
+
     async def submit_prompt(self, session_id: str, prompt: str) -> int:
         """Submit a prompt to a session, returning the turn index.
 

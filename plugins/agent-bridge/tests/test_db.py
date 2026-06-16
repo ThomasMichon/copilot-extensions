@@ -78,6 +78,18 @@ class TestSessionCRUD:
         assert len(tmp_db.get_turns("s1")) == 0
         assert len(tmp_db.get_events("s1")) == 0
 
+    def test_delete_events_keeps_session(self, tmp_db: Database) -> None:
+        now = time.time()
+        tmp_db.create_session("s1", "test", None, ".", "local", "idle", now)
+        tmp_db.create_turn("s1", 0, "hello", now)
+        tmp_db.append_event("s1", 1, "a", {}, now)
+        tmp_db.append_event("s1", 2, "b", {}, now)
+        tmp_db.delete_events("s1")
+        assert len(tmp_db.get_events("s1")) == 0
+        # Session and turns are untouched.
+        assert tmp_db.get_session("s1") is not None
+        assert len(tmp_db.get_turns("s1")) == 1
+
 
 class TestTurnCRUD:
     """Turn create/read/update operations."""

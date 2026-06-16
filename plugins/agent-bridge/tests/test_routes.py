@@ -134,6 +134,37 @@ class TestSessionRoutes:
         resp = client.post("/api/v1/sessions/nonexistent/resume")
         assert resp.status_code == 404
 
+    def test_resync_nonexistent(self, client) -> None:
+        resp = client.post("/api/v1/sessions/nonexistent/resync")
+        assert resp.status_code == 404
+
+    def test_resync_success(self, client, app) -> None:
+        """Resync route returns the rebuilt event count and latest id."""
+        mgr = app.state.session_manager
+        fake = MagicMock()
+        fake.status = SessionStatus.IDLE
+        fake.event_log = MagicMock()
+        fake.event_log.latest_id = 5
+        with patch.object(mgr, "resync_session", AsyncMock(return_value=5)), \
+             patch.object(mgr, "get_session", MagicMock(return_value=fake)):
+            resp = client.post("/api/v1/sessions/s1/resync")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["event_count"] == 5
+        assert body["latest_id"] == 5
+        assert body["status"] == SessionStatus.IDLE.value
+
+    def test_resync_running_returns_409(self, client, app) -> None:
+        """Resyncing a session mid-turn is rejected with 409."""
+        mgr = app.state.session_manager
+        with patch.object(
+            mgr, "resync_session",
+            AsyncMock(side_effect=ValueError("Session s1 is running a turn -- cannot resync")),
+        ):
+            resp = client.post("/api/v1/sessions/s1/resync")
+        assert resp.status_code == 409
+
     def test_start_session_conflict_returns_409(self, client, app) -> None:
         """Concurrency guard surfaces as 409 with the existing session id."""
         from agent_bridge.session_manager import SessionConflictError

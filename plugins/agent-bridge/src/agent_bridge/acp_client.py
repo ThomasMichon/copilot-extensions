@@ -246,6 +246,10 @@ class AcpClient:
         # session/update notifications are already persisted, so suppress
         # re-emitting them as fresh events.
         self._loading_session = False
+        # When False during a load, the replayed history is emitted as normal
+        # events (resync rebuilds the log from the agent's authoritative
+        # replay instead of suppressing it).
+        self._suppress_replay = True
 
         # Completion event -- set when prompt completes or permission requested
         self._completion_event = asyncio.Event()
@@ -308,23 +312,32 @@ class AcpClient:
         self._acp_session_id = result.session_id
         return result.session_id
 
-    async def load_session(self, cwd: str, session_id: str) -> None:
+    async def load_session(
+        self, cwd: str, session_id: str, suppress_replay: bool = True,
+    ) -> None:
         """Reload a previously persisted ACP session (for resume).
 
         Per the ACP spec, the agent streams the entire conversation history
-        back as session/update notifications during load. Those events are
-        already persisted in this session's event log, so suppress
-        re-emitting them (otherwise resume duplicates the last messages).
+        back as session/update notifications during load. By default those
+        events are suppressed (``suppress_replay=True``) because they are
+        already persisted in this session's event log -- otherwise resume
+        duplicates the last messages.
+
+        Pass ``suppress_replay=False`` to let the replay flow through as
+        normal events (the resync flow uses this to rebuild a truncated log
+        from the agent's authoritative history).
         """
         if not self._connection:
             raise RuntimeError("ACP connection not initialized")
         self._loading_session = True
+        self._suppress_replay = suppress_replay
         try:
             await self._connection.load_session(
                 cwd=cwd, session_id=session_id, mcp_servers=[],
             )
         finally:
             self._loading_session = False
+            self._suppress_replay = True
         self._acp_session_id = session_id
 
     async def send_prompt(self, text: str) -> dict[str, Any]:
@@ -399,9 +412,11 @@ class AcpClient:
     def _handle_session_update(self, update: Any) -> None:
         """Process ACP session update notifications."""
         # During load_session the agent replays the full conversation as
-        # session/update notifications. Those events are already persisted,
-        # so ignore them to avoid duplicating prior messages on resume.
-        if self._loading_session:
+        # session/update notifications. By default those events are already
+        # persisted, so ignore them to avoid duplicating prior messages on
+        # resume. The resync flow clears suppression so the replay rebuilds
+        # a truncated log from the agent's authoritative history.
+        if self._loading_session and self._suppress_replay:
             return
 
         if isinstance(update, AgentMessageChunk):
