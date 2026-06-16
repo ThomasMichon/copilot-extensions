@@ -405,16 +405,22 @@ overrides).
 
 ### Verify relay + bridge integration
 
+No registration step is needed: when agent-codespaces is installed, the
+agent-bridge service imports it as a sibling and **auto-registers the live
+`codespace:` namespace resolver** at startup, so CodeSpaces are addressable as
+`codespace:<name>` (raw or friendly) on demand.
+
 ```bash
-# Confirm the bridge service imports agent-codespaces (codespace: support)
-agent-bridge agents          # codespace:<name> entries appear after register
-agent-codespaces bridge register
-agent-codespaces bridge status
+# CodeSpaces should already appear here -- no `bridge register` required.
+agent-bridge agents          # look for codespace:<name> entries
 ```
 
 If `agent-bridge agents` shows no codespace entries and the bridge install
-WARNED about a missing sibling, re-run the agent-bridge installer **after**
-the agent-codespaces plugin is installed (section 0).
+WARNED about a missing sibling, re-run the agent-bridge installer **after** the
+agent-codespaces plugin is installed (section 0) so the service venv picks up
+the `agent_codespaces` package. (`agent-codespaces bridge register` exists but
+only POSTs a static `cs-*` snapshot with a TTL — it is optional and superseded
+by the resolver; see the `codespaces-lifecycle` skill.)
 
 ---
 

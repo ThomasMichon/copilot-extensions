@@ -479,6 +479,25 @@ Agent names come from `acp-agents.json` in your project repo. Use
 
 Run `agent-bridge agents` to see the full list for your deployment.
 
+### CodeSpace agents — friendly names
+
+CodeSpaces are exposed by the `codespace:` namespace resolver (auto-discovered;
+no registration). You can address one by its **raw** name or its **friendly**
+(display) name — the name stored in effort specs — and the `codespace:` prefix
+is **optional**:
+
+```bash
+agent-bridge send codespace:my-feature "..."   # friendly, prefixed
+agent-bridge send my-feature "..."             # friendly, bare
+```
+
+The bridge resolves the friendly name to the underlying raw CodeSpace and keys
+the one-session-per-CodeSpace guard by the raw name, so all three forms address
+the same session. A **bare** name that matches more than one agent (across
+namespaces) makes the bridge **balk** and enumerate the candidates with their
+namespaces — qualify it (`codespace:<name>`) or use the exact name to
+disambiguate.
+
 ## Remote Worktree Lifecycle
 
 When agent-bridge spawns a session for an agent with `project` configured,

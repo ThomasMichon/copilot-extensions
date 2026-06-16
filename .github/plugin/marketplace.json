@@ -6,25 +6,25 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, and GitHub Codespaces management",
-    "version": "1.7.4-dev31"
+    "version": "1.7.4-dev32"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev15",
+      "version": "1.5.3-dev16",
       "source": "plugins/agent-worktrees"
     },
     {
       "name": "agent-bridge",
       "description": "Persistent inter-agent communication service - session management, SSE event streaming, and agent subprocess spawning",
-      "version": "0.4.0-dev25",
+      "version": "0.4.0-dev26",
       "source": "plugins/agent-bridge"
     },
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.3.4-dev13",
+      "version": "0.3.4-dev14",
       "source": "plugins/agent-codespaces"
     },
     {
