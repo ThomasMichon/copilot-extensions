@@ -12,7 +12,7 @@
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev14",
+      "version": "1.5.3-dev15",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -30,7 +30,7 @@
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver",
-      "version": "0.1.2-dev6",
+      "version": "0.1.2-dev7",
       "source": "plugins/agent-containers"
     }
   ]
