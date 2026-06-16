@@ -27,6 +27,15 @@ from .connect import ConnectError, ConnectStage, ConnectTracker
 
 log = logging.getLogger("agent-bridge")
 
+# Max bytes for a single newline-delimited ACP JSON-RPC frame read from an agent
+# subprocess's stdout. asyncio's StreamReader defaults to 64 KiB per line, which
+# a large tool result (e.g. a full Hue scene export) can exceed in one
+# `session/update` frame -- overflowing readline(), killing the bridge's ACP
+# receive loop, and surfacing to the user as "Connection closed" even though the
+# agent process is alive and the tool succeeded. Mirror the acp library's 50 MB
+# default (acp.core.DEFAULT_STDIO_BUFFER_LIMIT_BYTES).
+_ACP_STDIO_LIMIT_BYTES = 50 * 1024 * 1024
+
 
 def _check_port_alive(port: int, host: str = "127.0.0.1", timeout: float = 1.0) -> bool:
     """Check if a local TCP port is listening."""
@@ -341,6 +350,7 @@ async def spawn_local(
         env=env,
         creationflags=_creation_flags(),
         start_new_session=(sys.platform != "win32"),
+        limit=_ACP_STDIO_LIMIT_BYTES,
     )
 
     return AgentProcess(proc, target)
@@ -605,6 +615,7 @@ async def spawn_raw(
         env=env,
         creationflags=_creation_flags(),
         start_new_session=(sys.platform != "win32"),
+        limit=_ACP_STDIO_LIMIT_BYTES,
     )
 
     return AgentProcess(proc, target)

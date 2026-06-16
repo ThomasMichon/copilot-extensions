@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent_bridge.transport import (
+    _ACP_STDIO_LIMIT_BYTES,
     AgentProcess,
     SpawnTarget,
     _build_remote_cmd,
@@ -315,6 +316,9 @@ class TestSpawnLocal:
             assert "--stdio" in exec_args
             assert "--allow-all" in exec_args
             assert exec_call[1]["cwd"] == "/tmp/worktree"
+            # The ACP stdout reader must use a large frame limit, not asyncio's
+            # 64 KiB default, so large tool results don't drop the connection.
+            assert exec_call[1]["limit"] == _ACP_STDIO_LIMIT_BYTES
 
             assert result.proc == copilot_proc
 
@@ -639,6 +643,8 @@ class TestSpawnRaw:
             mock_asyncio.create_subprocess_exec.assert_called_once()
             call_args = mock_asyncio.create_subprocess_exec.call_args
             assert call_args[0] == ("echo", "hello")
+            # ACP stdout reader must use the large frame limit (see spawn_local).
+            assert call_args[1]["limit"] == _ACP_STDIO_LIMIT_BYTES
 
     @pytest.mark.asyncio
     async def test_spawn_raw_requires_spawn_command(self):
