@@ -95,6 +95,21 @@ SSH is for diagnostics and one-off commands, **not routine dispatch**.
 If you find yourself using SSH for dispatch or status checks, diagnose
 the bridge connection instead.
 
+> **Never SSH a CodeSpace that has an active dispatch.** `agent-codespaces ssh`
+> shares the same ssh-manager ControlMaster socket as the dispatch's connection;
+> a concurrent diagnostic SSH can tear that down and **collapse the running
+> session**. To answer "is it making progress?", read the bridge feed and get
+> durable state (branch HEAD / pushed / PR) from the **source of truth** (the git
+> remote / PR API) — not by shelling into the CodeSpace. Reserve host SSH for a
+> CodeSpace whose dispatch is **stopped/idle**.
+
+> **CodeSpace dispatch sessions can drop on their own** (~10–15 min is common:
+> SSH idle/keepalive, the credential-relay TTL — see below, default 300 s — or a
+> bridge daemon restart). Design long jobs to survive it: dispatch an
+> **idempotent** prompt and have the agent **push early and often**, then
+> **resume on drop** (`agent-bridge end <sid>` → `agent-bridge create …`). See
+> the agent-bridge skill's *Dispatching Long Autonomous Work* flow.
+
 > **Always use `agent-codespaces ssh`**, not bare `gh codespace ssh`.
 > Raw `gh codespace ssh` bypasses ssh-manager and can conflict with
 > managed connections — duplicate ControlMaster sockets, missed

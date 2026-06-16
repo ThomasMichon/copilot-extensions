@@ -387,6 +387,68 @@ indicator. A session at 60% has done significant work. A session at 10%
 is just getting started. Host agents can use this to prioritize which
 sessions need attention, follow-up, or cycling.
 
+## Dispatching Long Autonomous Work (build / test / PR)
+
+When you hand a multi-step, long-running job (build → test → commit → PR) to a
+remote or CodeSpace agent, the robust pattern is **fire a complete prompt,
+monitor cheaply, resume on drop** — because you cannot steer a session mid-turn
+and long sessions can drop.
+
+### 1. Deliver the prompt intact
+
+On **Windows**, the `.cmd` shim forwards args via `%*`, which re-tokenizes a
+multi-line prompt and can deliver it **garbled** to the agent (silent
+non-compliance — the agent acts on a partial instruction). Pass the prompt so it
+survives by calling the venv module directly, so PowerShell preserves argv:
+
+```powershell
+$pyb = "$env:USERPROFILE\.agent-bridge\venv\Scripts\python.exe"
+& $pyb -m agent_bridge create --no-wait <agent> @'
+<your full multi-line prompt>
+'@
+```
+
+### 2. You cannot steer a running session — front-load everything
+
+- `send` to a **running** session is **rejected**; the only way to end a stuck
+  turn is to kill its tool call, which wedges/collapses the session. So the
+  *initial* prompt must be **complete and autonomous**: all rules, env caveats,
+  and the finish line (commit / push / PR). Don't plan to "correct it later".
+- Make the prompt **idempotent / resumable**: "inspect git state and any existing
+  PR first and continue from there; don't redo finished steps."
+- Tell the agent to **push early and often** (after build, after tests) so
+  progress survives a drop, and to emit **structured progress markers** —
+  `PROGRESS build=ok`, `PROGRESS tests=ok n=<count>`, `PROGRESS commit=<sha>`,
+  `PROGRESS pr=<id>` — so you can track milestones from the feed.
+
+### 3. Monitor cheaply — through the bridge, at phase boundaries
+
+- One `agent-bridge sessions` (state) + one cursor-neutral
+  `agent-bridge read <sid> --range A:B` (slice the tail / grep `PROGRESS`) per
+  check, at the *expected* phase boundaries (after setup, build ETA, test ETA) —
+  **not** continuously, and **never** dump the whole feed into your context.
+- The `CONTEXT` % column is a coarse progress signal (see Context Window
+  Monitoring).
+- **Get durable ground truth from the work's source of truth** (the git remote /
+  PR API), **not by shelling into the agent's host.** SSHing a CodeSpace that has
+  an active dispatch competes with the dispatch's own SSH/ControlMaster
+  connection and can collapse the session — reserve host SSH for a *stopped*
+  agent.
+
+### 4. Resume on drop is routine, not exceptional
+
+Long sessions (especially CodeSpace) can drop — tunnel/relay TTL, idle timeout, a
+daemon restart from a plugin self-update. When `agent-bridge sessions` shows the
+session `stopped`/gone:
+
+```bash
+agent-bridge end <sid>          # a daemon restart can also resurrect an old session as "active" — end that too
+agent-bridge create <agent> "<same idempotent prompt>"
+```
+
+Because the prompt is idempotent and the agent pushed incrementally, the new
+session continues from the remote with minimal rework.
+
 ## Agent Names
 
 Agent names come from `acp-agents.json` in your project repo. Use
