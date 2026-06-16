@@ -78,6 +78,20 @@ class TestSessionCRUD:
         assert len(tmp_db.get_turns("s1")) == 0
         assert len(tmp_db.get_events("s1")) == 0
 
+    def test_delete_session_clears_delivery_cursor(self, tmp_db: Database) -> None:
+        # Regression: a delivery_cursors row has a FK to sessions. With
+        # PRAGMA foreign_keys=ON, omitting it from delete_session raised
+        # "FOREIGN KEY constraint failed" -- which left ENDED sessions
+        # undeletable and crashed _rehydrate's ENDED-cleanup on startup.
+        now = time.time()
+        tmp_db.create_session("s1", "test", None, ".", "local", "idle", now)
+        tmp_db.append_event("s1", 1, "agent_message", {"text": "hi"}, now)
+        tmp_db.set_cursor("caller-a", "s1", 1, now)
+        # Must not raise a FOREIGN KEY constraint error.
+        tmp_db.delete_session("s1")
+        assert tmp_db.get_session("s1") is None
+        assert tmp_db.get_cursor("caller-a", "s1") == 0
+
     def test_delete_events_keeps_session(self, tmp_db: Database) -> None:
         now = time.time()
         tmp_db.create_session("s1", "test", None, ".", "local", "idle", now)
