@@ -1259,9 +1259,26 @@ def _cmd_stop(args: argparse.Namespace) -> None:
 
 
 def _cmd_end(args: argparse.Namespace) -> None:
-    """End (delete) a session."""
+    """End (delete) a session.
+
+    Idempotent + quiet (#48): ending an already-ended/absent session is a
+    no-op success, and any error prints a one-line message -- never a raw
+    client traceback.
+    """
+    from .client import BridgeClientError, BridgeConnectionError
+
     client = _get_client()
-    client.end_session(args.session_id)
+    try:
+        client.end_session(args.session_id)
+    except BridgeClientError as exc:
+        if exc.status == 404:
+            print(f"[OK] Session {args.session_id} already ended")
+            return
+        print(f"[FAIL] Could not end session {args.session_id}: {exc.detail}")
+        sys.exit(1)
+    except BridgeConnectionError:
+        print(f"[FAIL] agent-bridge is not reachable; could not end session {args.session_id}")
+        sys.exit(1)
     print(f"[OK] Session {args.session_id} ended")
 
 

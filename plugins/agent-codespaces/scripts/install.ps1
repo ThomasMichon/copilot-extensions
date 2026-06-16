@@ -59,7 +59,9 @@ $RepoRoot        = (Resolve-Path (Join-Path $PluginDir '..\..')).Path
 
 $VenvDir         = Join-Path $InstallDir '.venv'
 $VenvPython      = Join-Path $VenvDir 'Scripts\python.exe'
-$VenvBin         = Join-Path $VenvDir 'Scripts\agent-codespaces.exe'
+# Note: the Windows console-script exe (Scripts\agent-codespaces.exe) is
+# deliberately stripped post-install (SAC-blocked); all invocation goes through
+# "$VenvPython -m agent_codespaces". Do not reintroduce an exe-path dependency.
 # ssh-manager dir (contains pyproject.toml): plugin-vendored (marketplace
 # layout) or repo-root (git checkout layout).
 $SshMgrDir       = Join-Path $PluginDir 'libs\ssh-manager'
@@ -471,11 +473,22 @@ function Invoke-Status {
     }
     $ErrorActionPreference = $prevEAP
 
-    # Console script
-    if (Test-Path $VenvBin) {
-        Write-ServiceOk "Console script: $VenvBin"
+    # Launch path (SAC-safe model): the Windows console-script exe is
+    # deliberately stripped post-install (unsigned PE, blocked by Smart App
+    # Control); the binstub, services, and probes all launch via
+    # "python.exe -m agent_codespaces". So verify *that* path works rather than
+    # the (intentionally absent) Scripts\agent-codespaces.exe -- checking the
+    # stripped exe here reported a bogus "Console script missing" error and made
+    # a healthy deploy look broken (#49).
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $VenvPython -m agent_codespaces --help 2>&1 | Out-Null
+    $launchRc = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
+    if ($launchRc -eq 0) {
+        Write-ServiceOk "Launch path: python -m agent_codespaces"
     } else {
-        Write-ServiceErr "Console script missing: $VenvBin"
+        Write-ServiceErr "Launch path failed: python -m agent_codespaces (exit $launchRc)"
     }
 
     # Binstub
@@ -486,15 +499,13 @@ function Invoke-Status {
         Write-ServiceWarn "Binstub not found at $stubPath"
     }
 
-    # Version (from the installed package)
-    if (Test-Path $VenvBin) {
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $verInfo = & $VenvBin version 2>$null
-        $ErrorActionPreference = $prevEAP
-        if ($verInfo) {
-            Write-ServiceOk "Version: $(($verInfo | Out-String).Trim())"
-        }
+    # Version (from the installed package, via the SAC-safe launch path)
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $verInfo = & $VenvPython -m agent_codespaces version 2>$null
+    $ErrorActionPreference = $prevEAP
+    if ($verInfo) {
+        Write-ServiceOk "Version: $(($verInfo | Out-String).Trim())"
     }
 
     # Deploy manifest + source footprint (local checkout vs marketplace)

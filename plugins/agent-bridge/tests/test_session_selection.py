@@ -195,3 +195,31 @@ def test_cmd_create_refuses_on_conflict(monkeypatch):
         m._cmd_create(args)
     assert ei.value.code == 1
     assert client.resumed == []
+
+
+# -- end is idempotent + quiet (#48) -----------------------------------------
+
+
+def test_cmd_end_treats_404_as_already_ended(monkeypatch, capsys):
+    class _C:
+        def end_session(self, sid):
+            raise BridgeClientError(404, f"Session {sid} not found")
+
+    monkeypatch.setattr(m, "_get_client", lambda: _C())
+    # Must be a clean no-op success -- no SystemExit, no traceback.
+    m._cmd_end(argparse.Namespace(session_id="abc"))
+    assert "already ended" in capsys.readouterr().out
+
+
+def test_cmd_end_reports_error_without_traceback(monkeypatch, capsys):
+    class _C:
+        def end_session(self, sid):
+            raise BridgeClientError(500, "boom")
+
+    monkeypatch.setattr(m, "_get_client", lambda: _C())
+    with pytest.raises(SystemExit) as ei:
+        m._cmd_end(argparse.Namespace(session_id="abc"))
+    assert ei.value.code == 1
+    out = capsys.readouterr().out
+    assert "[FAIL]" in out
+    assert "boom" in out
