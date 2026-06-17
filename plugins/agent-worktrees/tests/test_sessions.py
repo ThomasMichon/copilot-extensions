@@ -605,3 +605,45 @@ class TestDetachedSessionsExcluded:
             discovered = backfill_sessions([rec])
 
         assert discovered.get("backfill-wt") == ["real-sess"]
+
+
+# ---------------------------------------------------------------------------
+# Mux probe robustness (has_mux_session / _list_mux_sessions /
+# kill_mux_session must degrade gracefully when the spawn itself fails,
+# e.g. Windows Application Control policy: OSError WinError 4551)
+# ---------------------------------------------------------------------------
+
+class TestMuxSpawnFailureDegrades:
+    """A blocked or missing multiplexer must not crash the caller.
+
+    Regression: subprocess.run raised OSError (WinError 4551, Application
+    Control policy blocked psmux) which escaped the narrow
+    except (FileNotFoundError, subprocess.TimeoutExpired) and crashed the
+    binstub during `resolve`.
+    """
+
+    _BLOCKED = OSError(4551, "An Application Control policy has blocked this file")
+
+    def test_has_mux_session_survives_oserror(self):
+        from agent_worktrees.sessions import has_mux_session
+
+        with patch("subprocess.run", side_effect=self._BLOCKED):
+            assert has_mux_session("anything") is False
+
+    def test_list_mux_sessions_survives_oserror(self):
+        from agent_worktrees.sessions import _list_mux_sessions
+
+        with patch("subprocess.run", side_effect=self._BLOCKED):
+            assert _list_mux_sessions() is None
+
+    def test_kill_mux_session_survives_oserror(self):
+        from agent_worktrees.sessions import kill_tmux_session
+
+        with patch("subprocess.run", side_effect=self._BLOCKED):
+            assert kill_tmux_session("anything") is False
+
+    def test_has_mux_session_still_handles_missing_binary(self):
+        from agent_worktrees.sessions import has_mux_session
+
+        with patch("subprocess.run", side_effect=FileNotFoundError()):
+            assert has_mux_session("anything") is False

@@ -658,7 +658,10 @@ def has_mux_session(worktree_id: str) -> bool:
     try:
         result = subprocess.run(cmd, capture_output=True, timeout=5)
         return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):
+        # OSError covers FileNotFoundError (mux not installed) as well as
+        # spawn failures such as WinError 4551 (Application Control policy
+        # blocked the executable). Degrade gracefully instead of crashing.
         return False
 
 
@@ -688,7 +691,10 @@ def _list_mux_sessions() -> dict[str, int] | None:
             except ValueError:
                 sessions_map[name] = 0
         return sessions_map
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):
+        # OSError covers FileNotFoundError (mux not installed) as well as
+        # spawn failures such as WinError 4551 (Application Control policy
+        # blocked the executable). Degrade gracefully instead of crashing.
         return None
 
 
@@ -736,5 +742,8 @@ def kill_tmux_session(worktree_id: str) -> bool:
     try:
         result = subprocess.run(cmd, capture_output=True, timeout=5)
         return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):
+        # OSError covers FileNotFoundError (mux not installed) as well as
+        # spawn failures such as WinError 4551 (Application Control policy
+        # blocked the executable). Degrade gracefully instead of crashing.
         return False

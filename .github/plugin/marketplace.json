@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, and GitHub Codespaces management",
-    "version": "1.7.4-dev32"
+    "version": "1.7.4-dev33"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev16",
+      "version": "1.5.3-dev17",
       "source": "plugins/agent-worktrees"
     },
     {
