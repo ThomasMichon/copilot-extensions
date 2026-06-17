@@ -110,6 +110,25 @@ class TestProvisioningAndClient:
         # Bare-name helpers symlinked into ~/.local/bin (on PATH).
         assert 'ln -sf "$HOME/$_n" "$HOME/.local/bin/$_n"' in cmd
 
+    def test_provision_hardens_headless_boot_git(self):
+        """#18: provision persists GIT_TERMINAL_PROMPT=0 for login shells and
+        invalidates the stale userEnvProbe cache, best-effort (never fails the
+        whole provision)."""
+        import base64 as _b64m
+        import re as _re
+        cmd = build_provision_command()
+        assert "/etc/profile.d/10-codespaces-noninteractive-git.sh" in cmd
+        assert "sudo tee" in cmd
+        assert "env-loginInteractiveShell.json" in cmd
+        # The hardening is wrapped so a sudo failure cannot abort provisioning.
+        assert ") || true" in cmd
+        # GIT_TERMINAL_PROMPT=0 rides in one of the base64 payloads.
+        blobs = _re.findall(r"printf %s (\S+) \| base64 -d", cmd)
+        assert any(
+            "GIT_TERMINAL_PROMPT=0" in _b64m.b64decode(b).decode("utf-8")
+            for b in blobs
+        )
+
     def test_relay_client_has_scoped_azure_branch(self):
         client = asset_text("ado-auth-helper-relay")
         assert 'SCOPE="${2:-}"' in client
