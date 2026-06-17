@@ -37,11 +37,17 @@ def register_relay(builder) -> None:
     builder.allow_azure_resources(["*"])
     builder.require_token(["get-azure-token"], _validate_codespace_token)
 
-    # Honor the configured relay_port from codespaces.yaml so the server binds
-    # the same port the SSH tunnel forwards (falls back to the server default).
+    # Honor the configured relay_port + ado_host from codespaces.yaml. The port
+    # must match what the SSH tunnel forwards; the ado_host lets host-less
+    # ``ado-auth-helper get-access-token`` (no scope) requests resolve a default
+    # ADO host instead of being rejected (#64). Both fall back to the relay
+    # defaults; ado_host is never hardcoded to a specific org here -- it comes
+    # from the adopting repo's config.
     try:
         from .config import load_merged_config
 
-        builder.set_port(load_merged_config().credentials.relay_port)
+        creds = load_merged_config().credentials
+        builder.set_port(creds.relay_port)
+        builder.set_ado_host(creds.ado_host)
     except Exception:  # pragma: no cover - config optional
-        log.debug("codespaces relay_port unavailable; using relay default")
+        log.debug("codespaces relay config unavailable; using relay defaults")

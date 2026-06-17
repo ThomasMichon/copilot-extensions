@@ -70,6 +70,39 @@ class TestRegisterRelay:
         assert srv.token_validator(relay_token.token_for("cs-y")) is True  # codespace
         assert srv.token_validator("neither") is False
 
+    def test_sets_ado_host_from_config(self, isolated_tokens, monkeypatch):
+        """A configured ado_host is plumbed to the relay so host-less
+        ``get-access-token`` requests resolve a default org (#64)."""
+        from agent_codespaces import config as cfg
+        from agent_codespaces.relay_provider import register_relay
+        from credential_relay import RelayBuilder
+
+        merged = cfg.CodespacesConfig()
+        merged.credentials.ado_host = "example.visualstudio.com"
+        monkeypatch.setattr(cfg, "load_merged_config", lambda: merged)
+
+        b = RelayBuilder()
+        register_relay(b)
+        srv = b.build()
+
+        assert srv.ado_host == "example.visualstudio.com"
+
+    def test_no_ado_host_when_unconfigured(self, isolated_tokens, monkeypatch):
+        """Unset ado_host leaves the relay default (None) -- never hardcoded."""
+        from agent_codespaces import config as cfg
+        from agent_codespaces.relay_provider import register_relay
+        from credential_relay import RelayBuilder
+
+        merged = cfg.CodespacesConfig()  # ado_host defaults to None
+        monkeypatch.setattr(cfg, "load_merged_config", lambda: merged)
+        monkeypatch.delenv("CODESPACES_ADO_HOST", raising=False)
+
+        b = RelayBuilder()
+        register_relay(b)
+        srv = b.build()
+
+        assert srv.ado_host is None
+
 
 class TestProvisioningAndClient:
     def test_provision_symlinks_helpers_onto_path(self):
@@ -85,3 +118,15 @@ class TestProvisioningAndClient:
         assert "get-azure-token" in client
         assert "scope=" in client
         assert "auth=" in client
+
+    def test_relay_client_discovers_ado_host_for_bare_token(self):
+        """The host-less get-access-token path supplies an ADO host so the
+        relay can resolve which org to mint a token for (#64)."""
+        client = asset_text("ado-auth-helper-relay")
+        # Explicit env override, then git-remote discovery (never hardcoded).
+        assert 'ADO_HOST="${LC_GIT_CREDENTIAL_RELAY_ADO_HOST:-}"' in client
+        assert "remote -v" in client
+        assert "visualstudio" in client and "azure.com" in client
+        # The discovered host is sent as a request field and passed to python.
+        assert "'host=' + host" in client
+        assert '"$RELAY_PORT" "$ADO_HOST"' in client
