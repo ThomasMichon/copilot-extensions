@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-mcp"
+version = "0.1.0-dev1"
+description = "Reusable MCP bridge -- wrap an upstream MCP server and inject host credentials"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+dependencies = [
+    "pyyaml>=6.0",
+    "agent-credential-relay",
+]
+
+[tool.uv.sources]
+# credential-relay framework + host-credential sources (module ``credential_relay``).
+# Vendored locally; resolved from the path, never an index. The injectors reuse the
+# az_login / gh_auth / git_credential token-acquisition logic from this lib.
+agent-credential-relay = { path = "libs/credential-relay" }
+
+[project.scripts]
+agent-mcp = "agent_mcp.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.ruff.lint]
+# S603/S607: subprocess calls to az/gh/git and the wrapped stdio child are intentional.
+# S310: urllib.request targets the bridge's configured upstream URL via Request objects.
+ignore = ["S603", "S607", "S310"]
+select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "S106"]  # asserts + fake tokens are expected in tests
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
