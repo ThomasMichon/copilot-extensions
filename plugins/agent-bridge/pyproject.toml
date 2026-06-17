@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-bridge"
-version = "0.4.0-dev30"
+version = "0.4.0-dev31"
 description = "Persistent inter-agent communication service for Copilot CLI"
 readme = "README.md"
 license = "MIT"
@@ -14,13 +14,13 @@ authors = [
 ]
 dependencies = [
     "fastapi>=0.115.0",
-    # uvicorn's [standard] extra pulls httptools, which ships no Windows/ARM64
-    # wheel and fails to build from source on headless hosts (no MSVC). Scope
-    # the speedup extra away from Windows/ARM64 and fall back to plain uvicorn
-    # there; uvicorn.run() uses asyncio + h11 by default, so the extra is
-    # optional. Every other platform keeps [standard].
-    "uvicorn[standard]>=0.30.0; platform_machine != 'ARM64'",
-    "uvicorn>=0.30.0; platform_machine == 'ARM64'",
+    # Plain uvicorn (not the [standard] extra) so the HTTP path stays pure
+    # Python (h11) on every platform. agent-bridge serves low-traffic localhost
+    # SSE -- it uses none of [standard]'s optional speedups (httptools, uvloop,
+    # websockets, watchfiles), and httptools in particular ships no win-arm64
+    # wheel and would build from source (MSVC) on headless ARM64 hosts. h11 is
+    # a core uvicorn dependency and uvicorn.run() falls back to it by default.
+    "uvicorn>=0.30.0",
     "pyyaml>=6.0",
     "pydantic>=2.0",
     "agent-client-protocol>=0.9,<1",
