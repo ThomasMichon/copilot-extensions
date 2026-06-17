@@ -848,6 +848,11 @@ def _match_agents(target: str, agents: list[dict]) -> list[str]:
                 matches.append(name)
             continue
         if bare:
+            # Modifier namespaces (e.g. admin:) mirror an existing agent's base
+            # name to wrap it; they are opt-in and must not match a bare name,
+            # or every local agent collides with its own elevated twin.
+            if a.get("bare_addressable", True) is False:
+                continue
             bare_forms = {f.split(":", 1)[1] for f in forms if ":" in f}
             if target in bare_forms and name not in matches:
                 matches.append(name)

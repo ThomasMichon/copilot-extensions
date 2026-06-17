@@ -99,6 +99,14 @@ class AdminResolver:
     def prefix(self) -> str:
         return "admin"
 
+    @property
+    def bare_addressable(self) -> bool:
+        # admin: is a modifier namespace -- it mirrors every static agent to
+        # wrap it for elevation. It must stay opt-in (explicit ``admin:``
+        # prefix) so a bare name never resolves to, or collides with, an
+        # elevated twin. See AgentResolver._gather_bare_candidates.
+        return False
+
     def _elevate_target(self, target: "SpawnTarget") -> "SpawnTarget":
         """Wrap a SpawnTarget's spawn mechanism for elevated execution."""
         from .transport import SpawnTarget as ST
@@ -155,10 +163,13 @@ class AdminResolver:
         return self._elevate_target(target)
 
     async def list(self) -> list["NamespaceAgentInfo"]:
-        """List all static agents as potential admin targets.
+        """List static agents that opted into admin elevation.
 
-        Only local and command agents are included (SSH agents
-        cannot be elevated from the bridge side).
+        Elevation is **opt-in**: only agents with ``requires_admin: true``
+        (in acp-agents.json or projects.yaml) get an ``admin:<name>`` twin.
+        This avoids blanket-mirroring every local agent -- which would make
+        each one ambiguous with its own elevated twin. SSH agents cannot be
+        elevated from the bridge side and are excluded regardless.
         """
         from .agent_registry import NamespaceAgentInfo
 
@@ -166,7 +177,9 @@ class AdminResolver:
         for config in self._parent.agents.values():
             if config.managed:
                 continue
-            # Skip SSH agents (can't be locally elevated)
+            if not config.requires_admin:
+                continue
+            # Skip SSH agents (can't be elevated locally)
             if config.host and not config.spawn_command:
                 continue
 
@@ -181,16 +194,25 @@ class AdminResolver:
         return agents
 
     async def ensure_ready(self, name: str) -> None:
-        """Verify the inner agent exists and elevation tools are available."""
-        # Verify agent exists
-        if name not in self._parent.agents:
-            from .agent_registry import AgentProvider
-            # Check provider agents too
-            provider_agents = self._parent._live_provider_agents()
-            if name not in provider_agents:
+        """Verify the inner agent exists, opted into admin, and tools exist."""
+        # Verify agent exists and opted into elevation. Provider agents
+        # (e.g. codespaces) are remote and never admin-eligible here.
+        config = self._parent.agents.get(name)
+        if config is None:
+            if name in self._parent._live_provider_agents():
                 raise RuntimeError(
-                    f"Agent '{name}' not found for admin elevation"
+                    f"Agent '{name}' is a provider agent and cannot be "
+                    "elevated from the bridge side"
                 )
+            raise RuntimeError(
+                f"Agent '{name}' not found for admin elevation"
+            )
+        if not config.requires_admin:
+            raise RuntimeError(
+                f"Agent '{name}' is not configured for admin elevation -- "
+                "set 'requires_admin: true' for it (acp-agents.json or "
+                "projects.yaml) to expose an admin: twin"
+            )
 
         # Verify elevation tools
         if self._platform == "windows":
