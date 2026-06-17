@@ -421,6 +421,23 @@ $nested = [bool]$env:TMUX
 function Reset-SshConptyViewport {
     if ($env:SSH_CONNECTION) { [Console]::Write("`e[2J`e[H") }
 }
+# Smart App Control (or another Application Control / WDAC policy) can block
+# an unsigned psmux.exe from executing even though Get-Command resolves it on
+# PATH. A blocked launch raises a *terminating* error
+# (ResourceUnavailable: "Program 'psmux.exe' failed to run...") rather than a
+# non-zero exit code, so the normal $LASTEXITCODE fallbacks never fire. Probe
+# once with a harmless has-session call; if psmux cannot actually run, drop to
+# a direct (un-multiplexed) launch instead of crashing the session.
+if (-not $noMux -and $psmuxCmd) {
+    try {
+        $null = & psmux has-session -t '__aw_probe__' 2>&1
+    } catch {
+        Write-Warning "psmux is installed but cannot run ($($_.Exception.Message.Split([Environment]::NewLine)[0].Trim())). Launching directly without a multiplexer."
+        Write-SetupLog "psmux blocked/unavailable, falling back to direct launch: $($_.Exception.Message)" 'WARN'
+        $psmuxCmd = $null
+    }
+}
+
 if (-not $noMux -and $psmuxCmd) {
     $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
     $sessName = "wt-$wtId"
