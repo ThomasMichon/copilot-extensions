@@ -45,13 +45,26 @@ _WRAPPER = "ado-auth-helper-wrapper"
 # cold connect slow. Persisting GIT_TERMINAL_PROMPT=0 for all login shells makes
 # that fallback fail fast ("terminal prompts disabled") instead; ADO auth then
 # converges once the agent connects and the relay comes up.
+#
+# Scope note: GIT_TERMINAL_PROMPT=0 only suppresses git's OWN last-resort
+# terminal username/password prompt. It does NOT disable credential helpers --
+# the codespace's ado-auth-helper / GitHub helper, the VS Code ado-codespaces
+# extension's interactive auth, and Git Credential Manager (where present) are
+# all invoked first and keep working. So a later interactive VS Code session
+# still authenticates normally; only git's legacy raw terminal prompt (a
+# fallback that hangs headless) is turned off. We intentionally do NOT set
+# GCM_INTERACTIVE here: that could suppress an interactive GCM prompt in a VS
+# Code terminal, and it is unnecessary -- GIT_TERMINAL_PROMPT is what fixes the
+# hang.
 _PROFILE_SNIPPET_PATH = "/etc/profile.d/10-codespaces-noninteractive-git.sh"
 _NONINTERACTIVE_GIT_PROFILE = (
-    "# Deployed by agent-codespaces (#18): never block headless boot on an\n"
-    "# interactive git/ADO terminal prompt when the credential relay tunnel is\n"
-    "# down. Auth converges once the agent connects and the relay is available.\n"
+    "# Deployed by agent-codespaces (#18): never block headless boot on git's\n"
+    "# own interactive terminal prompt when the credential relay tunnel is down.\n"
+    "# Credential helpers (ado-auth-helper, the VS Code auth extension, GCM)\n"
+    "# still run and do their own interactive auth -- this only disables git's\n"
+    "# legacy raw Username:/Password: terminal fallback, which hangs headless.\n"
+    "# Auth converges once the agent connects and the relay is available.\n"
     "export GIT_TERMINAL_PROMPT=0\n"
-    "export GCM_INTERACTIVE=never\n"
 )
 # The devcontainer userEnvProbe env (login-interactive shell) is computed once
 # at create and is NOT refreshed on restart. Deleting the cache forces
