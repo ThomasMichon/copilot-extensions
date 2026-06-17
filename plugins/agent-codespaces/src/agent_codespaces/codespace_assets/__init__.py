@@ -56,6 +56,12 @@ _WRAPPER = "ado-auth-helper-wrapper"
 # GCM_INTERACTIVE here: that could suppress an interactive GCM prompt in a VS
 # Code terminal, and it is unnecessary -- GIT_TERMINAL_PROMPT is what fixes the
 # hang.
+#
+# This is deliberately unconditional (all login shells, not headless-only):
+# suppressing git's inline prompt is *also* the better behavior in VS Code,
+# where that native prompt surfaces as an awkward top-of-window password
+# popup. Failing with a 401 and letting the proper credential helper / auth
+# flow handle it is cleaner. So do NOT try to scope this to the boot path.
 _PROFILE_SNIPPET_PATH = "/etc/profile.d/10-codespaces-noninteractive-git.sh"
 _NONINTERACTIVE_GIT_PROFILE = (
     "# Deployed by agent-codespaces (#18): never block headless boot on git's\n"
