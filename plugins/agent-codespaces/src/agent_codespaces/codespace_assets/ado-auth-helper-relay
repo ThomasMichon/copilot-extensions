@@ -136,17 +136,37 @@ finally:
 " "$RELAY_PORT" "$SCOPE" "$RELAY_TOKEN"
         fi
         # Direct token mode — return a raw ADO access token for npm, nuget, etc.
+        #
+        # The host-less `get-access-token` carries no ADO host, so the relay
+        # server cannot know which Azure DevOps org the token is for and rejects
+        # it ("no host provided and no CODESPACES_ADO_HOST configured"). The
+        # CodeSpace, however, *does* know its ADO host — so discover it here and
+        # pass it to the relay. Source order (never hardcoded to an org):
+        #   1. LC_GIT_CREDENTIAL_RELAY_ADO_HOST (explicit, plumbed by connect)
+        #   2. the workspace's git remotes (the ADO host of the checked-out repo)
+        # If none is found, fall through host-less and let the relay server apply
+        # its own configured default (#64).
+        ADO_HOST="${LC_GIT_CREDENTIAL_RELAY_ADO_HOST:-}"
+        if [ -z "$ADO_HOST" ]; then
+            ADO_HOST="$(git -C "${VM_REPO_PATH:-$PWD}" remote -v 2>/dev/null \
+                | grep -oiE '([A-Za-z0-9_-]+\.visualstudio\.com|dev\.azure\.com)' \
+                | head -n1)"
+        fi
         exec python3 -c "
 import socket, sys
 
 port = int(sys.argv[1])
+host = sys.argv[2] if len(sys.argv) > 2 else ''
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.settimeout(10)
 
 try:
     s.connect(('localhost', port))
 
-    request = 'get-access-token\n\n'
+    request = 'get-access-token\n'
+    if host:
+        request += 'host=' + host + '\n'
+    request += '\n'
     s.sendall(request.encode('utf-8'))
 
     s.settimeout(30)
@@ -168,7 +188,7 @@ except Exception:
     sys.exit(1)
 finally:
     s.close()
-" "$RELAY_PORT"
+" "$RELAY_PORT" "$ADO_HOST"
         ;;
 
     *)
