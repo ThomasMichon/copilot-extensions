@@ -1,0 +1,21 @@
+{
+  "name": "agent-mcp",
+  "description": "Reusable MCP bridge -- wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP server and inject host credentials (Entra/az, gh, git-credential, env). Config-driven, one file per bridge.",
+  "version": "0.1.0-dev1",
+  "author": {
+    "name": "Thomas Michon"
+  },
+  "homepage": "https://github.com/ThomasMichon/copilot-extensions",
+  "repository": "https://github.com/ThomasMichon/copilot-extensions",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "bridge",
+    "proxy",
+    "auth",
+    "credential-relay"
+  ],
+  "skills": [
+    "skills/"
+  ]
+}
