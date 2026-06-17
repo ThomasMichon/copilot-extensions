@@ -21,8 +21,10 @@
 # this helper exits immediately, letting the VS Code extension handle auth.
 
 ACTION="${1:-}"
+SCOPE="${2:-}"
 DEFAULT_RELAY_PORT=9857
 RELAY_PORT="${LC_GIT_CREDENTIAL_RELAY:-}"
+RELAY_TOKEN="${LC_GIT_CREDENTIAL_RELAY_TOKEN:-}"
 
 # If env var is not set, probe the default port (SSH RemoteForward may be
 # active from a codespace-ssh session even though this shell doesn't have
@@ -84,6 +86,55 @@ finally:
         ;;
 
     get-access-token)
+        if [ -n "$SCOPE" ]; then
+            # Azure managed-identity scope mode — the official
+            # `azure-auth-helper get-access-token "<scope>"` contract. Mint an
+            # AAD token for <scope> via the relay's gated get-azure-token action
+            # (resolved from the host az identity) and print the bare token.
+            exec python3 -c "
+import socket, sys
+
+port = int(sys.argv[1])
+scope = sys.argv[2]
+auth = sys.argv[3]
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(10)
+
+try:
+    s.connect(('localhost', port))
+
+    lines = ['get-azure-token', 'scope=' + scope]
+    if auth:
+        lines.append('auth=' + auth)
+    request = '\n'.join(lines) + '\n\n'
+    s.sendall(request.encode('utf-8'))
+
+    s.settimeout(30)
+    response = b''
+    while True:
+        chunk = s.recv(4096)
+        if not chunk:
+            break
+        response += chunk
+        if b'\n\n' in response:
+            break
+
+    # Response is git-credential key=value framing; extract token=.
+    token = ''
+    for line in response.decode('utf-8').splitlines():
+        if line.startswith('token='):
+            token = line[len('token='):]
+            break
+    if token:
+        print(token)
+    else:
+        sys.exit(1)
+except Exception:
+    sys.exit(1)
+finally:
+    s.close()
+" "$RELAY_PORT" "$SCOPE" "$RELAY_TOKEN"
+        fi
         # Direct token mode — return a raw ADO access token for npm, nuget, etc.
         exec python3 -c "
 import socket, sys

@@ -72,8 +72,14 @@ class RelayBuilder:
     allowed_hosts: list[str] = field(default_factory=list)
     port: int | None = None
     ado_host: str | None = None
-    _token_validator: Callable[[str], bool] | None = None
+    _token_validators: list[Callable[[str], bool]] = field(default_factory=list)
     token_required_actions: set[str] = field(default_factory=set)
+    # Merged Azure-token allowlist across providers. A single AzLoginSource is
+    # built from the union so two providers (codespaces + containers) can each
+    # contribute resources/scopes instead of racing add_source's first-wins
+    # dedup. ``"*"`` means any scope.
+    azure_resources: set[str] = field(default_factory=set)
+    _azure_enabled: bool = False
 
     def add_source(self, source: CredentialSource) -> None:
         """Register a credential source (deduped by ``name``; first wins).
@@ -85,6 +91,18 @@ class RelayBuilder:
         if any(s.name == source.name for s in self.sources):
             return
         self.sources.append(source)
+
+    def allow_azure_resources(self, resources: list[str]) -> None:
+        """Enable Azure-token minting for ``resources`` (merged across providers).
+
+        Each provider contributes the resources/scopes its targets need; the
+        builder constructs ONE ``AzLoginSource`` from the union at build time.
+        ``"*"`` permits any scope. Pair with :meth:`require_token` when the
+        target transport is network-reachable (containers); the SSH-tunnel-
+        isolated codespace path presents its own per-codespace token.
+        """
+        self._azure_enabled = True
+        self.azure_resources.update(resources)
 
     def allow_hosts(self, hosts: list[str]) -> None:
         """Extend the relay policy host allowlist (empty list = open policy)."""
@@ -109,23 +127,36 @@ class RelayBuilder:
         A :class:`TokenRegistry`'s ``.validate`` is one such validator; providers
         with cross-process token state (e.g. a file-backed store) pass their own.
         Open actions stay ungated so the codespace relay path is unaffected.
+
+        Multiple providers may gate the same action (e.g. both containers and
+        codespaces gate ``get-azure-token`` with their own per-target token
+        stores). Validators are accumulated and checked with **any-match**, so a
+        request is accepted if *any* registered provider recognizes its token.
         """
-        self._token_validator = validator
+        self._token_validators.append(validator)
         self.token_required_actions.update(actions)
 
     @property
     def empty(self) -> bool:
-        return not self.sources
+        return not self.sources and not self._azure_enabled
 
     def build(self) -> CredentialRelayServer:
         """Construct a CredentialRelayServer from the accumulated config."""
+        sources = list(self.sources)
+        if self._azure_enabled and not any(s.name == "az-login" for s in sources):
+            from .sources.az_login import AzLoginSource
+
+            sources.append(
+                AzLoginSource(allowed_resources=sorted(self.azure_resources))
+            )
         policy = RelayPolicy(allowed_hosts=list(self.allowed_hosts))
-        kwargs: dict = {"sources": list(self.sources), "policy": policy}
+        kwargs: dict = {"sources": sources, "policy": policy}
         if self.port is not None:
             kwargs["port"] = self.port
         if self.ado_host is not None:
             kwargs["ado_host"] = self.ado_host
         if self.token_required_actions:
-            kwargs["token_validator"] = self._token_validator
+            validators = list(self._token_validators)
+            kwargs["token_validator"] = lambda tok: any(v(tok) for v in validators)
             kwargs["token_required_actions"] = frozenset(self.token_required_actions)
         return CredentialRelayServer(**kwargs)

@@ -91,6 +91,11 @@ def build_provision_command() -> str:
         '{ printf "%s\\n" "$_sb"; tail -n +2 "$HOME/.agent-codespaces-auth-wrapper"; } '
         '> "$HOME/$_n"; '
         'chmod +x "$HOME/$_n"; '
+        # Expose the bare name on PATH (~/.local/bin) so official bare-name
+        # consumers (rush AdoCodespacesAuth, git, npm/nuget) resolve to our
+        # shim. Headless the extension never runs, so HOME is not on PATH and
+        # ~/<name> alone is unreachable by `Executable.spawnSync('<name>')`.
+        'ln -sf "$HOME/$_n" "$HOME/.local/bin/$_n"; '
         'done; '
         'rm -f "$HOME/.agent-codespaces-auth-wrapper"'
     )

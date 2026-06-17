@@ -275,14 +275,24 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     # Build port forwards for credential relay
     port_forwards: list[str] = []
     relay_env = ""
+    relay_token: str | None = None
     if not args.no_relay:
         port_forwards.append(f"-R {relay_port}:127.0.0.1:{relay_port}")
+        # Per-codespace relay token: the shared relay gates get-azure-token
+        # (it also serves network-reachable containers), so the codespace path
+        # must present its own secret for the official azure-auth-helper scope
+        # broker. Minted/persisted host-side; injected over SSH as LC_* so it
+        # survives the login shell into the relay client.
+        from .relay_token import token_for
+
+        relay_token = token_for(args.name)
         # GIT_TERMINAL_PROMPT=0 ensures git never blocks on an interactive
         # prompt if a credential cannot be resolved over the relay -- it aborts
         # with a prompt error instead of hanging (belt-and-suspenders alongside
         # the relay's quit=1 fail-fast).
         relay_env = (
             f"export LC_GIT_CREDENTIAL_RELAY={relay_port}; "
+            f"export LC_GIT_CREDENTIAL_RELAY_TOKEN={relay_token}; "
             "export GIT_TERMINAL_PROMPT=0; "
         )
 
@@ -379,6 +389,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             args.name,
             port_forwards,
             relay_port=relay_port if not args.no_relay else None,
+            relay_token=relay_token,
         )
 
     # Serialize SSH access to this CodeSpace across processes. All access funnels
@@ -632,6 +643,7 @@ def _interactive_ssh(
     codespace_name: str,
     port_forwards: list[str],
     relay_port: int | None = None,
+    relay_token: str | None = None,
 ) -> int:
     """Fall back to ``gh codespace ssh`` for interactive sessions."""
     import subprocess as sp
@@ -643,6 +655,8 @@ def _interactive_ssh(
             "LC_GIT_CREDENTIAL_RELAY": str(relay_port),
             "GIT_TERMINAL_PROMPT": "0",
         }
+        if relay_token:
+            env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = relay_token
 
     args = ["gh", "codespace", "ssh", "-c", codespace_name]
     for fwd in port_forwards:

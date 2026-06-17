@@ -48,6 +48,15 @@ class TestRelayPolicy:
         policy = RelayPolicy(allowed_hosts=[])
         assert policy.check("get", {"host": "anything.example.com"}) is None
 
+    def test_hostless_token_actions_skip_host_allowlist(self):
+        """get-azure-token/get-github-token carry no host -> not host-gated."""
+        policy = RelayPolicy(allowed_hosts=["dev.azure.com"])
+        # A host-scoped action with a non-matching host is still rejected...
+        assert policy.check("get", {"host": "github.com"}) is not None
+        # ...but the dedicated hostless token actions pass regardless.
+        assert policy.check("get-azure-token", {"scope": "https://storage.azure.com/.default"}) is None
+        assert policy.check("get-github-token", {}) is None
+
     def test_host_glob_patterns(self):
         policy = RelayPolicy(allowed_hosts=["*.visualstudio.com", "dev.azure.com"])
         assert policy.check("get", {"host": "myorg.visualstudio.com"}) is None
