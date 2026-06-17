@@ -81,36 +81,66 @@ class AzLoginSource:
         """Supports ``get-azure-token`` action only."""
         return action == "get-azure-token"
 
+    @staticmethod
+    def _normalize(target: str) -> str:
+        """Canonicalize a resource/scope for allowlist matching.
+
+        Treats the resource form (``https://storage.azure.com/``) and the scope
+        form (``https://storage.azure.com/.default``) as equivalent, ignoring a
+        trailing slash, so an allowlist entry in either form matches a request
+        in either form.
+        """
+        t = target.strip()
+        if t.endswith("/.default"):
+            t = t[: -len("/.default")]
+        return t.rstrip("/")
+
+    def _is_allowed(self, target: str) -> bool:
+        """Whether a resource/scope may be minted (``*`` = any)."""
+        if "*" in self._allowed_resources:
+            return True
+        norm = self._normalize(target)
+        return any(self._normalize(a) == norm for a in self._allowed_resources)
+
     async def resolve(
         self, action: str, fields: dict[str, str], *, timeout: float = 30.0,
     ) -> str | None:
-        """Resolve an Azure access token via ``az account get-access-token``."""
+        """Resolve an Azure access token via ``az account get-access-token``.
+
+        Accepts either a ``scope`` field (an AAD scope like
+        ``https://storage.azure.com/.default``, passed to ``az ... --scope``) or
+        a ``resource`` field (``https://storage.azure.com/``, ``--resource``).
+        The official ``azure-auth-helper get-access-token "<scope>"`` contract
+        sends a scope.
+        """
+        scope = fields.get("scope", "")
         resource = fields.get("resource", "")
         tenant = fields.get("tenant", "")
+        target = scope or resource
 
-        # Policy: exact-match resource allowlist
-        if not resource:
-            log.warning("get-azure-token request missing 'resource' field")
+        if not target:
+            log.warning("get-azure-token request missing 'scope'/'resource' field")
             return None
 
-        if resource not in self._allowed_resources:
+        # Policy: allowlist (exact, normalized) unless any-scope ("*").
+        if not self._is_allowed(target):
             log.warning(
-                "Denied get-azure-token for resource '%s' "
+                "Denied get-azure-token for '%s' "
                 "(not in allowed_resources: %s)",
-                resource,
+                target,
                 sorted(self._allowed_resources),
             )
             return None
 
         # Check cache
-        cache_key = (resource, tenant)
+        cache_key = (target, tenant)
         cached = self._cache.get(cache_key)
         if cached is not None:
             response_text, expiry = cached
             if time.time() < expiry:
                 log.info(
-                    "Cache hit for resource=%s (expires in %ds)",
-                    resource,
+                    "Cache hit for target=%s (expires in %ds)",
+                    target,
                     int(expiry - time.time()),
                 )
                 return response_text
@@ -118,7 +148,7 @@ class AzLoginSource:
 
         # Call az CLI
         result = await self._run_az_get_token(
-            resource, tenant=tenant, timeout=timeout,
+            resource=resource, scope=scope, tenant=tenant, timeout=timeout,
         )
         if result is None:
             return None
@@ -130,8 +160,8 @@ class AzLoginSource:
         if expiry_time > time.time():
             self._cache[cache_key] = (response_text, expiry_time)
             log.info(
-                "Cached token for resource=%s tenant=%s (expires in %ds)",
-                resource,
+                "Cached token for target=%s tenant=%s (expires in %ds)",
+                target,
                 token_data.get("tenant", "default"),
                 int(expiry_time - time.time()),
             )
@@ -171,15 +201,23 @@ class AzLoginSource:
 
     async def _run_az_get_token(
         self,
-        resource: str,
+        resource: str = "",
         *,
+        scope: str = "",
         tenant: str = "",
         timeout: float = 30.0,
     ) -> tuple[dict, str] | None:
-        """Run ``az account get-access-token`` and return (parsed_json, response_text)."""
+        """Run ``az account get-access-token`` and return (parsed_json, response_text).
+
+        Prefers ``--scope`` when a scope is given (the official
+        ``azure-auth-helper`` contract sends an AAD scope like
+        ``https://storage.azure.com/.default``); otherwise ``--resource``.
+        """
+        target = scope or resource
+        cred_args = ["--scope", scope] if scope else ["--resource", resource]
         args = _az_argv([
             "account", "get-access-token",
-            "--resource", resource,
+            *cred_args,
             "--output", "json",
             *(["--tenant", tenant] if tenant else []),
         ])
@@ -188,8 +226,8 @@ class AzLoginSource:
             return None
 
         log.info(
-            "Requesting Azure token for resource=%s tenant=%s",
-            resource,
+            "Requesting Azure token for target=%s tenant=%s",
+            target,
             tenant or "default",
         )
 
@@ -206,9 +244,9 @@ class AzLoginSource:
             )
         except (TimeoutError, asyncio.TimeoutError):
             log.error(
-                "az account get-access-token timed out (%.0fs) for resource=%s",
+                "az account get-access-token timed out (%.0fs) for target=%s",
                 timeout,
-                resource,
+                target,
             )
             return None
         except FileNotFoundError:
@@ -218,9 +256,9 @@ class AzLoginSource:
         if proc.returncode != 0:
             err = stderr.decode(errors="replace").strip()
             log.error(
-                "az account get-access-token failed (exit %d) for resource=%s: %s",
+                "az account get-access-token failed (exit %d) for target=%s: %s",
                 proc.returncode,
-                resource,
+                target,
                 err,
             )
             return None
@@ -234,13 +272,13 @@ class AzLoginSource:
 
         token = data.get("accessToken", "")
         if not token:
-            log.error("az CLI returned empty accessToken for resource=%s", resource)
+            log.error("az CLI returned empty accessToken for target=%s", target)
             return None
 
         # Build response in key=value format (never log the token)
-        host = resource.rstrip("/").split("//", 1)[-1] if "//" in resource else resource
+        host = target.rstrip("/").split("//", 1)[-1] if "//" in target else target
         parts = [
-            f"protocol=https",
+            "protocol=https",
             f"host={host}",
             f"token={token}",
         ]

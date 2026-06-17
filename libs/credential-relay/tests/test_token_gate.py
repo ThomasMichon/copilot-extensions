@@ -122,3 +122,40 @@ async def test_ungated_action_needs_no_token():
 
 def test_stats_has_token_rejections():
     assert RelayStats().token_rejections == 0
+
+
+# ---------------------------------------------------------------------------
+# Multi-validator + merged Azure allowlist (codespaces + containers share one
+# relay; #44 / option A).
+# ---------------------------------------------------------------------------
+def test_multiple_validators_any_match():
+    """Two providers gating the same action -> a token from EITHER is accepted."""
+    b = RelayBuilder()
+    b.add_source(_AzStub())
+    b.require_token(["get-azure-token"], lambda t: t == "alpha")
+    b.require_token(["get-azure-token"], lambda t: t == "beta")
+    srv = b.build()
+    assert srv.token_required_actions == frozenset({"get-azure-token"})
+    assert srv.token_validator("alpha") is True   # first provider's token
+    assert srv.token_validator("beta") is True    # second provider's token
+    assert srv.token_validator("gamma") is False  # neither
+
+
+def test_allow_azure_resources_builds_single_merged_source():
+    """allow_azure_resources from multiple providers -> one merged az-login."""
+    b = RelayBuilder()
+    b.allow_azure_resources(["https://storage.azure.com/"])  # containers
+    b.allow_azure_resources(["*"])                            # codespaces
+    srv = b.build()
+    az = [s for s in srv.sources if s.name == "az-login"]
+    assert len(az) == 1  # single merged source, not two racing add_source
+    assert az[0]._is_allowed("https://anything.example.com/.default") is True
+
+
+def test_allow_azure_enables_nonempty_builder():
+    """A builder with only Azure enabled is not 'empty' (relay must start)."""
+    b = RelayBuilder()
+    assert b.empty is True
+    b.allow_azure_resources(["*"])
+    assert b.empty is False
+

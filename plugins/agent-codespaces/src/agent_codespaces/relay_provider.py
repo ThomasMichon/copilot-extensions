@@ -24,7 +24,18 @@ def register_relay(builder) -> None:
     """
     from credential_relay.sources.git_credential import GitCredentialSource
 
+    from .relay_token import validate as _validate_codespace_token
+
     builder.add_source(GitCredentialSource())
+
+    # Faithfully shim the official ``azure-auth-helper get-access-token "<scope>"``
+    # broker: allow minting an AAD token for ANY scope from the host az identity
+    # (the official helper is a generic managed-identity broker). Gated behind a
+    # per-codespace token (see relay_token) -- the shared relay also serves
+    # network-reachable container targets, so get-azure-token must stay gated;
+    # the SSH-tunnel-isolated codespace presents its own token.
+    builder.allow_azure_resources(["*"])
+    builder.require_token(["get-azure-token"], _validate_codespace_token)
 
     # Honor the configured relay_port from codespaces.yaml so the server binds
     # the same port the SSH tunnel forwards (falls back to the server default).

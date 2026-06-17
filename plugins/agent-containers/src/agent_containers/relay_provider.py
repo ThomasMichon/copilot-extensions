@@ -68,7 +68,6 @@ def register_relay(builder) -> None:
 
     ``builder`` is a :class:`credential_relay.registry.RelayBuilder`.
     """
-    from credential_relay.sources.az_login import AzLoginSource
     from credential_relay.sources.gh_auth import GhAuthSource
     from credential_relay.sources.git_credential import GitCredentialSource
 
@@ -84,7 +83,9 @@ def register_relay(builder) -> None:
     # Generic host-credential sources (deduped against codespaces by name).
     builder.add_source(GitCredentialSource())
     builder.add_source(GhAuthSource())
-    builder.add_source(AzLoginSource(allowed_resources=list(resources)))
+    # Contribute container Azure resources to the merged allowlist (the builder
+    # constructs a single AzLoginSource from the union across providers).
+    builder.allow_azure_resources(list(resources))
 
     # Gate Azure token minting behind the per-container shared secret (file-backed
     # so the separate-process exec wrapper and the relay agree).

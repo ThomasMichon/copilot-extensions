@@ -135,6 +135,10 @@ _KNOWN_ACTIONS = frozenset({
 # interactive terminal prompt that blocks indefinitely.
 _GET_ACTIONS = frozenset({"get", "fill"})
 
+# Dedicated token actions that carry no ``host`` field -- the host allowlist
+# (which scopes git-credential requests) must not reject them.
+_HOSTLESS_ACTIONS = frozenset({"get-github-token", "get-azure-token"})
+
 # Fail-fast sentinel. Per the git-credential protocol, a helper that returns
 # ``quit=1`` makes git abort the whole credential-helper chain immediately
 # (``fatal: credential helper ... told us to quit``, exit 128) instead of
@@ -165,8 +169,11 @@ class RelayPolicy:
         if action not in self.allowed_actions:
             return f"action '{action}' not in allowed list"
 
-        # Host check only applies if allowed_hosts is non-empty
-        if self.allowed_hosts:
+        # Host check only applies to host-scoped actions when allowed_hosts is
+        # non-empty. Dedicated token actions (get-azure-token/get-github-token)
+        # carry no host and must not be rejected by the git-credential host
+        # allowlist.
+        if self.allowed_hosts and action not in _HOSTLESS_ACTIONS:
             host = fields.get("host", "")
             if not any(fnmatch.fnmatch(host, pat) for pat in self.allowed_hosts):
                 return f"host '{host}' not in allowed list"

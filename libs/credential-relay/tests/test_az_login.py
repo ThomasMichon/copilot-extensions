@@ -106,17 +106,40 @@ class TestAzLoginResourceAllowlist:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_exact_match_required(self):
-        """Resource allowlist uses exact match, not glob/prefix."""
+    async def test_normalized_form_allowed(self):
+        """Allowlist normalizes trailing slash + /.default (same resource).
+
+        ``https://management.azure.com`` / ``.../`` / ``.../.default`` are the
+        same resource in different URL forms, so an allowlist entry in one form
+        matches a request in another. (Denied requests short-circuit before az;
+        an allowed one would proceed to az, so we only assert it passes the
+        allowlist gate by checking a *different* resource is denied below.)
+        """
         source = AzLoginSource(
             allowed_resources=["https://management.azure.com/"]
         )
-        # Missing trailing slash -- should be denied
+        assert source._is_allowed("https://management.azure.com") is True
+        assert source._is_allowed("https://management.azure.com/.default") is True
+
+    @pytest.mark.asyncio
+    async def test_different_resource_denied(self):
+        """A genuinely different resource is still denied (no glob/prefix)."""
+        source = AzLoginSource(
+            allowed_resources=["https://management.azure.com/"]
+        )
+        assert source._is_allowed("https://storage.azure.com/") is False
         result = await source.resolve(
             "get-azure-token",
-            {"resource": "https://management.azure.com"},
+            {"resource": "https://storage.azure.com/"},
         )
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_wildcard_allows_any_scope(self):
+        """``*`` permits any scope (the codespace any-AAD-scope policy)."""
+        source = AzLoginSource(allowed_resources=["*"])
+        assert source._is_allowed("https://storage.azure.com/.default") is True
+        assert source._is_allowed("https://anything.example.com/.default") is True
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +190,23 @@ class TestAzLoginResolution:
         args = call_args[0] if call_args[0] else call_args.args
         assert "--tenant" in args
         assert "specific-tenant" in args
+
+    @pytest.mark.asyncio
+    async def test_scope_field_uses_az_scope(self):
+        """A ``scope`` field (official azure-auth-helper contract) -> az --scope."""
+        scope = "https://storage.azure.com/.default"
+        source = AzLoginSource(allowed_resources=["*"])
+
+        proc = _mock_process(stdout=_make_az_response(token="scoped-tok"))
+        with patch("asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
+            result = await source.resolve("get-azure-token", {"scope": scope})
+
+        call_args = mock_exec.call_args
+        args = call_args[0] if call_args[0] else call_args.args
+        assert "--scope" in args
+        assert scope in args
+        assert "--resource" not in args
+        assert result is not None and "token=scoped-tok" in result
 
 
 # ---------------------------------------------------------------------------

@@ -18,19 +18,19 @@
     {
       "name": "agent-bridge",
       "description": "Persistent inter-agent communication service - session management, SSE event streaming, and agent subprocess spawning",
-      "version": "0.4.0-dev32",
+      "version": "0.4.0-dev33",
       "source": "plugins/agent-bridge"
     },
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.3.4-dev17",
+      "version": "0.3.4-dev18",
       "source": "plugins/agent-codespaces"
     },
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver",
-      "version": "0.1.2-dev8",
+      "version": "0.1.2-dev9",
       "source": "plugins/agent-containers"
     }
   ]
