@@ -37,6 +37,31 @@ __all__ = ["asset_text", "build_provision_command"]
 _RELAY_CLIENT = "ado-auth-helper-relay"
 _WRAPPER = "ado-auth-helper-wrapper"
 
+# Headless-boot git hardening (#18). On a cold start-from-stopped, the
+# devcontainer's postStart runs before the agent connects (so before the
+# credential-relay tunnel exists). A boot step that calls ado-auth-helper for an
+# ADO token therefore fails fast and may fall back to a plain-git interactive
+# ``Username:`` prompt that HANGS in GitHub's start-waiter path, making every
+# cold connect slow. Persisting GIT_TERMINAL_PROMPT=0 for all login shells makes
+# that fallback fail fast ("terminal prompts disabled") instead; ADO auth then
+# converges once the agent connects and the relay comes up.
+_PROFILE_SNIPPET_PATH = "/etc/profile.d/10-codespaces-noninteractive-git.sh"
+_NONINTERACTIVE_GIT_PROFILE = (
+    "# Deployed by agent-codespaces (#18): never block headless boot on an\n"
+    "# interactive git/ADO terminal prompt when the credential relay tunnel is\n"
+    "# down. Auth converges once the agent connects and the relay is available.\n"
+    "export GIT_TERMINAL_PROMPT=0\n"
+    "export GCM_INTERACTIVE=never\n"
+)
+# The devcontainer userEnvProbe env (login-interactive shell) is computed once
+# at create and is NOT refreshed on restart. Deleting the cache forces
+# ``devcontainer up`` to re-probe on the next start so the profile.d export
+# above actually reaches postStart's environment.
+_ENV_PROBE_CACHE = (
+    "/workspaces/.codespaces/.persistedshare/devcontainers-cli/cache/"
+    "env-loginInteractiveShell.json"
+)
+
 
 def asset_text(name: str) -> str:
     """Return the text of a packaged CodeSpace asset."""
@@ -61,6 +86,8 @@ def build_provision_command() -> str:
     - writes the wrapper with the **extension's own node shebang** (taken from
       the backed-up native shim) so it runs under the same node the extension
       used; falls back to ``/usr/bin/env node``.
+    - hardens headless boot against an interactive git prompt hang (#18, see
+      :data:`_NONINTERACTIVE_GIT_PROFILE` below).
 
     The wrapper is relay-first and, when no relay is active, ``require()``s the
     REAL extension ``auth-helper.js`` discovered at runtime -- so VS Code auth
@@ -71,6 +98,9 @@ def build_provision_command() -> str:
     """
     relay_b64 = _b64(_RELAY_CLIENT)
     wrapper_b64 = _b64(_WRAPPER)
+    profile_b64 = base64.b64encode(
+        _NONINTERACTIVE_GIT_PROFILE.encode("utf-8")
+    ).decode("ascii")
     return (
         "set -e; "
         'mkdir -p "$HOME/.local/bin"; '
@@ -97,5 +127,22 @@ def build_provision_command() -> str:
         # ~/<name> alone is unreachable by `Executable.spawnSync('<name>')`.
         'ln -sf "$HOME/$_n" "$HOME/.local/bin/$_n"; '
         'done; '
-        'rm -f "$HOME/.agent-codespaces-auth-wrapper"'
+        'rm -f "$HOME/.agent-codespaces-auth-wrapper"; '
+        # --- #18: headless-boot git hardening ---------------------------------
+        # Persist GIT_TERMINAL_PROMPT=0 for ALL login shells so a cold
+        # start-from-stopped boot step (e.g. setup-agency calling
+        # ado-auth-helper before the relay tunnel is up) fails fast instead of
+        # hanging on an interactive `Username:` prompt in the start-waiter path.
+        # Best-effort: sudo may be unavailable on some targets, so never fail
+        # the whole provision command if this part can't run.
+        "( "
+        f"printf %s {profile_b64} | base64 -d "
+        f"| sudo tee {_PROFILE_SNIPPET_PATH} >/dev/null "
+        f"&& sudo chmod 0644 {_PROFILE_SNIPPET_PATH} "
+        # The devcontainer userEnvProbe env is computed once at create and is
+        # NOT refreshed on restart, so the export above would never reach
+        # postStart without re-probing. Invalidate the cache so the next
+        # `devcontainer up` re-probes with the snippet present.
+        f"&& rm -f {_ENV_PROBE_CACHE} "
+        ") || true"
     )
