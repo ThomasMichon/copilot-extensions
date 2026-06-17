@@ -52,6 +52,7 @@ class AgentConfig:
     project: str | None = None  # agent-worktrees project (binstub name)
     setup_script: str | None = None
     auto_discovered: bool = False  # True for agents from projects.yaml
+    requires_admin: bool = False  # opt-in: expose an admin:<name> elevated twin
     provider: str | None = None  # provider name (e.g. "codespaces")
     spawn_command: list[str] | None = None  # raw command for provider agents
 
@@ -148,6 +149,21 @@ class NamespaceResolver(ABC):
         """
         ...
 
+    @property
+    def bare_addressable(self) -> bool:
+        """Whether this namespace participates in bare-name resolution.
+
+        Discovery namespaces (``codespace:``, ``container:``) expose agents
+        that exist *only* under their prefix, so a bare name should match
+        them. A **modifier** namespace like ``admin:`` instead mirrors every
+        existing static agent under the same base name to wrap it (elevation);
+        letting it contribute bare-name candidates would make every local
+        agent ambiguous with its own elevated twin and unreachable by bare
+        name. Such resolvers return ``False`` so ``admin:`` stays strictly
+        opt-in (you must type the ``admin:`` prefix to elevate).
+        """
+        return True
+
     async def ensure_ready(self, name: str) -> None:
         """Pre-flight check: ensure the target is ready for a session.
 
@@ -180,6 +196,7 @@ def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
             env={str(k): str(v) for k, v in config.get("env", {}).items()},
             project=config.get("project"),
             setup_script=config.get("setup_script"),
+            requires_admin=bool(config.get("requires_admin")),
         )
     return registry
 
@@ -257,6 +274,7 @@ def discover_local_agents() -> dict[str, AgentConfig]:
             display_name=f"{project_name} (local)",
             description=f"Local agent for {project_name} (auto-discovered from projects.yaml)",
             auto_discovered=True,
+            requires_admin=bool(project_data.get("requires_admin")),
         )
 
     if skipped:
@@ -827,6 +845,11 @@ class AgentResolver:
 
         lname = name.lower()
         for prefix, resolver in self._namespace_resolvers.items():
+            # Modifier namespaces (e.g. admin:) mirror existing static agents
+            # under the same base name; they must not contribute bare-name
+            # candidates or every local agent collides with its elevated twin.
+            if not getattr(resolver, "bare_addressable", True):
+                continue
             try:
                 infos = await resolver.list()
             except Exception:
@@ -1055,6 +1078,9 @@ class AgentResolver:
                         "project": None,
                         "auto_discovered": False,
                         "provider": prefix,
+                        "bare_addressable": getattr(
+                            resolver, "bare_addressable", True
+                        ),
                         "state": agent.state,
                     })
             except Exception:

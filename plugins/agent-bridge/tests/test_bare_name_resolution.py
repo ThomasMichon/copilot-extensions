@@ -126,7 +126,93 @@ async def test_failing_resolver_does_not_break_resolution():
     assert target.spawn_command == ["echo", "container:foo"]
 
 
-# -- CLI-side target matching (_match_agents) --------------------------------
+# -- Modifier namespaces (admin:) must not pollute bare-name resolution -------
+
+from agent_bridge.admin_resolver import AdminResolver  # noqa: E402
+
+
+class _ModifierNsResolver(_NsResolver):
+    """A namespace resolver that opts out of bare-name resolution."""
+
+    @property
+    def bare_addressable(self) -> bool:
+        return False
+
+
+@pytest.mark.asyncio
+async def test_non_bare_addressable_resolver_excluded_from_candidates():
+    # A modifier resolver mirrors the static agent's base name, but because it
+    # is not bare-addressable it must not collide -- bare resolves to static.
+    r = AgentResolver({"foo": AgentConfig(name="foo", project="p")}, {})
+    r.register_namespace_resolver(
+        _ModifierNsResolver("admin", [NamespaceAgentInfo(name="foo")])
+    )
+    target = await r.resolve_async("foo")
+    assert target.type == "local"
+
+
+@pytest.mark.asyncio
+async def test_admin_resolver_does_not_shadow_bare_static_agent():
+    # End-to-end with the real AdminResolver: an opted-in agent has an admin:
+    # twin, yet the bare name still resolves to the non-elevated static agent.
+    r = AgentResolver(
+        {"spo": AgentConfig(name="spo", project="p", requires_admin=True)}, {}
+    )
+    r.register_namespace_resolver(AdminResolver(r))
+    target = await r.resolve_async("spo")
+    assert target.type == "local"
+    assert target.project == "p"
+
+
+@pytest.mark.asyncio
+async def test_admin_list_is_opt_in_only():
+    # Only agents flagged requires_admin get an admin: twin; the rest don't.
+    r = AgentResolver(
+        {
+            "spo": AgentConfig(name="spo", project="p", requires_admin=True),
+            "dotfiles": AgentConfig(name="dotfiles", project="p"),
+        },
+        {},
+    )
+    admin = AdminResolver(r)
+    names = {info.name for info in await admin.list()}
+    assert names == {"spo"}
+
+
+@pytest.mark.asyncio
+async def test_admin_prefix_rejects_non_opted_in_agent():
+    # admin:<name> on an agent that didn't opt in fails with clear guidance.
+    r = AgentResolver(
+        {"dotfiles": AgentConfig(name="dotfiles", spawn_command=["copilot"])}, {}
+    )
+    r.register_namespace_resolver(AdminResolver(r))
+    with pytest.raises(RuntimeError, match="requires_admin"):
+        await r.resolve_async("admin:dotfiles")
+
+
+@pytest.mark.asyncio
+async def test_admin_prefix_still_elevates_explicitly():
+    # admin: stays opt-in -- the explicit prefix resolves & elevates an
+    # opted-in agent.
+    r = AgentResolver(
+        {
+            "spo": AgentConfig(
+                name="spo", spawn_command=["copilot"], requires_admin=True
+            )
+        },
+        {},
+    )
+    r.register_namespace_resolver(AdminResolver(r))
+    target = await r.resolve_async("admin:spo")
+    # Elevation wraps the spawn command (gsudo / sudo / RunAs depending on host).
+    assert target.spawn_command[-1:] == ["copilot"] or "copilot" in str(
+        target.spawn_command
+    )
+
+
+def test_admin_resolver_is_not_bare_addressable():
+    assert AdminResolver(AgentResolver({}, {})).bare_addressable is False
+
 
 from agent_bridge import __main__ as m  # noqa: E402
 
@@ -169,3 +255,22 @@ def test_match_bare_collision_returns_all():
 def test_match_none():
     agents = [_agent("codespace:foo-aaa", aliases=["codespace:foo"])]
     assert m._match_agents("nope", agents) == []
+
+
+def test_match_bare_skips_non_bare_addressable_modifier():
+    # admin: mirrors the static agent under the same base name but is flagged
+    # not bare-addressable -- a bare name must resolve to the static agent only.
+    agents = [
+        {"name": "dotfiles", "aliases": []},
+        {"name": "admin:dotfiles", "aliases": [], "bare_addressable": False},
+    ]
+    assert m._match_agents("dotfiles", agents) == ["dotfiles"]
+
+
+def test_match_explicit_admin_prefix_still_matches():
+    agents = [
+        {"name": "dotfiles", "aliases": []},
+        {"name": "admin:dotfiles", "aliases": [], "bare_addressable": False},
+    ]
+    # The explicit prefix is an exact-name match -- not gated by the flag.
+    assert m._match_agents("admin:dotfiles", agents) == ["admin:dotfiles"]

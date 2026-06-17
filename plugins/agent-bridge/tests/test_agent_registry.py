@@ -800,6 +800,7 @@ class TestAdminResolver:
                 name="local-agent",
                 description="Local test agent",
                 project="my-project",
+                requires_admin=True,
             ),
             "ssh-agent": AgentConfig(
                 name="ssh-agent",
