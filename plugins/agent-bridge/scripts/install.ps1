@@ -887,6 +887,52 @@ function Invoke-Status {
     }
 }
 
+function Test-RuntimeHealthy {
+    <# True if the venv python can import the agent-bridge runtime + its key
+       deps. Used to (a) decide whether the current venv is worth snapshotting
+       and (b) verify a fresh install before declaring the update good (#52).
+       Checks uvicorn + credential_relay too -- the exact modules that went
+       missing in the observed broken-venv outage. #>
+    param([string]$Python)
+    if (-not (Test-Path $Python)) { return $false }
+    & $Python -c 'import agent_bridge, uvicorn, credential_relay' 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
+function Backup-Venv {
+    <# Snapshot $VenvDir to $VenvDir.bak so a failed update can roll back. Clears
+       any stale backup first. Returns $true on success. #>
+    $bak = "$VenvDir.bak"
+    if (Test-Path $bak) { Remove-Item -Recurse -Force $bak -ErrorAction SilentlyContinue }
+    try {
+        Copy-Item -Recurse -Force $VenvDir $bak -ErrorAction Stop
+        return $true
+    } catch {
+        Write-Warn "Could not snapshot venv for rollback: $_"
+        return $false
+    }
+}
+
+function Restore-Venv {
+    <# Replace a broken $VenvDir with the snapshot at $VenvDir.bak. Returns $true
+       on success. #>
+    $bak = "$VenvDir.bak"
+    if (-not (Test-Path $bak)) { return $false }
+    try {
+        if (Test-Path $VenvDir) { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop }
+        Move-Item -Force $bak $VenvDir -ErrorAction Stop
+        return $true
+    } catch {
+        Write-Warn "Restore-Venv failed: $_"
+        return $false
+    }
+}
+
+function Remove-VenvBackup {
+    $bak = "$VenvDir.bak"
+    if (Test-Path $bak) { Remove-Item -Recurse -Force $bak -ErrorAction SilentlyContinue }
+}
+
 function Invoke-Update {
     Write-Host ''
     Write-Host '=== agent-bridge update ===' -ForegroundColor Cyan
@@ -902,78 +948,112 @@ function Invoke-Update {
     # Stop running instance first -- a rebuild/repair of the venv (below) must
     # not race a live bridge holding python.exe open.
     $wasRunning = $null -ne (Get-RunningProcess)
-    if ($wasRunning) {
-        Invoke-Stop
+
+    # Snapshot the current healthy venv so a failed install can roll back to the
+    # previous-good runtime instead of leaving the service DOWN with a broken/
+    # empty venv (#52). Only snapshot a venv that actually works -- no point
+    # backing up an already-broken one.
+    $haveBackup = $false
+    if (Test-RuntimeHealthy $VenvPython) {
+        $haveBackup = Backup-Venv
     }
 
-    # Repair venv if python binary is missing (or rebuild if unsigned for SAC)
-    if ((-not (Test-Path $VenvPython)) -or ($env:OS -eq 'Windows_NT')) {
-        if ((Test-Path $VenvDir) -or (Get-SignedBasePython)) {
-            if (-not (Test-Path $VenvPython)) { Write-Step 'Repairing venv (python binary missing)...' }
-            if (-not (New-SignedVenv)) {
-                Write-Fail 'Venv repair failed'
-                exit 1
+    try {
+        if ($wasRunning) {
+            Invoke-Stop
+        }
+
+        # Repair venv if python binary is missing (or rebuild if unsigned for SAC)
+        if ((-not (Test-Path $VenvPython)) -or ($env:OS -eq 'Windows_NT')) {
+            if ((Test-Path $VenvDir) -or (Get-SignedBasePython)) {
+                if (-not (Test-Path $VenvPython)) { Write-Step 'Repairing venv (python binary missing)...' }
+                if (-not (New-SignedVenv)) {
+                    throw 'Venv repair failed'
+                }
+                if (-not (Test-Path $VenvPython)) {
+                    throw 'Venv repair failed'
+                }
+                Write-Ok 'Venv repaired'
+            } else {
+                throw 'agent-bridge not installed. Run: install.ps1 install'
             }
-            if (-not (Test-Path $VenvPython)) {
-                Write-Fail 'Venv repair failed'
-                exit 1
+        }
+
+        # Reinstall package via uv (ssh-manager + credential-relay + agent-bridge)
+        Write-Step 'Updating agent-bridge package...'
+        # Pre-strip any locked console-script trampoline so uv can overwrite it
+        # (Windows denies overwriting an in-use .exe -- os error 5).
+        Remove-ConsoleTrampolines -VenvDir $VenvDir
+        $SshManagerDir = Resolve-SshManager
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        if ($SshManagerDir) {
+            $sshOut = & uv pip install --python $VenvPython --reinstall-package agent-ssh-manager `
+                "$SshManagerDir" --quiet 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                $ErrorActionPreference = $prevEAP
+                if ($sshOut) { Write-Host ($sshOut | Out-String) }
+                throw "ssh-manager update failed (exit $LASTEXITCODE)"
             }
-            Write-Ok 'Venv repaired'
+        } elseif (Test-SshManagerInstalled) {
+            Write-Step 'ssh-manager already installed in venv (marketplace layout)'
         } else {
-            Write-Fail 'agent-bridge not installed. Run: install.ps1 install'
-            exit 1
+            throw 'Cannot locate ssh-manager library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
         }
+        # credential-relay: force-reinstall so a local code change propagates even
+        # without a version bump (uv otherwise skips a same-version path dep).
+        $CredRelayDir = Resolve-CredentialRelay
+        if ($CredRelayDir) {
+            $crOut = & uv pip install --python $VenvPython --reinstall-package agent-credential-relay `
+                "$CredRelayDir" --quiet 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                $ErrorActionPreference = $prevEAP
+                if ($crOut) { Write-Host ($crOut | Out-String) }
+                throw "credential-relay update failed (exit $LASTEXITCODE)"
+            }
+        } elseif (Test-CredentialRelayInstalled) {
+            Write-Step 'credential-relay already installed in venv (marketplace layout)'
+        } else {
+            throw 'Cannot locate credential-relay library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
+        }
+        $bridgeOut = & uv pip install --python $VenvPython --reinstall-package agent-bridge `
+            "$PluginDir" --quiet 2>&1
+        $updateResult = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+        if ($updateResult -ne 0) {
+            if ($bridgeOut) { Write-Host ($bridgeOut | Out-String) }
+            throw "Package update failed (exit $updateResult)"
+        }
+
+        # Verify the freshly-installed runtime imports before declaring success.
+        # Catches a half-installed venv (e.g. a wheel/dependency gap like #51)
+        # while we can still roll back -- rather than starting a broken service.
+        if (-not (Test-RuntimeHealthy $VenvPython)) {
+            throw 'Post-install verification failed (agent_bridge / uvicorn / credential_relay not importable)'
+        }
+        Write-Ok 'Package updated'
+    }
+    catch {
+        Write-Fail "Update failed: $_"
+        if ($haveBackup) {
+            Write-Step 'Rolling back to the previous venv...'
+            if (Restore-Venv) {
+                Write-Ok 'Previous venv restored'
+                if ($wasRunning) {
+                    Write-Step 'Restarting the previous service...'
+                    Invoke-Start
+                }
+            } else {
+                Write-Fail 'Rollback failed -- run "install.ps1 install" to rebuild the runtime'
+            }
+        } else {
+            Write-Warn 'No healthy venv snapshot to roll back to -- run "install.ps1 install" to rebuild the runtime'
+        }
+        exit 1
     }
 
-    # Reinstall package via uv (ssh-manager + agent-bridge)
-    Write-Step 'Updating agent-bridge package...'
-    # Pre-strip any locked console-script trampoline so uv can overwrite it
-    # (Windows denies overwriting an in-use .exe -- os error 5).
-    Remove-ConsoleTrampolines -VenvDir $VenvDir
-    $SshManagerDir = Resolve-SshManager
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    if ($SshManagerDir) {
-        $sshOut = & uv pip install --python $VenvPython --reinstall-package agent-ssh-manager `
-            "$SshManagerDir" --quiet 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            $ErrorActionPreference = $prevEAP
-            Write-Fail "ssh-manager update failed (exit $LASTEXITCODE)"
-            if ($sshOut) { Write-Host ($sshOut | Out-String) }
-            throw 'ssh-manager update failed'
-        }
-    } elseif (Test-SshManagerInstalled) {
-        Write-Step 'ssh-manager already installed in venv (marketplace layout)'
-    } else {
-        throw 'Cannot locate ssh-manager library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
-    }
-    # credential-relay: force-reinstall so a local code change propagates even
-    # without a version bump (uv otherwise skips a same-version path dep).
-    $CredRelayDir = Resolve-CredentialRelay
-    if ($CredRelayDir) {
-        $crOut = & uv pip install --python $VenvPython --reinstall-package agent-credential-relay `
-            "$CredRelayDir" --quiet 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            $ErrorActionPreference = $prevEAP
-            Write-Fail "credential-relay update failed (exit $LASTEXITCODE)"
-            if ($crOut) { Write-Host ($crOut | Out-String) }
-            throw 'credential-relay update failed'
-        }
-    } elseif (Test-CredentialRelayInstalled) {
-        Write-Step 'credential-relay already installed in venv (marketplace layout)'
-    } else {
-        throw 'Cannot locate credential-relay library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
-    }
-    $bridgeOut = & uv pip install --python $VenvPython --reinstall-package agent-bridge `
-        "$PluginDir" --quiet 2>&1
-    $updateResult = $LASTEXITCODE
-    $ErrorActionPreference = $prevEAP
-    if ($updateResult -ne 0) {
-        Write-Fail "Package update failed (exit $updateResult)"
-        if ($bridgeOut) { Write-Host ($bridgeOut | Out-String) }
-        throw 'Package update failed'
-    }
-    Write-Ok 'Package updated'
+    # Success: discard the rollback snapshot.
+    Remove-VenvBackup
 
     # Update sibling plugins (e.g. agent-codespaces for codespace: namespace)
     Install-SiblingPlugins -Reinstall
