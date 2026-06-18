@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, and MCP bridging",
-    "version": "1.7.4-dev43"
+    "version": "1.7.4-dev44"
   },
   "plugins": [
     {
@@ -36,7 +36,7 @@
     {
       "name": "agent-mcp",
       "description": "Reusable MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP server and inject host credentials (Entra/az, gh, git-credential, env)",
-      "version": "0.1.0-dev2",
+      "version": "0.1.0-dev3",
       "source": "plugins/agent-mcp"
     }
   ]

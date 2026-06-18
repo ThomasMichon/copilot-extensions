@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-mcp"
-version = "0.1.0-dev2"
+version = "0.1.0-dev3"
 description = "Reusable MCP bridge -- wrap an upstream MCP server and inject host credentials"
 readme = "README.md"
 license = "MIT"
