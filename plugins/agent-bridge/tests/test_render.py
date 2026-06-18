@@ -150,14 +150,14 @@ class TestToolProgressLiveness:
         r = _r()
         out = r.tool_progress_line(
             {
-                "title": "Build odsp-legacy",
-                "command": "rush build -t @ms/app-cores-odsp-legacy",
+                "title": "Build webapp",
+                "command": "rush build -t @scope/webapp",
                 "elapsed_s": 1027,
             }
         )
         assert "still running" in out
-        assert "Build odsp-legacy" in out
-        assert "rush build -t @ms/app-cores-odsp-legacy" in out
+        assert "Build webapp" in out
+        assert "rush build -t @scope/webapp" in out
         assert "17m" in out  # 1027s -> 17m7s
         assert out.endswith("\n")
 

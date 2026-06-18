@@ -13,7 +13,7 @@ name in the docker command (``-e GH_TOKEN``), so it never appears in argv or log
 Usage:
     from agent_containers.resolver import ContainerResolver
     resolver.register_namespace_resolver(ContainerResolver())
-    # Then: agent-bridge send container:odsp-web-1 "run the tests"
+    # Then: agent-bridge send container:myrepo-1 "run the tests"
 """
 
 from __future__ import annotations

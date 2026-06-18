@@ -8,8 +8,9 @@ Fleet/agent settings are read from a ``containers.yaml`` file, looked up
 2. ``./containers.yaml`` in the current working directory,
 3. ``~/.agent-containers/containers.yaml``.
 
-A missing config is fine -- built-in defaults target the odsp-web local
-Docker dev container (user ``vscode``, workspace ``/workspaces/odsp-web``).
+A missing config is fine -- built-in defaults target a generic VS Code dev
+container (user ``vscode``, workspace ``/workspace``). Point them at a real
+repo by writing a ``containers.yaml`` (see the README / containers-fleet skill).
 """
 
 from __future__ import annotations
@@ -72,8 +73,8 @@ class DotfilesConfig:
 class FleetConfig:
     """A named pool of dev containers built from one devcontainer spec.
 
-    Keyed by fleet name (e.g. ``odsp-web``). Containers are named
-    ``<name_prefix>-<n>`` (e.g. ``odsp-web-1``).
+    Keyed by fleet name (e.g. ``myrepo``). Containers are named
+    ``<name_prefix>-<n>`` (e.g. ``myrepo-1``).
     """
 
     repo: str = ""
@@ -119,7 +120,7 @@ class ContainersConfig:
 
     # Global defaults (overridable per-fleet)
     exec_user: str = "vscode"
-    workspace_folder: str = "/workspaces/odsp-web"
+    workspace_folder: str = "/workspace"
     acp_command: str | None = None
     # Forward the host `gh auth token` into the container as GH_TOKEN so the
     # in-container Copilot CLI is authenticated headlessly.
@@ -143,9 +144,10 @@ class ContainersConfig:
         default_factory=lambda: ["*"]
     )
     # Image-name prefixes used as a discovery fallback when a container lacks
-    # the devcontainer.local_folder / FLEET_LABEL labels.
+    # the devcontainer.local_folder / FLEET_LABEL labels. The default ``vsc-``
+    # matches any VS Code devcontainer image; narrow it per machine if needed.
     image_prefixes: list[str] = field(
-        default_factory=lambda: ["vsc-odsp-web-codespaces-"]
+        default_factory=lambda: ["vsc-"]
     )
     # Optional designated dotfiles repo reproduced inside fleet containers
     # (Codespaces-style clone + install.sh). None disables the step.

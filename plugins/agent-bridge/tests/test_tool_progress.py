@@ -30,9 +30,9 @@ class TestToolProgressSse:
     def test_framed_as_comment_not_event(self) -> None:
         active = {
             "tool_call_id": "t1",
-            "title": "Build odsp-legacy",
+            "title": "Build webapp",
             "kind": "execute",
-            "command": "rush build -t @ms/app-cores-odsp-legacy",
+            "command": "rush build -t @scope/webapp",
             "started_at": 1000.0,
             "started_id": 42,
         }
@@ -42,8 +42,8 @@ class TestToolProgressSse:
         assert "event:" not in block
         assert "data:" not in block
         data = _parse_tool_progress(block)
-        assert data["title"] == "Build odsp-legacy"
-        assert data["command"] == "rush build -t @ms/app-cores-odsp-legacy"
+        assert data["title"] == "Build webapp"
+        assert data["command"] == "rush build -t @scope/webapp"
         assert round(data["elapsed_s"]) == 1027
 
     def test_has_no_id_line_so_cursor_is_untouched(self) -> None:

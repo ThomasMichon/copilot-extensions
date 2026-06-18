@@ -46,7 +46,7 @@ The agent-bridge venv additionally imports `agent_codespaces` (for the
 | 4 | 🟠 | agent-codespaces has two install homes → binstub conflict / version skew | Bridge installer installs the package into its venv for import only; **does not** write the `agent-codespaces` binstub. `~/.agent-codespaces` is canonical |
 | 5 | 🟠 | codespaces-lifecycle SKILL uses relay port 9847 | Replace 9847 → 9857 (code default) |
 | 6 | 🟠 | Linux/WSL bridge port is 9281 but docs say 9280 | Document platform default (9280 Win / 9281 Linux-WSL); fix health-check example |
-| 7 | 🟡 | `aperture-labs` (personal project) leaks into teammate-facing strings | Genericize to `my-control-harness`; generic installer error/migration text; fix `~/.aperture-labs` temp-path bug |
+| 7 | 🟡 | A personal project name leaks into teammate-facing strings | Genericize to `my-control-harness`; generic installer error/migration text; fix `~/.<personal-project>` temp-path bug |
 | 8 | 🟡 | Repo AGENTS.md still says "two plugins" | Update to three plugins throughout |
 | 9 | 🟡 | `agent-codespaces create`/`cleanup` undocumented | Document in README + codespaces-lifecycle SKILL |
 | 10 | ⚪ | Codespace examples must stay generic | All org/repo/URL values live in the adopted repo's `codespaces.yaml`, never in this repo |
@@ -58,7 +58,7 @@ The agent-bridge venv additionally imports `agent_codespaces` (for the
 - Land these plans in `docs/plans/`.
 - Overhaul README (purpose → Quick Start → usage flows → links) with Mermaid.
 - Add repo-level `docs/architecture.md` component breakdown (Mermaid).
-- Genericize `aperture-labs` → `my-control-harness`; fix the temp-path bug.
+- Genericize the personal project name → `my-control-harness`; fix the temp-path bug.
 - Port fixes (9847→9857; 9281 notes).
 - Update AGENTS.md to three plugins.
 

@@ -55,7 +55,7 @@ class TestProjectName:
             cfg.project_name()
 
     def test_accepts_valid_names(self, monkeypatch):
-        for name in ["my-project", "dotfiles", "aperture_labs", "test.123"]:
+        for name in ["my-project", "dotfiles", "sample_project", "test.123"]:
             monkeypatch.setenv("WORKTREE_PROJECT", name)
             assert cfg.project_name() == name
 

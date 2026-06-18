@@ -17,8 +17,8 @@ def fleet(monkeypatch, tmp_path):
     monkeypatch.setattr(lease_mod, "_LOCK_FILE", tmp_path / "leases.lock")
 
     containers = [
-        DockerContainerInfo("odsp-web-1", "i1", "img", "running", "", fleet="odsp-web"),
-        DockerContainerInfo("odsp-web-2", "i2", "img", "exited", "", fleet="odsp-web"),
+        DockerContainerInfo("myrepo-1", "i1", "img", "running", "", fleet="myrepo"),
+        DockerContainerInfo("myrepo-2", "i2", "img", "exited", "", fleet="myrepo"),
     ]
     monkeypatch.setattr(lease_mod, "list_containers", lambda config: containers)
     return ContainersConfig()
@@ -26,14 +26,14 @@ def fleet(monkeypatch, tmp_path):
 
 def test_borrow_picks_running_first(fleet):
     lease = lease_mod.borrow(fleet, "effort-a")
-    assert lease.container == "odsp-web-1"
+    assert lease.container == "myrepo-1"
     assert lease.effort == "effort-a"
 
 
 def test_borrow_excludes_already_leased(fleet):
-    lease_mod.borrow(fleet, "effort-a")  # takes odsp-web-1
+    lease_mod.borrow(fleet, "effort-a")  # takes myrepo-1
     lease = lease_mod.borrow(fleet, "effort-b")
-    assert lease.container == "odsp-web-2"
+    assert lease.container == "myrepo-2"
 
 
 def test_borrow_all_leased_raises(fleet):
@@ -44,34 +44,34 @@ def test_borrow_all_leased_raises(fleet):
 
 
 def test_borrow_specific_container(fleet):
-    lease = lease_mod.borrow(fleet, "effort-a", container="odsp-web-2")
-    assert lease.container == "odsp-web-2"
+    lease = lease_mod.borrow(fleet, "effort-a", container="myrepo-2")
+    assert lease.container == "myrepo-2"
 
 
 def test_borrow_specific_conflict_raises(fleet):
-    lease_mod.borrow(fleet, "effort-a", container="odsp-web-1")
+    lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
     with pytest.raises(RuntimeError, match="leased by effort 'effort-a'"):
-        lease_mod.borrow(fleet, "effort-b", container="odsp-web-1")
+        lease_mod.borrow(fleet, "effort-b", container="myrepo-1")
 
 
 def test_borrow_same_effort_idempotent(fleet):
-    first = lease_mod.borrow(fleet, "effort-a", container="odsp-web-1")
-    second = lease_mod.borrow(fleet, "effort-a", container="odsp-web-1")
-    assert second.container == "odsp-web-1"
+    first = lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
+    second = lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
+    assert second.container == "myrepo-1"
     # acquired_at preserved across re-borrow
     assert second.acquired_at == first.acquired_at
 
 
 def test_release_by_container(fleet):
     lease_mod.borrow(fleet, "effort-a")
-    assert lease_mod.release("odsp-web-1") is True
+    assert lease_mod.release("myrepo-1") is True
     assert lease_mod.list_leases() == []
 
 
 def test_release_by_effort(fleet):
     lease_mod.borrow(fleet, "effort-a")
     assert lease_mod.release("effort-a") is True
-    assert lease_mod.get_lease("odsp-web-1") is None
+    assert lease_mod.get_lease("myrepo-1") is None
 
 
 def test_release_missing_returns_false(fleet):
@@ -79,7 +79,7 @@ def test_release_missing_returns_false(fleet):
 
 
 def test_reclaim_after_ttl(fleet):
-    lease_mod.borrow(fleet, "effort-a")  # leases odsp-web-1
+    lease_mod.borrow(fleet, "effort-a")  # leases myrepo-1
     # A negative TTL means any non-negative age is past expiry -- deterministic
     # regardless of clock resolution.
     assert lease_mod.list_leases(ttl=-1) == []

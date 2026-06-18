@@ -10,15 +10,15 @@ from agent_containers.config import DEFAULT_ACP_COMMAND, ContainersConfig, load_
 def test_defaults():
     c = ContainersConfig()
     assert c.exec_user == "vscode"
-    assert c.workspace_folder == "/workspaces/odsp-web"
+    assert c.workspace_folder == "/workspace"
     assert c.forward_gh_token is True
-    assert any("odsp-web-codespaces" in p for p in c.image_prefixes)
+    assert any(p == "vsc-" for p in c.image_prefixes)
 
 
 def test_effective_acp_command_default_prefixes_cd():
     c = ContainersConfig()
     cmd = c.effective_acp_command()
-    assert cmd == f"cd /workspaces/odsp-web && {DEFAULT_ACP_COMMAND}"
+    assert cmd == f"cd /workspace && {DEFAULT_ACP_COMMAND}"
 
 
 def test_effective_acp_command_explicit_override_wins():
@@ -43,9 +43,9 @@ def test_load_config_from_file(tmp_path, monkeypatch):
             image_prefixes:
               - vsc-foo-
             fleets:
-              odsp-web:
-                repo: odsp-microsoft/odsp-web
-                devcontainer_path: /src/odsp-web-codespaces
+              myrepo:
+                repo: your-org/your-repo
+                devcontainer_path: /src/myrepo-devcontainer
                 size: 3
                 code_model: clone
             """
@@ -58,24 +58,24 @@ def test_load_config_from_file(tmp_path, monkeypatch):
     assert c.workspace_folder == "/workspaces/foo"
     assert c.forward_gh_token is False
     assert c.image_prefixes == ["vsc-foo-"]
-    assert "odsp-web" in c.fleets
-    fleet = c.fleets["odsp-web"]
+    assert "myrepo" in c.fleets
+    fleet = c.fleets["myrepo"]
     assert fleet.size == 3
-    assert fleet.prefix("odsp-web") == "odsp-web"
-    assert fleet.devcontainer_path == "/src/odsp-web-codespaces"
+    assert fleet.prefix("myrepo") == "myrepo"
+    assert fleet.devcontainer_path == "/src/myrepo-devcontainer"
 
 
 def test_devcontainer_config_resolved_relative_to_path():
     from agent_containers.config import FleetConfig
 
     fleet = FleetConfig(
-        devcontainer_path="/src/odsp-web-codespaces",
+        devcontainer_path="/src/myrepo-devcontainer",
         devcontainer_config=".devcontainer/docker/devcontainer.json",
     )
     resolved = fleet.resolved_config()
     assert resolved is not None
     assert resolved.replace("\\", "/") == (
-        "/src/odsp-web-codespaces/.devcontainer/docker/devcontainer.json"
+        "/src/myrepo-devcontainer/.devcontainer/docker/devcontainer.json"
     )
 
 
@@ -104,8 +104,8 @@ def test_load_config_dotfiles(tmp_path, monkeypatch):
               repo: /home/me/dotfiles
               install_command: bash install.sh
             fleets:
-              odsp-web:
-                devcontainer_path: /src/odsp-web-codespaces
+              myrepo:
+                devcontainer_path: /src/myrepo-devcontainer
                 devcontainer_config: .devcontainer/docker/devcontainer.json
             """
         ),
@@ -117,7 +117,7 @@ def test_load_config_dotfiles(tmp_path, monkeypatch):
     assert c.dotfiles.repo == "/home/me/dotfiles"
     assert c.dotfiles.target == "/workspaces/.codespaces/.persistedshare/dotfiles"
     assert c.dotfiles.install_command == "bash install.sh"
-    fleet = c.fleets["odsp-web"]
+    fleet = c.fleets["myrepo"]
     assert fleet.devcontainer_config == ".devcontainer/docker/devcontainer.json"
 
 

@@ -1,8 +1,8 @@
 # Copilot Extensions -- Development Guide
 
-Source of truth for the **agent-worktrees**, **agent-bridge**, and
-**agent-codespaces** Copilot CLI plugins. All ship from this repo via the
-Copilot CLI marketplace.
+Source of truth for the **agent-worktrees**, **agent-bridge**,
+**agent-codespaces**, **agent-containers**, and **agent-mcp** Copilot CLI
+plugins. All ship from this repo via the Copilot CLI marketplace.
 
 ---
 
@@ -36,6 +36,20 @@ copilot-extensions/
       tests/                   # Test suite
       plugin.json              # Plugin manifest
       pyproject.toml           # Python project config
+    agent-containers/          # Local Docker dev-container fleet + container: resolver
+      scripts/                 # Installer (init.ps1/sh)
+      skills/                  # containers-fleet
+      src/agent_containers/    # Python source (CLI, lease broker, resolver)
+      tests/                   # Test suite
+      plugin.json              # Plugin manifest
+      pyproject.toml           # Python project config
+    agent-mcp/                 # Reusable MCP bridge (wrap upstream MCP + inject host creds)
+      scripts/                 # Installer (init.ps1/sh)
+      skills/                  # agent-mcp
+      src/agent_mcp/           # Python source (bridge core, transports, auth injectors)
+      tests/                   # Test suite
+      plugin.json              # Plugin manifest
+      pyproject.toml           # Python project config
   docs/
     architecture.md            # Repo-level architecture overview
     plans/                     # Rollout + validation plans
@@ -47,19 +61,24 @@ copilot-extensions/
 
 ---
 
-## Three Plugins, Three Lifecycles
+## Five Plugins, Five Lifecycles
 
-| Aspect | agent-worktrees | agent-bridge | agent-codespaces |
-|--------|----------------|-------------|------------------|
-| Type | Session plugin (hooks, skills) | Persistent HTTP service (9280 Win / 9281 WSL) | CLI + credential relay (9857) |
-| Lifecycle | Per-session via Copilot CLI | Per-machine daemon (systemd / scheduled task) | On-demand CLI; relay runs in the bridge process |
-| Runtime dir | `~/.agent-worktrees/` | `~/.agent-bridge/` | `~/.agent-codespaces/` |
-| Binstub | `~/.local/bin/agent-worktrees[.cmd]` | `~/.local/bin/agent-bridge[.cmd]` | `~/.local/bin/agent-codespaces[.cmd]` |
-| Test suite | -- | `plugins/agent-bridge/tests/` (pytest) | `plugins/agent-codespaces/tests/` (pytest) |
+| Plugin | Type | Lifecycle | Runtime dir | Binstub | Tests |
+|--------|------|-----------|-------------|---------|-------|
+| agent-worktrees | Session plugin (hooks, skills) | Per-session via Copilot CLI | `~/.agent-worktrees/` | `agent-worktrees[.cmd]` | -- |
+| agent-bridge | Persistent HTTP service (9280 Win / 9281 WSL) | Per-machine daemon (systemd / scheduled task) | `~/.agent-bridge/` | `agent-bridge[.cmd]` | `plugins/agent-bridge/tests/` |
+| agent-codespaces | CLI + credential relay (9857) | On-demand CLI; relay runs in the bridge process | `~/.agent-codespaces/` | `agent-codespaces[.cmd]` | `plugins/agent-codespaces/tests/` |
+| agent-containers | CLI + `container:` resolver | On-demand CLI; resolver runs in the bridge process | `~/.agent-containers/` | `agent-containers[.cmd]` | `plugins/agent-containers/tests/` |
+| agent-mcp | Standalone MCP bridge (stdio) | Spawned per-call by an agent's `mcp-servers` entry | `~/.agent-mcp/` | `agent-mcp[.cmd]` | `plugins/agent-mcp/tests/` |
 
-> The agent-bridge installer also imports the `agent_codespaces` package into
-> its venv (for the `codespace:` resolver + relay) but does **not** own the
-> `agent-codespaces` binstub — that belongs to `~/.agent-codespaces`.
+All binstubs live in `~/.local/bin/`.
+
+> The agent-bridge installer also imports the `agent_codespaces` **and**
+> `agent_containers` packages into its venv (for the `codespace:` / `container:`
+> resolvers + relay) but does **not** own their binstubs — those belong to
+> `~/.agent-codespaces` and `~/.agent-containers` respectively. agent-mcp is
+> standalone: it has no bridge resolver and is invoked directly from an agent's
+> `mcp-servers` config.
 
 ---
 
@@ -102,6 +121,22 @@ Bump these files **in the same commit**, immediately before pushing:
 | `plugins/agent-codespaces/pyproject.toml` | `version` under `[project]` |
 | `.github/plugin/marketplace.json` | `plugins[2].version` |
 
+**agent-containers:**
+
+| File | Field(s) |
+|------|----------|
+| `plugins/agent-containers/plugin.json` | `version` |
+| `plugins/agent-containers/pyproject.toml` | `version` under `[project]` |
+| `.github/plugin/marketplace.json` | `plugins[3].version` |
+
+**agent-mcp:**
+
+| File | Field(s) |
+|------|----------|
+| `plugins/agent-mcp/plugin.json` | `version` |
+| `plugins/agent-mcp/pyproject.toml` | `version` under `[project]` |
+| `.github/plugin/marketplace.json` | `plugins[4].version` |
+
 Default bump: **patch with `-devN` suffix** (e.g., `1.3.1` -> `1.3.2-dev1`).
 Do not bump minor or major unless the maintainer explicitly requests it.
 See `CONTRIBUTING.md` for the full versioning scheme.
@@ -112,6 +147,10 @@ See `CONTRIBUTING.md` for the full versioning scheme.
   pushing. The test suite covers transport, sessions, config, and CLI.
 - **agent-codespaces:** Run `pytest` from `plugins/agent-codespaces/` before
   pushing. Covers config, lifecycle, resolver, and the credential relay.
+- **agent-containers:** Run `pytest` from `plugins/agent-containers/` before
+  pushing. Covers config, lifecycle, the lease broker, and the resolver.
+- **agent-mcp:** Run `pytest` from `plugins/agent-mcp/` before pushing. Covers
+  config loading, auth injectors, transports, and bridge framing.
 - **agent-worktrees:** No automated test suite yet. Verify worktree
   operations work end-to-end (create, finalize, cleanup).
 
@@ -133,6 +172,11 @@ cd plugins/agent-bridge
 cd plugins/agent-codespaces
 ./scripts/install.sh update    # Linux/WSL
 .\scripts\install.ps1 update   # Windows
+
+# agent-containers / agent-mcp -- re-run init (no separate installer)
+cd plugins/agent-containers     # or plugins/agent-mcp
+./scripts/init.sh --force       # Linux/WSL
+.\scripts\init.ps1 -Force       # Windows
 ```
 
 ### Local Testing (Without Pushing)
@@ -199,14 +243,22 @@ cd plugins/agent-bridge
 | agent-worktrees manifest | `plugins/agent-worktrees/plugin.json` |
 | agent-bridge manifest | `plugins/agent-bridge/plugin.json` |
 | agent-codespaces manifest | `plugins/agent-codespaces/plugin.json` |
+| agent-containers manifest | `plugins/agent-containers/plugin.json` |
+| agent-mcp manifest | `plugins/agent-mcp/plugin.json` |
 | agent-worktrees Python source | `plugins/agent-worktrees/src/agent_worktrees/` |
 | agent-bridge Python source | `plugins/agent-bridge/src/agent_bridge/` |
 | agent-codespaces Python source | `plugins/agent-codespaces/src/agent_codespaces/` |
+| agent-containers Python source | `plugins/agent-containers/src/agent_containers/` |
+| agent-mcp Python source | `plugins/agent-mcp/src/agent_mcp/` |
 | agent-bridge tests | `plugins/agent-bridge/tests/` |
 | agent-codespaces tests | `plugins/agent-codespaces/tests/` |
+| agent-containers tests | `plugins/agent-containers/tests/` |
+| agent-mcp tests | `plugins/agent-mcp/tests/` |
 | Skills (agent-worktrees) | `plugins/agent-worktrees/skills/` |
 | Skills (agent-bridge) | `plugins/agent-bridge/skills/` |
 | Skills (agent-codespaces) | `plugins/agent-codespaces/skills/` |
+| Skills (agent-containers) | `plugins/agent-containers/skills/` |
+| Skills (agent-mcp) | `plugins/agent-mcp/skills/` |
 | Hooks | `plugins/agent-worktrees/hooks.json` |
-| Installers | `plugins/*/scripts/init.ps1, init.sh, install.ps1, install.sh` |
+| Installers | `agent-worktrees`/`agent-codespaces`: `scripts/init.*` + `scripts/install.*`; `agent-bridge`: `scripts/install.*`; `agent-containers`/`agent-mcp`: `scripts/init.*` only |
 | Repo architecture overview | `docs/architecture.md` |

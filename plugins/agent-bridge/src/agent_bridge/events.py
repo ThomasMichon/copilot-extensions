@@ -155,7 +155,7 @@ class EventLog:
         A tool call is *in-flight* once a ``tool_call_start`` is seen and until
         a later ``tool_call_update`` for the same ``tool_call_id`` carries a
         terminal status. This is what lets a live feed say *"still running:
-        Build odsp-legacy — rush build … (17m)"* during a long, output-buffered
+        Build webapp — rush build … (17m)"* during a long, output-buffered
         tool call instead of a contentless heartbeat -- so a watcher can tell a
         busy agent from a hung one, and knows the last thing it was doing.
 

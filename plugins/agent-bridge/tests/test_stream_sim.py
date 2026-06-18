@@ -178,8 +178,8 @@ class _ToolProgressBridge:
     def __init__(self):
         self.real = [
             {"id": 1, "event": "tool_call_start",
-             "data": {"tool_call_id": "t1", "title": "Build odsp-legacy",
-                      "command": "rush build -t @ms/app-cores-odsp-legacy"}},
+             "data": {"tool_call_id": "t1", "title": "Build webapp",
+                      "command": "rush build -t @scope/webapp"}},
         ]
         self.cursors = {}
         self.acks = []
@@ -209,8 +209,8 @@ class _ToolProgressBridge:
                 yield e
         # Quiet period: server surfaces what the remote is working on.
         yield {"id": "", "event": "tool_progress",
-               "data": {"title": "Build odsp-legacy",
-                        "command": "rush build -t @ms/app-cores-odsp-legacy",
+               "data": {"title": "Build webapp",
+                        "command": "rush build -t @scope/webapp",
                         "elapsed_s": 1027}}
 
 
@@ -222,8 +222,8 @@ class TestToolProgressLiveness:
         status, out = _run(bridge)
         assert status == "complete"
         # The watcher sees what the remote is stuck on, and that it's alive.
-        assert "still running: Build odsp-legacy" in out
-        assert "rush build -t @ms/app-cores-odsp-legacy" in out
+        assert "still running: Build webapp" in out
+        assert "rush build -t @scope/webapp" in out
         assert "17m" in out
 
     def test_tool_progress_does_not_move_cursor(self, monkeypatch) -> None:

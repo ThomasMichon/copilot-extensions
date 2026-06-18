@@ -21,7 +21,7 @@ from agent_containers.resolver import (
 
 
 def test_build_spawn_command_forwards_token_by_name():
-    cmd = build_spawn_command("odsp-web-1", "vscode", "cd /w && copilot --acp", True)
+    cmd = build_spawn_command("myrepo-1", "vscode", "cd /w && copilot --acp", True)
     assert cmd[:3] == ["docker", "exec", "-i"]
     assert "-e" in cmd and "GH_TOKEN" in cmd
     # token value must NOT be embedded
@@ -37,8 +37,8 @@ def test_build_spawn_command_no_token():
 
 
 def test_build_wrapper_command():
-    cmd = build_wrapper_command("odsp-web-1")
-    assert cmd[-3:] == ["exec", "--stdio", "odsp-web-1"]
+    cmd = build_wrapper_command("myrepo-1")
+    assert cmd[-3:] == ["exec", "--stdio", "myrepo-1"]
     # no docker / token details leak into the wrapper command
     assert "docker" not in cmd
     assert "GH_TOKEN" not in cmd
@@ -47,7 +47,7 @@ def test_build_wrapper_command():
 def test_build_wrapper_command_uses_module_not_binstub():
     """Spawn via ``python -m agent_containers``, never the .cmd binstub, so
     agent-bridge does not route the spawn through cmd.exe and mangle args."""
-    cmd = build_wrapper_command("odsp-web-1")
+    cmd = build_wrapper_command("myrepo-1")
     assert cmd[1:3] == ["-m", "agent_containers"]
     assert not cmd[0].lower().endswith((".cmd", ".bat"))
 
@@ -85,10 +85,10 @@ def test_resolve_returns_wrapper_without_token(monkeypatch):
         lambda: (_ for _ in ()).throw(AssertionError("resolve must not fetch token")),
     )
 
-    target = asyncio.run(ContainerResolver().resolve("odsp-web-1"))
+    target = asyncio.run(ContainerResolver().resolve("myrepo-1"))
     assert target.type == "command"
     # wrapper command, NOT docker directly
-    assert target.spawn_command[-3:] == ["exec", "--stdio", "odsp-web-1"]
+    assert target.spawn_command[-3:] == ["exec", "--stdio", "myrepo-1"]
     # no token persisted anywhere on the target
     assert not getattr(target, "env", {})
     assert "container" == ContainerResolver().prefix

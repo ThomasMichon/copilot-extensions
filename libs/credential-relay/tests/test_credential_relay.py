@@ -663,7 +663,7 @@ class TestFailFast:
         await server.start()
         try:
             data = await _exchange(
-                server, b"protocol=https\nhost=onedrive.visualstudio.com\n\n",
+                server, b"protocol=https\nhost=your-org.visualstudio.com\n\n",
             )
             assert b"quit=1" in data
             assert server.stats.failfast_responses == 1

@@ -40,7 +40,7 @@ def _drain(lines: list[str]) -> list[dict]:
 class TestSseCommentParsing:
     def test_tool_progress_comment_becomes_liveness_dict(self) -> None:
         payload = json.dumps(
-            {"title": "Build odsp-legacy", "command": "rush build", "elapsed_s": 1027}
+            {"title": "Build webapp", "command": "rush build", "elapsed_s": 1027}
         )
         events = _drain([f": tool_progress {payload}", ""])
         assert events == [
@@ -48,7 +48,7 @@ class TestSseCommentParsing:
                 "id": "",
                 "event": "tool_progress",
                 "data": {
-                    "title": "Build odsp-legacy",
+                    "title": "Build webapp",
                     "command": "rush build",
                     "elapsed_s": 1027,
                 },

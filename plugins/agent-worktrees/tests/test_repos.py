@@ -168,8 +168,8 @@ def test_migrate_git_repos(home: Path):
     (home / ".git-repos").write_text(
         "srcroot: D:/Src\n"
         "repos:\n"
-        "  aperture-labs:\n"
-        "    remote: https://example/aperture-labs.git\n"
+        "  sample-project:\n"
+        "    remote: https://example/sample-project.git\n"
         "    default_branch: master\n"
         "    tags: [facility]\n"
         "  some-lib:\n"
@@ -178,10 +178,10 @@ def test_migrate_git_repos(home: Path):
         "    path: D:/Other/some-lib\n",
         encoding="utf-8",
     )
-    # aperture-labs is an adopted project -> should classify as worktree.
+    # sample-project is an adopted project -> should classify as worktree.
     proj = home / ".agent-worktrees" / "projects.yaml"
     proj.parent.mkdir(parents=True, exist_ok=True)
-    proj.write_text("projects:\n  aperture-labs:\n    anchor: D:/Src/aperture-labs\n",
+    proj.write_text("projects:\n  sample-project:\n    anchor: D:/Src/sample-project\n",
                     encoding="utf-8")
 
     migrated, skipped = repos.migrate_git_repos(default_class="singleton",
@@ -190,11 +190,11 @@ def test_migrate_git_repos(home: Path):
     reg = repos.read_registry()
     assert reg.srcroot["windows"] == "D:/Src"
 
-    al = reg.repos["aperture-labs"]
+    al = reg.repos["sample-project"]
     assert al.repo_class == "worktree"            # adopted project
     assert al.default_branch == "master"
     assert al.tags == ["facility"]
-    assert al.local_path("windows") == str(Path("D:/Src/aperture-labs"))
+    assert al.local_path("windows") == str(Path("D:/Src/sample-project"))
 
     lib = reg.repos["some-lib"]
     assert lib.repo_class == "singleton"          # default
