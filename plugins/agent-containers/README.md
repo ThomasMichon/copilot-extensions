@@ -43,19 +43,21 @@ agent-containers bridge register     # push provider registrations (optional)
 ## Configuration
 
 `containers.yaml` (looked up via `$AGENT_CONTAINERS_CONFIG`, `./containers.yaml`,
-or `~/.agent-containers/containers.yaml`). Built-in defaults target the
-odsp-web local Docker dev container.
+or `~/.agent-containers/containers.yaml`). Built-in defaults target a generic
+VS Code dev container (`exec_user: vscode`, `workspace_folder: /workspace`,
+`image_prefixes: ["vsc-"]`); point them at a real repo in your own
+`containers.yaml`:
 
 ```yaml
 exec_user: vscode
-workspace_folder: /workspaces/odsp-web
+workspace_folder: /workspaces/myrepo
 forward_gh_token: true
 image_prefixes:
-  - vsc-odsp-web-codespaces-
+  - vsc-myrepo-                  # narrow discovery to your devcontainer image
 fleets:
-  odsp-web:
-    repo: odsp-microsoft/odsp-web
-    devcontainer_path: D:/Src/odsp-web-codespaces
+  myrepo:
+    repo: your-org/your-repo
+    devcontainer_path: D:/Src/myrepo-devcontainer
     size: 3
     code_model: clone   # Model A: repo cloned inside the container
 ```

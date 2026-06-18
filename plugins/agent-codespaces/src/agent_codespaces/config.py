@@ -30,7 +30,7 @@ CONFIG_FILENAME = "codespaces.yaml"
 # ``bash -l -c`` at launch, so the agent lands in the repo checkout rather than
 # ``/home/vscode``. Order: ``$CODESPACE_VSCODE_FOLDER`` (the VS Code/Codespaces
 # convention, when exported to the shell) -> ``$VM_REPO_PATH`` (set by many
-# devcontainers, incl. odsp-web-codespaces) -> ``.`` (no-op: keep the SSH
+# devcontainers) -> ``.`` (no-op: keep the SSH
 # default cwd, which Codespaces sets to the workspace -- never forces $HOME).
 _WORKSPACE_CD = 'cd "${CODESPACE_VSCODE_FOLDER:-${VM_REPO_PATH:-.}}"'
 

@@ -1,19 +1,25 @@
 ---
 name: copilot-extensions-setup
 description: >
-  Install and adopt for both copilot-extensions plugins (agent-worktrees
-  and agent-bridge) -- runtime bootstrap, repo adoption, topology wiring,
-  and service registration. One skill for all setup flows. Trigger phrases
-  include:
+  Install and adopt for the copilot-extensions plugins (agent-worktrees,
+  agent-bridge, agent-codespaces, agent-containers, and agent-mcp) -- runtime
+  bootstrap, repo adoption, topology wiring, and service registration. One
+  skill for all setup flows. Trigger phrases include:
   - 'install agent-worktrees'
   - 'install agent-bridge'
+  - 'install agent-codespaces'
+  - 'install agent-containers'
+  - 'install agent-mcp'
   - 'set up agent-worktrees'
   - 'set up agent-bridge'
+  - 'set up copilot extensions'
   - 'bootstrap agent-worktrees'
   - 'bootstrap agent-bridge'
   - 'agent-worktrees not found'
   - 'agent-bridge not found'
   - 'agent-bridge not installed'
+  - 'agent-containers not found'
+  - 'agent-mcp not found'
   - 'runtime not installed'
   - 'adopt this repo'
   - 'adopt repo'
@@ -25,12 +31,11 @@ description: >
   - 'agent-bridge topology missing'
   - 'set up worktree sessions for this repo'
   - 'bootstrap this machine'
-  - 'set up copilot extensions'
 ---
 
 # Copilot Extensions Setup
 
-Install and adopt flows for all **four** copilot-extensions plugins:
+Install and adopt flows for all **five** copilot-extensions plugins:
 
 | Plugin | Type | What It Does |
 |--------|------|-------------|
@@ -38,23 +43,27 @@ Install and adopt flows for all **four** copilot-extensions plugins:
 | **agent-bridge** | Persistent service | Inter-agent sessions, machine mesh (port 9280 Win / 9281 WSL) |
 | **agent-codespaces** | CLI + relay | CodeSpace lifecycle, `codespace:` resolver, credential relay (port 9857) |
 | **agent-containers** | CLI + fleet | Local Docker dev-container fleet, lease broker, `container:` resolver |
+| **agent-mcp** | MCP bridge (standalone) | Wrap an upstream MCP server + inject host creds; invoked from an agent's `mcp-servers` config — **not** part of the bridge mesh |
 
-All four ship from the same `copilot-extensions` repo. Install order:
-agent-worktrees first (prerequisite), then agent-codespaces and agent-containers,
-then agent-bridge (the bridge installer imports agent-codespaces and
-agent-containers for their `codespace:` / `container:` resolvers, so install
-them before the bridge).
+All five ship from the same `copilot-extensions` repo. Install order for the
+**mesh**: agent-worktrees first (prerequisite), then agent-codespaces and
+agent-containers, then agent-bridge (the bridge installer imports
+agent-codespaces and agent-containers for their `codespace:` / `container:`
+resolvers, so install them before the bridge). agent-mcp is **standalone and
+optional** — install it any time; it has no ordering constraint.
 
 **End state:** every module installed from the marketplace and running from its
 local install path (`~/.agent-worktrees`, `~/.agent-codespaces`,
-`~/.agent-containers`, `~/.agent-bridge`) with binstubs in `~/.local/bin`.
+`~/.agent-containers`, `~/.agent-bridge`, `~/.agent-mcp`) with binstubs in
+`~/.local/bin`.
 
 ---
 
 ## 0. Install the plugins (marketplace)
 
-Run once per machine. **Install all three** — the README's single-plugin
-example is not sufficient for codespace support.
+Run once per machine. **Install the four mesh plugins** — installing
+agent-worktrees alone is not enough for codespace/container support.
+agent-mcp is optional; add it if you need to wrap an authenticated MCP.
 
 ```bash
 copilot plugin marketplace add ThomasMichon/copilot-extensions
@@ -62,13 +71,14 @@ copilot plugin install agent-worktrees@copilot-extensions
 copilot plugin install agent-codespaces@copilot-extensions
 copilot plugin install agent-containers@copilot-extensions
 copilot plugin install agent-bridge@copilot-extensions
+copilot plugin install agent-mcp@copilot-extensions          # optional, standalone
 ```
 
-Verify all four vendored:
+Verify all vendored:
 
 ```powershell
 Get-ChildItem "$env:USERPROFILE\.copilot\installed-plugins\copilot-extensions"
-# expect: agent-worktrees, agent-bridge, agent-codespaces, agent-containers
+# expect: agent-worktrees, agent-bridge, agent-codespaces, agent-containers (+ agent-mcp if installed)
 ```
 
 If agent-codespaces or agent-containers is missing here, the bridge installer
@@ -97,6 +107,10 @@ $acDir = Get-ChildItem -Recurse -Path "$env:USERPROFILE\.copilot\installed-plugi
 $anDir = Get-ChildItem -Recurse -Path "$env:USERPROFILE\.copilot\installed-plugins" -Filter "plugin.json" |
     Where-Object { (Get-Content $_.FullName -Raw) -match '"agent-containers"' } |
     Select-Object -First 1 -ExpandProperty DirectoryName
+
+$amDir = Get-ChildItem -Recurse -Path "$env:USERPROFILE\.copilot\installed-plugins" -Filter "plugin.json" |
+    Where-Object { (Get-Content $_.FullName -Raw) -match '"agent-mcp"' } |
+    Select-Object -First 1 -ExpandProperty DirectoryName
 ```
 
 ```bash
@@ -105,6 +119,7 @@ aw_dir=$(find ~/.copilot/installed-plugins -name plugin.json -exec grep -l agent
 ab_dir=$(find ~/.copilot/installed-plugins -name plugin.json -exec grep -l agent-bridge {} \; | head -1 | xargs dirname)
 ac_dir=$(find ~/.copilot/installed-plugins -name plugin.json -exec grep -l agent-codespaces {} \; | head -1 | xargs dirname)
 an_dir=$(find ~/.copilot/installed-plugins -name plugin.json -exec grep -l agent-containers {} \; | head -1 | xargs dirname)
+am_dir=$(find ~/.copilot/installed-plugins -name plugin.json -exec grep -l agent-mcp {} \; | head -1 | xargs dirname)
 ```
 
 ---
@@ -466,17 +481,63 @@ into containers, so `gh` must be authenticated for dispatched agents to work.
 
 ---
 
-## Full Machine Bootstrap
+## 8. Agent-MCP Init (optional, standalone)
 
-To set up a fresh machine with all **four** plugins:
+Install the agent-mcp runtime (CLI binstub + `~/.agent-mcp` home). agent-mcp is
+**not** part of the bridge mesh — it has no `codespace:` / `container:`-style
+resolver and the bridge does not import it. An agent wraps an upstream MCP by
+pointing an `mcp-servers` entry at the `agent-mcp` binstub. Install it only if
+you need to bridge an authenticated MCP server.
+
+```powershell
+# Windows
+powershell -NoProfile -ExecutionPolicy Bypass -File "$amDir\scripts\init.ps1"
+```
 
 ```bash
-# 0. Install all four plugins from the marketplace (see section 0)
+# Linux/WSL
+bash "$am_dir/scripts/init.sh"
+```
+
+### What It Creates
+
+```
+~/.agent-mcp/
+  .venv/                   Python venv with the agent_mcp package
+  deploy-manifest.json
+
+~/.local/bin/
+  agent-mcp[.cmd]          Binstub
+```
+
+You create `~/.agent-mcp/bridges/<name>.yaml` config files yourself (or pass
+`--config <path>`); init does not create the `bridges/` directory.
+
+### Verify
+
+```bash
+agent-mcp status            # prerequisites + available bridges
+```
+
+Define a bridge under `~/.agent-mcp/bridges/<name>.yaml` (or pass `--config`),
+then validate it with `agent-mcp validate <name>`. See the `agent-mcp` skill for
+the config format and how to wire it into an agent's `mcp-servers`.
+
+---
+
+## Full Machine Bootstrap
+
+To set up a fresh machine with the four **mesh** plugins (add agent-mcp
+separately if needed — see section 8):
+
+```bash
+# 0. Install the mesh plugins from the marketplace (see section 0)
 copilot plugin marketplace add ThomasMichon/copilot-extensions
 copilot plugin install agent-worktrees@copilot-extensions
 copilot plugin install agent-codespaces@copilot-extensions
 copilot plugin install agent-containers@copilot-extensions
 copilot plugin install agent-bridge@copilot-extensions
+# optional: copilot plugin install agent-mcp@copilot-extensions
 
 # 1. Install agent-worktrees runtime      (section 1)
 # 2. Adopt the repo for worktree sessions  (section 2)
@@ -491,13 +552,15 @@ agent-bridge config adopt --repo /path/to/repo --profile my-control-harness
 cd /path/to/repo && agent-codespaces config adopt
 
 # 7. Install agent-containers runtime      (section 7)
+# 8. (optional) Install agent-mcp runtime  (section 8)
 
-# 8. Start the service
+# 9. Start the service
 agent-bridge start  # or: install.ps1 start
 
-# 9. Verify everything
+# 10. Verify everything
 agent-worktrees --version && agent-worktrees status
 agent-bridge version && agent-bridge machines && agent-bridge agents
 agent-codespaces version && agent-codespaces status
 agent-containers version && agent-containers fleet
+# agent-mcp status   # if installed
 ```

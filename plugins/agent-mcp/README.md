@@ -32,7 +32,7 @@ bridge packaged as a Copilot CLI plugin.
 # ~/.agent-mcp/bridges/ado.yaml   ->   agent-mcp bridge ado
 server:                                  # original launch info (lift from .mcp.json)
   type: http
-  url: https://mcp.dev.azure.com/onedrive
+  url: https://mcp.dev.azure.com/your-org
 auth:
   kind: entra
   resource: 2a72489c-aab2-4b65-b93a-a91edccf33b8   # mcp.dev.azure.com

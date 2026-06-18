@@ -768,7 +768,7 @@ def _discover_workspace_folder(codespaces: list[dict], repository: str) -> str |
     a cold-start. Returns None on any failure (no Available CodeSpace, SSH
     error, timeout) -- callers must treat workspace_folder as unknown, not
     guess it from the repo name (the CodeSpaces repo name often differs from
-    the checked-out workspace, e.g. ``odsp-web-codespaces`` vs ``odsp-web``).
+    the checked-out workspace, e.g. ``<repo>-codespaces`` vs ``<repo>``).
     """
     import subprocess as sp
 
@@ -1005,7 +1005,7 @@ def _config_init(
             )
             print(
                 "                     (often NOT the CodeSpaces repo name, e.g. "
-                "odsp-web vs odsp-web-codespaces)."
+                "<repo> vs <repo>-codespaces)."
             )
     else:
         print("  No existing CodeSpaces detected -- wrote a generic template.")

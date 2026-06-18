@@ -1,16 +1,18 @@
 # Architecture Overview
 
-How the three copilot-extensions plugins fit together — install topology,
+How the five copilot-extensions plugins fit together — install topology,
 runtimes, ports, and the credential relay. For per-plugin internals, follow the
 links in each section.
 
-## The three plugins
+## The plugins
 
 | Plugin | Kind | Runtime home | Binstub | Lifecycle |
 |--------|------|--------------|---------|-----------|
 | [agent-worktrees](../plugins/agent-worktrees/) | Session plugin (skills + `sessionStart` hook) | `~/.agent-worktrees/` | `~/.local/bin/agent-worktrees` + per-project binstubs | Per session (launched by binstub); runtime auto-updates on session start |
 | [agent-bridge](../plugins/agent-bridge/) | Persistent HTTP service | `~/.agent-bridge/` | `~/.local/bin/agent-bridge` | Always-on daemon (Windows scheduled task / Linux systemd user unit) |
-| [agent-codespaces](../plugins/agent-codespaces/) | CLI + credential relay | `~/.agent-codespaces/` | `~/.local/bin/agent-codespaces` | On-demand CLI; relay runs inside the agent-bridge service process |
+| [agent-codespaces](../plugins/agent-codespaces/) | CLI + credential relay | `~/.agent-codespaces/` | `~/.local/bin/agent-codespaces` | On-demand CLI; relay + `codespace:` resolver run inside the agent-bridge service process |
+| [agent-containers](../plugins/agent-containers/) | CLI + `container:` resolver | `~/.agent-containers/` | `~/.local/bin/agent-containers` | On-demand CLI; `container:` resolver runs inside the agent-bridge service process |
+| [agent-mcp](../plugins/agent-mcp/) | Standalone MCP bridge (stdio) | `~/.agent-mcp/` | `~/.local/bin/agent-mcp` | Spawned per-call by an agent's `mcp-servers` entry; no bridge integration |
 
 ## Install topology — marketplace to local paths
 
@@ -26,27 +28,39 @@ flowchart TB
       AW["agent-worktrees/<br/>scripts • src • skills • hooks.json"]
       AB["agent-bridge/<br/>scripts • src • libs/ssh-manager"]
       AC["agent-codespaces/<br/>scripts • src"]
+      AN["agent-containers/<br/>scripts • src"]
+      AM["agent-mcp/<br/>scripts • src"]
     end
     subgraph RT["Local runtimes"]
       RW["~/.agent-worktrees/<br/>.venv • lib • bin"]
       RB["~/.agent-bridge/<br/>venv • config.yaml • sessions.db"]
       RC["~/.agent-codespaces/<br/>.venv • lib"]
+      RN["~/.agent-containers/<br/>.venv • leases.json"]
+      RM["~/.agent-mcp/<br/>.venv • deploy-manifest.json"]
     end
-    BIN["~/.local/bin/<br/>agent-worktrees • agent-bridge • agent-codespaces"]
+    BIN["~/.local/bin/<br/>agent-worktrees • agent-bridge • agent-codespaces • agent-containers • agent-mcp"]
     MP --> AW --> RW
     MP --> AB --> RB
     MP --> AC --> RC
+    MP --> AN --> RN
+    MP --> AM --> RM
     RW --> BIN
     RB --> BIN
     RC --> BIN
+    RN --> BIN
+    RM --> BIN
     AC -.->|package imported into bridge venv| RB
+    AN -.->|package imported into bridge venv| RB
 ```
 
-Key rule: the **agent-codespaces binstub is owned by `~/.agent-codespaces`**.
-The agent-bridge installer also installs the `agent_codespaces` *package* into
-its own venv so the service can import the `codespace:` namespace resolver and
-the credential relay — but it must not repoint the binstub. This keeps one
-canonical CLI and avoids version skew.
+Key rule: the **agent-codespaces and agent-containers binstubs are owned by
+their own runtimes** (`~/.agent-codespaces`, `~/.agent-containers`). The
+agent-bridge installer also installs the `agent_codespaces` and
+`agent_containers` *packages* into its own venv so the service can import the
+`codespace:` / `container:` namespace resolvers (and, for codespaces, the
+credential relay) — but it must not repoint those binstubs. This keeps one
+canonical CLI per plugin and avoids version skew. agent-mcp is standalone: no
+bridge import, no resolver — agents invoke its binstub directly.
 
 ## Ports
 
@@ -58,7 +72,7 @@ canonical CLI and avoids version skew.
 ## The control-harness repo
 
 A teammate's own repo (a dotfiles-style hub, `my-control-harness` in examples)
-is the single source of truth all three plugins read from.
+is the single source of truth the mesh plugins read from.
 
 ```mermaid
 flowchart LR
@@ -66,11 +80,13 @@ flowchart LR
       MY["machines.yaml<br/>(machines + SSH)"]
       AG["acp-agents.json<br/>(agent definitions)"]
       CY["codespaces.yaml<br/>(Codespace defaults + relay policy)"]
+      CN["containers.yaml<br/>(fleet defaults)"]
     end
     MY --> WT["agent-worktrees<br/>(terminal/SSH targets)"]
     MY --> BR["agent-bridge<br/>(machine topology)"]
     AG --> BR
     CY --> CSp["agent-codespaces<br/>(create + relay)"]
+    CN --> CTp["agent-containers<br/>(fleet + lease)"]
     Repo -.->|provisioned into each CodeSpace| GH["GitHub Codespaces"]
 ```
 
@@ -79,6 +95,13 @@ flowchart LR
   + `acp-agents.json`.
 - `agent-codespaces config adopt` → registers the repo so `codespaces.yaml` is
   read live on every operation.
+- `agent-containers` reads `containers.yaml` (resolved via
+  `$AGENT_CONTAINERS_CONFIG`, `./containers.yaml`, or
+  `~/.agent-containers/containers.yaml`) — keep it in the control repo to share
+  fleet defaults.
+
+> agent-mcp is **not** wired to the control repo — its bridge configs live under
+> `~/.agent-mcp/bridges/` (or wherever an agent's `--config` points).
 
 See [machine-config](../plugins/agent-bridge/docs/machine-config.md) for the
 file formats and [codespaces-setup](../plugins/agent-codespaces/skills/codespaces-setup/SKILL.md)
@@ -119,6 +142,7 @@ flowchart TB
     A -->|"agent-bridge send local"| L["Local agent<br/>(another worktree, subprocess)"]
     A -->|"agent-bridge send dev-wsl"| R["Remote agent<br/>(SSH to another machine)"]
     A -->|"agent-bridge send codespace:name"| C["CodeSpace agent<br/>(auto-start + SSH + relay)"]
+    A -->|"agent-bridge send container:name"| N["Container agent<br/>(docker exec + gh token)"]
 ```
 
 - **Local** — no SSH; the bridge spawns a subprocess (optionally in a fresh
@@ -129,6 +153,13 @@ flowchart TB
   friendly/display name; the `codespace:` prefix is optional), auto-starts a
   Shutdown CodeSpace, opens SSH with the relay tunnel, and the bridge spawns
   `copilot --acp` inside it.
+- **Container** — agent-containers resolves `container:<name>` to a leased local
+  dev container, runs `copilot --acp` over `docker exec`, and forwards the host
+  `gh auth token` (as `GH_TOKEN`) so the in-container agent is authenticated.
+
+> **Note:** agent-mcp has no `agent-bridge send` path — it is not an inter-agent
+> transport. It is wrapped directly by an agent's `mcp-servers` config to expose
+> an authenticated upstream MCP server over local stdio.
 
 ## Where to go next
 
@@ -136,3 +167,5 @@ flowchart TB
 - agent-worktrees [architecture](../plugins/agent-worktrees/docs/architecture.md) · [CLI reference](../plugins/agent-worktrees/docs/cli-reference.md)
 - agent-bridge [architecture](../plugins/agent-bridge/docs/architecture.md) · [machine-config](../plugins/agent-bridge/docs/machine-config.md)
 - agent-codespaces [README](../plugins/agent-codespaces/README.md) · [lifecycle skill](../plugins/agent-codespaces/skills/codespaces-lifecycle/SKILL.md)
+- agent-containers [README](../plugins/agent-containers/README.md) · [containers-fleet skill](../plugins/agent-containers/skills/containers-fleet/SKILL.md)
+- agent-mcp [README](../plugins/agent-mcp/README.md) · [agent-mcp skill](../plugins/agent-mcp/skills/agent-mcp/SKILL.md)

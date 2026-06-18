@@ -4,7 +4,7 @@ description: >-
   Manage a local Docker dev-container fleet and dispatch Copilot agents into
   containers via agent-bridge. Use when asked to "set up containers", "borrow a
   container", "release a container", "container fleet", "dispatch to a
-  container", or to run work inside a local odsp-web dev container instead of a
+  container", or to run work inside a local Docker dev container instead of a
   CodeSpace.
 ---
 
@@ -21,7 +21,7 @@ agent-bridge as `container:<name>`.
 Define the fleet in `containers.yaml`, then:
 
 ```bash
-agent-containers up odsp-web --count 3   # create/top-up to 3 warm containers
+agent-containers up myrepo --count 3      # create/top-up to 3 warm containers
 agent-containers fleet                   # list members + lease status
 ```
 
@@ -77,7 +77,7 @@ effort; re-borrowing for the same effort is idempotent.
 ## Dispatch work
 
 ```bash
-agent-bridge send container:odsp-web-1 "run the unit tests in packages/foo"
+agent-bridge send container:myrepo-1 "run the unit tests in packages/foo"
 ```
 
 The resolver launches `copilot --acp --stdio --allow-all-tools` inside the

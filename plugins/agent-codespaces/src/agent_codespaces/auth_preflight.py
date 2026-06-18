@@ -24,7 +24,7 @@ from credential_relay.sources.git_credential import GitCredentialSource
 log = logging.getLogger("agent-codespaces.auth-preflight")
 
 # Remote command that prints the workspace's git remotes. Prefers the reliable
-# $VM_REPO_PATH checkout (odsp-web-codespaces devcontainers) and falls back to
+# $VM_REPO_PATH checkout (set by many codespaces devcontainers) and falls back to
 # the current directory. Bounded; never prompts.
 REMOTE_LIST_COMMAND = (
     'git -C "${VM_REPO_PATH:-$PWD}" remote -v 2>/dev/null '

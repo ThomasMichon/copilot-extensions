@@ -25,7 +25,7 @@ def test_parse_labels_empty():
 
 def test_is_fleet_member_by_fleet_label():
     c = ContainersConfig()
-    assert _is_fleet_member({FLEET_LABEL: "odsp-web"}, "anything", c)
+    assert _is_fleet_member({FLEET_LABEL: "myrepo"}, "anything", c)
 
 
 def test_is_fleet_member_by_devcontainer_label():
@@ -35,7 +35,7 @@ def test_is_fleet_member_by_devcontainer_label():
 
 def test_is_fleet_member_by_image_prefix():
     c = ContainersConfig()
-    assert _is_fleet_member({}, "vsc-odsp-web-codespaces-abc123", c)
+    assert _is_fleet_member({}, "vsc-myrepo-abc123", c)
 
 
 def test_is_not_fleet_member():
@@ -50,33 +50,33 @@ def _info(name: str) -> DockerContainerInfo:
 
 
 def test_next_indices_empty():
-    assert _next_indices([], "odsp-web", 3) == [1, 2, 3]
+    assert _next_indices([], "myrepo", 3) == [1, 2, 3]
 
 
 def test_next_indices_fills_gaps():
-    existing = [_info("odsp-web-1"), _info("odsp-web-3")]
-    assert _next_indices(existing, "odsp-web", 2) == [2, 4]
+    existing = [_info("myrepo-1"), _info("myrepo-3")]
+    assert _next_indices(existing, "myrepo", 2) == [2, 4]
 
 
 def test_container_repo_from_local_folder():
     c = DockerContainerInfo(
         name="x", container_id="i", image="img", state="running", status="",
-        local_folder="C:\\Users\\me\\src\\odsp-web",
+        local_folder="C:\\Users\\me\\src\\myrepo",
     )
-    assert c.repo == "odsp-web"
+    assert c.repo == "myrepo"
     assert c.is_running
 
 
 def test_row_to_info_parses_fleet_member():
     c = ContainersConfig()
-    line = "odsp-web-1\tabc123\tvsc-odsp-web-codespaces-x\trunning\tUp 2 minutes\t" + \
-        f"{FLEET_LABEL}=odsp-web,devcontainer.local_folder=/x/odsp-web"
+    line = "myrepo-1\tabc123\tvsc-myrepo-x\trunning\tUp 2 minutes\t" + \
+        f"{FLEET_LABEL}=myrepo,devcontainer.local_folder=/x/myrepo"
     info = _row_to_info(line, c)
     assert info is not None
-    assert info.name == "odsp-web-1"
+    assert info.name == "myrepo-1"
     assert info.state == "running"
-    assert info.fleet == "odsp-web"
-    assert info.local_folder == "/x/odsp-web"
+    assert info.fleet == "myrepo"
+    assert info.local_folder == "/x/myrepo"
 
 
 def test_row_to_info_skips_non_member():

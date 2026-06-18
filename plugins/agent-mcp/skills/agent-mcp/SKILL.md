@@ -30,7 +30,7 @@ shape as a `.mcp.json` entry) plus `auth` and overrides:
 ```yaml
 server:
   type: http                       # http | stdio
-  url: https://mcp.dev.azure.com/onedrive
+  url: https://mcp.dev.azure.com/your-org
 auth:
   kind: entra                      # entra|az | gh | git-credential | env|static | none
   resource: 2a72489c-aab2-4b65-b93a-a91edccf33b8

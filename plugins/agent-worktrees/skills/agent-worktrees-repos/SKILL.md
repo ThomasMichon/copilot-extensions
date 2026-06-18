@@ -40,7 +40,7 @@ field: it determines whether (and how) you may edit the repo.
 |-------|---------------|---------|
 | **reference** | Read-only. Tracked only for path resolution, cloning, and indexing (VEI). **Never edited locally.** | Upstream deps, consumer repos, indexed mirrors |
 | **singleton** | Editable as a **single anchor checkout**, no worktree isolation. One flow at a time. | Repos where worktrees are overkill or unsupported |
-| **worktree** | Full agent-worktrees lifecycle: **concurrent-flow safe**, edits/stages/commits isolated in per-task worktrees until the final push. | Owned/contributed repos edited by multiple agent flows (e.g. `copilot-extensions`, `aperture-labs`, `dotfiles`) |
+| **worktree** | Full agent-worktrees lifecycle: **concurrent-flow safe**, edits/stages/commits isolated in per-task worktrees until the final push. | Owned/contributed repos edited by multiple agent flows (e.g. `copilot-extensions`, your control-harness repo) |
 
 **Why this matters:** multiple agent flows editing the same anchor
 checkout collide on working-tree state, staging, and commits. A

@@ -74,7 +74,23 @@ plugin you changed:
 | `plugins/agent-codespaces/pyproject.toml` | `version` under `[project]` | Python package version; shown in `agent-codespaces version` output |
 | `.github/plugin/marketplace.json` | `plugins[2].version` | Marketplace catalog entry for agent-codespaces |
 
-**All three files must be bumped together in the same commit.** If any
+**agent-containers:**
+
+| File | Field | Purpose |
+|------|-------|---------|
+| `plugins/agent-containers/plugin.json` | `version` | Plugin version for marketplace detection |
+| `plugins/agent-containers/pyproject.toml` | `version` under `[project]` | Python package version; shown in `agent-containers version` output |
+| `.github/plugin/marketplace.json` | `plugins[3].version` | Marketplace catalog entry for agent-containers |
+
+**agent-mcp:**
+
+| File | Field | Purpose |
+|------|-------|---------|
+| `plugins/agent-mcp/plugin.json` | `version` | Plugin version for marketplace detection |
+| `plugins/agent-mcp/pyproject.toml` | `version` under `[project]` | Python package version; shown in `agent-mcp status` output |
+| `.github/plugin/marketplace.json` | `plugins[4].version` | Marketplace catalog entry for agent-mcp |
+
+**All version files for a plugin must be bumped together in the same commit.** If any
 file is out of sync:
 
 - Stale `plugin.json` — `copilot plugin update` reports "already at
@@ -252,6 +268,75 @@ other plugins):
 | `plugins/agent-codespaces/pyproject.toml` | `version` under `[project]` |
 | `.github/plugin/marketplace.json` | `plugins[2].version` |
 
+## Deploying Agent Containers
+
+Agent Containers is a CLI plugin with an `~/.agent-containers` runtime. It
+provides the `container:<name>` namespace resolver for agent-bridge (installed
+as a sibling package into the bridge venv) and a standalone `agent-containers`
+CLI for local Docker dev-container fleet and lease management.
+
+### The Deployment Pipeline
+
+1. **Commit** changes in `plugins/agent-containers/`
+2. **Bump the version** in all three files (see "Where the version lives")
+3. **Push** to `main` on GitHub: `git push origin main`
+4. **Update on each machine** by re-running the init script
+
+### Install / Update
+
+The plugin ships only `init` scripts (no separate `install`); re-running `init`
+with `--force` / `-Force` redeploys the runtime.
+
+```powershell
+# Windows -- from the copilot-extensions checkout
+pwsh -File plugins\agent-containers\scripts\init.ps1            # first time
+pwsh -File plugins\agent-containers\scripts\init.ps1 -Force     # redeploy
+```
+
+```bash
+# Linux/WSL -- from the copilot-extensions checkout
+bash plugins/agent-containers/scripts/init.sh                   # first time
+bash plugins/agent-containers/scripts/init.sh --force           # redeploy
+```
+
+The init script creates a venv at `~/.agent-containers/` and places a binstub in
+`~/.local/bin/`. So the bridge picks up the `container:` resolver, install
+agent-containers **before** (re)running the agent-bridge installer.
+
+## Deploying Agent MCP
+
+Agent MCP is a standalone CLI plugin with an `~/.agent-mcp` runtime. Unlike the
+other plugins it has **no** agent-bridge integration — an agent invokes the
+`agent-mcp` binstub directly from its `mcp-servers` config to wrap an upstream
+MCP server.
+
+### The Deployment Pipeline
+
+1. **Commit** changes in `plugins/agent-mcp/`
+2. **Bump the version** in all three files (see "Where the version lives")
+3. **Push** to `main` on GitHub: `git push origin main`
+4. **Update on each machine** by re-running the init script
+
+### Install / Update
+
+Like agent-containers, agent-mcp ships only `init` scripts; re-run with
+`--force` / `-Force` to redeploy.
+
+```powershell
+# Windows
+pwsh -File plugins\agent-mcp\scripts\init.ps1            # first time
+pwsh -File plugins\agent-mcp\scripts\init.ps1 -Force     # redeploy
+```
+
+```bash
+# Linux/WSL
+bash plugins/agent-mcp/scripts/init.sh                   # first time
+bash plugins/agent-mcp/scripts/init.sh --force           # redeploy
+```
+
+The init script creates a venv at `~/.agent-mcp/` and places the `agent-mcp`
+binstub in `~/.local/bin/`.
+
 ## Code Style
 
 - Python 3.10+, type hints encouraged
@@ -262,5 +347,5 @@ other plugins):
 ## Commit Messages
 
 - Descriptive, imperative mood: "Fix Unicode crash on cp1252 consoles"
-- Reference Gitea issue numbers where applicable: "Fix #372: …"
+- Reference this repo's GitHub issue numbers where applicable: "Fix #372: …"
 - Include `Co-authored-by` trailer for Copilot-assisted commits

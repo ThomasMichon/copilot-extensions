@@ -119,16 +119,16 @@ class TestActiveToolCall:
             "tool_call_start",
             {
                 "tool_call_id": "t1",
-                "title": "Build odsp-legacy",
+                "title": "Build webapp",
                 "kind": "execute",
-                "raw_input": {"command": "rush build -t @ms/app-cores-odsp-legacy"},
+                "raw_input": {"command": "rush build -t @scope/webapp"},
             },
         )
         active = event_log.active_tool_call()
         assert active is not None
         assert active["tool_call_id"] == "t1"
-        assert active["title"] == "Build odsp-legacy"
-        assert active["command"] == "rush build -t @ms/app-cores-odsp-legacy"
+        assert active["title"] == "Build webapp"
+        assert active["command"] == "rush build -t @scope/webapp"
         assert "started_at" in active
 
     def test_completed_tool_call_clears_active(self, event_log: EventLog) -> None:

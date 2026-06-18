@@ -65,7 +65,7 @@ async def test_sse_stream_drives_all_branches():
     log.append("agent_message", {"text": "hi"})  # id 1
     log.append(
         "tool_call_start",
-        {"tool_call_id": "t1", "title": "Build odsp", "raw_input": {"command": "rush build"}},
+        {"tool_call_id": "t1", "title": "Build webapp", "raw_input": {"command": "rush build"}},
     )  # id 2 -- in flight
 
     it = await _start_stream(log)
@@ -83,7 +83,7 @@ async def test_sse_stream_drives_all_branches():
     f3 = _decode(await it.__anext__())
     assert f3.startswith(": tool_progress ")
     payload = json.loads(f3[len(": tool_progress "):].strip())
-    assert payload["title"] == "Build odsp"
+    assert payload["title"] == "Build webapp"
     assert payload["command"] == "rush build"
     assert "elapsed_s" in payload  # derived from started_at -> the once-broken path
 

@@ -3,17 +3,21 @@
 A [Copilot CLI](https://docs.github.com/copilot/how-tos/use-copilot-agents/use-copilot-cli)
 plugin suite that gives every session its **own isolated git worktree** and lets
 your agents **talk to each other** — across worktrees, across machines, and into
-**GitHub Codespaces** — with credentials forwarded securely along the way.
+**GitHub Codespaces** and **local dev containers** — with credentials forwarded
+securely along the way. A fifth plugin wraps authenticated **MCP servers** so
+those same host credentials reach your tools.
 
-Three plugins, one marketplace. Install what you need; they compose.
+Five plugins, one marketplace. Install what you need; they compose.
 
 | Plugin | Type | What it gives you |
 |--------|------|-------------------|
 | [agent-worktrees](plugins/agent-worktrees/) | Session tool | Each Copilot CLI session runs in its own git worktree — no branch conflicts, no stale state. Install this first. |
 | [agent-bridge](plugins/agent-bridge/) | Persistent service | Send prompts to agents on other machines (or other worktrees) over an always-on local service + SSH mesh. |
 | [agent-codespaces](plugins/agent-codespaces/) | CLI + relay | Create/manage GitHub Codespaces, address them as bridge agents (`codespace:<name>`), and forward git/GitHub/Azure credentials into them. |
+| [agent-containers](plugins/agent-containers/) | CLI + resolver | Manage a fleet of local Docker dev containers, borrow/release them per effort, and address them as bridge agents (`container:<name>`). |
+| [agent-mcp](plugins/agent-mcp/) | MCP bridge | Wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP and inject host credentials (Entra/`az`, `gh`, git-credential, env). Standalone — used directly from an agent's `mcp-servers` config. |
 
-All three support **Windows** and **Linux/WSL** (macOS planned).
+All support **Windows** and **Linux/WSL** (macOS planned).
 
 ---
 
@@ -29,19 +33,28 @@ flowchart TB
       AW["agent-worktrees<br/>skills + sessionStart hook"]
       AB["agent-bridge<br/>service source + libs/ssh-manager"]
       AC["agent-codespaces<br/>CLI + credential relay"]
+      AN["agent-containers<br/>CLI + container: resolver"]
+      AM["agent-mcp<br/>MCP bridge CLI"]
     end
     subgraph RT["Local runtimes — ~/.* + ~/.local/bin"]
       RW["~/.agent-worktrees<br/>agent-worktrees"]
       RB["~/.agent-bridge<br/>service :9280 Win / :9281 WSL"]
       RC["~/.agent-codespaces<br/>agent-codespaces"]
+      RN["~/.agent-containers<br/>agent-containers"]
+      RM["~/.agent-mcp<br/>agent-mcp"]
     end
     MP -->|copilot plugin install| AW
     MP -->|copilot plugin install| AB
     MP -->|copilot plugin install| AC
+    MP -->|copilot plugin install| AN
+    MP -->|copilot plugin install| AM
     AW -->|init.ps1 / init.sh| RW
     AB -->|install.ps1 / install.sh| RB
     AC -->|init.ps1 / init.sh| RC
+    AN -->|init.ps1 / init.sh| RN
+    AM -->|init.ps1 / init.sh| RM
     AC -.->|codespace resolver + relay| RB
+    AN -.->|container resolver| RB
 ```
 
 How the pieces relate at run time:
@@ -54,13 +67,19 @@ flowchart LR
       WT["agent-worktrees<br/>per-session worktree"]
       BR["agent-bridge<br/>service"]
       CS["agent-codespaces<br/>+ credential relay :9857"]
+      CN["agent-containers<br/>local dev-container fleet"]
+      MCP["agent-mcp<br/>MCP bridge (host creds)"]
       CLI --> WT
       CLI -->|agent-bridge send| BR
+      CLI -.->|mcp-servers: agent-mcp| MCP
       BR --> CS
+      BR --> CN
     end
     BR -->|SSH| OM["Other machines<br/>dev box, WSL, server"]
     CS -->|SSH + gh| GH["GitHub Codespaces"]
     CS -.->|forwards git / gh / az creds| GH
+    CN -->|docker exec| DC["Local dev containers"]
+    CN -.->|forwards gh token| DC
 ```
 
 ---
@@ -74,16 +93,23 @@ flowchart LR
 ### Prerequisites
 
 - **Copilot CLI** (`copilot` on PATH) · **Python 3.10+** · **Git 2.15+**
-- **gh CLI**, authenticated (`gh auth login`) — for agent-codespaces
+- **gh CLI**, authenticated (`gh auth login`) — for agent-codespaces and agent-containers
+- **Docker** (Docker Desktop WSL2 backend) — for agent-containers only
 - **uv** (bootstrapped automatically by the init scripts if missing)
 
-### 1. Install all three plugins
+### 1. Install the plugins
+
+Install agent-worktrees first; add the others as you need them. The bridge
+installer imports agent-codespaces and agent-containers for their `codespace:` /
+`container:` resolvers, so install those **before** agent-bridge.
 
 ```bash
 copilot plugin marketplace add ThomasMichon/copilot-extensions
 copilot plugin install agent-worktrees@copilot-extensions
-copilot plugin install agent-bridge@copilot-extensions
 copilot plugin install agent-codespaces@copilot-extensions
+copilot plugin install agent-containers@copilot-extensions
+copilot plugin install agent-bridge@copilot-extensions
+copilot plugin install agent-mcp@copilot-extensions      # optional, standalone
 ```
 
 ### 2. Bootstrap the runtimes
@@ -135,11 +161,14 @@ the whole system. In examples it's called `my-control-harness`. It:
 - is **adopted by agent-worktrees** (gets a project binstub + worktree root),
 - holds the **topology** the bridge reads — `machines.yaml` (machines + SSH) and
   `acp-agents.json` (agents), plus `codespaces.yaml` (Codespace defaults +
-  credential-relay policy), and
+  credential-relay policy) and `containers.yaml` (local dev-container fleet
+  defaults), and
 - doubles as the **Codespaces dotfiles repo**, so the same repo provisions each
   CodeSpace.
 
-One repo, one source of truth, three plugins reading from it.
+One repo, one source of truth, the mesh plugins reading from it. (agent-mcp is
+standalone — its bridge configs live under `~/.agent-mcp/bridges/`, not the
+control repo.)
 
 ---
 
@@ -179,10 +208,13 @@ agent-worktrees update
 
 agent-worktrees also auto-updates its runtime on session launch. agent-bridge
 and agent-codespaces update via their installers (`scripts/install.* update`).
+agent-containers and agent-mcp re-run their `scripts/init.*` (with `-Force` /
+`--force`) to redeploy the runtime.
 
 ## Uninstalling / baseline reset
 
-Each plugin's installer uninstall stops its **own managed processes** before
+The installer-based plugins (agent-worktrees, agent-bridge, agent-codespaces)
+provide an `uninstall` action that stops their **own managed processes** before
 removing files — agent-bridge stops the daemon + credential relay, and
 agent-codespaces closes its SSH ControlMaster connections — so no manual
 process-killing is needed:
@@ -191,9 +223,14 @@ process-killing is needed:
 scripts/install.sh uninstall          # per-plugin (add --purge / --remove-config to wipe config)
 ```
 
+agent-containers and agent-mcp are init-only (no installer): remove them by
+deleting `~/.agent-containers` / `~/.agent-mcp` and their `~/.local/bin`
+binstubs.
+
 To return a machine to a clean baseline in one step (stops everything, removes
-all three runtimes, binstubs, the service/scheduled task, and config) use the
-repo-level reset tool — it's idempotent and works even if the CLIs are broken:
+the installer-based runtimes, binstubs, the service/scheduled task, and config)
+use the repo-level reset tool — it's idempotent and works even if the CLIs are
+broken:
 
 ```powershell
 # Windows
@@ -206,6 +243,10 @@ bash tools/reset.sh                              # prompts; add --yes to skip
 bash tools/reset.sh --yes --remove-plugins
 ```
 
+> The reset tool currently targets the installer-based runtimes
+> (`~/.agent-worktrees`, `~/.agent-bridge`, `~/.agent-codespaces`); remove
+> `~/.agent-containers` and `~/.agent-mcp` manually until it covers them.
+
 Your source repos and their `.worktrees` content are never touched.
 
 ---
@@ -216,7 +257,7 @@ Your source repos and their `.worktrees` content are never touched.
 
 | Document | What's inside |
 |----------|---------------|
-| [Architecture overview](docs/architecture.md) | How the three plugins fit together: install topology, runtimes, ports, credential relay |
+| [Architecture overview](docs/architecture.md) | How the plugins fit together: install topology, runtimes, ports, credential relay |
 | [Rollout plan](docs/plans/rollout-readiness.md) | Onboarding-readiness plan and fixes |
 | [Fresh dev box validation](docs/plans/fresh-devbox-validation.md) | Step-by-step validation on a clean machine |
 
@@ -245,6 +286,20 @@ Your source repos and their `.worktrees` content are never touched.
 | [README](plugins/agent-codespaces/README.md) | Plugin overview, CLI reference, config format |
 | [codespaces-setup](plugins/agent-codespaces/skills/codespaces-setup/SKILL.md) | First-time setup, adoption, credential relay config |
 | [codespaces-lifecycle](plugins/agent-codespaces/skills/codespaces-lifecycle/SKILL.md) | Day-to-day ops — SSH, listing, bridge integration |
+
+### Agent Containers
+
+| Document | Description |
+|----------|-------------|
+| [README](plugins/agent-containers/README.md) | Plugin overview, CLI reference, config format, discovery |
+| [containers-fleet](plugins/agent-containers/skills/containers-fleet/SKILL.md) | Fleet provisioning, borrow/release leases, `container:` dispatch |
+
+### Agent MCP
+
+| Document | Description |
+|----------|-------------|
+| [README](plugins/agent-mcp/README.md) | Plugin overview, bridge config format, auth kinds, CLI |
+| [agent-mcp](plugins/agent-mcp/skills/agent-mcp/SKILL.md) | Defining a bridge, wiring it into an agent's `mcp-servers` |
 
 ### Contributing
 

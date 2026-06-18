@@ -135,8 +135,15 @@ fix must **not** require downloaders to disable SAC.
 Reference implementation: `Get-SignedBasePython` + `New-SignedVenv` and the
 `"$VenvPython" -m <pkg>` launchers in
 `plugins/agent-bridge/scripts/install.ps1` (mirrored in `agent-worktrees`,
-`agent-codespaces`, and `agent-containers`). `tools/check-install-contract.py`
+`agent-codespaces`, and — in their `init.ps1` — `agent-containers` and
+`agent-mcp`). `tools/check-install-contract.py`
 flags any `install.ps1` that launches the `…\Scripts\<name>.exe` trampoline.
+
+> **Enforcement scope:** `check-install-contract.py` only scans plugins that
+> ship a `scripts/install.ps1`. `agent-containers` and `agent-mcp` implement the
+> same patterns in `scripts/init.ps1`, so they currently conform but are **not**
+> auto-enforced — keep them in sync by hand until the checker also globs
+> `init.ps1`.
 
 ## Binstub format (Windows)
 
@@ -194,9 +201,10 @@ if not, uninstall the shadowing package from the offending Python.
    and warns if only the `.cmd` is present.
 
 Reference: `Write-Binstubs` in `plugins/agent-bridge/scripts/install.ps1`,
-`Deploy-Binstub` in `agent-codespaces`, and `Deploy-Binstub` /
+`Deploy-Binstub` in `agent-codespaces`, `Deploy-Binstub` /
 `Deploy-GlobalBinstub` (+ static `bin/agent-worktrees.ps1`) in
-`agent-worktrees`.
+`agent-worktrees`, and the `init.ps1` binstub deployers in `agent-containers`
+and `agent-mcp`.
 
 ## Deploy manifest (schema_version 3)
 
