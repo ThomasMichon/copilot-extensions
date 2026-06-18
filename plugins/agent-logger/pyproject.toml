@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-logger"
+version = "0.1.0-dev1"
+description = "Reusable Copilot CLI session logging -- segmenter, log writer, session-sync, and orchestrator"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+agent-logger = "agent_logger.__main__:main"
+collate-session = "agent_logger.segmenter.collate:main"
+read-session-digest = "agent_logger.segmenter.read_digest:main"
+prepare-session-log = "agent_logger.segmenter.prepare_log:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
+ignore = ["S603"]  # subprocess calls to git/copilot CLIs are intentional
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
