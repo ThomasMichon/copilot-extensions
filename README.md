@@ -167,8 +167,9 @@ the whole system. In examples it's called `my-control-harness`. It:
   CodeSpace.
 
 One repo, one source of truth, the mesh plugins reading from it. (agent-mcp is
-standalone — its bridge configs live under `~/.agent-mcp/bridges/`, not the
-control repo.)
+standalone — its bridge configs are per-agent files, preferably in-repo via
+`--config` for repo-scoped agents, or under `~/.agent-mcp/bridges/` for personal
+ones; not the control repo.)
 
 ---
 
