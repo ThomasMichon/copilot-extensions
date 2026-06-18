@@ -10,6 +10,14 @@ add ThomasMichon/copilot-extensions`. The marketplace catalog lives at
 `.github/plugin/marketplace.json` and lists every plugin with its current
 version. The Copilot CLI reads this file to determine available updates.
 
+> **`copilot plugin update` refreshes only the payload, not the runtime.**
+> For plugins with a runtime (venv/binstubs/service — agent-worktrees,
+> agent-bridge, agent-codespaces, agent-containers), `copilot plugin update`
+> updates the cached source + skills but does **not** redeploy the runtime; that
+> is a separate installer step run from the source folder (via the plugin's
+> install skill). Pure skill/hook/agent plugins need no installer. See
+> [docs/install-contract.md → Plugin update ≠ runtime install](docs/install-contract.md#plugin-update--runtime-install).
+
 ### Version scheme
 
 Agent Worktrees follows [PEP 440](https://peps.python.org/pep-0440/)

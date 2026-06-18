@@ -7,6 +7,40 @@ shared install module that gets vendored. Instead, this document is the
 reference, and `tools/check-install-contract.py` enforces conformance (run it
 manually or wire it as a git `pre-push` hook).
 
+## Plugin update ≠ runtime install
+
+`copilot plugin update <name>` only refreshes the plugin's **marketplace
+payload** — the cached source plus any skills/hooks/agents — under
+`~/.copilot/installed-plugins/copilot-extensions/<name>`. It does **not** run the
+plugin's runtime installer: the venv (`~/.<runtime>/.venv`), the `~/.local/bin`
+binstubs, and any long-running service stay on the **old** version. Its
+"updated successfully (vX → vY)" message refers to the payload only — the Copilot
+CLI emits it and we cannot change it, so a runtime plugin can read "updated"
+while its actual runtime has not moved.
+
+Consequence — a rule for every plugin in this repo:
+
+- A plugin that ships **only** skills, hooks, and/or agents needs no installer:
+  `copilot plugin update` fully deploys it.
+- A plugin that ships a **runtime** — anything beyond skills/hooks/agents: a
+  venv, `~/.local/bin` binstubs, or a long-running service — **must** ship both:
+  1. `scripts/install.{ps1,sh}` implementing this contract, and
+  2. an **install skill** an agent can trigger to deploy/refresh that runtime
+     **from the source folder** after a payload update. The skill's job is to run
+     the plugin's `scripts/install.* update` from the source dir (the marketplace
+     plugin dir, or a local checkout — see
+     [Source = where the installer runs from](#source--where-the-installer-runs-from-no-flag)).
+     Existing examples: `copilot-extensions-setup` (agent-worktrees +
+     agent-bridge), `codespaces-setup` (agent-codespaces), `containers-fleet`
+     (agent-containers).
+
+So the full deploy of a runtime plugin is always two steps: `copilot plugin
+update <name>` (refresh the source cache) **then** run the installer from that
+source via its install skill. Never hand-copy source into the deployed runtime
+dir — that bypasses the venv sync, binstub/SAC handling, `_build_info.py`
+stamping, manifest, and service restart (see "What NOT to Do" in
+`CONTRIBUTING.md`).
+
 ## The flow (all plugins)
 
 ```
