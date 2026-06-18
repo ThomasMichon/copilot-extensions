@@ -35,6 +35,12 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-containers}"
 VENV_DIR="$INSTALL_DIR/.venv"
 LOCAL_BIN="$HOME/.local/bin"
 VENV_PYTHON="$VENV_DIR/bin/python"
+# credential-relay dir (vendored): plugin-vendored or repo-root. Force-reinstalled
+# below so a local code change propagates even without a version bump.
+CRED_RELAY_DIR="$PLUGIN_DIR/libs/credential-relay"
+if [[ ! -f "$CRED_RELAY_DIR/pyproject.toml" ]]; then
+    CRED_RELAY_DIR="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/credential-relay"
+fi
 
 echo ''
 echo '=== agent-containers init ==='
@@ -97,6 +103,16 @@ fi
 
 # -- 3. Install the package into the venv ------------------------------
 if [[ "$HAVE_UV" -eq 1 ]]; then
+    # credential-relay first (vendored lib), force-reinstalled so local code
+    # changes propagate even without a version bump; then agent-containers.
+    if [[ ! -f "$CRED_RELAY_DIR/pyproject.toml" ]]; then
+        _fail "credential-relay source not found at $CRED_RELAY_DIR"
+        exit 1
+    fi
+    if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-credential-relay "$CRED_RELAY_DIR" --quiet 2>/dev/null; then
+        _fail 'credential-relay install failed'
+        exit 1
+    fi
     if ! uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
         _fail 'Failed to install agent-containers package into venv'
         exit 1
@@ -178,6 +194,13 @@ if "$VENV_PYTHON" -c 'import agent_containers' 2>/dev/null; then
     _ok 'Verification: module imports successfully'
 else
     _fail 'Verification: module import failed'
+    exit 1
+fi
+
+if "$VENV_PYTHON" -c 'import credential_relay' 2>/dev/null; then
+    _ok 'credential-relay: importable in venv'
+else
+    _fail 'credential-relay not importable in venv'
     exit 1
 fi
 

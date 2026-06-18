@@ -68,6 +68,11 @@ $SshMgrDir       = Join-Path $PluginDir 'libs\ssh-manager'
 if (-not (Test-Path (Join-Path $SshMgrDir 'pyproject.toml'))) {
     $SshMgrDir   = Join-Path $RepoRoot 'libs\ssh-manager'
 }
+# credential-relay dir (vendored like ssh-manager): plugin-vendored or repo-root.
+$CredRelayDir    = Join-Path $PluginDir 'libs\credential-relay'
+if (-not (Test-Path (Join-Path $CredRelayDir 'pyproject.toml'))) {
+    $CredRelayDir = Join-Path $RepoRoot 'libs\credential-relay'
+}
 
 $DeploySourcePaths = @('plugins/agent-codespaces/')
 $InstallerRelPath  = 'plugins/agent-codespaces/scripts/install.ps1'
@@ -182,11 +187,18 @@ function Assert-Uv {
 }
 
 function Install-PackageInto {
-    <# uv pip install ssh-manager (sibling lib) then agent-codespaces into the
-       given venv python. Non-editable; deps resolved from pyproject.toml. #>
+    <# uv pip install the vendored libs (ssh-manager, credential-relay) then
+       agent-codespaces into the given venv python. Non-editable; deps resolved
+       from pyproject.toml. The vendored libs are force-reinstalled so a local
+       code change propagates even without a version bump (uv otherwise skips a
+       same-version path dep, leaving the venv stale). #>
     param([string]$Python)
     if (-not (Test-Path (Join-Path $SshMgrDir 'pyproject.toml'))) {
         Write-ServiceErr "ssh-manager source not found at $SshMgrDir"
+        return $false
+    }
+    if (-not (Test-Path (Join-Path $CredRelayDir 'pyproject.toml'))) {
+        Write-ServiceErr "credential-relay source not found at $CredRelayDir"
         return $false
     }
     # Pre-strip: rename any locked console-script trampoline aside so uv can write
@@ -199,6 +211,12 @@ function Install-PackageInto {
     if ($LASTEXITCODE -ne 0) {
         $ErrorActionPreference = $prevEAP
         Write-ServiceErr "ssh-manager install failed"
+        return $false
+    }
+    & uv pip install --python $Python --reinstall-package agent-credential-relay "$CredRelayDir" --quiet 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        $ErrorActionPreference = $prevEAP
+        Write-ServiceErr "credential-relay install failed"
         return $false
     }
     & uv pip install --python $Python --reinstall-package agent-codespaces "$PluginDir" --quiet 2>&1 | Out-Null
@@ -492,6 +510,12 @@ function Invoke-Status {
         Write-ServiceOk "ssh-manager: importable in venv"
     } else {
         Write-ServiceErr "ssh-manager not importable in venv"
+    }
+    & $VenvPython -c 'import credential_relay' 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-ServiceOk "credential-relay: importable in venv"
+    } else {
+        Write-ServiceErr "credential-relay not importable in venv"
     }
     $ErrorActionPreference = $prevEAP
 

@@ -47,6 +47,13 @@ if ($env:OS -eq 'Windows_NT') {
 } else {
     $VenvPython = Join-Path $VenvDir 'bin/python'
 }
+# credential-relay dir (vendored like the other plugins): plugin-vendored
+# (marketplace layout) or repo-root (git checkout layout). Force-reinstalled
+# below so a local code change propagates even without a version bump.
+$CredRelayDir = Join-Path $PluginDir 'libs\credential-relay'
+if (-not (Test-Path (Join-Path $CredRelayDir 'pyproject.toml'))) {
+    $CredRelayDir = Join-Path (Split-Path -Parent (Split-Path -Parent $PluginDir)) 'libs\credential-relay'
+}
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
@@ -224,6 +231,15 @@ $ErrorActionPreference = 'Continue'
 # Pre-strip any locked console-script trampoline so uv can overwrite it (os err 5).
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 if (Get-Command uv -ErrorAction SilentlyContinue) {
+    # credential-relay first (vendored lib), force-reinstalled so local code
+    # changes propagate even without a version bump; then agent-containers.
+    if (Test-Path (Join-Path $CredRelayDir 'pyproject.toml')) {
+        & uv pip install --python $VenvPython --reinstall-package agent-credential-relay "$CredRelayDir" --quiet 2>&1 | Out-Null
+    } else {
+        Write-Fail "credential-relay source not found at $CredRelayDir"
+        $ErrorActionPreference = $prevEAP
+        exit 1
+    }
     & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
 } else {
     & $VenvPython -m pip install --quiet "$PluginDir" 2>&1 | Out-Null
@@ -331,6 +347,13 @@ if ($importOk) {
     Write-Ok 'Verification: module imports successfully'
 } else {
     Write-Fail 'Verification: module import failed'
+    exit 1
+}
+& $VenvPython -c 'import credential_relay' 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Write-Ok 'credential-relay: importable in venv'
+} else {
+    Write-Fail 'credential-relay not importable in venv'
     exit 1
 }
 
