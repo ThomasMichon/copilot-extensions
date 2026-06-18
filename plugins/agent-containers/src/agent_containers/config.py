@@ -45,14 +45,14 @@ class DotfilesConfig:
 
     Mirrors the GitHub Codespaces dotfiles flow (clone the repo, run its
     ``install.sh``, symlink ``.*`` files into ``$HOME``) for a local Docker
-    container. The host repo is bind-mounted **read-only** at a staging path,
-    copied to ``target`` (writable, owned by the remote user) inside the
-    container, then ``install_command`` is run in ``target``.
+    container. After the container is created the host repo is copied in with
+    ``docker cp`` to ``target`` (owned by the remote user), then
+    ``install_command`` is run in ``target``.
 
-    Copying (rather than mounting ``target`` directly) keeps the host repo
-    pristine -- ``install.sh`` writes git config / symlinks against the
-    container-local copy, never the host checkout. Optional + per-user: a
-    missing ``repo`` disables the whole step.
+    Copying (rather than bind-mounting) keeps the host repo pristine -- it is
+    only read, never mounted, so ``install.sh`` writes git config / symlinks
+    against the container-local copy. Optional + per-user: a missing ``repo``
+    disables the whole step.
     """
 
     # Host path to the dotfiles repo to reproduce (absolute or ~-expanded).

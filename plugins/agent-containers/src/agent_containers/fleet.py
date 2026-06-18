@@ -35,10 +35,6 @@ from .lifecycle import (
 
 log = logging.getLogger("agent-containers")
 
-# Read-only bind-mount path where a designated dotfiles repo is staged inside
-# the container before being copied to its writable target (see DotfilesConfig).
-_DOTFILES_STAGING = "/tmp/agent-containers-dotfiles-src"
-
 
 def _creation_flags() -> int:
     if sys.platform == "win32":
@@ -90,8 +86,8 @@ def _devcontainer_up(
     Tags the container with ``agent-containers.fleet`` (via id-label, which
     devcontainer applies as a docker label) and renames it to ``name``. When
     ``fleet.devcontainer_config`` is set it is passed as ``--config`` (for
-    nested specs). When ``dotfiles.repo`` is set the host repo is bind-mounted
-    read-only and reproduced inside the container after creation.
+    nested specs). When ``dotfiles.repo`` is set the host repo is reproduced
+    inside the container after creation (via ``docker cp``).
     """
     devcontainer_exe = shutil.which("devcontainer")
     if not devcontainer_exe:
@@ -108,11 +104,6 @@ def _devcontainer_up(
     config_path = fleet.resolved_config()
     if config_path:
         args += ["--config", config_path]
-    staging = None
-    if dotfiles and dotfiles.host_repo():
-        staging = _DOTFILES_STAGING
-        source = dotfiles.host_repo().as_posix()
-        args += ["--mount", f"type=bind,source={source},target={staging},readonly"]
     log.info("devcontainer up: %s", " ".join(args))
     res = subprocess.run(
         args, capture_output=True, text=True, timeout=1800,
@@ -141,35 +132,56 @@ def _devcontainer_up(
         log.warning("Could not rename %s to %s: %s", container_id, name, rename.stderr.strip())
         name = container_id
 
-    if staging and dotfiles:
-        _materialize_dotfiles(name, exec_user, dotfiles, staging)
+    if dotfiles and dotfiles.host_repo():
+        _materialize_dotfiles(name, exec_user, dotfiles)
     return name
 
 
 def _materialize_dotfiles(
-    container: str, user: str, dotfiles: DotfilesConfig, staging: str
+    container: str, user: str, dotfiles: DotfilesConfig
 ) -> None:
     """Reproduce the dotfiles repo inside the container (copy + install).
 
-    Copies the read-only staged repo to its writable ``target`` (owned by the
-    remote user), then runs ``install_command`` in ``target`` as that user --
-    mirroring the Codespaces ``install.sh`` flow. Best-effort: a failed install
-    is warned about, never fatal (the container is already usable).
+    Copies the host repo into the container at ``target`` via ``docker cp``
+    (the host checkout is only read, never mounted, so it is never mutated),
+    chowns it to the remote user, then runs ``install_command`` in ``target``
+    as that user -- mirroring the Codespaces ``install.sh`` flow. Best-effort:
+    a failed copy/install is warned about, never fatal (the container is
+    already usable).
     """
+    host_repo = dotfiles.host_repo()
+    if host_repo is None:
+        return
     target = dotfiles.target
-    copy_script = (
-        f"mkdir -p {target} && cp -a {staging}/. {target}/ "
-        f"&& chown -R {user}:{user} {target}"
+
+    mk = _docker(
+        ["exec", "-u", "0", container, "bash", "-lc", f"mkdir -p {target}"],
+        timeout=60,
     )
-    res = _docker(
-        ["exec", "-u", "0", container, "bash", "-lc", copy_script], timeout=120
-    )
-    if res.returncode != 0:
+    if mk.returncode != 0:
         log.warning(
-            "dotfiles copy into %s failed: %s",
-            container, res.stderr.strip() or res.stdout.strip(),
+            "dotfiles target mkdir failed in %s: %s",
+            container, mk.stderr.strip() or mk.stdout.strip(),
         )
         return
+    cp = _docker(
+        ["cp", f"{host_repo.as_posix()}/.", f"{container}:{target}"], timeout=300
+    )
+    if cp.returncode != 0:
+        log.warning(
+            "dotfiles copy into %s failed: %s",
+            container, cp.stderr.strip() or cp.stdout.strip(),
+        )
+        return
+    chown = _docker(
+        ["exec", "-u", "0", container, "chown", "-R", f"{user}:{user}", target],
+        timeout=120,
+    )
+    if chown.returncode != 0:
+        log.warning(
+            "dotfiles chown in %s failed (continuing): %s",
+            container, chown.stderr.strip() or chown.stdout.strip(),
+        )
     log.info("Reproduced dotfiles repo at %s in %s", target, container)
 
     if not dotfiles.install_command:

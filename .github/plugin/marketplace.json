@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, and MCP bridging",
-    "version": "1.7.4-dev40"
+    "version": "1.7.4-dev41"
   },
   "plugins": [
     {
@@ -30,7 +30,7 @@
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver",
-      "version": "0.1.2-dev12",
+      "version": "0.1.2-dev13",
       "source": "plugins/agent-containers"
     },
     {

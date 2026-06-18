@@ -57,9 +57,10 @@ fleets:
   odsp-web-codespaces' local-Docker spec under `.devcontainer/docker/`) instead
   of the repo's default top-level config.
 - `dotfiles` materialises a host repo at `target` and runs its `install.sh`
-  (skill symlinks, instructions, etc.) — the host repo is mounted **read-only**
-  and copied, so `install.sh` never mutates the host checkout. The install step
-  is best-effort (a failure is logged, never aborts `up`).
+  (skill symlinks, instructions, etc.) — the host repo is copied in with
+  `docker cp` (read-only on the host side), so `install.sh` never mutates the
+  host checkout. The install step is best-effort (a failure is logged, never
+  aborts `up`).
 
 ## Borrow / release (effort owns a container)
 
