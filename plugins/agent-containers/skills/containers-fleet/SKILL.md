@@ -43,9 +43,9 @@ dotfiles:
   install_command: bash install.sh # run in `target` as the remote user; "" skips
 
 fleets:
-  odsp-web:
-    repo: odsp-microsoft/odsp-web
-    devcontainer_path: D:/Src/odsp-web-codespaces   # dir holding .devcontainer/
+  myrepo:
+    repo: your-org/your-repo
+    devcontainer_path: D:/Src/myrepo-devcontainer   # dir holding .devcontainer/
     # Needed when the spec is NOT at the default
     # .devcontainer/devcontainer.json — passed to the devcontainer CLI as
     # --config. Relative paths resolve against devcontainer_path.
@@ -54,7 +54,7 @@ fleets:
 ```
 
 - `devcontainer_config` lets `up` build a **nested** devcontainer spec (e.g.
-  odsp-web-codespaces' local-Docker spec under `.devcontainer/docker/`) instead
+  a repo's local-Docker spec under `.devcontainer/docker/`) instead
   of the repo's default top-level config.
 - `dotfiles` materialises a host repo at `target` and runs its `install.sh`
   (skill symlinks, instructions, etc.) — the host repo is copied in with
