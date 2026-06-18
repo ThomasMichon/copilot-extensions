@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# pre-push hook: enforce the install contract before pushing.
+# pre-push hook: enforce the install contract and the internal-identifier guard
+# before pushing.
 # Enable with:  git config core.hooksPath tools/hooks
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PY="$(command -v python3 || command -v python || true)"
 if [[ -z "$PY" ]]; then
-    echo "pre-push: python not found -- skipping install-contract check" >&2
+    echo "pre-push: python not found -- skipping pre-push checks" >&2
     exit 0
 fi
+# No-op unless a private denylist is configured (env / ~/.agent-codespaces).
+"$PY" "$ROOT/tools/check-no-internal-identifiers.py"
 exec "$PY" "$ROOT/tools/check-install-contract.py"

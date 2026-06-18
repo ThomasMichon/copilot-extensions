@@ -270,4 +270,8 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 - a `schema_version` 3 manifest with a `source` block is written,
 - the source-kind resolver is identical across plugins (per language).
 
-Wire it as a `pre-push` hook (see `tools/hooks/pre-push`).
+Wire it as a `pre-push` hook (see `tools/hooks/pre-push`, which also runs
+`tools/check-no-internal-identifiers.py` — a repo-wide guard that fails the push
+if any privately-configured internal identifier leaks into the tree; it no-ops
+unless a denylist is configured, see the agent-codespaces README "Local
+identifier guard").
