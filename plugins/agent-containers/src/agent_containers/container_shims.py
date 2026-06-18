@@ -53,8 +53,8 @@ def _send(request):
 
 
 def _normalize_resource(scope):
-    # rush/az may pass "<res>/.default"; the relay allowlist keys on the base
-    # resource with a trailing slash (e.g. https://storage.azure.com/).
+    # Retained for back-compat with the (legacy) resource= request form; the
+    # azure path now forwards the scope verbatim (see main()).
     res = scope.split("/.default")[0]
     if res and not res.endswith("/"):
         res += "/"
@@ -66,10 +66,18 @@ def main():
     action = sys.argv[2] if len(sys.argv) > 2 else ""
     if action == "get-access-token":
         if kind == "azure":
+            # Faithfully forward the official `azure-auth-helper get-access-token
+            # "<scope>"` contract: pass the AAD scope through VERBATIM (e.g.
+            # https://storage.azure.com/.default) as `scope=`, so the relay's
+            # AzLoginSource mints it via `az ... --scope <scope>` -- the same
+            # token the official managed-identity broker would. Do NOT downgrade
+            # the scope to a `resource=` (dropping `/.default`): the `.default`
+            # form requests the principal's full consented permission set, which
+            # the resource form does not, and some storage data-plane operations
+            # (e.g. user-delegation-key issuance for dev-deploy SAS) depend on it.
             scope = sys.argv[3] if len(sys.argv) > 3 else ""
             resp = _send(
-                "get-azure-token\nauth=%s\nresource=%s\n\n"
-                % (TOKEN, _normalize_resource(scope))
+                "get-azure-token\nauth=%s\nscope=%s\n\n" % (TOKEN, scope)
             )
             for line in resp.split("\n"):
                 if line.startswith("token="):

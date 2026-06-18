@@ -28,9 +28,12 @@ log = logging.getLogger("agent-containers.relay")
 # which secrets are valid. Mirrors the lease-file pattern.
 _TOKENS_FILE = Path.home() / ".agent-containers" / "relay-tokens.json"
 
-# Azure resources the relay may mint tokens for. Storage is what `rush
-# dev-deploy` needs (blob uploads via user-delegation SAS).
-DEFAULT_AZURE_RESOURCES = ["https://storage.azure.com/"]
+# Azure scopes the relay may mint tokens for, when config is unavailable.
+# "*" = any scope, gated behind the per-container secret (mirrors
+# agent-codespaces). `rush dev-deploy`'s user-delegation-SAS flow and the build
+# cache request storage scopes (e.g. https://storage.azure.com/.default), but
+# forwarding any scope verbatim keeps the shim a faithful broker.
+DEFAULT_AZURE_RESOURCES = ["*"]
 
 # Actions gated behind the per-container secret. Only the NEW Azure action is
 # gated: codespaces never calls get-azure-token, so its (shared) relay path is

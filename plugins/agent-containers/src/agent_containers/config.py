@@ -133,8 +133,14 @@ class ContainersConfig:
     # Also deploy ado-auth-helper (ADO PAT / git credential relay). Off by
     # default to avoid disturbing already-working in-container ADO auth.
     relay_deploy_ado: bool = False
+    # Azure scopes the relay may mint tokens for. "*" = any scope (gated behind
+    # the per-container relay token; mirrors agent-codespaces). Faithfully serves
+    # whatever scope the official `azure-auth-helper get-access-token "<scope>"`
+    # broker requests -- storage.azure.com/.default, account-specific blob
+    # scopes, etc. -- so the in-container consumer (rush build cache, dev-deploy
+    # user-delegation SAS) gets a scope-matching AAD token.
     relay_azure_resources: list[str] = field(
-        default_factory=lambda: ["https://storage.azure.com/"]
+        default_factory=lambda: ["*"]
     )
     # Image-name prefixes used as a discovery fallback when a container lacks
     # the devcontainer.local_folder / FLEET_LABEL labels.
