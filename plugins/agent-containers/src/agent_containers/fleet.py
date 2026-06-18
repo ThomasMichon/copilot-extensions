@@ -93,13 +93,14 @@ def _devcontainer_up(
     nested specs). When ``dotfiles.repo`` is set the host repo is bind-mounted
     read-only and reproduced inside the container after creation.
     """
-    if not shutil.which("devcontainer"):
+    devcontainer_exe = shutil.which("devcontainer")
+    if not devcontainer_exe:
         raise RuntimeError(
             "devcontainer CLI not found. Install with "
             "`npm i -g @devcontainers/cli`, or use an image-based fleet."
         )
     args = [
-        "devcontainer", "up",
+        devcontainer_exe, "up",
         "--workspace-folder", fleet.devcontainer_path,
         "--id-label", f"{FLEET_LABEL}={fleet_name}",
         "--id-label", f"agent-containers.instance={name}",
