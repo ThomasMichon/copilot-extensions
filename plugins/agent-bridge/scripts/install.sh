@@ -640,6 +640,95 @@ do_status() {
     fi
 }
 
+_runtime_healthy() {
+    # True if the venv python can import the agent-bridge runtime + key deps.
+    # Used to decide whether to snapshot the current venv and to verify a fresh
+    # install before declaring the update good (#52). uvicorn + credential_relay
+    # are the modules that went missing in the observed broken-venv outage.
+    [[ -x "$VENV_DIR/bin/python" ]] || return 1
+    "$VENV_DIR/bin/python" -c 'import agent_bridge, uvicorn, credential_relay' 2>/dev/null
+}
+
+_backup_venv() {
+    # Snapshot $VENV_DIR so a failed update can roll back. Clears any stale copy.
+    rm -rf "$VENV_DIR.bak"
+    cp -a "$VENV_DIR" "$VENV_DIR.bak" 2>/dev/null
+}
+
+_restore_venv() {
+    # Replace a broken $VENV_DIR with the snapshot at $VENV_DIR.bak.
+    [[ -d "$VENV_DIR.bak" ]] || return 1
+    rm -rf "$VENV_DIR" && mv "$VENV_DIR.bak" "$VENV_DIR"
+}
+
+_remove_venv_backup() {
+    rm -rf "$VENV_DIR.bak"
+}
+
+# Core update steps (venv repair + package installs + verify). Returns non-zero
+# on any failure WITHOUT exiting, so the caller can roll back. The service must
+# already be stopped before this runs.
+_update_core() {
+    # Repair venv if python binary is missing
+    if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+        if [[ -d "$VENV_DIR" ]]; then
+            _step "Repairing venv (python binary missing)..."
+        else
+            _fail "agent-bridge not installed. Run: install.sh install"
+            return 1
+        fi
+        if ! uv venv "$VENV_DIR" --python 3.10 --allow-existing; then
+            uv venv "$VENV_DIR" --allow-existing || { _fail "Venv repair failed"; return 1; }
+        fi
+        _ok "Venv repaired"
+    fi
+
+    _step "Updating agent-bridge package..."
+    local ssh_manager_dir
+    if ssh_manager_dir="$(_resolve_ssh_manager)"; then
+        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-ssh-manager \
+                "$ssh_manager_dir" --quiet; then
+            _fail "ssh-manager update failed"
+            return 1
+        fi
+    elif _ssh_manager_installed; then
+        _step "ssh-manager already installed in venv (marketplace layout)"
+    else
+        _fail "Cannot locate ssh-manager library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
+        return 1
+    fi
+    # credential-relay: force-reinstall so a local code change propagates even
+    # without a version bump (uv otherwise skips a same-version path dep).
+    local cred_relay_dir
+    if cred_relay_dir="$(_resolve_credential_relay)"; then
+        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-credential-relay \
+                "$cred_relay_dir" --quiet; then
+            _fail "credential-relay update failed"
+            return 1
+        fi
+    elif _credential_relay_installed; then
+        _step "credential-relay already installed in venv (marketplace layout)"
+    else
+        _fail "Cannot locate credential-relay library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
+        return 1
+    fi
+    if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge \
+            "$PLUGIN_DIR" --quiet; then
+        _fail "Package update failed"
+        return 1
+    fi
+
+    # Verify the freshly-installed runtime imports before declaring success --
+    # catches a half-installed venv (e.g. a wheel/dependency gap) while we can
+    # still roll back, rather than starting a broken service.
+    if ! _runtime_healthy; then
+        _fail "Post-install verification failed (agent_bridge / uvicorn / credential_relay not importable)"
+        return 1
+    fi
+    _ok "Package updated"
+    return 0
+}
+
 do_update() {
     echo ""
     echo "=== agent-bridge update ==="
@@ -652,63 +741,47 @@ do_update() {
         exit 1
     fi
 
-    # Repair venv if python binary is missing
-    if [[ ! -x "$VENV_DIR/bin/python" ]]; then
-        if [[ -d "$VENV_DIR" ]]; then
-            _step "Repairing venv (python binary missing)..."
-        else
-            _fail "agent-bridge not installed. Run: install.sh install"
-            exit 1
-        fi
-        if ! uv venv "$VENV_DIR" --python 3.10 --allow-existing; then
-            uv venv "$VENV_DIR" --allow-existing || { _fail "Venv repair failed"; exit 1; }
-        fi
-        _ok "Venv repaired"
-    fi
-
-    # Stop running instance
+    # Is the service currently running?
     local was_running=false
     if pid=$(_get_pid) || (command -v systemctl &>/dev/null && systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null); then
         was_running=true
+    fi
+
+    # Snapshot the current healthy venv so a failed install can roll back to the
+    # previous-good runtime instead of leaving the service DOWN with a broken/
+    # empty venv (#52). Only snapshot a venv that actually works.
+    local have_backup=false
+    if _runtime_healthy; then
+        if _backup_venv; then have_backup=true; fi
+    fi
+
+    # Stop running instance -- the in-place reinstall must not race a live bridge.
+    if [[ "$was_running" == true ]]; then
         do_stop
     fi
 
-    # Reinstall package via uv (ssh-manager + agent-bridge)
-    _step "Updating agent-bridge package..."
-    local ssh_manager_dir
-    if ssh_manager_dir="$(_resolve_ssh_manager)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-ssh-manager \
-                "$ssh_manager_dir" --quiet; then
-            _fail "ssh-manager update failed"
-            exit 1
+    # Run the protected update; on any failure, roll back to the snapshot.
+    if ! _update_core; then
+        _fail "Update failed"
+        if [[ "$have_backup" == true ]]; then
+            _step "Rolling back to the previous venv..."
+            if _restore_venv; then
+                _ok "Previous venv restored"
+                if [[ "$was_running" == true ]]; then
+                    _step "Restarting the previous service..."
+                    do_start
+                fi
+            else
+                _fail "Rollback failed -- run install.sh install to rebuild the runtime"
+            fi
+        else
+            _warn "No healthy venv snapshot to roll back to -- run install.sh install to rebuild"
         fi
-    elif _ssh_manager_installed; then
-        _step "ssh-manager already installed in venv (marketplace layout)"
-    else
-        _fail "Cannot locate ssh-manager library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         exit 1
     fi
-    # credential-relay: force-reinstall so a local code change propagates even
-    # without a version bump (uv otherwise skips a same-version path dep).
-    local cred_relay_dir
-    if cred_relay_dir="$(_resolve_credential_relay)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-credential-relay \
-                "$cred_relay_dir" --quiet; then
-            _fail "credential-relay update failed"
-            exit 1
-        fi
-    elif _credential_relay_installed; then
-        _step "credential-relay already installed in venv (marketplace layout)"
-    else
-        _fail "Cannot locate credential-relay library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
-        exit 1
-    fi
-    if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge \
-            "$PLUGIN_DIR" --quiet; then
-        _fail "Package update failed"
-        exit 1
-    fi
-    _ok "Package updated"
+
+    # Success: discard the rollback snapshot.
+    _remove_venv_backup
 
     # Update sibling plugins (e.g. agent-codespaces for codespace: namespace)
     _install_sibling_plugins reinstall
