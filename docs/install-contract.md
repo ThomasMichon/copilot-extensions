@@ -41,6 +41,16 @@ dir — that bypasses the venv sync, binstub/SAC handling, `_build_info.py`
 stamping, manifest, and service restart (see "What NOT to Do" in
 `CONTRIBUTING.md`).
 
+> **Windows caveat — prefer a local checkout.** When a plugin is loaded in the
+> running Copilot session, `copilot plugin update <name>` can fail outright on
+> Windows: the live CLI holds handles inside
+> `~/.copilot/installed-plugins/copilot-extensions/<name>`, so the update's
+> rmdir hits `EBUSY` and not even the payload refreshes. The reliable path is to
+> run the plugin's `scripts/install.* update` from a **local checkout** of this
+> repo (which flips `source.kind` to `local`); the install skill should drive
+> that. A future wired-in install hook would have to tolerate this loaded-plugin
+> lock (e.g. an out-of-process staged swap).
+
 ## The flow (all plugins)
 
 ```
