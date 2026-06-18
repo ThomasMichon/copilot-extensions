@@ -99,21 +99,22 @@ _wait_port_free() {
     return 1
 }
 
-# Resolve ssh-manager library path across multiple layouts.
+# Resolve a vendored library path (libs/<name>) across multiple layouts.
 # Prints the resolved directory path to stdout (nothing else).
 # Returns 0 if found, 1 if not.
-_resolve_ssh_manager() {
+_resolve_vendored_lib() {
+    local lib_name="$1"
     local candidate
 
     # 1. Vendored inside agent-bridge (marketplace install layout)
-    candidate="$PLUGIN_DIR/libs/ssh-manager"
+    candidate="$PLUGIN_DIR/libs/$lib_name"
     if [[ -f "$candidate/pyproject.toml" ]]; then
         cd "$candidate" && pwd
         return 0
     fi
 
-    # 2. Relative path (git checkout layout: plugins/agent-bridge/../../libs/ssh-manager)
-    candidate="$PLUGIN_DIR/../../libs/ssh-manager"
+    # 2. Relative path (git checkout layout: plugins/agent-bridge/../../libs/<name>)
+    candidate="$PLUGIN_DIR/../../libs/$lib_name"
     if [[ -f "$candidate/pyproject.toml" ]]; then
         cd "$candidate" && pwd
         return 0
@@ -132,7 +133,7 @@ repo = (reg or {}).get('repos', {}).get('copilot-extensions', {})
 if repo:
     p = repo.get('path', os.path.join(reg.get('srcroot', ''), 'copilot-extensions'))
     p = os.path.expanduser(p)
-    lib = os.path.join(p, 'libs', 'ssh-manager')
+    lib = os.path.join(p, 'libs', '$lib_name')
     if os.path.isfile(os.path.join(lib, 'pyproject.toml')):
         print(lib)
         raise SystemExit(0)
@@ -144,7 +145,7 @@ raise SystemExit(1)
     fi
 
     # 4. Common checkout path (repo exists but registry absent/stale)
-    candidate="$HOME/src/copilot-extensions/libs/ssh-manager"
+    candidate="$HOME/src/copilot-extensions/libs/$lib_name"
     if [[ -f "$candidate/pyproject.toml" ]]; then
         cd "$candidate" && pwd
         return 0
@@ -153,11 +154,21 @@ raise SystemExit(1)
     return 1
 }
 
+# Resolve the ssh-manager / credential-relay vendored libs (thin wrappers).
+_resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }
+_resolve_credential_relay() { _resolve_vendored_lib credential-relay; }
+
 # Check if ssh-manager is already importable in the venv.
 # Returns 0 if the key symbols can be imported successfully.
 _ssh_manager_installed() {
     [[ -x "$VENV_DIR/bin/python" ]] || return 1
     "$VENV_DIR/bin/python" -c 'from ssh_manager import SSHProfileSource, get_default_manager' 2>/dev/null
+}
+
+# Check if credential-relay is already importable in the venv.
+_credential_relay_installed() {
+    [[ -x "$VENV_DIR/bin/python" ]] || return 1
+    "$VENV_DIR/bin/python" -c 'from credential_relay import RelayBuilder' 2>/dev/null
 }
 
 # Install sibling plugin packages (e.g. agent-codespaces) into the bridge venv.
@@ -388,6 +399,19 @@ do_install() {
         _step "ssh-manager already installed in venv (marketplace layout)"
     else
         _fail "Cannot locate ssh-manager library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
+        exit 1
+    fi
+    # credential-relay (the relay framework agent-bridge runs in its daemon).
+    local cred_relay_dir
+    if cred_relay_dir="$(_resolve_credential_relay)"; then
+        if ! uv pip install --python "$VENV_DIR/bin/python" "$cred_relay_dir" --quiet; then
+            _fail "credential-relay install failed"
+            exit 1
+        fi
+    elif _credential_relay_installed; then
+        _step "credential-relay already installed in venv (marketplace layout)"
+    else
+        _fail "Cannot locate credential-relay library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         exit 1
     fi
     if ! uv pip install --python "$VENV_DIR/bin/python" "$PLUGIN_DIR" --quiet; then
@@ -662,6 +686,21 @@ do_update() {
         _step "ssh-manager already installed in venv (marketplace layout)"
     else
         _fail "Cannot locate ssh-manager library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
+        exit 1
+    fi
+    # credential-relay: force-reinstall so a local code change propagates even
+    # without a version bump (uv otherwise skips a same-version path dep).
+    local cred_relay_dir
+    if cred_relay_dir="$(_resolve_credential_relay)"; then
+        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-credential-relay \
+                "$cred_relay_dir" --quiet; then
+            _fail "credential-relay update failed"
+            exit 1
+        fi
+    elif _credential_relay_installed; then
+        _step "credential-relay already installed in venv (marketplace layout)"
+    else
+        _fail "Cannot locate credential-relay library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         exit 1
     fi
     if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge \

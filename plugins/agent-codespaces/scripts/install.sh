@@ -52,6 +52,11 @@ SSH_MGR_DIR="$PLUGIN_DIR/libs/ssh-manager"
 if [[ ! -f "$SSH_MGR_DIR/pyproject.toml" ]]; then
     SSH_MGR_DIR="$REPO_ROOT/libs/ssh-manager"
 fi
+# credential-relay dir (vendored like ssh-manager): plugin-vendored or repo-root.
+CRED_RELAY_DIR="$PLUGIN_DIR/libs/credential-relay"
+if [[ ! -f "$CRED_RELAY_DIR/pyproject.toml" ]]; then
+    CRED_RELAY_DIR="$REPO_ROOT/libs/credential-relay"
+fi
 
 DEPLOY_SOURCE_PATHS=("plugins/agent-codespaces/")
 INSTALLER_REL_PATH="plugins/agent-codespaces/scripts/install.sh"
@@ -90,16 +95,25 @@ _assert_uv() {
     command -v uv &>/dev/null || { _fail "uv is required but not found on PATH."; exit 1; }
 }
 
-# uv pip install ssh-manager (sibling lib) then agent-codespaces into the given
-# venv python. Non-editable; deps resolved from pyproject.toml.
+# uv pip install the vendored libs (ssh-manager, credential-relay) then
+# agent-codespaces into the given venv python. Non-editable; deps resolved from
+# pyproject.toml. The vendored libs are force-reinstalled so a local code change
+# propagates even without a version bump (uv otherwise skips a same-version path
+# dep, leaving the venv stale).
 _install_package_into() {
     local py="$1"
     if [[ ! -f "$SSH_MGR_DIR/pyproject.toml" ]]; then
         _fail "ssh-manager source not found at $SSH_MGR_DIR"
         return 1
     fi
+    if [[ ! -f "$CRED_RELAY_DIR/pyproject.toml" ]]; then
+        _fail "credential-relay source not found at $CRED_RELAY_DIR"
+        return 1
+    fi
     uv pip install --python "$py" --reinstall-package agent-ssh-manager "$SSH_MGR_DIR" --quiet || {
         _fail "ssh-manager install failed"; return 1; }
+    uv pip install --python "$py" --reinstall-package agent-credential-relay "$CRED_RELAY_DIR" --quiet || {
+        _fail "credential-relay install failed"; return 1; }
     uv pip install --python "$py" --reinstall-package agent-codespaces "$PLUGIN_DIR" --quiet || {
         _fail "agent-codespaces install failed"; return 1; }
 }
@@ -310,6 +324,13 @@ do_status() {
         _ok "ssh-manager: importable in venv"
     else
         _fail "ssh-manager not importable in venv"
+    fi
+
+    # credential-relay
+    if "$VENV_PYTHON" -c 'import credential_relay' 2>/dev/null; then
+        _ok "credential-relay: importable in venv"
+    else
+        _fail "credential-relay not importable in venv"
     fi
 
     # Console script

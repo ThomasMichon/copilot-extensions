@@ -92,17 +92,18 @@ function Remove-ConsoleTrampolines {
 }
 # === end install-contract:v3 strip-trampolines ===
 
-# Resolve ssh-manager library path across multiple layouts.
+# Resolve a vendored library path (libs\<LibName>) across multiple layouts.
 # Returns the path string, or $null if not found.
-function Resolve-SshManager {
+function Resolve-VendoredLib {
+    param([Parameter(Mandatory)][string]$LibName)
     # 1. Vendored inside agent-bridge (marketplace install layout)
-    $candidate = Join-Path $PluginDir 'libs\ssh-manager'
+    $candidate = Join-Path $PluginDir "libs\$LibName"
     if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
         return (Resolve-Path $candidate).Path
     }
 
     # 2. Relative path (git checkout layout)
-    $candidate = Join-Path $PluginDir '..\..\libs\ssh-manager'
+    $candidate = Join-Path $PluginDir "..\..\libs\$LibName"
     if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
         return (Resolve-Path $candidate).Path
     }
@@ -122,7 +123,7 @@ repo = (reg or {}).get('repos', {}).get('copilot-extensions', {})
 if repo:
     p = repo.get('path', os.path.join(reg.get('srcroot', ''), 'copilot-extensions'))
     p = os.path.expanduser(p)
-    lib = os.path.join(p, 'libs', 'ssh-manager')
+    lib = os.path.join(p, 'libs', '$LibName')
     if os.path.isfile(os.path.join(lib, 'pyproject.toml')):
         print(lib)
         raise SystemExit(0)
@@ -135,7 +136,7 @@ raise SystemExit(1)
     }
 
     # 4. Common checkout path (repo exists but registry absent/stale)
-    $candidate = Join-Path $env:USERPROFILE 'src\copilot-extensions\libs\ssh-manager'
+    $candidate = Join-Path $env:USERPROFILE "src\copilot-extensions\libs\$LibName"
     if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
         return (Resolve-Path $candidate).Path
     }
@@ -143,10 +144,21 @@ raise SystemExit(1)
     return $null
 }
 
+# Resolve the ssh-manager / credential-relay vendored libs (thin wrappers).
+function Resolve-SshManager { return (Resolve-VendoredLib -LibName 'ssh-manager') }
+function Resolve-CredentialRelay { return (Resolve-VendoredLib -LibName 'credential-relay') }
+
 # Check if ssh-manager is already importable in the venv.
 function Test-SshManagerInstalled {
     if (-not (Test-Path $VenvPython)) { return $false }
     & $VenvPython -c 'from ssh_manager import SSHProfileSource, get_default_manager' 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
+# Check if credential-relay is already importable in the venv.
+function Test-CredentialRelayInstalled {
+    if (-not (Test-Path $VenvPython)) { return $false }
+    & $VenvPython -c 'from credential_relay import RelayBuilder' 2>$null
     return $LASTEXITCODE -eq 0
 }
 
@@ -585,6 +597,21 @@ function Invoke-Install {
     } else {
         throw 'Cannot locate ssh-manager library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
     }
+    # credential-relay (the relay framework agent-bridge runs in its daemon).
+    $CredRelayDir = Resolve-CredentialRelay
+    if ($CredRelayDir) {
+        $crOut = & uv pip install --python $VenvPython "$CredRelayDir" --quiet 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Fail "credential-relay install failed (exit $LASTEXITCODE)"
+            if ($crOut) { Write-Host ($crOut | Out-String) }
+            throw 'credential-relay install failed'
+        }
+    } elseif (Test-CredentialRelayInstalled) {
+        Write-Step 'credential-relay already installed in venv (marketplace layout)'
+    } else {
+        throw 'Cannot locate credential-relay library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
+    }
     $bridgeOut = & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1
     $installResult = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
@@ -919,6 +946,23 @@ function Invoke-Update {
         Write-Step 'ssh-manager already installed in venv (marketplace layout)'
     } else {
         throw 'Cannot locate ssh-manager library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
+    }
+    # credential-relay: force-reinstall so a local code change propagates even
+    # without a version bump (uv otherwise skips a same-version path dep).
+    $CredRelayDir = Resolve-CredentialRelay
+    if ($CredRelayDir) {
+        $crOut = & uv pip install --python $VenvPython --reinstall-package agent-credential-relay `
+            "$CredRelayDir" --quiet 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Fail "credential-relay update failed (exit $LASTEXITCODE)"
+            if ($crOut) { Write-Host ($crOut | Out-String) }
+            throw 'credential-relay update failed'
+        }
+    } elseif (Test-CredentialRelayInstalled) {
+        Write-Step 'credential-relay already installed in venv (marketplace layout)'
+    } else {
+        throw 'Cannot locate credential-relay library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
     }
     $bridgeOut = & uv pip install --python $VenvPython --reinstall-package agent-bridge `
         "$PluginDir" --quiet 2>&1
