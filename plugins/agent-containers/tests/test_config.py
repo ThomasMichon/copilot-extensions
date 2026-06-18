@@ -63,3 +63,86 @@ def test_load_config_from_file(tmp_path, monkeypatch):
     assert fleet.size == 3
     assert fleet.prefix("odsp-web") == "odsp-web"
     assert fleet.devcontainer_path == "/src/odsp-web-codespaces"
+
+
+def test_devcontainer_config_resolved_relative_to_path():
+    from agent_containers.config import FleetConfig
+
+    fleet = FleetConfig(
+        devcontainer_path="/src/odsp-web-codespaces",
+        devcontainer_config=".devcontainer/docker/devcontainer.json",
+    )
+    resolved = fleet.resolved_config()
+    assert resolved is not None
+    assert resolved.replace("\\", "/") == (
+        "/src/odsp-web-codespaces/.devcontainer/docker/devcontainer.json"
+    )
+
+
+def test_devcontainer_config_absolute_kept():
+    from agent_containers.config import FleetConfig
+
+    fleet = FleetConfig(
+        devcontainer_path="/src/x",
+        devcontainer_config="/abs/devcontainer.json",
+    )
+    assert fleet.resolved_config().replace("\\", "/") == "/abs/devcontainer.json"
+
+
+def test_devcontainer_config_none_when_unset():
+    from agent_containers.config import FleetConfig
+
+    assert FleetConfig(devcontainer_path="/src/x").resolved_config() is None
+
+
+def test_load_config_dotfiles(tmp_path, monkeypatch):
+    cfg = tmp_path / "containers.yaml"
+    cfg.write_text(
+        textwrap.dedent(
+            """
+            dotfiles:
+              repo: /home/me/dotfiles
+              install_command: bash install.sh
+            fleets:
+              odsp-web:
+                devcontainer_path: /src/odsp-web-codespaces
+                devcontainer_config: .devcontainer/docker/devcontainer.json
+            """
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(cfg))
+    c = load_config()
+    assert c.dotfiles is not None
+    assert c.dotfiles.repo == "/home/me/dotfiles"
+    assert c.dotfiles.target == "/workspaces/.codespaces/.persistedshare/dotfiles"
+    assert c.dotfiles.install_command == "bash install.sh"
+    fleet = c.fleets["odsp-web"]
+    assert fleet.devcontainer_config == ".devcontainer/docker/devcontainer.json"
+
+
+def test_load_config_dotfiles_install_disabled(tmp_path, monkeypatch):
+    cfg = tmp_path / "containers.yaml"
+    cfg.write_text(
+        textwrap.dedent(
+            """
+            dotfiles:
+              repo: /home/me/dotfiles
+              target: /custom/dotfiles
+              install_command: ""
+            """
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(cfg))
+    c = load_config()
+    assert c.dotfiles is not None
+    assert c.dotfiles.target == "/custom/dotfiles"
+    assert c.dotfiles.install_command is None
+
+
+def test_load_config_no_dotfiles_when_repo_missing(tmp_path, monkeypatch):
+    cfg = tmp_path / "containers.yaml"
+    cfg.write_text("dotfiles:\n  target: /x\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(cfg))
+    assert load_config().dotfiles is None

@@ -40,6 +40,35 @@ DEFAULT_ACP_COMMAND = "copilot --acp --stdio --allow-all-tools"
 
 
 @dataclass
+class DotfilesConfig:
+    """A designated host *dotfiles* repo to reproduce in a fleet container.
+
+    Mirrors the GitHub Codespaces dotfiles flow (clone the repo, run its
+    ``install.sh``, symlink ``.*`` files into ``$HOME``) for a local Docker
+    container. The host repo is bind-mounted **read-only** at a staging path,
+    copied to ``target`` (writable, owned by the remote user) inside the
+    container, then ``install_command`` is run in ``target``.
+
+    Copying (rather than mounting ``target`` directly) keeps the host repo
+    pristine -- ``install.sh`` writes git config / symlinks against the
+    container-local copy, never the host checkout. Optional + per-user: a
+    missing ``repo`` disables the whole step.
+    """
+
+    # Host path to the dotfiles repo to reproduce (absolute or ~-expanded).
+    repo: str | None = None
+    # Container path the repo is materialised at (matches the Codespaces layout
+    # so dotfiles that hard-code it keep working).
+    target: str = "/workspaces/.codespaces/.persistedshare/dotfiles"
+    # Command run in ``target`` after the copy (login shell, as the remote
+    # user). Empty / null skips the install step (mount + copy still happen).
+    install_command: str | None = "bash install.sh"
+
+    def host_repo(self) -> Path | None:
+        return Path(self.repo).expanduser() if self.repo else None
+
+
+@dataclass
 class FleetConfig:
     """A named pool of dev containers built from one devcontainer spec.
 
@@ -51,6 +80,12 @@ class FleetConfig:
     # Path to the devcontainer project (dir containing .devcontainer/) used
     # to build/create containers for this fleet. Resolved on the host.
     devcontainer_path: str | None = None
+    # Path to a specific devcontainer.json, passed to the devcontainer CLI as
+    # ``--config``. Needed when the spec is NOT at the default
+    # ``<devcontainer_path>/.devcontainer/devcontainer.json`` -- e.g. a nested
+    # ``.devcontainer/docker/devcontainer.json``. Resolved relative to
+    # ``devcontainer_path`` when not absolute.
+    devcontainer_config: str | None = None
     # Container image to `docker run` when not using the devcontainer CLI.
     image: str | None = None
     size: int = 1
@@ -63,6 +98,19 @@ class FleetConfig:
 
     def prefix(self, fleet_name: str) -> str:
         return self.name_prefix or fleet_name
+
+    def resolved_config(self) -> str | None:
+        """Absolute path to the devcontainer.json for ``--config``, or None.
+
+        Relative ``devcontainer_config`` is resolved against
+        ``devcontainer_path``; an absolute value is returned as-is.
+        """
+        if not self.devcontainer_config:
+            return None
+        p = Path(self.devcontainer_config).expanduser()
+        if not p.is_absolute() and self.devcontainer_path:
+            p = Path(self.devcontainer_path).expanduser() / p
+        return str(p)
 
 
 @dataclass
@@ -93,6 +141,9 @@ class ContainersConfig:
     image_prefixes: list[str] = field(
         default_factory=lambda: ["vsc-odsp-web-codespaces-"]
     )
+    # Optional designated dotfiles repo reproduced inside fleet containers
+    # (Codespaces-style clone + install.sh). None disables the step.
+    dotfiles: DotfilesConfig | None = None
     fleets: dict[str, FleetConfig] = field(default_factory=dict)
 
     def effective_acp_command(
@@ -158,12 +209,23 @@ def load_config() -> ContainersConfig:
     if "image_prefixes" in data and isinstance(data["image_prefixes"], list):
         config.image_prefixes = [str(p) for p in data["image_prefixes"]]
 
+    dotfiles = data.get("dotfiles", None)
+    if isinstance(dotfiles, dict) and dotfiles.get("repo"):
+        df = DotfilesConfig(repo=str(dotfiles["repo"]))
+        if dotfiles.get("target"):
+            df.target = str(dotfiles["target"])
+        if "install_command" in dotfiles:
+            ic = dotfiles["install_command"]
+            df.install_command = str(ic) if ic else None
+        config.dotfiles = df
+
     fleets = data.get("fleets", {}) or {}
     for name, raw in fleets.items():
         raw = raw or {}
         config.fleets[name] = FleetConfig(
             repo=raw.get("repo", ""),
             devcontainer_path=raw.get("devcontainer_path"),
+            devcontainer_config=raw.get("devcontainer_config"),
             image=raw.get("image"),
             size=int(raw.get("size", 1)),
             name_prefix=raw.get("name_prefix"),
