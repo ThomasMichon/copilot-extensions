@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from unittest.mock import patch
 
 import yaml
@@ -10,6 +12,32 @@ from agent_codespaces.__main__ import (
     _derive_codespaces_defaults,
     _render_codespaces_yaml,
 )
+
+# Local-only denylist of internal identifiers that must never be baked into a
+# generated codespaces.yaml. The list is sourced **privately** so this public
+# repo carries none of the strings itself:
+#   1. env ``COPILOT_EXTENSIONS_FORBIDDEN_IDS`` (comma-separated), then
+#   2. ``~/.agent-codespaces/forbidden-identifiers.txt`` (one per line; blank
+#      lines and ``#`` comments ignored).
+# In a fresh clone / CI neither is present -> the identifier check is a no-op
+# while the generic structural assertion still runs. Maintain the real list on
+# your own machine (see the agent-codespaces README, "Local identifier guard")
+# so the guard enforces it locally and nothing leaks into the repo. The same two
+# sources drive the repo-wide ``tools/check-no-internal-identifiers.py``.
+def _forbidden_identifiers() -> list[str]:
+    ids: list[str] = []
+    env = os.environ.get("COPILOT_EXTENSIONS_FORBIDDEN_IDS", "")
+    ids += [s for s in (part.strip() for part in env.split(",")) if s]
+    local_file = Path.home() / ".agent-codespaces" / "forbidden-identifiers.txt"
+    try:
+        for raw in local_file.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if line and not line.startswith("#"):
+                ids.append(line)
+    except OSError:
+        pass
+    return [i.lower() for i in ids]
+
 
 SAMPLE = [
     {
@@ -116,6 +144,7 @@ class TestRenderYaml:
         assert "WORKING_DIRECTORY" in text
 
     def test_no_internal_identifiers_in_output(self):
+        forbidden = _forbidden_identifiers()
         for d in (None, {
             "repository": "my-org/my-codespaces-repo",
             "machine_type": "largePremiumLinux256gb",
@@ -123,5 +152,12 @@ class TestRenderYaml:
             "source_name": "x",
         }):
             text = _render_codespaces_yaml(d).lower()
-            for bad in ("odsp", "onedrive", "tmichon"):
-                assert bad not in text
+            # Generic invariant (always checked): the scaffold documents that
+            # org/account/URL values belong in the user's repo, not the plugin.
+            assert "never in" in text
+            # Private denylist (checked when configured locally / in CI).
+            for bad in forbidden:
+                assert bad not in text, (
+                    f"internal identifier {bad!r} leaked into the generated "
+                    "codespaces.yaml scaffold"
+                )

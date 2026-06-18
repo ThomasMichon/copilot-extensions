@@ -123,6 +123,35 @@ To avoid the failure mode where a missing/expired credential causes a CodeSpace
   (`az login` / GCM sign-in) before work begins, rather than discovered
   mid-fetch.
 
+## Local identifier guard
+
+This is a **public** repo, so internal org/account/repo names and personal
+aliases must never land in it. The generated `codespaces.yaml` scaffold is
+checked for such leaks by `tests/test_config_init.py`, and the whole working
+tree by [`tools/check-no-internal-identifiers.py`](../../tools/check-no-internal-identifiers.py)
+(wire it up as a git `pre-push` hook).
+
+A denylist that *named* those identifiers would itself leak them, so it is
+**never stored in the repo**. Both guards read it privately from:
+
+1. env `COPILOT_EXTENSIONS_FORBIDDEN_IDS` (comma-separated), and
+2. `~/.agent-codespaces/forbidden-identifiers.txt` (one per line; blank lines
+   and `#` comments ignored).
+
+With neither configured (a fresh clone / CI) the identifier check is a no-op, so
+the guards are safe to ship. Populate one of the sources on your own machine —
+e.g.:
+
+```text
+# ~/.agent-codespaces/forbidden-identifiers.txt
+my-internal-org
+my-internal-repo
+my-alias
+```
+
+Matching is case-insensitive (substring). The host file lives in `$HOME`, outside
+any repo, so it is never committed.
+
 ## Development
 
 ```bash
