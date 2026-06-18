@@ -23,7 +23,7 @@ from .acp_client import AcpClient
 from .connect import ConnectError, ConnectStage, ConnectTracker
 from .db import Database
 from .events import EventLog
-from .models import ContextThresholds, PhasedTimeouts, SessionStatus
+from .models import ContextThresholds, PhasedTimeouts, RetentionConfig, SessionStatus
 from .transport import SpawnTarget, spawn
 
 log = logging.getLogger("agent-bridge")
@@ -259,11 +259,13 @@ class SessionManager:
         *,
         context_thresholds: ContextThresholds | None = None,
         timeouts: PhasedTimeouts | None = None,
+        retention: RetentionConfig | None = None,
     ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
         self._thresholds = context_thresholds or ContextThresholds()
         self._timeouts = timeouts or PhasedTimeouts()
+        self._retention = retention or RetentionConfig()
         self._rehydrate()
 
     @property
@@ -365,6 +367,86 @@ class SessionManager:
             self._sessions[sid] = session
 
         log.info("Rehydrated %d sessions from DB", len(self._sessions))
+
+        # Startup GC: prune aged terminal/disconnected sessions and compact
+        # the DB so a long-lived daemon's sessions.db doesn't grow without
+        # bound (a single big dispatch can otherwise leave tens of GB of
+        # freelist pages -- see RetentionConfig).
+        try:
+            self.gc(reason="startup")
+        except Exception:
+            log.warning("Startup GC failed", exc_info=True)
+
+    def gc(self, *, now: float | None = None, reason: str = "manual") -> dict[str, Any]:
+        """Garbage-collect terminal/disconnected sessions and compact the DB.
+
+        Prunes the bridge's relay metadata (session row + turns + events +
+        delivery cursors) for sessions in a terminal state (per
+        ``RetentionConfig.statuses``) whose last update is older than the
+        retention window, then optionally VACUUMs to return freed pages to the
+        OS. Live sessions -- and any whose ACP client is still running -- are
+        never touched. The canonical Copilot session history lives outside
+        this DB and is unaffected.
+
+        Returns a summary dict: ``enabled``, ``pruned`` (ids), ``pruned_count``,
+        ``vacuumed`` (bool), ``reclaimed_bytes``.
+        """
+        ret = self._retention
+        result: dict[str, Any] = {
+            "enabled": ret.enabled,
+            "pruned": [],
+            "pruned_count": 0,
+            "vacuumed": False,
+            "reclaimed_bytes": 0,
+        }
+        if not ret.enabled:
+            return result
+
+        now = now if now is not None else time.time()
+        cutoff = now - ret.max_age_hours * 3600.0
+        eligible = self._db.gc_eligible_session_ids(ret.statuses, cutoff)
+
+        pruned: list[str] = []
+        for sid in eligible:
+            # Safety: never prune a session whose client is still running,
+            # even if its persisted status looks terminal.
+            sess = self._sessions.get(sid)
+            if sess is not None and sess.client and sess.client.is_running:
+                continue
+            try:
+                self._db.delete_session(sid)
+            except Exception:
+                log.warning("GC: failed to prune session %s", sid, exc_info=True)
+                continue
+            self._sessions.pop(sid, None)
+            pruned.append(sid)
+
+        result["pruned"] = pruned
+        result["pruned_count"] = len(pruned)
+
+        if ret.vacuum:
+            try:
+                info = self._db.db_size_info()
+                if info["free_bytes"] >= ret.vacuum_min_free_mb * 1024 * 1024:
+                    before = info["total_bytes"]
+                    self._db.vacuum()
+                    after = self._db.db_size_info()["total_bytes"]
+                    result["vacuumed"] = True
+                    result["reclaimed_bytes"] = max(0, before - after)
+            except Exception:
+                # A locked DB (concurrent reader) just defers compaction to the
+                # next sweep -- never fatal.
+                log.warning("GC: VACUUM skipped/failed", exc_info=True)
+
+        if pruned or result["vacuumed"]:
+            log.info(
+                "GC (%s): pruned %d session(s), reclaimed %.1f MB%s",
+                reason,
+                len(pruned),
+                result["reclaimed_bytes"] / 1e6,
+                " (vacuumed)" if result["vacuumed"] else "",
+            )
+        return result
 
     def _find_active_session(self, ws_key: tuple) -> Session | None:
         """Return an existing session that occupies the given workspace key.
