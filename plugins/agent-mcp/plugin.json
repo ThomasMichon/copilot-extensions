@@ -1,7 +1,7 @@
 {
   "name": "agent-mcp",
   "description": "Reusable MCP bridge -- wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP server and inject host credentials (Entra/az, gh, git-credential, env). Config-driven, one file per bridge.",
-  "version": "0.1.0-dev2",
+  "version": "0.1.0-dev3",
   "author": {
     "name": "Thomas Michon"
   },
