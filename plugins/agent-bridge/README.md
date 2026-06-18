@@ -133,6 +133,40 @@ target. If a launch hangs or fails opaquely, SSH into the target and check that
 log to confirm the connection actually reached the device (and roughly when) —
 distinguishing an unreachable host from an on-device failure.
 
+## External ACP clients (WebSocket) & status UX
+
+agent-bridge speaks the [Agent Client Protocol](https://agentclientprotocol.com/)
+to its downstream agents, and re-exposes that surface so **any ACP client** can
+drive a remote agent through the bridge — for example
+[acp-ui](https://acp-ui.github.io/), a browser ACP chat client.
+
+**Endpoints** (JSON-RPC 2.0 over a WebSocket, newline-delimited frames):
+
+| URL | Target |
+|-----|--------|
+| `ws://<host>:9280/acp/<agent>` | spawn a fresh session for a registered agent |
+| `ws://<host>:9280/acp/session/<session-id>` | *adopt* an already-running bridge session (observe/steer) — it is **not** stopped when the client disconnects |
+
+**Auth.** Browsers cannot set WebSocket headers, so the bridge token is carried
+as a `bearer.<token>` WebSocket subprotocol (acp-ui's convention); a plain
+`Authorization: Bearer <token>` header is also accepted for non-browser clients.
+The server negotiates the `acp.v1` subprotocol. Print the token with
+`agent-bridge token` (it lives in `~/.agent-bridge/auth.yaml`).
+
+**Status UX.** `GET /ui` serves a dependency-free status page listing registered
+agents and live sessions, each with a copyable ACP WebSocket URL to paste into
+acp-ui. It calls the token-protected `/api/v1` endpoints (token entered once,
+kept in `localStorage`), so no data is exposed without auth.
+
+> Hosted acp-ui is served over HTTPS, which (per the browser mixed-content rule)
+> can only dial `wss://` — not `ws://localhost`. For a local bridge, use the
+> acp-ui desktop app / `npm run preview:web`, or expose the bridge via a `wss://`
+> tunnel. acp-ui's "http (remote)" transport is not yet implemented upstream, so
+> only the WebSocket transport is wired today.
+
+> Enabled by the pure-Python `wsproto` dependency (uvicorn keeps its plain h11
+> HTTP path; no native build, preserving win-arm64 support).
+
 ## Getting Started
 
 See [Getting Started](docs/getting-started.md) for install, configuration,

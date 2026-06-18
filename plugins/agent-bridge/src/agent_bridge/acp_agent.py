@@ -15,7 +15,6 @@ connects via ``copilot --acp --stdio`` or equivalent.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -162,12 +161,19 @@ class BridgeAgent(Agent):
         *,
         resolver: AgentResolver | None = None,
         default_agent: str | None = None,
+        adopt_session_id: str | None = None,
     ) -> None:
         self._sm = session_manager
         self._resolver = resolver
         self._default_agent = default_agent
+        # When set, this connection "adopts" an already-running bridge session
+        # instead of spawning a fresh one: session/new returns the existing id
+        # (resuming it if stopped). Adopted sessions are NOT stopped on cleanup
+        # -- they belong to whoever started them (e.g. an inter-agent `send`).
+        self._adopt_session_id = adopt_session_id
         self._conn: AgentSideConnection | None = None
         self._owned_sessions: set[str] = set()
+        self._adopted_sessions: set[str] = set()
 
     def on_connect(self, conn: Any) -> None:
         """Called by the SDK when the upstream connection is established."""
@@ -207,6 +213,11 @@ class BridgeAgent(Agent):
         mcp_servers: list[Any] | None = None,
         **kwargs: Any,
     ) -> NewSessionResponse:
+        # Adopt mode: bind this connection to an existing bridge session
+        # (e.g. /acp/session/<id>) rather than spawning a new downstream agent.
+        if self._adopt_session_id:
+            return await self._adopt_existing(self._adopt_session_id)
+
         agent_name = self._default_agent
         target = self._resolve_target(cwd, agent_name)
 
@@ -272,10 +283,11 @@ class BridgeAgent(Agent):
         additional_directories: list[str] | None = None,
         **kwargs: Any,
     ) -> ListSessionsResponse:
-        # Only list sessions owned by this connection
+        # Include both owned (created here) and adopted (pre-existing) sessions
+        visible = self._owned_sessions | self._adopted_sessions
         sessions = [
             s for s in self._sm.list_sessions()
-            if s.session_id in self._owned_sessions
+            if s.session_id in visible
         ]
         return ListSessionsResponse(
             sessions=[
@@ -304,7 +316,7 @@ class BridgeAgent(Agent):
             await self._sm.resume_session(
                 session_id, permission_callback=permission_cb,
             )
-        self._owned_sessions.add(session_id)
+        self._track_session(session_id)
         return LoadSessionResponse()
 
     async def resume_session(
@@ -323,12 +335,13 @@ class BridgeAgent(Agent):
             await self._sm.resume_session(
                 session_id, permission_callback=permission_cb,
             )
-        self._owned_sessions.add(session_id)
+        self._track_session(session_id)
         return ResumeSessionResponse()
 
     async def close_session(self, session_id: str, **kwargs: Any) -> CloseSessionResponse | None:
         await self._sm.end_session(session_id)
         self._owned_sessions.discard(session_id)
+        self._adopted_sessions.discard(session_id)
         return CloseSessionResponse()
 
     # -- Unsupported methods -------------------------------------------------
@@ -355,6 +368,36 @@ class BridgeAgent(Agent):
         pass
 
     # -- Internal helpers ----------------------------------------------------
+
+    def _track_session(self, session_id: str) -> None:
+        """Record a session this connection observes.
+
+        In adopt mode the session is pre-existing and must never be stopped on
+        cleanup, so it is tracked as *adopted*; otherwise it is *owned* and
+        torn down when the connection closes.
+        """
+        if self._adopt_session_id:
+            self._adopted_sessions.add(session_id)
+        else:
+            self._owned_sessions.add(session_id)
+
+    async def _adopt_existing(self, session_id: str) -> NewSessionResponse:
+        """Bind to an existing bridge session, resuming it if stopped."""
+        session = self._sm.get_session(session_id)
+        if not session:
+            raise RequestError.invalid_params(
+                f"Session '{session_id}' not found"
+            )
+        if session.status == SessionStatus.STOPPED:
+            await self._sm.resume_session(
+                session_id, permission_callback=self._make_permission_callback(),
+            )
+        self._adopted_sessions.add(session_id)
+        log.info(
+            "Upstream new_session -> adopted existing bridge session %s",
+            session_id,
+        )
+        return NewSessionResponse(session_id=session_id)
 
     def _resolve_target(self, cwd: str, agent_name: str | None) -> SpawnTarget:
         """Resolve agent name to a spawn target."""

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-bridge"
-version = "0.4.0-dev39"
+version = "0.4.0-dev40"
 description = "Persistent inter-agent communication service for Copilot CLI"
 readme = "README.md"
 license = "MIT"
@@ -21,6 +21,11 @@ dependencies = [
     # wheel and would build from source (MSVC) on headless ARM64 hosts. h11 is
     # a core uvicorn dependency and uvicorn.run() falls back to it by default.
     "uvicorn>=0.30.0",
+    # Pure-Python WebSocket support for uvicorn (ACP-over-WS transport in
+    # routes/acp_ws.py). wsproto is sans-I/O and depends only on h11 (already a
+    # uvicorn core dep), so it adds no native build -- unlike the `websockets`
+    # speedup in uvicorn[standard]. Keeps the win-arm64 / pure-h11 guarantee.
+    "wsproto>=1.2",
     "pyyaml>=6.0",
     "pydantic>=2.0",
     "agent-client-protocol>=0.9,<1",
