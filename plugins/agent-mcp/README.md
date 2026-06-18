@@ -26,10 +26,24 @@ bridge packaged as a Copilot CLI plugin.
 | `env` / `static` | host env var or literal | templated header | target env var |
 | `none` | — | nothing | nothing |
 
+## Config location — in-repo vs. user-global
+
+A bridge config can be referenced two ways (both read the same schema; only the
+lookup differs):
+
+| Form | Reference | Lives in | Use for |
+|------|-----------|----------|---------|
+| **In-repo `--config`** (preferred) | `bridge --config <path>` | the repo (e.g. `.github/agents/<name>.mcp.yaml`) | **repo-scoped agents** — version-controlled, travels with the repo, no deploy |
+| **Named bridge** | `bridge <name>` | `~/.agent-mcp/bridges/<name>.{yaml,yml,json}` | **personal / cross-repo** MCPs not tied to one checkout |
+
+Prefer the in-repo `--config` form for any agent that ships inside a repo;
+reserve named bridges for MCPs you use across many repos.
+
 ## Config file
 
 ```yaml
-# ~/.agent-mcp/bridges/ado.yaml   ->   agent-mcp bridge ado
+# .github/agents/ado.mcp.yaml   (in-repo)  ->  agent-mcp bridge --config <path>
+# ~/.agent-mcp/bridges/ado.yaml (named)     ->  agent-mcp bridge ado
 server:                                  # original launch info (lift from .mcp.json)
   type: http
   url: https://mcp.dev.azure.com/your-org
@@ -73,10 +87,15 @@ agent-mcp status                   # prerequisites + available bridges
 mcp-servers:
   ado-remote-mcp:
     type: stdio
-    command: agent-mcp
+    command: agent-mcp.cmd        # Windows: use the .cmd binstub (see note)
     args: ['bridge', '--config', '.github/agents/ado.mcp.yaml']
     tools: ['*']
 ```
+
+> **Windows: use `command: agent-mcp.cmd` (explicit `.cmd`).** Copilot spawns the
+> MCP server directly; the `.ps1` binstub adapter does **not** forward piped stdin
+> on Windows, which a stdio MCP server depends on. The `.cmd` binstub forwards
+> stdin correctly. On Linux/WSL, plain `command: agent-mcp` is fine.
 
 ## Install
 

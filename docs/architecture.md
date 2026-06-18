@@ -100,8 +100,10 @@ flowchart LR
   `~/.agent-containers/containers.yaml`) — keep it in the control repo to share
   fleet defaults.
 
-> agent-mcp is **not** wired to the control repo — its bridge configs live under
-> `~/.agent-mcp/bridges/` (or wherever an agent's `--config` points).
+> agent-mcp is **not** wired to the control repo — its bridge configs are
+> per-agent files: preferably **in-repo** (`--config .github/agents/<name>.mcp.yaml`)
+> for repo-scoped agents, or **user-global** under `~/.agent-mcp/bridges/<name>`
+> for personal/cross-repo MCPs.
 
 See [machine-config](../plugins/agent-bridge/docs/machine-config.md) for the
 file formats and [codespaces-setup](../plugins/agent-codespaces/skills/codespaces-setup/SKILL.md)
