@@ -76,6 +76,31 @@ timeouts:
   command: 1800         # a single turn/command to complete
 ```
 
+### Session retention & garbage collection
+
+`sessions.db` is a *relay log* of cross-agent turns/events -- not the canonical
+Copilot session history (that lives in each target's `~/.copilot/session-state`
+and is archived separately). Left unbounded it grows monotonically: SQLite never
+shrinks the file, so a large dispatch can leave **tens of GB** of freelist pages
+behind even after the session ends.
+
+The daemon garbage-collects automatically: it prunes the relay metadata for
+**terminal** sessions (`ended`/`failed`/`stopped`) older than the retention
+window, then VACUUMs to return freed pages to the OS. GC runs on **startup**, on
+a periodic **sweep**, and on demand via `agent-bridge gc`. Live sessions (and any
+with a still-running client) are never touched. Configure in
+`~/.agent-bridge/config.yaml`:
+
+```yaml
+retention:
+  enabled: true
+  max_age_hours: 168       # prune terminal sessions older than this (7 days)
+  statuses: [ended, failed, stopped]
+  vacuum: true             # compact the DB after pruning
+  vacuum_min_free_mb: 128  # only VACUUM when freelist exceeds this
+  sweep_interval_hours: 12 # background sweep cadence (0 = startup + manual only)
+```
+
 ## Connection pipeline & diagnostics
 
 Bringing up a remote agent passes through seven distinct stages, each with its

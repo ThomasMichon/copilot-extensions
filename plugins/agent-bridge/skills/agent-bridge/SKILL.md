@@ -196,6 +196,10 @@ agent-bridge resume <session-id>
 
 # End a session (full cleanup)
 agent-bridge end <session-id>
+
+# Garbage-collect aged terminal/disconnected sessions + compact the DB.
+# Runs automatically (startup + periodic sweep); this forces it on demand.
+agent-bridge gc
 ```
 
 ### Service Control

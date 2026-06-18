@@ -522,6 +522,33 @@ def _cmd_machines(args: argparse.Namespace) -> None:
     ])
 
 
+def _cmd_gc(args: argparse.Namespace) -> None:
+    """Run a GC sweep: prune aged terminal/disconnected sessions + compact DB."""
+    from .client import BridgeClientError, BridgeConnectionError
+
+    client = _get_client()
+    try:
+        res = client.gc()
+    except (BridgeClientError, BridgeConnectionError) as exc:
+        detail = getattr(exc, "detail", str(exc))
+        print(f"[FAIL] {detail}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.json:
+        _json_out(res)
+        return
+
+    if not res.get("enabled", True):
+        print("GC is disabled in config (retention.enabled = false).")
+        return
+
+    pruned = res.get("pruned_count", 0)
+    msg = f"GC complete: pruned {pruned} session(s)"
+    if res.get("vacuumed"):
+        msg += f", reclaimed {res.get('reclaimed_bytes', 0) / 1e6:.1f} MB (vacuumed)"
+    print(msg)
+
+
 def _cmd_sessions(args: argparse.Namespace) -> None:
     """List sessions."""
     client = _get_client()
@@ -1765,6 +1792,13 @@ def main(argv: list[str] | None = None) -> None:
     sessions_p = sub.add_parser("sessions", help="List sessions")
     sessions_p.add_argument("--status", help="Filter by status")
     sessions_p.set_defaults(func=_cmd_sessions)
+
+    gc_p = sub.add_parser(
+        "gc",
+        help="Garbage-collect aged terminal/disconnected sessions and compact "
+             "the sessions.db (reclaims freelist bloat)",
+    )
+    gc_p.set_defaults(func=_cmd_gc)
 
     send_p = sub.add_parser(
         "send", help="Send a prompt to an agent or session (reuses/resumes "

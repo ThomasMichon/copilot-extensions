@@ -355,6 +355,10 @@ class BridgeClient:
         """DELETE /api/v1/sessions/{id}"""
         self._request("DELETE", f"/api/v1/sessions/{session_id}")
 
+    def gc(self) -> dict[str, Any]:
+        """POST /api/v1/gc -- prune aged terminal sessions and compact the DB."""
+        return self._request("POST", "/api/v1/gc") or {}
+
     def stream_events(
         self,
         session_id: str,

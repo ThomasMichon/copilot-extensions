@@ -233,6 +233,46 @@ class PhasedTimeouts(BaseModel):
     )
 
 
+class RetentionConfig(BaseModel):
+    """Garbage-collection policy for completed/disconnected sessions.
+
+    agent-bridge's ``sessions.db`` is a *relay log* of cross-agent turns and
+    events -- it is **not** the canonical Copilot session history (that lives
+    in each target machine's ``~/.copilot/session-state`` and is archived
+    separately by the session-sync flow). GC therefore only prunes the
+    bridge's own metadata for **terminal** sessions older than the retention
+    window; live sessions are never touched. The default 7-day window also
+    gives session-sync time to archive before the relay copy is reclaimed.
+    """
+
+    enabled: bool = True
+    max_age_hours: float = Field(
+        default=168.0,
+        description="Prune terminal sessions whose last update is older than "
+        "this many hours (default 7 days).",
+    )
+    statuses: list[str] = Field(
+        default_factory=lambda: ["ended", "failed", "stopped"],
+        description="Terminal session states eligible for GC. Live states "
+        "(created/starting/running/idle) are never pruned.",
+    )
+    vacuum: bool = Field(
+        default=True,
+        description="Compact (VACUUM) the DB after pruning so freed pages are "
+        "returned to the filesystem -- SQLite never shrinks the file otherwise.",
+    )
+    vacuum_min_free_mb: float = Field(
+        default=128.0,
+        description="Only VACUUM when at least this many MB of freelist "
+        "(reclaimable) pages exist, to avoid churn on a healthy DB.",
+    )
+    sweep_interval_hours: float = Field(
+        default=12.0,
+        description="Hours between background GC sweeps while the daemon runs. "
+        "0 disables periodic sweeps (startup + manual `gc` only).",
+    )
+
+
 class TopologyProfile(BaseModel):
     """A topology profile pointing to external config files."""
 
@@ -250,6 +290,7 @@ class ServiceConfig(BaseModel):
     topologies: dict[str, TopologyProfile] = Field(default_factory=dict)
     context_thresholds: ContextThresholds = Field(default_factory=ContextThresholds)
     timeouts: PhasedTimeouts = Field(default_factory=PhasedTimeouts)
+    retention: RetentionConfig = Field(default_factory=RetentionConfig)
     worktree_discovery_interval: float = Field(
         default=0,
         description="Seconds between periodic worktree discovery sweeps. "

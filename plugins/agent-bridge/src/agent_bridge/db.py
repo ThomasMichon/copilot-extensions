@@ -497,3 +497,54 @@ class Database:
             )
             conn.commit()
             return new_val
+
+    # -- Garbage collection / maintenance ------------------------------------
+
+    def gc_eligible_session_ids(
+        self, statuses: list[str], cutoff_ts: float
+    ) -> list[str]:
+        """Return ids of sessions in ``statuses`` last updated before ``cutoff_ts``.
+
+        Used by the GC sweep to find terminal/disconnected sessions whose
+        relay metadata is past the retention window.
+        """
+        if not statuses:
+            return []
+        placeholders = ",".join("?" for _ in statuses)
+        rows = self.execute_read(
+            f"SELECT id FROM sessions WHERE status IN ({placeholders}) "
+            "AND updated_at < ? ORDER BY updated_at",
+            (*statuses, cutoff_ts),
+        )
+        return [r["id"] for r in rows]
+
+    def db_size_info(self) -> dict[str, int]:
+        """Return page/byte stats for the DB file (drives the VACUUM decision)."""
+        conn = self._get_conn()
+        page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+        page_count = conn.execute("PRAGMA page_count").fetchone()[0]
+        freelist = conn.execute("PRAGMA freelist_count").fetchone()[0]
+        return {
+            "page_size": page_size,
+            "page_count": page_count,
+            "freelist_count": freelist,
+            "total_bytes": page_size * page_count,
+            "free_bytes": page_size * freelist,
+        }
+
+    def vacuum(self) -> None:
+        """Checkpoint the WAL and VACUUM, returning freed pages to the OS.
+
+        Runs under the write lock so no write interleaves. VACUUM rewrites
+        the file; the scratch space it needs is ~the *live* content size
+        (tiny when the DB is mostly freelist), so it succeeds even on a
+        nearly-full disk. VACUUM cannot run inside an open transaction, so we
+        commit any pending one first.
+        """
+        conn = self._get_conn()
+        with self._write_lock:
+            if conn.in_transaction:
+                conn.commit()
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.execute("VACUUM")
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
