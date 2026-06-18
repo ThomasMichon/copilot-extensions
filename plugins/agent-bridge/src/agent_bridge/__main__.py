@@ -13,10 +13,13 @@ import logging
 import os
 import sys
 import urllib.error
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from . import __version__
+
+if TYPE_CHECKING:
+    from .client import BridgeClientError
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +127,10 @@ def _cmd_start(args: argparse.Namespace) -> None:
         host=cfg.bind,
         port=cfg.port,
         log_level=cfg.log_level,
+        # Pure-Python WebSocket protocol (wsproto) for the ACP-over-WS
+        # transport. Explicit so we never silently fall back to "none" (which
+        # would 403 every /acp WebSocket upgrade) on a host without it.
+        ws="wsproto",
     )
 
 
@@ -226,6 +233,27 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
 
 def _cmd_version(_args: argparse.Namespace) -> None:
     print(f"agent-bridge {__version__}")
+
+
+def _cmd_token(args: argparse.Namespace) -> None:
+    """Print the bearer token external ACP clients (e.g. acp-ui) authenticate with.
+
+    Reads ``~/.agent-bridge/auth.yaml`` (generating one on first run, matching
+    the daemon). Plain output is the bare token so it can be piped; ``-v`` adds
+    the source path and the status-UX / ACP-WebSocket URLs.
+    """
+    from .config import config_dir, load_or_create_auth_token
+
+    token = load_or_create_auth_token()
+    if getattr(args, "verbose", False):
+        port = _service_port()
+        print(f"Token:     {token}")
+        print(f"Source:    {config_dir() / 'auth.yaml'}")
+        print(f"Status UX: http://127.0.0.1:{port}/ui")
+        print(f"ACP WS:    ws://127.0.0.1:{port}/acp/<agent>")
+        print("Header:    Authorization: Bearer <token>")
+    else:
+        print(token)
 
 
 # ---------------------------------------------------------------------------
@@ -1780,6 +1808,16 @@ def main(argv: list[str] | None = None) -> None:
 
     ver_p = sub.add_parser("version", help="Print version")
     ver_p.set_defaults(func=_cmd_version)
+
+    token_p = sub.add_parser(
+        "token",
+        help="Print the bearer token for external ACP clients (acp-ui, /ui)",
+    )
+    token_p.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Also print the token source path and connect URLs",
+    )
+    token_p.set_defaults(func=_cmd_token)
 
     # -- Client commands --
 

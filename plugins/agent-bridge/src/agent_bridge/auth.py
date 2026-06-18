@@ -10,7 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 log = logging.getLogger("agent-bridge")
 
 # Paths that skip auth
-_PUBLIC_PATHS = frozenset({"/health", "/docs", "/openapi.json", "/redoc"})
+_PUBLIC_PATHS = frozenset({"/health", "/ui", "/docs", "/openapi.json", "/redoc"})
 
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
