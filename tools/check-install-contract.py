@@ -7,6 +7,11 @@ Each plugin with native installers (scripts/install.ps1 / install.sh) must:
   3. write a schema_version 3 deploy manifest with a `source` block,
   4. carry a source-kind resolver identical (per language) across plugins.
 
+Payload-runtime plugins (no pyproject.toml -- e.g. a JS extension copied to
+~/.copilot/extensions/) are exempt from rule 1 (there is no Python package to
+install); rules 2-4 still apply. See docs/install-contract.md
+§ "Payload runtime (non-Python)".
+
 Run manually:  python tools/check-install-contract.py
 Exit code 0 = conformant, 1 = violations (suitable for a pre-push hook).
 """
@@ -75,6 +80,13 @@ def check() -> int:
 
     for plugin in plugins:
         name = plugin.name
+        # Payload-runtime plugins ship a non-Python runtime (a JS extension
+        # copied to ~/.copilot/extensions/, etc.) and carry no pyproject.toml.
+        # The venv / uv-pip-install / SAC-launcher rules do not apply to them;
+        # they must still write a schema_version 3 manifest with a source block
+        # and carry the shared source-kind resolver. See docs/install-contract.md
+        # § "Payload runtime (non-Python)".
+        is_payload = not (plugin / "pyproject.toml").exists()
         for script in ("install.ps1", "install.sh"):
             path = plugin / "scripts" / script
             if not path.exists():
@@ -82,7 +94,7 @@ def check() -> int:
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
 
-            if "uv pip install" not in text:
+            if not is_payload and "uv pip install" not in text:
                 violations.append(f"{name}/{script}: no 'uv pip install' (package must not be file-copied)")
             if FORBIDDEN_PYTHONPATH.search(text):
                 violations.append(f"{name}/{script}: binstub sets PYTHONPATH to a runtime lib/ dir")

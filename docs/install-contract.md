@@ -254,6 +254,39 @@ across plugins:
 # === end install-contract:v3 source-kind ===
 ```
 
+## Payload runtime (non-Python)
+
+Most plugins here ship a **Python** runtime (a venv + package + binstubs). A
+few ship a **payload runtime** instead: a non-Python artifact deployed outside
+the plugin cache, with no venv. The canonical example is **context-handoff**,
+which deploys a single JavaScript Copilot CLI extension (`extension.mjs`) to the
+user-space extension load path `~/.copilot/extensions/<name>/` and sets the
+`experimental: true` flag in `~/.copilot/settings.json` that gates extensions.
+
+A payload-runtime plugin is identified structurally: it has **no
+`pyproject.toml`**. The Python-specific rules above — `uv pip install`, the venv
+build, SAC-safe venv launchers, `_build_info.py` stamping, `~/.local/bin`
+binstubs — **do not apply**, because there is no Python package or interpreter
+to launch. What still applies:
+
+1. It is still a **runtime** (it deploys beyond what `copilot plugin update`
+   does), so it **must** ship `scripts/install.{ps1,sh}` plus an **install
+   skill** that runs `install.* update` from the source dir. The two-step deploy
+   (payload update → run installer) is unchanged.
+2. It **must** write a `schema_version` 3 deploy manifest with a `source` block,
+   written atomically (temp+move). `venv` is `null`; `runtime` names the payload
+   kind (e.g. `"extension"`); add an `extension_path` (or equivalent) pointing at
+   the deployed artifact.
+3. It **must** carry the byte-identical `# === install-contract:v3 source-kind`
+   resolver block, exactly as the Python plugins do — `update` still re-installs
+   from whatever footprint (marketplace vs local) the installer was run from.
+4. Output stays ASCII unless the script establishes a UTF-8 context (the
+   installers here use `[OK]` / `[WARN]` markers).
+
+`check-install-contract.py` detects payload plugins by the absent
+`pyproject.toml` and skips only the `uv pip install` check for them; the
+manifest and resolver checks are still enforced.
+
 ## Within-plugin consolidation
 
 A plugin's own `scripts/*` and `src/<pkg>/installer.py` ship together, so they
@@ -263,7 +296,9 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 ## Enforcement
 
 `tools/check-install-contract.py` verifies, per plugin:
-- `uv pip install` is used (no package file-copy),
+- `uv pip install` is used (no package file-copy) — **skipped for
+  payload-runtime plugins** (no `pyproject.toml`; see
+  [Payload runtime (non-Python)](#payload-runtime-non-python)),
 - no binstub sets `PYTHONPATH=…/lib`,
 - no `install.ps1` launches the `…\Scripts\<name>.exe` console-script trampoline
   ([SAC-safe launchers](#sac-safe-launchers-windows)),
