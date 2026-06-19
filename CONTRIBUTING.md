@@ -340,9 +340,33 @@ binstub in `~/.local/bin/`.
 ## Code Style
 
 - Python 3.10+, type hints encouraged
-- No external linter configured yet — keep code clean and consistent
-  with existing style
+- **Linter: [ruff](https://docs.astral.sh/ruff/).** Each plugin configures its
+  own `[tool.ruff]` in `pyproject.toml`. Run the full pass with `ruff check .`
+  (and `ruff format` for formatting). The repo carries pre-existing style debt,
+  so the committed `pre-commit` hook lints only **staged** files and only the
+  high-signal `F` (pyflakes) + `E9` (syntax) rule groups — fix those as you go.
 - Docstrings for public functions
+
+### Git Hooks
+
+The repo ships git hooks under `tools/hooks/`:
+
+- **`pre-commit`** — runs `ruff check --select F,E9` on staged Python files
+  (unused imports/vars, undefined names, syntax errors).
+- **`pre-push`** — runs `tools/check-install-contract.py` (the
+  [install contract](docs/install-contract.md)) and
+  `tools/check-no-internal-identifiers.py`.
+
+They are **not active until wired** per clone (git does not auto-enable a
+committed hooks dir):
+
+```bash
+git config core.hooksPath tools/hooks
+```
+
+Bypass in a pinch with `git commit/push --no-verify` (discouraged). The
+install-contract check fails until every runtime plugin's installer conforms —
+see the contract doc for the rules.
 
 ## Commit Messages
 
