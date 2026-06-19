@@ -27,11 +27,23 @@ except ImportError:  # pragma: no cover - pyyaml is a hard dependency
 DEFAULTS: dict[str, Any] = {
     # Where collated digest chunks are written/read.
     "store_dir": None,  # resolved to <home>/session-digests when None
-    # Sync target -- see agent_logger.sync (later phase). "local" writes to a
-    # dotfolder under $HOME; other targets are onedrive/ssh/ingest.
+    # Sync target -- see agent_logger.sync. "local" writes to a dotfolder
+    # under $HOME; other targets are onedrive/ssh/ssh-tunnel/ingest.
     "sync": {
         "target": "local",
-        "path": None,  # resolved to <home>/sessions when None
+        # What to sync. None -> ~/.copilot (the Copilot CLI state dir).
+        "source": None,
+        # Retention for destination pruning. None/<=0 -> retain everything.
+        "retention_days": None,
+        "lock_timeout_sec": 10,
+        # Per-target options, keyed by target name.
+        "targets": {
+            "local": {"path": None},
+            "onedrive": {"subfolder": "Apps/agent-logger/sessions"},
+            "ssh": {},
+            "ssh-tunnel": {},
+            "ingest": {},
+        },
     },
     # Log writer presentation.
     "log": {
@@ -112,10 +124,57 @@ class Config:
 
     @property
     def sync_path(self) -> Path:
-        configured = self._data.get("sync", {}).get("path")
+        """Default local-target root (``<home>/sessions``)."""
+        local = self._data.get("sync", {}).get("targets", {}).get("local", {}) or {}
+        configured = local.get("path")
         if configured:
             return Path(configured).expanduser()
         return self.home / "sessions"
+
+    @property
+    def sync_source(self) -> Path:
+        """What to sync. Defaults to the Copilot CLI state dir ``~/.copilot``."""
+        configured = self._data.get("sync", {}).get("source")
+        if configured:
+            return Path(configured).expanduser()
+        return Path.home() / ".copilot"
+
+    @property
+    def sync_retention_days(self) -> int | None:
+        """Retention in days, or ``None`` to retain everything.
+
+        Accepts the sentinel strings ``infinite``/``forever``/``never`` (and
+        blank) as "retain all".
+        """
+        raw = self._data.get("sync", {}).get("retention_days")
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            if raw.strip().lower() in {"infinite", "forever", "never", "none", ""}:
+                return None
+            try:
+                return int(raw)
+            except ValueError:
+                return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def sync_lock_timeout(self) -> int:
+        return int(self._data.get("sync", {}).get("lock_timeout_sec", 10))
+
+    def target_options(self, name: str) -> dict[str, Any]:
+        """Resolved options for the named sync target.
+
+        The ``local`` target's ``path`` defaults to :attr:`sync_path` so the
+        destination stays tied to the configured home dir.
+        """
+        opts = dict(self._data.get("sync", {}).get("targets", {}).get(name, {}) or {})
+        if name == "local" and not opts.get("path"):
+            opts["path"] = str(self.sync_path)
+        return opts
 
     @property
     def log_path_template(self) -> str:
