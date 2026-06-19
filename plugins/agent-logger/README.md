@@ -7,8 +7,12 @@ session-to-log pipeline out of any single bespoke service:
 - **Segmenter** — collate one Copilot session into context-ingestible
   Markdown digest chunks (`collate-session`, `read-session-digest`,
   `prepare-session-log`).
-- **Log writer** *(later phase)* — skills + agents that turn digests into a
-  structured Markdown session log, with a configurable voice pack.
+- **Log writer** — one voice-neutral `session-log-writer` agent that turns a
+  manifest of 1..N sessions into structured Markdown logs, plus the
+  `log-session` (interactive) and `process-backlog` (local batch) skills
+  that drive it. Personality is never built in; a host repo injects a
+  closing remark through the manifest's closing-remark seam
+  (see [`docs/manifest-contract.md`](docs/manifest-contract.md)).
 - **session-sync** — push raw session data to a configurable target: a
   `local` dotfolder, `onedrive`, `ssh`/`ssh-tunnel`, or a generic `ingest`
   endpoint. Configure with the `session-sync-setup` skill; deploy as a
