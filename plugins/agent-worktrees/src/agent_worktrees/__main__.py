@@ -2697,6 +2697,18 @@ def cmd_install(args: argparse.Namespace) -> int:
     # Deploy manifest (shared runtime)
     inst.write_deploy_manifest(repo_dir, machine)
 
+    # Install PR-workflow git hook shims into the anchor's shared hooks dir.
+    # Inert unless AGENT_WORKTREES_HOOKS=1 (and pre-push only acts in PR mode).
+    try:
+        from . import hooks as _hooks
+        installed_hooks = _hooks.install_hooks(repo_dir)
+        if installed_hooks:
+            output.ok(
+                f"PR-workflow git hooks installed ({', '.join(installed_hooks)})"
+            )
+    except Exception as e:
+        output.warn(f"Could not install git hooks: {e}")
+
     print()
     output.ok("Installation complete")
     print(f"  Runtime:   {runtime_dir}")
@@ -4981,7 +4993,7 @@ def _git_toplevel(path: Path) -> Path | None:
 
 # Commands that work without a project context (no load_config/project_name).
 _NO_PROJECT_COMMANDS = {
-    "--version", "-V", "--help", "-h", "repos", "install", "register",
+    "--version", "-V", "--help", "-h", "repos", "install", "register", "hook",
 }
 
 
@@ -5211,6 +5223,12 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
+
+    # Hook guardrails (manual dispatch: hook name + git passthrough args).
+    if args_list[0] == "hook":
+        from . import hooks as _hooks
+        name = args_list[1] if len(args_list) > 1 else ""
+        return _hooks.run_hook(name, args_list[2:])
 
     # First arg is a known subcommand → parse normally
     if args_list[0] in COMMAND_MAP:

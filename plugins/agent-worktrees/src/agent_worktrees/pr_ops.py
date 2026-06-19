@@ -22,7 +22,7 @@ import re
 from pathlib import Path
 
 from . import config as cfg
-from . import git_ops, tracking
+from . import git_ops, hooks, tracking
 from .config import Config
 from .tracking import PRRecord
 
@@ -211,7 +211,11 @@ def create_pr(
         git_ops.git("branch", "-f", wt_branch, upstream, cwd=worktree_path, check=False)
 
     # 6. Push the feature branch.
-    if not git_ops.push(remote, feature_branch, cwd=worktree_path, force_with_lease=reusing):
+    with hooks.allow_pr_push():
+        pushed = git_ops.push(
+            remote, feature_branch, cwd=worktree_path, force_with_lease=reusing
+        )
+    if not pushed:
         return {**base, "error": (
             f"Failed to push '{feature_branch}' to '{remote}'. The feature "
             f"branch exists locally; tracking state left as 'creating' for "
@@ -333,7 +337,9 @@ def _push_existing_feature(
 ) -> dict:
     """Re-run helper: push an already-created feature branch and record state."""
     head_sha = _rev("HEAD", cwd=worktree_path)
-    if not git_ops.push(remote, feature_branch, cwd=worktree_path, force_with_lease=True):
+    with hooks.allow_pr_push():
+        pushed = git_ops.push(remote, feature_branch, cwd=worktree_path, force_with_lease=True)
+    if not pushed:
         return {**base, "error": (
             f"Failed to (re)push '{feature_branch}' to '{remote}'."
         )}

@@ -41,7 +41,7 @@ import shutil
 import time
 from pathlib import Path
 
-from . import activity, git_ops, output, permissions, sessions, tracking
+from . import activity, git_ops, hooks, output, permissions, sessions, tracking
 from .config import Config
 
 
@@ -525,7 +525,9 @@ def _push_changes_pr(
                 )
                 return False
 
-        if not git_ops.push(remote, feature, cwd=worktree_path, force_with_lease=True):
+        with hooks.allow_pr_push():
+            pushed = git_ops.push(remote, feature, cwd=worktree_path, force_with_lease=True)
+        if not pushed:
             output.err(f"Failed to push {feature} to {remote}.")
             if record.pr.state in ("", "creating"):
                 tracking.save_record(record)
