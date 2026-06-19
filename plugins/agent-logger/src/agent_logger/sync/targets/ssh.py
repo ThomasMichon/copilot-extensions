@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 
 from agent_logger.sync.targets.base import (
+    NO_WINDOW_KWARGS,
     DoctorResult,
     PushResult,
     Target,
@@ -71,7 +72,12 @@ class SshTarget(Target):
         ]
         try:
             proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=_TIMEOUT, check=False
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=_TIMEOUT,
+                check=False,
+                **NO_WINDOW_KWARGS,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return PushResult(ok=False, detail=f"rsync failed: {exc}")
@@ -91,6 +97,7 @@ class SshTarget(Target):
                     capture_output=True,
                     timeout=15,
                     check=False,
+                    **NO_WINDOW_KWARGS,
                 )
                 result.add("ssh reachable", proc.returncode == 0, "")
             except (OSError, subprocess.TimeoutExpired) as exc:
