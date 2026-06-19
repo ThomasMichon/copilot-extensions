@@ -254,3 +254,78 @@ class TestSetPRAndStatus:
         assert res["success"] is False
         assert "No tracking record" in res["error"]
 
+
+# ---------------------------------------------------------------------------
+# PR-aware finalize + push-changes (#586)
+# ---------------------------------------------------------------------------
+
+class TestPRFinalizeAndPush:
+    def test_precondition_fails_before_push(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        # Record a pr.branch that was never pushed.
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr = tracking.PRRecord(state="creating", branch="feature/never-pushed-aaaa")
+        tracking.save_record(rec)
+        repo = config.default_repo
+        ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
+        assert ok is False
+        assert "not on" in err
+
+    def test_precondition_ok_after_create_pr(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        repo = config.default_repo
+        ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
+        assert ok is True, err
+        assert err is None
+
+    def test_precondition_detects_unpushed(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        # Add a local commit on the feature branch without pushing.
+        (wt_path / "c.txt").write_text("more\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "feedback", cwd=wt_path)
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        repo = config.default_repo
+        ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
+        assert ok is False
+        assert "unpushed" in err
+
+    def test_push_changes_updates_feature_branch(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, remote_dir = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+
+        before = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
+
+        # New feedback commit on the feature branch
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        ok = fin.push_changes(wid, config)
+        assert ok is True
+
+        after = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
+        assert after != before  # remote feature branch advanced
+
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        local_head = _git("rev-parse", "HEAD", cwd=wt_path)
+        assert rec.pr.head_sha == local_head
+        assert rec.pr.state == "open"
+
+    def test_push_changes_rejects_wrong_branch(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        # Switch back to the worktree base branch -- push-changes should refuse.
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        ok = fin.push_changes(wid, config)
+        assert ok is False
+
+
