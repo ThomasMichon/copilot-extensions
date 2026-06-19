@@ -9,9 +9,10 @@ session-to-log pipeline out of any single bespoke service:
   `prepare-session-log`).
 - **Log writer** *(later phase)* — skills + agents that turn digests into a
   structured Markdown session log, with a configurable voice pack.
-- **session-sync** *(later phase)* — push raw session data to a configurable
-  target: a `local` dotfolder, `onedrive`, `ssh`, or a generic `ingest`
-  endpoint.
+- **session-sync** — push raw session data to a configurable target: a
+  `local` dotfolder, `onedrive`, `ssh`/`ssh-tunnel`, or a generic `ingest`
+  endpoint. Configure with the `session-sync-setup` skill; deploy as a
+  4-hourly Scheduled Task (Windows) or systemd user timer (Linux).
 - **Orchestrator** *(optional, later phase)* — a scheduled daemon that
   crunches a backlog of sessions into committed logs, with pluggable
   session-source and log-sink seams. Exposes an HTTP read API so a richer
