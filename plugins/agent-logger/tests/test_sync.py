@@ -128,6 +128,40 @@ def test_ssh_target_describe_and_doctor() -> None:
     assert not SshTarget({}).doctor().ok
 
 
+def test_rsync_children_suppress_console_window(monkeypatch, tmp_path: Path) -> None:
+    """ssh/ingest pushes must pass the windowless kwargs to their rsync child.
+
+    Regression guard: on Windows a child rsync/ssh process launched from a
+    windowless host flashes a console unless CREATE_NO_WINDOW is set. The kwargs
+    are a no-op on POSIX, so this asserts they are forwarded verbatim.
+    """
+    from agent_logger.sync.targets import base, ingest, ssh
+
+    captured: dict = {}
+
+    class _Proc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _fake_run(cmd, **kwargs):
+        captured.clear()
+        captured.update(kwargs)
+        return _Proc()
+
+    monkeypatch.setattr("shutil.which", lambda _name: "rsync")
+
+    monkeypatch.setattr(ssh.subprocess, "run", _fake_run)
+    SshTarget({"host": "user@example", "remote_path": "/srv"}).push(tmp_path, "m1")
+    for key, val in base.NO_WINDOW_KWARGS.items():
+        assert captured.get(key) == val
+
+    monkeypatch.setattr(ingest.subprocess, "run", _fake_run)
+    IngestTarget({"url": "rsync://h/mod"}).push(tmp_path, "m1")
+    for key, val in base.NO_WINDOW_KWARGS.items():
+        assert captured.get(key) == val
+
+
 def _cfg(home: Path, source: Path, dest: Path) -> Config:
     data = dict(load_config(home=home).as_dict())
     data["sync"]["source"] = str(source)

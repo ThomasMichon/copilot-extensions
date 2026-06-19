@@ -10,7 +10,7 @@ from agent_logger.segmenter.platform import detect_machine, sanitize_path_compon
 
 
 def test_version_matches_build_info() -> None:
-    assert __version__ == "0.1.0"
+    assert __version__ == "0.1.1-dev1"
 
 
 def test_config_defaults_and_home(tmp_path: Path) -> None:

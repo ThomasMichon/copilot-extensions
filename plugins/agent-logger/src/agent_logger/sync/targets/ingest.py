@@ -20,6 +20,7 @@ import urllib.request
 from pathlib import Path
 
 from agent_logger.sync.targets.base import (
+    NO_WINDOW_KWARGS,
     DoctorResult,
     PushResult,
     Target,
@@ -73,6 +74,7 @@ class IngestTarget(Target):
                 timeout=_TIMEOUT,
                 env=self._rsync_env(),
                 check=False,
+                **NO_WINDOW_KWARGS,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return PushResult(ok=False, detail=f"rsync failed: {exc}")

@@ -7,7 +7,9 @@
     registers a Scheduled Task that runs `session-sync run --prune` every 4
     hours. Windows-first by design: the runtime is the venv's python invoked
     as `python -m agent_logger.sync.engine` (the console-script .exe is not
-    relied upon, matching the other plugins' Smart App Control posture).
+    relied upon, matching the other plugins' Smart App Control posture). The
+    scheduled task runs under the windowless pythonw.exe host so the sync flow
+    never flashes a console window.
 
     Run from the repo root:
       pwsh -File plugins\agent-logger\scripts\install.ps1 install
@@ -33,6 +35,11 @@ function Write-Warn2   { param([string]$m) Write-Host "  [WARN] $m" -ForegroundC
 $InstallDir = Join-Path $env:USERPROFILE '.agent-logger'
 $VenvDir    = Join-Path $InstallDir '.venv'
 $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+# pythonw.exe is the GUI-subsystem (windowless) Python host. Running the
+# scheduled sync under it -- rather than console python.exe -- stops the
+# engine's own console window from flashing on each 4-hourly run. The engine's
+# rsync/ssh children are kept windowless separately via CREATE_NO_WINDOW.
+$VenvPythonw = Join-Path $VenvDir 'Scripts\pythonw.exe'
 $LocalBin   = Join-Path $env:USERPROFILE '.local\bin'
 $ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginDir  = (Resolve-Path (Join-Path $ScriptDir '..')).Path
@@ -62,7 +69,10 @@ function Install-Package {
 }
 
 function Register-SyncTask {
-    $action = New-ScheduledTaskAction -Execute $VenvPython `
+    # Prefer the windowless host so the task never flashes a console; fall back
+    # to console python.exe only if pythonw.exe is somehow absent.
+    $runHost = if (Test-Path $VenvPythonw) { $VenvPythonw } else { $VenvPython }
+    $action = New-ScheduledTaskAction -Execute $runHost `
         -Argument '-m agent_logger.sync.engine run --prune'
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(5) `
         -RepetitionInterval (New-TimeSpan -Hours 4)
