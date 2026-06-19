@@ -26,7 +26,7 @@ from . import git_ops, tracking
 from .config import Config
 from .tracking import PRRecord
 
-__all__ = ["slugify", "feature_branch_name", "create_pr"]
+__all__ = ["slugify", "feature_branch_name", "create_pr", "set_pr", "pr_status"]
 
 
 def slugify(text: str, *, max_len: int = 40) -> str:
@@ -236,6 +236,89 @@ def create_pr(
         "branch": feature_branch, "remote": remote,
         "base_sha": base_sha, "head_sha": head_sha,
         "provider": prcfg.provider, "default_branch": repo.default_branch,
+    }
+
+
+def _load_record_or_none(worktree_id: str) -> tracking.WorktreeRecord | None:
+    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    if not yaml_path.exists():
+        return None
+    try:
+        return tracking.load_record(yaml_path)
+    except Exception:
+        return None
+
+
+_VALID_PR_STATES = ("creating", "open", "merged", "closed")
+
+
+def set_pr(
+    worktree_id: str,
+    *,
+    url: str | None = None,
+    number: int | None = None,
+    state: str | None = None,
+    provider: str | None = None,
+    branch: str | None = None,
+) -> dict:
+    """Record PR metadata (URL/number/state/provider) on a worktree record.
+
+    Called by the agent after a provider sub-agent creates the PR.  Merges
+    into any existing ``pr`` block rather than replacing it, so create-pr's
+    branch/base/head SHAs are preserved.
+    """
+    base: dict = {"success": False, "worktree_id": worktree_id}
+    record = _load_record_or_none(worktree_id)
+    if record is None:
+        return {**base, "error": f"No tracking record found for '{worktree_id}'."}
+
+    if state is not None and state not in _VALID_PR_STATES:
+        return {**base, "error": (
+            f"Invalid PR state '{state}'. Expected one of: "
+            f"{', '.join(_VALID_PR_STATES)}."
+        )}
+
+    pr = record.pr or PRRecord()
+    if url is not None:
+        pr.url = url
+    if number is not None:
+        pr.number = number
+    if provider is not None:
+        pr.provider = provider
+    if branch is not None:
+        pr.branch = branch
+    if state is not None:
+        pr.state = state
+    elif not pr.state:
+        # First time recording metadata with no explicit state -> open.
+        pr.state = "open"
+
+    record.pr = pr
+    tracking.save_record(record)
+    return {**base, "success": True, **_pr_to_dict(pr)}
+
+
+def pr_status(worktree_id: str) -> dict:
+    """Return the tracked PR metadata for a worktree (for pr-status)."""
+    base: dict = {"worktree_id": worktree_id}
+    record = _load_record_or_none(worktree_id)
+    if record is None:
+        return {**base, "has_pr": False,
+                "error": f"No tracking record found for '{worktree_id}'."}
+    if record.pr is None:
+        return {**base, "has_pr": False}
+    return {**base, "has_pr": True, **_pr_to_dict(record.pr)}
+
+
+def _pr_to_dict(pr: PRRecord) -> dict:
+    return {
+        "state": pr.state,
+        "branch": pr.branch,
+        "base_sha": pr.base_sha,
+        "head_sha": pr.head_sha,
+        "url": pr.url,
+        "number": pr.number,
+        "provider": pr.provider,
     }
 
 

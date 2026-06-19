@@ -1914,6 +1914,81 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# set-pr / pr-status
+# ═══════════════════════════════════════════════════════════════════════════
+
+def cmd_set_pr(args: argparse.Namespace) -> int:
+    """Record PR metadata (URL/number/state/provider) from the sub-agent."""
+    use_json = getattr(args, "json", False)
+    try:
+        config = cfg.load_config(Path(args.config) if args.config else None)
+    except Exception as e:
+        if use_json:
+            return _json_error(str(e))
+        raise
+    worktree_id = _infer_worktree_id(args.worktree_id, config)
+    if not worktree_id:
+        msg = ("Could not determine worktree ID. Pass it explicitly "
+               "or run from inside a worktree.")
+        return _json_error(msg) if use_json else (output.err(msg) or 1)
+    worktree_id = _resolve_worktree_id(worktree_id)
+
+    result = pr_ops.set_pr(
+        worktree_id,
+        url=args.url,
+        number=args.number,
+        state=args.state,
+        provider=args.provider,
+        branch=args.branch,
+    )
+    if use_json:
+        _json_output(result)
+    elif result.get("success"):
+        output.ok(
+            f"Recorded PR for {worktree_id}: "
+            f"#{result.get('number')} ({result.get('state')}) {result.get('url')}"
+        )
+    else:
+        output.err(result.get("error", "set-pr failed."))
+    return 0 if result.get("success") else 1
+
+
+def cmd_pr_status(args: argparse.Namespace) -> int:
+    """Read the tracked PR metadata for a worktree."""
+    use_json = getattr(args, "json", False)
+    try:
+        config = cfg.load_config(Path(args.config) if args.config else None)
+    except Exception as e:
+        if use_json:
+            return _json_error(str(e))
+        raise
+    worktree_id = _infer_worktree_id(args.worktree_id, config)
+    if not worktree_id:
+        msg = ("Could not determine worktree ID. Pass it explicitly "
+               "or run from inside a worktree.")
+        return _json_error(msg) if use_json else (output.err(msg) or 1)
+    worktree_id = _resolve_worktree_id(worktree_id)
+
+    result = pr_ops.pr_status(worktree_id)
+    if use_json:
+        _json_output(result)
+        return 0 if result.get("has_pr") or "error" not in result else 1
+    if result.get("error"):
+        output.err(result["error"])
+        return 1
+    if not result.get("has_pr"):
+        print(f"{worktree_id}: no PR recorded (direct-push or not yet created).")
+        return 0
+    print(f"PR for {worktree_id}:")
+    print(f"  state:    {result.get('state')}")
+    print(f"  branch:   {result.get('branch')}")
+    print(f"  number:   {result.get('number')}")
+    print(f"  url:      {result.get('url')}")
+    print(f"  provider: {result.get('provider')}")
+    return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # mark-complete
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -4330,6 +4405,25 @@ def build_parser() -> argparse.ArgumentParser:
                    help="JSON output mode (stdout is JSON only)")
     p.add_argument("--config", default=None)
 
+    # set-pr (record PR metadata from the provider sub-agent)
+    p = sub.add_parser("set-pr", help="Record PR metadata (URL/number/state) on a worktree")
+    p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("--url", default=None, help="PR URL")
+    p.add_argument("--number", type=int, default=None, help="PR number")
+    p.add_argument("--state", default=None,
+                   choices=["creating", "open", "merged", "closed"],
+                   help="PR lifecycle state")
+    p.add_argument("--provider", default=None, help="PR provider (gitea|github|azure-devops)")
+    p.add_argument("--branch", default=None, help="Feature branch name (if not already recorded)")
+    p.add_argument("--json", action="store_true", help="JSON output mode")
+    p.add_argument("--config", default=None)
+
+    # pr-status (read tracked PR metadata)
+    p = sub.add_parser("pr-status", help="Show tracked PR metadata for a worktree")
+    p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("--json", action="store_true", help="JSON output mode")
+    p.add_argument("--config", default=None)
+
     # mark-complete (manual recovery only -- hidden from normal help)
     p = sub.add_parser(
         "mark-complete",
@@ -4702,6 +4796,8 @@ COMMAND_MAP = {
     "finalize": cmd_finalize,
     "push-changes": cmd_push_changes,
     "create-pr": cmd_create_pr,
+    "set-pr": cmd_set_pr,
+    "pr-status": cmd_pr_status,
     "mark-complete": cmd_mark_complete,
     "status": cmd_status,
     "list": cmd_list,

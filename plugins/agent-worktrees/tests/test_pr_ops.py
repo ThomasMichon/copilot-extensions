@@ -193,3 +193,64 @@ class TestCreatePR:
         # Still on the worktree branch -- nothing happened
         head = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path)
         assert head == f"worktree/{wid}"
+
+
+# ---------------------------------------------------------------------------
+# set_pr / pr_status
+# ---------------------------------------------------------------------------
+
+class TestSetPRAndStatus:
+    def test_status_no_pr(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        res = pr_ops.pr_status(wid)
+        assert res["has_pr"] is False
+
+    def test_status_missing_record(self, pr_repo):
+        res = pr_ops.pr_status("does-not-exist")
+        assert res["has_pr"] is False
+        assert "error" in res
+
+    def test_set_pr_creates_block(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        res = pr_ops.set_pr(
+            wid, url="https://example/pulls/7", number=7, provider="gitea"
+        )
+        assert res["success"] is True
+        assert res["number"] == 7
+        assert res["state"] == "open"  # defaulted
+        # Persisted
+        st = pr_ops.pr_status(wid)
+        assert st["has_pr"] is True
+        assert st["url"] == "https://example/pulls/7"
+        assert st["number"] == 7
+
+    def test_set_pr_merges_with_create_pr(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        created = pr_ops.create_pr(wid, config, title="Add feature")
+        assert created["success"]
+        res = pr_ops.set_pr(wid, url="https://example/pulls/9", number=9)
+        assert res["success"] is True
+        # create-pr's branch/head_sha preserved
+        assert res["branch"] == "feature/add-feature-aaaa"
+        assert res["head_sha"] == created["head_sha"]
+        assert res["number"] == 9
+
+    def test_set_pr_invalid_state(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        res = pr_ops.set_pr(wid, state="bogus")
+        assert res["success"] is False
+        assert "Invalid PR state" in res["error"]
+
+    def test_set_pr_state_transition(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.set_pr(wid, url="u", number=1)
+        res = pr_ops.set_pr(wid, state="merged")
+        assert res["success"] is True
+        assert res["state"] == "merged"
+        assert res["number"] == 1  # preserved
+
+    def test_set_pr_missing_record(self, pr_repo):
+        res = pr_ops.set_pr("does-not-exist", number=1)
+        assert res["success"] is False
+        assert "No tracking record" in res["error"]
+
