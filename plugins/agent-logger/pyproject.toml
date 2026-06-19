@@ -21,6 +21,7 @@ agent-logger = "agent_logger.__main__:main"
 collate-session = "agent_logger.segmenter.collate:main"
 read-session-digest = "agent_logger.segmenter.read_digest:main"
 prepare-session-log = "agent_logger.segmenter.prepare_log:main"
+session-sync = "agent_logger.sync.engine:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -33,6 +34,8 @@ line-length = 99
 select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
 ignore = [
     "S603",  # subprocess calls to git/copilot CLIs are intentional
+    "S607",  # ssh/rsync are resolved from PATH by design
+    "S310",  # notify URL is operator-configured, not attacker-controlled
     "S108",  # /tmp fallback is an intentional cross-platform default
     "S110",  # best-effort file reads intentionally swallow errors
 ]
