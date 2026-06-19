@@ -29,6 +29,50 @@ def _machine(cfg: Config) -> str:
     return cfg.machine_name or detect_machine()
 
 
+def _session_matches_allowlist(session_dir, allowlist: list[str]) -> bool:
+    """Match a session's workspace cwd/git_root against the allowlist.
+
+    Case-insensitive substring match. Sessions with no workspace.yaml or no
+    cwd/git_root are considered matching (fail-open), to avoid silently
+    dropping sessions that predate workspace metadata.
+    """
+    ws = session_dir / "workspace.yaml"
+    if not ws.is_file():
+        return True
+    try:
+        paths: list[str] = []
+        with open(ws, encoding="utf-8", errors="replace") as fh:
+            for raw in fh:
+                line = raw.strip()
+                for key in ("cwd:", "git_root:", "repository:"):
+                    if line.startswith(key):
+                        val = line[len(key):].strip()
+                        if val:
+                            paths.append(val.lower())
+        if not paths:
+            return True
+        return any(p.lower() in path_val for path_val in paths for p in allowlist)
+    except OSError:
+        return True
+
+
+def _included_sessions(source, allowlist: list[str]) -> set[str] | None:
+    """Resolve the allowlist to a set of included session-state ids.
+
+    Returns ``None`` when the allowlist is empty (sync everything).
+    """
+    if not allowlist:
+        return None
+    ss = source / "session-state"
+    if not ss.is_dir():
+        return set()
+    return {
+        d.name
+        for d in ss.iterdir()
+        if d.is_dir() and _session_matches_allowlist(d, allowlist)
+    }
+
+
 def run_sync(
     cfg: Config,
     *,
@@ -44,18 +88,26 @@ def run_sync(
     machine = _machine(cfg)
     source = cfg.sync_source
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
+    allowlist = cfg.sync_repo_allowlist
+    include = _included_sessions(source, allowlist)
 
     if verbose:
         print(f"machine:   {machine}")
         print(f"source:    {source}")
         print(f"target:    {target.describe()}")
+        if include is not None:
+            print(f"allowlist: {allowlist} -> {len(include)} session(s) included")
 
     if not source.is_dir():
         print(f"session-sync: source not found: {source}", file=sys.stderr)
         return 1
 
     if dry_run:
-        print(f"session-sync: would push {source} -> {target.describe()} (machine={machine})")
+        scope = "" if include is None else f", {len(include)} session(s) match"
+        print(
+            f"session-sync: would push {source} -> {target.describe()} "
+            f"(machine={machine}{scope})"
+        )
         return 0
 
     lock_file = cfg.home / "session-sync.lock"
@@ -63,7 +115,7 @@ def run_sync(
         if not acquired:
             print("session-sync: another sync holds the lock; skipping", file=sys.stderr)
             return 0
-        result = target.push(source, machine)
+        result = target.push(source, machine, include)
         if not result.ok:
             print(f"session-sync: push failed: {result.detail}", file=sys.stderr)
             return 1
@@ -83,6 +135,8 @@ def do_status(cfg: Config) -> int:
     print(f"source:         {cfg.sync_source}")
     print(f"target:         {target.describe()}")
     print(f"retention_days: {cfg.sync_retention_days}")
+    allowlist = cfg.sync_repo_allowlist
+    print(f"repo_allowlist: {allowlist or '(all)'}")
     return 0
 
 

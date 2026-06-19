@@ -33,6 +33,9 @@ DEFAULTS: dict[str, Any] = {
         "target": "local",
         # What to sync. None -> ~/.copilot (the Copilot CLI state dir).
         "source": None,
+        # Only sync sessions whose workspace cwd/git_root matches one of
+        # these (case-insensitive substring). Empty -> sync all sessions.
+        "repo_allowlist": [],
         # Retention for destination pruning. None/<=0 -> retain everything.
         "retention_days": None,
         "lock_timeout_sec": 10,
@@ -164,6 +167,14 @@ class Config:
     @property
     def sync_lock_timeout(self) -> int:
         return int(self._data.get("sync", {}).get("lock_timeout_sec", 10))
+
+    @property
+    def sync_repo_allowlist(self) -> list[str]:
+        """Repo patterns to include; empty list means "sync all"."""
+        raw = self._data.get("sync", {}).get("repo_allowlist", [])
+        if isinstance(raw, str):
+            return [s.strip() for s in raw.split(",") if s.strip()]
+        return [str(s).strip() for s in raw if str(s).strip()]
 
     def target_options(self, name: str) -> dict[str, Any]:
         """Resolved options for the named sync target.
