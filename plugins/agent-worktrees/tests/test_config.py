@@ -191,6 +191,39 @@ class TestHeadlessConfig:
 
 
 # ---------------------------------------------------------------------------
+# auto_fast_forward parsing
+# ---------------------------------------------------------------------------
+
+class TestAutoFastForwardConfig:
+    def _write(self, path: Path, extra_line: str = "") -> None:
+        path.write_text(
+            "repo_name: ext\n"
+            "srcroot: /tmp/src\n"
+            "machine: lambda-core\n"
+            "platform: wsl\n"
+            f"{extra_line}"
+            "repos:\n"
+            "  ext:\n"
+            "    anchor: /tmp/src/ext\n"
+            "    worktree_root: /tmp/src/.worktrees/ext\n"
+            "    default_branch: main\n"
+            "    remote: origin\n"
+        )
+
+    def test_defaults_true_when_absent(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile)
+        conf = cfg.load_config(cfgfile)
+        assert conf.auto_fast_forward is True
+
+    def test_opt_out_false(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile, "auto_fast_forward: false\n")
+        conf = cfg.load_config(cfgfile)
+        assert conf.auto_fast_forward is False
+
+
+# ---------------------------------------------------------------------------
 # find_machine_entry -- hostnames are case-insensitive
 # ---------------------------------------------------------------------------
 

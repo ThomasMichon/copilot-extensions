@@ -148,6 +148,53 @@ class WorktreeStateInfo:
     """True when the worktree's HEAD is on a different branch than tracked."""
 
 
+@dataclass
+class FastForwardResult:
+    """Outcome of attempting to fast-forward a worktree to its upstream.
+
+    ``updated`` is True only when commits were actually advanced.  ``reason``
+    is a stable token describing what happened (or why nothing did):
+
+    - ``updated``     -- fast-forwarded ``behind`` commits onto the branch.
+    - ``up-to-date``  -- clean and already level with upstream (no-op).
+    - ``dirty``       -- working tree has uncommitted changes; skipped.
+    - ``ahead``       -- branch has local commits, none behind; skipped.
+    - ``diverged``    -- branch has both local commits and is behind; skipped.
+    - ``detached``    -- HEAD is detached; skipped.
+    - ``no-upstream`` -- the upstream ref does not exist; skipped.
+    - ``orphan``      -- no merge base with upstream; skipped.
+    - ``gone``        -- the worktree path/.git is missing; skipped.
+    - ``ff-failed``   -- the fast-forward merge itself failed; skipped.
+    """
+
+    updated: bool
+    reason: str
+    behind: int = 0
+    ahead: int = 0
+
+
+def _rev_count(rangespec: str, *, cwd: str | Path) -> int:
+    """Return ``git rev-list --count <rangespec>`` as an int (0 on failure)."""
+    result = git("rev-list", "--count", rangespec, cwd=cwd, check=False)
+    if result.returncode != 0:
+        return 0
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return 0
+
+
+def can_fast_forward(info: WorktreeStateInfo) -> bool:
+    """Return True when an already-classified worktree is fast-forward eligible.
+
+    Eligible means: clean working tree, no local commits ahead of upstream,
+    and strictly behind.  This is a cheap predicate over an existing
+    :class:`WorktreeStateInfo` (no git calls); the freshness of ``behind``
+    depends on whether the classification fetched first.
+    """
+    return info.dirty == 0 and info.ahead == 0 and info.behind > 0
+
+
 def _get_current_branch_safe(cwd: str | Path) -> str | None:
     """Return the worktree's current branch, or None if detached/unreadable."""
     result = git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd, check=False)
@@ -378,6 +425,74 @@ def merge_ff(branch: str, *, cwd: str | Path) -> bool:
     """Fast-forward merge. Returns True on success."""
     result = git("merge", branch, "--ff-only", "--quiet", cwd=cwd, check=False)
     return result.returncode == 0
+
+
+def fast_forward_worktree(
+    worktree_path: str | Path,
+    *,
+    remote: str = "origin",
+    default_branch: str = "master",
+    do_fetch: bool = True,
+) -> FastForwardResult:
+    """Safely fast-forward a worktree's branch to its upstream default branch.
+
+    Fast-forward *only*.  The branch is advanced to ``<remote>/<default_branch>``
+    only when ALL of these hold:
+
+    - the working tree is clean (no uncommitted changes),
+    - the branch has zero commits ahead of upstream (no local work to lose),
+    - the branch is strictly behind upstream.
+
+    A dirty, ahead, diverged, or detached worktree is never touched -- this
+    function never rebases, never creates a merge commit, and never discards
+    local commits.  When ``do_fetch`` is True the remote is fetched first so
+    the ahead/behind comparison and fast-forward target are against the
+    freshest upstream; a fetch failure (e.g. offline) is non-fatal and the
+    comparison falls back to the already-known upstream ref.
+    """
+    path = Path(worktree_path)
+    if not path.exists() or not (path / ".git").exists():
+        return FastForwardResult(updated=False, reason="gone")
+
+    upstream = f"{remote}/{default_branch}"
+
+    if do_fetch and has_remote(remote, cwd=path):
+        try:
+            fetch(remote, cwd=path)
+        except Exception:
+            # Offline or auth failure -- compare against the local upstream ref.
+            pass
+
+    if not ref_exists(upstream, cwd=path):
+        return FastForwardResult(updated=False, reason="no-upstream")
+
+    if not is_clean(cwd=path):
+        return FastForwardResult(updated=False, reason="dirty")
+
+    branch = _get_current_branch_safe(path)
+    if branch is None:
+        return FastForwardResult(updated=False, reason="detached")
+
+    mb = git("merge-base", upstream, branch, cwd=path, check=False)
+    if mb.returncode != 0:
+        return FastForwardResult(updated=False, reason="orphan")
+    merge_base = mb.stdout.strip()
+
+    ahead = _rev_count(f"{merge_base}..{branch}", cwd=path)
+    behind = _rev_count(f"{branch}..{upstream}", cwd=path)
+
+    if ahead > 0:
+        return FastForwardResult(
+            updated=False,
+            reason="diverged" if behind > 0 else "ahead",
+            ahead=ahead, behind=behind,
+        )
+    if behind == 0:
+        return FastForwardResult(updated=False, reason="up-to-date")
+
+    if not merge_ff(upstream, cwd=path):
+        return FastForwardResult(updated=False, reason="ff-failed", behind=behind)
+    return FastForwardResult(updated=True, reason="updated", behind=behind)
 
 
 def merge_squash(branch: str, worktree_id: str, *, cwd: str | Path) -> bool:
