@@ -137,6 +137,10 @@ def push_changes(
         record.title = title.replace("\n", " ").strip()
         tracking.save_record(record)
 
+    # PR mode: push the feature branch, not master.
+    if repo.pr.enabled and record and record.pr and record.pr.branch:
+        return _push_changes_pr(worktree_id, config, record, dry_run=dry_run)
+
     # Guard against branch drift
     if Path(worktree_path).exists():
         actual = git_ops._get_current_branch_safe(worktree_path)
@@ -441,6 +445,151 @@ def _is_content_on_upstream(
     return True
 
 
+def _push_changes_pr(
+    worktree_id: str,
+    config: Config,
+    record: tracking.WorktreeRecord,
+    *,
+    dry_run: bool = False,
+) -> bool:
+    """PR-mode push-changes: update the feature branch, not master.
+
+    Runs the rebase chain (worktree/{id} onto upstream, feature onto
+    worktree/{id}) and force-with-lease pushes the *feature* branch.  Never
+    touches master or the worktree base branch on the remote.
+    """
+    repo = config.default_repo
+    remote = repo.remote
+    upstream = f"{remote}/{repo.default_branch}"
+    wt_branch = f"worktree/{worktree_id}"
+    feature = record.pr.branch
+    worktree_path = str(Path(repo.worktree_root) / worktree_id)
+    lock_path = Path(repo.worktree_root) / ".finalize.lock"
+
+    if not Path(worktree_path).exists():
+        output.err(f"Worktree path not found: {worktree_path}")
+        return False
+
+    head = git_ops._get_current_branch_safe(worktree_path)
+    if head != feature:
+        output.err(
+            f"PR mode: push-changes expects HEAD on the feature branch "
+            f"'{feature}', but it is on '{head}'. Checkout '{feature}' first "
+            f"(create-pr leaves you there)."
+        )
+        return False
+
+    if not git_ops.is_clean(cwd=worktree_path):
+        dirty = git_ops.get_dirty_files(cwd=worktree_path)
+        detail = "\n".join(f"    {ln}" for ln in dirty)
+        output.err(
+            "Working tree has uncommitted changes. Commit them before "
+            f"push-changes:\n{detail}"
+        )
+        return False
+
+    if dry_run:
+        print(
+            f"[dry-run] Would rebase {wt_branch} onto {upstream}, rebase "
+            f"{feature} onto {wt_branch}, then push {feature} to {remote} "
+            f"(--force-with-lease)."
+        )
+        return True
+
+    lock = FinalizeLock(lock_path)
+    try:
+        lock.acquire()
+    except TimeoutError:
+        output.err("Timed out waiting for finalization lock.")
+        return False
+
+    try:
+        print(f"Fetching from {remote}...")
+        git_ops.fetch(remote, cwd=worktree_path)
+
+        # Rebase chain: base onto master, then feature onto the updated base.
+        if git_ops.ref_exists(upstream, cwd=worktree_path):
+            git_ops.checkout(wt_branch, cwd=worktree_path)
+            if not git_ops.rebase(upstream, cwd=worktree_path):
+                output.err(
+                    f"Rebase of {wt_branch} onto {upstream} hit conflicts. "
+                    f"Resolve them and retry push-changes."
+                )
+                git_ops.checkout(feature, cwd=worktree_path)
+                return False
+            git_ops.checkout(feature, cwd=worktree_path)
+            if not git_ops.rebase(wt_branch, cwd=worktree_path):
+                output.err(
+                    f"Rebase of {feature} onto {wt_branch} hit conflicts. "
+                    f"Resolve them and retry push-changes."
+                )
+                return False
+
+        if not git_ops.push(remote, feature, cwd=worktree_path, force_with_lease=True):
+            output.err(f"Failed to push {feature} to {remote}.")
+            if record.pr.state in ("", "creating"):
+                tracking.save_record(record)
+            return False
+
+        head_sha = git_ops.git(
+            "rev-parse", "HEAD", cwd=worktree_path, check=False
+        ).stdout.strip()
+        record.pr.head_sha = head_sha
+        if record.pr.state in ("", "creating"):
+            record.pr.state = "open"
+        tracking.save_record(record)
+
+        activity.log_event(
+            "pr_changes_pushed", worktree_id=worktree_id, branch=feature,
+        )
+        output.ok(
+            f"Pushed {feature} to {remote} (--force-with-lease). "
+            f"The open PR is updated."
+        )
+        return True
+    finally:
+        lock.release()
+
+
+def _pr_finalize_precondition(
+    record: tracking.WorktreeRecord,
+    repo,
+    worktree_path: str,
+    anchor: str,
+) -> tuple[bool, str | None]:
+    """Check whether a PR-mode worktree's work is safely upstream.
+
+    Work is safe when the feature branch exists on the remote and the local
+    feature branch has no commits that have not been pushed.  Returns
+    ``(ok, error_message)``.
+    """
+    remote = repo.remote
+    feature = record.pr.branch
+    cwd = worktree_path if Path(worktree_path).exists() else anchor
+
+    if not git_ops.remote_branch_exists(remote, feature, cwd=cwd):
+        return False, (
+            f"Feature branch '{feature}' is not on '{remote}'. Run "
+            f"'agent-worktrees create-pr' (or push-changes) to push your work "
+            f"upstream before finalizing."
+        )
+
+    local = git_ops.git("rev-parse", feature, cwd=cwd, check=False)
+    remote_ref = git_ops.git("rev-parse", f"{remote}/{feature}", cwd=cwd, check=False)
+    if local.returncode == 0 and remote_ref.returncode == 0:
+        ahead = git_ops.git(
+            "rev-list", "--count", f"{remote}/{feature}..{feature}",
+            cwd=cwd, check=False,
+        )
+        if ahead.returncode == 0 and ahead.stdout.strip() not in ("", "0"):
+            return False, (
+                f"Feature branch '{feature}' has unpushed commits. Run "
+                f"'agent-worktrees push-changes' to update the PR branch, "
+                f"then finalize."
+            )
+    return True, None
+
+
 def validate_and_finalize(
     worktree_id: str,
     config: Config,
@@ -479,6 +628,9 @@ def validate_and_finalize(
             pass
 
     wt_exists = Path(worktree_path).exists()
+    pr_mode = bool(
+        repo.pr.enabled and record and record.pr and record.pr.branch
+    )
 
     if dry_run:
         _dry_run_finalize_preview(
@@ -490,8 +642,19 @@ def validate_and_finalize(
     print(f"Fetching from {repo.remote}...")
     git_ops.fetch(repo.remote, cwd=anchor)
 
-    # Check if the worktree is unused (0 commits, clean tree)
-    if wt_exists:
+    if pr_mode:
+        # PR mode: finalize is decoupled from merge. Work is safe to prune as
+        # soon as the feature branch is pushed -- the PR may still be open.
+        ok, err = _pr_finalize_precondition(record, repo, worktree_path, anchor)
+        if not ok:
+            output.err(err or "PR finalize precondition not met.")
+            return False
+        print(
+            f"Verified: feature branch '{record.pr.branch}' is safely on "
+            f"{repo.remote}. Finalizing this worktree (the PR may still be open)."
+        )
+    elif wt_exists:
+        # Check if the worktree is unused (0 commits, clean tree)
         ahead_commits = git_ops.get_commits_ahead(branch, upstream, cwd=worktree_path)
         is_clean = git_ops.is_clean(cwd=worktree_path)
         if len(ahead_commits) == 0 and is_clean:
@@ -566,6 +729,14 @@ def validate_and_finalize(
             print(f"Removing branch {branch}...")
             if not git_ops.delete_branch(branch, cwd=anchor):
                 output.warn(f"Could not delete branch {branch} (may already be gone).")
+
+            if pr_mode and record.pr.branch:
+                print(f"Removing local feature branch {record.pr.branch}...")
+                git_ops.delete_branch(record.pr.branch, cwd=anchor, force=True)
+                output.info(
+                    f"Remote feature branch '{record.pr.branch}' left intact on "
+                    f"{repo.remote} -- it backs the PR and is the recovery source."
+                )
 
             wt_dir = Path(worktree_path)
             if wt_dir.exists():
