@@ -421,6 +421,7 @@ $nested = [bool]$env:TMUX
 function Reset-SshConptyViewport {
     if ($env:SSH_CONNECTION) { [Console]::Write("`e[2J`e[H") }
 }
+
 # Smart App Control (or another Application Control / WDAC policy) can block
 # an unsigned psmux.exe from executing even though Get-Command resolves it on
 # PATH. A blocked launch raises a *terminating* error
@@ -438,6 +439,22 @@ if (-not $noMux -and $psmuxCmd) {
     }
 }
 
+# psmux 3.3.6 regression: `attach-session -t <name>` ignores -t and attaches to
+# whatever session is recorded in ~/.psmux/last_session, so every worktree
+# launch lands in the most-recent session instead of the one we asked for.
+# Writing the target name to that file immediately before attach forces psmux to
+# honor the intended session. Harmless on fixed/older psmux (which honor -t and
+# rewrite the file on attach anyway). See install.ps1 for the version pin.
+function Set-PsmuxLastSession {
+    param([string]$Name)
+    try {
+        $psmuxDir = Join-Path $env:USERPROFILE '.psmux'
+        if (Test-Path $psmuxDir) {
+            Set-Content -Path (Join-Path $psmuxDir 'last_session') `
+                -Value $Name -NoNewline -ErrorAction SilentlyContinue
+        }
+    } catch {}
+}
 if (-not $noMux -and $psmuxCmd) {
     $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
     $sessName = "wt-$wtId"
@@ -453,6 +470,7 @@ if (-not $noMux -and $psmuxCmd) {
         }
         Write-Host "Joining existing session: $sessName"
         Reset-SshConptyViewport
+        Set-PsmuxLastSession $sessName
         & psmux attach-session -t $sessName
         if ($LASTEXITCODE -eq 0) {
             exit 0
@@ -512,6 +530,7 @@ if (-not $noMux -and $psmuxCmd) {
             exit 0
         }
         Reset-SshConptyViewport
+        Set-PsmuxLastSession $sessName
         try {
             & psmux attach-session -t $sessName
         } catch [System.Management.Automation.PipelineStoppedException] {

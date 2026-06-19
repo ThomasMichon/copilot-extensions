@@ -1650,17 +1650,31 @@ switch ($Action) {
             exit 1
         }
 
-        # Optional: psmux terminal multiplexer for session persistence
+        # Optional: psmux terminal multiplexer for session persistence.
+        # Pinned to 3.3.5: 3.3.6 regressed `attach-session -t` (ignores the
+        # target and attaches to ~/.psmux/last_session), which makes every
+        # worktree launch land in the wrong session. launch-session.ps1 also
+        # carries a last_session workaround as defense-in-depth.
         if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) {
-            Write-Host "  Installing psmux (terminal multiplexer)..."
-            & winget install --id marlocarlo.psmux --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+            Write-Host "  Installing psmux 3.3.5 (terminal multiplexer)..."
+            & winget install --id marlocarlo.psmux --version 3.3.5 --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) {
-                Write-ServiceOk "psmux installed"
+                # Block winget from auto-upgrading back into the 3.3.6 regression.
+                & winget pin add --id marlocarlo.psmux --version 3.3.5 2>&1 | Out-Null
+                Write-ServiceOk "psmux 3.3.5 installed (pinned)"
             } else {
                 Write-ServiceWarn "psmux install failed - sessions will launch without multiplexing"
             }
         } else {
-            Write-ServiceOk "psmux available"
+            # Already installed. We don't force a downgrade here -- that would
+            # disrupt live sessions (3.3.5 client vs running 3.3.6 servers).
+            # Surface a warning so the operator can downgrade deliberately.
+            $psmuxVer = (& psmux --help 2>&1 | Select-Object -First 1) -replace '.*psmux v([0-9.]+).*', '$1'
+            if ($psmuxVer -eq '3.3.6') {
+                Write-ServiceWarn "psmux $psmuxVer has the attach -t regression; the launcher works around it. To pin: winget install --id marlocarlo.psmux --version 3.3.5 --uninstall-previous; winget pin add --id marlocarlo.psmux --version 3.3.5"
+            } else {
+                Write-ServiceOk "psmux available ($psmuxVer)"
+            }
         }
 
         # Create directory structure (runtime dirs always; project dirs only if adopting)
