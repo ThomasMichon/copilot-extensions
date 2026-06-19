@@ -861,6 +861,13 @@ class SessionManager:
         self._db.update_session_status(session_id, SessionStatus.RUNNING.value, now)
 
         if session.event_log:
+            # Persist the user's prompt as a durable, replayable event -- not
+            # just a row in the turns table -- so every consumer (other tabs,
+            # other relay instances, and history replayed on resume/open) sees
+            # the prompt bubble, not only the agent's response. This mirrors
+            # what the agent's load-time replay emits during a resync, keeping
+            # live and replayed histories consistent.
+            session.event_log.append("user_message", {"content": prompt})
             session.event_log.append("session_state_changed", {
                 "status": SessionStatus.RUNNING.value,
                 "turn_index": turn_index,

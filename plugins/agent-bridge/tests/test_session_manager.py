@@ -212,6 +212,26 @@ class TestSubmitPrompt:
         assert session.status == SessionStatus.RUNNING
 
     @pytest.mark.asyncio
+    async def test_submit_persists_user_message_event(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """The prompt is persisted as a durable ``user_message`` event (ahead
+        of the running state change) so it replays on resume/open -- not just a
+        row in the turns table that the chat history never sees (issue #912)."""
+        session = await session_manager.start_session(spawn_target)
+        await session_manager.submit_prompt(session.session_id, "Hello there")
+
+        events = session.event_log.get_events()
+        user_events = [e for e in events if e.event == "user_message"]
+        assert len(user_events) == 1
+        assert user_events[0].data.get("content") == "Hello there"
+        # The user bubble is logged immediately before the turn goes "running".
+        types = [e.event for e in events]
+        ui = types.index("user_message")
+        assert events[ui + 1].event == "session_state_changed"
+        assert events[ui + 1].data.get("status") == "running"
+
+    @pytest.mark.asyncio
     async def test_submit_unknown_session(self, session_manager) -> None:
         with pytest.raises(KeyError):
             await session_manager.submit_prompt("nonexistent", "Hello")
