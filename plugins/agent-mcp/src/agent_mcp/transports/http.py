@@ -1,8 +1,8 @@
 """HTTP (Streamable HTTP + SSE) upstream transport.
 
-A Python port of the original ``ado-mcp-proxy/proxy.mjs`` HTTP path, generalized:
+A Streamable HTTP + SSE upstream transport for the MCP bridge:
 the bearer/header is supplied by the configured :class:`AuthInjector` rather than
-hardcoded to ``az``. Requests are serialized (one in flight at a time), the
+hardcoded to a single auth command. Requests are serialized (one in flight at a time), the
 ``Mcp-Session-Id`` header is captured and replayed, and a ``401`` triggers one
 auth refresh + retry.
 
