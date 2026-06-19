@@ -71,7 +71,7 @@ tools: ["*"]
 mcp-servers:
   ado-remote-mcp:
     type: stdio
-    command: agent-mcp.cmd          # see Windows note below
+    command: agent-mcp              # cross-platform (Linux/WSL + Windows)
     args: ['bridge', '--config', '.github/agents/ado.mcp.yaml']
     tools: ['*']
 ---
@@ -85,10 +85,11 @@ path just works.
 tool (e.g. fetch a repo). A clean way to prove the bridge -- not a stale runtime
 -- is in use is to exercise a real query and confirm a live result.
 
-> **Windows: use `command: agent-mcp.cmd` (explicit `.cmd`).** Copilot spawns
-> the MCP server directly; the `.ps1` binstub adapter does **not** forward piped
-> stdin on Windows, which an stdio MCP server depends on. The `.cmd` binstub
-> forwards stdin correctly. On Linux/WSL, plain `command: agent-mcp` is fine.
+> **`command: agent-mcp` is cross-platform.** The Windows binstub is a single
+> `.cmd` (no competing `.ps1`), so a bare `agent-mcp` resolves to it under
+> PowerShell, `where`/PATHEXT, and `cmd`, and the `.cmd` forwards stdin to the
+> stdio MCP child. Use plain `command: agent-mcp` on every platform -- no `.cmd`
+> suffix needed.
 
 ## Auth kinds
 
@@ -97,11 +98,43 @@ tool (e.g. fetch a repo). A clean way to prove the bridge -- not a stale runtime
 | `entra` / `az` | `az account get-access-token` | `Authorization: Bearer` (http) / env (stdio) |
 | `gh` | `gh auth token` | `Authorization: Bearer` / env |
 | `git-credential` | Git Credential Manager | `Authorization: Basic` / env |
+| `command` | any `git credential fill`-shaped command | templated header / env |
 | `env` / `static` | host env var or literal | templated header / target env |
 | `none` | -- | nothing |
 
 Token acquisition reuses the `credential-relay` sources; the bridge refreshes the
 credential and retries once on an upstream `401`.
+
+The `command` kind runs **any** external command that speaks the git-credential
+protocol — `auth.request` fields are fed on stdin, and stdout supplies the
+secret. Two parse modes:
+
+- `parse: raw` (stdout is the secret verbatim) wraps a plain printer such as
+  `vault get "<entry>" password` with no adapter.
+- `parse: keyvalue` (default; extract `auth.field`, default `token`/`password`)
+  wraps `git credential fill`, a vault `git-credential` helper, or a password
+  manager CLI.
+
+This is the path for vault-backed secrets: the token is fetched on demand and
+injected only into the wrapped child, instead of being exported into the whole
+session environment.
+
+**Multiple secrets:** set `auth` to a **list** of auth blocks to inject several
+secrets into one child (e.g. a controller password *and* an API key). Each entry
+is a normal auth block and must set a distinct `target_env`; the bridge merges
+them into the child environment.
+
+```yaml
+auth:
+  - kind: command
+    command: ["vault", "get", "Aperture Science/UniFi Controller", "password"]
+    parse: raw
+    target_env: UNIFI_NETWORK_PASSWORD
+  - kind: command
+    command: ["vault", "get", "Aperture Science/UniFi API Key (Local)", "password"]
+    parse: raw
+    target_env: UNIFI_API_KEY
+```
 
 ## Commands
 
@@ -115,5 +148,5 @@ agent-mcp status                  # prerequisites + available named bridges
 ## Install
 
 `./scripts/init.sh` (Linux/WSL) or `.\scripts\init.ps1` (Windows) -- creates the
-venv at `~/.agent-mcp` and the `agent-mcp` binstub (`.cmd` + `.ps1` on Windows)
+venv at `~/.agent-mcp` and the `agent-mcp` binstub (a single `.cmd` on Windows)
 in `~/.local/bin`.
