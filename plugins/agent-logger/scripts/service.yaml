@@ -1,0 +1,49 @@
+name: agent-logger-sync
+display_name: Agent Logger -- Session Sync
+description: >
+  Per-machine timer that pushes raw Copilot session data to a configurable
+  target (local dotfolder, OneDrive subfolder, SSH, or an rsync/HTTP ingest
+  sink). Stage 1 of the reusable session-logging pipeline. Runtime venv at
+  ~/.agent-logger; scheduled via a Windows Scheduled Task or a systemd user
+  timer.
+
+# Periodic timer (not a long-lived daemon). Windows-first: the likely
+# operators are a roaming Windows workstation self-serving, or a Windows
+# hub with native OneDrive.
+type: scheduled-task
+level: user
+
+runtime:
+  install_dir: "${HOME}/.agent-logger"
+  config_dir: "${HOME}/.agent-logger"
+
+schedule:
+  interval: 4h
+  on_boot_delay: 5m
+  jitter: 10m
+
+prereqs:
+  - name: python3
+    notes: "Python 3.10+"
+  - name: rsync
+    notes: "Required only for the ssh / ssh-tunnel / ingest targets"
+
+data:
+  config:
+    - path: config.yaml
+      description: Sync target + per-target options (sync.target, sync.targets.*)
+      recovery: Re-run 'session-sync-setup' or hand-edit ~/.agent-logger/config.yaml
+      notes: Local-only; never place inside a cloud-synced folder
+  internal:
+    - path: session-sync.lock
+      description: Advisory lock serializing concurrent syncs
+      recovery: Safe to delete when no sync is running
+    - path: deploy-manifest.json
+      description: Deployment provenance (version, commit, timestamp)
+      recovery: Re-run installer
+
+maturity: alpha
+
+consumers:
+  - "agent-logger orchestrator (optional) -- crunches the synced tree into logs"
+  - "any bespoke processing service reading the {machine}/ session layout"

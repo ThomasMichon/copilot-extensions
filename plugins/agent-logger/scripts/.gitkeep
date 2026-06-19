@@ -1,2 +1,0 @@
-# Installers + service manifests ship in later phases (session-sync,
-# orchestrator daemon).
