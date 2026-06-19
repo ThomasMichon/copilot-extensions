@@ -100,6 +100,62 @@ class TestDataModels:
         assert repo.anchor == "/tmp/repo"
         assert repo.remote == "origin"
 
+    def test_repo_config_pr_defaults_disabled(self):
+        repo = cfg.RepoConfig(anchor="/tmp/repo", worktree_root="/tmp/wt")
+        assert repo.pr.enabled is False
+        assert repo.pr.provider == "gitea"
+        assert repo.pr.strategy == "detach"
+        assert repo.pr.branch_prefix == "feature"
+
+    def test_pr_config_defaults(self):
+        pr = cfg.PRConfig()
+        assert pr.enabled is False
+        assert pr.provider == "gitea"
+
+
+# ---------------------------------------------------------------------------
+# pr-workflow config parsing
+# ---------------------------------------------------------------------------
+
+class TestPRConfigParsing:
+    def _write(self, path: Path, pr_block: str = "") -> None:
+        path.write_text(
+            "repo_name: ext\n"
+            "srcroot: /tmp/src\n"
+            "machine: lambda-core\n"
+            "platform: wsl\n"
+            "repos:\n"
+            "  ext:\n"
+            "    anchor: /tmp/src/ext\n"
+            "    worktree_root: /tmp/src/.worktrees/ext\n"
+            "    default_branch: main\n"
+            "    remote: origin\n"
+            f"{pr_block}"
+        )
+
+    def test_pr_absent_defaults_disabled(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile)
+        conf = cfg.load_config(cfgfile)
+        assert conf.repos["ext"].pr.enabled is False
+
+    def test_pr_block_parsed(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      provider: github\n"
+            "      strategy: keep-alive\n"
+            "      branch_prefix: pr\n",
+        )
+        conf = cfg.load_config(cfgfile)
+        pr = conf.repos["ext"].pr
+        assert pr.enabled is True
+        assert pr.provider == "github"
+        assert pr.strategy == "keep-alive"
+        assert pr.branch_prefix == "pr"
+
 
 # ---------------------------------------------------------------------------
 # headless project parsing

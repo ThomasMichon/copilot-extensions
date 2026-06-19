@@ -37,6 +37,30 @@ DEFAULT_PROFILE = CopilotProfile(name="cloud", label="☁️  Cloud (GitHub)")
 
 
 @dataclass(frozen=True)
+class PRConfig:
+    """Pull-request workflow configuration for a managed repo.
+
+    When ``enabled`` is false (the default), the repo uses the direct-push
+    finalization flow unchanged.  When enabled, finalization runs the
+    PR-based flow (see ``docs/plans/pr-workflow.md`` in aperture-labs).
+
+    ``strategy`` selects the default *disposition* after ``create-pr`` --
+    it does not control squash timing (squashing always happens at
+    ``create-pr``):
+
+    - ``detach``    -- finalize the worktree immediately; resume later via a
+                       fresh ``create`` workflow if the PR needs more work.
+    - ``keep-alive`` -- keep the worktree open to iterate on review feedback,
+                        pushing updates to the feature branch.
+    """
+
+    enabled: bool = False
+    provider: str = "gitea"        # gitea | github | azure-devops
+    strategy: str = "detach"       # default disposition: keep-alive | detach
+    branch_prefix: str = "feature"
+
+
+@dataclass(frozen=True)
 class RepoConfig:
     """Configuration for a single managed repository."""
 
@@ -50,6 +74,7 @@ class RepoConfig:
     validate_hook: dict[str, list[str]] = field(default_factory=dict)
     service_paths: list[str] = field(default_factory=list)
     post_install_hook: dict[str, list[str]] = field(default_factory=dict)
+    pr: PRConfig = field(default_factory=PRConfig)
 
 
 @dataclass(frozen=True)
@@ -365,6 +390,9 @@ def load_config(path: Path | None = None) -> Config:
                     if isinstance(cmd_list, list):
                         post_install_hook[plat_key] = [str(c) for c in cmd_list]
 
+            # Parse pr config (optional PR-workflow block)
+            pr_cfg = _parse_pr(repo_data.get("pr"))
+
             repos[name] = RepoConfig(
                 anchor=repo_data["anchor"],
                 worktree_root=repo_data["worktree_root"],
@@ -376,6 +404,7 @@ def load_config(path: Path | None = None) -> Config:
                 validate_hook=validate_hook,
                 service_paths=service_paths,
                 post_install_hook=post_install_hook,
+                pr=pr_cfg,
             )
 
     repo_name = raw.get("repo_name")
@@ -390,6 +419,21 @@ def load_config(path: Path | None = None) -> Config:
         repos=repos,
         copilot_profiles=_parse_profiles(raw.get("copilot_profiles", [])),
         headless=bool(raw.get("headless", False)),
+    )
+
+
+def _parse_pr(raw: Any) -> PRConfig:
+    """Parse the optional ``pr:`` block of a repo config into a PRConfig.
+
+    Unknown or missing values fall back to PRConfig defaults (disabled).
+    """
+    if not isinstance(raw, dict):
+        return PRConfig()
+    return PRConfig(
+        enabled=bool(raw.get("enabled", False)),
+        provider=str(raw.get("provider", "gitea")),
+        strategy=str(raw.get("strategy", "detach")),
+        branch_prefix=str(raw.get("branch_prefix", "feature")),
     )
 
 

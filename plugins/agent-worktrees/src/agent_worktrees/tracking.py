@@ -31,6 +31,23 @@ class SessionEntry:
 
 
 @dataclass
+class PRRecord:
+    """Pull-request metadata nested under a worktree record (PR mode).
+
+    Present only when the worktree has entered the PR workflow.  ``state``
+    tracks the PR lifecycle; ``branch`` is the pushed feature branch.
+    """
+
+    state: str = ""          # creating | open | merged | closed
+    branch: str = ""
+    base_sha: str = ""
+    head_sha: str = ""
+    url: str = ""
+    number: int | None = None
+    provider: str = ""
+
+
+@dataclass
 class WorktreeRecord:
     """Parsed worktree tracking record."""
 
@@ -48,6 +65,7 @@ class WorktreeRecord:
     completed_at: str | None
     handoff_prompt: str | None  # deprecated, kept for YAML compat
     sessions: list[SessionEntry] | None = field(default=None)
+    pr: PRRecord | None = field(default=None)
 
     @property
     def yaml_path(self) -> Path:
@@ -128,6 +146,28 @@ def load_record(path: Path) -> WorktreeRecord:
                         ended_at=str(ea) if ea else None,
                     ))
 
+    # Parse nested pr block -- present only in PR-workflow mode.
+    raw_pr = data.get("pr")
+    pr_obj: PRRecord | None = None
+    if isinstance(raw_pr, dict):
+        num = raw_pr.get("number")
+        if num in (None, "", "null"):
+            num_val: int | None = None
+        else:
+            try:
+                num_val = int(num)
+            except (TypeError, ValueError):
+                num_val = None
+        pr_obj = PRRecord(
+            state=str(raw_pr.get("state", "")),
+            branch=str(raw_pr.get("branch", "")),
+            base_sha=str(raw_pr.get("base_sha", "")),
+            head_sha=str(raw_pr.get("head_sha", "")),
+            url=str(raw_pr.get("url", "")),
+            number=num_val,
+            provider=str(raw_pr.get("provider", "")),
+        )
+
     return WorktreeRecord(
         worktree_id=data["worktree_id"],
         branch=data["branch"],
@@ -143,6 +183,7 @@ def load_record(path: Path) -> WorktreeRecord:
         completed_at=str(completed_raw) if completed_raw else None,
         handoff_prompt=data.get("handoff_prompt") or None,
         sessions=sessions_list,
+        pr=pr_obj,
     )
 
 
@@ -172,6 +213,24 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         f"completed_at: {record.completed_at or 'null'}\n"
         f"handoff_prompt: {record.handoff_prompt or 'null'}\n"
     )
+
+    # Serialize nested pr block -- only when in PR-workflow mode.
+    if record.pr is not None:
+        pr_data: dict[str, object] = {
+            "state": record.pr.state,
+            "branch": record.pr.branch,
+            "base_sha": record.pr.base_sha,
+            "head_sha": record.pr.head_sha,
+            "url": record.pr.url,
+        }
+        if record.pr.number is not None:
+            pr_data["number"] = record.pr.number
+        pr_data["provider"] = record.pr.provider
+        content += yaml.safe_dump(
+            {"pr": pr_data},
+            default_flow_style=False,
+            sort_keys=False,
+        )
 
     # Serialize sessions list -- None omitted (not yet indexed),
     # [] written as empty list (indexed, no sessions).
