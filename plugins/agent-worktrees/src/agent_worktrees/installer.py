@@ -785,6 +785,8 @@ def register_project(
     default_branch: str = "master",
     *,
     expose_agent: bool = True,
+    base_repo: bool = False,
+    elevated: bool = False,
     wsl_state: str | None = None,
     wsl_distro: str | None = None,
     wsl_path: str | None = None,
@@ -797,6 +799,17 @@ def register_project(
         Whether agent-bridge should expose a same-machine agent for this
         project. Defaults ``True``; pass ``False`` for a reference-only
         adoption (worktree-managed but no agent).
+    base_repo
+        When true, the project is adopted in **base-repo (no-worktree)** mode:
+        the anchor checkout is used directly and no worktree is created. For
+        repos that can't support worktrees (e.g. an enlistment monorepo). The
+        functional gate also lives in ``repos.<name>.base_repo`` of the
+        user-local ``~/.<project>/config.yaml``; this flag records intent on the
+        projects.yaml entry.
+    elevated
+        When true, agent-bridge should run this project's agent in an elevated
+        (admin) context. Recorded here for the bridge to consume; the elevation
+        mechanism itself is owned by agent-bridge.
     wsl_state
         WSL adoption state: ``"adopted"`` (full install exists in WSL),
         ``"bootstrap"`` (bootstrap stub deployed), or *None* (no WSL).
@@ -821,6 +834,10 @@ def register_project(
         "expose_agent": expose_agent,
         "registered_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    if base_repo:
+        entry["base_repo"] = True
+    if elevated:
+        entry["elevated"] = True
 
     # Preserve existing WSL state when re-registering from Windows
     existing = registry["projects"].get(project, {})
