@@ -70,7 +70,10 @@ function Register-SyncTask {
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
         -DontStopIfGoingOnBatteries -StartWhenAvailable `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -MultipleInstances IgnoreNew
-    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
+    # Interactive logon: runs as the current user when logged on, and -- unlike
+    # an S4U principal -- registers without elevation. Right default for a
+    # per-user roaming workstation. (Run-when-logged-off would need admin.)
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
