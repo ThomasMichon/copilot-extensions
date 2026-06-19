@@ -19,7 +19,12 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from agent_logger.sync.targets.base import DoctorResult, PushResult, Target
+from agent_logger.sync.targets.base import (
+    DoctorResult,
+    PushResult,
+    Target,
+    rsync_session_filters,
+)
 
 _TIMEOUT = 180
 
@@ -46,14 +51,16 @@ class IngestTarget(Target):
             env["RSYNC_PASSWORD_FILE"] = pw
         return env
 
-    def push(self, source: Path, machine: str) -> PushResult:
+    def push(
+        self, source: Path, machine: str, include_sessions: set[str] | None = None
+    ) -> PushResult:
         url = self._url()
         if not url:
             return PushResult(ok=False, detail="ingest target requires a url")
         if shutil.which("rsync") is None:
             return PushResult(ok=False, detail="rsync not found on PATH")
         dest = f"{url}/{machine}/"
-        cmd = ["rsync", "-az", "--delete"]
+        cmd = ["rsync", "-az", "--delete", *rsync_session_filters(include_sessions)]
         pw = self._password_file()
         if pw:
             cmd += [f"--password-file={pw}"]

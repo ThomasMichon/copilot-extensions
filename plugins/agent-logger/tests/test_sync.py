@@ -160,3 +160,52 @@ def test_engine_run_sync_disabled(monkeypatch, tmp_path: Path) -> None:
     cfg = _cfg(tmp_path / "home", _make_source(tmp_path), tmp_path / "dest")
     assert engine.run_sync(cfg) == 0
     assert not (tmp_path / "dest").exists()
+
+
+def _make_multi_repo_source(root: Path) -> Path:
+    """Source with two sessions in different repos (by workspace cwd)."""
+    src = root / "copilot"
+    a = src / "session-state" / "sess-a"
+    a.mkdir(parents=True)
+    (a / "events.jsonl").write_text("{}\n", encoding="utf-8")
+    (a / "workspace.yaml").write_text("cwd: /home/u/Src/dotfiles\n", encoding="utf-8")
+    b = src / "session-state" / "sess-b"
+    b.mkdir(parents=True)
+    (b / "events.jsonl").write_text("{}\n", encoding="utf-8")
+    (b / "workspace.yaml").write_text("cwd: /home/u/Src/other-repo\n", encoding="utf-8")
+    (src / "session-store.db").write_text("global", encoding="utf-8")  # must be excluded
+    return src
+
+
+def test_repo_allowlist_filters_sessions(tmp_path: Path) -> None:
+    src = _make_multi_repo_source(tmp_path)
+    dest = tmp_path / "dest"
+    data = dict(load_config(home=tmp_path / "home").as_dict())
+    data["sync"]["source"] = str(src)
+    data["sync"]["repo_allowlist"] = ["dotfiles"]
+    data["sync"]["targets"]["local"]["path"] = str(dest)
+    cfg = Config(data, tmp_path / "home")
+
+    assert engine.run_sync(cfg, verbose=True) == 0
+    machine_dir = next(dest.iterdir())
+    ss = machine_dir / "session-state"
+    assert (ss / "sess-a").is_dir()           # dotfiles -> included
+    assert not (ss / "sess-b").exists()       # other-repo -> excluded
+    # Global session-store.db must NOT leak when filtering.
+    assert not (machine_dir / "session-store.db").exists()
+
+
+def test_allowlist_fail_open_without_workspace(tmp_path: Path) -> None:
+    src = tmp_path / "copilot"
+    s = src / "session-state" / "no-ws"
+    s.mkdir(parents=True)
+    (s / "events.jsonl").write_text("{}\n", encoding="utf-8")  # no workspace.yaml
+    included = engine._included_sessions(src, ["dotfiles"])
+    assert included == {"no-ws"}  # fail-open: kept when repo unknown
+
+
+def test_config_repo_allowlist_parsing(tmp_path: Path) -> None:
+    base = load_config(home=tmp_path).as_dict()
+    data = dict(base)
+    data["sync"] = dict(data["sync"], repo_allowlist="dotfiles, odsp-ai-hub")
+    assert Config(data, tmp_path).sync_repo_allowlist == ["dotfiles", "odsp-ai-hub"]

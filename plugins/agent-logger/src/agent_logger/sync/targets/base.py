@@ -34,6 +34,24 @@ class PushResult:
     byte_count: int = 0
 
 
+def rsync_session_filters(include_sessions: set[str] | None) -> list[str]:
+    """Build rsync include/exclude args restricting to allowed sessions.
+
+    With ``None`` there is no restriction. Otherwise only the named
+    ``session-state/<id>`` trees are transferred; everything else (including
+    a global session-store.db) is excluded so other repos' sessions never
+    leak to the destination.
+    """
+    if include_sessions is None:
+        return []
+    filters = ["--include=session-state/"]
+    for sid in sorted(include_sessions):
+        filters.append(f"--include=session-state/{sid}/")
+        filters.append(f"--include=session-state/{sid}/***")
+    filters.append("--exclude=*")
+    return filters
+
+
 @dataclass
 class DoctorResult:
     """Outcome of a :meth:`Target.doctor` readiness check."""
@@ -57,8 +75,16 @@ class Target(ABC):
         self.options = options or {}
 
     @abstractmethod
-    def push(self, source: Path, machine: str) -> PushResult:
-        """Publish *source* under the target's ``{machine}/`` subpath."""
+    def push(
+        self, source: Path, machine: str, include_sessions: set[str] | None = None
+    ) -> PushResult:
+        """Publish *source* under the target's ``{machine}/`` subpath.
+
+        ``include_sessions``, when not ``None``, restricts the transfer to
+        the named ``session-state/<id>`` directories (repo-allowlist
+        filtering); everything else under *source* is skipped to avoid
+        leaking sessions from other repos.
+        """
 
     @abstractmethod
     def doctor(self) -> DoctorResult:

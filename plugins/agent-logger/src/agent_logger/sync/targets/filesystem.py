@@ -41,13 +41,30 @@ def _count_sessions(dest: Path) -> int:
     return sum(1 for d in base.iterdir() if d.is_dir())
 
 
+def _included(rel: Path, include_sessions: set[str] | None) -> bool:
+    """Decide whether a relative source path is in scope under a filter.
+
+    With no filter, everything is included. With a filter, only files under
+    ``session-state/<id>/`` for an allowed ``<id>`` are included (other
+    top-level files such as the global session-store.db are skipped).
+    """
+    if include_sessions is None:
+        return True
+    parts = rel.parts
+    if len(parts) >= 2 and parts[0] == "session-state":
+        return parts[1] in include_sessions
+    return False
+
+
 class FilesystemTarget(Target):
     """Base for targets that publish to a local-or-mounted directory root."""
 
     def _root(self) -> Path:  # pragma: no cover - abstract-ish
         raise NotImplementedError
 
-    def push(self, source: Path, machine: str) -> PushResult:
+    def push(
+        self, source: Path, machine: str, include_sessions: set[str] | None = None
+    ) -> PushResult:
         if not source.is_dir():
             return PushResult(ok=False, detail=f"source not found: {source}")
         dest = self._root() / machine
@@ -62,6 +79,8 @@ class FilesystemTarget(Target):
             if src_file.is_dir() or src_file.name in _EXCLUDE_NAMES:
                 continue
             rel = src_file.relative_to(source)
+            if not _included(rel, include_sessions):
+                continue
             dst_file = dest / rel
             if _needs_copy(src_file, dst_file):
                 dst_file.parent.mkdir(parents=True, exist_ok=True)

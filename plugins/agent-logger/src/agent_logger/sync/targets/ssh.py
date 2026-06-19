@@ -15,7 +15,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from agent_logger.sync.targets.base import DoctorResult, PushResult, Target
+from agent_logger.sync.targets.base import (
+    DoctorResult,
+    PushResult,
+    Target,
+    rsync_session_filters,
+)
 
 _TIMEOUT = 120
 
@@ -44,7 +49,9 @@ class SshTarget(Target):
         opts += ["-o", f"ConnectTimeout={timeout}"]
         return opts
 
-    def push(self, source: Path, machine: str) -> PushResult:
+    def push(
+        self, source: Path, machine: str, include_sessions: set[str] | None = None
+    ) -> PushResult:
         host = self._host()
         if not host:
             return PushResult(ok=False, detail="ssh target requires a host")
@@ -56,6 +63,7 @@ class SshTarget(Target):
             "rsync",
             "-az",
             "--delete",
+            *rsync_session_filters(include_sessions),
             "-e",
             ssh_cmd,
             f"{source}/",
