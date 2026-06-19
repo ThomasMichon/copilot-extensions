@@ -3,9 +3,9 @@
 A reusable **MCP bridge**: wrap an upstream MCP server as a local **stdio** MCP
 server and inject host credentials. One config file describes one bridge.
 
-It generalizes the bespoke `ado-mcp-proxy` (a Node script hardcoded to
-`mcp.dev.azure.com` + `az`) into a config-driven, multi-transport, multi-auth
-bridge packaged as a Copilot CLI plugin.
+It replaces single-purpose wrapper scripts -- e.g. a script hardcoded to one
+upstream endpoint and one auth command -- with a config-driven, multi-transport,
+multi-auth bridge packaged as a Copilot CLI plugin.
 
 ## Concepts
 

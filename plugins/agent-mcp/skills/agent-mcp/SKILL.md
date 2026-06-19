@@ -12,8 +12,8 @@ description: >-
 
 `agent-mcp` wraps one upstream MCP server as a local **stdio** MCP server and
 injects host credentials, driven by a single per-bridge config file. It
-generalizes the old `ado-mcp-proxy` into a config-driven, multi-transport,
-multi-auth bridge.
+replaces single-purpose, hardcoded MCP wrapper scripts with a config-driven,
+multi-transport, multi-auth bridge.
 
 ## When to use
 
