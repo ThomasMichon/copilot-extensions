@@ -99,6 +99,13 @@ def _add_stream_args(p: argparse.ArgumentParser) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _cmd_acp_connect(args: argparse.Namespace) -> None:
+    """Relay stdio <-> a remote bridge's ACP-over-WebSocket endpoint."""
+    from .acp_connect import cmd_acp_connect
+
+    cmd_acp_connect(args)
+
+
 def _cmd_start(args: argparse.Namespace) -> None:
     """Start the agent-bridge server."""
     import uvicorn
@@ -1775,6 +1782,32 @@ def main(argv: list[str] | None = None) -> None:
     start_p.add_argument("--port", type=int, help="Port to listen on")
     start_p.add_argument("--bind", type=str, help="Address to bind to")
     start_p.set_defaults(func=_cmd_start)
+
+    # Relay stdio <-> a remote bridge's ACP-over-WebSocket endpoint. Used as a
+    # type="command" spawn target so the primary bridge can route an elevated /
+    # federated agent to a sub-daemon's /acp/<agent> without spawning copilot
+    # itself (see acp_connect.py).
+    acp_connect_p = sub.add_parser(
+        "acp-connect",
+        help="Relay stdio <-> a remote bridge's ACP-over-WebSocket endpoint",
+    )
+    acp_connect_p.add_argument(
+        "url", help="ws(s):// URL, e.g. ws://127.0.0.1:9281/acp/<agent>"
+    )
+    acp_connect_p.add_argument(
+        "--token", default=None,
+        help="Bearer token (default: this machine's bridge token)",
+    )
+    acp_connect_p.add_argument(
+        "--no-token", action="store_true",
+        help="Connect without a bearer token",
+    )
+    acp_connect_p.add_argument(
+        "--stdio", action="store_true",
+        help="Bridge over stdin/stdout (default; accepted for symmetry with "
+             "'copilot --acp --stdio')",
+    )
+    acp_connect_p.set_defaults(func=_cmd_acp_connect)
 
     status_p = sub.add_parser(
         "status",
