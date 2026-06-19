@@ -121,6 +121,14 @@ class TestInstallHooks:
             text = shim.read_text()
             assert hooks._SHIM_MARKER in text
             assert f"hook {name}" in text
+            # The PR guard is gated on AGENT_WORKTREES_HOOKS=1 ...
+            assert 'if [ "$AGENT_WORKTREES_HOOKS" = "1" ]' in text
+            # ... but the preserved foreign hook (.local) runs unconditionally
+            # (its invocation is NOT inside the HOOKS guard block).
+            guard_idx = text.index('"$AGENT_WORKTREES_HOOKS"')
+            fi_idx = text.index("\nfi\n", guard_idx)
+            local_idx = text.index(f"{name}.local")
+            assert local_idx > fi_idx
 
     def test_idempotent(self, anchor_and_worktree):
         anchor, _ = anchor_and_worktree
