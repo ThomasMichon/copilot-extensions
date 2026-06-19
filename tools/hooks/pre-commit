@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# pre-commit hook: basic, high-signal ruff lint on staged Python files.
+# Enable with:  git config core.hooksPath tools/hooks
+#
+# Scope is deliberately narrow: only the staged files in this commit, and only
+# the pyflakes (F) + syntax-error (E9) rule groups. This keeps the hook
+# decoupled from each plugin's full [tool.ruff] config so it does NOT block on
+# the repo's pre-existing style debt -- it fails only on genuine problems
+# (undefined names, unused imports/vars, syntax errors) in the code you touch.
+# Run a full `ruff check .` manually for the complete style pass.
+set -uo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# Collect staged Python files (added/copied/modified), NUL-safe so paths with
+# spaces survive.
+STAGED=()
+while IFS= read -r -d '' f; do
+    STAGED+=("$f")
+done < <(git diff --cached --name-only --diff-filter=ACM -z -- '*.py')
+
+if [[ ${#STAGED[@]} -eq 0 ]]; then
+    exit 0
+fi
+
+# Resolve ruff: prefer a ruff on PATH, else fall back to `python -m ruff`
+# (skipping the Windows Store python stub under WindowsApps, then `py`).
+if command -v ruff >/dev/null 2>&1; then
+    RUFF=(ruff)
+else
+    PY=()
+    for c in python3 python; do
+        p="$(command -v "$c" 2>/dev/null || true)"
+        case "$p" in *WindowsApps*) continue ;; esac
+        if [[ -n "$p" ]]; then PY=("$p"); break; fi
+    done
+    if [[ ${#PY[@]} -eq 0 ]] && command -v py >/dev/null 2>&1; then
+        PY=(py -3)
+    fi
+    if [[ ${#PY[@]} -gt 0 ]] && "${PY[@]}" -m ruff --version >/dev/null 2>&1; then
+        RUFF=("${PY[@]}" -m ruff)
+    else
+        echo "pre-commit: ruff not found -- skipping lint (pip install ruff to enable)" >&2
+        exit 0
+    fi
+fi
+
+cd "$ROOT"
+if ! "${RUFF[@]}" check --select F,E9 --force-exclude "${STAGED[@]}"; then
+    echo "" >&2
+    echo "pre-commit: ruff found issues in staged files (rules: F, E9)." >&2
+    echo "  Fix them, or run with --no-verify to bypass (discouraged)." >&2
+    echo "  Many are auto-fixable: ruff check --select F,E9 --fix <files>" >&2
+    exit 1
+fi
