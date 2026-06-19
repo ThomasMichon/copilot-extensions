@@ -13,6 +13,34 @@ def test_extract_project_flag_space():
     assert rest == ["list"]
 
 
+def test_get_pr_keys_registered():
+    assert "pr-enabled" in m._GET_KEYS
+    assert "pr-provider" in m._GET_KEYS
+
+
+def test_get_pr_keys_values(monkeypatch, capsys):
+    import argparse
+
+    from agent_worktrees import config as cfg
+
+    conf = cfg.Config(
+        srcroot="/s", machine="m", platform="linux", repo_name="ext",
+        repos={"ext": cfg.RepoConfig(
+            anchor="/a", worktree_root="/w",
+            pr=cfg.PRConfig(enabled=True, provider="gitea"),
+        )},
+    )
+    monkeypatch.setattr("agent_worktrees.config.load_config", lambda *a, **k: conf)
+
+    rc = m.cmd_get(argparse.Namespace(key="pr-enabled"))
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == "true"
+
+    rc = m.cmd_get(argparse.Namespace(key="pr-provider"))
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == "gitea"
+
+
 def test_extract_project_flag_equals():
     rest, proj = m._extract_project_flag(["--project=bar", "worktree", "create"])
     assert proj == "bar"

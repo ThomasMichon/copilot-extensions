@@ -33,6 +33,13 @@ description: >
   - 'squash and merge'
   - 'remove worktree'
   - 'delete worktree'
+  - 'create PR'
+  - 'create pr'
+  - 'open PR'
+  - 'open a pull request'
+  - 'submit PR'
+  - 'submit for review'
+  - 'pull request'
 ---
 
 # Worktree Skill
@@ -182,6 +189,104 @@ session; **do not present it as a bug or as cleanup having failed.** Only if
 it says content is *not* on master did something go wrong -- in that case the
 push did not succeed or was not run, so retry `push-changes` first.
 
+## PR Workflow (PR mode)
+
+Some repos opt into a **pull-request workflow** instead of direct-push
+finalization. A repo is in PR mode when its config sets `pr.enabled: true`.
+Check before signing off:
+
+```
+agent-worktrees get pr-enabled      # "true" or "false"
+agent-worktrees get pr-provider     # gitea | github | azure-devops (empty in direct mode)
+```
+
+In **direct mode** (the default), use the two-phase `push-changes` +
+`finalize` flow above. In **PR mode**, the flow becomes
+`create-pr -> [delegate PR creation] -> finalize`, and `push-changes` targets
+the *feature* branch instead of master.
+
+### Branch topology (PR mode)
+
+```
+origin/master  <-  worktree/{id}  <-  feature/{slug}-{suffix}
+  (upstream)       (local base,        (the PR branch: one squashed
+                    tracks master)      work commit, pushed to remote)
+```
+
+`worktree/{id}` is a **local-only base** -- it is never pushed. The feature
+branch carries the squashed work and is the only thing that reaches the remote.
+
+### Step 1: `create-pr`
+
+```
+agent-worktrees create-pr --title "Concise PR title"
+```
+
+Squashes the worktree's commits into one, rebases onto upstream, creates the
+feature branch off `worktree/{id}`, resets the worktree base to the upstream
+tip, checks out the feature branch, and **pushes the feature branch**. Records
+`pr.state` and prints the branch, base/head SHAs, and provider. Add `--json`
+to capture the metadata, or `--branch NAME` to override the generated name.
+`create-pr` is idempotent -- safe to re-run.
+
+### Step 2: Delegate PR creation to the provider sub-agent
+
+The CLI does **not** call any provider API -- you do, via the matching
+sub-agent. Read the provider and route accordingly:
+
+| Provider | How to create the PR |
+|----------|----------------------|
+| `gitea` | Use the **gitea** sub-agent (Task tool, `agent_type: "gitea"`) to open a PR for the pushed feature branch into the default branch. |
+| `github` | `gh pr create --head <feature-branch> --base <default-branch>` via the shell (or a GitHub sub-agent). |
+| `azure-devops` | `az repos pr create --source-branch <feature-branch> --target-branch <default-branch>` via the shell. |
+
+Enable auto-merge if the workflow calls for it -- that is a provider-side
+action you request, not a CLI flag.
+
+### Step 3: Record the PR metadata
+
+After the sub-agent returns the PR URL and number:
+
+```
+agent-worktrees set-pr --url <URL> --number <N>
+```
+
+Inspect tracked PR state any time with `agent-worktrees pr-status [--json]`.
+
+### Iterating on review feedback (keep-alive disposition)
+
+To address feedback in the **same** worktree: edit, commit on the feature
+branch, then update the PR branch with:
+
+```
+agent-worktrees push-changes
+```
+
+In PR mode `push-changes` runs the rebase chain (worktree base onto master,
+feature onto the base) and force-with-lease pushes the **feature branch** --
+never master. It does not create a PR; it updates the existing one.
+
+### Finalizing a PR-mode worktree
+
+```
+agent-worktrees finalize
+```
+
+**Finalize is decoupled from merge.** A PR-mode worktree finalizes as soon as
+its work is *safely upstream* -- the feature branch is pushed with no unpushed
+commits. The PR does **not** need to be merged first. Finalize tears down the
+worktree and removes the local branches but **leaves the remote feature branch
+intact** (it backs the open PR). If there are unpushed commits, finalize blocks
+and tells you to run `push-changes`.
+
+### Recovering a PR after teardown (detach disposition)
+
+If a finalized PR later needs more work, there is **no special resume
+command**. Start the normal `create` workflow for a fresh worktree, then use
+your provider git-ops skill to fetch the surviving remote feature branch and
+re-establish the rebase chain. The CLI stays provider-agnostic; recovery is
+ordinary git owned by you.
+
 ## Committing and Pushing
 
 ### Push Policy
@@ -258,6 +363,9 @@ modules directly. The binstub resolves the project from the
 |--------|---------|
 | **Push changes to master** (normal sign-off step 1) | `agent-worktrees push-changes --title "desc"` |
 | **Finalize** (validate + clean up, step 2) | `agent-worktrees finalize` |
+| **PR mode: create + push a feature branch** | `agent-worktrees create-pr --title "desc"` |
+| **PR mode: record PR metadata** (after sub-agent opens it) | `agent-worktrees set-pr --url URL --number N` |
+| **PR mode: show tracked PR state** | `agent-worktrees pr-status` |
 | Set/update title only | `agent-worktrees push-changes --title "desc" --title-only` |
 | Show worktree git status | `agent-worktrees status` |
 | List worktrees for cleanup | `agent-worktrees cleanup` |

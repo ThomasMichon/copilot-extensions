@@ -3277,6 +3277,8 @@ _GET_KEYS: dict[str, str] = {
     "machine":       "Machine name from config",
     "platform":      "Platform (win/wsl/linux)",
     "project":       "Project name",
+    "pr-enabled":    "Whether PR mode is enabled (true/false)",
+    "pr-provider":   "PR provider (gitea|github|azure-devops) when PR mode is on",
 }
 
 
@@ -3304,6 +3306,8 @@ def cmd_get(args: argparse.Namespace) -> int:
         "machine":      config.machine,
         "platform":     config.platform,
         "project":      config.repo_name,
+        "pr-enabled":    "true" if repo.pr.enabled else "false",
+        "pr-provider":   repo.pr.provider if repo.pr.enabled else "",
     }
 
     if key not in values:
