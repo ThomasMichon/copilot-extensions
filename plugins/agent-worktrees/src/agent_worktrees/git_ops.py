@@ -392,15 +392,26 @@ def merge_squash(branch: str, worktree_id: str, *, cwd: str | Path) -> bool:
     return commit_r.returncode == 0
 
 
-def push(remote: str, branch: str, *, cwd: str | Path) -> bool:
+def push(
+    remote: str,
+    branch: str,
+    *,
+    cwd: str | Path,
+    force_with_lease: bool = False,
+) -> bool:
     """Push a branch to remote. Returns True on success.
 
     Auto-authenticates when the remote is owned by a different ``gh`` account
     than the active one, without persisting a token in ``.git/config`` (#29).
+
+    When *force_with_lease* is True, push with ``--force-with-lease`` -- used
+    by the PR workflow to update a feature branch whose history was rewritten
+    by the rebase chain, without clobbering unrelated remote updates.
     """
+    extra = ["--force-with-lease"] if force_with_lease else []
     result = git(
         *_auth_config_args(remote, cwd=cwd),
-        "push", remote, branch, "--quiet",
+        "push", remote, branch, *extra, "--quiet",
         cwd=cwd, check=False,
     )
     return result.returncode == 0
@@ -481,6 +492,25 @@ def ref_exists(ref: str, *, cwd: str | Path) -> bool:
     """Return True if a git ref/commit resolves in the repo."""
     result = git(
         "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}",
+        cwd=cwd, check=False,
+    )
+    return result.returncode == 0
+
+
+def remote_branch_exists(remote: str, branch: str, *, cwd: str | Path) -> bool:
+    """Return True if *branch* exists on *remote* (via ls-remote)."""
+    result = git(
+        *_auth_config_args(remote, cwd=cwd),
+        "ls-remote", "--heads", remote, branch,
+        cwd=cwd, check=False,
+    )
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def local_branch_exists(branch: str, *, cwd: str | Path) -> bool:
+    """Return True if a local branch named *branch* exists."""
+    result = git(
+        "show-ref", "--verify", "--quiet", f"refs/heads/{branch}",
         cwd=cwd, check=False,
     )
     return result.returncode == 0

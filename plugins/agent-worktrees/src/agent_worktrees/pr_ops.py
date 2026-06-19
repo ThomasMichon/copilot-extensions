@@ -1,0 +1,272 @@
+"""Pull-request workflow git operations (PR mode).
+
+This module owns the *git* side of the PR workflow -- it never talks to a
+provider API.  The agent (via a Gitea/GitHub/ADO sub-agent) creates the actual
+pull request and records its URL/number back via ``set-pr``.
+
+Branch topology (PR mode)::
+
+    origin/master  <-  worktree/{id}  <-  feature/{slug}-{suffix}
+      (upstream)       (local base,        (the PR branch: one squashed
+                        tracks master)      work commit, pushed to remote)
+
+``create_pr`` squashes the worktree's commits into one, rebases that commit
+onto the upstream default branch, creates the feature branch at it, resets the
+worktree base branch back to the upstream tip, checks out the feature branch,
+and pushes it.  See ``docs/plans/pr-workflow.md`` in aperture-labs.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from . import config as cfg
+from . import git_ops, tracking
+from .config import Config
+from .tracking import PRRecord
+
+__all__ = ["slugify", "feature_branch_name", "create_pr"]
+
+
+def slugify(text: str, *, max_len: int = 40) -> str:
+    """Sanitize *text* into a branch-safe slug (ascii, lowercase, dashes)."""
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower()).strip("-")
+    if len(s) > max_len:
+        s = s[:max_len].rstrip("-")
+    return s or "change"
+
+
+def feature_branch_name(prefix: str, title: str, worktree_id: str) -> str:
+    """Build ``{prefix}/{slug}-{worktree_id_suffix}``.
+
+    The suffix is the final dash-delimited token of the worktree id (its
+    short hash), which keeps feature branches unique per worktree.
+    """
+    suffix = worktree_id.rsplit("-", 1)[-1] if "-" in worktree_id else worktree_id
+    slug = slugify(title)
+    return f"{(prefix or 'feature')}/{slug}-{suffix}"
+
+
+def _rollback(worktree_path: str, wt_branch: str, orig_sha: str | None) -> None:
+    """Restore the worktree branch to its pre-create-pr commit."""
+    if orig_sha:
+        git_ops.git("checkout", wt_branch, "--quiet", cwd=worktree_path, check=False)
+        git_ops.git("reset", "--hard", orig_sha, "--quiet", cwd=worktree_path, check=False)
+    git_ops.git("update-ref", "-d", "refs/pre-squash-backup", cwd=worktree_path, check=False)
+
+
+def _rev(ref: str, *, cwd: str) -> str:
+    r = git_ops.git("rev-parse", ref, cwd=cwd, check=False)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def create_pr(
+    worktree_id: str,
+    config: Config,
+    *,
+    title: str | None = None,
+    branch: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Squash worktree commits, create + push a feature branch for a PR.
+
+    Returns a JSON-friendly result dict.  On success it includes ``branch``,
+    ``remote``, ``base_sha``, ``head_sha``, ``provider`` and ``default_branch``
+    so the agent can delegate PR creation to the right provider sub-agent.
+
+    Idempotent: safe to re-run.  If the worktree is already on the feature
+    branch (a prior run pushed it or failed after checkout), the branch is
+    simply (re)pushed and the tracking state advanced to ``open``.
+    """
+    repo = config.default_repo
+    prcfg = repo.pr
+    remote = repo.remote
+    upstream = f"{remote}/{repo.default_branch}"
+    worktree_path = str(Path(repo.worktree_root) / worktree_id)
+    wt_branch = f"worktree/{worktree_id}"
+
+    base: dict = {"success": False, "worktree_id": worktree_id}
+
+    if not prcfg.enabled:
+        return {**base, "error": (
+            "PR mode is not enabled for this repo. Set pr.enabled: true in "
+            "the repo config to use create-pr."
+        )}
+
+    if not Path(worktree_path).exists():
+        return {**base, "error": f"Worktree path not found: {worktree_path}"}
+
+    # Load tracking record (optional but expected).
+    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    record: tracking.WorktreeRecord | None = None
+    if yaml_path.exists():
+        try:
+            record = tracking.load_record(yaml_path)
+        except Exception:
+            record = None
+
+    if title and record:
+        record.title = title.replace("\n", " ").strip()
+
+    eff_title = title or (record.title if record else None) or worktree_id
+
+    # Resolve the feature branch name: explicit > already-recorded > derived.
+    if branch:
+        feature_branch = branch
+    elif record and record.pr and record.pr.branch:
+        feature_branch = record.pr.branch
+    else:
+        feature_branch = feature_branch_name(prcfg.branch_prefix, eff_title, worktree_id)
+
+    if dry_run:
+        return {
+            **base, "success": True, "dry_run": True,
+            "branch": feature_branch, "remote": remote,
+            "provider": prcfg.provider, "default_branch": repo.default_branch,
+        }
+
+    if not git_ops.is_clean(cwd=worktree_path):
+        return {**base, "error": (
+            "Working tree has uncommitted changes; commit or stash them "
+            "before create-pr."
+        )}
+
+    # Best-effort fetch so the rebase targets current upstream.
+    if git_ops.has_remote(remote, cwd=worktree_path):
+        try:
+            git_ops.fetch(remote, cwd=worktree_path)
+        except git_ops.GitError:
+            pass
+
+    head_branch = git_ops._get_current_branch_safe(worktree_path)
+
+    # --- Re-run path: already on the feature branch -> (re)push + record. ---
+    if head_branch == feature_branch:
+        return _push_existing_feature(
+            worktree_path, feature_branch, remote, repo, prcfg, record, base
+        )
+
+    if head_branch != wt_branch:
+        return {**base, "error": (
+            f"Worktree HEAD is on '{head_branch}', expected '{wt_branch}'. "
+            f"Checkout '{wt_branch}' before create-pr."
+        )}
+
+    reusing = bool(record and record.pr and record.pr.branch == feature_branch)
+    if not reusing:
+        if git_ops.local_branch_exists(feature_branch, cwd=worktree_path) or \
+                git_ops.remote_branch_exists(remote, feature_branch, cwd=worktree_path):
+            return {**base, "error": (
+                f"Feature branch '{feature_branch}' already exists locally or on "
+                f"'{remote}'. Pass --branch to choose a different name."
+            )}
+
+    ahead = git_ops.get_commits_ahead(wt_branch, upstream, cwd=worktree_path)
+    if not ahead:
+        return {**base, "error": (
+            f"No commits on {wt_branch} ahead of {upstream} -- nothing to "
+            f"open a PR for."
+        )}
+
+    orig_sha = _rev(wt_branch, cwd=worktree_path)
+
+    # Record the transitional 'creating' state up front so a later failure is
+    # recoverable.
+    if record is not None:
+        record.pr = PRRecord(state="creating", branch=feature_branch, provider=prcfg.provider)
+        tracking.save_record(record)
+
+    # 1. Squash all worktree commits into one (always, regardless of strategy).
+    squash_msg = (record.title if record and record.title else None) \
+        or (eff_title if eff_title != worktree_id else f"{worktree_id} changes")
+    if len(ahead) > 1:
+        if not git_ops.squash_branch(upstream, squash_msg, cwd=worktree_path):
+            _rollback(worktree_path, wt_branch, orig_sha)
+            return {**base, "error": "Failed to squash worktree commits."}
+
+    # 2. Rebase the squashed commit onto the upstream default branch so the
+    #    feature branch is based on the latest master.
+    base_sha = ""
+    if git_ops.ref_exists(upstream, cwd=worktree_path):
+        if not git_ops.rebase(upstream, cwd=worktree_path):
+            _rollback(worktree_path, wt_branch, orig_sha)
+            return {**base, "error": (
+                f"Rebase onto {upstream} hit conflicts. Resolve them on "
+                f"'{wt_branch}' and retry create-pr."
+            )}
+        base_sha = _rev(upstream, cwd=worktree_path)
+
+    head_sha = _rev("HEAD", cwd=worktree_path)
+
+    # 3. Create (or move) the feature branch at the squashed work commit.
+    git_ops.git("branch", "-f", feature_branch, "HEAD", cwd=worktree_path, check=False)
+
+    # 4. Checkout the feature branch (worktree/{id} stays as the local base).
+    git_ops.checkout(feature_branch, cwd=worktree_path)
+
+    # 5. Reset the worktree base branch to the upstream tip -- it is a
+    #    local-only base that tracks master and is never pushed.
+    if base_sha:
+        git_ops.git("branch", "-f", wt_branch, upstream, cwd=worktree_path, check=False)
+
+    # 6. Push the feature branch.
+    if not git_ops.push(remote, feature_branch, cwd=worktree_path, force_with_lease=reusing):
+        return {**base, "error": (
+            f"Failed to push '{feature_branch}' to '{remote}'. The feature "
+            f"branch exists locally; tracking state left as 'creating' for "
+            f"retry (re-run create-pr)."
+        )}
+
+    # 7. Record the open state.
+    prev_url = record.pr.url if record and record.pr else ""
+    prev_num = record.pr.number if record and record.pr else None
+    if record is not None:
+        record.pr = PRRecord(
+            state="open", branch=feature_branch, base_sha=base_sha,
+            head_sha=head_sha, url=prev_url, number=prev_num,
+            provider=prcfg.provider,
+        )
+        tracking.save_record(record)
+
+    git_ops.delete_backup_ref(cwd=worktree_path)
+
+    return {
+        **base, "success": True, "state": "open",
+        "branch": feature_branch, "remote": remote,
+        "base_sha": base_sha, "head_sha": head_sha,
+        "provider": prcfg.provider, "default_branch": repo.default_branch,
+    }
+
+
+def _push_existing_feature(
+    worktree_path: str,
+    feature_branch: str,
+    remote: str,
+    repo,
+    prcfg,
+    record: tracking.WorktreeRecord | None,
+    base: dict,
+) -> dict:
+    """Re-run helper: push an already-created feature branch and record state."""
+    head_sha = _rev("HEAD", cwd=worktree_path)
+    if not git_ops.push(remote, feature_branch, cwd=worktree_path, force_with_lease=True):
+        return {**base, "error": (
+            f"Failed to (re)push '{feature_branch}' to '{remote}'."
+        )}
+    base_sha = record.pr.base_sha if record and record.pr else ""
+    prev_url = record.pr.url if record and record.pr else ""
+    prev_num = record.pr.number if record and record.pr else None
+    if record is not None:
+        record.pr = PRRecord(
+            state="open", branch=feature_branch, base_sha=base_sha,
+            head_sha=head_sha, url=prev_url, number=prev_num,
+            provider=prcfg.provider,
+        )
+        tracking.save_record(record)
+    return {
+        **base, "success": True, "state": "open", "rerun": True,
+        "branch": feature_branch, "remote": remote,
+        "base_sha": base_sha, "head_sha": head_sha,
+        "provider": prcfg.provider, "default_branch": repo.default_branch,
+    }

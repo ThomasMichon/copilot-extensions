@@ -62,6 +62,7 @@ from . import activity, git_ops, output, permissions, sessions, tracking
 from . import config as cfg
 from . import finalize as fin
 from . import installer as inst
+from . import pr_ops
 from . import services as svc
 from . import validate as val
 from .picker import ItemKind, MenuItem, pick
@@ -1844,6 +1845,75 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# create-pr
+# ═══════════════════════════════════════════════════════════════════════════
+
+def cmd_create_pr(args: argparse.Namespace) -> int:
+    """Squash worktree commits, create + push a feature branch for a PR.
+
+    The CLI owns the git operations only.  After this succeeds, the agent
+    delegates actual PR creation to the configured provider sub-agent
+    (``pr.provider``) and records the result via ``set-pr``.
+    """
+    use_json = getattr(args, "json", False)
+    if use_json:
+        ctx = output.stdout_to_stderr()
+        ctx.__enter__()
+    else:
+        ctx = None  # type: ignore[assignment]
+
+    try:
+        try:
+            config = cfg.load_config(Path(args.config) if args.config else None)
+        except Exception as e:
+            if use_json:
+                return _json_error(str(e))
+            raise
+        worktree_id = _infer_worktree_id(args.worktree_id, config)
+        if not worktree_id:
+            msg = (
+                "Could not determine worktree ID. Pass it explicitly "
+                "or run from inside a worktree."
+            )
+            if use_json:
+                return _json_error(msg)
+            output.err(msg)
+            return 1
+        worktree_id = _resolve_worktree_id(worktree_id)
+
+        result = pr_ops.create_pr(
+            worktree_id, config,
+            title=args.title,
+            branch=args.branch,
+            dry_run=args.dry_run,
+        )
+
+        if use_json:
+            _json_output(result)
+        elif result.get("success"):
+            branch = result.get("branch", "")
+            remote = result.get("remote", "")
+            provider = result.get("provider", "")
+            output.ok(f"Feature branch '{branch}' pushed to {remote}.")
+            print(
+                f"  base: {result.get('base_sha', '')[:10]}  "
+                f"head: {result.get('head_sha', '')[:10]}"
+            )
+            print(
+                f"Next: delegate PR creation to the '{provider}' provider, "
+                f"then record it with:\n"
+                f"  agent-worktrees set-pr {worktree_id} --url <URL> --number <N>"
+            )
+        else:
+            output.err(result.get("error", "create-pr failed."))
+
+        return 0 if result.get("success") else 1
+    finally:
+        if ctx is not None:
+            ctx.__exit__(None, None, None)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # mark-complete
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -3227,6 +3297,7 @@ _WORKTREE_VERBS = {
     "status": "status",
     "push": "push-changes",
     "push-changes": "push-changes",
+    "create-pr": "create-pr",
     "finalize": "finalize",
     "cleanup": "cleanup",
 }
@@ -3241,6 +3312,7 @@ def _worktree_usage() -> None:
     print("  list [--json]          List this project's worktrees", file=out)
     print("  status <id>            Show a worktree's git status", file=out)
     print("  push <id> [--title T]  Squash, rebase, and push to the default branch", file=out)
+    print("  create-pr [id] [--title T] [--branch B]  PR mode: squash + push a feature branch", file=out)
     print("  finalize [id]          Validate content on upstream and clean up", file=out)
     print("  cleanup                List and remove orphaned/finalized worktrees", file=out)
 
@@ -4243,6 +4315,21 @@ def build_parser() -> argparse.ArgumentParser:
                    help="JSON output mode (stdout is JSON only)")
     p.add_argument("--config", default=None)
 
+    # create-pr (PR-workflow: squash, create + push feature branch)
+    p = sub.add_parser(
+        "create-pr",
+        help="Squash worktree commits, create + push a feature branch for a PR",
+    )
+    p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("--title", default=None,
+                   help="Title for the squashed commit / PR slug")
+    p.add_argument("--branch", default=None,
+                   help="Override the generated feature branch name")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--json", action="store_true",
+                   help="JSON output mode (stdout is JSON only)")
+    p.add_argument("--config", default=None)
+
     # mark-complete (manual recovery only -- hidden from normal help)
     p = sub.add_parser(
         "mark-complete",
@@ -4614,6 +4701,7 @@ COMMAND_MAP = {
     "post-exit": cmd_post_exit,
     "finalize": cmd_finalize,
     "push-changes": cmd_push_changes,
+    "create-pr": cmd_create_pr,
     "mark-complete": cmd_mark_complete,
     "status": cmd_status,
     "list": cmd_list,
