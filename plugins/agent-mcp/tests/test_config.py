@@ -77,6 +77,111 @@ def test_unknown_auth_kind_rejected():
         parse_config(_http_doc(auth={"kind": "magic"}))
 
 
+def test_command_parses_request_and_args():
+    doc = {
+        "server": {"type": "stdio", "command": "npx"},
+        "auth": {
+            "kind": "command",
+            "command": "git-credential-vault",
+            "args": ["get"],
+            "request": {"protocol": "https", "host": "h"},
+            "parse": "keyvalue",
+            "field": "password",
+            "target_env": "API_KEY",
+        },
+    }
+    cfg = parse_config(doc)
+    assert cfg.auth.command == ["git-credential-vault", "get"]
+    assert cfg.auth.request == {"protocol": "https", "host": "h"}
+    assert cfg.auth.parse == "keyvalue"
+    assert cfg.auth.field_name == "password"
+
+
+def test_command_requires_command():
+    with pytest.raises(ConfigError) as exc:
+        parse_config({"server": {"type": "stdio", "command": "npx"},
+                      "auth": {"kind": "command"}})
+    assert "command" in str(exc.value)
+
+
+def test_command_invalid_parse_rejected():
+    with pytest.raises(ConfigError) as exc:
+        parse_config({"server": {"type": "stdio", "command": "npx"},
+                      "auth": {"kind": "command", "command": "vault", "parse": "xml"}})
+    assert "auth.parse" in str(exc.value)
+
+
+def test_auth_list_parses_to_extra_auths():
+    doc = {
+        "server": {"type": "stdio", "command": "npx"},
+        "auth": [
+            {"kind": "command", "command": ["vault", "get", "A", "password"],
+             "parse": "raw", "target_env": "PW"},
+            {"kind": "command", "command": ["vault", "get", "B", "password"],
+             "parse": "raw", "target_env": "KEY"},
+        ],
+    }
+    cfg = parse_config(doc)
+    assert len(cfg.auths) == 2
+    assert cfg.auth.target_env == "PW"
+    assert [a.target_env for a in cfg.auths] == ["PW", "KEY"]
+
+
+def test_auth_list_requires_target_env():
+    doc = {
+        "server": {"type": "stdio", "command": "npx"},
+        "auth": [
+            {"kind": "command", "command": ["vault", "get", "A", "password"],
+             "parse": "raw", "target_env": "PW"},
+            {"kind": "command", "command": ["vault", "get", "B", "password"],
+             "parse": "raw"},  # missing target_env
+        ],
+    }
+    with pytest.raises(ConfigError) as exc:
+        parse_config(doc)
+    assert "target_env" in str(exc.value)
+
+
+def test_auth_list_rejects_duplicate_target_env():
+    doc = {
+        "server": {"type": "stdio", "command": "npx"},
+        "auth": [
+            {"kind": "command", "command": ["vault", "get", "A", "password"],
+             "parse": "raw", "target_env": "SAME"},
+            {"kind": "command", "command": ["vault", "get", "B", "password"],
+             "parse": "raw", "target_env": "SAME"},
+        ],
+    }
+    with pytest.raises(ConfigError) as exc:
+        parse_config(doc)
+    assert "duplicate target_env" in str(exc.value)
+
+
+def test_empty_auth_list_is_none():
+    cfg = parse_config({"server": {"type": "stdio", "command": "npx"}, "auth": []})
+    assert len(cfg.auths) == 1
+    assert cfg.auth.kind == "none"
+
+
+def test_inject_mismatch_rejected_on_http():
+    with pytest.raises(ConfigError) as exc:
+        parse_config({"server": {"type": "http", "url": "u"},
+                      "auth": {"kind": "env", "value": "x", "inject": "env"}})
+    assert "not supported" in str(exc.value)
+
+
+def test_multi_auth_rejected_on_http():
+    with pytest.raises(ConfigError) as exc:
+        parse_config({
+            "server": {"type": "http", "url": "u"},
+            "auth": [
+                {"kind": "command", "command": "a", "parse": "raw", "target_env": "X"},
+                {"kind": "command", "command": "b", "parse": "raw", "target_env": "Y"},
+            ],
+        })
+    assert "stdio" in str(exc.value)
+
+
 def test_resolve_explicit_path(tmp_path):
     p = tmp_path / "x.yaml"
     p.write_text("server: {type: http, url: u}\n", encoding="utf-8")

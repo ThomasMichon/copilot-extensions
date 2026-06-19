@@ -9,4 +9,12 @@ overrides.
 
 from __future__ import annotations
 
-__version__ = "0.1.0-dev1"
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+
+try:
+    # Single source of truth: the installed package metadata (pyproject version),
+    # so `status` / `--version` never drift from the real version.
+    __version__ = _pkg_version("agent-mcp")
+except PackageNotFoundError:  # running from source without an install
+    __version__ = "0.0.0+unknown"

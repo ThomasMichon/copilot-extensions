@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from .base import AuthInjector, NoneInjector, TokenInjector
+from .base import AuthInjector, CompositeInjector, NoneInjector, TokenInjector
 from .injectors import (
+    CommandInjector,
     EntraInjector,
     EnvInjector,
     GhInjector,
@@ -14,6 +15,8 @@ from .injectors import (
 
 __all__ = [
     "AuthInjector",
+    "CommandInjector",
+    "CompositeInjector",
     "EntraInjector",
     "EnvInjector",
     "GhInjector",

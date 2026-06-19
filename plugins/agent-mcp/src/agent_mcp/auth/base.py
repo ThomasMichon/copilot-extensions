@@ -45,6 +45,36 @@ class NoneInjector(AuthInjector):
     name = "none"
 
 
+class CompositeInjector(AuthInjector):
+    """Merge several injectors -- e.g. inject two secrets into two env vars.
+
+    :meth:`headers` and :meth:`child_env` union the results of each wrapped
+    injector in order, so later entries win on a key collision. :meth:`invalidate`
+    fans out to every wrapped injector (so a 401 retry refreshes them all).
+    """
+
+    name = "composite"
+
+    def __init__(self, injectors: list[AuthInjector]) -> None:
+        self.injectors = injectors
+
+    async def headers(self) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for inj in self.injectors:
+            out.update(await inj.headers())
+        return out
+
+    async def child_env(self) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for inj in self.injectors:
+            out.update(await inj.child_env())
+        return out
+
+    async def invalidate(self) -> None:
+        for inj in self.injectors:
+            await inj.invalidate()
+
+
 class TokenInjector(AuthInjector, abc.ABC):
     """Base for single-bearer-token injectors.
 

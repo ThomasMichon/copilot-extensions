@@ -236,17 +236,20 @@ Write-Ok 'Package installed: agent-mcp'
 
 $stubName = 'agent-mcp'
 if ($env:OS -eq 'Windows_NT') {
-    # Primary .ps1 (PowerShell prefers it over the .cmd in the same dir; @args
-    # forwards argv verbatim so quoting/&&/|/;/! survive). The .cmd is kept as a
-    # fallback for non-PowerShell callers. Both launch the signed venv python
-    # via -m, never the SAC-blocked console-script trampoline .exe.
+    # Single .cmd binstub (npx / uv parity) -- and NO .ps1.
+    #
+    # Unlike the sibling plugins (CLIs invoked interactively, where a .ps1 wins
+    # PowerShell's command discovery and forwards argv verbatim), agent-mcp is
+    # spawned by Copilot as a stdio MCP server via a bare `command: agent-mcp`.
+    # PowerShell prefers a same-named .ps1 over a .cmd, but a .ps1 shim does not
+    # reliably stream stdin into the child python the way an stdio MCP requires.
+    # A .cmd forwards stdin verbatim and is what `where`/PATHEXT resolution and
+    # (absent a .ps1) PowerShell both pick. So ship ONLY the .cmd, and remove any
+    # stale .ps1 from earlier installs so it can't shadow the .cmd. The .cmd
+    # launches the signed venv python via -m, never the SAC-blocked console-script
+    # trampoline .exe.
     $ps1Path = Join-Path $LocalBin "$stubName.ps1"
-    $ps1Content = @'
-$env:PYTHONUTF8 = '1'
-& "$env:USERPROFILE\.agent-mcp\.venv\Scripts\python.exe" -m agent_mcp @args
-exit $LASTEXITCODE
-'@
-    [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
+    if (Test-Path $ps1Path) { Remove-Item $ps1Path -Force -ErrorAction SilentlyContinue }
 
     $stubPath = Join-Path $LocalBin "$stubName.cmd"
     $stubContent = @"
@@ -255,7 +258,6 @@ set "PYTHONUTF8=1"
 "%USERPROFILE%\.agent-mcp\.venv\Scripts\python.exe" -m agent_mcp %*
 "@
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
-    $stubPath = "$ps1Path (+ .cmd fallback)"
 } else {
     $stubPath = Join-Path $LocalBin $stubName
     $stubContent = @"

@@ -27,10 +27,17 @@ import yaml
 TRANSPORTS = ("http", "stdio")
 
 # Auth injector kinds. ``az`` is an alias for ``entra``; ``static`` for ``env``.
-AUTH_KINDS = ("entra", "az", "gh", "git-credential", "env", "static", "none")
+AUTH_KINDS = (
+    "entra", "az", "gh", "git-credential", "command", "env", "static", "none",
+)
 
 # Where token credentials are injected.
 INJECT_MODES = ("header", "env")
+
+# How a ``command`` source's stdout is interpreted.
+#   ``keyvalue`` -- git-credential ``key=value`` text; extract ``field``.
+#   ``raw``      -- the whole trimmed stdout is the secret verbatim.
+PARSE_MODES = ("keyvalue", "raw")
 
 BRIDGES_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp")) / "bridges"
 
@@ -63,6 +70,11 @@ class AuthSpec:
     # env/static
     source_env: str | None = None
     value: str | None = None
+    # command (run an external git-credential-fill-shaped command)
+    command: list[str] = field(default_factory=list)
+    request: dict[str, str] = field(default_factory=dict)
+    parse: str = "keyvalue"
+    field_name: str | None = None  # which output key to extract (keyvalue mode)
     # injection
     inject: str | None = None  # defaults per transport in resolve_inject()
     header: str = "Authorization"
@@ -109,6 +121,15 @@ class BridgeConfig:
     retries: int = 1
     name: str | None = None
     source_path: Path | None = None
+    # Additional auth injectors beyond ``auth`` (the first). Populated when the
+    # config's ``auth`` is a *list* -- e.g. a bridge that must inject two
+    # vault-sourced secrets into two env vars. Empty for the single-auth form.
+    extra_auths: list[AuthSpec] = field(default_factory=list)
+
+    @property
+    def auths(self) -> list[AuthSpec]:
+        """All auth injectors for this bridge, in order (``auth`` first)."""
+        return [self.auth, *self.extra_auths]
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +182,30 @@ def _as_command(value: Any) -> list[str]:
     raise ConfigError("server.command must be a string or a list")
 
 
+def _parse_auth_spec(raw_auth: dict[str, Any]) -> AuthSpec:
+    """Build one :class:`AuthSpec` from a parsed ``auth`` mapping."""
+    if not isinstance(raw_auth, dict):
+        raise ConfigError("each 'auth' entry must be a mapping")
+    return AuthSpec(
+        kind=str(raw_auth.get("kind", "none")),
+        resource=raw_auth.get("resource"),
+        scope=raw_auth.get("scope"),
+        tenant=raw_auth.get("tenant"),
+        source_env=raw_auth.get("source_env"),
+        value=raw_auth.get("value"),
+        command=_as_command(raw_auth.get("command")) + [
+            str(a) for a in raw_auth.get("args", [])
+        ],
+        request={str(k): str(v) for k, v in (raw_auth.get("request") or {}).items()},
+        parse=str(raw_auth.get("parse", "keyvalue")),
+        field_name=raw_auth.get("field"),
+        inject=raw_auth.get("inject"),
+        header=str(raw_auth.get("header", "Authorization")),
+        format=str(raw_auth.get("format", "Bearer {token}")),
+        target_env=raw_auth.get("target_env"),
+    )
+
+
 def parse_config(data: dict[str, Any], *, name: str | None = None,
                  source_path: Path | None = None) -> BridgeConfig:
     """Build a :class:`BridgeConfig` from a parsed mapping (no I/O)."""
@@ -177,21 +222,23 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
         env={str(k): str(v) for k, v in (raw_server.get("env") or {}).items()},
     )
 
-    raw_auth = data.get("auth") or {"kind": "none"}
-    if not isinstance(raw_auth, dict):
-        raise ConfigError("'auth' must be a mapping")
-    auth = AuthSpec(
-        kind=str(raw_auth.get("kind", "none")),
-        resource=raw_auth.get("resource"),
-        scope=raw_auth.get("scope"),
-        tenant=raw_auth.get("tenant"),
-        source_env=raw_auth.get("source_env"),
-        value=raw_auth.get("value"),
-        inject=raw_auth.get("inject"),
-        header=str(raw_auth.get("header", "Authorization")),
-        format=str(raw_auth.get("format", "Bearer {token}")),
-        target_env=raw_auth.get("target_env"),
-    )
+    # ``auth`` may be a single mapping (one injector) or a list of mappings
+    # (several secrets injected into the same bridge child, e.g. a password and
+    # an API key into two env vars). An absent ``auth`` means no injection.
+    raw_auth = data.get("auth")
+    if raw_auth is None:
+        auth_specs = [AuthSpec(kind="none")]
+    elif isinstance(raw_auth, list):
+        if not raw_auth:
+            auth_specs = [AuthSpec(kind="none")]
+        else:
+            auth_specs = [_parse_auth_spec(a) for a in raw_auth]
+    elif isinstance(raw_auth, dict):
+        auth_specs = [_parse_auth_spec(raw_auth)]
+    else:
+        raise ConfigError("'auth' must be a mapping or a list of mappings")
+    auth = auth_specs[0]
+    extra_auths = auth_specs[1:]
 
     raw_tools = data.get("tools") or {}
     tools = ToolFilter(
@@ -208,6 +255,7 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
         retries=int(data.get("retries", 1)),
         name=name,
         source_path=source_path,
+        extra_auths=extra_auths,
     )
     errors = validate_config(cfg)
     if errors:
@@ -240,17 +288,60 @@ def validate_config(cfg: BridgeConfig) -> list[str]:
     if s.type == "stdio" and not s.command:
         errors.append("server.command is required for transport 'stdio'")
 
-    a = cfg.auth
-    if a.kind not in AUTH_KINDS:
-        errors.append(f"auth.kind '{a.kind}' must be one of {AUTH_KINDS}")
-    if a.inject and a.inject not in INJECT_MODES:
-        errors.append(f"auth.inject '{a.inject}' must be one of {INJECT_MODES}")
+    # The bridge injects via the transport's native mechanism: header for http,
+    # env for stdio. ``inject`` is parsed but the transport ultimately decides, so
+    # reject an explicit value that contradicts the transport rather than silently
+    # ignoring it.
+    native_inject = "header" if cfg.server.type == "http" else "env"
 
-    kind = a.normalized_kind
-    if kind == "entra" and not (a.resource or a.scope):
-        errors.append("auth: entra/az requires 'resource' or 'scope'")
-    if kind == "env" and not (a.source_env or a.value):
-        errors.append("auth: env/static requires 'source_env' or 'value'")
+    for idx, a in enumerate(cfg.auths):
+        label = "auth" if len(cfg.auths) == 1 else f"auth[{idx}]"
+        if a.kind not in AUTH_KINDS:
+            errors.append(f"{label}.kind '{a.kind}' must be one of {AUTH_KINDS}")
+        if a.inject and a.inject not in INJECT_MODES:
+            errors.append(f"{label}.inject '{a.inject}' must be one of {INJECT_MODES}")
+        elif a.inject and a.inject != native_inject:
+            errors.append(
+                f"{label}.inject '{a.inject}' is not supported for "
+                f"'{cfg.server.type}' transport (it injects via '{native_inject}')"
+            )
+
+        kind = a.normalized_kind
+        if kind == "entra" and not (a.resource or a.scope):
+            errors.append(f"{label}: entra/az requires 'resource' or 'scope'")
+        if kind == "env" and not (a.source_env or a.value):
+            errors.append(f"{label}: env/static requires 'source_env' or 'value'")
+        if kind == "command":
+            if not a.command:
+                errors.append(f"{label}: command requires 'command'")
+            if a.parse not in PARSE_MODES:
+                errors.append(f"{label}.parse '{a.parse}' must be one of {PARSE_MODES}")
+
+    # Multiple auths compose only cleanly over stdio, where each targets a
+    # distinct env var. Over http they would all write the same header (default
+    # Authorization) and silently clobber, so restrict the list form to stdio and
+    # require a distinct target_env per injector.
+    if len(cfg.auths) > 1:
+        if cfg.server.type != "stdio":
+            errors.append(
+                "auth: a list of injectors is supported for 'stdio' transport "
+                "only (each must inject a distinct env var); use a single auth "
+                f"for '{cfg.server.type}'"
+            )
+        targets: list[str] = []
+        for idx, a in enumerate(cfg.auths):
+            if a.normalized_kind == "none":
+                continue
+            if not a.target_env:
+                errors.append(
+                    f"auth[{idx}]: 'target_env' is required when 'auth' is a list "
+                    "(multiple injectors must each target a distinct env var)"
+                )
+            else:
+                targets.append(a.target_env)
+        dupes = sorted({t for t in targets if targets.count(t) > 1})
+        if dupes:
+            errors.append(f"auth: duplicate target_env across injectors: {dupes}")
 
     if cfg.tools.allow and cfg.tools.deny:
         errors.append("tools: set either 'allow' or 'deny', not both")
