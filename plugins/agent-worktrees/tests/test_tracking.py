@@ -88,6 +88,51 @@ class TestSaveLoadRoundTrip:
         loaded = load_record(path)
         assert loaded.handoff_prompt == "/tmp/handoff.md"
 
+    def test_pr_absent_round_trips_as_none(self, tmp_path: Path):
+        rec = self._make_record()
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        assert "pr:" not in path.read_text()
+        loaded = load_record(path)
+        assert loaded.pr is None
+
+    def test_pr_record_round_trip(self, tmp_path: Path):
+        from agent_worktrees.tracking import PRRecord
+
+        rec = self._make_record(
+            pr=PRRecord(
+                state="open",
+                branch="feature/fix-auth-abc123",
+                base_sha="abc123",
+                head_sha="def456",
+                url="https://example/pulls/42",
+                number=42,
+                provider="gitea",
+            )
+        )
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        loaded = load_record(path)
+        assert loaded.pr is not None
+        assert loaded.pr.state == "open"
+        assert loaded.pr.branch == "feature/fix-auth-abc123"
+        assert loaded.pr.base_sha == "abc123"
+        assert loaded.pr.head_sha == "def456"
+        assert loaded.pr.url == "https://example/pulls/42"
+        assert loaded.pr.number == 42
+        assert loaded.pr.provider == "gitea"
+
+    def test_pr_record_number_optional(self, tmp_path: Path):
+        from agent_worktrees.tracking import PRRecord
+
+        rec = self._make_record(pr=PRRecord(state="creating", branch="feature/x"))
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        loaded = load_record(path)
+        assert loaded.pr is not None
+        assert loaded.pr.state == "creating"
+        assert loaded.pr.number is None
+
 
 # ---------------------------------------------------------------------------
 # Session registry — three-state semantics
