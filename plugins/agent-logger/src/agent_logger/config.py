@@ -35,9 +35,15 @@ DEFAULTS: dict[str, Any] = {
     },
     # Log writer presentation.
     "log": {
-        # Path template for emitted logs. Tokens: {year} {month} {day}
-        # {hhmmss} {machine} {title}. Neutral default groups by date.
+        # Root directory under which logs are written. None = current
+        # working directory (the repo the user is in).
+        "root": None,
+        # Path template for emitted logs, relative to root. Tokens:
+        # {year} {month} {day} {hhmmss} {machine} {title}. Neutral default
+        # groups by date and omits machine.
         "path_template": "{year}/{month}/{day} {hhmmss} {title}.md",
+        # IANA timezone for log timestamps. None = system local time.
+        "timezone": None,
         # Name of the voice pack (a skills directory). "none" = no persona.
         "voice_pack": "none",
         # Marker that flags operator-highlighted session notes.
@@ -114,6 +120,17 @@ class Config:
     @property
     def log_path_template(self) -> str:
         return self._data.get("log", {}).get("path_template", DEFAULTS["log"]["path_template"])
+
+    @property
+    def log_root(self) -> Path:
+        configured = self._data.get("log", {}).get("root")
+        if configured:
+            return Path(configured).expanduser()
+        return Path.cwd()
+
+    @property
+    def log_timezone(self) -> str | None:
+        return self._data.get("log", {}).get("timezone")
 
     @property
     def voice_pack(self) -> str:

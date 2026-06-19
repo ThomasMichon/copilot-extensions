@@ -31,7 +31,14 @@ line-length = 99
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
-ignore = ["S603"]  # subprocess calls to git/copilot CLIs are intentional
+ignore = [
+    "S603",  # subprocess calls to git/copilot CLIs are intentional
+    "S108",  # /tmp fallback is an intentional cross-platform default
+    "S110",  # best-effort file reads intentionally swallow errors
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # asserts are expected in pytest
 
 [project.optional-dependencies]
 dev = [
