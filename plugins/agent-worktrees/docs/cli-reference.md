@@ -81,6 +81,24 @@ continue to work unchanged.
 | `handoff` | Manage handoff prompt state on a worktree |
 
 
+## Keeping worktrees current
+
+The picker keeps idle worktrees aligned with the default branch, fast-forward
+only -- it never rebases, merges, or discards local commits.
+
+- **Inline sync status.** Each worktree row shows its relationship to the
+  default branch: `↓N` (behind by N, i.e. stale), `↑N` (ahead by N local
+  commits), or `↑A↓B` (diverged). Aligned worktrees show nothing.
+- **Auto-fast-forward on resume.** Resuming a *clean* worktree that is
+  strictly behind upstream fast-forwards it before the session and setup
+  script run, so they see an up-to-date tree. A worktree with uncommitted
+  changes or local commits (ahead/diverged) is left untouched. Disable
+  per-invocation with `--no-fast-forward`, or globally with
+  `auto_fast_forward: false` in `config.yaml`.
+- **System menu -> Update stale worktrees.** Fetches once, then fast-forwards
+  a single selected eligible worktree or all eligible worktrees in a batch.
+  Only clean, strictly-behind worktrees with no local commits are eligible.
+
 ## Installation & Config
 
 | Subcommand | Description |
@@ -202,6 +220,7 @@ srcroot: C:\Data\Src              # or ~/src on Linux
 machine: my-machine
 platform: windows                 # windows | wsl | linux
 repo_name: my-project
+auto_fast_forward: true           # auto-FF a stale clean worktree on resume (default true)
 
 repos:
   my-project:

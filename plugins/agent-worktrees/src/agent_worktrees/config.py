@@ -92,6 +92,12 @@ class Config:
     invocation lists worktrees instead of launching an interactive Copilot
     session. Used to control external repos (e.g. copilot-extensions) whose
     worktree lifecycle is managed from another project's session."""
+    auto_fast_forward: bool = True
+    """When true (the default), resuming a clean worktree that is strictly
+    behind its upstream default branch fast-forwards it before launch, so
+    the session and setup script see an up-to-date tree.  Only ever a
+    fast-forward (clean + no local commits ahead); dirty/ahead/diverged
+    worktrees are left untouched.  Set false to opt out of auto-update."""
 
     @property
     def default_repo(self) -> RepoConfig:
@@ -419,6 +425,7 @@ def load_config(path: Path | None = None) -> Config:
         repos=repos,
         copilot_profiles=_parse_profiles(raw.get("copilot_profiles", [])),
         headless=bool(raw.get("headless", False)),
+        auto_fast_forward=bool(raw.get("auto_fast_forward", True)),
     )
 
 

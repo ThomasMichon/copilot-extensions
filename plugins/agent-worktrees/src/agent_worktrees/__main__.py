@@ -58,11 +58,10 @@ from pathlib import Path
 
 import yaml
 
-from . import activity, git_ops, output, permissions, sessions, tracking
+from . import activity, git_ops, output, permissions, pr_ops, sessions, tracking
 from . import config as cfg
 from . import finalize as fin
 from . import installer as inst
-from . import pr_ops
 from . import services as svc
 from . import validate as val
 from .picker import ItemKind, MenuItem, pick
@@ -769,6 +768,17 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 if info.branch_drift and info.current_branch:
                     drift_tag = f" ⚠ {info.current_branch}"
 
+                # Inline sync status vs the default branch: ↑ahead / ↓behind.
+                # Surfaces stale worktrees (↓N) at a glance so they can be
+                # updated before resuming.  Counts reflect the last fetch.
+                sync_tag = ""
+                if info.ahead and info.behind:
+                    sync_tag = f" ↑{info.ahead}↓{info.behind}"
+                elif info.behind:
+                    sync_tag = f" ↓{info.behind}"
+                elif info.ahead:
+                    sync_tag = f" ↑{info.ahead}"
+
                 state_tag = (
                     f" [{info.state.value}]"
                     if info.state in (
@@ -778,7 +788,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                     else ""
                 )
                 short_id = rec.worktree_id[-4:] if len(rec.worktree_id) > 4 else rec.worktree_id
-                return f"{icon} …{short_id}  ({age}{resume}){tag}{drift_tag}{state_tag}"
+                return f"{icon} …{short_id}  ({age}{resume}){tag}{drift_tag}{sync_tag}{state_tag}"
 
             def _wt_subtitle(
                 rec: tracking.WorktreeRecord,
@@ -969,6 +979,7 @@ def _run_system_menu(config: cfg.Config, args: argparse.Namespace) -> int | None
     """
     system_items = [
         MenuItem(label="🧹 Cleanup worktrees", kind=ItemKind.ACTION, value="cleanup"),
+        MenuItem(label="⬆ Update stale worktrees", kind=ItemKind.ACTION, value="update"),
         MenuItem(label="📊 Worktree status", kind=ItemKind.ACTION, value="status"),
         MenuItem(label="", kind=ItemKind.SEPARATOR),
         MenuItem(label="↩ Back to picker", kind=ItemKind.ACTION, value="back"),
@@ -990,6 +1001,9 @@ def _run_system_menu(config: cfg.Config, args: argparse.Namespace) -> int | None
 
     if action == "cleanup":
         return _system_cleanup(config)
+
+    if action == "update":
+        return _system_update(config)
 
     if action == "status":
         return _system_status(config)
@@ -1166,6 +1180,122 @@ def _system_cleanup(config: cfg.Config) -> int | None:
     # Show result briefly in a picker-style pause
     _system_pause("Cleanup complete.")
     return None
+
+
+def _system_update(config: cfg.Config) -> int | None:
+    """Fast-forward stale worktrees to the default branch (FF-only).
+
+    Fetches once, then offers a single-worktree update or an "update all
+    eligible" batch.  Only clean worktrees that are strictly behind with no
+    local commits are eligible; dirty/ahead/diverged worktrees are never
+    touched and never fast-forwarded.
+    """
+    repo = config.default_repo
+    tracking_path = cfg.tracking_dir()
+    records = tracking.list_records(
+        tracking_path, status_filter="active",
+        platform_filter=cfg.detect_platform(),
+    )
+    records = [r for r in records if r.worktree_path and Path(r.worktree_path).exists()]
+
+    if not records:
+        _system_pause("No tracked worktrees.")
+        return None
+
+    # One fetch refreshes the shared upstream ref for every worktree of this
+    # repo, so per-worktree classification can run with fetch=False.
+    if git_ops.has_remote(repo.remote, cwd=repo.anchor):
+        try:
+            git_ops.fetch(repo.remote, cwd=repo.anchor)
+        except Exception:
+            pass
+
+    active_paths = _build_active_paths(records)
+
+    eligible: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo]] = []
+    for rec in records:
+        info = git_ops.classify_worktree(
+            rec.worktree_path, rec.branch,
+            fetch=False, remote=repo.remote, default_branch=repo.default_branch,
+            active_paths=active_paths,
+        )
+        info = _apply_tracking_override(rec, info)
+        # Never auto-update a worktree with a live session under it.
+        if info.state == git_ops.WorktreeState.ACTIVE:
+            continue
+        if git_ops.can_fast_forward(info):
+            eligible.append((rec, info))
+
+    if not eligible:
+        _system_pause("All worktrees are up to date.")
+        return None
+
+    # Build the update picker: "update all" + one row per eligible worktree.
+    while True:
+        update_items: list[MenuItem] = [
+            MenuItem(
+                label=f"⬆ Update all ({len(eligible)} eligible)",
+                kind=ItemKind.ACTION, value="all",
+            ),
+            MenuItem(label="", kind=ItemKind.SEPARATOR),
+        ]
+        index_map: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo]] = []
+        for rec, info in eligible:
+            short_id = rec.worktree_id[-4:] if len(rec.worktree_id) > 4 else rec.worktree_id
+            update_items.append(MenuItem(
+                label=f"⬜ …{short_id}  ↓{info.behind}",
+                subtitle=_age_str(rec.started_at) + " old",
+                kind=ItemKind.NORMAL, value=len(index_map),
+            ))
+            index_map.append((rec, info))
+
+        update_items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
+        update_items.append(MenuItem(label="↩ Back", kind=ItemKind.ACTION, value="back"))
+
+        result = pick(
+            update_items,
+            title=f"⬆ {config.repo_name.replace('-', ' ').title()} -- Update Worktrees",
+            subtitle="Use ↑↓, Enter to fast-forward, Esc back",
+            default=0,
+        )
+
+        if result.selected < 0:
+            return None
+
+        choice = update_items[result.selected].value
+        if choice == "back":
+            return None
+
+        if choice == "all":
+            targets = list(eligible)
+        else:
+            targets = [index_map[choice]]  # type: ignore[index]
+
+        updated = 0
+        skipped = 0
+        for rec, _info in targets:
+            ff = git_ops.fast_forward_worktree(
+                rec.worktree_path,
+                remote=repo.remote,
+                default_branch=repo.default_branch,
+                do_fetch=False,  # already fetched once above
+            )
+            if ff.updated:
+                updated += 1
+            else:
+                skipped += 1
+
+        # Drop the just-updated worktrees from the eligible set.
+        done_paths = {r.worktree_path for r, _ in targets}
+        eligible = [(r, i) for r, i in eligible if r.worktree_path not in done_paths]
+
+        msg = f"Fast-forwarded {updated} worktree{'s' if updated != 1 else ''}"
+        if skipped:
+            msg += f", skipped {skipped}"
+        if not eligible:
+            _system_pause(msg + ". All up to date.")
+            return None
+        _system_pause(msg + ".")
 
 
 def _system_status(config: cfg.Config) -> int | None:
@@ -1431,6 +1561,32 @@ def _resolve_resume(
         branch=record.branch,
         resume_count=record.resume_count,
     )
+
+    # Auto-fast-forward a stale-but-clean worktree before launch so the
+    # session (and any setup script) sees an up-to-date tree.  This is a
+    # fast-forward only -- a worktree with local commits or uncommitted
+    # changes is never touched.  Skipped under --dry-run, when the
+    # auto_fast_forward config flag is off, or with --no-fast-forward.
+    if (
+        not args.dry_run
+        and getattr(config, "auto_fast_forward", True)
+        and not getattr(args, "no_fast_forward", False)
+    ):
+        repo = config.default_repo
+        ff = git_ops.fast_forward_worktree(
+            record.worktree_path,
+            remote=repo.remote,
+            default_branch=repo.default_branch,
+            do_fetch=True,
+        )
+        if ff.updated:
+            plural = "s" if ff.behind != 1 else ""
+            print(
+                f"   ⬆ Fast-forwarded {ff.behind} commit{plural} to "
+                f"{repo.remote}/{repo.default_branch}"
+            )
+        elif ff.reason in ("ahead", "diverged"):
+            print(f"   ⚠ Local commits present -- skipping auto-update ({ff.reason})")
 
     launch_cmd = _build_launch_cmd(config, args, record.worktree_path, profile=profile)
     merged_env = _build_env(profile)
@@ -3406,7 +3562,9 @@ def _worktree_usage() -> None:
     print("  list [--json]          List this project's worktrees", file=out)
     print("  status <id>            Show a worktree's git status", file=out)
     print("  push <id> [--title T]  Squash, rebase, and push to the default branch", file=out)
-    print("  create-pr [id] [--title T] [--branch B]  PR mode: squash + push a feature branch", file=out)
+    print(
+        "  create-pr [id] [--title T] [--branch B]  "
+        "PR mode: squash + push a feature branch", file=out)
     print("  finalize [id]          Validate content on upstream and clean up", file=out)
     print("  cleanup                List and remove orphaned/finalized worktrees", file=out)
 
@@ -4371,6 +4529,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Don't auto-resume the last Copilot session")
     p.add_argument("--no-mux", action="store_true",
                    help="Bypass tmux/psmux multiplexer (launch directly)")
+    p.add_argument("--no-fast-forward", action="store_true",
+                   help="Don't auto-fast-forward a stale clean worktree on resume")
     p.add_argument("--json", action="store_true",
                    help="Non-interactive JSON mode (requires --worktree-id)")
     p.add_argument("--worktree-id", default=None,
@@ -4391,7 +4551,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("worktree_id", nargs="?", default=None)
 
     # finalize
-    p = sub.add_parser("finalize", help="Validate the branch's content is on upstream; prune the worktree only when idle")
+    p = sub.add_parser(
+        "finalize",
+        help="Validate the branch's content is on upstream; prune the worktree only when idle",
+    )
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true",
