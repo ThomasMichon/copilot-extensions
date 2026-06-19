@@ -33,16 +33,19 @@ from . import git_ops
 HOOK_NAMES = ("pre-commit", "pre-push")
 
 # A POSIX-sh shim. Git ships sh on Windows too, so #!/bin/sh works on every
-# platform. It no-ops unless hooks are explicitly enabled, then delegates to
-# the Python handler. A pre-existing hook (saved as <name>.local) runs after.
+# platform. The PR-workflow guard runs only when hooks are explicitly enabled;
+# a pre-existing hook (saved as <name>.local) ALWAYS runs afterward so wrapping
+# never disables a repo's own hook.
 _SHIM_TEMPLATE = (
     "#!/bin/sh\n"
     "# agent-worktrees PR-workflow hook shim -- managed; do not edit.\n"
-    '[ "$AGENT_WORKTREES_HOOKS" = "1" ] || exit 0\n'
-    'agent-worktrees hook {name} "$@" || exit $?\n'
+    'if [ "$AGENT_WORKTREES_HOOKS" = "1" ]; then\n'
+    '  agent-worktrees hook {name} "$@" || exit $?\n'
+    "fi\n"
     'if [ -x "$(dirname "$0")/{name}.local" ]; then\n'
     '  exec "$(dirname "$0")/{name}.local" "$@"\n'
     "fi\n"
+    "exit 0\n"
 )
 
 _SHIM_MARKER = "agent-worktrees PR-workflow hook shim"

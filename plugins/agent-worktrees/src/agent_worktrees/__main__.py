@@ -2698,14 +2698,17 @@ def cmd_install(args: argparse.Namespace) -> int:
     inst.write_deploy_manifest(repo_dir, machine)
 
     # Install PR-workflow git hook shims into the anchor's shared hooks dir.
-    # Inert unless AGENT_WORKTREES_HOOKS=1 (and pre-push only acts in PR mode).
+    # Gated on PR mode so deploying to a direct-push repo never touches its
+    # hooks. Inert unless AGENT_WORKTREES_HOOKS=1 even when installed.
     try:
-        from . import hooks as _hooks
-        installed_hooks = _hooks.install_hooks(repo_dir)
-        if installed_hooks:
-            output.ok(
-                f"PR-workflow git hooks installed ({', '.join(installed_hooks)})"
-            )
+        cfg_for_hooks = cfg.load_config(config_path)
+        if cfg_for_hooks.default_repo.pr.enabled:
+            from . import hooks as _hooks
+            installed_hooks = _hooks.install_hooks(repo_dir)
+            if installed_hooks:
+                output.ok(
+                    f"PR-workflow git hooks installed ({', '.join(installed_hooks)})"
+                )
     except Exception as e:
         output.warn(f"Could not install git hooks: {e}")
 
