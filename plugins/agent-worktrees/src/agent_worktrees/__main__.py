@@ -542,6 +542,22 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         args.no_mux = True
 
     with output.stdout_to_stderr():
+        # Base-repo (no-worktree) projects resolve against the anchor directly,
+        # regardless of --json/--new/--worktree-id. Configured via
+        # repos.<name>.base_repo in the user-local ~/.<project>/config.yaml
+        # overlay, so repos that can't support worktrees (e.g. an enlistment
+        # monorepo) can still back an agent-bridge ACP agent without writing any
+        # config into the repo. Any config/lookup failure falls through to the
+        # normal worktree flow unchanged.
+        try:
+            _base_cfg = cfg.load_config()
+            _is_base_repo = _base_cfg.default_repo.base_repo
+        except Exception:
+            _base_cfg, _is_base_repo = None, False
+        if _is_base_repo and _base_cfg is not None:
+            base_profile = _resolve_profile(_base_cfg, args)
+            return _resolve_base_repo(_base_cfg, args, profile=base_profile)
+
         if use_base:
             try:
                 config = cfg.load_config()
@@ -1511,7 +1527,7 @@ def _resolve_base_repo(
     output.warn("Commits will go directly to the current branch.")
     print()
 
-    dirty = git_ops.get_dirty_files(repo.anchor)
+    dirty = git_ops.get_dirty_files(repo.anchor) if sys.stdin.isatty() else []
     if dirty:
         output.warn(f"Anchor repo has {len(dirty)} uncommitted change(s):")
         for f in dirty[:5]:
@@ -3060,6 +3076,8 @@ def cmd_register(args: argparse.Namespace) -> int:
         repo_dir=repo_dir,
         default_branch=default_branch,
         expose_agent=expose_agent,
+        base_repo=getattr(args, "base_repo", False),
+        elevated=getattr(args, "elevated", False),
         wsl_state=wsl_state,
         wsl_distro=wsl_distro,
         wsl_path=wsl_path,
@@ -4676,6 +4694,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--agent", action="store_true",
                    help="Force exposing an agent-bridge agent (overrides a "
                         "repos.yaml agent:false classification).")
+    p.add_argument("--base-repo", action="store_true",
+                   help="Adopt in base-repo (no-worktree) mode: the anchor "
+                        "checkout is used directly and no worktree is created. "
+                        "For repos that can't support worktrees (e.g. an "
+                        "enlistment monorepo). Also set repos.<name>.base_repo "
+                        "in the user-local ~/.<project>/config.yaml.")
+    p.add_argument("--elevated", action="store_true",
+                   help="Record that agent-bridge should run this project's "
+                        "agent in an elevated (admin) context.")
 
     # uninstall
     p = sub.add_parser("uninstall", help="Remove worktree manager")

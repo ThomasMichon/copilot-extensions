@@ -75,6 +75,13 @@ class RepoConfig:
     service_paths: list[str] = field(default_factory=list)
     post_install_hook: dict[str, list[str]] = field(default_factory=dict)
     pr: PRConfig = field(default_factory=PRConfig)
+    base_repo: bool = False
+    """When true, this repo is driven in **base-repo (no-worktree)** mode: the
+    anchor checkout is used directly and no worktree is ever created. Used to
+    adopt repos that do not support worktrees (e.g. an enlistment-based monorepo)
+    so agent-bridge can launch an ACP agent against the anchor via a custom
+    ``launch`` command. Configured entirely from the user-local
+    ``~/.<project>/config.yaml`` overlay -- nothing is written into the repo."""
 
 
 @dataclass(frozen=True)
@@ -411,6 +418,7 @@ def load_config(path: Path | None = None) -> Config:
                 service_paths=service_paths,
                 post_install_hook=post_install_hook,
                 pr=pr_cfg,
+                base_repo=bool(repo_data.get("base_repo", False)),
             )
 
     repo_name = raw.get("repo_name")
