@@ -29,6 +29,7 @@ Usage (direct):
     agent-worktrees repos find <name>
     agent-worktrees repos srcroot [--set PATH] [--platform P]
     agent-worktrees pre-launch
+    agent-worktrees reconcile-plugins [--machine M]
 
 JSON mode (--json):
     stdout is machine-parseable JSON only, stderr is log output only.
@@ -4741,6 +4742,15 @@ def build_parser() -> argparse.ArgumentParser:
     # pre-launch (two-pass self-update protocol)
     sub.add_parser("pre-launch", help="Check bootstrap staleness (JSON output)")
 
+    # reconcile-plugins (repo-configured plugin payload + runtime reconcile)
+    sp = sub.add_parser(
+        "reconcile-plugins",
+        help="Reconcile repo enabledPlugins payloads + gated runtimes (JSON)")
+    sp.add_argument("--machine", default=None,
+                    help="Machine name (auto-detected from hostname if omitted)")
+    sp.add_argument("--repo", default=None,
+                    help="Repo path to reconcile (defaults to the resolved anchor)")
+
     # dev (repo development tooling)
     sp = sub.add_parser("dev", help="Dev venv and test runner")
     sp.add_argument("dev_action", nargs="?", default="status",
@@ -4971,6 +4981,36 @@ def cmd_backfill_sessions(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
+    """Reconcile repo-configured copilot-extensions plugins (JSON action plan).
+
+    Reads the anchor repo's ``.github/copilot/settings.json`` ``enabledPlugins``
+    and emits a declarative action plan (same shape as ``pre-launch``): ensure
+    each plugin's payload is installed, and its runtime is deployed per the
+    plugin's ``runtimeScope`` + facility machine gate. The launcher executes the
+    ``argv`` vectors and re-invokes for a second pass (payload, then runtime).
+
+    Never fails the launch: any error degrades to ``{"action": "continue"}``.
+    """
+    from . import reconcile
+
+    repo_override = getattr(args, "repo", None)
+    repo_dir = repo_override or _find_repo_dir()
+    if not repo_dir:
+        print(json.dumps({"action": "continue", "reason": "no-repo"}))
+        return 0
+
+    machine = getattr(args, "machine", None)
+    try:
+        plan = reconcile.build_plan(Path(repo_dir), machine=machine)
+    except Exception as e:  # never break the launch
+        print(json.dumps({"action": "continue", "reason": f"error: {e}"}))
+        return 0
+
+    print(json.dumps(plan))
+    return 0
+
+
 def cmd_anchor_check(args: argparse.Namespace) -> int:
     """Check anchor repo for uncommitted work and stash entries."""
     from . import anchor_hygiene
@@ -5024,6 +5064,7 @@ COMMAND_MAP = {
     "deploy-instructions": cmd_deploy_instructions,
     "get": cmd_get,
     "pre-launch": cmd_pre_launch,
+    "reconcile-plugins": cmd_reconcile_plugins,
     "dev": cmd_dev,
     "register-session": cmd_register_session,
     "deregister-session": cmd_deregister_session,

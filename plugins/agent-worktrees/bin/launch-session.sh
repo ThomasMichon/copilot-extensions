@@ -261,13 +261,58 @@ fi
 # Subcommands that agent_worktrees's main() handles directly — these
 # must NOT fall through to the resolve→picker flow.  Keep in sync with
 # COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
-_DIRECT_COMMANDS="services repos worktree agent-worktrees resolve post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch dev handoff register-session deregister-session backfill-sessions anchor-check activity activity-log"
+_DIRECT_COMMANDS="services repos worktree agent-worktrees resolve post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch reconcile-plugins dev handoff register-session deregister-session backfill-sessions anchor-check activity activity-log"
 if [[ $# -gt 0 ]]; then
     for _dc in $_DIRECT_COMMANDS; do
         if [[ "$1" == "$_dc" ]]; then
             setup_log INFO "Direct dispatch: $1 (bypassing resolve)"
             exec "$PYTHON" -m agent_worktrees "$@"
         fi
+    done
+fi
+
+# ── Plugin reconciliation (repo-configured payloads + gated runtimes) ──────
+# Reconcile the anchor repo's .github/copilot/settings.json enabledPlugins:
+# for each copilot-extensions plugin ensure its payload is installed, and its
+# runtime is deployed per the plugin's runtimeScope + facility machine gate.
+#
+# Placed AFTER direct-dispatch so plain `agent-worktrees <subcommand>` calls
+# never trigger it -- only the real launch path reaches here. Deliberately NOT
+# guarded by WORKTREE_NO_UPDATE: the agent-worktrees self-update above re-execs
+# with that flag set, and reconcile must still run on that pass. Opt out with
+# WORKTREE_NO_RECONCILE=1.
+#
+# Two passes: payload first, then runtime -- a freshly installed payload's
+# runtime manifest is only readable on the second pass.
+if [[ "${WORKTREE_NO_RECONCILE:-}" != "1" ]]; then
+    for _rpass in 1 2; do
+        REC_JSON=$("$PYTHON" -m agent_worktrees reconcile-plugins 2>/dev/null) \
+            || REC_JSON='{"action":"continue"}'
+        REC_ACTION=$(printf '%s' "$REC_JSON" \
+            | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) \
+            || REC_ACTION="continue"
+        if [[ "$REC_ACTION" != "reconcile" ]]; then
+            [[ "$_rpass" == "1" ]] && setup_log INFO 'Plugin reconcile: nothing to do'
+            break
+        fi
+        REC_COUNT=$("$PYTHON" -c "import sys,json; print(len(json.load(sys.stdin).get('updates',[])))" <<< "$REC_JSON" 2>/dev/null) || REC_COUNT=0
+        setup_log INFO "Plugin reconcile pass $_rpass: $REC_COUNT action(s)"
+        for (( _ri=0; _ri<REC_COUNT; _ri++ )); do
+            _RSVC=$("$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['updates'][$_ri].get('service','?'))" <<< "$REC_JSON" 2>/dev/null) || _RSVC="?"
+            mapfile -t _RARGV < <("$PYTHON" -c "
+import sys, json
+for a in json.load(sys.stdin)['updates'][$_ri].get('argv', []):
+    print(a)
+" <<< "$REC_JSON" 2>/dev/null)
+            [[ ${#_RARGV[@]} -gt 0 ]] || continue
+            if [[ "${_RARGV[0]}" == "copilot" ]] && ! command -v copilot &>/dev/null; then
+                setup_log WARN "Plugin reconcile: skipping $_RSVC (copilot not on PATH)"
+                continue
+            fi
+            setup_log INFO "Plugin reconcile: $_RSVC -> ${_RARGV[*]}"
+            "${_RARGV[@]}" 2>&1 | while IFS= read -r _rl; do setup_log INFO "reconcile: $_rl"; done \
+                || setup_log WARN "Plugin reconcile: step failed for $_RSVC"
+        done
     done
 fi
 

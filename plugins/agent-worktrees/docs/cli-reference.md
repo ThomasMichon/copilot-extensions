@@ -119,6 +119,21 @@ only -- it never rebases, merges, or discards local commits.
 | `repos` | Repos registry -- list, find, add, clone, srcroot management |
 | `validate` | Validate core infrastructure files |
 | `pre-launch` | Check bootstrap staleness (JSON output, for launch wrappers) |
+| `reconcile-plugins` | Reconcile repo-adopted plugin payloads + gated runtimes (JSON output, for launch wrappers) |
+
+### Repo-adopted plugin reconciliation (`reconcile-plugins`)
+
+On an interactive launch, the launcher reconciles the anchor repo's
+`.github/copilot/settings.json` `enabledPlugins`: for each
+`<name>@copilot-extensions` it ensures the **payload** is installed (throttled
+refresh) and the **runtime** matches the installed payload version, per the
+plugin's `runtimeScope` (`none` | `universal` | `machine-gated`) and a facility
+machine gate (`external-repos.yaml` `deploy_machines`). It is local and
+version-keyed, so an unchanged re-launch does ~no work. Runs only after the
+direct-dispatch boundary (plain subcommands never trigger it); opt out with
+`WORKTREE_NO_RECONCILE=1`. See `docs/install-contract.md` § "Automatic
+reconciliation at launch" for the full policy. Headless `copilot -p` launches do
+**not** reconcile (repo settings aren't merged there).
 
 ### Deployment ownership (`extensions.agent-worktrees.auto_update`)
 

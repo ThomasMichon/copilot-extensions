@@ -318,7 +318,7 @@ $DirectCommands = @(
     'resolve', 'post-exit', 'finalize', 'push-changes', 'mark-complete',
     'status', 'list', 'create', 'cleanup', 'validate', 'install',
     'register', 'unregister', 'uninstall', 'update', 'install-status',
-    'deploy-instructions', 'get', 'pre-launch', 'dev', 'handoff',
+    'deploy-instructions', 'get', 'pre-launch', 'reconcile-plugins', 'dev', 'handoff',
     'register-session', 'deregister-session', 'backfill-sessions',
     'anchor-check'
 )
@@ -326,6 +326,43 @@ if ($CopilotArgs.Count -gt 0 -and $CopilotArgs[0] -in $DirectCommands) {
     Write-SetupLog "Direct dispatch: $($CopilotArgs[0]) (bypassing resolve)"
     & $VenvPython -m agent_worktrees @CopilotArgs
     exit $LASTEXITCODE
+}
+
+# ── Plugin reconciliation (repo-configured payloads + gated runtimes) ─────
+# Reconcile the anchor repo's .github/copilot/settings.json enabledPlugins:
+# for each copilot-extensions plugin ensure its payload is installed and its
+# runtime deployed per the plugin's runtimeScope + facility machine gate.
+#
+# Placed AFTER direct-dispatch so plain `agent-worktrees <subcommand>` calls
+# never trigger it. Deliberately NOT guarded by WORKTREE_NO_UPDATE: the
+# self-update block above re-execs with that flag set and reconcile must still
+# run on that pass. Opt out with WORKTREE_NO_RECONCILE=1. Two passes: payload
+# first, then runtime (a freshly installed payload is only readable next pass).
+if ($env:WORKTREE_NO_RECONCILE -ne '1') {
+    foreach ($rpass in 1, 2) {
+        $recJson = & $VenvPython -m agent_worktrees reconcile-plugins 2>$null
+        if (-not $recJson) { break }
+        try { $recPlan = ($recJson | ConvertFrom-Json) } catch { break }
+        if ($recPlan.action -ne 'reconcile') {
+            if ($rpass -eq 1) { Write-SetupLog 'Plugin reconcile: nothing to do' }
+            break
+        }
+        $recUpdates = @($recPlan.updates)
+        Write-SetupLog "Plugin reconcile pass ${rpass}: $($recUpdates.Count) action(s)"
+        foreach ($u in $recUpdates) {
+            $rargv = @($u.argv)
+            if ($rargv.Count -eq 0) { continue }
+            if ($rargv[0] -eq 'copilot' -and -not (Get-Command copilot -ErrorAction SilentlyContinue)) {
+                Write-SetupLog "Plugin reconcile: skipping $($u.service) (copilot not on PATH)" 'WARN'
+                continue
+            }
+            $exe = $rargv[0]
+            $rest = @()
+            if ($rargv.Count -gt 1) { $rest = $rargv[1..($rargv.Count - 1)] }
+            Write-SetupLog "Plugin reconcile: $($u.service) -> $($rargv -join ' ')"
+            & $exe @rest 2>&1 | ForEach-Object { Write-SetupLog "reconcile: $_" }
+        }
+    }
 }
 
 # ── Resolve launch plan via Python ────────────────────────────────────────
