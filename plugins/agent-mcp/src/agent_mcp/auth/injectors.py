@@ -15,6 +15,7 @@ import logging
 import os
 from urllib.parse import urlsplit
 
+from .._exec import resolve_argv
 from ..config import AuthSpec, BridgeConfig
 from .base import AuthInjector, CompositeInjector, NoneInjector, TokenInjector
 
@@ -204,6 +205,9 @@ class CommandInjector(TokenInjector):
         argv = self.spec.command
         if not argv:
             return None
+        # Resolve argv[0] so a .cmd/.bat credential binstub (e.g. vault.cmd)
+        # spawns on Windows -- create_subprocess_exec only auto-appends .exe.
+        argv = resolve_argv(argv)
         proc: asyncio.subprocess.Process | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
