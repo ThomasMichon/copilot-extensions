@@ -72,7 +72,7 @@ continue to work unchanged.
 |------------|-------------|
 | `resolve` | Interactive picker -- select or create a worktree, emit JSON launch plan |
 | `create` | Create a new worktree non-interactively |
-| `push-changes` | Push worktree changes to remote default branch (squash, rebase, push) |
+| `push-changes` | Push worktree changes to remote default branch (squash, rebase, push). Aborts if the pre-squash fails (`--allow-unsquashed` to opt into individual commits) |
 | `finalize` | Validate the branch's content is on upstream; prune the worktree/branch only when idle (deferred while a session is live) |
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
 | `cleanup` | List and remove orphaned or finalized worktrees |

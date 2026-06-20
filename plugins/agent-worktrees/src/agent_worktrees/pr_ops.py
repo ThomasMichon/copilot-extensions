@@ -26,7 +26,7 @@ from . import git_ops, hooks, tracking
 from .config import Config
 from .tracking import PRRecord
 
-__all__ = ["slugify", "feature_branch_name", "create_pr", "set_pr", "pr_status"]
+__all__ = ["create_pr", "feature_branch_name", "pr_status", "set_pr", "slugify"]
 
 
 def slugify(text: str, *, max_len: int = 40) -> str:
@@ -181,9 +181,13 @@ def create_pr(
     squash_msg = (record.title if record and record.title else None) \
         or (eff_title if eff_title != worktree_id else f"{worktree_id} changes")
     if len(ahead) > 1:
-        if not git_ops.squash_branch(upstream, squash_msg, cwd=worktree_path):
+        squashed, squash_reason = git_ops.squash_branch(
+            upstream, squash_msg, cwd=worktree_path
+        )
+        if not squashed:
             _rollback(worktree_path, wt_branch, orig_sha)
-            return {**base, "error": "Failed to squash worktree commits."}
+            detail = f" {squash_reason}" if squash_reason else ""
+            return {**base, "error": f"Failed to squash worktree commits.{detail}"}
 
     # 2. Rebase the squashed commit onto the upstream default branch so the
     #    feature branch is based on the latest master.
