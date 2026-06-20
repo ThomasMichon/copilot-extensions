@@ -60,8 +60,8 @@ A plugin declares whether — and where — its runtime should be reconciled via
 
 | `runtimeScope` | Meaning |
 |----------------|---------|
-| `none` | The reconciler never touches the runtime. Use for skills/agents/hooks-only plugins, **and** for plugins whose runtime is managed out-of-band (per-machine, by hand). |
-| `universal` | Reconcile the runtime on **every** machine (e.g. `context-handoff`). |
+| `none` | The reconciler never touches the runtime. Use for skills/agents/hooks-only plugins, **plugin-contributed extensions** whose payload *is* the runtime (e.g. `context-handoff`), **and** plugins whose runtime is managed out-of-band (per-machine, by hand). |
+| `universal` | Reconcile the runtime on **every** machine (a non-Python runtime that every machine needs and that deploys outside the plugin payload). |
 | `machine-gated` | Reconcile the runtime only on machines in the plugin's allowed set (e.g. `agent-bridge`, `agent-codespaces`, `agent-containers`). |
 
 The machine set for `machine-gated` plugins is **not** hard-coded in the plugin:
@@ -292,20 +292,46 @@ across plugins:
 # === end install-contract:v3 source-kind ===
 ```
 
-## Payload runtime (non-Python)
+## Non-Python plugins (extensions and payload runtimes)
 
-Most plugins here ship a **Python** runtime (a venv + package + binstubs). A
-few ship a **payload runtime** instead: a non-Python artifact deployed outside
-the plugin cache, with no venv. The canonical example is **context-handoff**,
-which deploys a single JavaScript Copilot CLI extension (`extension.mjs`) to the
-user-space extension load path `~/.copilot/extensions/<name>/` and sets the
-`experimental: true` flag in `~/.copilot/settings.json` that gates extensions.
+Most plugins here ship a **Python** runtime (a venv + package + binstubs). Some
+ship no Python at all (**no `pyproject.toml`**). The Python-specific rules above
+— `uv pip install`, the venv build, SAC-safe venv launchers, `_build_info.py`
+stamping, `~/.local/bin` binstubs — **do not apply** to these. There are two
+shapes:
 
-A payload-runtime plugin is identified structurally: it has **no
-`pyproject.toml`**. The Python-specific rules above — `uv pip install`, the venv
-build, SAC-safe venv launchers, `_build_info.py` stamping, `~/.local/bin`
-binstubs — **do not apply**, because there is no Python package or interpreter
-to launch. What still applies:
+### Plugin-contributed extension (preferred — no install scripts)
+
+A Copilot CLI session extension can be shipped **inside the plugin** and
+discovered directly by the CLI, with **no install step**. Place each extension
+at `extensions/<name>/extension.{mjs,cjs,js}` in the plugin; the CLI scans an
+**enabled** plugin's `extensions/` dir at session startup and loads it as a
+`plugin`-source extension. The canonical example is **context-handoff**
+(`plugins/context-handoff/extensions/context-handoff/extension.mjs`).
+
+Such a plugin ships **no `scripts/install.*`**, no deploy manifest, and copies
+nothing to `~/.copilot/extensions/`. `copilot plugin update <name>` (or repo
+`enabledPlugins` auto-install) is the entire deploy. Two conditions gate
+loading, both handled outside the plugin:
+
+- the plugin must be in `enabledPlugins` (a marketplace plugin's `extensions/`
+  dir is only scanned when enabled);
+- `experimental: true` must be set in `~/.copilot/settings.json` (the CLI gates
+  *all* extension loading on it) — ensured by the **agent-worktrees** installer
+  (`Ensure-CopilotExperimental`), not by the extension plugin.
+
+Because it ships no install scripts, `check-install-contract.py` does not
+include it (the checker only scans plugins that have `scripts/install.*`).
+
+### Payload runtime with installer (legacy)
+
+The older shape deploys a non-Python artifact **outside** what the CLI can
+discover from the plugin dir — so it needs an installer to place the payload and
+record a footprint. It is identified structurally by having `scripts/install.*`
+but no `pyproject.toml`. Prefer the plugin-contributed-extension shape above for
+new extensions; reach for an installer only when the artifact genuinely must
+land somewhere the CLI will not scan from the plugin. When an installer is used,
+the Python rules still do not apply, but what does:
 
 1. It is still a **runtime** (it deploys beyond what `copilot plugin update`
    does), so it **must** ship `scripts/install.{ps1,sh}` plus an **install
@@ -321,9 +347,11 @@ to launch. What still applies:
 4. Output stays ASCII unless the script establishes a UTF-8 context (the
    installers here use `[OK]` / `[WARN]` markers).
 
-`check-install-contract.py` detects payload plugins by the absent
-`pyproject.toml` and skips only the `uv pip install` check for them; the
-manifest and resolver checks are still enforced.
+`check-install-contract.py` only scans plugins that ship `scripts/install.*`.
+Plugin-contributed-extension plugins (no install scripts) are not included at
+all. For a payload-runtime-with-installer plugin it detects the absent
+`pyproject.toml` and skips only the `uv pip install` check; the manifest and
+resolver checks are still enforced.
 
 ## Within-plugin consolidation
 
@@ -336,7 +364,7 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 `tools/check-install-contract.py` verifies, per plugin:
 - `uv pip install` is used (no package file-copy) — **skipped for
   payload-runtime plugins** (no `pyproject.toml`; see
-  [Payload runtime (non-Python)](#payload-runtime-non-python)),
+  [Non-Python plugins](#non-python-plugins-extensions-and-payload-runtimes)),
 - no binstub sets `PYTHONPATH=…/lib`,
 - no `install.ps1` launches the `…\Scripts\<name>.exe` console-script trampoline
   ([SAC-safe launchers](#sac-safe-launchers-windows)),

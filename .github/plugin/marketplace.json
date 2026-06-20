@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, and effort planning",
-    "version": "1.7.4-dev63"
+    "version": "1.7.4-dev64"
   },
   "plugins": [
     {
@@ -48,7 +48,7 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a Copilot CLI session extension that tracks token utilization and nudges toward a continuation prompt before auto-compaction, plus the /handoff skill",
-      "version": "0.1.0-dev2",
+      "version": "0.1.0-dev3",
       "source": "plugins/context-handoff"
     },
     {

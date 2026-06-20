@@ -1,91 +1,80 @@
 ---
 name: context-handoff-setup
 description: >
-  Install or update the context-handoff Copilot CLI extension runtime --
-  deploy extension.mjs to ~/.copilot/extensions/, ensure the experimental
-  flag, and verify it loads. Use this skill when the context-handoff
-  extension is missing, stale, or not loading, or after a
-  `copilot plugin update context-handoff`. Trigger phrases include:
-  - 'install context-handoff'
-  - 'set up context-handoff'
+  Troubleshoot the context-handoff Copilot CLI extension when it is missing or
+  not loading. The extension is contributed directly by the context-handoff
+  plugin (no install step) -- this skill verifies the two conditions that gate
+  it: the plugin is enabled, and experimental mode is on. Use when the
+  context-handoff extension is not loading or its tools are absent. Trigger
+  phrases include:
   - 'context-handoff not loading'
   - 'context-handoff extension missing'
   - 'handoff extension not working'
   - 'no handoff reminders'
   - 'generate_handoff_prompt missing'
-  - 'update context-handoff'
-  - 'deploy the handoff extension'
+  - 'enable context-handoff'
+  - 'set up context-handoff'
 ---
 
 # Context Handoff Setup
 
-Install / update the **context-handoff extension** runtime. The extension is
-the live context-window monitor (token tracking + 55%/70% nudges +
-`generate_handoff_prompt` / `save_handoff_prompt` tools). For the `/handoff`
-authoring workflow itself, see the **context-handoff** skill.
+The **context-handoff extension** (the live context-window monitor: token
+tracking + 55%/70% nudges + `generate_handoff_prompt` / `save_handoff_prompt`
+tools) is **plugin-contributed** -- there is no install step. The Copilot CLI
+discovers it directly from the plugin's `extensions/` dir when the plugin is
+enabled. This skill is for the case where it is **not** loading.
 
-## Why a separate install step
+For the `/handoff` authoring workflow itself, see the **context-handoff** skill.
 
-`copilot plugin update context-handoff@copilot-extensions` only refreshes the
-plugin **payload** under
-`~/.copilot/installed-plugins/copilot-extensions/context-handoff`. It does
-**not** deploy the extension to the load path. The runtime install is a
-second step: run the plugin's `scripts/install.*` from the source dir.
+## How it loads
 
-## Install / Update
+When `context-handoff@copilot-extensions` is enabled, the CLI scans
+`~/.copilot/installed-plugins/copilot-extensions/context-handoff/extensions/`
+at session startup and loads `context-handoff/extension.mjs` as a `plugin`-source
+extension. No copy to `~/.copilot/extensions/`, no `scripts/install.*`, no
+manifest.
 
-Run the installer from the **source dir** -- the marketplace plugin dir, or a
-local checkout of `copilot-extensions`:
+## Two conditions gate it
 
-```powershell
-# Windows -- from the context-handoff plugin source dir
-pwsh -File scripts/install.ps1 update
-```
+Both must hold. Check them in order, then start a fresh session.
+
+### 1. The plugin must be enabled
+
+A marketplace plugin's `extensions/` dir is only scanned when the plugin is in
+`enabledPlugins`. Confirm `copilot plugin list` shows
+`context-handoff@copilot-extensions`. If missing, install it:
 
 ```bash
-# Linux/WSL -- from the context-handoff plugin source dir
-bash scripts/install.sh update
+copilot plugin install context-handoff@copilot-extensions
 ```
 
-The marketplace source dir is:
+To enable it everywhere on a machine, add it to the user settings file
+`~/.copilot/settings.json`:
 
+```json
+{ "enabledPlugins": { "context-handoff@copilot-extensions": true } }
 ```
-~/.copilot/installed-plugins/copilot-extensions/context-handoff
+
+Or enable it per-repo in that repo's `.github/copilot/settings.json`.
+
+### 2. experimental mode must be on
+
+The CLI gates **all** extension loading behind `"experimental": true` in
+`~/.copilot/settings.json`. This is ensured by the **agent-worktrees** installer
+(`Ensure-CopilotExperimental`), run on `agent-worktrees install` / `update`. If
+extensions are not loading at all, run:
+
+```bash
+agent-worktrees update
 ```
 
-> **Windows caveat.** If the extension is loaded in the running session,
-> `copilot plugin update` can fail with `EBUSY` (the live CLI holds handles in
-> the installed-plugins dir). Prefer running `scripts/install.* update` from a
-> **local checkout** of `copilot-extensions` in that case.
-
-## What the installer does
-
-1. Copies `extension/context-handoff/extension.mjs` to
-   `~/.copilot/extensions/context-handoff/extension.mjs`.
-2. Ensures `experimental: true` in `~/.copilot/settings.json` (extensions are
-   gated behind it -- the env var alone is insufficient).
-3. Writes a `schema_version` 3 deploy manifest to
-   `~/.context-handoff/deploy-manifest.json`.
+and confirm `"experimental": true` is present in `~/.copilot/settings.json`.
 
 ## Verify
 
-The extension activates on the **next** session (the CLI scans
-`~/.copilot/extensions/` at startup). After restarting:
-
-```bash
-scripts/install.ps1 status      # or install.sh status
-```
-
-A loaded extension logs `[Context Handoff] Session started ...` and exposes
-the `generate_handoff_prompt` / `save_handoff_prompt` tools. If it does not
-load, confirm `experimental: true` in `~/.copilot/settings.json` and that
-`~/.copilot/extensions/context-handoff/extension.mjs` exists.
-
-## Uninstall
-
-```bash
-scripts/install.ps1 uninstall   # or install.sh uninstall
-```
-
-Removes the deployed extension and the deploy manifest. Leaves
-`experimental: true` untouched (other extensions may need it).
+Start a fresh Copilot CLI session. A loaded extension logs
+`[Context Handoff] Session started ...` and exposes `generate_handoff_prompt` /
+`save_handoff_prompt`. `/extensions` lists `context-handoff` with source
+**plugin** (exactly once -- if you see it twice, a stale copy exists under
+`~/.copilot/extensions/context-handoff/` or a project `.github/extensions/`; the
+CLI loads every source with no dedup, so remove the redundant copy).
