@@ -133,13 +133,39 @@ def _cmd_elevated(args: argparse.Namespace) -> None:
 
 def _cmd_start(args: argparse.Namespace) -> None:
     """Start the agent-bridge server."""
+    import os
+
     import uvicorn
 
-    from .config import load_config, load_or_create_auth_token, write_default_config
+    from .config import (
+        config_dir,
+        load_config,
+        load_or_create_auth_token,
+        write_default_config,
+    )
 
     cfg = load_config()
     write_default_config(cfg)
     token = load_or_create_auth_token()
+
+    # #89: chdir to a neutral dir so spawned children never inherit (and pin)
+    # the daemon's launch cwd -- which, when started from a binstub, is the
+    # installed-plugins plugin dir and blocked `copilot plugin update` (EBUSY).
+    try:
+        neutral = config_dir()
+        neutral.mkdir(parents=True, exist_ok=True)
+        os.chdir(neutral)
+    except OSError:
+        pass
+    logging.getLogger("agent-bridge").info(
+        "Daemon working directory: %s", os.getcwd()
+    )
+
+    # #90: place the daemon in a kill-on-close Job Object so spawned agent
+    # children (e.g. an `agent-codespaces ssh --stdio` tree) die with the daemon
+    # even on a crash / hard kill, instead of orphaning for days.
+    from .winjob import setup_kill_on_close_job
+    setup_kill_on_close_job()
 
     if args.port:
         cfg.port = args.port
