@@ -8,7 +8,7 @@ sessions. This guide covers what you need to get started.
 
 ```
 Your repo (anchor)          Worktrees (ephemeral)
-D:\Src\my-project\          D:\Src\.worktrees\my-project\
+D:\Src\my-project\          D:\Src\my-project.worktrees\
 ├── .git/                       ├── feature-abc-20260527\
 ├── src/                        │   ├── .git  (file → anchor/.git)
 └── ...                         │   ├── src/
@@ -18,6 +18,9 @@ D:\Src\my-project\          D:\Src\.worktrees\my-project\
 ```
 
 Each worktree is a full working copy sharing the same `.git` database.
+Worktrees live in a `<anchor>.worktrees` sibling folder next to the repo —
+the same layout the Copilot CLI's native `/worktree` command uses, so
+worktrees from either tool are mutually discoverable.
 Sessions can run in parallel without conflicts. When done, the worktree
 is merged and cleaned up automatically.
 

@@ -225,7 +225,9 @@ auto_fast_forward: true           # auto-FF a stale clean worktree on resume (de
 repos:
   my-project:
     anchor: C:\Data\Src\my-project
-    worktree_root: C:\Data\Src\.worktrees\my-project
+    # worktree_root is optional; it defaults to a sibling
+    # <anchor>.worktrees folder (here C:\Data\Src\my-project.worktrees),
+    # matching the Copilot CLI's /worktree layout. Set it only to override.
     default_branch: main
     remote: origin
 ```

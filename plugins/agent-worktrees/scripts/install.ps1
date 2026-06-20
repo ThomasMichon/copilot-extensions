@@ -788,7 +788,7 @@ function Deploy-Config {
     }
 
     $srcRoot = Split-Path -Parent $RepoDir
-    $worktreeRoot = Join-Path (Join-Path $srcRoot '.worktrees') $ProjectName
+    $worktreeRoot = "$RepoDir.worktrees"
 
     @"
 # ~/.$ProjectName/config.yaml
@@ -802,7 +802,9 @@ repo_name: $ProjectName
 repos:
   ${ProjectName}:
     anchor: $RepoDir
-    worktree_root: $worktreeRoot
+    # worktree_root defaults to $worktreeRoot -- a sibling
+    # <anchor>.worktrees dir, matching Copilot CLI's /worktree layout.
+    # Uncomment and set an absolute path to override.
     default_branch: master
     remote: origin
 "@ | Set-Content -Path $configPath

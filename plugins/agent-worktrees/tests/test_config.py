@@ -158,6 +158,50 @@ class TestPRConfigParsing:
 
 
 # ---------------------------------------------------------------------------
+# worktree_root derivation (Copilot-aligned <anchor>.worktrees layout)
+# ---------------------------------------------------------------------------
+
+class TestWorktreeRootDerivation:
+    def test_derive_helper_posix(self):
+        assert cfg.derive_worktree_root("/tmp/src/ext") == "/tmp/src/ext.worktrees"
+
+    def test_derive_helper_windows(self):
+        assert (
+            cfg.derive_worktree_root(r"D:\Src\dotfiles")
+            == r"D:\Src\dotfiles.worktrees"
+        )
+
+    def test_derive_helper_strips_trailing_separator(self):
+        assert cfg.derive_worktree_root("/tmp/src/ext/") == "/tmp/src/ext.worktrees"
+
+    def _write(self, path: Path, worktree_root_line: str = "") -> None:
+        path.write_text(
+            "repo_name: ext\n"
+            "srcroot: /tmp/src\n"
+            "machine: lambda-core\n"
+            "platform: wsl\n"
+            "repos:\n"
+            "  ext:\n"
+            "    anchor: /tmp/src/ext\n"
+            f"{worktree_root_line}"
+            "    default_branch: main\n"
+            "    remote: origin\n"
+        )
+
+    def test_worktree_root_derived_when_absent(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile)
+        conf = cfg.load_config(cfgfile)
+        assert conf.repos["ext"].worktree_root == "/tmp/src/ext.worktrees"
+
+    def test_worktree_root_explicit_overrides(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile, "    worktree_root: /custom/wt/ext\n")
+        conf = cfg.load_config(cfgfile)
+        assert conf.repos["ext"].worktree_root == "/custom/wt/ext"
+
+
+# ---------------------------------------------------------------------------
 # headless project parsing
 # ---------------------------------------------------------------------------
 

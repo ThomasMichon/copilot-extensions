@@ -468,7 +468,7 @@ deploy_config() {
 
     local src_root
     src_root="$(dirname "$REPO_DIR")"
-    local worktree_root="$src_root/.worktrees/$PROJECT_NAME"
+    local worktree_root="$REPO_DIR.worktrees"
 
     cat > "$config_path" <<EOF
 # ~/.$PROJECT_NAME/config.yaml
@@ -482,7 +482,9 @@ repo_name: $PROJECT_NAME
 repos:
   $PROJECT_NAME:
     anchor: $REPO_DIR
-    worktree_root: $worktree_root
+    # worktree_root defaults to $worktree_root -- a sibling
+    # <anchor>.worktrees dir, matching Copilot CLI's /worktree layout.
+    # Uncomment and set an absolute path to override.
     default_branch: master
     remote: origin
 EOF
