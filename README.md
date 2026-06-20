@@ -7,7 +7,7 @@ your agents **talk to each other** — across worktrees, across machines, and in
 securely along the way. A fifth plugin wraps authenticated **MCP servers** so
 those same host credentials reach your tools.
 
-Five plugins, one marketplace. Install what you need; they compose.
+Plugins, one marketplace. Install what you need; they compose.
 
 | Plugin | Type | What it gives you |
 |--------|------|-------------------|
@@ -16,6 +16,7 @@ Five plugins, one marketplace. Install what you need; they compose.
 | [agent-codespaces](plugins/agent-codespaces/) | CLI + relay | Create/manage GitHub Codespaces, address them as bridge agents (`codespace:<name>`), and forward git/GitHub/Azure credentials into them. |
 | [agent-containers](plugins/agent-containers/) | CLI + resolver | Manage a fleet of local Docker dev containers, borrow/release them per effort, and address them as bridge agents (`container:<name>`). |
 | [agent-mcp](plugins/agent-mcp/) | MCP bridge | Wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP and inject host credentials (Entra/`az`, `gh`, git-credential, env). Standalone — used directly from an agent's `mcp-servers` config. |
+| [efforts](plugins/efforts/) | Planning skills | Plan a stretch of work as an **effort** — a folder with a README-as-shared-contract (premise + plan + journal) that humans and agents coordinate through. The executor plugins above bind its participant seam. |
 
 All support **Windows** and **Linux/WSL** (macOS planned).
 
@@ -301,6 +302,15 @@ Your source repos and their `.worktrees` content are never touched.
 |----------|-------------|
 | [README](plugins/agent-mcp/README.md) | Plugin overview, bridge config format, auth kinds, CLI |
 | [agent-mcp](plugins/agent-mcp/skills/agent-mcp/SKILL.md) | Defining a bridge, wiring it into an agent's `mcp-servers` |
+
+### Efforts
+
+| Document | Description |
+|----------|-------------|
+| [README](plugins/efforts/README.md) | Plugin overview, the skill-governs-pattern + repo-addendum model |
+| [planning-efforts](plugins/efforts/skills/planning-efforts/SKILL.md) | Start, plan, resume, archive efforts |
+| [reference guide](plugins/efforts/skills/planning-efforts/references/efforts.md) | Full effort schema, lifecycle, participants seam |
+| [efforts-setup](plugins/efforts/skills/efforts-setup/SKILL.md) | Adopt efforts in a repo: scaffold + write the addendum |
 
 ### Contributing
 

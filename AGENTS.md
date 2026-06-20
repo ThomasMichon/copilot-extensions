@@ -50,6 +50,9 @@ copilot-extensions/
       tests/                   # Test suite
       plugin.json              # Plugin manifest
       pyproject.toml           # Python project config
+    efforts/                   # Efforts planning system (pure skill plugin -- no runtime)
+      skills/                  # planning-efforts (+ references/, assets/), efforts-setup
+      plugin.json              # Plugin manifest
   docs/
     architecture.md            # Repo-level architecture overview
     plans/                     # Rollout + validation plans
@@ -136,6 +139,13 @@ Bump these files **in the same commit**, immediately before pushing:
 | `plugins/agent-mcp/plugin.json` | `version` |
 | `plugins/agent-mcp/pyproject.toml` | `version` under `[project]` |
 | `.github/plugin/marketplace.json` | `plugins[4].version` |
+
+**efforts:** (pure skill plugin -- no `pyproject.toml`/runtime)
+
+| File | Field(s) |
+|------|----------|
+| `plugins/efforts/plugin.json` | `version` |
+| `.github/plugin/marketplace.json` | `plugins[7].version` |
 
 Default bump: **patch with `-devN` suffix** (e.g., `1.3.1` -> `1.3.2-dev1`).
 Do not bump minor or major unless the maintainer explicitly requests it.
