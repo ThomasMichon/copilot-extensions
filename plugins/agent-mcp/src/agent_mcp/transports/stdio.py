@@ -15,6 +15,7 @@ import json
 import logging
 import os
 
+from .._exec import resolve_argv
 from .base import Transport
 
 log = logging.getLogger("agent-mcp.stdio")
@@ -36,6 +37,9 @@ class StdioTransport(Transport):
         argv = self.cfg.server.command
         if not argv:
             raise ValueError("stdio transport requires server.command")
+        # Resolve argv[0] so .cmd/.bat shims (e.g. npx.cmd) spawn on Windows --
+        # create_subprocess_exec only auto-appends .exe, not PATHEXT.
+        argv = resolve_argv(argv)
         log.info("spawning upstream MCP: %s", " ".join(argv))
         self._proc = await asyncio.create_subprocess_exec(
             *argv,
