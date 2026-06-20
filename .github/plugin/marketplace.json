@@ -5,8 +5,8 @@
     "email": "thomas@thomasmichon.com"
   },
   "metadata": {
-    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, and context-window handoff",
-    "version": "1.7.4-dev60"
+    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, and effort planning",
+    "version": "1.7.4-dev61"
   },
   "plugins": [
     {
@@ -50,6 +50,12 @@
       "description": "Context window monitoring and session handoff - a Copilot CLI session extension that tracks token utilization and nudges toward a continuation prompt before auto-compaction, plus the /handoff skill",
       "version": "0.1.0-dev1",
       "source": "plugins/context-handoff"
+    },
+    {
+      "name": "efforts",
+      "description": "Efforts planning system - comprehensive planning folders that represent a stretch of work (premise + plan + validation plan + journal + participant coordination), with a README-as-shared-contract; ships the planning-efforts and efforts-setup skills",
+      "version": "0.1.0-dev1",
+      "source": "plugins/efforts"
     }
   ]
 }
