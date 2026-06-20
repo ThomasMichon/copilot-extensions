@@ -106,6 +106,28 @@ def _cmd_acp_connect(args: argparse.Namespace) -> None:
     cmd_acp_connect(args)
 
 
+def _cmd_elevated(args: argparse.Namespace) -> None:
+    """Manage the elevated sub-daemon (Windows)."""
+    from . import elevated
+
+    action = getattr(args, "elevated_action", None) or "status"
+    if action == "start":
+        try:
+            tok = elevated.ensure_running()
+        except Exception as exc:
+            print(f"Failed to start elevated sub-daemon: {exc}")
+            sys.exit(1)
+        port = elevated.ELEVATED_PORT
+        print(f"Elevated sub-daemon up on 127.0.0.1:{port}")
+        print(f"Token:  {tok[:8]}...")
+        print(f"ACP WS: ws://127.0.0.1:{port}/acp/<agent>")
+    elif action == "stop":
+        elevated.stop()
+        print("Elevated sub-daemon stop requested")
+    else:
+        print(json.dumps(elevated.status(), indent=2))
+
+
 def _cmd_start(args: argparse.Namespace) -> None:
     """Start the agent-bridge server."""
     import uvicorn
@@ -1808,6 +1830,19 @@ def main(argv: list[str] | None = None) -> None:
              "'copilot --acp --stdio')",
     )
     acp_connect_p.set_defaults(func=_cmd_acp_connect)
+
+    # Elevated sub-daemon management (Windows): a second, admin-token bridge on a
+    # loopback port that the primary relays elevated agents to (Capability 2).
+    elev_p = sub.add_parser(
+        "elevated", help="Manage the elevated sub-daemon (Windows)"
+    )
+    elev_sub = elev_p.add_subparsers(dest="elevated_action")
+    elev_sub.add_parser(
+        "start", help="Start the elevated sub-daemon (one UAC prompt)"
+    )
+    elev_sub.add_parser("stop", help="Stop + deregister the elevated sub-daemon")
+    elev_sub.add_parser("status", help="Show elevated sub-daemon status")
+    elev_p.set_defaults(func=_cmd_elevated)
 
     status_p = sub.add_parser(
         "status",
