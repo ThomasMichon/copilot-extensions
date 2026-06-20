@@ -41,6 +41,44 @@ dir — that bypasses the venv sync, binstub/SAC handling, `_build_info.py`
 stamping, manifest, and service restart (see "What NOT to Do" in
 `CONTRIBUTING.md`).
 
+### Automatic reconciliation at launch (`runtimeScope`)
+
+`agent-worktrees` closes this gap automatically for **repo-adopted** plugins.
+When a session launches in a repo whose `.github/copilot/settings.json`
+`enabledPlugins` enables `<name>@copilot-extensions`, the launcher runs
+`agent-worktrees reconcile-plugins`, which:
+
+1. ensures each enabled plugin's **payload** is installed (and refreshes it on a
+   throttled cadence), and
+2. ensures its **runtime** matches the installed payload version — comparing the
+   payload `plugin.json` `version` against the runtime
+   `~/.<name>/deploy-manifest.json` `source.version`, and running the plugin's
+   own `scripts/install.* update` (or `init.*`) only on drift.
+
+A plugin declares whether — and where — its runtime should be reconciled via a
+**`runtimeScope`** field in its `plugin.json`:
+
+| `runtimeScope` | Meaning |
+|----------------|---------|
+| `none` | The reconciler never touches the runtime. Use for skills/agents/hooks-only plugins, **and** for plugins whose runtime is managed out-of-band (per-machine, by hand). |
+| `universal` | Reconcile the runtime on **every** machine (e.g. `context-handoff`). |
+| `machine-gated` | Reconcile the runtime only on machines in the plugin's allowed set (e.g. `agent-bridge`, `agent-codespaces`, `agent-containers`). |
+
+The machine set for `machine-gated` plugins is **not** hard-coded in the plugin:
+it is read from a facility `external-repos.yaml` (`repos.*.services[].{name,
+deploy_machines}`) resolved from the current repo or the `aperture-labs` anchor.
+With no gate info available, a `machine-gated` runtime is **skipped** (safe
+default — never auto-install a machine-specific runtime where the policy is
+unknown). Reconciliation is local and version-keyed, so a re-launch with no
+version change does ~no work; the network payload refresh is throttled via a
+small cache under `~/.agent-worktrees/`. Opt out per session with
+`WORKTREE_NO_RECONCILE=1`.
+
+> **Headless caveat.** This runs only on **interactive** launches.
+> `copilot -p --autopilot` (the facility harnesses) does not merge repo
+> `enabledPlugins`, so harness machines still need required runtimes installed
+> globally, out-of-band.
+
 > **Windows caveat — prefer a local checkout.** When a plugin is loaded in the
 > running Copilot session, `copilot plugin update <name>` can fail outright on
 > Windows: the live CLI holds handles inside

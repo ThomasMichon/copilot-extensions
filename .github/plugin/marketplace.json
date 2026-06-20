@@ -6,49 +6,49 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, and effort planning",
-    "version": "1.7.4-dev62"
+    "version": "1.7.4-dev63"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev25",
+      "version": "1.5.3-dev26",
       "source": "plugins/agent-worktrees"
     },
     {
       "name": "agent-bridge",
       "description": "Persistent inter-agent communication service - session management, SSE event streaming, agent subprocess spawning, and an ACP-over-WebSocket transport (+ built-in status UX) for external ACP clients like acp-ui",
-      "version": "0.4.0-dev42",
+      "version": "0.4.0-dev43",
       "source": "plugins/agent-bridge"
     },
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.3.4-dev23",
+      "version": "0.3.4-dev24",
       "source": "plugins/agent-codespaces"
     },
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver",
-      "version": "0.1.2-dev15",
+      "version": "0.1.2-dev16",
       "source": "plugins/agent-containers"
     },
     {
       "name": "agent-mcp",
       "description": "Reusable MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP server and inject host credentials (Entra/az, gh, git-credential, env)",
-      "version": "0.1.0-dev10",
+      "version": "0.1.0-dev11",
       "source": "plugins/agent-mcp"
     },
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync raw sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.1.1-dev1",
+      "version": "0.1.1-dev2",
       "source": "plugins/agent-logger"
     },
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a Copilot CLI session extension that tracks token utilization and nudges toward a continuation prompt before auto-compaction, plus the /handoff skill",
-      "version": "0.1.0-dev1",
+      "version": "0.1.0-dev2",
       "source": "plugins/context-handoff"
     },
     {
