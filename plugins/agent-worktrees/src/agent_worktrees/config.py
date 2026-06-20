@@ -408,7 +408,10 @@ def load_config(path: Path | None = None) -> Config:
 
             repos[name] = RepoConfig(
                 anchor=repo_data["anchor"],
-                worktree_root=repo_data["worktree_root"],
+                worktree_root=(
+                    repo_data.get("worktree_root")
+                    or derive_worktree_root(repo_data["anchor"])
+                ),
                 default_branch=repo_data.get("default_branch", "master"),
                 remote=repo_data.get("remote", "origin"),
                 launch=launch,
@@ -486,6 +489,18 @@ def _parse_profiles(raw_list: list[Any]) -> list[CopilotProfile]:
         ))
 
     return profiles
+
+
+def derive_worktree_root(anchor: str | Path) -> str:
+    """Default worktree root for an *anchor*: a sibling ``<anchor>.worktrees``
+    directory.
+
+    This mirrors the GitHub Copilot CLI's native ``--worktree`` / ``/worktree``
+    layout (worktrees created as a ``<repo>.worktrees`` sibling of the repo),
+    so worktrees created by agent-worktrees and by Copilot land in the same
+    place and are mutually discoverable.  Used whenever a repo's config omits
+    an explicit ``worktree_root`` (the field remains an optional override)."""
+    return f"{str(anchor).rstrip('/').rstrip(chr(92))}.worktrees"
 
 
 def tracking_dir() -> Path:

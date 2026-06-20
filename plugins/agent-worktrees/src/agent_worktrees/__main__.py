@@ -4509,7 +4509,7 @@ def _write_config(
 ) -> None:
     """Write the project config YAML."""
     src_root = repo_dir.parent
-    wt_root = src_root / ".worktrees" / project
+    wt_root = f"{repo_dir}.worktrees"
 
     headless_line = "headless: true\n" if headless else ""
     content = f"""# ~/.{project}/config.yaml
@@ -4523,7 +4523,9 @@ platform: {plat}
 repos:
   {project}:
     anchor: {repo_dir}
-    worktree_root: {wt_root}
+    # worktree_root defaults to {wt_root} -- a sibling
+    # <anchor>.worktrees dir, matching Copilot CLI's /worktree layout.
+    # Uncomment and set an absolute path to override.
     default_branch: {default_branch}
     remote: origin
 """
