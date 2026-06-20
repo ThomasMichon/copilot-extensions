@@ -145,7 +145,7 @@ function Format-YamlValue {
     <# Format a scalar value for YAML output. #>
     param([object]$Val)
     if ($null -eq $Val) { return 'null' }
-    if ($Val -is [bool]) { return if ($Val) { 'true' } else { 'false' } }
+    if ($Val -is [bool]) { if ($Val) { return 'true' } else { return 'false' } }
     if ($Val -is [string]) { return "`"$($Val -replace '\\', '\\')`"" }
     return "$Val"
 }
