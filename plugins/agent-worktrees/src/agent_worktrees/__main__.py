@@ -1994,6 +1994,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             worktree_id, config,
             title=args.title,
             dry_run=args.dry_run,
+            allow_unsquashed=getattr(args, "allow_unsquashed", False),
         )
 
         if use_json:
@@ -4589,6 +4590,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--title-only", action="store_true",
                    help="Set title without pushing (worktree stays active)")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--allow-unsquashed", action="store_true",
+                   help="If the pre-squash step fails, push the individual "
+                        "commits instead of aborting. Off by default -- a "
+                        "squash failure must never silently push every commit "
+                        "to the shared default branch (issue #783).")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
     p.add_argument("--config", default=None)

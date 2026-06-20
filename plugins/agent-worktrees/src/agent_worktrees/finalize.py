@@ -99,6 +99,7 @@ def push_changes(
     *,
     title: str | None = None,
     dry_run: bool = False,
+    allow_unsquashed: bool = False,
 ) -> bool:
     """Push worktree changes to the remote default branch.
 
@@ -111,6 +112,10 @@ def push_changes(
         config: Loaded project configuration.
         title: Optional title to set on the tracking record.
         dry_run: If True, preview without side effects.
+        allow_unsquashed: If True, proceed with the individual commits when
+            the pre-squash step fails, instead of aborting. Off by default --
+            a squash failure must never silently degrade to pushing every
+            commit to the shared default branch (see issue #783).
 
     Returns:
         True on success, False on failure (worktree preserved).
@@ -217,10 +222,40 @@ def push_changes(
             squash_title = title or (record.title if record else None)
             squash_msg = squash_title or f"squash: merge worktree/{worktree_id}"
             print(f"Squashing {ahead_count} commits into one...")
-            if not git_ops.squash_branch(upstream, squash_msg, cwd=worktree_path):
-                output.warn("Pre-squash failed -- proceeding with individual commits.")
-            else:
+            squashed, squash_reason = git_ops.squash_branch(
+                upstream, squash_msg, cwd=worktree_path
+            )
+            if squashed:
                 ahead_count = 1
+            elif allow_unsquashed:
+                output.warn(
+                    "Pre-squash failed -- proceeding with individual commits "
+                    "(--allow-unsquashed)."
+                )
+                if squash_reason:
+                    output.warn(f"  Reason: {squash_reason}")
+            else:
+                # Never silently push unsquashed commits to the shared default
+                # branch -- that is irreversible there (issue #783). Abort and
+                # leave the worktree with its original commits, unpushed.
+                output.err(
+                    f"Pre-squash failed for {worktree_id} -- aborting push so "
+                    f"the unsquashed commits do not land on "
+                    f"{repo.remote}/{repo.default_branch}."
+                )
+                if squash_reason:
+                    output.err(f"  Reason: {squash_reason}")
+                output.warn(
+                    "Resolve the cause and retry, or pass --allow-unsquashed "
+                    "to push the individual commits intentionally."
+                )
+                # squash_branch already restored the original commits and
+                # deleted its backup ref on failure -- do NOT restore again
+                # here (refs/pre-squash-backup is repo-global, so a stale
+                # backup from a prior run could be wrongly applied).
+                if record:
+                    tracking.update_status(record, "active")
+                return False
 
         # 5. Rebase
         print(f"Rebasing {branch} onto {upstream}...")

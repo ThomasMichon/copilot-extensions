@@ -701,25 +701,35 @@ def is_clean(*, cwd: str | Path) -> bool:
     return result.returncode == 0 and not result.stdout.strip()
 
 
-def squash_branch(upstream: str, message: str, *, cwd: str | Path) -> bool:
+def squash_branch(
+    upstream: str, message: str, *, cwd: str | Path
+) -> tuple[bool, str | None]:
     """Squash all commits ahead of *upstream* into one on the current branch.
 
     Uses soft reset to merge-base, then re-commits.  A backup ref is
     created before the reset and restored on failure.
 
-    Returns True on success (including the no-op case of 0-1 commits).
+    Returns ``(ok, reason)``:
+      * ``(True, None)``  -- squashed (or the no-op case of 0-1 commits).
+      * ``(False, reason)`` -- failed; *reason* is a human-readable diagnostic
+        carrying the underlying git failure (stderr/stdout), and the branch has
+        been restored to its original commits.  Callers MUST NOT proceed with a
+        push on a ``False`` result -- doing so would push the unsquashed
+        commits, violating the one-commit-per-worktree invariant.
     """
     mb = git("merge-base", upstream, "HEAD", cwd=cwd, check=False)
     if mb.returncode != 0:
-        return False
+        return False, _git_detail(
+            f"could not compute merge-base with {upstream}", mb
+        )
     merge_base = mb.stdout.strip()
 
     count_r = git("rev-list", "--count", f"{merge_base}..HEAD", cwd=cwd, check=False)
     if count_r.returncode != 0:
-        return False
+        return False, _git_detail("could not count commits to squash", count_r)
     count = int(count_r.stdout.strip())
     if count <= 1:
-        return True  # nothing to squash
+        return True, None  # nothing to squash
 
     # Save backup ref for rollback
     orig_head = git("rev-parse", "HEAD", cwd=cwd, check=False).stdout.strip()
@@ -729,15 +739,32 @@ def squash_branch(upstream: str, message: str, *, cwd: str | Path) -> bool:
     if reset_r.returncode != 0:
         git("reset", "--hard", orig_head, cwd=cwd, check=False)
         git("update-ref", "-d", "refs/pre-squash-backup", cwd=cwd, check=False)
-        return False
+        return False, _git_detail(
+            f"git reset --soft {merge_base[:12]} failed", reset_r
+        )
 
     commit_r = git("commit", "-m", message, cwd=cwd, check=False)
     if commit_r.returncode != 0:
         git("reset", "--hard", orig_head, cwd=cwd, check=False)
         git("update-ref", "-d", "refs/pre-squash-backup", cwd=cwd, check=False)
-        return False
+        return False, _git_detail(
+            "git commit of the squashed tree failed "
+            "(a failing commit hook is the common cause)",
+            commit_r,
+        )
 
-    return True
+    return True, None
+
+
+def _git_detail(summary: str, result: object) -> str:
+    """Compose a one-line diagnostic from a git result's stderr/stdout."""
+    parts = [summary]
+    for stream in ("stderr", "stdout"):
+        text = getattr(result, stream, "") or ""
+        text = text.strip()
+        if text:
+            parts.append(text)
+    return ": ".join(parts)
 
 
 def delete_backup_ref(*, cwd: str | Path) -> None:

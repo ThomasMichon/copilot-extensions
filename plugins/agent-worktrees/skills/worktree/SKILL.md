@@ -123,6 +123,14 @@ This command:
 4. Merges to local default branch and pushes to origin
 5. Sets tracking status to `pushed`
 
+> **Squash is a hard invariant.** If the pre-squash step fails (e.g. a
+> commit hook rejects the squashed re-commit), `push-changes` **aborts with
+> a non-zero exit and surfaces the underlying reason** -- it never silently
+> falls back to pushing the individual commits, which would pollute the
+> shared default branch irreversibly. Resolve the cause and retry. For the
+> rare case where individual commits are genuinely intended, pass
+> `--allow-unsquashed` to opt in explicitly.
+
 ### Step 2: Finalize (validate and clean up)
 
 ```
