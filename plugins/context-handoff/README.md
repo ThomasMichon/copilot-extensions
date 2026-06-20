@@ -23,46 +23,47 @@ hook surface a plugin normally uses cannot replicate it:
   Command-hook output is discarded (only `preToolUse` can *deny* a tool call,
   not inject a message).
 
-So the capability requires the extension payload. This plugin's job is to
-**deliver that payload** to the user-space extension load path
-(`~/.copilot/extensions/`) and ship the accompanying skill.
+So the capability requires the extension payload.
 
-## Install
+## How the extension is delivered (no install step)
 
-This is a **payload runtime** plugin (a non-Python runtime: a JavaScript
-extension deployed outside the plugin cache). Per the
-[install contract](../../docs/install-contract.md), a payload update is two
-steps -- refresh the marketplace cache, then run the installer from the
-source dir:
+This is a **plugin-contributed extension**. The Copilot CLI discovers
+extensions contributed by **enabled** installed plugins directly from the
+plugin's `extensions/` directory (the `plugin` extension source) -- it scans
+each `extensions/<name>/` subdir holding an `extension.{mjs,cjs,js}` file. This
+plugin ships exactly one:
 
-```bash
-copilot plugin update context-handoff@copilot-extensions
-# then, from the updated source (the context-handoff-setup skill drives this):
-#   Windows: pwsh -File scripts/install.ps1 update
-#   Linux:   bash scripts/install.sh update
+```
+plugins/context-handoff/extensions/context-handoff/extension.mjs
 ```
 
-The installer:
+There is **no** copy to `~/.copilot/extensions/`, no deploy manifest, and no
+`scripts/install.*`. Installing/updating the plugin via the marketplace
+(`copilot plugin update context-handoff@copilot-extensions`, or repo-level
+`enabledPlugins` auto-install) is the whole deploy. The extension activates on
+the **next** Copilot CLI session (extensions are scanned at startup).
 
-1. Copies `extension/context-handoff/extension.mjs` to
-   `~/.copilot/extensions/context-handoff/extension.mjs`.
-2. Ensures `experimental: true` in `~/.copilot/settings.json` (extensions are
-   gated behind it).
-3. Writes a `schema_version` 3 deploy manifest to `~/.context-handoff/`.
+## Requirements
 
-The extension activates on the **next** Copilot CLI session (the CLI scans
-`~/.copilot/extensions/` at startup, before installers run).
+Two conditions must hold for the extension to load -- both are handled outside
+this plugin:
 
-## Status / uninstall
+1. **The plugin must be enabled.** `context-handoff@copilot-extensions: true`
+   in `enabledPlugins` (user `~/.copilot/settings.json`, or a repo's
+   `.github/copilot/settings.json`). A marketplace plugin's `extensions/` dir is
+   only scanned when the plugin is enabled.
+2. **`experimental: true`** in `~/.copilot/settings.json` -- the CLI gates *all*
+   extension loading behind it. This is ensured by the **agent-worktrees**
+   installer (`Ensure-CopilotExperimental`, run on `agent-worktrees
+   install`/`update`), the session-lifecycle owner present on every machine.
+   This plugin does not set it.
 
-```bash
-scripts/install.ps1 status      # or install.sh status
-scripts/install.ps1 uninstall   # removes the deployed extension + manifest
-```
+## Verify
 
-Uninstall removes the deployed extension and manifest. It intentionally
-leaves `experimental: true` in `settings.json` alone -- other extensions may
-rely on it.
+A loaded extension logs `[Context Handoff] Session started ...` and exposes the
+`generate_handoff_prompt` / `save_handoff_prompt` tools. `/extensions` lists it
+with source **plugin**. If it does not load, confirm both requirements above and
+start a fresh session (the context-handoff-setup skill walks through this).
 
 ## Thresholds
 
