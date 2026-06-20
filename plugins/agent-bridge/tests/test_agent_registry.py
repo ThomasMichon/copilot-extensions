@@ -923,3 +923,93 @@ class TestAdminResolver:
         target = await resolver.resolve_async("admin:local-agent")
         assert target.type == "command"
         assert target.spawn_command is not None
+
+
+class TestElevatedRelayRouting:
+    """Cap 2 Slice 3: a bare requires_admin agent routes to the sub-daemon."""
+
+    def _resolver(self):
+        agents = {
+            "SPO.Core": AgentConfig(
+                name="SPO.Core",
+                project="SPO.Core",
+                description="Elevated enlistment agent",
+                requires_admin=True,
+                auto_discovered=True,
+            ),
+            "plain": AgentConfig(name="plain", project="p", description="plain"),
+        }
+        return AgentResolver(agents, {})
+
+    @pytest.mark.asyncio
+    async def test_bare_elevated_agent_routes_to_relay(self, monkeypatch):
+        from agent_bridge import elevated
+
+        monkeypatch.setattr(elevated, "relay_applicable", lambda req: bool(req))
+        monkeypatch.setattr(elevated, "ensure_running", lambda: "subtok")
+
+        target = await self._resolver().resolve_async("SPO.Core")
+
+        assert target.type == "command"
+        assert target.project == "SPO.Core"
+        assert target.spawn_command[1:] == [
+            "-m", "agent_bridge", "acp-connect",
+            "ws://127.0.0.1:9281/acp/SPO.Core", "--token", "subtok", "--stdio",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_bare_elevated_agent_local_when_not_applicable(self, monkeypatch):
+        """When relay is not applicable (e.g. already elevated / non-Windows),
+        the elevated agent resolves locally instead of relaying."""
+        from agent_bridge import elevated
+
+        monkeypatch.setattr(elevated, "relay_applicable", lambda req: False)
+
+        def _boom():
+            raise AssertionError("ensure_running must not be called")
+
+        monkeypatch.setattr(elevated, "ensure_running", _boom)
+
+        target = await self._resolver().resolve_async("SPO.Core")
+
+        assert target.type == "local"
+        assert target.project == "SPO.Core"
+
+    @pytest.mark.asyncio
+    async def test_non_elevated_agent_never_relays(self, monkeypatch):
+        from agent_bridge import elevated
+
+        # relay_applicable would say yes for requires_admin, but this agent
+        # is not requires_admin, so the relay branch must be skipped entirely.
+        monkeypatch.setattr(elevated, "relay_applicable", lambda req: True)
+
+        def _boom():
+            raise AssertionError("ensure_running must not be called")
+
+        monkeypatch.setattr(elevated, "ensure_running", _boom)
+
+        target = await self._resolver().resolve_async("plain")
+
+        assert target.type == "local"
+
+
+class TestElevatedDiscovery:
+    """projects.yaml `elevated: true` (what register --elevated writes) maps
+    to requires_admin so routing can find it."""
+
+    def test_discover_honors_elevated_key(self, tmp_path, monkeypatch):
+        projects = tmp_path / "projects.yaml"
+        projects.write_text(
+            "projects:\n"
+            "  SPO.Core:\n"
+            "    anchor: 'D:/Git/SPO'\n"
+            "    base_repo: true\n"
+            "    elevated: true\n"
+            "  Plain:\n"
+            "    anchor: 'D:/Git/Plain'\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("AGENT_WORKTREES_PROJECTS_YAML", str(projects))
+        discovered = discover_local_agents()
+        assert discovered["SPO.Core"].requires_admin is True
+        assert discovered["Plain"].requires_admin is False

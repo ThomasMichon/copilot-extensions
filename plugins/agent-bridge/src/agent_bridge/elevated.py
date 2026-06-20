@@ -139,6 +139,60 @@ def _run_elevated(script: Path) -> int:
     return proc.returncode
 
 
+def is_process_elevated() -> bool:
+    """True if the current process holds an elevated (admin) token.
+
+    Windows only; returns ``False`` on other platforms (and on any failure).
+    This is the recursion guard for routing: the elevated sub-daemon runs
+    elevated, so it spawns ``requires_admin`` agents locally instead of
+    relaying back into itself (see ``relay_spawn_command``).
+    """
+    import sys
+
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def relay_applicable(requires_admin: bool) -> bool:
+    """True if an elevated agent should be routed to the sub-daemon relay.
+
+    Only on Windows, only for ``requires_admin`` agents, and only when *this*
+    daemon is not already elevated (an elevated daemon spawns such agents
+    locally -- relaying would recurse).
+    """
+    import sys
+
+    if not requires_admin or sys.platform != "win32":
+        return False
+    return not is_process_elevated()
+
+
+def relay_spawn_command(
+    agent_name: str, *, token: str, port: int = ELEVATED_PORT
+) -> list[str]:
+    """Build the ``acp-connect`` relay command for an elevated agent.
+
+    The primary (non-elevated) bridge spawns this as a ``type="command"``
+    target; the relay shuttles stdio NDJSON to the elevated sub-daemon's
+    ``WS /acp/<agent>`` endpoint, which drives the elevated copilot.
+    Invoked via ``<python> -m agent_bridge`` (not the ``.cmd`` binstub) so
+    forwarded arguments are not mangled by cmd.exe.
+    """
+    import sys
+
+    url = f"ws://127.0.0.1:{port}/acp/{agent_name}"
+    return [
+        sys.executable, "-m", "agent_bridge", "acp-connect",
+        url, "--token", token, "--stdio",
+    ]
+
+
 def is_up(port: int = ELEVATED_PORT, timeout: float = 1.0) -> bool:
     """True if a bridge answers /health on the loopback port."""
     try:
