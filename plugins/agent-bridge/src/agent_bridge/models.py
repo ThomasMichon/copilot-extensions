@@ -296,3 +296,10 @@ class ServiceConfig(BaseModel):
         description="Seconds between periodic worktree discovery sweeps. "
         "0 disables periodic crawling (on-demand only).",
     )
+    idle_shutdown_seconds: int = Field(
+        default=0,
+        description="If > 0, the daemon exits after this many seconds with no "
+        "active sessions. Used by the elevated sub-daemon so it does not linger "
+        "once no host needs it; the persistent task restarts it headlessly. "
+        "0 disables (the primary daemon stays up indefinitely).",
+    )

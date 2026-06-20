@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -20,6 +21,21 @@ from .session_manager import SessionManager
 from .transport import shutdown_ssh
 
 log = logging.getLogger("agent-bridge")
+
+# Session statuses that mean "a host is actively using this daemon". When none
+# of these are present, the idle-shutdown monitor (if armed) counts down.
+_ACTIVE_STATUSES = {"created", "starting", "running", "idle"}
+
+
+def _count_active_sessions(mgr) -> int:
+    """Count sessions that are live (not a terminal/stopped state)."""
+    n = 0
+    for s in mgr.list_sessions():
+        st = getattr(s, "status", None)
+        st = getattr(st, "value", st)
+        if str(st).lower() in _ACTIVE_STATUSES:
+            n += 1
+    return n
 
 
 @asynccontextmanager
@@ -101,7 +117,49 @@ async def lifespan(app: FastAPI):
         gc_task = asyncio.create_task(_gc_loop())
         log.info("Periodic GC sweep every %.1fh", sweep_hours)
 
+    # Idle auto-shutdown -- the elevated sub-daemon (and any caller that passes
+    # idle_shutdown_seconds) exits once no host needs it, so it does not linger.
+    # The primary daemon leaves this at 0 and stays up indefinitely.
+    idle_task = None
+    idle_secs = getattr(cfg, "idle_shutdown_seconds", 0) or 0
+    if idle_secs > 0:
+        async def _idle_loop() -> None:
+            poll = max(5.0, min(30.0, idle_secs / 4))
+            last_active = time.monotonic()
+            while True:
+                await asyncio.sleep(poll)
+                try:
+                    active = await asyncio.to_thread(_count_active_sessions, mgr)
+                except Exception:
+                    log.warning("Idle-shutdown check failed", exc_info=True)
+                    continue
+                if active > 0:
+                    last_active = time.monotonic()
+                    continue
+                idle_for = time.monotonic() - last_active
+                if idle_for >= idle_secs:
+                    log.info(
+                        "Idle %.0fs with no active sessions -- shutting down",
+                        idle_for,
+                    )
+                    server = getattr(app.state, "uvicorn_server", None)
+                    if server is not None:
+                        server.should_exit = True
+                    return
+
+        idle_task = asyncio.create_task(_idle_loop())
+        log.info(
+            "Idle-shutdown armed: exit after %ds with no active sessions",
+            idle_secs,
+        )
+
     yield
+
+    # Shutdown: stop the idle-shutdown monitor
+    if idle_task is not None:
+        idle_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await idle_task
 
     # Shutdown: stop the periodic GC sweep
     if gc_task is not None:

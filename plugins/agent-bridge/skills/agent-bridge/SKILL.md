@@ -268,20 +268,27 @@ The (non-elevated) primary daemon cannot spawn an elevated Copilot directly, so
 for a flagged agent it transparently:
 
 1. **auto-ensures an elevated sub-daemon** -- a second agent-bridge on loopback
-   `127.0.0.1:9281`, launched elevated via a one-shot scheduled task (**one UAC
-   prompt** on first use per session), isolated under `<config>/elevated/`; and
+   `127.0.0.1:9281`, run elevated via a persistent `/RL HIGHEST` scheduled task,
+   isolated under `<config>/elevated/`; and
 2. **relays** the session to it over ACP-over-WebSocket (`agent-bridge
    acp-connect ws://127.0.0.1:9281/acp/<Project>`). Because the whole sub-daemon
    is elevated, the agent it spawns is elevated too.
 
 This only triggers on Windows when the primary is **not already elevated**; an
 already-elevated daemon (and the sub-daemon itself) spawns the agent locally, so
-there is no recursion. Manage the sub-daemon directly when needed:
+there is no recursion.
+
+**Headless after first use.** The scheduled task is consented **once** (a single
+UAC prompt the first time it is registered); every cold start afterwards runs it
+with `schtasks /run` -- **no UAC**. The sub-daemon also **auto-shuts-down** after
+~10 min with no active sessions (so it does not linger), and the persistent task
+restarts it headlessly on the next request. Manage it directly when needed:
 
 ```bash
-agent-bridge elevated start    # ensure the sub-daemon is up (one UAC prompt)
-agent-bridge elevated status   # port / up / task-registered / discovered agents
-agent-bridge elevated stop     # end + deregister the scheduled task (one UAC prompt)
+agent-bridge elevated start          # ensure up (headless once the task exists)
+agent-bridge elevated status         # port / up / task-registered / agents
+agent-bridge elevated stop           # stop now, headless (keeps task for restart)
+agent-bridge elevated stop --deregister  # full teardown: delete the task (one UAC)
 ```
 
 > **Security (v1):** the sub-daemon is loopback-only and bearer-token gated, but
