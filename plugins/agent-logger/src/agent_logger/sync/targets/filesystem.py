@@ -22,6 +22,14 @@ from agent_logger.sync.targets.base import DoctorResult, PushResult, Target
 #: Files never copied to a destination (session lock sidecars, temp files).
 _EXCLUDE_NAMES = frozenset({".lock"})
 
+#: Top-level session-index files kept alongside the ``session-state`` tree when
+#: no repo allowlist narrows the scope. Everything else under the source (the
+#: rest of ~/.copilot: binaries, installed plugins, OAuth/credential state,
+#: encryption keys, settings) is never archived.
+_SESSION_INDEX_NAMES = frozenset(
+    {"session-store.db", "session-store.db-wal", "session-store.db-shm"}
+)
+
 
 def _needs_copy(src: Path, dst: Path) -> bool:
     """Copy if the destination is missing, a different size, or older."""
@@ -42,18 +50,31 @@ def _count_sessions(dest: Path) -> int:
 
 
 def _included(rel: Path, include_sessions: set[str] | None) -> bool:
-    """Decide whether a relative source path is in scope under a filter.
+    """Decide whether a relative source path is in scope.
 
-    With no filter, everything is included. With a filter, only files under
-    ``session-state/<id>/`` for an allowed ``<id>`` are included (other
-    top-level files such as the global session-store.db are skipped).
+    session-sync archives *session* data only -- the ``session-state`` tree
+    plus the global ``session-store.db`` index -- never the rest of the source
+    (``~/.copilot``: binaries, installed plugins, OAuth/credential state,
+    encryption keys, settings).
+
+    With no allowlist, the whole ``session-state`` tree and the session-store.db
+    index are included. With an allowlist, only ``session-state/<id>/`` for an
+    allowed ``<id>`` is included (the global session-store.db is skipped so
+    other repos' session metadata never leaks).
     """
-    if include_sessions is None:
-        return True
     parts = rel.parts
-    if len(parts) >= 2 and parts[0] == "session-state":
-        return parts[1] in include_sessions
-    return False
+    if not parts:
+        return False
+    if parts[0] == "session-state":
+        if include_sessions is None:
+            return True
+        return len(parts) >= 2 and parts[1] in include_sessions
+    # Top-level session index: kept only when not filtering by repo.
+    return (
+        include_sessions is None
+        and len(parts) == 1
+        and rel.name in _SESSION_INDEX_NAMES
+    )
 
 
 class FilesystemTarget(Target):
