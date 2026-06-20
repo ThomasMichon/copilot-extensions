@@ -122,8 +122,11 @@ def _cmd_elevated(args: argparse.Namespace) -> None:
         print(f"Token:  {tok[:8]}...")
         print(f"ACP WS: ws://127.0.0.1:{port}/acp/<agent>")
     elif action == "stop":
-        elevated.stop()
-        print("Elevated sub-daemon stop requested")
+        elevated.stop(deregister=bool(getattr(args, "deregister", False)))
+        if getattr(args, "deregister", False):
+            print("Elevated sub-daemon stopped and task deregistered")
+        else:
+            print("Elevated sub-daemon stopped (task kept for headless restart)")
     else:
         print(json.dumps(elevated.status(), indent=2))
 
@@ -142,6 +145,9 @@ def _cmd_start(args: argparse.Namespace) -> None:
         cfg.port = args.port
     if args.bind:
         cfg.bind = args.bind
+    idle = getattr(args, "idle_shutdown", None)
+    if idle is not None:
+        cfg.idle_shutdown_seconds = idle
 
     from .app import create_app
 
@@ -150,8 +156,12 @@ def _cmd_start(args: argparse.Namespace) -> None:
     print(f"[agent-bridge] Starting on {cfg.bind}:{cfg.port}")
     print(f"[agent-bridge] Auth token: {token[:8]}...")
     print(f"[agent-bridge] DB: {cfg.db_path}")
+    if cfg.idle_shutdown_seconds and cfg.idle_shutdown_seconds > 0:
+        print(f"[agent-bridge] Idle shutdown after {cfg.idle_shutdown_seconds}s")
 
-    uvicorn.run(
+    # Use an explicit Server (not uvicorn.run) so the idle-shutdown monitor in
+    # the lifespan can request a graceful stop via server.should_exit.
+    config = uvicorn.Config(
         app,
         host=cfg.bind,
         port=cfg.port,
@@ -161,6 +171,9 @@ def _cmd_start(args: argparse.Namespace) -> None:
         # would 403 every /acp WebSocket upgrade) on a host without it.
         ws="wsproto",
     )
+    server = uvicorn.Server(config)
+    app.state.uvicorn_server = server
+    server.run()
 
 
 def _cmd_status(args: argparse.Namespace) -> None:
@@ -1803,6 +1816,11 @@ def main(argv: list[str] | None = None) -> None:
     start_p = sub.add_parser("start", help="Start the agent-bridge server")
     start_p.add_argument("--port", type=int, help="Port to listen on")
     start_p.add_argument("--bind", type=str, help="Address to bind to")
+    start_p.add_argument(
+        "--idle-shutdown", type=int, default=None, metavar="SECONDS",
+        help="Exit after this many seconds with no active sessions "
+             "(0 = never). Used by the elevated sub-daemon.",
+    )
     start_p.set_defaults(func=_cmd_start)
 
     # Relay stdio <-> a remote bridge's ACP-over-WebSocket endpoint. Used as a
@@ -1838,9 +1856,16 @@ def main(argv: list[str] | None = None) -> None:
     )
     elev_sub = elev_p.add_subparsers(dest="elevated_action")
     elev_sub.add_parser(
-        "start", help="Start the elevated sub-daemon (one UAC prompt)"
+        "start",
+        help="Start the elevated sub-daemon (one UAC on first use, then headless)",
     )
-    elev_sub.add_parser("stop", help="Stop + deregister the elevated sub-daemon")
+    elev_stop = elev_sub.add_parser(
+        "stop", help="Stop the elevated sub-daemon (headless; keeps the task)"
+    )
+    elev_stop.add_argument(
+        "--deregister", action="store_true",
+        help="Also delete the scheduled task (one UAC) -- full teardown",
+    )
     elev_sub.add_parser("status", help="Show elevated sub-daemon status")
     elev_p.set_defaults(func=_cmd_elevated)
 

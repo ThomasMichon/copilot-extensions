@@ -52,6 +52,11 @@ ELEVATED_PORT = 9281
 TASK_NAME = "agent-bridge-elevated"
 _SUBDIR = "elevated"
 
+# The elevated sub-daemon self-terminates after this many seconds with no active
+# sessions, so it does not linger once no host needs it. Because the scheduled
+# task is persistent, the next request cold-starts it again headlessly (no UAC).
+IDLE_SHUTDOWN_SECONDS = 600
+
 
 def elevated_dir() -> Path:
     """The sub-daemon's isolated config/state dir (``<primary>/elevated``)."""
@@ -84,7 +89,11 @@ def _seed_config(port: int) -> Path:
 
 
 def _write_launcher(ed: Path, port: int) -> Path:
-    """Write the task-action launcher.cmd that runs the elevated daemon."""
+    """Write the task-action launcher.cmd that runs the elevated daemon.
+
+    The daemon is started with ``--idle-shutdown`` so it exits once no host
+    needs it; the persistent task lets the next request restart it headlessly.
+    """
     py = _venv_python()
     log_path = ed / "elevated-daemon.log"
     launcher = ed / "launcher.cmd"
@@ -92,6 +101,7 @@ def _write_launcher(ed: Path, port: int) -> Path:
         "@echo off\r\n"
         f'set "AGENT_BRIDGE_CONFIG_DIR={ed}"\r\n'
         f'"{py}" -m agent_bridge start --port {port} --bind 127.0.0.1 '
+        f'--idle-shutdown {IDLE_SHUTDOWN_SECONDS} '
         f'>> "{log_path}" 2>&1\r\n',
         encoding="ascii",
     )
@@ -99,7 +109,12 @@ def _write_launcher(ed: Path, port: int) -> Path:
 
 
 def _write_bootstrap(ed: Path, launcher: Path, *, action: str) -> Path:
-    """Write a privileged bootstrap .cmd (create+run, or end+delete the task)."""
+    """Write a privileged bootstrap .cmd (register the task, or end+delete it).
+
+    Only the **first** registration is privileged: a ``/RL HIGHEST`` task is
+    consented once via UAC here, after which ``schtasks /run`` / ``/end`` drive
+    it with no further prompt (see ``_run_task`` / ``_end_task``).
+    """
     if action == "start":
         body = (
             "@echo off\r\n"
@@ -118,6 +133,44 @@ def _write_bootstrap(ed: Path, launcher: Path, *, action: str) -> Path:
     p = ed / name
     p.write_text(body, encoding="ascii")
     return p
+
+
+def _task_registered() -> bool:
+    """True if the persistent elevated scheduled task already exists."""
+    try:
+        out = subprocess.run(
+            ["schtasks", "/query", "/tn", TASK_NAME],
+            capture_output=True, text=True,
+        )
+        return out.returncode == 0
+    except OSError:
+        return False
+
+
+def _run_task() -> int:
+    """Start the registered task (elevated) without a UAC prompt.
+
+    Running an already-consented ``/RL HIGHEST`` task needs no elevation, so
+    this is headless. The task action re-reads ``launcher.cmd``, so config /
+    flag changes written just before this call take effect.
+    """
+    out = subprocess.run(
+        ["schtasks", "/run", "/tn", TASK_NAME], capture_output=True, text=True,
+    )
+    if out.returncode != 0:
+        log.warning(
+            "schtasks /run failed: %s",
+            (out.stderr or out.stdout or "").strip(),
+        )
+    return out.returncode
+
+
+def _end_task() -> int:
+    """Terminate the running task instance (elevated) without a UAC prompt."""
+    out = subprocess.run(
+        ["schtasks", "/end", "/tn", TASK_NAME], capture_output=True, text=True,
+    )
+    return out.returncode
 
 
 def _run_elevated(script: Path) -> int:
@@ -220,9 +273,11 @@ def read_token() -> str | None:
 def ensure_running(port: int = ELEVATED_PORT, *, wait: float = 60.0) -> str:
     """Ensure the elevated sub-daemon is up; return its bearer token.
 
-    Idempotent: if already serving on the port, just returns the token. Otherwise
-    seeds config, registers+runs the elevated scheduled task (one UAC), and polls
-    /health until ready.
+    Idempotent and **headless after first use**: if already serving, returns the
+    token. Otherwise it re-seeds config + launcher and starts the daemon. The
+    very first start registers a persistent ``/RL HIGHEST`` scheduled task (one
+    UAC prompt); every subsequent cold start runs that already-consented task
+    via ``schtasks /run`` with **no** prompt.
     """
     if is_up(port):
         tok = read_token()
@@ -231,10 +286,20 @@ def ensure_running(port: int = ELEVATED_PORT, *, wait: float = 60.0) -> str:
 
     ed = _seed_config(port)
     launcher = _write_launcher(ed, port)
-    bootstrap = _write_bootstrap(ed, launcher, action="start")
 
-    log.info("Launching elevated sub-daemon on 127.0.0.1:%d (expect a UAC prompt)", port)
-    _run_elevated(bootstrap)
+    if _task_registered():
+        log.info(
+            "Starting elevated sub-daemon headlessly via scheduled task "
+            "(127.0.0.1:%d)", port,
+        )
+        _run_task()
+    else:
+        bootstrap = _write_bootstrap(ed, launcher, action="start")
+        log.info(
+            "Registering elevated sub-daemon task on 127.0.0.1:%d "
+            "(expect one UAC prompt -- subsequent starts are headless)", port,
+        )
+        _run_elevated(bootstrap)
 
     deadline = time.time() + wait
     while time.time() < deadline:
@@ -250,12 +315,20 @@ def ensure_running(port: int = ELEVATED_PORT, *, wait: float = 60.0) -> str:
     )
 
 
-def stop(port: int = ELEVATED_PORT) -> None:
-    """Stop and deregister the elevated sub-daemon (one UAC prompt)."""
-    ed = elevated_dir()
-    launcher = ed / "launcher.cmd"
-    bootstrap = _write_bootstrap(ed, launcher, action="stop")
-    _run_elevated(bootstrap)
+def stop(port: int = ELEVATED_PORT, *, deregister: bool = False) -> None:
+    """Stop the elevated sub-daemon. Headless by default.
+
+    Ends the running task instance via ``schtasks /end`` (no UAC) but **keeps**
+    the persistent task registered so the next start stays headless. Pass
+    ``deregister=True`` to also delete the task (one UAC) -- e.g. to fully
+    uninstall or re-consent the elevation grant.
+    """
+    _end_task()
+    if deregister:
+        ed = elevated_dir()
+        launcher = ed / "launcher.cmd"
+        bootstrap = _write_bootstrap(ed, launcher, action="stop")
+        _run_elevated(bootstrap)
 
 
 def status(port: int = ELEVATED_PORT) -> dict:

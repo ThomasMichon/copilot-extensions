@@ -68,3 +68,95 @@ def test_relay_not_applicable_when_already_elevated(monkeypatch):
     monkeypatch.setattr(_sys, "platform", "win32")
     monkeypatch.setattr(elevated, "is_process_elevated", lambda: True)
     assert elevated.relay_applicable(True) is False
+
+
+# -- Headless start / stop (scheduled-task lifecycle) ------------------------
+
+
+def _stub_start(monkeypatch, tmp_path):
+    """Stub disk/health side effects so ensure_running can run logic-only.
+
+    is_up returns False once (the top guard) then True (poll), and read_token
+    yields a token. Returns the tmp launcher path the writer pretends to make.
+    """
+    seq = iter([False, True])
+    monkeypatch.setattr(elevated, "is_up", lambda *a, **k: next(seq))
+    monkeypatch.setattr(elevated, "read_token", lambda: "subtok")
+    monkeypatch.setattr(elevated, "_seed_config", lambda port: tmp_path)
+    monkeypatch.setattr(
+        elevated, "_write_launcher", lambda ed, port: tmp_path / "launcher.cmd"
+    )
+
+
+def test_ensure_running_returns_token_when_already_up(monkeypatch):
+    monkeypatch.setattr(elevated, "is_up", lambda *a, **k: True)
+    monkeypatch.setattr(elevated, "read_token", lambda: "tok")
+    called = {"elev": False, "run": False}
+    monkeypatch.setattr(elevated, "_run_elevated", lambda s: called.__setitem__("elev", True))
+    monkeypatch.setattr(elevated, "_run_task", lambda: called.__setitem__("run", True))
+    assert elevated.ensure_running() == "tok"
+    assert called == {"elev": False, "run": False}
+
+
+def test_ensure_running_headless_when_task_registered(monkeypatch, tmp_path):
+    _stub_start(monkeypatch, tmp_path)
+    monkeypatch.setattr(elevated, "_task_registered", lambda: True)
+    calls = []
+    monkeypatch.setattr(elevated, "_run_task", lambda: calls.append("run") or 0)
+    monkeypatch.setattr(
+        elevated, "_run_elevated",
+        lambda s: calls.append("elevated") or 0,
+    )
+    tok = elevated.ensure_running(wait=2.0)
+    assert tok == "subtok"
+    # Headless: schtasks /run only, NO elevated UAC bootstrap.
+    assert calls == ["run"]
+
+
+def test_ensure_running_registers_when_task_absent(monkeypatch, tmp_path):
+    _stub_start(monkeypatch, tmp_path)
+    monkeypatch.setattr(elevated, "_task_registered", lambda: False)
+    calls = []
+    monkeypatch.setattr(elevated, "_run_task", lambda: calls.append("run") or 0)
+    monkeypatch.setattr(
+        elevated, "_run_elevated",
+        lambda s: calls.append("elevated") or 0,
+    )
+    monkeypatch.setattr(
+        elevated, "_write_bootstrap",
+        lambda ed, launcher, action: tmp_path / "bootstrap.cmd",
+    )
+    tok = elevated.ensure_running(wait=2.0)
+    assert tok == "subtok"
+    # First time: one elevated registration bootstrap, no headless /run.
+    assert calls == ["elevated"]
+
+
+def test_stop_is_headless_by_default(monkeypatch):
+    calls = []
+    monkeypatch.setattr(elevated, "_end_task", lambda: calls.append("end") or 0)
+    monkeypatch.setattr(elevated, "_run_elevated", lambda s: calls.append("elevated") or 0)
+    elevated.stop()
+    assert calls == ["end"]  # no UAC
+
+
+def test_stop_deregister_runs_elevated(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(elevated, "_end_task", lambda: calls.append("end") or 0)
+    monkeypatch.setattr(elevated, "_run_elevated", lambda s: calls.append("elevated") or 0)
+    monkeypatch.setattr(elevated, "elevated_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        elevated, "_write_bootstrap",
+        lambda ed, launcher, action: tmp_path / "bootstrap.cmd",
+    )
+    elevated.stop(deregister=True)
+    assert calls == ["end", "elevated"]
+
+
+def test_launcher_passes_idle_shutdown(monkeypatch, tmp_path):
+    monkeypatch.setattr(elevated, "_venv_python", lambda: "py.exe")
+    monkeypatch.setattr(elevated, "elevated_dir", lambda: tmp_path)
+    launcher = elevated._write_launcher(tmp_path, 9281)
+    body = launcher.read_text()
+    assert f"--idle-shutdown {elevated.IDLE_SHUTDOWN_SECONDS}" in body
+    assert "-m agent_bridge start --port 9281" in body
