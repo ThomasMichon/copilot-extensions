@@ -248,6 +248,47 @@ Presents agent-bridge as an ACP-compatible agent. Upstream ACP clients
 connect via stdio and the bridge routes prompts to the named downstream
 agent. Used by chat interfaces that speak ACP natively.
 
+### Elevated Agents (Windows)
+
+Some local agents must run **elevated** (admin) -- e.g. an enlistment-based
+`base_repo` agent that needs admin plus a build environment. Such a project is
+flagged once, at adoption time:
+
+```bash
+agent-worktrees register <Project> --base-repo --elevated   # writes elevated: true
+```
+
+After that, **just send to it by its bare name** -- no special prefix:
+
+```bash
+agent-bridge send <Project> "do the elevated work"
+```
+
+The (non-elevated) primary daemon cannot spawn an elevated Copilot directly, so
+for a flagged agent it transparently:
+
+1. **auto-ensures an elevated sub-daemon** -- a second agent-bridge on loopback
+   `127.0.0.1:9281`, launched elevated via a one-shot scheduled task (**one UAC
+   prompt** on first use per session), isolated under `<config>/elevated/`; and
+2. **relays** the session to it over ACP-over-WebSocket (`agent-bridge
+   acp-connect ws://127.0.0.1:9281/acp/<Project>`). Because the whole sub-daemon
+   is elevated, the agent it spawns is elevated too.
+
+This only triggers on Windows when the primary is **not already elevated**; an
+already-elevated daemon (and the sub-daemon itself) spawns the agent locally, so
+there is no recursion. Manage the sub-daemon directly when needed:
+
+```bash
+agent-bridge elevated start    # ensure the sub-daemon is up (one UAC prompt)
+agent-bridge elevated status   # port / up / task-registered / discovered agents
+agent-bridge elevated stop     # end + deregister the scheduled task (one UAC prompt)
+```
+
+> **Security (v1):** the sub-daemon is loopback-only and bearer-token gated, but
+> the token is in a user-readable file, so any same-user process could drive the
+> elevated agent. Acceptable on a single-user dev box; hardening is tracked
+> separately.
+
 ### Config Management
 
 ```bash

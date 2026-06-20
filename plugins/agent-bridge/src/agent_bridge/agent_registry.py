@@ -15,6 +15,7 @@ always fresh (no TTL, no registration).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -274,7 +275,9 @@ def discover_local_agents() -> dict[str, AgentConfig]:
             display_name=f"{project_name} (local)",
             description=f"Local agent for {project_name} (auto-discovered from projects.yaml)",
             auto_discovered=True,
-            requires_admin=bool(project_data.get("requires_admin")),
+            requires_admin=bool(
+                project_data.get("requires_admin") or project_data.get("elevated")
+            ),
         )
 
     if skipped:
@@ -817,13 +820,57 @@ class AgentResolver:
         if len(candidates) == 1:
             _, resolver, resolve_name = candidates[0]
             if resolver is None:
-                return self._resolve_static(agent_name)
+                return await self._resolve_bare(agent_name)
             await resolver.ensure_ready(resolve_name)
             return await resolver.resolve(resolve_name)
 
         # No match anywhere -- defer to static resolution for its precise
         # "not found in registry" error.
         return self._resolve_static(agent_name)
+
+    async def _resolve_bare(self, agent_name: str) -> SpawnTarget:
+        """Resolve a bare static/provider agent, routing elevated ones.
+
+        A ``requires_admin`` agent is relayed to the elevated sub-daemon
+        (Capability 2) when this daemon is non-elevated; otherwise it falls
+        through to normal static resolution.
+        """
+        relay = await self._maybe_elevated_relay(agent_name)
+        if relay is not None:
+            return relay
+        return self._resolve_static(agent_name)
+
+    async def _maybe_elevated_relay(
+        self, agent_name: str,
+    ) -> SpawnTarget | None:
+        """Return a sub-daemon relay target for an elevated agent, else None.
+
+        Applies only to a registered ``requires_admin`` agent, on Windows,
+        when this daemon is not itself elevated (the elevated sub-daemon
+        resolves such agents locally via the sync path, so it never recurses
+        here). Ensuring the sub-daemon is up can prompt for UAC and block, so
+        it runs off the event loop.
+        """
+        from . import elevated
+
+        config = self._agents.get(agent_name)
+        if config is None:
+            config = self._live_provider_agents().get(agent_name)
+        if config is None or not config.requires_admin:
+            return None
+        if not elevated.relay_applicable(config.requires_admin):
+            return None
+
+        loop = asyncio.get_running_loop()
+        token = await loop.run_in_executor(None, elevated.ensure_running)
+        cmd = elevated.relay_spawn_command(config.name, token=token)
+        log.info(
+            "Routing elevated agent '%s' via sub-daemon relay (port %d)",
+            config.name, elevated.ELEVATED_PORT,
+        )
+        return SpawnTarget(
+            type="command", spawn_command=cmd, project=config.project,
+        )
 
     async def _gather_bare_candidates(
         self, name: str

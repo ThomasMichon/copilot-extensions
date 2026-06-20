@@ -152,9 +152,35 @@ async def test_non_bare_addressable_resolver_excluded_from_candidates():
 
 
 @pytest.mark.asyncio
-async def test_admin_resolver_does_not_shadow_bare_static_agent():
-    # End-to-end with the real AdminResolver: an opted-in agent has an admin:
-    # twin, yet the bare name still resolves to the non-elevated static agent.
+async def test_admin_resolver_does_not_shadow_bare_static_agent(monkeypatch):
+    # The admin: twin must not make the bare name ambiguous. A requires_admin
+    # agent's bare name auto-relays to the elevated sub-daemon (Cap 2 Slice 3)
+    # when relay is applicable -- here we force it applicable so the assertion
+    # is platform-independent.
+    from agent_bridge import elevated
+
+    monkeypatch.setattr(elevated, "relay_applicable", lambda req: bool(req))
+    monkeypatch.setattr(elevated, "ensure_running", lambda: "subtok")
+
+    r = AgentResolver(
+        {"spo": AgentConfig(name="spo", project="p", requires_admin=True)}, {}
+    )
+    r.register_namespace_resolver(AdminResolver(r))
+    target = await r.resolve_async("spo")
+    assert target.type == "command"
+    assert target.project == "p"
+    assert target.spawn_command[-4:] == [
+        "ws://127.0.0.1:9281/acp/spo", "--token", "subtok", "--stdio",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_bare_requires_admin_stays_local_when_relay_not_applicable(monkeypatch):
+    # Off Windows / already elevated, relay is not applicable, so a bare
+    # requires_admin agent falls through to normal (local) resolution.
+    from agent_bridge import elevated
+
+    monkeypatch.setattr(elevated, "relay_applicable", lambda req: False)
     r = AgentResolver(
         {"spo": AgentConfig(name="spo", project="p", requires_admin=True)}, {}
     )
