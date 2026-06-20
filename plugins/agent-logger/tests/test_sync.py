@@ -238,6 +238,58 @@ def test_allowlist_fail_open_without_workspace(tmp_path: Path) -> None:
     assert included == {"no-ws"}  # fail-open: kept when repo unknown
 
 
+def _make_polluted_source(root: Path) -> Path:
+    """Source with one session plus non-session ~/.copilot junk and secrets."""
+    src = root / "copilot"
+    sess = src / "session-state" / "abc-123"
+    sess.mkdir(parents=True)
+    (sess / "events.jsonl").write_text("{}\n", encoding="utf-8")
+    (src / "session-store.db").write_text("index", encoding="utf-8")
+    # Non-session state that must NEVER be archived.
+    (src / "installed-plugins").mkdir()
+    (src / "installed-plugins" / "binary.exe").write_text("MZ", encoding="utf-8")
+    (src / "mcp-oauth-config").mkdir()
+    (src / "mcp-oauth-config" / "token.json").write_text("secret", encoding="utf-8")
+    (src / "m-encryption-key.enc").write_text("key", encoding="utf-8")
+    (src / "settings.json").write_text("{}", encoding="utf-8")
+    return src
+
+
+def test_push_without_allowlist_excludes_non_session_state(tmp_path: Path) -> None:
+    """No allowlist must still scope to session data, not the whole ~/.copilot."""
+    src = _make_polluted_source(tmp_path)
+    dest_root = tmp_path / "dest"
+    result = LocalTarget({"path": str(dest_root)}).push(src, "m1")
+    assert result.ok
+
+    machine_dir = dest_root / "m1"
+    # Session data is archived.
+    assert (machine_dir / "session-state" / "abc-123" / "events.jsonl").is_file()
+    assert (machine_dir / "session-store.db").is_file()
+    # Secrets and binaries are NOT.
+    assert not (machine_dir / "installed-plugins").exists()
+    assert not (machine_dir / "mcp-oauth-config").exists()
+    assert not (machine_dir / "m-encryption-key.enc").exists()
+    assert not (machine_dir / "settings.json").exists()
+    assert result.file_count == 2  # events.jsonl + session-store.db only
+
+
+def test_rsync_session_filters_scope_without_allowlist() -> None:
+    """The unfiltered rsync filter must scope to session data, not be empty."""
+    from agent_logger.sync.targets.base import rsync_session_filters
+
+    unfiltered = rsync_session_filters(None)
+    assert "--include=session-state/***" in unfiltered
+    assert "--include=session-store.db" in unfiltered
+    assert unfiltered[-1] == "--exclude=*"
+
+    filtered = rsync_session_filters({"abc-123"})
+    assert "--include=session-state/abc-123/***" in filtered
+    # session-store.db is dropped when filtering by repo.
+    assert "--include=session-store.db" not in filtered
+    assert filtered[-1] == "--exclude=*"
+
+
 def test_config_repo_allowlist_parsing(tmp_path: Path) -> None:
     base = load_config(home=tmp_path).as_dict()
     data = dict(base)

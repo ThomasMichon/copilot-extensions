@@ -49,15 +49,27 @@ class PushResult:
 
 
 def rsync_session_filters(include_sessions: set[str] | None) -> list[str]:
-    """Build rsync include/exclude args restricting to allowed sessions.
+    """Build rsync include/exclude args restricting the transfer to session data.
 
-    With ``None`` there is no restriction. Otherwise only the named
-    ``session-state/<id>`` trees are transferred; everything else (including
-    a global session-store.db) is excluded so other repos' sessions never
-    leak to the destination.
+    session-sync archives session data only -- never the rest of the source
+    (``~/.copilot``: binaries, installed plugins, OAuth/credential state,
+    encryption keys, settings).
+
+    With ``None`` (no repo allowlist) the whole ``session-state`` tree plus the
+    global ``session-store.db`` index is transferred and nothing else. With an
+    allowlist, only the named ``session-state/<id>`` trees are transferred and
+    the global session-store.db is excluded so other repos' sessions never leak
+    to the destination.
     """
     if include_sessions is None:
-        return []
+        return [
+            "--include=session-state/",
+            "--include=session-state/***",
+            "--include=session-store.db",
+            "--include=session-store.db-wal",
+            "--include=session-store.db-shm",
+            "--exclude=*",
+        ]
     filters = ["--include=session-state/"]
     for sid in sorted(include_sessions):
         filters.append(f"--include=session-state/{sid}/")
@@ -94,10 +106,15 @@ class Target(ABC):
     ) -> PushResult:
         """Publish *source* under the target's ``{machine}/`` subpath.
 
-        ``include_sessions``, when not ``None``, restricts the transfer to
-        the named ``session-state/<id>`` directories (repo-allowlist
-        filtering); everything else under *source* is skipped to avoid
-        leaking sessions from other repos.
+        Only session data is published -- the ``session-state`` tree plus the
+        global ``session-store.db`` index -- never the rest of the source
+        (``~/.copilot``: binaries, installed plugins, OAuth/credential state,
+        encryption keys, settings).
+
+        ``include_sessions``, when not ``None``, further restricts the transfer
+        to the named ``session-state/<id>`` directories (repo-allowlist
+        filtering) and drops the global session-store.db, so sessions from
+        other repos never leak.
         """
 
     @abstractmethod
