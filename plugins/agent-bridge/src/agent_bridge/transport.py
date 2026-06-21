@@ -24,6 +24,7 @@ from typing import Any
 from ssh_manager import SSHProfileSource, get_default_manager
 
 from .connect import ConnectError, ConnectStage, ConnectTracker
+from .procgroup import safe_killpg
 
 log = logging.getLogger("agent-bridge")
 
@@ -142,10 +143,11 @@ class AgentProcess:
                 pass
         else:
             # POSIX: the agent spawns use start_new_session, so the child is a
-            # process-group leader -- signal the whole group.
-            try:
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
-            except (ProcessLookupError, PermissionError, OSError):
+            # process-group leader -- signal the whole group. Guard against
+            # ever signaling the bridge's own group (see procgroup / #1001):
+            # if the child unexpectedly shares our group, fall back to the
+            # direct child only.
+            if not safe_killpg(pid, signal.SIGTERM):
                 try:
                     self.proc.terminate()
                 except ProcessLookupError:

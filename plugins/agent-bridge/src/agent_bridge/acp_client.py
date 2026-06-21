@@ -47,6 +47,7 @@ from acp.schema import (
 )
 
 from . import __version__
+from .procgroup import safe_killpg
 
 log = logging.getLogger("agent-bridge")
 
@@ -72,10 +73,11 @@ async def _terminate_process_tree(proc: asyncio.subprocess.Process) -> None:
             pass
     else:
         # POSIX: agent spawns use start_new_session, so the child leads its
-        # own process group -- signal the whole group, then escalate.
-        try:
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
-        except (ProcessLookupError, PermissionError, OSError):
+        # own process group -- signal the whole group, then escalate. Guard
+        # against ever signaling the bridge's own group (see procgroup /
+        # #1001): if the child unexpectedly shares our group, fall back to
+        # the direct child only.
+        if not safe_killpg(pid, signal.SIGTERM):
             with contextlib.suppress(ProcessLookupError):
                 proc.terminate()
     with contextlib.suppress(TimeoutError, ProcessLookupError):
@@ -84,8 +86,7 @@ async def _terminate_process_tree(proc: asyncio.subprocess.Process) -> None:
     # Last resort if still alive.
     with contextlib.suppress(ProcessLookupError):
         if sys.platform != "win32":
-            with contextlib.suppress(ProcessLookupError, OSError):
-                os.killpg(os.getpgid(pid), signal.SIGKILL)
+            safe_killpg(pid, signal.SIGKILL)
         proc.kill()
     with contextlib.suppress(Exception):
         await asyncio.wait_for(proc.wait(), timeout=3.0)
