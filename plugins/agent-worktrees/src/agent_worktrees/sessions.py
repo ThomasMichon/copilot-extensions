@@ -12,6 +12,7 @@ Provides two scanning modes:
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 from dataclasses import dataclass, field
@@ -36,13 +37,73 @@ class SessionContext:
     turn_count: dict[str, int] = field(default_factory=dict)
     """normalized_path → total user-message turns across all sessions"""
 
+    last_activity: dict[str, str] = field(default_factory=dict)
+    """normalized_path → ISO updated_at of the most-recent session"""
+
+    context_pct: dict[str, int] = field(default_factory=dict)
+    """normalized_path → context-window utilization % of the most-recent session"""
+
     _latest_ts: dict[str, str] = field(default_factory=dict)
     """Internal: tracks latest updated_at per path for summary selection."""
+
+    _activity_ts: dict[str, str] = field(default_factory=dict)
+    """Internal: tracks latest updated_at per path for activity/context selection."""
 
 
 def _normalize_path(p: str) -> str:
     """Normalize a path for comparison -- strip trailing separators."""
     return p.rstrip("/\\")
+
+
+def _read_context_pct(entry: Path) -> int | None:
+    """Read context-window utilization % from a session's ``context.json``.
+
+    The context-handoff extension writes this sidecar after each model
+    interaction (the ``session.usage_info`` event carries the exact token
+    counts, which are not present in ``events.jsonl``).  Returns the
+    rounded percentage, or None when the sidecar is absent/unreadable.
+    Never raises.
+    """
+    f = entry / "context.json"
+    try:
+        if not f.exists():
+            return None
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    pct = data.get("utilizationPct")
+    if isinstance(pct, bool):
+        return None
+    if isinstance(pct, (int, float)):
+        return max(0, min(100, int(round(pct))))
+    return None
+
+
+def _update_activity(
+    ctx: SessionContext, norm_path: str, entry: Path, updated_at: str
+) -> None:
+    """Track the most-recent session's activity timestamp + context %.
+
+    ``last_activity`` and ``context_pct`` always reflect the newest
+    session (by ``updated_at``) for a worktree, independent of whether
+    that session has a usable title.
+    """
+    if not updated_at:
+        return
+    prev = ctx._activity_ts.get(norm_path, "")
+    if prev and updated_at <= prev:
+        return
+    ctx._activity_ts[norm_path] = updated_at
+    ctx.last_activity[norm_path] = updated_at
+    pct = _read_context_pct(entry)
+    if pct is not None:
+        ctx.context_pct[norm_path] = pct
+    elif norm_path in ctx.context_pct:
+        # Newest session has no context.json -- drop a stale older value
+        # rather than misreport an unrelated session's utilization.
+        del ctx.context_pct[norm_path]
 
 
 def _session_state_dir() -> Path:
@@ -241,6 +302,9 @@ def scan_sessions(worktree_paths: list[str]) -> SessionContext:
         # Track best available display text per path by updated_at.
         # Prefer summary (richer) over name (short title), but pick
         # the newest session's best text overall.
+        updated_at = str(ws_data.get("updated_at", ""))
+        _update_activity(ctx, matched_path, entry, updated_at)
+
         _placeholder = ("", "|-", "|", ">-", ">", "null", "Untitled")
         display_text = ""
         summary = ws_data.get("summary", "")
@@ -252,7 +316,6 @@ def scan_sessions(worktree_paths: list[str]) -> SessionContext:
                 display_text = name.strip()
 
         if display_text:
-            updated_at = ws_data.get("updated_at", "")
             if not latest_ts.get(matched_path) or updated_at > latest_ts[matched_path]:
                 latest_ts[matched_path] = updated_at
                 if len(display_text) > 60:
@@ -326,6 +389,9 @@ def _enrich_session_dir(
             ws_data = None
 
         if ws_data and isinstance(ws_data, dict):
+            updated_at = str(ws_data.get("updated_at", ""))
+            _update_activity(ctx, norm_path, entry, updated_at)
+
             _placeholder = ("", "|-", "|", ">-", ">", "null", "Untitled")
             display_text = ""
             summary = ws_data.get("summary", "")
@@ -337,7 +403,6 @@ def _enrich_session_dir(
                     display_text = name.strip()
 
             if display_text:
-                updated_at = str(ws_data.get("updated_at", ""))
                 prev_ts = ctx._latest_ts.get(norm_path, "")
                 if not prev_ts or updated_at > prev_ts:
                     ctx._latest_ts[norm_path] = updated_at
@@ -421,6 +486,12 @@ def scan_sessions_fast(
             ctx.session_count[k] = ctx.session_count.get(k, 0) + v
         for k, v in fallback_ctx.turn_count.items():
             ctx.turn_count[k] = ctx.turn_count.get(k, 0) + v
+        # Fallback paths are disjoint from fast-path records, so a direct
+        # copy is safe (no key collisions to reconcile).
+        for k, v in fallback_ctx.last_activity.items():
+            ctx.last_activity.setdefault(k, v)
+        for k, v in fallback_ctx.context_pct.items():
+            ctx.context_pct.setdefault(k, v)
 
     return ctx
 

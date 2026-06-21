@@ -184,6 +184,51 @@ def _age_str(started_at: str) -> str:
         return "?"
 
 
+def _epoch_or_zero(iso: str) -> float:
+    """Parse an ISO timestamp to epoch seconds for sorting (0.0 on failure).
+
+    Handles both the naive-local ``started_at`` form and the UTC ``Z``
+    form written to ``workspace.yaml``.  ``datetime.timestamp()`` treats a
+    naive value as local time, which matches how ``started_at`` is written.
+    """
+    if not iso:
+        return 0.0
+    try:
+        s = iso.strip()
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _activity_age_str(iso: str) -> str | None:
+    """Human-readable age from a session ``updated_at`` (UTC, may end in Z).
+
+    Unlike ``_age_str`` (which expects naive local timestamps), this
+    tolerates the ``Z`` suffix and tz-aware values written by the Copilot
+    CLI to ``workspace.yaml``.  Returns None when *iso* is empty/unparseable.
+    """
+    if not iso:
+        return None
+    try:
+        s = iso.strip()
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        now = datetime.now(dt.tzinfo) if dt.tzinfo is not None else datetime.now()
+        minutes = int((now - dt).total_seconds() / 60)
+        if minutes < 0:
+            minutes = 0
+        if minutes >= 1440:
+            return f"{minutes // 1440}d ago"
+        if minutes >= 60:
+            return f"{minutes // 60}h ago"
+        return f"{minutes}m ago"
+    except Exception:
+        return None
+
+
 def _normalize_path(p: str) -> str:
     """Normalize for comparison -- strip trailing separators."""
     return p.rstrip("/\\")
@@ -761,6 +806,21 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 else:
                     recent_wts.append((rec, info))
 
+            # Sort every bucket by most-recent activity first: prefer the
+            # latest session's updated_at, falling back to the worktree's
+            # started_at.  Descending so the freshest worktrees lead.
+            def _bucket_sort_key(
+                pair: tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo],
+                session_ctx: sessions.SessionContext = session_ctx,
+            ) -> float:
+                rec, _ = pair
+                norm = _normalize_path(rec.worktree_path)
+                iso = session_ctx.last_activity.get(norm) or rec.started_at or ""
+                return _epoch_or_zero(iso)
+
+            for _bucket in (active_wts, recent_wts, unused_wts, completed_wts):
+                _bucket.sort(key=_bucket_sort_key, reverse=True)
+
             # Build picker menu
             menu_items: list[MenuItem] = []
 
@@ -812,10 +872,25 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 info: git_ops.WorktreeStateInfo,
                 session_ctx: sessions.SessionContext = session_ctx,
             ) -> str | None:
-                """Resolve the best available title for a worktree."""
+                """Resolve the best available title + live metadata for a worktree.
+
+                Metadata (turn count, context-window %, last-activity age)
+                is appended in parentheses, e.g.
+                ``Fix the picker (12 turns · 43% ctx · 5m ago)``.
+                """
                 norm = _normalize_path(rec.worktree_path)
                 turns = session_ctx.turn_count.get(norm, 0)
-                turn_tag = f" ({turns} turn{'s' if turns != 1 else ''})" if turns > 0 else ""
+                pct = session_ctx.context_pct.get(norm)
+                age = _activity_age_str(session_ctx.last_activity.get(norm, ""))
+
+                meta: list[str] = []
+                if turns > 0:
+                    meta.append(f"{turns} turn{'s' if turns != 1 else ''}")
+                if pct is not None:
+                    meta.append(f"{pct}% ctx")
+                if age:
+                    meta.append(age)
+                meta_tag = f" ({' · '.join(meta)})" if meta else ""
 
                 title = ""
                 if rec.title and rec.title != "null":
@@ -825,15 +900,14 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 elif info.title:
                     title = info.title
                 if title:
-                    return " ".join(title.split()) + turn_tag
-                # Last resort: show session count so the worktree isn't blank
+                    return " ".join(title.split()) + meta_tag
+                # Last resort: lead with session count so it isn't blank
                 count = session_ctx.session_count.get(norm, 0)
                 if count > 0:
                     parts = [f"{count} session{'s' if count != 1 else ''}"]
-                    if turns > 0:
-                        parts.append(f"{turns} turn{'s' if turns != 1 else ''}")
-                    return f"({', '.join(parts)})"
-                return None
+                    parts.extend(meta)
+                    return f"({' · '.join(parts)})"
+                return meta_tag.strip() or None
 
             for rec, info in active_wts:
                 menu_items.append(MenuItem(
@@ -4766,8 +4840,14 @@ def build_parser() -> argparse.ArgumentParser:
     # register-session / deregister-session (called from hooks)
     sp = sub.add_parser("register-session",
                         help="Register a Copilot session against a worktree")
-    sp.add_argument("--worktree-id", required=True, help="Worktree ID")
-    sp.add_argument("--session-id", required=True, help="Copilot session ID")
+    sp.add_argument("--worktree-id", default=None,
+                    help="Worktree ID (resolved from --cwd when omitted)")
+    sp.add_argument("--session-id", default=None,
+                    help="Copilot session ID (read from --stdin payload when omitted)")
+    sp.add_argument("--cwd", default=None,
+                    help="Session cwd, used to resolve the worktree when --worktree-id is absent")
+    sp.add_argument("--stdin", action="store_true",
+                    help="Read the Copilot sessionStart JSON payload from stdin")
     sp.add_argument("--pid", type=int, default=None,
                     help="PID of the Copilot process (diagnostic only)")
 
@@ -4853,14 +4933,63 @@ def cmd_dev(args: argparse.Namespace) -> int:
         return 1  # unreachable
 
 
+def _read_hook_stdin() -> dict | None:
+    """Read and parse the Copilot hook JSON payload from stdin (best-effort).
+
+    The Copilot CLI pipes a JSON object (sessionStart: ``{sessionId, cwd,
+    source, ...}``) to the hook command's stdin.  Returns the parsed dict,
+    or None when there is no payload / it isn't valid JSON.  Never raises.
+    """
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return None
+        raw = sys.stdin.read()
+    except Exception:
+        return None
+    if not raw or not raw.strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def cmd_register_session(args: argparse.Namespace) -> int:
-    """Register a Copilot session against a worktree (hook-invoked)."""
+    """Register a Copilot session against a worktree (hook-invoked).
+
+    Robust to the sessionStart hook environment, where
+    ``COPILOT_AGENT_SESSION_ID`` is NOT reliably exported.  With
+    ``--stdin`` the Copilot CLI's JSON payload is read from stdin and used
+    to fill in any missing ``--session-id`` / ``--cwd``.  The worktree is
+    resolved from ``--worktree-id`` or, failing that, from the cwd.
+
+    Any "nothing to do" condition (no session id, or cwd not under a
+    tracked worktree) is a silent success so the hook never surfaces an
+    error to the user.
+    """
     wt_id = getattr(args, "worktree_id", None)
     session_id = getattr(args, "session_id", None)
+    cwd = getattr(args, "cwd", None)
     pid = getattr(args, "pid", None)
-    if not wt_id or not session_id:
-        output.err("Usage: register-session --worktree-id ID --session-id ID")
-        return 1
+
+    if getattr(args, "stdin", False):
+        payload = _read_hook_stdin()
+        if payload:
+            session_id = session_id or payload.get("sessionId")
+            cwd = cwd or payload.get("cwd")
+
+    # Last-resort env fallback (set for tool subprocesses, not the hook).
+    if not session_id:
+        session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+    if not session_id:
+        return 0  # nothing to register -- silent no-op
+
+    if not wt_id and cwd:
+        wt_id = tracking.find_worktree_id_by_cwd(cwd)
+    if not wt_id:
+        return 0  # cwd isn't a tracked worktree (base repo / unrelated dir)
+
     try:
         tracking.register_session(wt_id, session_id, pid=pid)
     except Exception as e:
