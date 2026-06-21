@@ -143,6 +143,28 @@ class TestBuildRemoteCmd:
         assert "--acp" in cmd
         assert "--stdio" in cmd
 
+    def test_project_pwsh_skips_bash_breadcrumb(self):
+        """PowerShell targets must not get the bash breadcrumb -- it
+        ParserErrors in pwsh and aborts the whole launch command (#985)."""
+        target = SpawnTarget(
+            type="ssh", host="lambda-core", user="tmichon",
+            project="aperture-labs", ssh_shell="pwsh",
+            copilot_args=["--allow-all"],
+        )
+        cmd = _build_remote_cmd(target, session_id="s")
+        assert "reached-device" not in cmd  # no breadcrumb prelude
+        assert not cmd.startswith("(")      # no bash subshell
+        assert cmd.startswith("aperture-labs")
+        assert "'--'" in cmd and "--acp" in cmd
+
+    def test_project_posix_keeps_breadcrumb(self):
+        """POSIX targets still get the device-arrival breadcrumb."""
+        target = SpawnTarget(
+            type="ssh", host="h", project="p", ssh_shell="bash",
+        )
+        cmd = _build_remote_cmd(target, session_id="s")
+        assert "reached-device" in cmd
+
 
 class TestSpawnSsh:
     """Tests for spawn_ssh using ssh-manager's ConnectionManager."""
