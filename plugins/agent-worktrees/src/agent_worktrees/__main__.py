@@ -342,6 +342,10 @@ def _worktree_to_dict(
     }
     if rec.completed_at:
         d["completed_at"] = rec.completed_at
+    if rec.kind == "system":
+        d["kind"] = rec.kind
+        if rec.owner:
+            d["owner"] = rec.owner
     if state_info is not None:
         d["state"] = state_info.state.value
         d["ahead"] = state_info.ahead
@@ -366,12 +370,19 @@ def _create_worktree_core(
     *,
     profile: cfg.CopilotProfile | None = None,
     no_mux: bool = False,
+    kind: tracking.WorktreeKind = "session",
+    owner: str | None = None,
+    name: str | None = None,
 ) -> dict:
     """Create a new worktree and return a dict with worktree info + launch plan.
 
     Performs the side-effects (fetch, git worktree add, tracking YAML,
     permissions) but does NOT launch copilot.  Returns a dict suitable
     for JSON serialization.
+
+    ``kind="system"`` marks the worktree as daemon-owned (hidden from the
+    Picker, exempt from routine cleanup); ``owner``/``name`` label it for the
+    System-menu browse view.
 
     Raises ``RuntimeError`` on failure.
     """
@@ -381,7 +392,12 @@ def _create_worktree_core(
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     suffix = secrets.token_hex(2)
-    worktree_id = f"{config.machine}-{plat_short}-{timestamp}-{suffix}"
+    if kind == "system":
+        # Recognizable id for daemon worktrees: sys-<name>-<ts>-<suffix>.
+        slug = _slugify(name or owner or "daemon")
+        worktree_id = f"sys-{slug}-{timestamp}-{suffix}"
+    else:
+        worktree_id = f"{config.machine}-{plat_short}-{timestamp}-{suffix}"
     branch = f"worktree/{worktree_id}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
 
@@ -418,6 +434,8 @@ def _create_worktree_core(
         machine=config.machine,
         platform_name=plat,
         tracking_path=tracking_path,
+        kind=kind,
+        owner=owner,
     )
 
     # Clone permissions
@@ -773,6 +791,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 r for r in records
                 if Path(r.worktree_path).exists()
                 and (Path(r.worktree_path) / ".git").exists()
+                and r.kind != "system"  # daemon-owned; hidden from the Picker
             ]
 
             # Scan for live Copilot sessions and mux sessions
@@ -1072,6 +1091,8 @@ def _run_system_menu(config: cfg.Config, args: argparse.Namespace) -> int | None
         MenuItem(label="🧹 Cleanup worktrees", kind=ItemKind.ACTION, value="cleanup"),
         MenuItem(label="⬆ Update stale worktrees", kind=ItemKind.ACTION, value="update"),
         MenuItem(label="📊 Worktree status", kind=ItemKind.ACTION, value="status"),
+        MenuItem(label="🛠 System worktrees (daemon-owned)", kind=ItemKind.ACTION,
+                 value="system-worktrees"),
         MenuItem(label="", kind=ItemKind.SEPARATOR),
         MenuItem(label="↩ Back to picker", kind=ItemKind.ACTION, value="back"),
     ]
@@ -1098,6 +1119,9 @@ def _run_system_menu(config: cfg.Config, args: argparse.Namespace) -> int | None
 
     if action == "status":
         return _system_status(config)
+
+    if action == "system-worktrees":
+        return _system_worktrees_browse(config)
 
     return None
 
@@ -1187,6 +1211,13 @@ def _system_cleanup(config: cfg.Config) -> int | None:
     tracking_path = cfg.tracking_dir()
     records = tracking.list_records(tracking_path)
 
+    if not records:
+        _system_pause("No tracked worktrees.")
+        return None
+
+    # Exclude daemon-owned system worktrees; they have their own browse/
+    # force-remove flow and must never be swept by routine cleanup.
+    records = [r for r in records if r.kind != "system"]
     if not records:
         _system_pause("No tracked worktrees.")
         return None
@@ -1288,6 +1319,8 @@ def _system_update(config: cfg.Config) -> int | None:
         platform_filter=cfg.detect_platform(),
     )
     records = [r for r in records if r.worktree_path and Path(r.worktree_path).exists()]
+    # System worktrees are recreated fresh per daemon run; never FF them here.
+    records = [r for r in records if r.kind != "system"]
 
     if not records:
         _system_pause("No tracked worktrees.")
@@ -1451,6 +1484,91 @@ def _system_pause(msg: str) -> None:
     """Show a brief message via a single-item picker (press Enter to dismiss)."""
     items = [MenuItem(label=f"↩ {msg}", kind=ItemKind.ACTION, value="ok")]
     pick(items, title="", subtitle="Enter to return", default=0)
+
+
+def _system_worktrees_browse(config: cfg.Config) -> int | None:
+    """Browse daemon-owned system worktrees and force-remove leaked ones.
+
+    System worktrees are created per work-session by background services and
+    torn down by their owner. One left behind (a crashed or amok daemon) is
+    never reaped by routine cleanup -- this view is the manual safety net.
+    A live session marks a worktree as likely in-use; an old, session-less one
+    is flagged as likely leaked.
+    """
+    tracking_path = cfg.tracking_dir()
+    records = tracking.list_records(tracking_path, kind_filter="system")
+    records = [r for r in records if r.repo == config.repo_name]
+
+    if not records:
+        _system_pause("No system worktrees.")
+        return None
+
+    active_paths = _build_active_paths(records)
+
+    while True:
+        records = [
+            r for r in tracking.list_records(tracking_path, kind_filter="system")
+            if r.repo == config.repo_name
+        ]
+        if not records:
+            _system_pause("No system worktrees remain.")
+            return None
+
+        items: list[MenuItem] = []
+        for rec in records:
+            live = _normalize_path(rec.worktree_path) in active_paths
+            gone = not (rec.worktree_path and Path(rec.worktree_path).exists())
+            owner = rec.owner or "?"
+            if live:
+                tag = "live"
+            elif gone:
+                tag = "missing dir"
+            else:
+                tag = "likely leaked"
+            items.append(MenuItem(
+                label=f"🛠 {owner} · {rec.worktree_id}",
+                subtitle=f"{tag} · {_age_str(rec.started_at)} · {rec.worktree_path}",
+                kind=ItemKind.DIMMED if live else ItemKind.NORMAL,
+                value=rec.worktree_id,
+            ))
+        items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
+        items.append(MenuItem(label="↩ Back", kind=ItemKind.ACTION, value="back"))
+
+        result = pick(
+            items,
+            title="🛠 System Worktrees -- daemon-owned",
+            subtitle="Enter to force-remove a leaked one, Esc back",
+            default=0,
+        )
+        if result.selected < 0:
+            return None
+        choice = items[result.selected].value
+        if choice == "back":
+            return None
+
+        # Confirm force-remove of the selected worktree.
+        sel = next((r for r in records if r.worktree_id == choice), None)
+        if sel is None:
+            continue
+        sel_live = _normalize_path(sel.worktree_path) in active_paths
+        warn = "  ⚠ has a LIVE session -- removing may disrupt a running daemon" if sel_live else ""
+        confirm = pick(
+            [
+                MenuItem(label=f"🗑 Force-remove {sel.worktree_id}", kind=ItemKind.ACTION,
+                         value="yes", subtitle=warn or None),
+                MenuItem(label="↩ Cancel", kind=ItemKind.ACTION, value="no"),
+            ],
+            title="Force-remove system worktree?",
+            subtitle="This deletes the git worktree + tracking record",
+            default=1,
+        )
+        if confirm.selected != 0:
+            continue  # cancelled
+
+        rc = cmd_remove_system(argparse.Namespace(worktree_id=sel.worktree_id, json=False))
+        _system_pause("Removed." if rc == 0 else "Remove failed (see logs).")
+        # loop re-lists remaining system worktrees
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2485,6 +2603,85 @@ def cmd_list(args: argparse.Namespace) -> int:
 # create -- non-interactive worktree creation
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _slugify(text: str) -> str:
+    """Lowercase, keep alnum/dash, collapse the rest to single dashes."""
+    import re
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()
+    return s or "daemon"
+
+
+def cmd_create_system(args: argparse.Namespace) -> int:
+    """Create a daemon-owned *system* worktree (hidden from the Picker).
+
+    Per-session model: a background service calls this for each work run, uses
+    the returned path, then tears it down with ``remove-system``. System
+    worktrees are exempt from routine cleanup; leaked ones (crashed daemon) are
+    force-removable via the System menu or ``remove-system``.
+    """
+    with output.stdout_to_stderr():
+        try:
+            config = cfg.load_config()
+            result = _create_worktree_core(
+                config, no_mux=True, kind="system",
+                owner=getattr(args, "owner", None) or getattr(args, "name", None),
+                name=getattr(args, "name", None),
+            )
+        except Exception as e:
+            if getattr(args, "json", False):
+                return _json_error(str(e))
+            output.err(str(e))
+            return 1
+
+    if getattr(args, "json", False):
+        _json_output(result)
+        return 0
+
+    wt = result["worktree"]
+    print(f"✅ Created system worktree: {wt['id']}")
+    print(f"   Path:   {wt['path']}")
+    print(f"   Branch: {wt['branch']}")
+    return 0
+
+
+def cmd_remove_system(args: argparse.Namespace) -> int:
+    """Remove a system worktree by id (git worktree + tracking record).
+
+    Refuses non-system worktrees. Used by daemons at end-of-run and by the
+    System-menu browse view to reap leaked worktrees.
+    """
+    config = cfg.load_config()
+    repo = config.default_repo
+    tracking_path = cfg.tracking_dir()
+    wt_id = getattr(args, "worktree_id", None)
+    if not wt_id:
+        output.err("remove-system requires a worktree id")
+        return 2
+
+    yaml_path = tracking_path / f"{wt_id}.yaml"
+    if not yaml_path.exists():
+        output.err(f"no such worktree: {wt_id}")
+        return 1
+    rec = tracking.load_record(yaml_path)
+    if rec.kind != "system":
+        output.err(f"{wt_id} is not a system worktree (kind={rec.kind}); refusing")
+        return 1
+
+    if rec.worktree_path and Path(rec.worktree_path).exists():
+        git_ops.remove_worktree(repo.anchor, rec.worktree_path)
+    if rec.branch:
+        git_ops.git("branch", "-D", rec.branch, cwd=repo.anchor, check=False)
+    try:
+        yaml_path.unlink()
+    except OSError:
+        pass
+    activity.log_event("system_worktree_removed", worktree_id=wt_id)
+    if getattr(args, "json", False):
+        _json_output({"removed": wt_id})
+    else:
+        print(f"✅ Removed system worktree: {wt_id}")
+    return 0
+
+
 def cmd_create(args: argparse.Namespace) -> int:
     """Create a new worktree non-interactively.
 
@@ -2525,6 +2722,14 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     tracking_path = cfg.tracking_dir()
 
     records = tracking.list_records(tracking_path)
+    if not records:
+        print("No tracked sessions.")
+        return 0
+
+    # System worktrees are daemon-owned and torn down by their owning service;
+    # never auto-removed here (a routine cleanup must not yank one out from
+    # under a running daemon). Force-removal lives in the ":" System menu.
+    records = [r for r in records if r.kind != "system"]
     if not records:
         print("No tracked sessions.")
         return 0
@@ -3637,6 +3842,8 @@ def _service_is_installed(service: svc.ServiceInfo) -> bool:
 # Worktree namespace verb -> canonical top-level command.
 _WORKTREE_VERBS = {
     "create": "create",
+    "create-system": "create-system",
+    "remove-system": "remove-system",
     "list": "list",
     "status": "status",
     "push": "push-changes",
@@ -3653,6 +3860,12 @@ def _worktree_usage() -> None:
     print(file=out)
     print("Non-launching worktree lifecycle commands:", file=out)
     print("  create [--json]        Create a worktree; print id + dir (no launch)", file=out)
+    print(
+        "  create-system --name N [--owner O] [--json]  "
+        "Create a daemon-owned worktree (hidden from Picker)", file=out)
+    print(
+        "  remove-system <id> [--json]  "
+        "Tear down a system worktree by id", file=out)
     print("  list [--json]          List this project's worktrees", file=out)
     print("  status <id>            Show a worktree's git status", file=out)
     print("  push <id> [--title T]  Squash, rebase, and push to the default branch", file=out)
@@ -4741,6 +4954,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
 
+    # create-system (daemon-owned worktree; hidden from the Picker)
+    p = sub.add_parser("create-system",
+                       help="Create a daemon-owned system worktree (hidden from Picker)")
+    p.add_argument("--name", default=None,
+                   help="Short slug for the worktree id (e.g. the service name)")
+    p.add_argument("--owner", default=None,
+                   help="Owning service name (recorded for the browse view)")
+    p.add_argument("--json", action="store_true",
+                   help="JSON output mode (stdout is JSON only)")
+
+    # remove-system (tear down a system worktree by id)
+    p = sub.add_parser("remove-system", help="Remove a system worktree by id")
+    p.add_argument("worktree_id", help="Worktree id to remove")
+    p.add_argument("--json", action="store_true",
+                   help="JSON output mode (stdout is JSON only)")
+
     # cleanup
     p = sub.add_parser("cleanup", help="List and clean orphaned worktrees")
     p.add_argument("--clean", action="store_true")
@@ -5188,6 +5417,8 @@ COMMAND_MAP = {
     "status": cmd_status,
     "list": cmd_list,
     "create": cmd_create,
+    "create-system": cmd_create_system,
+    "remove-system": cmd_remove_system,
     "cleanup": cmd_cleanup,
     "validate": cmd_validate,
     "install": cmd_install,

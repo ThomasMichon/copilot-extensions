@@ -609,3 +609,96 @@ class TestFindWorktreeIdByCwd:
 
     def test_empty_cwd_returns_none(self, tmp_tracking_dir: Path, monkeypatch_config):
         assert find_worktree_id_by_cwd("") is None
+
+
+# ---------------------------------------------------------------------------
+# System worktrees -- kind annotation, back-compat, and filtering
+# ---------------------------------------------------------------------------
+
+class TestSystemWorktreeKind:
+    """The `kind` field marks daemon-owned worktrees (hidden from the Picker)."""
+
+    def _base(self, **overrides) -> WorktreeRecord:
+        defaults = dict(
+            worktree_id="wt-k",
+            branch="worktree/wt-k",
+            worktree_path="/tmp/wt-k",
+            repo="test-repo",
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            handoff_prompt=None,
+            sessions=None,
+        )
+        defaults.update(overrides)
+        return WorktreeRecord(**defaults)
+
+    def test_default_kind_is_session(self, tmp_path: Path):
+        rec = self._base()
+        assert rec.kind == "session"
+
+    def test_system_kind_round_trip(self, tmp_path: Path):
+        rec = self._base(kind="system", owner="config-reflect")
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        loaded = load_record(path)
+        assert loaded.kind == "system"
+        assert loaded.owner == "config-reflect"
+
+    def test_legacy_record_without_kind_loads_as_session(self, tmp_path: Path):
+        # A pre-feature YAML has no `kind:` line.
+        path = tmp_path / "legacy.yaml"
+        path.write_text(
+            "worktree_id: old\n"
+            "branch: worktree/old\n"
+            "worktree_path: /tmp/old\n"
+            "repo: test-repo\n"
+            "machine: test\n"
+            "platform: wsl\n"
+            "started_at: 2026-06-01T10:00:00\n"
+            "last_resumed_at: 2026-06-01T10:00:00\n"
+            "resume_count: 0\n"
+            "title: null\n"
+            "status: active\n"
+            "completed_at: null\n"
+            "handoff_prompt: null\n",
+            encoding="utf-8",
+        )
+        loaded = load_record(path)
+        assert loaded.kind == "session"
+        assert loaded.owner is None
+
+    def test_session_record_yaml_has_no_kind_line(self, tmp_path: Path):
+        # Back-compat: session records must not gain a `kind:` line (no churn).
+        rec = self._base(kind="session")
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        assert "kind:" not in path.read_text(encoding="utf-8")
+
+    def test_list_records_kind_filter(self, tmp_path: Path):
+        save_record(self._base(worktree_id="s1", kind="session"), tmp_path / "s1.yaml")
+        save_record(
+            self._base(worktree_id="d1", kind="system", owner="config-reflect"),
+            tmp_path / "d1.yaml",
+        )
+        system = list_records(tmp_path, kind_filter="system")
+        assert [r.worktree_id for r in system] == ["d1"]
+        sessions_only = list_records(tmp_path, kind_filter="session")
+        assert [r.worktree_id for r in sessions_only] == ["s1"]
+        assert len(list_records(tmp_path)) == 2
+
+    def test_create_new_record_system(self, tmp_path: Path):
+        rec = create_new_record(
+            "sys-x", "worktree/sys-x", "/tmp/sys-x", "test-repo", "test", "wsl",
+            tmp_path, kind="system", owner="session-sync",
+        )
+        assert rec.kind == "system"
+        assert rec.owner == "session-sync"
+        loaded = load_record(tmp_path / "sys-x.yaml")
+        assert loaded.kind == "system"
+        assert loaded.owner == "session-sync"

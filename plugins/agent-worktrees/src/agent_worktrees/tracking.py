@@ -19,6 +19,13 @@ from . import config as cfg
 
 WorktreeStatus = Literal["active", "complete", "pushed", "finalized", "orphaned"]
 
+# A worktree's owner class. "session" = an interactive agent session (the
+# default, shown in the launch Picker). "system" = a daemon-owned worktree
+# created per work-session by a background service; hidden from the Picker and
+# exempt from routine cleanup. See the agent-worktrees docs and the
+# aperture-labs system-worktrees effort.
+WorktreeKind = Literal["session", "system"]
+
 
 @dataclass
 class SessionEntry:
@@ -66,6 +73,8 @@ class WorktreeRecord:
     handoff_prompt: str | None  # deprecated, kept for YAML compat
     sessions: list[SessionEntry] | None = field(default=None)
     pr: PRRecord | None = field(default=None)
+    kind: WorktreeKind = "session"
+    owner: str | None = None  # owning service name, for system worktrees
 
     @property
     def yaml_path(self) -> Path:
@@ -168,6 +177,13 @@ def load_record(path: Path) -> WorktreeRecord:
             provider=str(raw_pr.get("provider", "")),
         )
 
+    # Owner class -- absent (legacy records) defaults to "session".
+    kind_raw = data.get("kind")
+    kind_val: WorktreeKind = "system" if kind_raw == "system" else "session"
+    owner_raw = data.get("owner")
+    if owner_raw in (None, "", "null"):
+        owner_raw = None
+
     return WorktreeRecord(
         worktree_id=data["worktree_id"],
         branch=data["branch"],
@@ -184,6 +200,8 @@ def load_record(path: Path) -> WorktreeRecord:
         handoff_prompt=data.get("handoff_prompt") or None,
         sessions=sessions_list,
         pr=pr_obj,
+        kind=kind_val,
+        owner=str(owner_raw) if owner_raw else None,
     )
 
 
@@ -213,6 +231,13 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         f"completed_at: {record.completed_at or 'null'}\n"
         f"handoff_prompt: {record.handoff_prompt or 'null'}\n"
     )
+
+    # Owner class -- only emit for system worktrees so existing session-record
+    # YAMLs stay byte-identical (no churn for the common case).
+    if record.kind == "system":
+        content += "kind: system\n"
+        if record.owner:
+            content += f"owner: {record.owner}\n"
 
     # Serialize nested pr block -- only when in PR-workflow mode.
     if record.pr is not None:
@@ -259,8 +284,9 @@ def list_records(
     status_filter: WorktreeStatus | None = None,
     platform_filter: str | None = None,
     repo_filter: str | None = None,
+    kind_filter: WorktreeKind | None = None,
 ) -> list[WorktreeRecord]:
-    """List all worktree records, optionally filtered by status/platform/repo."""
+    """List all worktree records, optionally filtered by status/platform/repo/kind."""
     records: list[WorktreeRecord] = []
     if not tracking_path.exists():
         return records
@@ -275,6 +301,8 @@ def list_records(
         if platform_filter and rec.platform != platform_filter:
             continue
         if repo_filter and rec.repo != repo_filter:
+            continue
+        if kind_filter and rec.kind != kind_filter:
             continue
         records.append(rec)
 
@@ -338,6 +366,9 @@ def create_new_record(
     machine: str,
     platform_name: str,
     tracking_path: Path,
+    *,
+    kind: WorktreeKind = "session",
+    owner: str | None = None,
 ) -> WorktreeRecord:
     """Create and save a new worktree tracking record."""
     now = _now_iso()
@@ -356,6 +387,8 @@ def create_new_record(
         completed_at=None,
         handoff_prompt=None,
         sessions=[],
+        kind=kind,
+        owner=owner,
     )
     path = tracking_path / f"{worktree_id}.yaml"
     save_record(record, path)
