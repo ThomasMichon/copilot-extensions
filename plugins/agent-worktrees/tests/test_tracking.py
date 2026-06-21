@@ -10,6 +10,7 @@ from agent_worktrees.tracking import (
     _atomic_write,
     create_new_record,
     deregister_session,
+    find_worktree_id_by_cwd,
     list_records,
     load_record,
     mark_resumed,
@@ -565,3 +566,46 @@ class TestAtomicWrite:
         target.write_text("old")
         _atomic_write(target, "new")
         assert target.read_text() == "new"
+
+
+class TestFindWorktreeIdByCwd:
+    """find_worktree_id_by_cwd -- resolve a worktree from a session cwd."""
+
+    def _save(self, tracking_dir: Path, wt_id: str, wt_path: str) -> None:
+        rec = WorktreeRecord(
+            worktree_id=wt_id,
+            branch=f"worktree/{wt_id}",
+            worktree_path=wt_path,
+            repo="test-repo",
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            handoff_prompt=None,
+            sessions=[],
+        )
+        save_record(rec, tracking_dir / f"{wt_id}.yaml")
+
+    def test_exact_match(self, tmp_tracking_dir: Path, monkeypatch_config):
+        self._save(tmp_tracking_dir, "wt-a", "/tmp/src/wt-a")
+        assert find_worktree_id_by_cwd("/tmp/src/wt-a") == "wt-a"
+
+    def test_subdirectory_match(self, tmp_tracking_dir: Path, monkeypatch_config):
+        self._save(tmp_tracking_dir, "wt-a", "/tmp/src/wt-a")
+        assert find_worktree_id_by_cwd("/tmp/src/wt-a/sub/dir") == "wt-a"
+
+    def test_deepest_match_wins(self, tmp_tracking_dir: Path, monkeypatch_config):
+        self._save(tmp_tracking_dir, "outer", "/tmp/src")
+        self._save(tmp_tracking_dir, "inner", "/tmp/src/inner")
+        assert find_worktree_id_by_cwd("/tmp/src/inner/x") == "inner"
+
+    def test_no_match_returns_none(self, tmp_tracking_dir: Path, monkeypatch_config):
+        self._save(tmp_tracking_dir, "wt-a", "/tmp/src/wt-a")
+        assert find_worktree_id_by_cwd("/tmp/elsewhere") is None
+
+    def test_empty_cwd_returns_none(self, tmp_tracking_dir: Path, monkeypatch_config):
+        assert find_worktree_id_by_cwd("") is None

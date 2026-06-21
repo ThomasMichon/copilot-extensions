@@ -281,6 +281,39 @@ def list_records(
     return records
 
 
+def find_worktree_id_by_cwd(cwd: str) -> str | None:
+    """Resolve a worktree_id from a session cwd.
+
+    Matches *cwd* (or any worktree root that is an ancestor of it) against
+    the tracked ``worktree_path`` values.  Used by the sessionStart hook to
+    associate a session with its worktree when the ``WORKTREE_ID`` env var
+    is not present in the hook environment -- the Copilot CLI delivers the
+    cwd via the hook's stdin payload instead.
+
+    When several worktree roots match (nested trees), the deepest
+    (longest) match wins.  Returns None if no worktree contains *cwd*.
+    """
+    if not cwd:
+        return None
+    tracking_path = cfg.tracking_dir()
+    if not tracking_path.exists():
+        return None
+
+    norm = os.path.normcase(os.path.normpath(cwd)).rstrip("/\\")
+    best_id: str | None = None
+    best_len = -1
+    for rec in list_records(tracking_path):
+        wp = rec.worktree_path
+        if not wp:
+            continue
+        wnorm = os.path.normcase(os.path.normpath(wp)).rstrip("/\\")
+        if norm == wnorm or norm.startswith(wnorm + os.sep):
+            if len(wnorm) > best_len:
+                best_len = len(wnorm)
+                best_id = rec.worktree_id
+    return best_id
+
+
 def update_status(record: WorktreeRecord, new_status: WorktreeStatus) -> None:
     """Update a record's status and save it."""
     record.status = new_status

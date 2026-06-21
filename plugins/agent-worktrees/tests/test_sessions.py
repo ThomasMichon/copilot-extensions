@@ -647,3 +647,88 @@ class TestMuxSpawnFailureDegrades:
 
         with patch("subprocess.run", side_effect=FileNotFoundError()):
             assert has_mux_session("anything") is False
+
+
+# ---------------------------------------------------------------------------
+# Context % + last-activity enrichment
+# ---------------------------------------------------------------------------
+
+class TestContextEnrichment:
+    """last_activity and context_pct derived from session-state."""
+
+    def test_scan_sessions_populates_activity_and_context(
+        self, tmp_session_state_dir: Path
+    ):
+        wt_path = "/tmp/wt-ctx"
+        make_session_dir(
+            tmp_session_state_dir, "sess-ctx", wt_path,
+            updated_at="2026-06-01T10:00:00.000Z",
+            context_pct=42,
+        )
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            ctx = scan_sessions([wt_path])
+
+        norm = _normalize_path(wt_path)
+        assert ctx.context_pct[norm] == 42
+        # YAML parses the timestamp to a datetime; str() form is preserved.
+        assert "2026-06-01" in ctx.last_activity[norm]
+        assert "10:00:00" in ctx.last_activity[norm]
+
+    def test_newest_session_wins_for_context(self, tmp_session_state_dir: Path):
+        wt_path = "/tmp/wt-ctx2"
+        make_session_dir(
+            tmp_session_state_dir, "old", wt_path,
+            updated_at="2026-06-01T10:00:00.000Z", context_pct=30,
+        )
+        make_session_dir(
+            tmp_session_state_dir, "new", wt_path,
+            updated_at="2026-06-01T12:00:00.000Z", context_pct=70,
+        )
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            ctx = scan_sessions([wt_path])
+
+        norm = _normalize_path(wt_path)
+        # Newest session (12:00) drives both activity and context%.
+        assert "12:00:00" in ctx.last_activity[norm]
+        assert ctx.context_pct[norm] == 70
+
+    def test_missing_context_json_omits_pct(self, tmp_session_state_dir: Path):
+        wt_path = "/tmp/wt-noctx"
+        make_session_dir(tmp_session_state_dir, "sess-noctx", wt_path)
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            ctx = scan_sessions([wt_path])
+
+        norm = _normalize_path(wt_path)
+        assert norm not in ctx.context_pct
+        # last_activity is still populated from workspace.yaml updated_at.
+        assert norm in ctx.last_activity
+
+    def test_fast_path_populates_context(self, tmp_session_state_dir: Path):
+        wt_path = "/tmp/wt-fast-ctx"
+        make_session_dir(
+            tmp_session_state_dir, "fast-ctx", wt_path,
+            updated_at="2026-06-02T09:00:00.000Z", context_pct=55,
+        )
+        rec = _make_record(
+            "wt-fast-ctx", wt_path,
+            sessions=[SessionEntry(session_id="fast-ctx", started_at="2026-06-02T09:00:00")],
+        )
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            ctx = scan_sessions_fast([rec])
+
+        norm = _normalize_path(wt_path)
+        assert ctx.context_pct[norm] == 55
+        assert "2026-06-02" in ctx.last_activity[norm]
+        assert "09:00:00" in ctx.last_activity[norm]
