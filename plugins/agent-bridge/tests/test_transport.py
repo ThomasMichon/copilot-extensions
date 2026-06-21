@@ -74,6 +74,10 @@ class TestBuildRemoteCmd:
         assert "--acp" in cmd
         assert "--stdio" in cmd
         assert "--allow-all" in cmd
+        # The ACP passthrough separator must be *quoted* so PowerShell (the
+        # default OpenSSH shell on native Windows targets) does not strip the
+        # bare ``--`` end-of-parameters token (#985).
+        assert "'--'" in cmd
         # Should NOT contain cd or export (binstub handles setup)
         assert "cd " not in cmd
 
