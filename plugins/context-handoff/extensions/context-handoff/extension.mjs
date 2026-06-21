@@ -134,6 +134,36 @@ function saveHandoffPrompt(promptText, sid) {
   return promptPath;
 }
 
+// Persist a small context-usage sidecar that the agent-worktrees picker
+// reads to show live context-window utilization per worktree. The exact
+// token counts arrive via the session.usage_info event, which is delivered
+// only to this extension (never written to events.jsonl), so this file is
+// the sole on-disk source. Best-effort: never throws into the event loop.
+function persistState() {
+  try {
+    const sid = state.sessionId;
+    if (!sid) return;
+    const dir = join(homedir(), ".copilot", "session-state", sid);
+    // Don't create the dir -- an active session already owns it; a missing
+    // dir means there's nothing meaningful to associate the sidecar with.
+    if (!existsSync(dir)) return;
+    const pct = state.tokenLimit > 0
+      ? Math.round(state.lastUtilization * 100)
+      : null;
+    const payload = {
+      sessionId: sid,
+      currentTokens: state.currentTokens,
+      tokenLimit: state.tokenLimit,
+      utilizationPct: pct,
+      turnCount: state.turnCount,
+      updatedAt: new Date().toISOString(),
+    };
+    writeFileSync(join(dir, "context.json"), JSON.stringify(payload), "utf-8");
+  } catch {
+    // Best-effort; the picker simply omits context% when the file is absent.
+  }
+}
+
 // Format handoff data as a markdown document suitable for continuation.
 function formatHandoffMarkdown(handoffData, scope) {
   const lines = [
