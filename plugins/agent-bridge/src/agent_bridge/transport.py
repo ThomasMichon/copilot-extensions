@@ -379,7 +379,7 @@ def _breadcrumb_prelude(session_id: str) -> str:
 
 
 def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
-    """Build the POSIX remote command string for SSH execution.
+    """Build the remote command string for SSH execution.
 
     Two modes:
     - With ``project``: uses the project binstub (handles setup scripts,
@@ -420,6 +420,21 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
             "'--'" if a == "--" else shlex.quote(a)
             for a in binstub_args
         )
+        # The breadcrumb prelude and ``export K=V`` are POSIX shell syntax.
+        # Native Windows SSH targets run PowerShell, which cannot parse the
+        # bash subshell in the breadcrumb ( ``( ... ) || true`` ): pwsh
+        # raises a ParserError and aborts the *entire* launch command before
+        # the binstub runs (#985). For a non-POSIX shell, skip the
+        # best-effort breadcrumb and emit any env vars in the shell's syntax.
+        shell = (target.ssh_shell or "bash").lower()
+        if shell in ("pwsh", "powershell"):
+            if target.env:
+                prefix = "".join(
+                    f"$env:{k} = '{v.replace(chr(39), chr(39) * 2)}'; "
+                    for k, v in target.env.items()
+                )
+                return f"{prefix}{binstub_cmd}"
+            return binstub_cmd
         # Prepend env exports (e.g. auth hook vars) so they're available
         # to the binstub and all child processes in the SSH session
         if target.env:
