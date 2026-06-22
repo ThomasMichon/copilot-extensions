@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Enforce the install contract (docs/install-contract.md) across plugins.
 
-Each plugin with native installers (scripts/install.ps1 / install.sh) must:
+Each plugin with a runtime installer must, per language variant:
   1. install the package via `uv pip install` (no file-copy of the package),
   2. emit no binstub that sets PYTHONPATH to a runtime lib/ dir,
   3. write a schema_version 3 deploy manifest with a `source` block,
   4. carry a source-kind resolver identical (per language) across plugins.
+
+The enforced entrypoint pair is the plugin's *canonical* installer: `install.*`
+when present (it carries an `update` action), otherwise `init.*` for plugins
+that ship only an idempotent bootstrap (agent-mcp, agent-containers). A plugin
+with both has `init.*` delegate to `install.*`, so only `install.*` is checked.
 
 Payload-runtime plugins (no pyproject.toml -- e.g. a JS extension copied to
 ~/.copilot/extensions/) are exempt from rule 1 (there is no Python package to
@@ -64,6 +69,23 @@ def _norm(s: str | None) -> str | None:
     return re.sub(r"\s+", " ", s).strip()
 
 
+def _entrypoint_base(plugin: Path) -> str | None:
+    """Return the runtime entrypoint base for a plugin, or None.
+
+    Prefers ``install`` (the canonical installer with an ``update`` action);
+    falls back to ``init`` for plugins that ship only an idempotent bootstrap
+    (e.g. agent-mcp, agent-containers). When a plugin has both, ``init``
+    delegates to ``install`` -- the canonical pair -- so only ``install`` is
+    enforced. Returns None for plugins with no runtime installer at all.
+    """
+    scripts = plugin / "scripts"
+    if (scripts / "install.ps1").exists() or (scripts / "install.sh").exists():
+        return "install"
+    if (scripts / "init.ps1").exists() or (scripts / "init.sh").exists():
+        return "init"
+    return None
+
+
 def check() -> int:
     violations: list[str] = []
     ps1_resolvers: dict[str, str | None] = {}
@@ -71,8 +93,7 @@ def check() -> int:
 
     plugins = sorted(
         p for p in PLUGINS_DIR.iterdir()
-        if (p / "scripts" / "install.ps1").exists()
-        or (p / "scripts" / "install.sh").exists()
+        if p.is_dir() and _entrypoint_base(p) is not None
     )
     if not plugins:
         print("No plugins with install scripts found.", file=sys.stderr)
@@ -87,7 +108,11 @@ def check() -> int:
         # and carry the shared source-kind resolver. See docs/install-contract.md
         # § "Payload runtime (non-Python)".
         is_payload = not (plugin / "pyproject.toml").exists()
-        for script in ("install.ps1", "install.sh"):
+        # Enforce the canonical entrypoint pair (install.* if present, else
+        # init.*). Both language variants of that base must exist and conform.
+        base = _entrypoint_base(plugin)
+        for ext in ("ps1", "sh"):
+            script = f"{base}.{ext}"
             path = plugin / "scripts" / script
             if not path.exists():
                 violations.append(f"{name}: missing scripts/{script}")
@@ -103,7 +128,7 @@ def check() -> int:
             elif not re.search(r"schema_version[\"'=:\s]+3", text):
                 violations.append(f"{name}/{script}: manifest is not schema_version 3")
 
-            if script == "install.ps1":
+            if ext == "ps1":
                 if FORBIDDEN_TRAMPOLINE.search(text):
                     violations.append(
                         f"{name}/{script}: launches the unsigned console-script .exe "
