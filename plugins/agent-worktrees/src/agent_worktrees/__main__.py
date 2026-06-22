@@ -3719,6 +3719,7 @@ _GET_KEYS: dict[str, str] = {
     "platform":      "Platform (win/wsl/linux)",
     "project":       "Project name",
     "pr-enabled":    "Whether PR mode is enabled (true/false)",
+    "pr-required":   "Whether PRs are required, blocking direct-to-master (true/false)",
     "pr-provider":   "PR provider (gitea|github|azure-devops) when PR mode is on",
 }
 
@@ -3748,6 +3749,7 @@ def cmd_get(args: argparse.Namespace) -> int:
         "platform":     config.platform,
         "project":      config.repo_name,
         "pr-enabled":    "true" if repo.pr.enabled else "false",
+        "pr-required":   "true" if repo.pr.required else "false",
         "pr-provider":   repo.pr.provider if repo.pr.enabled else "",
     }
 

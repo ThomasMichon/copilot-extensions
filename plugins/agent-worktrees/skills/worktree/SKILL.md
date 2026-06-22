@@ -205,6 +205,7 @@ Check before signing off:
 
 ```
 agent-worktrees get pr-enabled      # "true" or "false"
+agent-worktrees get pr-required     # "true" -> direct-to-master is blocked
 agent-worktrees get pr-provider     # gitea | github | azure-devops (empty in direct mode)
 ```
 
@@ -212,6 +213,71 @@ In **direct mode** (the default), use the two-phase `push-changes` +
 `finalize` flow above. In **PR mode**, the flow becomes
 `create-pr -> [delegate PR creation] -> finalize`, and `push-changes` targets
 the *feature* branch instead of master.
+
+### Where PR config lives (machine-local vs in-repo)
+
+The `pr` block may come from two places:
+
+- **Machine-local** `~/.{project}/config.yaml` under `repos.<name>.pr` --
+  the default location, per-machine.
+- **In-repo** `<repo-root>/.agent-worktrees.yaml` (committed) under a top-level
+  `pr:` block -- **repo-level policy shared across every machine**. When this
+  file provides a `pr` block it **overrides** the machine-local one entirely.
+
+Put PR *policy* (enabled/required/provider) in the in-repo file when it should
+be identical everywhere -- it then needs no per-machine replication. A
+malformed or absent in-repo file safely falls back to machine-local. Either
+way, query the effective values with `agent-worktrees get pr-*`.
+
+### `pr.enabled` vs `pr.required` -- available vs mandatory
+
+These are two distinct switches:
+
+- **`pr.enabled: true`** makes the PR path *available*. The mode is **opt-in
+  per worktree**: `push-changes`/`finalize` only take the PR path once a PR
+  record exists (you ran `create-pr`). A worktree that never runs `create-pr`
+  still finalizes **direct-to-master**.
+- **`pr.required: true`** makes the PR path *mandatory* (it implies
+  `enabled`). The direct-to-master path is **refused**: `push-changes` will
+  not push to the default branch, and `finalize` will not prune a worktree
+  with unmerged work. The **only** way to land work is `create-pr` -> open PR
+  -> merge. There is no local bypass — when `pr-required` is `true`, every
+  worktree goes through a PR.
+
+If `agent-worktrees get pr-required` returns `true`, **do not** attempt a
+direct `push-changes`/`finalize` for unmerged work — it will be refused. Go
+straight to the end-to-end PR loop below.
+
+### End-to-end PR loop (when PRs are required)
+
+The normal, expected flow for a worktree with work to land:
+
+1. **`create-pr`** — squash + push the feature branch (Step 1 below).
+2. **Open the PR** via the provider sub-agent (Step 2). Add the provider's
+   **auto-merge** affordance if the work should merge automatically once the
+   review gate is satisfied.
+3. **`set-pr`** — record the PR URL/number (Step 3).
+4. **Wait for review.** The PR goes through the repo's review gate (e.g. the
+   facility's automated reviewer). Poll the PR via the provider sub-agent for
+   review state and comments.
+5. **Address feedback** in the **same** worktree (keep-alive disposition):
+   edit -> commit on the feature branch -> `push-changes` updates the PR
+   branch (never master). Note: new commits **dismiss stale approvals**, so
+   re-request / await review again.
+6. **Repeat 4–5** until the PR is **approved and merged upstream**. With
+   auto-merge set, merge happens automatically on approval; otherwise a human
+   merges.
+7. **Finalize.** Once the feature branch is safely pushed you *may* `finalize`
+   at any point — finalize is decoupled from merge (see below). Choose the
+   disposition deliberately (keep-alive to babysit review, detach to let it
+   ride).
+
+**Rare opt-out — submit and detach without babysitting review.** An agent may,
+when the operator approves, open the PR and immediately `finalize` (detach
+disposition), leaving the open PR for asynchronous review + auto-merge rather
+than waiting in-session. This still goes through a PR — it is **not** a
+direct-to-master bypass. Use it sparingly: the default is to see the PR
+through to merge. Never skip the PR entirely when `pr-required` is `true`.
 
 ### Branch topology (PR mode)
 
@@ -374,6 +440,7 @@ modules directly. The binstub resolves the project from the
 | **PR mode: create + push a feature branch** | `agent-worktrees create-pr --title "desc"` |
 | **PR mode: record PR metadata** (after sub-agent opens it) | `agent-worktrees set-pr --url URL --number N` |
 | **PR mode: show tracked PR state** | `agent-worktrees pr-status` |
+| **Check if PRs are required** (direct-to-master blocked) | `agent-worktrees get pr-required` |
 | Set/update title only | `agent-worktrees push-changes --title "desc" --title-only` |
 | Show worktree git status | `agent-worktrees status` |
 | List worktrees for cleanup | `agent-worktrees cleanup` |

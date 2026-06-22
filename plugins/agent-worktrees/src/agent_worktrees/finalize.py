@@ -146,6 +146,21 @@ def push_changes(
     if repo.pr.enabled and record and record.pr and record.pr.branch:
         return _push_changes_pr(worktree_id, config, record, dry_run=dry_run)
 
+    # PRs required: refuse to push directly to the default branch. The only
+    # way to land work is the PR path -- run create-pr first.
+    if repo.pr.required:
+        output.err(
+            f"PRs are required for this repo -- 'push-changes' cannot push "
+            f"directly to {upstream}.\n"
+            f"Open a pull request instead:\n"
+            f"  1. agent-worktrees create-pr --title \"...\"\n"
+            f"  2. open the PR via the '{repo.pr.provider}' provider "
+            f"(see the worktree skill 'PR Workflow')\n"
+            f"  3. agent-worktrees set-pr --url <URL> --number <N>\n"
+            f"Then re-run push-changes to update the feature branch."
+        )
+        return False
+
     # Guard against branch drift
     if Path(worktree_path).exists():
         actual = git_ops._get_current_branch_safe(worktree_path)
@@ -698,12 +713,24 @@ def validate_and_finalize(
             print("No commits and clean tree -- finalizing unused worktree.")
             # Fall through to cleanup
         elif not _is_content_on_upstream(branch, upstream, cwd=worktree_path):
-            output.err(
-                f"Unmerged work detected on {branch}. "
-                f"Run 'agent-worktrees push-changes' to push your changes "
-                f"to {repo.remote}/{repo.default_branch} first, "
-                f"then retry 'agent-worktrees finalize'."
-            )
+            if repo.pr.required:
+                output.err(
+                    f"Unmerged work detected on {branch}, and PRs are required "
+                    f"for this repo -- it cannot be finalized direct-to-master.\n"
+                    f"Land it through a pull request:\n"
+                    f"  1. agent-worktrees create-pr --title \"...\"\n"
+                    f"  2. open the PR via the '{repo.pr.provider}' provider, "
+                    f"then 'agent-worktrees set-pr --url <URL> --number <N>'\n"
+                    f"Once the feature branch is pushed, finalize succeeds "
+                    f"(the PR may still be open)."
+                )
+            else:
+                output.err(
+                    f"Unmerged work detected on {branch}. "
+                    f"Run 'agent-worktrees push-changes' to push your changes "
+                    f"to {repo.remote}/{repo.default_branch} first, "
+                    f"then retry 'agent-worktrees finalize'."
+                )
             return False
         else:
             print(f"Verified: all content from {branch} is on {upstream}.")
