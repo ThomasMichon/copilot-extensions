@@ -104,17 +104,17 @@ function Find-PluginScript($pluginName, $script) {
 $awUninstall = Find-PluginScript 'agent-worktrees' 'install.ps1'
 if ($awUninstall) {
     Step 'Running agent-worktrees uninstall...'
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $awUninstall uninstall -RemoveConfig -Force *> $null
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $awUninstall uninstall -RemoveConfig -Force *> $null
 }
 $abUninstall = Find-PluginScript 'agent-bridge' 'install.ps1'
 if ($abUninstall) {
     Step 'Running agent-bridge uninstall...'
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $abUninstall uninstall -Purge *> $null
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $abUninstall uninstall -Purge *> $null
 }
 $acUninstall = Find-PluginScript 'agent-codespaces' 'install.ps1'
 if ($acUninstall) {
     Step 'Running agent-codespaces uninstall...'
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $acUninstall uninstall *> $null
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $acUninstall uninstall *> $null
 }
 
 # -- 4. Hard sweep (idempotent -- catches partial / init-only installs) --------

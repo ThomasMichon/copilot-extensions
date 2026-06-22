@@ -130,7 +130,7 @@ Install the worktree runtime. Run **once per machine**.
 
 ```powershell
 # Windows
-powershell -NoProfile -ExecutionPolicy Bypass -File "$awDir\scripts\init.ps1"
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$awDir\scripts\init.ps1"
 ```
 
 ```bash
@@ -241,7 +241,7 @@ Install the bridge service. Run **once per machine** (after agent-worktrees).
 
 ```powershell
 # Windows
-powershell -NoProfile -ExecutionPolicy Bypass -File "$abDir\scripts\install.ps1" install
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$abDir\scripts\install.ps1" install
 ```
 
 ```bash
@@ -383,7 +383,7 @@ owner of the `~/.local/bin/agent-codespaces` binstub.
 
 ```powershell
 # Windows
-powershell -NoProfile -ExecutionPolicy Bypass -File "$acDir\scripts\init.ps1"
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$acDir\scripts\init.ps1"
 ```
 
 ```bash
@@ -449,7 +449,7 @@ service (installed as a sibling import); this step gives you the standalone
 
 ```powershell
 # Windows
-powershell -NoProfile -ExecutionPolicy Bypass -File "$anDir\scripts\init.ps1"
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$anDir\scripts\init.ps1"
 ```
 
 ```bash
@@ -491,7 +491,7 @@ you need to bridge an authenticated MCP server.
 
 ```powershell
 # Windows
-powershell -NoProfile -ExecutionPolicy Bypass -File "$amDir\scripts\init.ps1"
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$amDir\scripts\init.ps1"
 ```
 
 ```bash
