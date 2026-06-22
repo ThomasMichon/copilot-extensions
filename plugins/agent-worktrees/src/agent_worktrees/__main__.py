@@ -2610,39 +2610,6 @@ def _slugify(text: str) -> str:
     return s or "daemon"
 
 
-def cmd_create_system(args: argparse.Namespace) -> int:
-    """Create a daemon-owned *system* worktree (hidden from the Picker).
-
-    Per-session model: a background service calls this for each work run, uses
-    the returned path, then tears it down with ``remove-system``. System
-    worktrees are exempt from routine cleanup; leaked ones (crashed daemon) are
-    force-removable via the System menu or ``remove-system``.
-    """
-    with output.stdout_to_stderr():
-        try:
-            config = cfg.load_config()
-            result = _create_worktree_core(
-                config, no_mux=True, kind="system",
-                owner=getattr(args, "owner", None) or getattr(args, "name", None),
-                name=getattr(args, "name", None),
-            )
-        except Exception as e:
-            if getattr(args, "json", False):
-                return _json_error(str(e))
-            output.err(str(e))
-            return 1
-
-    if getattr(args, "json", False):
-        _json_output(result)
-        return 0
-
-    wt = result["worktree"]
-    print(f"✅ Created system worktree: {wt['id']}")
-    print(f"   Path:   {wt['path']}")
-    print(f"   Branch: {wt['branch']}")
-    return 0
-
-
 def cmd_remove_system(args: argparse.Namespace) -> int:
     """Remove a system worktree by id (git worktree + tracking record).
 
@@ -2685,15 +2652,24 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
 def cmd_create(args: argparse.Namespace) -> int:
     """Create a new worktree non-interactively.
 
-    When ``--json`` is passed, emits a JSON envelope with the new
-    worktree info and launch plan.  The caller is responsible for
-    launching Copilot -- this command returns the command info only.
+    Default creates a normal (``session``) worktree and emits a JSON envelope
+    with the new worktree info and launch plan; the caller launches Copilot.
+
+    ``--system`` instead creates a daemon-owned worktree (``--name``/``--owner``
+    label it): hidden from the launch Picker, exempt from routine cleanup, and
+    torn down per-run via ``remove-system``. System worktrees never launch
+    Copilot -- a daemon uses only the returned ``path``.
     """
+    is_system = getattr(args, "system", False)
     with output.stdout_to_stderr():
         try:
             config = cfg.load_config()
             result = _create_worktree_core(
                 config, no_mux=True,
+                kind="system" if is_system else "session",
+                owner=(getattr(args, "owner", None) or getattr(args, "name", None))
+                if is_system else None,
+                name=getattr(args, "name", None) if is_system else None,
             )
         except Exception as e:
             if args.json:
@@ -2706,7 +2682,8 @@ def cmd_create(args: argparse.Namespace) -> int:
         return 0
 
     wt = result["worktree"]
-    print(f"✅ Created worktree: {wt['id']}")
+    label = "system worktree" if is_system else "worktree"
+    print(f"✅ Created {label}: {wt['id']}")
     print(f"   Path:   {wt['path']}")
     print(f"   Branch: {wt['branch']}")
     return 0
@@ -3842,7 +3819,6 @@ def _service_is_installed(service: svc.ServiceInfo) -> bool:
 # Worktree namespace verb -> canonical top-level command.
 _WORKTREE_VERBS = {
     "create": "create",
-    "create-system": "create-system",
     "remove-system": "remove-system",
     "list": "list",
     "status": "status",
@@ -3861,7 +3837,7 @@ def _worktree_usage() -> None:
     print("Non-launching worktree lifecycle commands:", file=out)
     print("  create [--json]        Create a worktree; print id + dir (no launch)", file=out)
     print(
-        "  create-system --name N [--owner O] [--json]  "
+        "  create --system --name N [--owner O]  "
         "Create a daemon-owned worktree (hidden from Picker)", file=out)
     print(
         "  remove-system <id> [--json]  "
@@ -4949,18 +4925,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--include-other-platforms", action="store_true",
                    help="Include worktrees from other platforms (e.g. Windows when on Linux)")
 
-    # create (non-interactive worktree creation)
+    # create (non-interactive worktree creation; --system for daemon-owned)
     p = sub.add_parser("create", help="Create a new worktree non-interactively")
-    p.add_argument("--json", action="store_true",
-                   help="JSON output mode (stdout is JSON only)")
-
-    # create-system (daemon-owned worktree; hidden from the Picker)
-    p = sub.add_parser("create-system",
-                       help="Create a daemon-owned system worktree (hidden from Picker)")
+    p.add_argument("--system", action="store_true",
+                   help="Create a daemon-owned worktree (hidden from Picker, "
+                        "cleanup-exempt; tear down with remove-system)")
     p.add_argument("--name", default=None,
-                   help="Short slug for the worktree id (e.g. the service name)")
+                   help="With --system: short slug for the worktree id (e.g. the service name)")
     p.add_argument("--owner", default=None,
-                   help="Owning service name (recorded for the browse view)")
+                   help="With --system: owning service name (recorded for the browse view)")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
 
@@ -5417,7 +5390,6 @@ COMMAND_MAP = {
     "status": cmd_status,
     "list": cmd_list,
     "create": cmd_create,
-    "create-system": cmd_create_system,
     "remove-system": cmd_remove_system,
     "cleanup": cmd_cleanup,
     "validate": cmd_validate,
