@@ -277,14 +277,17 @@ const session = await joinSession({
             args.next_steps ? `### Agent Next Steps\n${args.next_steps}\n` : "",
             "",
             "---",
-            "Compose a continuation prompt using this data plus your live context.",
-            "Follow the template in the context-handoff skill.",
-            "**IMPORTANT:** Do not exceed 40 lines or ~250 words.",
-            "Lead with the original topic/request — not recent activity.",
-            "Prefer omission over completeness. Include only details needed to resume.",
-            "Present it to the user in a fenced code block they can copy.",
-            "Then call save_handoff_prompt with the composed text.",
-            "Present the short prompt to the user in a fenced code block they can copy-paste into a new session.",
+            "Now follow the context-handoff skill:",
+            "1. Compose the FULL handoff markdown — direction + motivation of the",
+            "   work, key next action items, and target goals — from this data",
+            "   plus your live context. Lead with the original topic/request.",
+            "2. Call save_handoff_prompt with that full markdown; it writes the",
+            "   file to the session state folder and returns its absolute path.",
+            "3. Reply to the user with a SHORT 2-3 sentence handoff prompt that",
+            "   explicitly names the returned file path (a ~/ form is fine) and",
+            "   tells them to paste it into '/new' or '/clear' in a new session.",
+            "Do NOT commit the file, store it outside the session folder, hide",
+            "the path, or claim it will be auto-loaded on restart (it will not).",
           ].join("\n"),
           resultType: "success",
         };
@@ -293,16 +296,18 @@ const session = await joinSession({
     {
       name: "save_handoff_prompt",
       description:
-        "Persist a composed continuation prompt so future sessions in " +
-        "the same worktree can discover it via onSessionStart. Call this " +
-        "after composing the handoff prose from generate_handoff_prompt data.",
+        "Persist the full handoff markdown to the CURRENT session's state " +
+        "folder and return its absolute path. Call this after composing the " +
+        "handoff from generate_handoff_prompt data. The file is NOT loaded " +
+        "automatically by any future session -- the agent must show the user " +
+        "the returned path plus a short prompt that points at it.",
       skipPermission: true,
       parameters: {
         type: "object",
         properties: {
           prompt_text: {
             type: "string",
-            description: "The full composed continuation prompt text.",
+            description: "The full composed handoff markdown text.",
           },
         },
         required: ["prompt_text"],
@@ -316,7 +321,13 @@ const session = await joinSession({
 
         const promptPath = saveHandoffPrompt(args.prompt_text, sid);
 
-        return `Handoff prompt saved to ${promptPath} and pointer updated.`;
+        return (
+          `Handoff saved to ${promptPath}\n` +
+          `Reply to the user with this absolute path (a ~/ form is fine) and a ` +
+          `2-3 sentence prompt that references it, telling them to paste it into ` +
+          `'/new' or '/clear' in a new session. Do NOT claim it will be picked ` +
+          `up automatically on restart -- that does not happen.`
+        );
       },
     },
   ],
@@ -390,8 +401,8 @@ const session = await joinSession({
           additionalContext:
             `[Context Handoff] ⚠️ Context window is ${pct}% full ` +
             `(${state.currentTokens.toLocaleString()} / ${state.tokenLimit.toLocaleString()} tokens). ` +
-            `Auto-compaction triggers at ~80%. Call generate_handoff_prompt NOW ` +
-            `to prepare a continuation prompt before context is lost.`,
+            `Auto-compaction triggers at ~80%. Invoke the context-handoff skill NOW ` +
+            `(call generate_handoff_prompt) to write a handoff file before context is lost.`,
         };
       }
 
@@ -402,8 +413,8 @@ const session = await joinSession({
           additionalContext:
             `[Context Handoff] Context window is ${pct}% full ` +
             `(${state.currentTokens.toLocaleString()} / ${state.tokenLimit.toLocaleString()} tokens). ` +
-            `Consider calling generate_handoff_prompt soon to prepare a continuation ` +
-            `prompt. No rush — finish your current task first.`,
+            `Consider invoking the context-handoff skill soon (call generate_handoff_prompt) ` +
+            `to write a handoff file. No rush — finish your current task first.`,
         };
       }
     },
