@@ -177,11 +177,13 @@ Reference implementation: `Get-SignedBasePython` + `New-SignedVenv` and the
 `agent-mcp`). `tools/check-install-contract.py`
 flags any `install.ps1` that launches the `…\Scripts\<name>.exe` trampoline.
 
-> **Enforcement scope:** `check-install-contract.py` only scans plugins that
-> ship a `scripts/install.ps1`. `agent-containers` and `agent-mcp` implement the
-> same patterns in `scripts/init.ps1`, so they currently conform but are **not**
-> auto-enforced — keep them in sync by hand until the checker also globs
-> `init.ps1`.
+> **Enforcement scope:** `check-install-contract.py` enforces each plugin's
+> *canonical* runtime entrypoint — `install.ps1`/`install.sh` when present,
+> otherwise `init.ps1`/`init.sh`. `agent-containers` and `agent-mcp` ship only
+> `init.*`, so they are checked there; plugins with both (`agent-codespaces`,
+> `agent-worktrees`) have `init.*` delegate to `install.*`, so only `install.*`
+> is enforced. The SAC trampoline rule applies to whichever `.ps1` is the
+> canonical entrypoint.
 
 ## Binstub format (Windows)
 
@@ -320,8 +322,9 @@ loading, both handled outside the plugin:
   *all* extension loading on it) — ensured by the **agent-worktrees** installer
   (`Ensure-CopilotExperimental`), not by the extension plugin.
 
-Because it ships no install scripts, `check-install-contract.py` does not
-include it (the checker only scans plugins that have `scripts/install.*`).
+Because it ships no install or init scripts, `check-install-contract.py` does not
+include it (the checker only scans plugins that have `scripts/install.*` or
+`scripts/init.*`).
 
 ### Payload runtime with installer (legacy)
 
@@ -347,11 +350,12 @@ the Python rules still do not apply, but what does:
 4. Output stays ASCII unless the script establishes a UTF-8 context (the
    installers here use `[OK]` / `[WARN]` markers).
 
-`check-install-contract.py` only scans plugins that ship `scripts/install.*`.
-Plugin-contributed-extension plugins (no install scripts) are not included at
-all. For a payload-runtime-with-installer plugin it detects the absent
-`pyproject.toml` and skips only the `uv pip install` check; the manifest and
-resolver checks are still enforced.
+`check-install-contract.py` scans plugins that ship a runtime entrypoint —
+`scripts/install.*` or, failing that, `scripts/init.*`. Plugin-contributed-extension
+plugins (no install/init scripts) are not included at all. For a
+payload-runtime-with-installer plugin it detects the absent `pyproject.toml` and
+skips only the `uv pip install` check; the manifest and resolver checks are
+still enforced.
 
 ## Within-plugin consolidation
 
@@ -361,13 +365,14 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 
 ## Enforcement
 
-`tools/check-install-contract.py` verifies, per plugin:
+`tools/check-install-contract.py` verifies, per plugin, against its canonical
+runtime entrypoint (`install.*` if present, else `init.*`):
 - `uv pip install` is used (no package file-copy) — **skipped for
   payload-runtime plugins** (no `pyproject.toml`; see
   [Non-Python plugins](#non-python-plugins-extensions-and-payload-runtimes)),
 - no binstub sets `PYTHONPATH=…/lib`,
-- no `install.ps1` launches the `…\Scripts\<name>.exe` console-script trampoline
-  ([SAC-safe launchers](#sac-safe-launchers-windows)),
+- no canonical `.ps1` entrypoint launches the `…\Scripts\<name>.exe`
+  console-script trampoline ([SAC-safe launchers](#sac-safe-launchers-windows)),
 - a `schema_version` 3 manifest with a `source` block is written,
 - the source-kind resolver is identical across plugins (per language).
 
