@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-bridge"
-version = "0.4.0-dev48"
+version = "0.4.0-dev49"
 description = "Persistent inter-agent communication service for Copilot CLI"
 readme = "README.md"
 license = "MIT"
@@ -28,7 +28,7 @@ dependencies = [
     "wsproto>=1.2",
     "pyyaml>=6.0",
     "pydantic>=2.0",
-    "agent-client-protocol>=0.9,<1",
+    "agent-client-protocol>=0.10.1,<1",
     "agent-ssh-manager",
     "agent-credential-relay",
 ]
