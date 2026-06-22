@@ -3103,8 +3103,14 @@ def cmd_install(args: argparse.Namespace) -> int:
     if not inst.deploy_binstubs(repo_dir, project=project):
         return 1
 
-    # Update projects registry
-    inst.register_project(project, repo_dir=repo_dir)
+    # Update projects registry. Honor the repos.yaml agent-exposure
+    # classification (default ON) so a repo marked ``agent: false`` (e.g. a
+    # contributor/owner repo that hosts no agent) is registered reference-only
+    # instead of silently exposing a same-machine agent on (re-)install.
+    from . import repos as _repos
+    _entry = _repos.find_repo(project)
+    _expose_agent = _entry.agent if _entry else True
+    inst.register_project(project, repo_dir=repo_dir, expose_agent=_expose_agent)
 
     # Run post-install hook (project-specific, e.g. icon deployment)
     try:
