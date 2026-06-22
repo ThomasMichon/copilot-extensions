@@ -44,7 +44,7 @@ platform-specific installer.
 $abDir = Get-ChildItem -Recurse "$env:USERPROFILE\.copilot\installed-plugins" -Filter plugin.json |
     Where-Object { (Get-Content $_.FullName -Raw) -match '"agent-bridge"' } |
     Select-Object -First 1 -ExpandProperty DirectoryName
-powershell -NoProfile -ExecutionPolicy Bypass -File "$abDir\scripts\install.ps1" install
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$abDir\scripts\install.ps1" install
 ```
 
 ```bash

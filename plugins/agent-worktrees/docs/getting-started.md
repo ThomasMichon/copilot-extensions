@@ -53,7 +53,7 @@ Or run the init script directly:
 $pluginDir = (Get-ChildItem -Recurse "$env:USERPROFILE\.copilot\installed-plugins" -Filter plugin.json |
     Where-Object { (Get-Content $_.FullName -Raw) -match 'agent-worktrees' } |
     Select-Object -First 1).DirectoryName
-powershell -NoProfile -ExecutionPolicy Bypass -File "$pluginDir\scripts\init.ps1"
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$pluginDir\scripts\init.ps1"
 ```
 
 ```bash

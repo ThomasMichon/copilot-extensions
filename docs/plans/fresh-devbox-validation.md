@@ -42,7 +42,7 @@ nudges "set up agent-worktrees"), or run init directly:
 ```powershell
 $aw = (Get-ChildItem -Recurse "$env:USERPROFILE\.copilot\installed-plugins" -Filter plugin.json |
   ? { (Get-Content $_.FullName -Raw) -match '"agent-worktrees"' } | select -First 1).DirectoryName
-powershell -NoProfile -ExecutionPolicy Bypass -File "$aw\scripts\init.ps1"
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$aw\scripts\init.ps1"
 $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
 agent-worktrees --version
 ```
@@ -50,7 +50,7 @@ agent-worktrees --version
 ```powershell
 $ac = (Get-ChildItem -Recurse "$env:USERPROFILE\.copilot\installed-plugins" -Filter plugin.json |
   ? { (Get-Content $_.FullName -Raw) -match '"agent-codespaces"' } | select -First 1).DirectoryName
-powershell -NoProfile -ExecutionPolicy Bypass -File "$ac\scripts\init.ps1"
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$ac\scripts\init.ps1"
 agent-codespaces version
 Get-Content $env:USERPROFILE\.local\bin\agent-codespaces.cmd   # should point to ~/.agent-codespaces
 ```
@@ -59,7 +59,7 @@ venv for the relay/resolver:
 ```powershell
 $ab = (Get-ChildItem -Recurse "$env:USERPROFILE\.copilot\installed-plugins" -Filter plugin.json |
   ? { (Get-Content $_.FullName -Raw) -match '"agent-bridge"' } | select -First 1).DirectoryName
-powershell -NoProfile -ExecutionPolicy Bypass -File "$ab\scripts\install.ps1" install
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$ab\scripts\install.ps1" install
 agent-bridge version; agent-bridge status
 ```
 **CRITICAL CHECK:** the installer output must show `Sibling plugin:
