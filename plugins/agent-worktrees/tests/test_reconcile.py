@@ -32,6 +32,12 @@ def env(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         reconcile.cfg, "install_dir", lambda: home / ".agent-worktrees"
     )
+    # Pin POSIX semantics so the suite is deterministic regardless of the host
+    # OS: these tests create scripts/install.sh payloads and assert bash argv.
+    # On Windows, runtime_installer_argv() correctly prefers install.ps1 (absent
+    # here), so without this pin the runtime-phase tests fail on a Windows dev
+    # box while passing on Linux CI. Individual tests may still re-pin.
+    monkeypatch.setattr(reconcile.platform, "system", lambda: "Linux")
 
     class Env:
         pass
