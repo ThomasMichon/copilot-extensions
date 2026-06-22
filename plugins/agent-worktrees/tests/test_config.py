@@ -152,9 +152,106 @@ class TestPRConfigParsing:
         conf = cfg.load_config(cfgfile)
         pr = conf.repos["ext"].pr
         assert pr.enabled is True
+        assert pr.required is False
         assert pr.provider == "github"
         assert pr.strategy == "keep-alive"
         assert pr.branch_prefix == "pr"
+
+    def test_pr_required_parsed(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      required: true\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.enabled is True
+        assert pr.required is True
+
+    def test_pr_required_implies_enabled(self, tmp_path: Path):
+        # ``required: true`` alone turns PR mode on even without ``enabled``.
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      required: true\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.required is True
+        assert pr.enabled is True
+
+    def test_pr_required_defaults_false(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.required is False
+
+
+class TestInRepoPRPolicy:
+    """The in-repo .agent-worktrees.yaml `pr:` block overrides machine-local."""
+
+    def _write_machine(self, path: Path, anchor: Path, pr_block: str = "") -> None:
+        path.write_text(
+            "repo_name: ext\n"
+            "srcroot: /tmp/src\n"
+            "machine: lambda-core\n"
+            "platform: wsl\n"
+            "repos:\n"
+            "  ext:\n"
+            f"    anchor: {anchor}\n"
+            "    worktree_root: /tmp/src/.worktrees/ext\n"
+            "    default_branch: master\n"
+            "    remote: origin\n"
+            f"{pr_block}"
+        )
+
+    def test_inrepo_overrides_machine_local(self, tmp_path: Path):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        (anchor / cfg.INREPO_CONFIG_FILENAME).write_text(
+            "pr:\n  enabled: true\n  required: true\n  provider: gitea\n"
+        )
+        cfgfile = tmp_path / "config.yaml"
+        # Machine-local says disabled; in-repo says required -> in-repo wins.
+        self._write_machine(
+            cfgfile, anchor,
+            "    pr:\n      enabled: false\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.enabled is True
+        assert pr.required is True
+        assert pr.provider == "gitea"
+
+    def test_machine_local_used_when_no_inrepo(self, tmp_path: Path):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()  # no .agent-worktrees.yaml
+        cfgfile = tmp_path / "config.yaml"
+        self._write_machine(
+            cfgfile, anchor,
+            "    pr:\n      enabled: true\n      provider: github\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.enabled is True
+        assert pr.required is False
+        assert pr.provider == "github"
+
+    def test_malformed_inrepo_falls_back(self, tmp_path: Path):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        (anchor / cfg.INREPO_CONFIG_FILENAME).write_text("pr: [not, a, mapping]\n")
+        cfgfile = tmp_path / "config.yaml"
+        self._write_machine(
+            cfgfile, anchor,
+            "    pr:\n      enabled: true\n",
+        )
+        # Malformed in-repo pr -> ignored, machine-local used, no crash.
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.enabled is True
 
 
 # ---------------------------------------------------------------------------

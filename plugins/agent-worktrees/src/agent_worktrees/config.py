@@ -22,6 +22,14 @@ import yaml
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 
+# In-repo, committed config file carrying *repo-level policy* (shared across
+# every machine that checks out the repo), as opposed to the machine-local
+# ~/.{project}/config.yaml which carries machine-specific paths. Currently
+# scopes the ``pr:`` block so PR-workflow policy (enabled/required/provider/
+# strategy/branch_prefix) lives with the code and needs no per-machine
+# replication. Lives at the repo root (the anchor checkout).
+INREPO_CONFIG_FILENAME = ".agent-worktrees.yaml"
+
 @dataclass(frozen=True)
 class CopilotProfile:
     """A named Copilot backend configuration."""
@@ -44,6 +52,15 @@ class PRConfig:
     finalization flow unchanged.  When enabled, finalization runs the
     PR-based flow (see ``docs/plans/pr-workflow.md`` in aperture-labs).
 
+    ``required`` is the enforcement switch.  With ``enabled`` alone, PR mode
+    is *available* but optional: ``push-changes``/``finalize`` only take the
+    PR path once a PR record exists (a ``create-pr`` was run), otherwise they
+    finalize direct-to-master.  With ``required: true`` the direct-to-master
+    path is **refused** -- ``push-changes`` (and the unmerged-work guard in
+    ``finalize``) will not push to the default branch; the only way to land
+    work is ``create-pr`` -> open PR -> merge.  Setting ``required: true``
+    implies ``enabled: true``.
+
     ``strategy`` selects the default *disposition* after ``create-pr`` --
     it does not control squash timing (squashing always happens at
     ``create-pr``):
@@ -55,6 +72,7 @@ class PRConfig:
     """
 
     enabled: bool = False
+    required: bool = False         # enforce PRs: refuse direct-to-master
     provider: str = "gitea"        # gitea | github | azure-devops
     strategy: str = "detach"       # default disposition: keep-alive | detach
     branch_prefix: str = "feature"
@@ -403,8 +421,12 @@ def load_config(path: Path | None = None) -> Config:
                     if isinstance(cmd_list, list):
                         post_install_hook[plat_key] = [str(c) for c in cmd_list]
 
-            # Parse pr config (optional PR-workflow block)
-            pr_cfg = _parse_pr(repo_data.get("pr"))
+            # Parse pr config. Repo-level PR policy may live in the in-repo
+            # .agent-worktrees.yaml (shared across machines); when present it
+            # overrides the machine-local ``pr`` block entirely.
+            inrepo_pr = _load_inrepo_pr(repo_data["anchor"])
+            pr_source = inrepo_pr if inrepo_pr is not None else repo_data.get("pr")
+            pr_cfg = _parse_pr(pr_source)
 
             repos[name] = RepoConfig(
                 anchor=repo_data["anchor"],
@@ -440,6 +462,29 @@ def load_config(path: Path | None = None) -> Config:
     )
 
 
+def _load_inrepo_pr(anchor: str) -> dict[str, Any] | None:
+    """Return the ``pr`` block from the repo's in-repo config, or None.
+
+    Reads ``<anchor>/.agent-worktrees.yaml`` -- the committed, repo-level
+    policy file shared across every machine. Returns the ``pr`` mapping when
+    the file exists and carries one; otherwise None (caller falls back to the
+    machine-local ``pr`` block). Never raises: a missing or malformed in-repo
+    file degrades to None so config loading -- on the critical path of every
+    command -- cannot be broken by a bad committed file.
+    """
+    try:
+        path = Path(anchor) / INREPO_CONFIG_FILENAME
+        if not path.exists():
+            return None
+        with open(path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f)
+        if isinstance(raw, dict) and isinstance(raw.get("pr"), dict):
+            return raw["pr"]
+    except Exception:
+        return None
+    return None
+
+
 def _parse_pr(raw: Any) -> PRConfig:
     """Parse the optional ``pr:`` block of a repo config into a PRConfig.
 
@@ -447,8 +492,13 @@ def _parse_pr(raw: Any) -> PRConfig:
     """
     if not isinstance(raw, dict):
         return PRConfig()
+    required = bool(raw.get("required", False))
+    # ``required`` implies ``enabled``: enforcing PRs only makes sense when
+    # PR mode is on, so a lone ``required: true`` turns the mode on too.
+    enabled = bool(raw.get("enabled", False)) or required
     return PRConfig(
-        enabled=bool(raw.get("enabled", False)),
+        enabled=enabled,
+        required=required,
         provider=str(raw.get("provider", "gitea")),
         strategy=str(raw.get("strategy", "detach")),
         branch_prefix=str(raw.get("branch_prefix", "feature")),

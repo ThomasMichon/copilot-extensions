@@ -329,3 +329,55 @@ class TestPRFinalizeAndPush:
         assert ok is False
 
 
+class TestPRRequiredEnforcement:
+    """``pr.required`` blocks the direct-to-master path entirely."""
+
+    def _required_config(self, config):
+        repo = config.default_repo
+        return cfg.Config(
+            srcroot=config.srcroot, machine=config.machine,
+            platform=config.platform, repo_name=config.repo_name,
+            repos={config.repo_name: cfg.RepoConfig(
+                anchor=repo.anchor, worktree_root=repo.worktree_root,
+                default_branch=repo.default_branch, remote=repo.remote,
+                pr=cfg.PRConfig(
+                    enabled=True, required=True,
+                    provider="gitea", branch_prefix="feature",
+                ),
+            )},
+        )
+
+    def test_push_changes_refuses_direct_to_master(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, remote_dir = pr_repo
+        req_config = self._required_config(config)
+
+        before = _git("ls-remote", str(remote_dir), "master", cwd=wt_path)
+        # No create-pr was run -> no PR record -> direct push must be refused.
+        ok = fin.push_changes(wid, req_config)
+        assert ok is False
+        after = _git("ls-remote", str(remote_dir), "master", cwd=wt_path)
+        assert after == before  # remote master untouched
+
+    def test_finalize_refuses_unmerged_direct(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        req_config = self._required_config(config)
+        # Unmerged work, no PR -> finalize must refuse (not prune).
+        ok = fin.validate_and_finalize(wid, req_config)
+        assert ok is False
+
+    def test_create_pr_path_still_works_when_required(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        req_config = self._required_config(config)
+        # The PR path remains available: create-pr then push-changes updates
+        # the feature branch, never master.
+        pr_ops.create_pr(wid, req_config, title="Add feature")
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+        ok = fin.push_changes(wid, req_config)
+        assert ok is True
+
+
