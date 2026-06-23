@@ -377,6 +377,24 @@ deploy_wrappers() {
             ok "Hook: $script"
         fi
     done
+
+    # Deploy default setup scripts to ~/.agent-worktrees/scripts/ (used when a
+    # repo lacks its own tools/setup/setup.sh). The agent-bridge launch plan
+    # invokes ~/.agent-worktrees/scripts/default-setup.{ps1,sh}, so these MUST
+    # be deployed here to keep the install flow and that launch instruction in
+    # sync -- otherwise spawning a worktree agent fails at LAUNCH_ACP because
+    # the setup script is missing. Mirrors installer.py deploy_wrappers().
+    mkdir -p "$INSTALL_DIR/scripts"
+    for setup in default-setup.ps1 default-setup.sh; do
+        local setup_src="$SCRIPT_DIR/$setup"
+        if [[ -f "$setup_src" ]]; then
+            tmp="$(mktemp "$INSTALL_DIR/scripts/$setup.XXXXXX")"
+            cp "$setup_src" "$tmp"
+            chmod +x "$tmp"
+            mv -f "$tmp" "$INSTALL_DIR/scripts/$setup"
+            ok "Default setup: $setup"
+        fi
+    done
 }
 
 remove_legacy_scripts() {

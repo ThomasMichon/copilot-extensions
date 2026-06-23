@@ -173,6 +173,17 @@ def create_venv() -> bool:
     """
     venv = venv_dir()
 
+    # Idempotency / lock-safety: if the venv already exists and is healthy,
+    # do NOT re-run `uv venv`. On Windows `uv venv` re-links Scripts\python.exe,
+    # which fails with "Access is denied (os error 5)" whenever the interpreter
+    # is held by a running process (the agent-bridge daemon or an active
+    # worktree session). That early failure aborted the whole install before
+    # the static-asset deploy (deploy_wrappers -> default-setup.ps1) could run.
+    # Skipping recreation when healthy lets the install proceed to those steps.
+    if check_venv_health():
+        output.skipped(f"Venv already healthy at {venv}")
+        return True
+
     # Create venv via uv (fast, reliable)
     try:
         subprocess.run(
