@@ -9,6 +9,14 @@ import pytest
 from agent_bridge.db import Database
 
 
+def test_connection_pragmas_for_fast_ingest(tmp_db: Database) -> None:
+    """WAL + synchronous=NORMAL keeps event ingestion off the per-commit fsync
+    path that backpressures the ACP read loop (dotfiles #99)."""
+    conn = tmp_db._get_conn()
+    assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1  # 1 == NORMAL
+
+
 class TestSessionCRUD:
     """Session create/read/update/delete operations."""
 

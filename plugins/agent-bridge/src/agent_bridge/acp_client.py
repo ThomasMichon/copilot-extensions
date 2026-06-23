@@ -51,6 +51,16 @@ from .procgroup import safe_killpg
 
 log = logging.getLogger("agent-bridge")
 
+# Tool-call statuses that mean the call has finished. Mirrors
+# events._TERMINAL_TOOL_STATUSES / render._TERMINAL_TOOL_STATUS, duplicated here
+# so the ACP client has no dependency on the event-log or display layers.
+_TERMINAL_TOOL_STATUSES = frozenset(
+    {
+        "completed", "complete", "success", "succeeded",
+        "failed", "error", "cancelled", "canceled",
+    }
+)
+
 
 async def _terminate_process_tree(proc: asyncio.subprocess.Process) -> None:
     """Terminate a spawned agent process **and its child tree**.
@@ -472,9 +482,9 @@ class AcpClient:
             })
 
         elif isinstance(update, ToolCallProgress):
+            status = getattr(update, "status", None)
             existing = self._tool_calls.get(update.tool_call_id)
             if existing:
-                status = getattr(update, "status", None)
                 if status:
                     existing.status = status
                 content = getattr(update, "content", None)
@@ -483,13 +493,19 @@ class AcpClient:
                         text = getattr(getattr(c, "content", None), "text", None)
                         if text:
                             existing.content.append(text)
-            # Forward the accumulated tool result (content text + raw_output)
-            # so consumers can render full fidelity, not just status.
+            # Only the TERMINAL update carries the accumulated content + raw_output.
+            # They are consumed solely at completion (render._render_tool_update
+            # emits content only on a terminal status; the ACP-WS re-emit and
+            # active_tool_call ignore content entirely). Sending the growing
+            # accumulation on every in-progress update is O(n^2) in storage, CPU
+            # (json.dumps), and SSE fan-out, and the per-event commit backpressures
+            # the ACP read loop -- stalling a remote agent over SSH (dotfiles #99).
+            terminal = bool(status) and str(status).lower() in _TERMINAL_TOOL_STATUSES
             self._emit("tool_call_update", {
                 "tool_call_id": update.tool_call_id,
-                "status": getattr(update, "status", None),
-                "content": list(existing.content) if existing else [],
-                "raw_output": getattr(update, "raw_output", None),
+                "status": status,
+                "content": list(existing.content) if (terminal and existing) else [],
+                "raw_output": getattr(update, "raw_output", None) if terminal else None,
             })
 
         elif isinstance(update, UsageUpdate):

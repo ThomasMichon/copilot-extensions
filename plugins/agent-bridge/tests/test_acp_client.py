@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from acp.schema import ToolCallProgress, ToolCallStart
+from acp.schema import ContentToolCallContent, TextContentBlock, ToolCallProgress, ToolCallStart
 
 from agent_bridge.acp_client import AcpClient
 
@@ -61,6 +61,57 @@ def test_tool_call_update_emits_results() -> None:
     assert update["raw_output"] == {"exit_code": 0, "stdout": "hello"}
     # content list is always present (accumulated tool-result text)
     assert update["content"] == []
+
+
+def _content_block(text: str) -> ContentToolCallContent:
+    return ContentToolCallContent(
+        type="content", content=TextContentBlock(type="text", text=text)
+    )
+
+
+def test_tool_call_update_content_only_on_terminal() -> None:
+    """In-progress updates must NOT carry the accumulated content/raw_output.
+
+    Emitting the growing accumulation on every progress chunk is O(n^2) in
+    storage/CPU/SSE and backpressures the ingestion loop (dotfiles #99). Only the
+    terminal update carries the full accumulated result -- the only point any
+    consumer reads it (render._render_tool_update).
+    """
+    client, events = _client_with_recorder()
+    client._handle_session_update(
+        ToolCallStart(
+            session_update="tool_call", tool_call_id="tc3", title="Run", kind="execute"
+        )
+    )
+    # Two in-progress chunks accumulate internally but must emit empty content.
+    for chunk in ("line1\n", "line2\n"):
+        client._handle_session_update(
+            ToolCallProgress(
+                session_update="tool_call_update",
+                tool_call_id="tc3",
+                status="in_progress",
+                content=[_content_block(chunk)],
+                raw_output={"partial": True},
+            )
+        )
+    in_progress = [d for t, d in events if t == "tool_call_update"]
+    assert in_progress, "expected in-progress updates"
+    assert all(d["content"] == [] for d in in_progress)
+    assert all(d["raw_output"] is None for d in in_progress)
+
+    # The terminal update carries the full accumulation.
+    client._handle_session_update(
+        ToolCallProgress(
+            session_update="tool_call_update",
+            tool_call_id="tc3",
+            status="completed",
+            raw_output={"exit_code": 0},
+        )
+    )
+    final = [d for t, d in events if t == "tool_call_update"][-1]
+    assert final["status"] == "completed"
+    assert final["content"] == ["line1\n", "line2\n"]
+    assert final["raw_output"] == {"exit_code": 0}
 
 
 def test_load_session_replay_is_suppressed() -> None:
