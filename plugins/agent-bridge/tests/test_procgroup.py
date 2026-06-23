@@ -13,7 +13,14 @@ from __future__ import annotations
 import os
 import signal
 
+import pytest
+
 from agent_bridge.procgroup import safe_killpg
+
+pytestmark = pytest.mark.skipif(
+    not hasattr(os, "getpgid") or not hasattr(os, "killpg"),
+    reason="POSIX process group APIs are not available on this platform",
+)
 
 
 def test_safe_killpg_refuses_own_group(monkeypatch):

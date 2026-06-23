@@ -65,6 +65,7 @@ class EventLog:
     @classmethod
     def from_db(cls, db: Database, session_id: str) -> EventLog:
         """Create an EventLog pre-populated with persisted events."""
+        db.flush()
         log = cls(db=db, session_id=session_id)
         rows = db.get_events(session_id, after=0)
         for row in rows:
@@ -83,27 +84,24 @@ class EventLog:
     def append(self, event_type: str, data: dict[str, Any]) -> SseEvent:
         """Append an event and return it with its assigned ID.
 
-        Persists to DB before adding to the in-memory list, so SSE
-        consumers never see events that failed to persist.
+        Adds the event to the in-memory list and wakes SSE consumers before
+        queueing the durable write, so live delivery is not blocked by SQLite.
         """
         ts = time.time()
 
         with self._lock:
             event_id = self._next_id
             self._next_id += 1
+            evt = SseEvent(id=event_id, event=event_type, data=data, timestamp=ts)
+            self._events.append(evt)
+            waiters = list(self._waiters)
 
+        for waiter in waiters:
+            waiter.set()
         if self._db is not None and self._session_id is not None:
             self._db.append_event(
                 self._session_id, event_id, event_type, data, ts,
             )
-
-        evt = SseEvent(id=event_id, event=event_type, data=data, timestamp=ts)
-
-        with self._lock:
-            self._events.append(evt)
-
-        for waiter in self._waiters:
-            waiter.set()
         return evt
 
     def get_events(self, after: int = 0) -> list[SseEvent]:
@@ -124,6 +122,7 @@ class EventLog:
         """
         with self._lock:
             if self._db is not None and self._session_id is not None:
+                self._db.flush()
                 self._db.delete_events(self._session_id)
             self._events = []
             self._next_id = 1
@@ -139,6 +138,8 @@ class EventLog:
                     SseEvent(id=event_id, event=event_type, data=data, timestamp=ts)
                 )
             count = len(self._events)
+            if self._db is not None and self._session_id is not None:
+                self._db.flush()
         for waiter in self._waiters:
             waiter.set()
         return count

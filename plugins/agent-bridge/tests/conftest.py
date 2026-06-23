@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,9 +21,11 @@ from agent_bridge.transport import SpawnTarget
 
 
 @pytest.fixture
-def tmp_db(tmp_path: Path) -> Database:
+def tmp_db(tmp_path: Path) -> Iterator[Database]:
     """Create a temporary SQLite database."""
-    return Database(tmp_path / "test.db")
+    db = Database(tmp_path / "test.db")
+    yield db
+    db.close()
 
 
 @pytest.fixture

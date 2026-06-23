@@ -76,6 +76,22 @@ class TestEventLog:
         assert [r["event_type"] for r in rows] == ["only"]
         assert rows[0]["event_id"] == 1
 
+    def test_burst_append_flush_persists_all_in_order(
+        self, event_log: EventLog, tmp_db: Database
+    ) -> None:
+        for i in range(80):
+            event_log.append("agent_message", {"i": i})
+
+        tmp_db.flush()
+
+        rows = tmp_db.get_events("test-session", after=0)
+        assert [r["event_id"] for r in rows] == list(range(1, 81))
+        assert [r["data"]["i"] for r in rows] == list(range(80))
+
+        range_rows = tmp_db.get_events_range("test-session", 25, 30)
+        assert [r["event_id"] for r in range_rows] == list(range(25, 31))
+        assert [r["data"]["i"] for r in range_rows] == list(range(24, 30))
+
     def test_rebuild_empty_clears_log(self, event_log: EventLog) -> None:
         event_log.append("x", {})
         count = event_log.rebuild([])
@@ -188,6 +204,20 @@ class TestEventLogFromDB:
         assert len(events) == 2
         assert events[0].event == "agent_message"
         assert events[1].id == 2
+
+    def test_from_db_flushes_queued_burst(self, tmp_db: Database) -> None:
+        now = time.time()
+        tmp_db.create_session("s1", "test", None, ".", "local", "idle", now)
+        source = EventLog(db=tmp_db, session_id="s1")
+        for i in range(75):
+            source.append("agent_message", {"i": i})
+
+        restored = EventLog.from_db(tmp_db, "s1")
+
+        events = restored.get_events()
+        assert [e.id for e in events] == list(range(1, 76))
+        assert [e.data["i"] for e in events] == list(range(75))
+        assert restored.append("tail", {}).id == 76
 
     def test_from_db_next_id_continues(self, tmp_db: Database) -> None:
         now = time.time()
