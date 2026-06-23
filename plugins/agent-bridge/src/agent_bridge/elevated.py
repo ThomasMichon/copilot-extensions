@@ -288,6 +288,15 @@ def ensure_running(port: int = ELEVATED_PORT, *, wait: float = 60.0) -> str:
     launcher = _write_launcher(ed, port)
 
     if _task_registered():
+        # The task may be a zombie: schtasks reports the instance "Running"
+        # while the daemon has actually idle-shut-down or died, leaving the
+        # port dead and the credential-relay child orphaned (holding 9857).
+        # `schtasks /run` refuses to start a second instance, so clear any
+        # stale instance first. `/end` terminates the task's whole process
+        # tree, which also reaps the orphaned relay so the restart can rebind.
+        if not is_up(port):
+            _end_task()
+            time.sleep(0.5)
         log.info(
             "Starting elevated sub-daemon headlessly via scheduled task "
             "(127.0.0.1:%d)", port,
