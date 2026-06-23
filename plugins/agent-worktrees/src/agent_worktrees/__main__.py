@@ -557,8 +557,20 @@ def _build_launch_cmd(
     cmd.extend(extra)
 
     # Append profile-specific Copilot args
-    if profile and profile.copilot_args:
-        cmd.extend(profile.copilot_args)
+    profile_args = profile.copilot_args if profile and profile.copilot_args else []
+    cmd.extend(profile_args)
+
+    # Auto-approve tools so worktree sessions run without per-tool
+    # confirmation prompts.  Skip ACP sessions (agent-bridge manages
+    # permissions over the protocol) and never duplicate an
+    # all-permissions flag the caller already supplied.
+    passthrough = list(extra) + list(profile_args)
+    if "--acp" not in passthrough and not any(
+        a == flag
+        for a in passthrough
+        for flag in ("--allow-all-tools", "--allow-all", "--yolo")
+    ):
+        cmd.append("--allow-all-tools")
 
     return cmd
 
@@ -685,7 +697,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                     record.worktree_path, record.sessions,
                 )
                 if last_session:
-                    launch_cmd.extend(["--resume", last_session])
+                    # copilot's --resume[=value] is an optional-value option;
+                    # the id MUST be attached with '=' or it is treated as a
+                    # stray operand ("unknown command").
+                    launch_cmd.append(f"--resume={last_session}")
 
             _json_output({
                 "worktree": _worktree_to_dict(record),
@@ -1801,14 +1816,17 @@ def _resolve_resume(
     merged_env = _build_env(profile)
 
     # Auto-resume: find the most recent Copilot session for this worktree
-    # and pass --resume <session-id> so the user picks up where they left off.
+    # and pass --resume=<session-id> so the user picks up where they left off.
     no_resume = getattr(args, "no_resume", False)
     if not no_resume:
         last_session = sessions.find_latest_session_id_fast(
             record.worktree_path, record.sessions,
         )
         if last_session:
-            launch_cmd.extend(["--resume", last_session])
+            # copilot's --resume[=value] is an optional-value option; the id
+            # MUST be attached with '=' or it is treated as a stray operand
+            # ("unknown command").
+            launch_cmd.append(f"--resume={last_session}")
             print(f"   Resuming session: {last_session[:12]}…")
 
     print()
@@ -4307,6 +4325,12 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
 
     sub = argv[0]
     rest = argv[1:]
+
+    # A subcommand-level help flag (e.g. `repos clone --help`) must show usage,
+    # never be consumed as a positional value (a remote, name, or path).
+    if "--help" in rest or "-h" in rest:
+        _repos_usage()
+        return 0
 
     if sub == "list":
         class_filter = None
