@@ -6,9 +6,13 @@ delegates name resolution to the parent ``AgentResolver``, then wraps
 the spawn command in the platform-appropriate elevation mechanism.
 
 Platform behavior:
-    Windows:  Wraps the spawn command with a scheduled-task technique
-              (runs as the current user with highest privileges) since
-              UAC cannot be used non-interactively from a service.
+    Windows:  Routes the session through the **elevated sub-daemon relay**
+              (a second, elevated agent-bridge bound to a loopback port).
+              The ``admin:`` prefix is purely a routing cue -- it selects the
+              same relay transport a bare ``requires_admin`` agent uses, with
+              no ``gsudo`` / ``Start-Process RunAs`` (those give the elevated
+              child no stdio pipe, so the ACP handshake closes) and no
+              CLI-side difference.
     Linux/WSL: Wraps the spawn command with ``sudo -A`` (requires
                SUDO_ASKPASS to be configured for non-interactive use).
 
@@ -23,6 +27,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
 import sys
@@ -46,29 +51,6 @@ def _detect_platform() -> str:
     except OSError:
         pass
     return "linux"
-
-
-def _wrap_elevated_windows(spawn_command: list[str]) -> list[str]:
-    """Wrap a command for elevated execution on Windows.
-
-    Uses ``gsudo`` if available (preferred -- allows non-interactive
-    elevation from services). Falls back to a PowerShell
-    Start-Process -Verb RunAs wrapper, though that approach is
-    interactive and may not work from headless services.
-    """
-    gsudo = shutil.which("gsudo")
-    if gsudo:
-        return [gsudo] + spawn_command
-
-    # Fallback: powershell Start-Process with -Verb RunAs
-    # This is interactive (UAC prompt) and won't work from services,
-    # but it's better than nothing for interactive use.
-    escaped_args = " ".join(f'"{a}"' for a in spawn_command[1:])
-    return [
-        "powershell", "-NoProfile", "-Command",
-        f'Start-Process -FilePath "{spawn_command[0]}" '
-        f'-ArgumentList {escaped_args} -Verb RunAs -Wait',
-    ]
 
 
 def _wrap_elevated_posix(spawn_command: list[str]) -> list[str]:
@@ -107,47 +89,44 @@ class AdminResolver:
         # elevated twin. See AgentResolver._gather_bare_candidates.
         return False
 
-    def _elevate_target(self, target: "SpawnTarget") -> "SpawnTarget":
-        """Wrap a SpawnTarget's spawn mechanism for elevated execution."""
+    def _elevate_target_posix(self, target: "SpawnTarget") -> "SpawnTarget":
+        """Wrap a SpawnTarget with ``sudo -A`` for Linux/WSL elevation.
+
+        Windows elevation does not go through here -- it routes through the
+        elevated sub-daemon relay (see :meth:`resolve`).
+        """
         from .transport import SpawnTarget as ST
 
-        if target.type == "ssh":
-            raise ValueError(
-                "Cannot elevate SSH agents -- elevation must be "
-                "configured on the remote side (e.g., via sudoers)"
-            )
-
-        # Build the effective command that would be spawned
+        # Build the effective command that would be spawned, then sudo-wrap it.
         if target.spawn_command:
             base_cmd = list(target.spawn_command)
         elif target.copilot_path:
             base_cmd = [target.copilot_path, "--acp", "--stdio"]
             base_cmd.extend(target.copilot_args or [])
         else:
-            # Default copilot path
             copilot = shutil.which("copilot") or "copilot"
             base_cmd = [copilot, "--acp", "--stdio"]
             base_cmd.extend(target.copilot_args or [])
 
-        if self._platform == "windows":
-            elevated_cmd = _wrap_elevated_windows(base_cmd)
-        else:
-            elevated_cmd = _wrap_elevated_posix(base_cmd)
-
         return ST(
             type="command",
-            spawn_command=elevated_cmd,
+            spawn_command=_wrap_elevated_posix(base_cmd),
             cwd=target.cwd,
             env=target.env,
             project=target.project,
         )
 
     async def resolve(self, name: str) -> "SpawnTarget":
-        """Resolve an agent name and wrap for elevated execution.
+        """Resolve an agent name and route it for elevated execution.
 
-        The inner name is resolved via the parent resolver (static
-        path only -- nested namespace resolution is not supported).
+        The inner name is resolved via the parent resolver (static path only
+        -- nested namespace resolution is not supported). On Windows the
+        session is relayed through the elevated sub-daemon (the ``admin:``
+        prefix is just the cue to elevate); on Linux/WSL it is ``sudo``-wrapped.
         """
+        from . import elevated
+        from .transport import SpawnTarget as ST
+
         try:
             target = self._parent._resolve_static(name)
         except KeyError:
@@ -156,11 +135,41 @@ class AdminResolver:
                 "(admin: resolves against static agents only)"
             )
 
+        if target.type == "ssh":
+            raise ValueError(
+                "Cannot elevate SSH agents -- elevation must be "
+                "configured on the remote side (e.g., via sudoers)"
+            )
+
+        # Windows: relay through the elevated sub-daemon -- identical transport
+        # to a bare requires_admin agent, no gsudo / RunAs, no CLI-side diff.
+        # The sub-daemon (itself elevated) resolves the bare name locally and
+        # runs the elevated agent-worktrees / copilot flow in the target repo.
+        if elevated.relay_applicable(True):
+            loop = asyncio.get_running_loop()
+            token = await loop.run_in_executor(None, elevated.ensure_running)
+            cmd = elevated.relay_spawn_command(name, token=token)
+            log.info(
+                "Routing admin:%s via elevated sub-daemon relay (port %d)",
+                name, elevated.ELEVATED_PORT,
+            )
+            return ST(
+                type="command", spawn_command=cmd, project=target.project,
+            )
+
+        # Windows but already elevated (e.g. this *is* the sub-daemon): spawn
+        # locally -- the child inherits elevation; relaying would recurse.
+        if self._platform == "windows":
+            log.info(
+                "admin:%s -- daemon already elevated, spawning locally", name,
+            )
+            return target
+
+        # Linux/WSL: no sub-daemon; elevate with sudo -A.
         log.info(
-            "Elevating agent '%s' for admin execution (platform=%s)",
-            name, self._platform,
+            "Elevating agent '%s' via sudo (platform=%s)", name, self._platform,
         )
-        return self._elevate_target(target)
+        return self._elevate_target_posix(target)
 
     async def list(self) -> list["NamespaceAgentInfo"]:
         """List static agents that opted into admin elevation.
@@ -214,14 +223,10 @@ class AdminResolver:
                 "projects.yaml) to expose an admin: twin"
             )
 
-        # Verify elevation tools
-        if self._platform == "windows":
-            if not shutil.which("gsudo"):
-                log.warning(
-                    "gsudo not found -- admin: elevation will use "
-                    "interactive UAC fallback (may not work from services)"
-                )
-        else:
+        # Verify elevation prerequisites. On Windows elevation routes through
+        # the elevated sub-daemon relay (started on demand by ensure_running),
+        # so no gsudo is required. On Linux/WSL it uses sudo -A.
+        if self._platform != "windows":
             import os
             if not os.environ.get("SUDO_ASKPASS"):
                 log.warning(

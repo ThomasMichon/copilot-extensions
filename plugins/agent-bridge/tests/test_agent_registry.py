@@ -823,15 +823,37 @@ class TestAdminResolver:
         assert admin.prefix == "admin"
 
     @pytest.mark.asyncio
-    async def test_resolve_local_agent(self):
+    async def test_resolve_local_agent(self, monkeypatch):
+        from agent_bridge import elevated
         from agent_bridge.admin_resolver import AdminResolver
+
+        # Windows path: admin: routes through the elevated sub-daemon relay.
+        monkeypatch.setattr(elevated, "relay_applicable", lambda req: True)
+        monkeypatch.setattr(elevated, "ensure_running", lambda: "subtok")
 
         resolver = self._make_resolver_with_agents()
         admin = AdminResolver(resolver)
         target = await admin.resolve("local-agent")
         assert target.type == "command"
-        assert target.spawn_command is not None
-        assert len(target.spawn_command) > 0
+        assert target.project == "my-project"
+        assert target.spawn_command[-4:] == [
+            "ws://127.0.0.1:9281/acp/local-agent",
+            "--token", "subtok", "--stdio",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_resolve_posix_uses_sudo(self, monkeypatch):
+        from agent_bridge import elevated
+        from agent_bridge.admin_resolver import AdminResolver
+
+        # Off Windows there is no sub-daemon; admin: falls back to sudo -A.
+        monkeypatch.setattr(elevated, "relay_applicable", lambda req: False)
+        resolver = self._make_resolver_with_agents()
+        admin = AdminResolver(resolver)
+        admin._platform = "linux"
+        target = await admin.resolve("local-agent")
+        assert target.type == "command"
+        assert target.spawn_command[:2] == ["sudo", "-A"]
 
     @pytest.mark.asyncio
     async def test_resolve_ssh_agent_raises(self):
@@ -912,9 +934,13 @@ class TestAdminResolver:
         await admin.ensure_ready("local-agent")
 
     @pytest.mark.asyncio
-    async def test_integration_via_resolver(self):
+    async def test_integration_via_resolver(self, monkeypatch):
         """Test admin: dispatch through the full AgentResolver path."""
+        from agent_bridge import elevated
         from agent_bridge.admin_resolver import AdminResolver
+
+        monkeypatch.setattr(elevated, "relay_applicable", lambda req: True)
+        monkeypatch.setattr(elevated, "ensure_running", lambda: "subtok")
 
         resolver = self._make_resolver_with_agents()
         admin = AdminResolver(resolver)
@@ -922,7 +948,10 @@ class TestAdminResolver:
 
         target = await resolver.resolve_async("admin:local-agent")
         assert target.type == "command"
-        assert target.spawn_command is not None
+        assert target.spawn_command[-4:] == [
+            "ws://127.0.0.1:9281/acp/local-agent",
+            "--token", "subtok", "--stdio",
+        ]
 
 
 class TestElevatedRelayRouting:

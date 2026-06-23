@@ -217,9 +217,15 @@ async def test_admin_prefix_rejects_non_opted_in_agent():
 
 
 @pytest.mark.asyncio
-async def test_admin_prefix_still_elevates_explicitly():
-    # admin: stays opt-in -- the explicit prefix resolves & elevates an
-    # opted-in agent.
+async def test_admin_prefix_still_elevates_explicitly(monkeypatch):
+    # admin: stays opt-in -- the explicit prefix resolves an opted-in agent and
+    # routes it through the elevated sub-daemon relay (no gsudo / RunAs, no
+    # CLI-side difference from a bare elevated agent).
+    from agent_bridge import elevated
+
+    monkeypatch.setattr(elevated, "relay_applicable", lambda req: True)
+    monkeypatch.setattr(elevated, "ensure_running", lambda: "subtok")
+
     r = AgentResolver(
         {
             "spo": AgentConfig(
@@ -230,10 +236,10 @@ async def test_admin_prefix_still_elevates_explicitly():
     )
     r.register_namespace_resolver(AdminResolver(r))
     target = await r.resolve_async("admin:spo")
-    # Elevation wraps the spawn command (gsudo / sudo / RunAs depending on host).
-    assert target.spawn_command[-1:] == ["copilot"] or "copilot" in str(
-        target.spawn_command
-    )
+    assert target.type == "command"
+    assert target.spawn_command[-4:] == [
+        "ws://127.0.0.1:9281/acp/spo", "--token", "subtok", "--stdio",
+    ]
 
 
 def test_admin_resolver_is_not_bare_addressable():
