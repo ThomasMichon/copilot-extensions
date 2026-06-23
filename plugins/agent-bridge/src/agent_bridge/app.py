@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
 
     db_path = Path(cfg.db_path).expanduser()
     db = Database(db_path)
+    db.start_writer()
     app.state.db = db
 
     mgr = SessionManager(
@@ -190,6 +191,12 @@ async def lifespan(app: FastAPI):
 
     # Shutdown: disconnect SSH master connections (after sessions are stopped)
     await shutdown_ssh()
+
+    # Shutdown: persist every queued event before the process exits.
+    try:
+        await asyncio.to_thread(db.close)
+    except Exception:
+        log.warning("Failed to stop event writer cleanly", exc_info=True)
 
 
 def create_app(*, config=None, token: str | None = None) -> FastAPI:

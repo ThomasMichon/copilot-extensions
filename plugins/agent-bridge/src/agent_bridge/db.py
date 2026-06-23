@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
 SCHEMA_VERSION = 5
+_EVENT_BATCH_MAX = 256
+_EVENT_BATCH_WINDOW_SECS = 0.05
+_EVENT_WRITE_SENTINEL = object()
+_EventWriteItem = tuple[str, int, str, str, float]
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -84,6 +90,10 @@ class Database:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._write_lock = threading.Lock()
         self._local = threading.local()
+        self._event_write_q: queue.Queue[_EventWriteItem | object] = queue.Queue()
+        self._writer_state_lock = threading.Lock()
+        self._writer_thread: threading.Thread | None = None
+        self._writer_error: BaseException | None = None
         self._init_schema()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -100,6 +110,136 @@ class Database:
             conn.execute("PRAGMA foreign_keys=ON")
             self._local.conn = conn
         return self._local.conn
+
+    def start_writer(self) -> None:
+        """Start the background event writer thread if it is not already running."""
+        with self._writer_state_lock:
+            if self._writer_thread is not None and self._writer_thread.is_alive():
+                return
+            self._writer_error = None
+            self._writer_thread = threading.Thread(
+                target=self._event_writer_loop,
+                name="agent-bridge-event-writer",
+                daemon=True,
+            )
+            self._writer_thread.start()
+
+    def stop_writer(self) -> None:
+        """Flush queued events and stop the background event writer thread."""
+        thread = self._writer_thread
+        if thread is None or not thread.is_alive():
+            if self._event_write_q.unfinished_tasks:
+                self.flush()
+            self._raise_writer_error()
+            return
+
+        self._event_write_q.put(_EVENT_WRITE_SENTINEL)
+        self._event_write_q.join()
+        thread.join(timeout=5.0)
+        if thread.is_alive():
+            raise RuntimeError("event writer thread did not stop")
+        self._raise_writer_error()
+
+    def flush(self) -> None:
+        """Block until every previously queued event has been committed."""
+        if threading.current_thread() is self._writer_thread:
+            return
+        self.start_writer()
+        self._event_write_q.join()
+        self._raise_writer_error()
+
+    def close(self) -> None:
+        """Flush pending event writes, stop the writer, and close this thread's connection."""
+        self.stop_writer()
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            conn.close()
+            self._local.conn = None
+
+    def _raise_writer_error(self) -> None:
+        if self._writer_error is not None:
+            raise RuntimeError("event writer failed") from self._writer_error
+
+    def _record_writer_error(self, exc: BaseException) -> None:
+        with self._writer_state_lock:
+            self._writer_error = exc
+
+    def _event_writer_loop(self) -> None:
+        """Persist queued event writes in batches on a dedicated SQLite connection."""
+        try:
+            while True:
+                item = self._event_write_q.get()
+                if item is _EVENT_WRITE_SENTINEL:
+                    self._event_write_q.task_done()
+                    self._drain_event_queue_for_stop()
+                    return
+
+                batch = [item]
+                deadline = time.monotonic() + _EVENT_BATCH_WINDOW_SECS
+                while len(batch) < _EVENT_BATCH_MAX:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    try:
+                        item = self._event_write_q.get(timeout=remaining)
+                    except queue.Empty:
+                        break
+                    if item is _EVENT_WRITE_SENTINEL:
+                        self._commit_event_batch(batch)
+                        self._event_write_q.task_done()
+                        self._drain_event_queue_for_stop()
+                        return
+                    batch.append(item)
+
+                self._commit_event_batch(batch)
+        finally:
+            conn = getattr(self._local, "conn", None)
+            if conn is not None:
+                conn.close()
+                self._local.conn = None
+
+    def _drain_event_queue_for_stop(self) -> None:
+        batch: list[_EventWriteItem | object] = []
+        while True:
+            try:
+                item = self._event_write_q.get_nowait()
+            except queue.Empty:
+                break
+            if item is _EVENT_WRITE_SENTINEL:
+                self._event_write_q.task_done()
+                continue
+            batch.append(item)
+            if len(batch) >= _EVENT_BATCH_MAX:
+                self._commit_event_batch(batch)
+                batch = []
+        self._commit_event_batch(batch)
+
+    def _commit_event_batch(self, batch: list[_EventWriteItem | object]) -> None:
+        if not batch:
+            return
+        try:
+            self._write_event_batch(batch)
+        except Exception as exc:
+            self._record_writer_error(exc)
+            log.exception("Failed to persist %d queued event(s)", len(batch))
+        finally:
+            for _ in batch:
+                self._event_write_q.task_done()
+
+    def _write_event_batch(self, batch: list[_EventWriteItem | object]) -> None:
+        conn = self._get_conn()
+        with self._write_lock:
+            try:
+                conn.executemany(
+                    "INSERT INTO events "
+                    "(session_id, event_id, event_type, data_json, timestamp) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    batch,
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     def _init_schema(self) -> None:
         """Create tables if they don't exist, run migrations."""
@@ -311,6 +451,7 @@ class Database:
         return [dict(r) for r in rows]
 
     def delete_session(self, session_id: str) -> None:
+        self.flush()
         with self._write_lock:
             conn = self._get_conn()
             # Clear every child table that has a FK to sessions BEFORE the
@@ -332,6 +473,7 @@ class Database:
         Used by the resync flow, which rebuilds the event log from the
         agent's authoritative load-time replay.
         """
+        self.flush()
         with self._write_lock:
             conn = self._get_conn()
             conn.execute("DELETE FROM events WHERE session_id=?", (session_id,))
@@ -409,15 +551,15 @@ class Database:
         data: dict[str, Any],
         timestamp: float,
     ) -> None:
-        self.execute_write(
-            "INSERT INTO events (session_id, event_id, event_type, data_json, timestamp) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (session_id, event_id, event_type, json.dumps(data), timestamp),
-        )
+        self.start_writer()
+        self._event_write_q.put((
+            session_id, event_id, event_type, json.dumps(data), timestamp,
+        ))
 
     def get_events(
         self, session_id: str, after: int = 0
     ) -> list[dict[str, Any]]:
+        self.flush()
         rows = self.execute_read(
             "SELECT * FROM events WHERE session_id=? AND event_id>? ORDER BY event_id",
             (session_id, after),
@@ -430,6 +572,7 @@ class Database:
         return result
 
     def get_max_event_id(self, session_id: str) -> int:
+        self.flush()
         rows = self.execute_read(
             "SELECT MAX(event_id) as max_id FROM events WHERE session_id=?",
             (session_id,),
@@ -445,6 +588,7 @@ class Database:
         Used for random-access historical reads. Does not touch any
         delivery cursor. ``end_id=None`` means "to the latest event".
         """
+        self.flush()
         if end_id is None:
             rows = self.execute_read(
                 "SELECT * FROM events WHERE session_id=? AND event_id>=? "
@@ -546,6 +690,7 @@ class Database:
         nearly-full disk. VACUUM cannot run inside an open transaction, so we
         commit any pending one first.
         """
+        self.flush()
         conn = self._get_conn()
         with self._write_lock:
             if conn.in_transaction:
