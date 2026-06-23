@@ -172,6 +172,35 @@ def test_help_unrouted_unadopted_git_repo(monkeypatch, capsys, tmp_path: Path):
     assert "register orphan" in err
 
 
+# ── repos namespace ───────────────────────────────────────────────────
+
+
+def test_repos_subcommand_help_does_not_consume_value(monkeypatch, capsys):
+    """`repos clone --help` must show usage, not clone a repo named '--help'."""
+    from agent_worktrees import repos
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("clone_repo must not run for `repos clone --help`")
+
+    monkeypatch.setattr(repos, "clone_repo", _boom)
+    rc = m.cmd_repos_dispatch(["clone", "--help"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "clone <remote>" in out
+
+
+def test_repos_short_help_flag_shows_usage(monkeypatch, capsys):
+    from agent_worktrees import repos
+
+    monkeypatch.setattr(
+        repos, "add_repo",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("add_repo must not run")),
+    )
+    rc = m.cmd_repos_dispatch(["add", "-h"])
+    assert rc == 0
+    assert "Repo classes:" in capsys.readouterr().out
+
+
 # ── worktree namespace ────────────────────────────────────────────────
 
 
