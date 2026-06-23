@@ -92,6 +92,11 @@ class Database:
             conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=WAL")
+            # NORMAL (vs the default FULL) skips the per-commit fsync of the WAL,
+            # syncing only at checkpoints. Safe under WAL -- a power loss can lose
+            # the last few commits but never corrupts the db. ~3x faster event
+            # ingestion, which runs on the loop draining the ACP/SSH pipe (#99).
+            conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA foreign_keys=ON")
             self._local.conn = conn
         return self._local.conn
