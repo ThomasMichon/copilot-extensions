@@ -1167,11 +1167,10 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
         print(f"[WARN] Session recovery for {args.name} failed: "
               f"{res.get('detail')}", file=sys.stderr)
         if args.delete and not args.force:
-            print("Refusing to delete after a failed recovery. Diagnose the "
-                  "error above first (often a still-booting CodeSpace or an "
-                  "SSH/relay issue). Only re-run with --force once you've "
-                  "confirmed the cause and that losing unrecovered sessions is "
-                  "acceptable.", file=sys.stderr)
+            print("Refusing to delete after a failed recovery. Diagnose and "
+                  "resolve the error above (often a still-booting CodeSpace or "
+                  "an SSH/relay issue), then re-run finalize so the sessions "
+                  "are captured.", file=sys.stderr)
             return 1
 
     if args.delete:
