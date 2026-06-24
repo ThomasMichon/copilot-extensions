@@ -107,3 +107,78 @@ def make_session_dir(
         }))
 
     return sdir
+
+
+# ---------------------------------------------------------------------------
+# PR-mode repo fixture (shared by test_pr_ops + test_providers)
+# ---------------------------------------------------------------------------
+
+from agent_worktrees import config as cfg  # noqa: E402
+from agent_worktrees import git_ops  # noqa: E402
+
+
+def _pr_git(*args: str, cwd) -> str:
+    return git_ops.git(*args, cwd=str(cwd)).stdout.strip()
+
+
+@pytest.fixture
+def pr_repo(tmp_path: Path, monkeypatch):
+    """A bare 'remote' + anchor + a worktree branch with two commits.
+
+    Returns (config, worktree_id, worktree_path, remote_dir).  Patches
+    tracking_dir so records land in a tmp directory.  PR mode is enabled with
+    ``auto_open=False`` so create_pr exercises only the git side unless a test
+    opts in.
+    """
+    remote_dir = tmp_path / "remote.git"
+    anchor = tmp_path / "anchor"
+    wt_root = tmp_path / "worktrees"
+    tracking_d = tmp_path / "tracking"
+    tracking_d.mkdir()
+
+    git_ops.git("init", "--bare", "-b", "master", str(remote_dir))
+
+    git_ops.git("init", "-b", "master", str(anchor))
+    _pr_git("config", "user.email", "t@example.com", cwd=anchor)
+    _pr_git("config", "user.name", "Test", cwd=anchor)
+    (anchor / "README.md").write_text("base\n")
+    _pr_git("add", "-A", cwd=anchor)
+    _pr_git("commit", "-m", "initial", cwd=anchor)
+    _pr_git("remote", "add", "origin", str(remote_dir), cwd=anchor)
+    _pr_git("push", "-u", "origin", "master", cwd=anchor)
+
+    worktree_id = "test-wt-20260618-aaaa"
+    wt_path = wt_root / worktree_id
+    wt_root.mkdir(parents=True, exist_ok=True)
+    git_ops.git(
+        "worktree", "add", str(wt_path), "-b", f"worktree/{worktree_id}",
+        "origin/master", cwd=str(anchor),
+    )
+    _pr_git("config", "user.email", "t@example.com", cwd=wt_path)
+    _pr_git("config", "user.name", "Test", cwd=wt_path)
+    (wt_path / "a.txt").write_text("one\n")
+    _pr_git("add", "-A", cwd=wt_path)
+    _pr_git("commit", "-m", "work 1", cwd=wt_path)
+    (wt_path / "b.txt").write_text("two\n")
+    _pr_git("add", "-A", cwd=wt_path)
+    _pr_git("commit", "-m", "work 2", cwd=wt_path)
+
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="test", platform="linux",
+        repo_name="ext",
+        repos={"ext": cfg.RepoConfig(
+            anchor=str(anchor), worktree_root=str(wt_root),
+            default_branch="master", remote="origin",
+            pr=cfg.PRConfig(enabled=True, provider="gitea", branch_prefix="feature",
+                            auto_open=False),
+        )},
+    )
+
+    monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: tracking_d)
+
+    tracking.create_new_record(
+        worktree_id, f"worktree/{worktree_id}", str(wt_path),
+        "ext", "test", "linux", tracking_d,
+    )
+
+    return config, worktree_id, wt_path, remote_dir

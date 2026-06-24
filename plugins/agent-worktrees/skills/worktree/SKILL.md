@@ -311,10 +311,23 @@ already **merged or closed**, `create-pr` automatically opens a *fresh* PR
 branch -- so landing a second change from the same worktree just works. See
 *Multiple PRs per worktree* below.
 
+**Auto-open (provider plugins).** When the repo config sets `pr.provider` with
+credentials (`pr.api_base`, `pr.token_command`/`pr.token_env`) and
+`pr.auto_open` is on, `create-pr` **opens the PR itself** right after the push
+-- via the provider CLI (`curl` for Gitea, `gh` for GitHub, `az` for Azure
+DevOps) -- embeds a hidden source-worktree attribution marker in the body, and
+**auto-records** the url/number on the worktree (no manual `set-pr`). Useful
+flags: `--no-open` (push only), `--no-attribution` (omit the marker),
+`--body`/`--body-file`, `--repo owner/name`. If the provider call fails the
+branch is still pushed, and the result carries `pr_open_error` so you can fall
+back to Steps 2-3 below. A repo **without** provider credentials configured
+uses the manual flow unchanged.
+
 ### Step 2: Delegate PR creation to the provider sub-agent
 
-The CLI does **not** call any provider API -- you do, via the matching
-sub-agent. Read the provider and route accordingly:
+*(Manual fallback -- used when `pr.auto_open` is off or no provider creds are
+configured.)* The CLI does **not** call any provider API -- you do, via the
+matching sub-agent. Read the provider and route accordingly:
 
 | Provider | How to create the PR |
 |----------|----------------------|

@@ -91,6 +91,18 @@ class PRConfig:
     provider: str = "gitea"        # gitea | github | azure-devops
     strategy: str = "detach"       # default disposition: keep-alive | detach
     branch_prefix: str = "feature"
+    # Provider-plugin settings (PR creation via a provider CLI). ``api_base``
+    # is the hosting endpoint -- required for self-hosted Gitea
+    # (e.g. https://host/gitea) and Azure DevOps org URLs; GitHub defaults to
+    # the public API. ``token_command`` (a shell command that prints a token,
+    # e.g. a vault fetch) takes precedence over ``token_env`` (an env var
+    # name); GitHub falls back to ``gh`` auth when neither is set. ``labels``
+    # are applied to every opened PR (``{machine}`` is templated).
+    api_base: str = ""
+    token_env: str = ""
+    token_command: str = ""
+    labels: tuple[str, ...] = ()
+    auto_open: bool = True         # open the PR via the provider after push
 
 
 @dataclass(frozen=True)
@@ -655,12 +667,25 @@ def _parse_pr(raw: Any) -> PRConfig:
     # ``required`` implies ``enabled``: enforcing PRs only makes sense when
     # PR mode is on, so a lone ``required: true`` turns the mode on too.
     enabled = bool(raw.get("enabled", False)) or required
+    raw_labels = raw.get("labels", ())
+    labels: tuple[str, ...]
+    if isinstance(raw_labels, (list, tuple)):
+        labels = tuple(str(x) for x in raw_labels)
+    elif raw_labels:
+        labels = (str(raw_labels),)
+    else:
+        labels = ()
     return PRConfig(
         enabled=enabled,
         required=required,
         provider=str(raw.get("provider", "gitea")),
         strategy=str(raw.get("strategy", "detach")),
         branch_prefix=str(raw.get("branch_prefix", "feature")),
+        api_base=str(raw.get("api_base", "")),
+        token_env=str(raw.get("token_env", "")),
+        token_command=str(raw.get("token_command", "")),
+        labels=labels,
+        auto_open=bool(raw.get("auto_open", True)),
     )
 
 
