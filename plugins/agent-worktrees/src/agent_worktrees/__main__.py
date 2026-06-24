@@ -2294,12 +2294,24 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             return 1
         worktree_id = _resolve_worktree_id(worktree_id)
 
+        body = getattr(args, "body", None)
+        body_file = getattr(args, "body_file", None)
+        if body_file:
+            try:
+                body = Path(body_file).read_text(encoding="utf-8")
+            except OSError as e:
+                msg = f"Could not read --body-file '{body_file}': {e}"
+                return _json_error(msg) if use_json else (output.err(msg) or 1)
+
         result = pr_ops.create_pr(
             worktree_id, config,
             title=args.title,
             branch=args.branch,
             target_repo=getattr(args, "repo", None),
             new=getattr(args, "new", False),
+            body=body,
+            open_pr=(False if getattr(args, "no_open", False) else None),
+            attribution=(not getattr(args, "no_attribution", False)),
             dry_run=args.dry_run,
         )
 
@@ -2314,11 +2326,26 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 f"  base: {result.get('base_sha', '')[:10]}  "
                 f"head: {result.get('head_sha', '')[:10]}"
             )
-            print(
-                f"Next: delegate PR creation to the '{provider}' provider, "
-                f"then record it with:\n"
-                f"  agent-worktrees set-pr {worktree_id} --url <URL> --number <N>"
-            )
+            if result.get("pr_opened"):
+                output.ok(
+                    f"Opened PR #{result.get('number')} via '{provider}': "
+                    f"{result.get('url')}"
+                )
+            elif result.get("pr_open_error"):
+                output.warn(
+                    f"Branch pushed, but auto-open failed: "
+                    f"{result.get('pr_open_error')}"
+                )
+                print(
+                    f"Open the PR via the '{provider}' provider, then record it:\n"
+                    f"  agent-worktrees set-pr {worktree_id} --url <URL> --number <N>"
+                )
+            else:
+                print(
+                    f"Next: delegate PR creation to the '{provider}' provider, "
+                    f"then record it with:\n"
+                    f"  agent-worktrees set-pr {worktree_id} --url <URL> --number <N>"
+                )
         else:
             output.err(result.get("error", "create-pr failed."))
 
@@ -4995,6 +5022,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Target repo 'owner/name' for the PR (default: the worktree repo)")
     p.add_argument("--new", action="store_true",
                    help="Force a brand-new PR (fresh branch) even if a live PR is open")
+    p.add_argument("--body", default=None,
+                   help="PR body text (a source-attribution marker is appended)")
+    p.add_argument("--body-file", default=None, dest="body_file",
+                   help="Read the PR body from a file")
+    p.add_argument("--no-open", action="store_true", dest="no_open",
+                   help="Push the branch only; do not auto-open the PR via the provider")
+    p.add_argument("--no-attribution", action="store_true", dest="no_attribution",
+                   help="Do not embed the source-worktree attribution marker in the PR body")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")

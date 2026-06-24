@@ -69,13 +69,23 @@ def create_pr(
     branch: str | None = None,
     target_repo: str | None = None,
     new: bool = False,
+    body: str | None = None,
+    open_pr: bool | None = None,
+    attribution: bool = True,
     dry_run: bool = False,
 ) -> dict:
     """Squash worktree commits, create + push a feature branch for a PR.
 
     Returns a JSON-friendly result dict.  On success it includes ``branch``,
-    ``remote``, ``base_sha``, ``head_sha``, ``provider`` and ``default_branch``
-    so the agent can delegate PR creation to the right provider sub-agent.
+    ``remote``, ``base_sha``, ``head_sha``, ``provider`` and ``default_branch``.
+
+    When a provider is configured and ``pr.auto_open`` is on (and ``open_pr``
+    is not False), the matching provider plugin **opens the PR** right after
+    the push -- embedding a hidden source-worktree attribution marker in the
+    body and **auto-recording** the resulting url/number on the worktree (no
+    skippable manual ``set-pr``).  Provider failure is non-fatal: the feature
+    branch is already pushed, so the result carries ``pr_open_error`` and the
+    agent can fall back to delegating PR creation manually.
 
     A worktree can track multiple PRs.  When the active PR is **terminal**
     (merged/closed) -- or ``new`` is set, or none exists -- a *fresh* PR is
@@ -274,7 +284,7 @@ def create_pr(
 
     git_ops.delete_backup_ref(cwd=worktree_path)
 
-    return {
+    result = {
         **base, "success": True, "state": "open",
         "branch": feature_branch, "remote": remote,
         "base_sha": base_sha, "head_sha": head_sha,
@@ -282,6 +292,74 @@ def create_pr(
         "repo": (target_pr.repo if target_pr else default_pr_repo),
         "pr_count": len(record.prs) if record else 0,
     }
+
+    # 8. Auto-open the PR via the configured provider plugin (Phase 2/3):
+    #    open the PR, embed the source-worktree attribution marker, and
+    #    auto-record the url/number on the worktree. Non-fatal on failure --
+    #    the branch is already pushed, so the agent can fall back to a manual
+    #    provider sub-agent + set-pr.
+    want_open = prcfg.auto_open if open_pr is None else open_pr
+    if want_open and target_pr is not None:
+        _open_via_provider(
+            result, config, record, target_pr, eff_title, body, worktree_id,
+            head_sha, attribution=attribution,
+        )
+
+    return result
+
+
+def _open_via_provider(
+    result: dict,
+    config: Config,
+    record: tracking.WorktreeRecord | None,
+    target_pr: PRRecord,
+    title: str,
+    body: str | None,
+    worktree_id: str,
+    head_sha: str,
+    *,
+    attribution: bool = True,
+) -> None:
+    """Open the PR through the provider plugin and auto-record it (best-effort)."""
+    from . import providers
+    from .providers import attribution as attr
+
+    prcfg = config.default_repo.pr
+    machine = record.machine if record else ""
+    session = ""
+    if record and record.sessions:
+        live = [s for s in record.sessions if not s.ended_at]
+        session = (live[-1] if live else record.sessions[-1]).session_id
+
+    if attribution:
+        marker = attr.build_marker(
+            worktree_id, machine=machine, session=session, head=head_sha,
+        )
+        full_body = attr.append_marker(body or "", marker)
+    else:
+        full_body = body or ""
+    scope = providers.scope_from_create_result(
+        result, title=title, body=full_body, prcfg=prcfg, machine=machine,
+    )
+    try:
+        provider = providers.get_provider(prcfg.provider)
+        token = providers.resolve_token(prcfg)
+        pull = provider.create_pull(scope, token=token)
+    except providers.ProviderError as e:
+        result["pr_open_error"] = str(e)
+        result["pr_opened"] = False
+        return
+
+    target_pr.url = pull.url
+    target_pr.number = pull.number
+    if pull.state:
+        target_pr.state = pull.state
+    if record is not None:
+        tracking.save_record(record)
+    result["pr_opened"] = True
+    result["url"] = pull.url
+    result["number"] = pull.number
+    result["state"] = pull.state or result.get("state")
 
 
 def _load_record_or_none(worktree_id: str) -> tracking.WorktreeRecord | None:
