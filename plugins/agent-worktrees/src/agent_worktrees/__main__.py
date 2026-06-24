@@ -1566,7 +1566,10 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
         if sel is None:
             continue
         sel_live = _normalize_path(sel.worktree_path) in active_paths
-        warn = "  ⚠ has a LIVE session -- removing may disrupt a running daemon" if sel_live else ""
+        warn = (
+            "  ⚠ has a LIVE session -- removing may disrupt a running daemon"
+            if sel_live else ""
+        )
         confirm = pick(
             [
                 MenuItem(label=f"🗑 Force-remove {sel.worktree_id}", kind=ItemKind.ACTION,
@@ -3092,8 +3095,9 @@ def cmd_install(args: argparse.Namespace) -> int:
     for d in [proj_dir, proj_dir / "worktrees"]:
         d.mkdir(parents=True, exist_ok=True)
 
-    # Deploy config (per-project)
+    # Deploy global machine-wide config (lowest tier), then per-project config
     config_path = proj_dir / "config.yaml"
+    _write_global_config(machine, plat, repo_dir.parent, force=args.force)
     if not config_path.exists() or args.force:
         _write_config(config_path, repo_dir, machine, plat, project)
     else:
@@ -3313,8 +3317,9 @@ def cmd_register(args: argparse.Namespace) -> int:
     proj_dir.mkdir(parents=True, exist_ok=True)
     (proj_dir / "worktrees").mkdir(exist_ok=True)
 
-    # Write config
+    # Write global machine-wide config (lowest tier), then per-project config
     config_path = proj_dir / "config.yaml"
+    _write_global_config(machine, plat, repo_dir.parent, force=args.force)
     if not config_path.exists() or args.force:
         _write_config(
             config_path, repo_dir, machine, plat, project, default_branch,
@@ -4800,22 +4805,63 @@ def _find_repo_dir() -> Path | None:
     return None
 
 
+def _write_global_config(
+    machine: str, plat: str, srcroot: Path | str, *, force: bool = False,
+) -> None:
+    """Write the global machine-wide config (~/.agent-worktrees/config.yaml).
+
+    Carries machine-wide defaults (srcroot/machine/platform) shared by every
+    project on this machine -- the lowest config tier. Copilot backend profiles
+    are user-authored (left as a commented placeholder). Idempotent: skips an
+    existing file unless ``force`` so it never clobbers user-added profiles.
+    """
+    path = cfg.global_config_path()
+    if path.exists() and not force:
+        output.skipped(f"Global config exists at {path}")
+        return
+    content = f"""# ~/.agent-worktrees/config.yaml
+# GLOBAL machine-wide agent-worktrees config (lowest precedence tier).
+#
+# Machine-wide defaults shared across every project on this machine. Per-repo
+# settings layer on top: <anchor>/.agent-worktrees/config.yaml (the repo's own
+# config) then ~/.<project>/config.yaml (machine-local override).
+
+srcroot: {srcroot}
+machine: {machine}
+platform: {plat}
+
+# Copilot backend profiles -- machine-wide (Tab to cycle in the picker).
+# User-authored; uncomment and edit. Example:
+# copilot_profiles:
+#   - name: cloud
+#     label: "Cloud (GitHub)"
+"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    output.changed(f"Written global config: {path}")
+
+
 def _write_config(
     path: Path, repo_dir: Path, machine: str, plat: str,
     project: str, default_branch: str = "master", *, headless: bool = False,
 ) -> None:
-    """Write the project config YAML."""
-    src_root = repo_dir.parent
+    """Write the machine-local per-project config YAML.
+
+    Machine-wide fields (srcroot/machine/platform/copilot_profiles) live in the
+    global ~/.agent-worktrees/config.yaml; repo settings may live in-repo at
+    <anchor>/.agent-worktrees/config.yaml. This file keeps only the project
+    marker and machine paths (anchor / worktree_root) plus repo defaults that a
+    foreign repo without in-repo config still needs.
+    """
     wt_root = f"{repo_dir}.worktrees"
 
     headless_line = "headless: true\n" if headless else ""
     content = f"""# ~/.{project}/config.yaml
-# Machine-local configuration for worktree session management.
+# Machine-local config for {project} (overrides + machine paths only).
+# Machine-wide defaults -> ~/.agent-worktrees/config.yaml.
+# Repo settings may live in-repo -> <anchor>/.agent-worktrees/config.yaml.
 
 repo_name: {project}
-srcroot: {src_root}
-machine: {machine}
-platform: {plat}
 {headless_line}
 repos:
   {project}:

@@ -793,6 +793,33 @@ function Deploy-Config {
     <# Write config.yaml to the project dir if missing (or Force). Returns $true if written. #>
     param([string]$Machine)
 
+    # Global machine-wide config first (lowest tier).
+    $globalPath = Join-Path $InstallDir 'config.yaml'
+    if ((-not (Test-Path $globalPath)) -or $Force) {
+        $srcRootG = if ($RepoDir) { Split-Path -Parent $RepoDir } else { '' }
+        @"
+# ~/.agent-worktrees/config.yaml
+# GLOBAL machine-wide agent-worktrees config (lowest precedence tier).
+#
+# Machine-wide defaults shared across every project on this machine. Per-repo
+# settings layer on top: <anchor>/.agent-worktrees/config.yaml (the repo's own
+# config) then ~/.<project>/config.yaml (machine-local override).
+
+srcroot: $srcRootG
+machine: $Machine
+platform: windows
+
+# Copilot backend profiles -- machine-wide (Tab to cycle in the picker).
+# User-authored; uncomment and edit. Example:
+# copilot_profiles:
+#   - name: cloud
+#     label: "Cloud (GitHub)"
+"@ | Set-Content -Path $globalPath
+        Write-ServiceChanged "Written global config: $globalPath"
+    } else {
+        Write-ServiceSkipped "Global config exists at $globalPath"
+    }
+
     $configPath = Join-Path $ProjectDir 'config.yaml'
     if ((Test-Path $configPath) -and -not $Force) {
         Write-ServiceSkipped "Config exists at $configPath (use -Force to overwrite)"
@@ -804,16 +831,14 @@ function Deploy-Config {
         return $false
     }
 
-    $srcRoot = Split-Path -Parent $RepoDir
     $worktreeRoot = "$RepoDir.worktrees"
 
     @"
 # ~/.$ProjectName/config.yaml
-# Machine-local configuration for $ProjectName worktree management.
+# Machine-local config for $ProjectName (overrides + machine paths only).
+# Machine-wide defaults -> ~/.agent-worktrees/config.yaml.
+# Repo settings may live in-repo -> <anchor>/.agent-worktrees/config.yaml.
 
-srcroot: $srcRoot
-machine: $Machine
-platform: windows
 repo_name: $ProjectName
 
 repos:

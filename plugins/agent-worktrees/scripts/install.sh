@@ -469,10 +469,50 @@ BINSTUB_BODY
     done
 }
 
+deploy_global_config() {
+    # Write the global machine-wide config (~/.agent-worktrees/config.yaml),
+    # the lowest config tier. Idempotent: never clobbers an existing file (which
+    # may carry user-authored copilot_profiles) unless --force.
+    local machine="$1"
+    local platform="$2"
+    local global_path="$INSTALL_DIR/config.yaml"
+
+    if [[ -f "$global_path" ]] && ! $FORCE; then
+        skipped "Global config exists at $global_path"
+        return 0
+    fi
+    local src_root=""
+    [[ -n "$REPO_DIR" ]] && src_root="$(dirname "$REPO_DIR")"
+
+    cat > "$global_path" <<EOF
+# ~/.agent-worktrees/config.yaml
+# GLOBAL machine-wide agent-worktrees config (lowest precedence tier).
+#
+# Machine-wide defaults shared across every project on this machine. Per-repo
+# settings layer on top: <anchor>/.agent-worktrees/config.yaml (the repo's own
+# config) then ~/.<project>/config.yaml (machine-local override).
+
+srcroot: $src_root
+machine: $machine
+platform: $platform
+
+# Copilot backend profiles -- machine-wide (Tab to cycle in the picker).
+# User-authored; uncomment and edit. Example:
+# copilot_profiles:
+#   - name: cloud
+#     label: "Cloud (GitHub)"
+EOF
+    changed "Written global config: $global_path"
+    return 0
+}
+
 deploy_config() {
     local machine="$1"
     local platform="$2"
     local config_path="$PROJECT_DIR/config.yaml"
+
+    # Global machine-wide config first (lowest tier).
+    deploy_global_config "$machine" "$platform"
 
     if [[ -f "$config_path" ]] && ! $FORCE; then
         skipped "Config exists at $config_path (use --force to overwrite)"
@@ -484,17 +524,14 @@ deploy_config() {
         return 1
     fi
 
-    local src_root
-    src_root="$(dirname "$REPO_DIR")"
     local worktree_root="$REPO_DIR.worktrees"
 
     cat > "$config_path" <<EOF
 # ~/.$PROJECT_NAME/config.yaml
-# Machine-local configuration for $PROJECT_NAME worktree management.
+# Machine-local config for $PROJECT_NAME (overrides + machine paths only).
+# Machine-wide defaults -> ~/.agent-worktrees/config.yaml.
+# Repo settings may live in-repo -> <anchor>/.agent-worktrees/config.yaml.
 
-srcroot: $src_root
-machine: $machine
-platform: $platform
 repo_name: $PROJECT_NAME
 
 repos:
