@@ -324,9 +324,12 @@ function Register-SyncTask {
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(5) `
         -RepetitionInterval (New-TimeSpan -Hours 4)
     $trigger.Repetition.StopAtDurationEnd = $false
+    # 30-min cap: the first sync cold-copies the whole session history (can take
+    # 10+ min over a network/CIFS path); a 10-min limit killed it mid-copy.
+    # Incremental runs finish in seconds.
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
         -DontStopIfGoingOnBatteries -StartWhenAvailable `
-        -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -MultipleInstances IgnoreNew
+        -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -MultipleInstances IgnoreNew
     # Interactive logon: runs as the current user when logged on, and -- unlike
     # an S4U principal -- registers without elevation. Right default for a
     # per-user roaming workstation. (Run-when-logged-off would need admin.)
