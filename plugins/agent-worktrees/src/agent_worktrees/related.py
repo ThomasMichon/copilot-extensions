@@ -1,0 +1,451 @@
+"""Per-project "related repos" -- the directional relationship layer.
+
+Where ``repos.yaml`` (see :mod:`agent_worktrees.repos`) is a **global,
+machine-wide catalog** of every checkout, this module models the
+**directional, per-project** view: *from the current repo's point of view*,
+which other repos are relevant, why, and -- crucially -- **where to actually
+work on them**.
+
+The data lives **in-repo and committed**, at
+``<anchor>/.agent-worktrees/related.yaml`` (alongside the in-repo
+``config.yaml``), with a plain-markdown narrative per related repo under
+``<anchor>/.agent-worktrees/related/<name>.md``.  Because it is committed, it
+travels with the repo and is shared across machines and collaborators.
+
+Design intent (so we never duplicate the registry):
+
+* ``related.yaml`` keys are **names in the global registry**.  A related entry
+  adds only **relationship** (``role`` / ``summary`` / ``doc``), **locus**
+  (where work happens: ``local`` / ``machine:<key>`` / ``codespace``, plus
+  per-machine availability), and **delegate** (how to hand work to the agent
+  that owns the repo).  Checkout paths, class, remote, and ``contributing``
+  still resolve from ``repos.yaml`` -- never restated here.
+* Per-machine availability and preferred locus are **directional only** -- the
+  global registry is intentionally *not* extended with per-machine paths.
+* A top-level ``primary:`` marker names the default/primary project repo.
+
+Schema (``<anchor>/.agent-worktrees/related.yaml``)::
+
+    primary: odsp-web
+    related:
+      odsp-web:
+        role: product
+        summary: "Primary product monorepo we ship changes to."
+        doc: related/odsp-web.md
+        locus:
+          preferred: codespace          # local | machine:<key> | codespace
+          codespace: { repo: org/odsp-web-codespaces,
+                       machine: largePremiumLinux256gb, location: EastUs }
+        delegate: { via: agent-codespaces }
+      copilot-extensions:
+        role: tooling
+        summary: "Source of the plugins this control plane drives."
+        doc: related/copilot-extensions.md
+        locus: { preferred: machine:dev6, machines: [dev6, cloud1] }
+        delegate: { via: agent-bridge }
+
+All reads degrade safely: a missing or malformed file yields an empty
+:class:`RelatedConfig` rather than raising, mirroring the config/registry
+loaders.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+# The in-repo ``.agent-worktrees/`` directory name.  Kept in sync with
+# ``config.INREPO_CONFIG_DIRNAME``; defined locally so this module has no
+# import-time dependency on the config layer.
+INREPO_DIRNAME = ".agent-worktrees"
+RELATED_FILENAME = "related.yaml"      # <anchor>/.agent-worktrees/related.yaml
+RELATED_DOCS_DIRNAME = "related"       # <anchor>/.agent-worktrees/related/<name>.md
+
+# Descriptive roles a related repo can play, *from the current repo's POV*.
+# Stored verbatim (lower-cased) -- unknown values are kept, not coerced, since
+# the role is human-facing documentation.  Callers/CLI may validate against
+# this set.
+VALID_ROLES = ("product", "dependency", "consumer", "tooling", "docs", "sibling")
+
+# How work is handed off to the agent that owns a related repo.
+VALID_DELEGATES = ("agent-bridge", "agent-codespaces", "none")
+
+# Locus "kinds" -- where work on a related repo actually happens.
+VALID_LOCUS_KINDS = ("local", "machine", "codespace")
+
+
+# ---------------------------------------------------------------------------
+# Data model
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Locus:
+    """Where work on a related repo happens, *from the current machine*.
+
+    ``preferred`` is one of ``local``, ``machine:<key>``, or ``codespace``.
+    ``machines`` lists the machine keys on which the repo is available (e.g.
+    ``[dev6, cloud1]``) -- this is the per-machine availability the global,
+    per-*platform* registry cannot express.  ``codespace`` carries the
+    provisioning hints (``repo`` / ``machine`` / ``location``) used when the
+    preferred locus is a CodeSpace.
+    """
+
+    preferred: str = ""
+    machines: list[str] = field(default_factory=list)
+    codespace: dict[str, str] = field(default_factory=dict)
+
+    def is_empty(self) -> bool:
+        return not (self.preferred or self.machines or self.codespace)
+
+
+@dataclass
+class RelatedEntry:
+    """A single related repo, keyed by its **global-registry** name."""
+
+    name: str
+    role: str = ""
+    summary: str = ""
+    doc: str = ""                       # relative to ``.agent-worktrees/``
+    locus: Locus = field(default_factory=Locus)
+    delegate: str = ""                  # the ``via`` value; see VALID_DELEGATES
+
+
+@dataclass
+class RelatedConfig:
+    """The full ``related.yaml`` content for one repo."""
+
+    primary: str = ""
+    related: dict[str, RelatedEntry] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Path helpers
+# ---------------------------------------------------------------------------
+
+def related_dir(anchor: str | Path) -> Path:
+    """The in-repo ``<anchor>/.agent-worktrees`` directory."""
+    return Path(anchor) / INREPO_DIRNAME
+
+
+def related_path(anchor: str | Path) -> Path:
+    """Path to ``<anchor>/.agent-worktrees/related.yaml``."""
+    return related_dir(anchor) / RELATED_FILENAME
+
+
+def docs_dir(anchor: str | Path) -> Path:
+    """The narrative docs directory ``<anchor>/.agent-worktrees/related``."""
+    return related_dir(anchor) / RELATED_DOCS_DIRNAME
+
+
+def default_doc_rel(name: str) -> str:
+    """Default narrative doc path for ``name`` (relative to ``.agent-worktrees``)."""
+    return f"{RELATED_DOCS_DIRNAME}/{name}.md"
+
+
+def doc_abs_path(anchor: str | Path, entry_or_name: RelatedEntry | str) -> Path:
+    """Absolute path to a related repo's narrative doc.
+
+    Resolves the entry's ``doc`` field (or the default ``related/<name>.md``)
+    against the in-repo ``.agent-worktrees`` directory.
+    """
+    if isinstance(entry_or_name, RelatedEntry):
+        rel = entry_or_name.doc or default_doc_rel(entry_or_name.name)
+    else:
+        rel = default_doc_rel(entry_or_name)
+    return related_dir(anchor) / rel
+
+
+# ---------------------------------------------------------------------------
+# Normalizers / parsers
+# ---------------------------------------------------------------------------
+
+def normalize_role(value: str | None) -> str:
+    """Lower-case and strip a role; unknown roles are kept verbatim."""
+    return (value or "").strip().lower()
+
+
+def normalize_delegate(value: str | None) -> str:
+    """Lower-case and strip a delegate target (the ``via`` value)."""
+    return (value or "").strip().lower()
+
+
+def parse_preferred(value: str | None) -> tuple[str, str]:
+    """Split a ``locus.preferred`` value into ``(kind, machine)``.
+
+    - ``"local"``        -> ``("local", "")``
+    - ``"codespace"``    -> ``("codespace", "")``
+    - ``"machine:dev6"`` -> ``("machine", "dev6")``
+    - empty / unknown    -> ``(value_lower, "")``  (kind returned verbatim)
+    """
+    v = (value or "").strip().lower()
+    if not v:
+        return ("", "")
+    if v.startswith("machine:"):
+        return ("machine", v.split(":", 1)[1].strip())
+    return (v, "")
+
+
+# ---------------------------------------------------------------------------
+# Read / write
+# ---------------------------------------------------------------------------
+
+def _parse_locus(raw: Any) -> Locus:
+    if not isinstance(raw, dict):
+        return Locus()
+    preferred = str(raw.get("preferred", "")).strip()
+    raw_machines = raw.get("machines", [])
+    machines = (
+        [str(m).strip() for m in raw_machines if str(m).strip()]
+        if isinstance(raw_machines, list)
+        else []
+    )
+    raw_cs = raw.get("codespace", {})
+    codespace = (
+        {str(k): str(v) for k, v in raw_cs.items()}
+        if isinstance(raw_cs, dict)
+        else {}
+    )
+    return Locus(preferred=preferred, machines=machines, codespace=codespace)
+
+
+def _parse_delegate(raw: Any) -> str:
+    """Accept ``delegate: {via: X}`` (canonical) or a bare ``delegate: X``."""
+    if isinstance(raw, dict):
+        return normalize_delegate(raw.get("via", ""))
+    if isinstance(raw, str):
+        return normalize_delegate(raw)
+    return ""
+
+
+def read_related(anchor: str | Path) -> RelatedConfig:
+    """Load ``<anchor>/.agent-worktrees/related.yaml``.
+
+    Returns an empty :class:`RelatedConfig` if the file is missing, empty, or
+    malformed -- never raises on bad content.
+    """
+    path = related_path(anchor)
+    if not path.exists():
+        return RelatedConfig()
+
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        return RelatedConfig()
+    if not isinstance(data, dict):
+        return RelatedConfig()
+
+    primary = str(data.get("primary", "")).strip()
+
+    related: dict[str, RelatedEntry] = {}
+    raw_related = data.get("related", {})
+    if isinstance(raw_related, dict):
+        for name, entry in raw_related.items():
+            # A bare ``name:`` (null value) is a valid minimal link.
+            if entry is None:
+                entry = {}
+            if not isinstance(entry, dict):
+                continue
+            related[str(name)] = RelatedEntry(
+                name=str(name),
+                role=normalize_role(entry.get("role", "")),
+                summary=str(entry.get("summary", "")).strip(),
+                doc=str(entry.get("doc", "")).strip(),
+                locus=_parse_locus(entry.get("locus")),
+                delegate=_parse_delegate(entry.get("delegate")),
+            )
+
+    return RelatedConfig(primary=primary, related=related)
+
+
+def _quote(v: str) -> str:
+    """Quote a YAML scalar if it contains characters needing escaping."""
+    if v == "" or any(c in v for c in (":", "#", "'", '"', "\\", "{", "}", "[", "]")):
+        escaped = v.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return v
+
+
+def _emit_locus(lines: list[str], locus: Locus, indent: str) -> None:
+    if locus.is_empty():
+        return
+    lines.append(f"{indent}locus:")
+    inner = indent + "  "
+    if locus.preferred:
+        lines.append(f"{inner}preferred: {_quote(locus.preferred)}")
+    if locus.machines:
+        rendered = ", ".join(_quote(m) for m in locus.machines)
+        lines.append(f"{inner}machines: [{rendered}]")
+    if locus.codespace:
+        rendered = ", ".join(
+            f"{k}: {_quote(str(v))}" for k, v in locus.codespace.items()
+        )
+        lines.append(f"{inner}codespace: {{ {rendered} }}")
+
+
+def write_related(anchor: str | Path, cfg: RelatedConfig) -> None:
+    """Write ``related.yaml`` with stable, hand-formatted YAML.
+
+    Only non-empty fields are emitted, keeping committed files minimal and
+    review-friendly (matching ``repos.write_registry``).
+    """
+    path = related_path(anchor)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    lines = [
+        "# <repo>/.agent-worktrees/related.yaml",
+        "# Directional, per-project related-repos index (this repo's POV).",
+        "# Keys are names in the global repos registry (~/.agent-worktrees/repos.yaml);",
+        "# this file adds relationship + locus + delegate only -- never checkout paths.",
+        "",
+    ]
+
+    if cfg.primary:
+        lines.append(f"primary: {_quote(cfg.primary)}")
+        lines.append("")
+
+    if cfg.related:
+        lines.append("related:")
+        for name in sorted(cfg.related.keys()):
+            entry = cfg.related[name]
+            lines.append(f"  {name}:")
+            if entry.role:
+                lines.append(f"    role: {_quote(entry.role)}")
+            if entry.summary:
+                lines.append(f"    summary: {_quote(entry.summary)}")
+            if entry.doc:
+                lines.append(f"    doc: {_quote(entry.doc)}")
+            _emit_locus(lines, entry.locus, "    ")
+            if entry.delegate:
+                lines.append(f"    delegate: {{ via: {_quote(entry.delegate)} }}")
+            lines.append("")
+
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Operations (in-memory mutate + persist)
+# ---------------------------------------------------------------------------
+
+def get_related(anchor: str | Path, name: str) -> RelatedEntry | None:
+    """Return the related entry for ``name``, or ``None``."""
+    return read_related(anchor).related.get(name)
+
+
+def list_related(
+    anchor: str | Path, *, role: str | None = None
+) -> list[RelatedEntry]:
+    """Return related entries, optionally filtered by ``role``, name-sorted."""
+    entries = list(read_related(anchor).related.values())
+    if role:
+        wanted = normalize_role(role)
+        entries = [e for e in entries if e.role == wanted]
+    return sorted(entries, key=lambda e: e.name)
+
+
+def get_primary(anchor: str | Path) -> str:
+    """Return the ``primary:`` marker (empty string if unset)."""
+    return read_related(anchor).primary
+
+
+def set_primary(anchor: str | Path, name: str) -> RelatedConfig:
+    """Set the ``primary:`` marker and persist.  Returns the updated config."""
+    cfg = read_related(anchor)
+    cfg.primary = str(name).strip()
+    write_related(anchor, cfg)
+    return cfg
+
+
+def upsert_related(anchor: str | Path, entry: RelatedEntry) -> RelatedConfig:
+    """Insert or merge a related entry and persist.
+
+    A merge only overwrites fields that are set on ``entry`` (non-empty),
+    preserving existing values otherwise -- so callers can update one field
+    without clobbering the rest.
+    """
+    cfg = read_related(anchor)
+    existing = cfg.related.get(entry.name)
+    if existing is None:
+        cfg.related[entry.name] = entry
+    else:
+        if entry.role:
+            existing.role = entry.role
+        if entry.summary:
+            existing.summary = entry.summary
+        if entry.doc:
+            existing.doc = entry.doc
+        if not entry.locus.is_empty():
+            existing.locus = entry.locus
+        if entry.delegate:
+            existing.delegate = entry.delegate
+    write_related(anchor, cfg)
+    return cfg
+
+
+def remove_related(anchor: str | Path, name: str) -> bool:
+    """Remove a related entry (and clear ``primary`` if it pointed here).
+
+    Returns ``True`` if an entry was removed.
+    """
+    cfg = read_related(anchor)
+    if name not in cfg.related:
+        return False
+    del cfg.related[name]
+    if cfg.primary == name:
+        cfg.primary = ""
+    write_related(anchor, cfg)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Narrative-doc scaffolding
+# ---------------------------------------------------------------------------
+
+_DOC_TEMPLATE = """\
+# {name} — related repo
+
+> Narrative for `{name}` **from this repo's point of view**. Resolve its local
+> checkout with `agent-worktrees repos find {name}` — never hardcode a path
+> (it varies by machine).
+
+- **Role:** {role}
+- **Registry:** `agent-worktrees repos find {name}` (class, remote, paths)
+- **Work here via:** `agent-worktrees related resolve {name}`
+
+## Why it matters here
+
+{summary}
+
+## How to make a change
+
+_TODO: where work happens (locus: local / a machine via agent-bridge / a
+CodeSpace via agent-codespaces), build/test commands, branch naming, how a PR is
+opened, merge style._
+
+## Rules & governing policies
+
+_TODO: conventions, required checks, auth/credential needs, and do-nots._
+"""
+
+
+def scaffold_doc(
+    anchor: str | Path, entry: RelatedEntry, *, force: bool = False
+) -> tuple[Path, bool]:
+    """Create the narrative doc for ``entry`` if missing.
+
+    Returns ``(path, created)``.  An existing file is left untouched unless
+    ``force`` is set.
+    """
+    path = doc_abs_path(anchor, entry)
+    if path.exists() and not force:
+        return (path, False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = _DOC_TEMPLATE.format(
+        name=entry.name,
+        role=entry.role or "_(unset)_",
+        summary=entry.summary or "_(unset)_",
+    )
+    path.write_text(body, encoding="utf-8")
+    return (path, True)
