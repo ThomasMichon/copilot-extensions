@@ -14,6 +14,7 @@ configuration with neutral defaults.
 
 from __future__ import annotations
 
+import copy
 import os
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,18 @@ DEFAULTS: dict[str, Any] = {
         # Retention for destination pruning. None/<=0 -> retain everything.
         "retention_days": None,
         "lock_timeout_sec": 10,
+        # Target-independent post-push notify. After any successful push the
+        # engine fires a best-effort HTTP POST to `url` (JSON body
+        # {"machine": <machine>}; `{machine}` in the url is also substituted),
+        # so a downstream consumer can crunch immediately regardless of which
+        # transport target is used. Empty url -> no notify. Facility-neutral:
+        # point it at a public webhook callback (e.g. a Home Assistant webhook
+        # that relays to a processing service).
+        "notify": {
+            "url": None,
+            "bearer_token_file": None,
+            "timeout": 5,
+        },
         # Per-target options, keyed by target name.
         "targets": {
             "local": {"path": None},
@@ -176,6 +189,20 @@ class Config:
             return [s.strip() for s in raw.split(",") if s.strip()]
         return [str(s).strip() for s in raw if str(s).strip()]
 
+    @property
+    def sync_notify(self) -> dict[str, Any]:
+        """Resolved target-independent post-push notify config.
+
+        ``url`` empty/None means no notify. ``bearer_token_file`` is optional;
+        ``timeout`` defaults to 5s.
+        """
+        raw = dict(self._data.get("sync", {}).get("notify", {}) or {})
+        return {
+            "url": (raw.get("url") or "").strip(),
+            "bearer_token_file": (raw.get("bearer_token_file") or "").strip(),
+            "timeout": int(raw.get("timeout") or 5),
+        }
+
     def target_options(self, name: str) -> dict[str, Any]:
         """Resolved options for the named sync target.
 
@@ -218,7 +245,16 @@ class Config:
         return self._data.get(key, default)
 
     def as_dict(self) -> dict[str, Any]:
-        return dict(self._data)
+        """Return a deep copy of the merged config.
+
+        Deep (not shallow): without a user override for a given nested block,
+        ``_deep_merge`` leaves that block as a reference into the module-global
+        ``DEFAULTS``. A shallow copy here would let a caller's nested mutation
+        (e.g. ``cfg.as_dict()["sync"]["notify"] = ...``) corrupt ``DEFAULTS``
+        for the whole process. Deep-copying keeps the config a value, not a
+        shared view.
+        """
+        return copy.deepcopy(self._data)
 
 
 def load_config(home: Path | None = None) -> Config:

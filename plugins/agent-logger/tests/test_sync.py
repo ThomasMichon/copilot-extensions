@@ -321,3 +321,81 @@ def test_config_repo_allowlist_parsing(tmp_path: Path) -> None:
     data = dict(base)
     data["sync"] = dict(data["sync"], repo_allowlist="dotfiles, odsp-ai-hub")
     assert Config(data, tmp_path).sync_repo_allowlist == ["dotfiles", "odsp-ai-hub"]
+
+
+# ── Post-push notify (target-independent) ────────────────────────────
+
+
+def _cfg_notify(home, source, dest, *, url, token_file=""):
+    data = dict(load_config(home=home).as_dict())
+    data["sync"]["source"] = str(source)
+    data["sync"]["targets"]["local"]["path"] = str(dest)
+    data["sync"]["notify"] = {"url": url, "bearer_token_file": token_file, "timeout": 3}
+    return Config(data, home)
+
+
+def test_notify_helper_posts_json_and_substitutes_machine(monkeypatch, tmp_path):
+    from agent_logger.sync import notify as notify_mod
+
+    captured = {}
+
+    def _fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["data"] = req.data
+        captured["timeout"] = timeout
+        captured["auth"] = req.get_header("Authorization")
+        return None
+
+    monkeypatch.setattr(notify_mod.urllib.request, "urlopen", _fake_urlopen)
+    tok = tmp_path / "tok"
+    tok.write_text("s3cret", encoding="utf-8")
+    ok = notify_mod.post_notify(
+        "https://h/api/webhook/x?m={machine}", "lambda-core-wsl",
+        bearer_token_file=str(tok), timeout=3,
+    )
+    assert ok is True
+    assert captured["url"] == "https://h/api/webhook/x?m=lambda-core-wsl"
+    assert b'"machine": "lambda-core-wsl"' in captured["data"]
+    assert captured["auth"] == "Bearer s3cret"
+    assert captured["timeout"] == 3
+
+
+def test_notify_helper_swallows_errors(monkeypatch):
+    from agent_logger.sync import notify as notify_mod
+
+    def _boom(req, timeout=None):
+        raise OSError("network down")
+
+    monkeypatch.setattr(notify_mod.urllib.request, "urlopen", _boom)
+    assert notify_mod.post_notify("https://h/x", "m") is False
+
+
+def test_notify_helper_no_url_is_noop():
+    from agent_logger.sync import notify as notify_mod
+
+    assert notify_mod.post_notify("", "m") is False
+
+
+def test_engine_fires_notify_after_push(monkeypatch, tmp_path):
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg_notify(tmp_path / "home", src, dest, url="https://h/api/webhook/x")
+    calls = []
+    monkeypatch.setattr(
+        engine, "post_notify",
+        lambda url, machine, **kw: calls.append((url, machine, kw)) or True,
+    )
+    assert engine.run_sync(cfg, verbose=True) == 0
+    assert len(calls) == 1
+    assert calls[0][0] == "https://h/api/webhook/x"
+    assert calls[0][1]  # machine resolved (non-empty)
+
+
+def test_engine_no_notify_without_url(monkeypatch, tmp_path):
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)  # default: no notify url
+    calls = []
+    monkeypatch.setattr(engine, "post_notify", lambda *a, **k: calls.append(a) or True)
+    assert engine.run_sync(cfg) == 0
+    assert calls == []

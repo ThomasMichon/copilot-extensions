@@ -18,6 +18,7 @@ from pathlib import Path
 from agent_logger.config import Config, load_config
 from agent_logger.segmenter.platform import detect_machine
 from agent_logger.sync.lock import sync_lock
+from agent_logger.sync.notify import post_notify
 from agent_logger.sync.targets import build_target
 
 
@@ -126,6 +127,17 @@ def run_sync(
             removed = target.prune(machine, cfg.sync_retention_days)
             if removed:
                 print(f"session-sync: pruned {removed} old session(s)")
+
+        notify = cfg.sync_notify
+        if notify["url"]:
+            sent = post_notify(
+                notify["url"],
+                machine,
+                bearer_token_file=notify["bearer_token_file"],
+                timeout=notify["timeout"],
+            )
+            if verbose:
+                print(f"session-sync: notify {'sent' if sent else 'failed (ignored)'}")
     return 0
 
 
@@ -182,6 +194,8 @@ def do_status(cfg: Config) -> int:
     print(f"retention_days: {cfg.sync_retention_days}")
     allowlist = cfg.sync_repo_allowlist
     print(f"repo_allowlist: {allowlist or '(all)'}")
+    notify = cfg.sync_notify
+    print(f"notify:         {notify['url'] or '(none)'}")
     return 0
 
 

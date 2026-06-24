@@ -15,10 +15,9 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import urllib.error
-import urllib.request
 from pathlib import Path
 
+from agent_logger.sync.notify import post_notify
 from agent_logger.sync.targets.base import (
     NO_WINDOW_KWARGS,
     DoctorResult,
@@ -86,19 +85,12 @@ class IngestTarget(Target):
 
     def _notify(self, machine: str) -> None:
         """Best-effort HTTP ping so the consumer can crunch immediately."""
-        notify_url = self._notify_url()
-        if not notify_url:
-            return
-        url = notify_url.replace("{machine}", machine)
-        try:
-            req = urllib.request.Request(url, method="POST")
-            token_file = self.options.get("bearer_token_file", "")
-            if token_file and Path(token_file).is_file():
-                token = Path(token_file).read_text(encoding="utf-8").strip()
-                req.add_header("Authorization", f"Bearer {token}")
-            urllib.request.urlopen(req, timeout=5)
-        except (urllib.error.URLError, OSError, ValueError):
-            pass
+        post_notify(
+            self._notify_url(),
+            machine,
+            bearer_token_file=self.options.get("bearer_token_file", ""),
+            timeout=5,
+        )
 
     def doctor(self) -> DoctorResult:
         result = DoctorResult(ok=True)
