@@ -1,0 +1,25 @@
+# In-repo agent-worktrees config for copilot-extensions (CANONICAL).
+#
+# This is the repo's own committed config -- the BASE layer for its
+# agent-worktrees settings, shared by every machine that checks out the repo.
+# It carries repo-level settings only (no machine paths). Precedence, highest
+# wins (see plugins/agent-worktrees config.py `load_config`):
+#
+#   ~/.copilot-extensions/config.yaml        (machine-local override / adapter)
+#   <repo>/.agent-worktrees/config.yaml      (THIS file -- the repo's own config)
+#   ~/.agent-worktrees/config.yaml           (machine-wide defaults)
+#
+# A machine that checks out this repo resolves its anchor from
+# ~/.agent-worktrees/repos.yaml and reads this file for the repo settings, so
+# the only machine-local config it needs is the project marker (repo_name +
+# headless). Read by agent-worktrees >= v1.5.3-dev34.
+
+default_branch: main
+remote: origin
+
+# No `pr:` block -> PR mode is OFF: copilot-extensions uses the direct-push
+# workflow (changes land on `main` via `git push origin main`, per
+# CONTRIBUTING.md). There is no automated reviewer here yet; bringing the
+# Intelligence Dampener to this repo (owner-only) is tracked in aperture-labs
+# issue #1102. Add a `pr:` block here (required: true, provider, strategy) once
+# that lands, to mirror aperture-labs.
