@@ -405,7 +405,11 @@ class TestLayeredConfig:
             repos={
                 "ext": repos_mod.RepoEntry(
                     name="ext", repo_class="worktree",
-                    paths={"wsl": str(anchor)},
+                    # All-platform paths so the anchor resolves regardless of
+                    # the host's detected platform (no machine-local file here
+                    # means platform = detection, which varies by CI host).
+                    paths={"windows": str(anchor), "wsl": str(anchor),
+                           "linux": str(anchor)},
                 )
             }
         )
