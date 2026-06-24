@@ -177,6 +177,12 @@ Worktree completion is a two-step process:
 
 Use the `worktree` skill during a Copilot session for guided sign-off.
 
+> **PR mode:** a repo can require sign-off through a pull request instead of
+> direct-push finalization (`pr.enabled` / `pr.required` — settable per machine
+> or repo-wide via the in-repo `.agent-worktrees.yaml`). See
+> [Configuration Reference](config-reference.md) § PR workflow and the
+> `worktree` skill § PR Workflow.
+
 ## Next Steps
 
 - **Customize sessions** -- create a setup script for your repo
@@ -188,3 +194,5 @@ Use the `worktree` skill during a Copilot session for guided sign-off.
   per-machine configuration
 - **Architecture** -- see [Architecture](architecture.md) for internals
 - **CLI reference** -- see [CLI Reference](cli-reference.md) for commands
+- **Configuration** -- see [Configuration Reference](config-reference.md) for
+  every config option (per-repo keys, PR workflow, in-repo overlay, profiles)
