@@ -134,8 +134,12 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=${VENV}/bin/session-sync run --prune
-TimeoutStartSec=120
-RuntimeMaxSec=300
+# Generous start timeout: the FIRST sync cold-copies the entire session
+# history (potentially thousands of sessions over a CIFS mount) and can take
+# 10+ minutes; 120s killed it mid-copy. Incremental runs finish in seconds.
+# (RuntimeMaxSec has no effect on Type=oneshot -- systemd ignores it -- so the
+# run is bounded by TimeoutStartSec instead.)
+TimeoutStartSec=1800
 SyslogIdentifier=${TIMER_NAME}
 EOF
 
