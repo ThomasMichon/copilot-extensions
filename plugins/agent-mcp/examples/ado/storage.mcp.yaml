@@ -1,0 +1,18 @@
+# Variant: storage — read-only + relay large results through a stream buffer.
+server:
+  type: http
+  url: https://mcp.dev.azure.com/onedrive
+auth:
+  kind: entra
+  resource: 2a72489c-aab2-4b65-b93a-a91edccf33b8
+decorators:
+  - type: filter
+    deny: ["*_write", "*_run", "repo_create_branch", "wiki_upsert_page"]
+  - type: storage
+    backend: file
+    threshold: 4096          # big text results (e.g. the PR list) -> a handle
+    rules:
+      - tool: search_workitem
+        outputs:
+          - path: results    # externalize the work-item array, keep count + summary
+            summary: { head: 2 }

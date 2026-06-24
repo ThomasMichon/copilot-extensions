@@ -35,8 +35,8 @@
     },
     {
       "name": "agent-mcp",
-      "description": "Reusable MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP server and inject host credentials (Entra/az, gh, git-credential, env)",
-      "version": "0.1.0-dev11",
+      "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform)",
+      "version": "0.2.0-dev3",
       "source": "plugins/agent-mcp"
     },
     {

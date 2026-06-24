@@ -39,6 +39,10 @@ INJECT_MODES = ("header", "env")
 #   ``raw``      -- the whole trimmed stdout is the secret verbatim.
 PARSE_MODES = ("keyvalue", "raw")
 
+# Decorator types in the ``decorators:`` stack. Kept in sync with the registry in
+# ``agent_mcp.decorators`` (a test asserts they match) to avoid a circular import.
+DECORATOR_TYPES = ("filter", "rename", "defer", "code-mode", "storage", "transform")
+
 BRIDGES_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp")) / "bridges"
 
 
@@ -110,6 +114,14 @@ class ToolFilter:
 
 
 @dataclass
+class DecoratorSpec:
+    """One entry in the ``decorators:`` stack: a ``type`` plus free-form options."""
+
+    type: str
+    options: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class BridgeConfig:
     """A fully-resolved bridge definition."""
 
@@ -121,6 +133,8 @@ class BridgeConfig:
     retries: int = 1
     name: str | None = None
     source_path: Path | None = None
+    # Decorator stack (client->upstream order). See ``agent_mcp.decorators``.
+    decorators: list[DecoratorSpec] = field(default_factory=list)
     # Additional auth injectors beyond ``auth`` (the first). Populated when the
     # config's ``auth`` is a *list* -- e.g. a bridge that must inject two
     # vault-sourced secrets into two env vars. Empty for the single-auth form.
@@ -206,6 +220,24 @@ def _parse_auth_spec(raw_auth: dict[str, Any]) -> AuthSpec:
     )
 
 
+def _parse_decorators(raw: Any) -> list[DecoratorSpec]:
+    """Parse the ``decorators:`` list into :class:`DecoratorSpec` entries."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ConfigError("'decorators' must be a list of mappings")
+    specs: list[DecoratorSpec] = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ConfigError(f"decorators[{i}] must be a mapping")
+        dtype = entry.get("type")
+        if not dtype:
+            raise ConfigError(f"decorators[{i}] requires a 'type'")
+        options = {k: v for k, v in entry.items() if k != "type"}
+        specs.append(DecoratorSpec(type=str(dtype), options=options))
+    return specs
+
+
 def parse_config(data: dict[str, Any], *, name: str | None = None,
                  source_path: Path | None = None) -> BridgeConfig:
     """Build a :class:`BridgeConfig` from a parsed mapping (no I/O)."""
@@ -246,6 +278,8 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
         deny=[str(t) for t in raw_tools.get("deny", [])],
     )
 
+    decorators = _parse_decorators(data.get("decorators"))
+
     cfg = BridgeConfig(
         server=server,
         auth=auth,
@@ -255,6 +289,7 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
         retries=int(data.get("retries", 1)),
         name=name,
         source_path=source_path,
+        decorators=decorators,
         extra_auths=extra_auths,
     )
     errors = validate_config(cfg)
@@ -349,4 +384,92 @@ def validate_config(cfg: BridgeConfig) -> list[str]:
         errors.append("retries must be >= 0")
     if cfg.timeout <= 0:
         errors.append("timeout must be > 0")
+
+    errors.extend(_validate_decorators(cfg.decorators))
+    return errors
+
+
+def _validate_decorators(decorators: list[DecoratorSpec]) -> list[str]:
+    """Validate the decorator stack (types + a few per-type requirements)."""
+    errors: list[str] = []
+    for i, d in enumerate(decorators):
+        label = f"decorators[{i}]"
+        if d.type not in DECORATOR_TYPES:
+            errors.append(f"{label}.type '{d.type}' must be one of {DECORATOR_TYPES}")
+            continue
+        opts = d.options
+        if d.type == "filter" and opts.get("allow") and opts.get("deny"):
+            errors.append(f"{label}: set either 'allow' or 'deny', not both")
+        if d.type == "defer":
+            mode = opts.get("mode", "lazy")
+            if mode not in ("lazy", "eager", "meta_only"):
+                errors.append(
+                    f"{label}.mode '{mode}' must be lazy|eager|meta_only")
+        if d.type == "code-mode":
+            if float(opts.get("timeout", 30.0)) <= 0:
+                errors.append(f"{label}.timeout must be > 0")
+        if d.type == "storage":
+            backend = opts.get("backend", "file")
+            if backend not in ("file", "http"):
+                errors.append(f"{label}.backend '{backend}' must be file|http")
+            if backend == "http" and not opts.get("url"):
+                errors.append(f"{label}: storage backend 'http' requires 'url'")
+            if int(opts.get("threshold", 8192)) < 0:
+                errors.append(f"{label}.threshold must be >= 0")
+            errors.extend(_validate_storage_rules(opts.get("rules"), label))
+        if d.type == "transform":
+            errors.extend(_validate_transform_rules(opts, label))
+    return errors
+
+
+def _validate_transform_rules(opts: dict, label: str) -> list[str]:
+    """Validate a transform decorator's rules (a ``rules`` list or inline rule)."""
+    raw = opts.get("rules")
+    if raw is None:
+        if any(k in opts for k in ("tool", "extract", "pick", "drop", "command")):
+            raw = [opts]
+        else:
+            return [f"{label}: transform needs 'rules' or an inline rule "
+                    f"(extract/pick/drop/command)"]
+    if not isinstance(raw, list):
+        return [f"{label}.rules must be a list"]
+    errors: list[str] = []
+    for j, rule in enumerate(raw):
+        rlabel = f"{label}.rules[{j}]"
+        if not isinstance(rule, dict):
+            errors.append(f"{rlabel} must be a mapping")
+            continue
+        if not any(rule.get(k) for k in ("extract", "pick", "drop", "command")):
+            errors.append(f"{rlabel} needs one of extract/pick/drop/command")
+        for list_field in ("pick", "drop", "command"):
+            val = rule.get(list_field)
+            if val is not None and not isinstance(val, list):
+                errors.append(f"{rlabel}.{list_field} must be a list")
+    return errors
+
+
+def _validate_storage_rules(raw: Any, label: str) -> list[str]:
+    """Validate a storage decorator's optional ``rules`` list."""
+    if raw is None:
+        return []
+    errors: list[str] = []
+    if not isinstance(raw, list):
+        return [f"{label}.rules must be a list"]
+    for j, rule in enumerate(raw):
+        rlabel = f"{label}.rules[{j}]"
+        if not isinstance(rule, dict):
+            errors.append(f"{rlabel} must be a mapping")
+            continue
+        for field_name in ("outputs", "inputs"):
+            entries = rule.get(field_name)
+            if entries is None:
+                continue
+            if not isinstance(entries, list):
+                errors.append(f"{rlabel}.{field_name} must be a list")
+                continue
+            for k, entry in enumerate(entries):
+                if not isinstance(entry, dict) or not entry.get("path"):
+                    errors.append(f"{rlabel}.{field_name}[{k}] requires a 'path'")
+        if not rule.get("outputs") and not rule.get("inputs"):
+            errors.append(f"{rlabel} needs at least one of 'outputs' or 'inputs'")
     return errors

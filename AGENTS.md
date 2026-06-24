@@ -43,10 +43,10 @@ copilot-extensions/
       tests/                   # Test suite
       plugin.json              # Plugin manifest
       pyproject.toml           # Python project config
-    agent-mcp/                 # Reusable MCP bridge (wrap upstream MCP + inject host creds)
+    agent-mcp/                 # Swiss-army MCP bridge (wrap upstream MCP + auth + decorator stack)
       scripts/                 # Installer (init.ps1/sh)
       skills/                  # agent-mcp
-      src/agent_mcp/           # Python source (bridge core, transports, auth injectors)
+      src/agent_mcp/           # Python source (bridge, pipeline, transports, auth, decorators)
       tests/                   # Test suite
       plugin.json              # Plugin manifest
       pyproject.toml           # Python project config
@@ -160,7 +160,9 @@ See `CONTRIBUTING.md` for the full versioning scheme.
 - **agent-containers:** Run `pytest` from `plugins/agent-containers/` before
   pushing. Covers config, lifecycle, the lease broker, and the resolver.
 - **agent-mcp:** Run `pytest` from `plugins/agent-mcp/` before pushing. Covers
-  config loading, auth injectors, transports, and bridge framing.
+  config loading, auth injectors, transports, bridge framing, the decorator
+  pipeline (filter/rename/defer/code-mode/storage), and an end-to-end stdio
+  bridge run. The code-mode Node tests skip automatically when `node` is absent.
 - **agent-worktrees:** No automated test suite yet. Verify worktree
   operations work end-to-end (create, finalize, cleanup).
 

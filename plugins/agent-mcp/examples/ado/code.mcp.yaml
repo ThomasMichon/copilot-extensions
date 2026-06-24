@@ -1,0 +1,12 @@
+# Variant: code — read-only + a typed run_code tool (find_tool for signatures).
+server:
+  type: http
+  url: https://mcp.dev.azure.com/onedrive
+auth:
+  kind: entra
+  resource: 2a72489c-aab2-4b65-b93a-a91edccf33b8
+decorators:
+  - type: code-mode
+    interface_limit: 12     # 25+ read tools -> point run_code at find_tool
+  - type: filter
+    deny: ["*_write", "*_run", "repo_create_branch", "wiki_upsert_page"]

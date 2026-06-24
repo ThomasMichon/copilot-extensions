@@ -1,0 +1,21 @@
+# Variant: transform — read-only + slim verbose list/search results.
+server:
+  type: http
+  url: https://mcp.dev.azure.com/onedrive
+auth:
+  kind: entra
+  resource: 2a72489c-aab2-4b65-b93a-a91edccf33b8
+decorators:
+  - type: filter
+    deny: ["*_write", "*_run", "repo_create_branch", "wiki_upsert_page"]
+  - type: transform
+    rules:
+      # repo_pull_request (action=list) returns a top-level array of fat PR objects.
+      - tool: repo_pull_request
+        pick: ["pullRequestId", "title", "status", "isDraft",
+               "createdBy.displayName", "sourceRefName", "targetRefName"]
+      # search_workitem returns {count, results:[{fields:{...}}]}; keep the rows slim.
+      - tool: search_workitem
+        extract: results
+        pick: ["fields.system.id", "fields.system.title",
+               "fields.system.state", "fields.system.workitemtype"]

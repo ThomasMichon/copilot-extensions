@@ -1,0 +1,12 @@
+# Variant: defer — read-only + hide the catalog behind find_tool/execute_tool.
+server:
+  type: http
+  url: https://mcp.dev.azure.com/onedrive
+auth:
+  kind: entra
+  resource: 2a72489c-aab2-4b65-b93a-a91edccf33b8
+decorators:
+  - type: defer
+    mode: lazy
+  - type: filter
+    deny: ["*_write", "*_run", "repo_create_branch", "wiki_upsert_page"]
