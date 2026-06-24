@@ -4371,6 +4371,7 @@ def _repos_usage() -> None:
     print("  migrate [--default-class C]         Import legacy ~/.git-repos")
     print("  status [--tag T] [--class C]        Show branch/dirty/ahead-behind")
     print("  sync [--tag T] [--class C]          Fetch + fast-forward (skips dirty)")
+    print("  doctor [--fix] [--json]             Reconcile projects.yaml <-> repos.yaml")
     print()
     print("Repo classes:")
     print("  reference   read-only; resolve/clone/index only; never edited")
@@ -4654,6 +4655,35 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                 had_error = True
                 output.err(f"{name}: {detail}")
         return 1 if had_error else 0
+
+    if sub == "doctor":
+        from . import doctor
+        do_fix = "--fix" in rest
+        json_out = "--json" in rest
+        findings = doctor.reconcile(fix=do_fix)
+        if json_out:
+            _json_output({
+                "fixed": do_fix,
+                "findings": [
+                    {
+                        "repo": f.repo,
+                        "kind": f.kind,
+                        "severity": f.severity,
+                        "detail": f.detail,
+                        "fixable": f.fixable,
+                        "fix_detail": f.fix_detail,
+                        "fixed": f.fixed,
+                    }
+                    for f in findings
+                ],
+            })
+        else:
+            doctor.render(findings, fixed_mode=do_fix)
+        # Unresolved errors -> non-zero exit so callers/CI can gate on it.
+        unresolved = [
+            f for f in findings if f.severity == doctor.SEV_ERROR and not f.fixed
+        ]
+        return 1 if unresolved else 0
 
     output.err(f"Unknown repos subcommand: {sub}")
     _repos_usage()

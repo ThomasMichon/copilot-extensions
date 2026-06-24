@@ -761,9 +761,15 @@ def _format_yaml_value(v: object) -> str:
     return f'"{escaped}"'
 
 
-def write_projects_registry(registry: dict) -> None:
-    """Write the projects registry back to projects.yaml."""
-    path = projects_yaml_path()
+def write_projects_registry(registry: dict, path: Path | None = None) -> None:
+    """Write the projects registry back to projects.yaml.
+
+    ``path`` defaults to :func:`projects_yaml_path`; callers that resolve the
+    registry location independently (e.g. the reconciliation doctor) may pass
+    an explicit path so read and write stay symmetric.
+    """
+    if path is None:
+        path = projects_yaml_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
     lines = [

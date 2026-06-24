@@ -1,0 +1,249 @@
+"""Tests for registry reconciliation (``repos doctor``)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+import yaml
+
+from agent_worktrees import doctor, repos
+
+
+@pytest.fixture
+def home(tmp_path: Path, monkeypatch) -> Path:
+    """Redirect ~ so both registries read/write under a tmp dir."""
+    monkeypatch.setattr(repos.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(doctor.Path, "home", lambda: tmp_path)
+    # Pin the platform so path keys are deterministic across CI hosts.
+    monkeypatch.setattr(repos, "_current_platform", lambda: "linux")
+    (tmp_path / ".agent-worktrees").mkdir(parents=True, exist_ok=True)
+    return tmp_path
+
+
+def _write_repos(home: Path, text: str) -> None:
+    (home / ".agent-worktrees" / "repos.yaml").write_text(text, encoding="utf-8")
+
+
+def _write_projects(home: Path, projects: dict) -> None:
+    (home / ".agent-worktrees" / "projects.yaml").write_text(
+        yaml.safe_dump({"projects": projects}), encoding="utf-8"
+    )
+
+
+def _kinds(findings) -> set[str]:
+    return {f.kind for f in findings}
+
+
+def _by_repo(findings, repo: str):
+    return [f for f in findings if f.repo == repo]
+
+
+# ---------------------------------------------------------------------------
+# Clean state
+# ---------------------------------------------------------------------------
+
+def test_no_drift_when_consistent(home: Path):
+    repo_dir = home / "src" / "proj"
+    repo_dir.mkdir(parents=True)
+    _write_repos(home, f"""
+repos:
+  proj:
+    class: worktree
+    linux: {repo_dir}
+""")
+    _write_projects(home, {
+        "proj": {"anchor": str(repo_dir), "expose_agent": True,
+                 "default_branch": "main"},
+    })
+    findings = doctor.diagnose()
+    # Only possible finding would be unadopted/stale; here it's adopted + exists.
+    assert _kinds(findings) == set()
+
+
+# ---------------------------------------------------------------------------
+# missing_repo_entry
+# ---------------------------------------------------------------------------
+
+def test_missing_repo_entry_detected_and_fixed(home: Path):
+    repo_dir = home / "src" / "newproj"
+    repo_dir.mkdir(parents=True)
+    _write_repos(home, "repos: {}\n")
+    _write_projects(home, {
+        "newproj": {"anchor": str(repo_dir), "expose_agent": False,
+                    "default_branch": "main"},
+    })
+
+    findings = doctor.diagnose()
+    assert "missing_repo_entry" in _kinds(findings)
+
+    doctor.reconcile(fix=True)
+    entry = repos.find_repo("newproj")
+    assert entry is not None
+    assert entry.repo_class == "worktree"
+    assert entry.agent is False           # took expose_agent from the project
+    assert entry.paths.get("linux") == str(repo_dir)
+
+
+# ---------------------------------------------------------------------------
+# wrong_class (adopted but reference)
+# ---------------------------------------------------------------------------
+
+def test_wrong_class_upgraded_to_worktree(home: Path):
+    repo_dir = home / "src" / "harness"
+    repo_dir.mkdir(parents=True)
+    _write_repos(home, f"""
+repos:
+  harness:
+    class: reference
+    linux: {repo_dir}
+""")
+    _write_projects(home, {
+        "harness": {"anchor": str(repo_dir), "expose_agent": True,
+                    "default_branch": "main"},
+    })
+
+    findings = doctor.diagnose()
+    assert "wrong_class" in _kinds(findings)
+    assert any(f.severity == doctor.SEV_ERROR for f in findings)
+
+    doctor.reconcile(fix=True)
+    entry = repos.find_repo("harness")
+    assert entry.repo_class == "worktree"
+    assert entry.agent is True            # exposure taken from adoption on upgrade
+
+
+# ---------------------------------------------------------------------------
+# anchor_mismatch
+# ---------------------------------------------------------------------------
+
+def test_anchor_mismatch_aligns_to_live_anchor(home: Path):
+    live = home / "src" / "moved"
+    live.mkdir(parents=True)
+    _write_repos(home, """
+repos:
+  moved:
+    class: worktree
+    linux: /old/stale/path
+""")
+    _write_projects(home, {
+        "moved": {"anchor": str(live), "expose_agent": True},
+    })
+
+    assert "anchor_mismatch" in _kinds(doctor.diagnose())
+    doctor.reconcile(fix=True)
+    assert repos.find_repo("moved").paths["linux"] == str(live)
+
+
+# ---------------------------------------------------------------------------
+# agent_mismatch (repos.yaml wins)
+# ---------------------------------------------------------------------------
+
+def test_agent_mismatch_repos_wins_and_aligns_project(home: Path):
+    repo_dir = home / "src" / "noagent"
+    repo_dir.mkdir(parents=True)
+    _write_repos(home, f"""
+repos:
+  noagent:
+    class: worktree
+    agent: false
+    linux: {repo_dir}
+""")
+    # Project omits expose_agent -> effective True -> disagrees with agent:false.
+    _write_projects(home, {"noagent": {"anchor": str(repo_dir)}})
+
+    assert "agent_mismatch" in _kinds(doctor.diagnose())
+    doctor.reconcile(fix=True)
+
+    projects = doctor._read_projects()
+    assert projects["noagent"]["expose_agent"] is False
+
+
+# ---------------------------------------------------------------------------
+# name_collision (SPO / SPO.Core)
+# ---------------------------------------------------------------------------
+
+def test_name_collision_renames_to_project_name(home: Path):
+    shared = home / "git" / "SPO"
+    shared.mkdir(parents=True)
+    _write_repos(home, f"""
+repos:
+  SPO:
+    class: reference
+    remote: "https://example/_git/SPO.Core"
+    linux: {shared}
+""")
+    _write_projects(home, {
+        "SPO.Core": {"anchor": str(shared), "base_repo": True,
+                     "expose_agent": True},
+    })
+
+    findings = doctor.diagnose()
+    assert "name_collision" in _kinds(findings)
+
+    doctor.reconcile(fix=True)
+    assert repos.find_repo("SPO") is None
+    canon = repos.find_repo("SPO.Core")
+    assert canon is not None
+    assert canon.repo_class == "worktree"          # upgraded from reference
+    assert canon.agent is True                     # took expose_agent on upgrade
+    assert canon.remote == "https://example/_git/SPO.Core"   # preserved
+    # Single-pass convergence: no residual auto-fixable drift (e.g. agent_mismatch).
+    assert not [f for f in doctor.diagnose() if f.fixable]
+
+
+# ---------------------------------------------------------------------------
+# report-only findings
+# ---------------------------------------------------------------------------
+
+def test_unadopted_worktree_reported_not_fixed(home: Path):
+    repo_dir = home / "src" / "lonely"
+    repo_dir.mkdir(parents=True)
+    _write_repos(home, f"""
+repos:
+  lonely:
+    class: worktree
+    linux: {repo_dir}
+""")
+    _write_projects(home, {})  # not adopted
+
+    findings = doctor.diagnose()
+    f = _by_repo(findings, "lonely")
+    assert any(x.kind == "unadopted_worktree" and not x.fixable for x in f)
+
+    # --fix must NOT adopt it (side effects); finding stays unfixed.
+    after = doctor.reconcile(fix=True)
+    assert any(x.kind == "unadopted_worktree" and not x.fixed
+               for x in _by_repo(after, "lonely"))
+
+
+def test_stale_path_reported(home: Path):
+    _write_repos(home, """
+repos:
+  ghost:
+    class: reference
+    linux: /does/not/exist/ghost
+""")
+    _write_projects(home, {})
+    assert "stale_path" in _kinds(doctor.diagnose())
+
+
+# ---------------------------------------------------------------------------
+# idempotence
+# ---------------------------------------------------------------------------
+
+def test_fix_is_idempotent(home: Path):
+    repo_dir = home / "src" / "proj"
+    repo_dir.mkdir(parents=True)
+    _write_repos(home, "repos: {}\n")
+    _write_projects(home, {
+        "proj": {"anchor": str(repo_dir), "expose_agent": True,
+                 "default_branch": "main"},
+    })
+    doctor.reconcile(fix=True)
+    first = doctor.diagnose()
+    doctor.reconcile(fix=True)
+    second = doctor.diagnose()
+    # After a fix, the auto-fixable findings are gone and stay gone.
+    assert not [f for f in first if f.fixable]
+    assert not [f for f in second if f.fixable]
