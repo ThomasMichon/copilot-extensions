@@ -162,7 +162,6 @@ agent-codespaces create <owner/repo> --branch <branch> --display-name <name>
 agent-codespaces create <owner/repo> --no-wait        # don't wait / skip provisioning
 
 agent-codespaces delete <codespace-name>
-agent-codespaces delete <codespace-name> --force
 agent-codespaces delete <codespace-name> --no-sync   # skip pre-delete session recovery
 
 # Remove stale local state (orphaned SSH configs, ControlMaster sockets)
@@ -189,18 +188,15 @@ agent-codespaces finalize <codespace-name>
 
 # Recover sessions, then delete only if recovery succeeded
 agent-codespaces finalize <codespace-name> --delete
-
-# Recover (best-effort) and delete even if recovery fails
-agent-codespaces finalize <codespace-name> --delete --force
 ```
 
-> 🛑 **`--force` / `--no-sync` are not retry buttons — diagnose first.** A failed
-> recovery is usually a still-booting CodeSpace, an SSH/relay hiccup, or a real
-> problem worth understanding — not a cue to force. Forcing past it permanently
-> destroys the unrecovered session history. Investigate the reported error first;
-> only use `--force` once you've **confirmed** the cause and that the loss is
-> acceptable (e.g. a genuinely unbootable/corrupted CodeSpace, or work already
-> verified safe elsewhere). When unsure, surface the error rather than forcing.
+> 🛑 **If `finalize --delete` refuses (recovery failed), diagnose — don't bypass.**
+> A failed recovery is usually a still-booting CodeSpace, an SSH/relay hiccup, or
+> a real problem worth understanding. Resolve the underlying cause and **re-run
+> `finalize`** so the sessions are captured and the delete proceeds. For a
+> genuinely unrecoverable CodeSpace (broken/corrupted, SSH unavailable), deletion
+> is a deliberate break-glass step — see `agent-codespaces delete --help`. When
+> unsure, surface the error rather than bypassing recovery.
 
 `delete` also runs this recovery automatically as a **best-effort pre-delete
 hook** (skip with `--no-sync`); unlike `finalize --delete`, a failed recovery
