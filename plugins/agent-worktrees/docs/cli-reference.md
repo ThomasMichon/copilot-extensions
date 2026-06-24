@@ -228,6 +228,11 @@ ssh my-machine "cd <copilot-extensions-checkout>/plugins/agent-worktrees && bash
 
 ## Config Reference
 
+> **Full reference:** [config-reference.md](config-reference.md) documents
+> **every** option — top-level keys, all per-repo keys, the `pr:` workflow
+> block, the in-repo `.agent-worktrees.yaml` overlay, backend profiles, and
+> the platform-keyed hook maps. The example below is just the common subset.
+
 `~/.{project}/config.yaml`:
 
 ```yaml
