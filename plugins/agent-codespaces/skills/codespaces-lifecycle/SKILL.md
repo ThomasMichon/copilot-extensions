@@ -194,6 +194,14 @@ agent-codespaces finalize <codespace-name> --delete
 agent-codespaces finalize <codespace-name> --delete --force
 ```
 
+> 🛑 **`--force` / `--no-sync` are not retry buttons — diagnose first.** A failed
+> recovery is usually a still-booting CodeSpace, an SSH/relay hiccup, or a real
+> problem worth understanding — not a cue to force. Forcing past it permanently
+> destroys the unrecovered session history. Investigate the reported error first;
+> only use `--force` once you've **confirmed** the cause and that the loss is
+> acceptable (e.g. a genuinely unbootable/corrupted CodeSpace, or work already
+> verified safe elsewhere). When unsure, surface the error rather than forcing.
+
 `delete` also runs this recovery automatically as a **best-effort pre-delete
 hook** (skip with `--no-sync`); unlike `finalize --delete`, a failed recovery
 there only warns and still deletes. Prefer `finalize --delete` when you want

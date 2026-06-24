@@ -165,7 +165,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     finalize_parser.add_argument(
         "--force", action="store_true",
-        help="With --delete: delete even if the session recovery failed",
+        help="With --delete: delete even if recovery failed -- diagnose the "
+             "failure first, do not use for routine hiccups (destroys "
+             "unrecovered sessions)",
     )
     finalize_parser.add_argument(
         "--timeout", type=float, default=300.0,
@@ -1165,8 +1167,11 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
         print(f"[WARN] Session recovery for {args.name} failed: "
               f"{res.get('detail')}", file=sys.stderr)
         if args.delete and not args.force:
-            print("Refusing to delete after a failed sync; "
-                  "re-run with --force to override.", file=sys.stderr)
+            print("Refusing to delete after a failed recovery. Diagnose the "
+                  "error above first (often a still-booting CodeSpace or an "
+                  "SSH/relay issue). Only re-run with --force once you've "
+                  "confirmed the cause and that losing unrecovered sessions is "
+                  "acceptable.", file=sys.stderr)
             return 1
 
     if args.delete:
