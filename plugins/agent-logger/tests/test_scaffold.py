@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from agent_logger import __version__
@@ -10,7 +11,13 @@ from agent_logger.segmenter.platform import detect_machine, sanitize_path_compon
 
 
 def test_version_matches_build_info() -> None:
-    assert __version__ == "0.1.1-dev1"
+    """``_build_info.__version__`` must track ``pyproject.toml`` (version triplet)."""
+    pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.MULTILINE)
+    assert match, "version not found in pyproject.toml"
+    assert __version__ == match.group(1)
 
 
 def test_config_defaults_and_home(tmp_path: Path) -> None:
