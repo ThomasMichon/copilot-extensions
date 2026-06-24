@@ -163,6 +163,7 @@ agent-codespaces create <owner/repo> --no-wait        # don't wait / skip provis
 
 agent-codespaces delete <codespace-name>
 agent-codespaces delete <codespace-name> --force
+agent-codespaces delete <codespace-name> --no-sync   # skip pre-delete session recovery
 
 # Remove stale local state (orphaned SSH configs, ControlMaster sockets)
 agent-codespaces cleanup
@@ -172,6 +173,35 @@ agent-codespaces cleanup --dry-run
 CodeSpace creation uses `gh codespace create` with defaults from
 `codespaces.yaml`. Per-repo overrides (machine type, location) apply
 automatically based on the target repository.
+
+## Finalize — graceful close-out with session recovery
+
+Before a CodeSpace is destroyed, its Copilot session history (`~/.copilot`
+session-state) should be recovered — a deleted CodeSpace's transcripts are
+gone forever. `finalize` pulls the session-state off the CodeSpace and lands
+it in the agent-logger storage hub (under `.codespaces/<name>/`), reusing
+agent-logger's `session-sync push`. Only the `session-state` tree and the
+`session-store.db` index are pulled — never credentials, keys, or settings.
+
+```bash
+# Recover sessions only (no delete) — safe to run any time
+agent-codespaces finalize <codespace-name>
+
+# Recover sessions, then delete only if recovery succeeded
+agent-codespaces finalize <codespace-name> --delete
+
+# Recover (best-effort) and delete even if recovery fails
+agent-codespaces finalize <codespace-name> --delete --force
+```
+
+`delete` also runs this recovery automatically as a **best-effort pre-delete
+hook** (skip with `--no-sync`); unlike `finalize --delete`, a failed recovery
+there only warns and still deletes. Prefer `finalize --delete` when you want
+the delete gated on a successful recovery.
+
+> Requires the **agent-logger** plugin (provides the `session-sync` CLI). If it
+> isn't installed, recovery reports a clear error and (for plain `delete`) the
+> deletion still proceeds.
 
 ## Syncing Dotfiles on CodeSpaces
 

@@ -196,6 +196,32 @@ def test_engine_run_sync_disabled(monkeypatch, tmp_path: Path) -> None:
     assert not (tmp_path / "dest").exists()
 
 
+def test_engine_run_push_explicit_machine(tmp_path: Path) -> None:
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", tmp_path / "unused", dest)
+    rc = engine.run_push(cfg, source=str(src), machine=".codespaces/my-cs", verbose=True)
+    assert rc == 0
+    machine_dir = dest / ".codespaces" / "my-cs"
+    assert (machine_dir / "session-state" / "abc-123" / "events.jsonl").is_file()
+    assert not (machine_dir / "session-state" / "abc-123" / ".lock").exists()
+    assert (machine_dir / "sync-meta.json").is_file()
+
+
+def test_engine_run_push_missing_source(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path / "home", tmp_path / "unused", tmp_path / "dest")
+    assert engine.run_push(cfg, source=str(tmp_path / "nope"), machine="m") == 1
+
+
+def test_engine_push_parser_wires_args() -> None:
+    args = engine.build_parser().parse_args(
+        ["push", "--source", "/tmp/x", "--machine", ".codespaces/foo"]
+    )
+    assert args.command == "push"
+    assert args.source == "/tmp/x"
+    assert args.machine == ".codespaces/foo"
+
+
 def _make_multi_repo_source(root: Path) -> Path:
     """Source with two sessions in different repos (by workspace cwd)."""
     src = root / "copilot"

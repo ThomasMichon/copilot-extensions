@@ -7,6 +7,8 @@ Subcommands:
   config init           Scaffold codespaces.yaml from existing CodeSpaces
   config show           Show resolved config
   config validate       Validate config
+  delete <name>         Delete a CodeSpace (recovers sessions first)
+  finalize <name>       Recover Copilot sessions, then optionally --delete
   status                Show service status
 """
 
@@ -45,6 +47,7 @@ from .lifecycle import (
     list_codespaces,
     wait_for_available,
 )
+from .sessions import sync_codespace_sessions
 
 log = logging.getLogger("agent-codespaces")
 
@@ -143,6 +146,30 @@ def main(argv: list[str] | None = None) -> int:
     delete_parser.add_argument("name", help="CodeSpace name")
     delete_parser.add_argument(
         "--force", action="store_true", help="Force deletion",
+    )
+    delete_parser.add_argument(
+        "--no-sync", action="store_true",
+        help="Skip the pre-delete Copilot session recovery",
+    )
+
+    # --- finalize ---
+    finalize_parser = sub.add_parser(
+        "finalize",
+        help="Gracefully close out a CodeSpace: recover Copilot sessions, "
+             "then optionally delete",
+    )
+    finalize_parser.add_argument("name", help="CodeSpace name")
+    finalize_parser.add_argument(
+        "--delete", action="store_true",
+        help="Delete the CodeSpace after a successful session recovery",
+    )
+    finalize_parser.add_argument(
+        "--force", action="store_true",
+        help="With --delete: delete even if the session recovery failed",
+    )
+    finalize_parser.add_argument(
+        "--timeout", type=float, default=300.0,
+        help="Seconds for the session pull (default: 300)",
     )
 
     # --- create ---
@@ -245,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_config(args)
         if args.command == "delete":
             return _cmd_delete(args)
+        if args.command == "finalize":
+            return _cmd_finalize(args)
         if args.command == "create":
             return _cmd_create(args)
         if args.command == "bridge":
@@ -1105,10 +1134,46 @@ def _config_validate() -> int:
 
 
 def _cmd_delete(args: argparse.Namespace) -> int:
-    """Delete a CodeSpace."""
+    """Delete a CodeSpace, recovering its Copilot sessions first (unless
+    --no-sync). The recovery is best-effort: a failure warns but does not block
+    deletion (use `finalize` for a sync-gated delete)."""
+    if not getattr(args, "no_sync", False):
+        res = sync_codespace_sessions(args.name, verbose=args.verbose)
+        if res.get("ok"):
+            print(f"[OK] Recovered {res.get('session_count', 0)} session(s) "
+                  f"before delete: {res.get('detail', '')}")
+        else:
+            print(f"[WARN] Pre-delete session recovery failed (continuing): "
+                  f"{res.get('detail')}", file=sys.stderr)
     delete_codespace(args.name, force=args.force)
     print(f"Deleted: {args.name}")
     return 0
+
+
+def _cmd_finalize(args: argparse.Namespace) -> int:
+    """Gracefully close out a CodeSpace: recover its Copilot sessions into the
+    agent-logger hub, then optionally delete it.
+
+    Without --delete this is a pure recovery. With --delete, the CodeSpace is
+    removed only after a successful sync, unless --force overrides a failed one.
+    """
+    res = sync_codespace_sessions(args.name, timeout=args.timeout, verbose=args.verbose)
+    if res.get("ok"):
+        print(f"[OK] Recovered {res.get('session_count', 0)} session(s) from "
+              f"{args.name}: {res.get('detail', '')}")
+    else:
+        print(f"[WARN] Session recovery for {args.name} failed: "
+              f"{res.get('detail')}", file=sys.stderr)
+        if args.delete and not args.force:
+            print("Refusing to delete after a failed sync; "
+                  "re-run with --force to override.", file=sys.stderr)
+            return 1
+
+    if args.delete:
+        delete_codespace(args.name, force=args.force)
+        print(f"Deleted: {args.name}")
+
+    return 0 if res.get("ok") else 1
 
 
 def _cmd_create(args: argparse.Namespace) -> int:
