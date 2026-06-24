@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "s=\"$HOME/.local/bin/session-sync\"; [ -x \"$s\" ] && nohup \"$s\" run >/dev/null 2>&1 </dev/null &",
+        "powershell": "$b = Join-Path $env:USERPROFILE '.local\\bin\\session-sync.cmd'; if (Test-Path $b) { Start-Process -FilePath $b -ArgumentList 'run' -WindowStyle Hidden }",
+        "timeoutSec": 5
+      }
+    ]
+  }
+}
