@@ -8,6 +8,24 @@ import pytest
 
 from agent_worktrees import config as cfg
 
+
+@pytest.fixture(autouse=True)
+def _isolate_config_layers(tmp_path_factory, monkeypatch):
+    """Make layered config hermetic across the module.
+
+    Points the global config tier at a non-existent path and stubs the repos
+    registry to empty, so unit tests never pick up this machine's real
+    ``~/.agent-worktrees/config.yaml`` or ``repos.yaml``. Tests that exercise
+    those tiers override these within the test.
+    """
+    missing_global = tmp_path_factory.mktemp("noglobal") / "config.yaml"
+    monkeypatch.setattr(cfg, "global_config_path", lambda: missing_global)
+    from agent_worktrees import repos as repos_mod
+
+    monkeypatch.setattr(
+        repos_mod, "read_registry", lambda: repos_mod.ReposRegistry()
+    )
+
 # ---------------------------------------------------------------------------
 # detect_platform
 # ---------------------------------------------------------------------------
@@ -193,7 +211,7 @@ class TestPRConfigParsing:
 
 
 class TestInRepoPRPolicy:
-    """The in-repo .agent-worktrees.yaml `pr:` block overrides machine-local."""
+    """In-repo config is the BASE for repo settings; machine-local overrides it."""
 
     def _write_machine(self, path: Path, anchor: Path, pr_block: str = "") -> None:
         path.write_text(
@@ -210,26 +228,41 @@ class TestInRepoPRPolicy:
             f"{pr_block}"
         )
 
-    def test_inrepo_overrides_machine_local(self, tmp_path: Path):
+    def test_inrepo_provides_base_when_no_machine_pr(self, tmp_path: Path):
+        # In-repo policy applies when the machine-local file says nothing.
         anchor = tmp_path / "ext"
         anchor.mkdir()
         (anchor / cfg.INREPO_CONFIG_FILENAME).write_text(
             "pr:\n  enabled: true\n  required: true\n  provider: gitea\n"
         )
         cfgfile = tmp_path / "config.yaml"
-        # Machine-local says disabled; in-repo says required -> in-repo wins.
-        self._write_machine(
-            cfgfile, anchor,
-            "    pr:\n      enabled: false\n",
-        )
+        self._write_machine(cfgfile, anchor)
         pr = cfg.load_config(cfgfile).repos["ext"].pr
         assert pr.enabled is True
         assert pr.required is True
         assert pr.provider == "gitea"
 
+    def test_machine_local_overrides_inrepo_per_key(self, tmp_path: Path):
+        # New precedence: machine-local wins per key over the in-repo base.
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        (anchor / cfg.INREPO_CONFIG_FILENAME).write_text(
+            "pr:\n  required: true\n  provider: gitea\n  branch_prefix: feature\n"
+        )
+        cfgfile = tmp_path / "config.yaml"
+        # Machine overrides provider only; required stays from the in-repo base.
+        self._write_machine(
+            cfgfile, anchor,
+            "    pr:\n      provider: github\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.provider == "github"      # machine-local override wins
+        assert pr.required is True          # in-repo base preserved
+        assert pr.branch_prefix == "feature"
+
     def test_machine_local_used_when_no_inrepo(self, tmp_path: Path):
         anchor = tmp_path / "ext"
-        anchor.mkdir()  # no .agent-worktrees.yaml
+        anchor.mkdir()  # no in-repo config
         cfgfile = tmp_path / "config.yaml"
         self._write_machine(
             cfgfile, anchor,
@@ -249,9 +282,168 @@ class TestInRepoPRPolicy:
             cfgfile, anchor,
             "    pr:\n      enabled: true\n",
         )
-        # Malformed in-repo pr -> ignored, machine-local used, no crash.
+        # Malformed in-repo -> ignored, machine-local used, no crash.
         pr = cfg.load_config(cfgfile).repos["ext"].pr
         assert pr.enabled is True
+
+
+class TestLayeredConfig:
+    """Three-tier merge: global < in-repo < machine-local; optional machine file."""
+
+    def _machine(self, path: Path, anchor: Path, *, extra: str = "", pr: str = ""):
+        path.write_text(
+            "repo_name: ext\n"
+            "srcroot: /tmp/src\n"
+            "machine: lambda-core\n"
+            "platform: wsl\n"
+            "repos:\n"
+            "  ext:\n"
+            f"    anchor: {anchor}\n"
+            "    worktree_root: /tmp/src/.worktrees/ext\n"
+            f"{extra}{pr}"
+        )
+
+    def test_inrepo_dir_form_read(self, tmp_path: Path):
+        # Preferred location: <anchor>/.agent-worktrees/config.yaml (dir form).
+        anchor = tmp_path / "ext"
+        (anchor / cfg.INREPO_CONFIG_DIRNAME).mkdir(parents=True)
+        cfg.inrepo_config_path(anchor).write_text(
+            "default_branch: main\nremote: upstream\n"
+            "pr:\n  required: true\n  strategy: keep-alive\n"
+        )
+        cfgfile = tmp_path / "config.yaml"
+        self._machine(cfgfile, anchor)
+        repo = cfg.load_config(cfgfile).repos["ext"]
+        assert repo.default_branch == "main"
+        assert repo.remote == "upstream"
+        assert repo.pr.required is True
+        assert repo.pr.strategy == "keep-alive"
+
+    def test_dir_form_wins_over_legacy_single_file(self, tmp_path: Path):
+        anchor = tmp_path / "ext"
+        (anchor / cfg.INREPO_CONFIG_DIRNAME).mkdir(parents=True)
+        cfg.inrepo_config_path(anchor).write_text("pr:\n  provider: github\n")
+        (anchor / cfg.INREPO_CONFIG_FILENAME).write_text("pr:\n  provider: gitea\n")
+        cfgfile = tmp_path / "config.yaml"
+        self._machine(cfgfile, anchor)
+        repo = cfg.load_config(cfgfile).repos["ext"]
+        assert repo.pr.provider == "github"  # dir form takes precedence
+
+    def test_legacy_single_file_backcompat(self, tmp_path: Path):
+        # Old .agent-worktrees.yaml (pr-only) still honored when no dir form.
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        (anchor / cfg.INREPO_CONFIG_FILENAME).write_text(
+            "pr:\n  required: true\n  provider: gitea\n"
+        )
+        cfgfile = tmp_path / "config.yaml"
+        self._machine(cfgfile, anchor)
+        repo = cfg.load_config(cfgfile).repos["ext"]
+        assert repo.pr.required is True
+        assert repo.pr.provider == "gitea"
+
+    def test_global_repo_defaults_underlie_inrepo(self, tmp_path: Path, monkeypatch):
+        # Global repo_defaults are the lowest tier; in-repo overrides them.
+        gpath = tmp_path / "global.yaml"
+        gpath.write_text(
+            "repo_defaults:\n  remote: origin\n  pr:\n    provider: gitea\n"
+        )
+        monkeypatch.setattr(cfg, "global_config_path", lambda: gpath)
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        (anchor / cfg.INREPO_CONFIG_FILENAME).write_text(
+            "pr:\n  required: true\n"   # in-repo adds required; inherits provider
+        )
+        cfgfile = tmp_path / "config.yaml"
+        self._machine(cfgfile, anchor)
+        repo = cfg.load_config(cfgfile).repos["ext"]
+        assert repo.remote == "origin"        # from global defaults
+        assert repo.pr.provider == "gitea"    # from global defaults
+        assert repo.pr.required is True        # from in-repo
+
+    def test_global_provides_toplevel_defaults(self, tmp_path: Path, monkeypatch):
+        gpath = tmp_path / "global.yaml"
+        gpath.write_text("srcroot: /global/src\nplatform: wsl\n")
+        monkeypatch.setattr(cfg, "global_config_path", lambda: gpath)
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        # Machine-local omits srcroot -> falls back to global.
+        cfgfile = tmp_path / "config.yaml"
+        cfgfile.write_text(
+            "repo_name: ext\nmachine: lambda-core\nplatform: wsl\n"
+            "repos:\n  ext:\n"
+            f"    anchor: {anchor}\n"
+            "    worktree_root: /tmp/wt\n"
+        )
+        conf = cfg.load_config(cfgfile)
+        assert conf.srcroot == "/global/src"
+
+    def test_machine_local_toplevel_overrides_global(self, tmp_path: Path, monkeypatch):
+        gpath = tmp_path / "global.yaml"
+        gpath.write_text("srcroot: /global/src\n")
+        monkeypatch.setattr(cfg, "global_config_path", lambda: gpath)
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        cfgfile = tmp_path / "config.yaml"
+        cfgfile.write_text(
+            "repo_name: ext\nsrcroot: /machine/src\nmachine: lambda-core\n"
+            "platform: wsl\nrepos:\n  ext:\n"
+            f"    anchor: {anchor}\n    worktree_root: /tmp/wt\n"
+        )
+        assert cfg.load_config(cfgfile).srcroot == "/machine/src"
+
+    def test_convention_repo_no_machine_local_uses_registry(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # No machine-local file: anchor comes from the repos registry,
+        # settings from the repo's own in-repo config.
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        (anchor / cfg.INREPO_CONFIG_FILENAME).write_text(
+            "pr:\n  required: true\n  provider: gitea\n"
+        )
+        from agent_worktrees import repos as repos_mod
+
+        registry = repos_mod.ReposRegistry(
+            repos={
+                "ext": repos_mod.RepoEntry(
+                    name="ext", repo_class="worktree",
+                    paths={"wsl": str(anchor)},
+                )
+            }
+        )
+        monkeypatch.setattr(repos_mod, "read_registry", lambda: registry)
+        monkeypatch.setenv("WORKTREE_PROJECT", "ext")
+
+        missing = tmp_path / "no-machine-config.yaml"  # does not exist
+        conf = cfg.load_config(missing)
+        repo = conf.repos["ext"]
+        assert repo.anchor == str(anchor)
+        assert repo.pr.required is True
+        assert repo.pr.provider == "gitea"
+
+    def test_no_repo_resolvable_raises(self, tmp_path: Path, monkeypatch):
+        # No machine-local repos, empty registry -> cannot resolve any repo.
+        monkeypatch.setenv("WORKTREE_PROJECT", "ext")
+        missing = tmp_path / "absent.yaml"
+        with pytest.raises(ValueError, match="No repo could be resolved"):
+            cfg.load_config(missing)
+
+    def test_foreign_repo_machine_local_only(self, tmp_path: Path):
+        # A foreign repo with no in-repo config loads purely from machine-local.
+        anchor = tmp_path / "work-product"
+        anchor.mkdir()  # no .agent-worktrees config in the repo
+        cfgfile = tmp_path / "config.yaml"
+        cfgfile.write_text(
+            "repo_name: ext\nmachine: lambda-core\nplatform: wsl\n"
+            "repos:\n  ext:\n"
+            f"    anchor: {anchor}\n    worktree_root: /tmp/wt\n"
+            "    default_branch: develop\n"
+            "    pr:\n      required: true\n"
+        )
+        repo = cfg.load_config(cfgfile).repos["ext"]
+        assert repo.default_branch == "develop"
+        assert repo.pr.required is True
 
 
 # ---------------------------------------------------------------------------
