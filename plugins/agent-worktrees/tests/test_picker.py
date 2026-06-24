@@ -130,3 +130,48 @@ class TestDataModels:
         assert ItemKind.ACTION == "action"
         assert ItemKind.DIMMED == "dimmed"
         assert ItemKind.SEPARATOR == "separator"
+
+
+# ---------------------------------------------------------------------------
+# _sync_status_tag — picker ahead/behind tag (#1106)
+# ---------------------------------------------------------------------------
+
+class TestSyncStatusTag:
+    def _info(self, state, ahead, behind):
+        from agent_worktrees import git_ops
+        return git_ops.WorktreeStateInfo(
+            state=state, ahead=ahead, behind=behind,
+        )
+
+    def test_diverged_shows_both(self):
+        from agent_worktrees import git_ops
+        from agent_worktrees.__main__ import _sync_status_tag
+        tag = _sync_status_tag(self._info(git_ops.WorktreeState.WIP, 2, 3))
+        assert tag == " ↑2↓3"
+
+    def test_behind_only(self):
+        from agent_worktrees import git_ops
+        from agent_worktrees.__main__ import _sync_status_tag
+        tag = _sync_status_tag(self._info(git_ops.WorktreeState.UNUSED, 0, 4))
+        assert tag == " ↓4"
+
+    def test_ahead_only(self):
+        from agent_worktrees import git_ops
+        from agent_worktrees.__main__ import _sync_status_tag
+        tag = _sync_status_tag(self._info(git_ops.WorktreeState.WIP, 5, 0))
+        assert tag == " ↑5"
+
+    def test_completed_suppresses_ahead(self):
+        # A squash-merged (COMPLETED) worktree carries pre-squash commits, so
+        # raw ahead > 0 -- but its content is on master, so the ↑ahead half is
+        # suppressed and only the (genuine) behind count remains (#1106).
+        from agent_worktrees import git_ops
+        from agent_worktrees.__main__ import _sync_status_tag
+        tag = _sync_status_tag(self._info(git_ops.WorktreeState.COMPLETED, 1, 2))
+        assert tag == " ↓2"
+
+    def test_completed_ahead_only_is_blank(self):
+        from agent_worktrees import git_ops
+        from agent_worktrees.__main__ import _sync_status_tag
+        tag = _sync_status_tag(self._info(git_ops.WorktreeState.COMPLETED, 3, 0))
+        assert tag == ""

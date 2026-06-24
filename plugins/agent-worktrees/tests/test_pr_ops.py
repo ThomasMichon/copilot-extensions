@@ -328,6 +328,92 @@ class TestPRFinalizeAndPush:
         ok = fin.push_changes(wid, config)
         assert ok is False
 
+    # --- #1045: finalize must not false-block once the PR is merged -----------
+
+    def _simulate_squash_merge(self, config, wid, feature):
+        """Squash-merge *feature* into origin/master (mimics a Gitea merge).
+
+        Leaves ``origin/<feature>`` at its stale pre-merge head -- the exact
+        condition that tripped the old precondition (#1045).
+        """
+        anchor = config.default_repo.anchor
+        _git("fetch", "origin", cwd=anchor)
+        _git("checkout", "master", cwd=anchor)
+        _git("merge", "--squash", f"origin/{feature}", cwd=anchor)
+        _git("commit", "-m", f"Squash merge {feature}", cwd=anchor)
+        _git("push", "origin", "master", cwd=anchor)
+
+    def test_precondition_ok_after_merge(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        feature = "feature/add-feature-aaaa"
+        self._simulate_squash_merge(config, wid, feature)
+        # origin/<feature> is stale (pre-merge); the OLD check would false-block.
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr.state = "merged"
+        tracking.save_record(rec)
+        repo = config.default_repo
+        ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
+        assert ok is True, err
+        assert err is None
+
+    def test_precondition_ok_after_merge_remote_branch_deleted(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        feature = "feature/add-feature-aaaa"
+        self._simulate_squash_merge(config, wid, feature)
+        # Provider deleted the remote feature branch on merge.
+        _git("push", "origin", "--delete", feature, cwd=config.default_repo.anchor)
+        _git("fetch", "origin", "--prune", cwd=str(wt_path))
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        repo = config.default_repo
+        ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
+        assert ok is True, err
+
+    # --- #1106: reconcile merged branch pointers so the picker isn't diverged -
+
+    def test_reconcile_aligns_worktree_base_after_merge(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        feature = "feature/add-feature-aaaa"
+        self._simulate_squash_merge(config, wid, feature)
+        _git("fetch", "origin", cwd=str(wt_path))
+        repo = config.default_repo
+        wt_branch = f"worktree/{wid}"
+
+        # HEAD is on the feature branch (drift); worktree/<id> is a free pointer.
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == feature
+
+        fin._reconcile_merged_pointers(repo, str(wt_path), repo.anchor, wt_branch)
+
+        # worktree/<id> now aligns with origin/master -> 0 ahead in the picker.
+        wt_sha = _git("rev-parse", wt_branch, cwd=wt_path)
+        up_sha = _git("rev-parse", "origin/master", cwd=wt_path)
+        assert wt_sha == up_sha
+        # The live feature checkout is untouched.
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == feature
+
+    def test_reconcile_fast_forwards_anchor_default_branch(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        feature = "feature/add-feature-aaaa"
+        self._simulate_squash_merge(config, wid, feature)
+        repo = config.default_repo
+        anchor = repo.anchor
+        # Rewind the anchor's local master behind origin to prove the FF.
+        _git("reset", "--hard", "HEAD~1", cwd=anchor)
+        assert _git("rev-parse", "master", cwd=anchor) != \
+            _git("rev-parse", "origin/master", cwd=anchor)
+
+        fin._reconcile_merged_pointers(repo, str(wt_path), anchor, f"worktree/{wid}")
+
+        assert _git("rev-parse", "master", cwd=anchor) == \
+            _git("rev-parse", "origin/master", cwd=anchor)
+
 
 class TestPRRequiredEnforcement:
     """``pr.required`` blocks the direct-to-master path entirely."""
