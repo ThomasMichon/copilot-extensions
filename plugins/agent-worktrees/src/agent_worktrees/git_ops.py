@@ -564,6 +564,33 @@ def _parse_github_owner(url: str) -> str | None:
     return None
 
 
+def remote_slug(remote: str, *, cwd: str | Path) -> str | None:
+    """Return the hosting ``owner/name`` slug for *remote*, or None.
+
+    Parses the remote URL's last two path components (dropping a trailing
+    ``.git``), so it works for both https and ssh forms and for self-hosted
+    hosts with a path prefix, e.g.:
+
+        https://host/gitea/tmichon/aperture-labs.git -> tmichon/aperture-labs
+        git@github.com:owner/repo.git                -> owner/repo
+
+    This is the value a PR provider needs (the API is keyed on owner/name),
+    as opposed to the local project name.
+    """
+    url = _remote_url(remote, cwd=cwd)
+    if not url:
+        return None
+    s = url.strip().rstrip("/")
+    if s.endswith(".git"):
+        s = s[:-4]
+    s = s.rstrip("/")
+    # Normalize scp-like ssh (git@host:owner/repo) by splitting on ':' too.
+    parts = [p for p in re.split(r"[/:]", s) if p]
+    if len(parts) < 2:
+        return None
+    return f"{parts[-2]}/{parts[-1]}"
+
+
 @functools.cache
 def _gh_token_for_owner(owner: str) -> str | None:
     """Return a ``gh`` token for the GitHub account *owner*, or None.

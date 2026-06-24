@@ -97,6 +97,21 @@ class TestCrossAccountAuth:
     def test_parse_github_owner(self, url, owner):
         assert go._parse_github_owner(url) == owner
 
+    @pytest.mark.parametrize("url,slug", [
+        ("https://host/gitea/tmichon/aperture-labs.git", "tmichon/aperture-labs"),
+        ("https://github.com/owner/copilot-extensions.git", "owner/copilot-extensions"),
+        ("git@github.com:owner/repo.git", "owner/repo"),
+        ("ssh://git@host/owner/repo", "owner/repo"),
+        ("https://host/deep/path/org/proj.git/", "org/proj"),
+    ])
+    def test_remote_slug(self, monkeypatch, url, slug):
+        monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: url)
+        assert go.remote_slug("origin", cwd=".") == slug
+
+    def test_remote_slug_none_when_no_url(self, monkeypatch):
+        monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: None)
+        assert go.remote_slug("origin", cwd=".") is None
+
     def test_auth_args_empty_when_no_token(self, monkeypatch):
         monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: "https://github.com/Owner/r.git")
         monkeypatch.setattr(go, "_gh_token_for_owner", lambda owner: None)

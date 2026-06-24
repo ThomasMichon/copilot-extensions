@@ -459,11 +459,15 @@ class TestMultiPR:
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.prs[0].repo == "owner/other"
 
-    def test_create_pr_defaults_repo_to_worktree_repo(self, pr_repo):
-        config, wid, _wt, _ = pr_repo
+    def test_create_pr_defaults_repo_to_remote_slug(self, pr_repo):
+        # Default target repo = the remote's owner/name slug (what the provider
+        # API needs), not the local project name.
+        config, wid, wt_path, _ = pr_repo
         pr_ops.create_pr(wid, config, title="Add feature")
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
-        assert rec.prs[0].repo == rec.repo  # "ext"
+        expected = git_ops.remote_slug("origin", cwd=str(wt_path))
+        assert expected  # the bare-remote path yields a two-part slug
+        assert rec.prs[0].repo == expected
 
     def test_set_pr_selects_by_number_and_stamps_closed_at(self, pr_repo):
         config, wid, _wt, _ = pr_repo
