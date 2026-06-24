@@ -342,24 +342,21 @@ class TestLayeredConfig:
         assert repo.pr.required is True
         assert repo.pr.provider == "gitea"
 
-    def test_global_repo_defaults_underlie_inrepo(self, tmp_path: Path, monkeypatch):
-        # Global repo_defaults are the lowest tier; in-repo overrides them.
+    def test_global_carries_no_per_repo_settings(self, tmp_path: Path, monkeypatch):
+        # The global tier holds only machine-wide top-level settings; any
+        # per-repo keys placed there (e.g. repo_defaults) are NOT applied.
         gpath = tmp_path / "global.yaml"
         gpath.write_text(
-            "repo_defaults:\n  remote: origin\n  pr:\n    provider: gitea\n"
+            "repo_defaults:\n  remote: upstream\n  pr:\n    provider: github\n"
         )
         monkeypatch.setattr(cfg, "global_config_path", lambda: gpath)
         anchor = tmp_path / "ext"
-        anchor.mkdir()
-        (anchor / cfg.INREPO_CONFIG_FILENAME).write_text(
-            "pr:\n  required: true\n"   # in-repo adds required; inherits provider
-        )
+        anchor.mkdir()  # no in-repo config -> repo defaults come from dataclass
         cfgfile = tmp_path / "config.yaml"
         self._machine(cfgfile, anchor)
         repo = cfg.load_config(cfgfile).repos["ext"]
-        assert repo.remote == "origin"        # from global defaults
-        assert repo.pr.provider == "gitea"    # from global defaults
-        assert repo.pr.required is True        # from in-repo
+        assert repo.remote == "origin"            # repo_defaults NOT applied
+        assert repo.pr.provider == "gitea"        # default, not the global block
 
     def test_global_provides_toplevel_defaults(self, tmp_path: Path, monkeypatch):
         gpath = tmp_path / "global.yaml"
@@ -444,6 +441,25 @@ class TestLayeredConfig:
         repo = cfg.load_config(cfgfile).repos["ext"]
         assert repo.default_branch == "develop"
         assert repo.pr.required is True
+
+
+class TestGlobalConfigUserOwned:
+    """The global config is user-owned: scaffold-if-missing, never overwritten."""
+
+    def test_scaffold_then_never_overwrite(self, tmp_path: Path, monkeypatch):
+        from agent_worktrees import __main__ as m
+
+        gpath = tmp_path / "global.yaml"
+        monkeypatch.setattr(cfg, "global_config_path", lambda: gpath)
+
+        m._write_global_config("mach", "wsl", "/src")
+        assert gpath.exists()
+
+        # User edits it (adds profiles); a subsequent install must NOT clobber.
+        edited = gpath.read_text() + "\ncopilot_profiles:\n  - name: mine\n    label: x\n"
+        gpath.write_text(edited)
+        m._write_global_config("mach", "wsl", "/src")
+        assert gpath.read_text() == edited  # untouched, profiles preserved
 
 
 # ---------------------------------------------------------------------------

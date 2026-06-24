@@ -26,9 +26,9 @@ _PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 # across every machine that checks out the repo), as opposed to the
 # machine-local ``~/.{project}/config.yaml`` which carries machine-specific
 # paths. It is the **base** layer for a repo's settings; the machine-local
-# ``repos.<name>`` block overrides it per key, and a global ``repo_defaults``
-# block underlies it. The schema is **flat repo-settings** (no ``anchor`` /
-# ``worktree_root`` -- those are machine paths -- and no ``repos:`` map).
+# ``repos.<name>`` block overrides it per key. The schema is **flat
+# repo-settings** (no ``anchor`` / ``worktree_root`` -- those are machine
+# paths -- and no ``repos:`` map).
 #
 # Preferred location is the **directory form**
 # ``<anchor>/.agent-worktrees/config.yaml``; the legacy single-file
@@ -37,10 +37,11 @@ _PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 INREPO_CONFIG_DIRNAME = ".agent-worktrees"        # <anchor>/.agent-worktrees/config.yaml
 INREPO_CONFIG_FILENAME = ".agent-worktrees.yaml"  # legacy single-file fallback
 
-# Global, machine-wide defaults shared across every project on this machine:
-# top-level ``srcroot`` / ``machine`` / ``platform`` / ``copilot_profiles`` /
-# ``auto_fast_forward`` / ``headless``, plus an optional ``repo_defaults`` flat
-# block that underlies every repo's settings (lowest precedence). Lives at
+# Global, machine-wide config: the user-owned BASE layer holding only
+# machine-wide settings -- top-level ``srcroot`` / ``machine`` / ``platform`` /
+# ``copilot_profiles`` / ``auto_fast_forward`` / ``headless``. It never carries
+# per-repo settings or a registry of repos/machines; the full merged config for
+# a target repo is computed on demand by ``load_config``. Lives at
 # ``~/.agent-worktrees/config.yaml`` (the shared runtime root).
 GLOBAL_CONFIG_FILENAME = "config.yaml"
 
@@ -393,9 +394,10 @@ def load_config(path: Path | None = None) -> Config:
 
     Top-level fields (``srcroot``/``machine``/``platform``/``copilot_profiles``
     /``headless``/``auto_fast_forward``) resolve machine-local > global >
-    detected. Per-repo settings merge global ``repo_defaults`` < in-repo flat
-    settings < machine-local ``repos.<name>`` block. Anchors come from the
-    machine-local file or, when absent, from ``~/.agent-worktrees/repos.yaml``.
+    detected. Per-repo settings merge in-repo flat settings < machine-local
+    ``repos.<name>`` block (the global tier carries no per-repo settings).
+    Anchors come from the machine-local file or, when absent, from
+    ``~/.agent-worktrees/repos.yaml``.
 
     Args:
         path: Machine-local config path. Uses the default if None.
@@ -435,11 +437,6 @@ def load_config(path: Path | None = None) -> Config:
         or _project_name_safe()
     )
 
-    # Per-repo defaults that underlie every repo (lowest precedence).
-    global_repo_defaults = global_raw.get("repo_defaults") or {}
-    if not isinstance(global_repo_defaults, dict):
-        global_repo_defaults = {}
-
     machine_repos = machine_raw.get("repos") or {}
     if not isinstance(machine_repos, dict):
         machine_repos = {}
@@ -472,9 +469,10 @@ def load_config(path: Path | None = None) -> Config:
         # Tier 2: the repo's own in-repo flat settings (base for repo settings).
         inrepo_settings = _load_inrepo_config(anchor)
 
-        # Merge per-repo settings: global defaults < in-repo < machine-local.
-        merged = _deep_merge(global_repo_defaults, inrepo_settings)
-        merged = _deep_merge(merged, machine_repo)
+        # Merge per-repo settings: in-repo base < machine-local override.
+        # (The global tier carries only machine-wide top-level defaults --
+        # srcroot/machine/platform/profiles -- never per-repo settings.)
+        merged = _deep_merge(inrepo_settings, machine_repo)
 
         repos[name] = _build_repo_config(merged, anchor, str(worktree_root))
 

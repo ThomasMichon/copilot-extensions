@@ -3097,7 +3097,7 @@ def cmd_install(args: argparse.Namespace) -> int:
 
     # Deploy global machine-wide config (lowest tier), then per-project config
     config_path = proj_dir / "config.yaml"
-    _write_global_config(machine, plat, repo_dir.parent, force=args.force)
+    _write_global_config(machine, plat, repo_dir.parent)
     if not config_path.exists() or args.force:
         _write_config(config_path, repo_dir, machine, plat, project)
     else:
@@ -3319,7 +3319,7 @@ def cmd_register(args: argparse.Namespace) -> int:
 
     # Write global machine-wide config (lowest tier), then per-project config
     config_path = proj_dir / "config.yaml"
-    _write_global_config(machine, plat, repo_dir.parent, force=args.force)
+    _write_global_config(machine, plat, repo_dir.parent)
     if not config_path.exists() or args.force:
         _write_config(
             config_path, repo_dir, machine, plat, project, default_branch,
@@ -4806,18 +4806,21 @@ def _find_repo_dir() -> Path | None:
 
 
 def _write_global_config(
-    machine: str, plat: str, srcroot: Path | str, *, force: bool = False,
+    machine: str, plat: str, srcroot: Path | str,
 ) -> None:
-    """Write the global machine-wide config (~/.agent-worktrees/config.yaml).
+    """Scaffold the global machine-wide config (~/.agent-worktrees/config.yaml).
 
-    Carries machine-wide defaults (srcroot/machine/platform) shared by every
-    project on this machine -- the lowest config tier. Copilot backend profiles
-    are user-authored (left as a commented placeholder). Idempotent: skips an
-    existing file unless ``force`` so it never clobbers user-added profiles.
+    Carries machine-wide base settings (srcroot/machine/platform) plus
+    user-authored copilot_profiles -- the lowest config tier. This file is
+    **user-owned**: the installer scaffolds it once when missing, then **never**
+    overwrites it -- not even with ``--force`` (which targets installer-owned
+    artifacts, not the user's global base settings). The only thing that should
+    ever rewrite it is a deliberate schema migration. Always skips an existing
+    file so user-added profiles are never clobbered.
     """
     path = cfg.global_config_path()
-    if path.exists() and not force:
-        output.skipped(f"Global config exists at {path}")
+    if path.exists():
+        output.skipped(f"Global config exists at {path} (user-owned, left as-is)")
         return
     content = f"""# ~/.agent-worktrees/config.yaml
 # GLOBAL machine-wide agent-worktrees config (lowest precedence tier).

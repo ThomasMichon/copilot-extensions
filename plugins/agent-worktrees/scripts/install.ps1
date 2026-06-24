@@ -793,9 +793,9 @@ function Deploy-Config {
     <# Write config.yaml to the project dir if missing (or Force). Returns $true if written. #>
     param([string]$Machine)
 
-    # Global machine-wide config first (lowest tier).
+    # Global machine-wide config first (the user-owned base tier).
     $globalPath = Join-Path $InstallDir 'config.yaml'
-    if ((-not (Test-Path $globalPath)) -or $Force) {
+    if (-not (Test-Path $globalPath)) {
         $srcRootG = if ($RepoDir) { Split-Path -Parent $RepoDir } else { '' }
         @"
 # ~/.agent-worktrees/config.yaml
@@ -817,7 +817,8 @@ platform: windows
 "@ | Set-Content -Path $globalPath
         Write-ServiceChanged "Written global config: $globalPath"
     } else {
-        Write-ServiceSkipped "Global config exists at $globalPath"
+        # User-owned: scaffolded once, then never overwritten (not even -Force).
+        Write-ServiceSkipped "Global config exists at $globalPath (user-owned, left as-is)"
     }
 
     $configPath = Join-Path $ProjectDir 'config.yaml'
