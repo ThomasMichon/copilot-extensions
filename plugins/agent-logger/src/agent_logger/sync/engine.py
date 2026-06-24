@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from agent_logger.config import Config, load_config
 from agent_logger.segmenter.platform import detect_machine
@@ -128,6 +129,50 @@ def run_sync(
     return 0
 
 
+def run_push(
+    cfg: Config,
+    *,
+    source: str,
+    machine: str,
+    verbose: bool = False,
+) -> int:
+    """Push an explicit *source* directory under an explicit *machine* label.
+
+    Unlike :func:`run_sync` (which discovers the local ``~/.copilot`` source and
+    derives the machine name from the host), this lands a caller-supplied
+    directory into the configured target under an arbitrary machine subpath —
+    e.g. a CodeSpace's pulled ``~/.copilot`` under ``.codespaces/<name>``. The
+    source must contain ``session-state/`` and/or the top-level
+    ``session-store.db`` files, exactly like ``~/.copilot``.
+
+    Used by external callers (e.g. agent-codespaces) to reuse the agent-logger
+    storage pattern without importing the package. No global sync lock is taken:
+    the machine namespace is disjoint from the scheduled local sync.
+    """
+    if _automation_disabled():
+        print("session-sync: disabled via AGENT_LOGGER_SYNC_DISABLED")
+        return 0
+
+    src = Path(source).expanduser()
+    if not src.is_dir():
+        print(f"session-sync: source not found: {src}", file=sys.stderr)
+        return 1
+
+    target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
+
+    if verbose:
+        print(f"machine: {machine}")
+        print(f"source:  {src}")
+        print(f"target:  {target.describe()}")
+
+    result = target.push(src, machine, None)
+    if not result.ok:
+        print(f"session-sync: push failed: {result.detail}", file=sys.stderr)
+        return 1
+    print(f"session-sync: ok {result.detail} ({result.file_count} files)")
+    return 0
+
+
 def do_status(cfg: Config) -> int:
     machine = _machine(cfg)
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
@@ -160,6 +205,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--prune", action="store_true", help="prune old sessions after sync")
     p_run.add_argument("--verbose", action="store_true", help="verbose output")
 
+    p_push = sub.add_parser(
+        "push",
+        help="push an explicit source dir under an explicit machine label",
+    )
+    p_push.add_argument(
+        "--source", required=True,
+        help="source dir containing session-state/ and/or session-store.db",
+    )
+    p_push.add_argument(
+        "--machine", required=True,
+        help="machine label / subpath under the target root (e.g. .codespaces/<name>)",
+    )
+    p_push.add_argument("--verbose", action="store_true", help="verbose output")
+
     sub.add_parser("status", help="show resolved sync configuration")
     sub.add_parser("doctor", help="check the target is reachable/usable")
     return parser
@@ -172,6 +231,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run":
         return run_sync(
             cfg, dry_run=args.dry_run, prune=args.prune, verbose=args.verbose
+        )
+    if args.command == "push":
+        return run_push(
+            cfg, source=args.source, machine=args.machine, verbose=args.verbose
         )
     if args.command == "status":
         return do_status(cfg)
