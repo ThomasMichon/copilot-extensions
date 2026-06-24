@@ -581,13 +581,21 @@ def _push_changes_pr(
         return False
 
     head = git_ops._get_current_branch_safe(worktree_path)
+    # Accept ANY tracked PR branch as the feature to push (a worktree may carry
+    # parallel PRs): prefer the branch matching the current HEAD over the
+    # active PR's branch.
+    if head and any(p.branch == head for p in record.prs):
+        feature = head
     if head != feature:
         output.err(
-            f"PR mode: push-changes expects HEAD on the feature branch "
-            f"'{feature}', but it is on '{head}'. Checkout '{feature}' first "
-            f"(create-pr leaves you there)."
+            f"PR mode: push-changes expects HEAD on a tracked feature branch "
+            f"(active: '{feature}'), but it is on '{head}'. Checkout the "
+            f"feature branch first (create-pr leaves you there)."
         )
         return False
+
+    # The PRRecord this push updates -- the one matching the branch being pushed.
+    pushed_pr = next((p for p in record.prs if p.branch == feature), record.pr)
 
     if not git_ops.is_clean(cwd=worktree_path):
         dirty = git_ops.get_dirty_files(cwd=worktree_path)
@@ -639,16 +647,17 @@ def _push_changes_pr(
             pushed = git_ops.push(remote, feature, cwd=worktree_path, force_with_lease=True)
         if not pushed:
             output.err(f"Failed to push {feature} to {remote}.")
-            if record.pr.state in ("", "creating"):
+            if pushed_pr is not None and pushed_pr.state in ("", "creating"):
                 tracking.save_record(record)
             return False
 
         head_sha = git_ops.git(
             "rev-parse", "HEAD", cwd=worktree_path, check=False
         ).stdout.strip()
-        record.pr.head_sha = head_sha
-        if record.pr.state in ("", "creating"):
-            record.pr.state = "open"
+        if pushed_pr is not None:
+            pushed_pr.head_sha = head_sha
+            if pushed_pr.state in ("", "creating"):
+                pushed_pr.state = "open"
         tracking.save_record(record)
 
         activity.log_event(
@@ -871,13 +880,20 @@ def validate_and_finalize(
             if not git_ops.delete_branch(branch, cwd=anchor):
                 output.warn(f"Could not delete branch {branch} (may already be gone).")
 
-            if pr_mode and record.pr.branch:
-                print(f"Removing local feature branch {record.pr.branch}...")
-                git_ops.delete_branch(record.pr.branch, cwd=anchor, force=True)
-                output.info(
-                    f"Remote feature branch '{record.pr.branch}' left intact on "
-                    f"{repo.remote} -- it backs the PR and is the recovery source."
-                )
+            if pr_mode and record.prs:
+                # Remove every tracked PR's local feature branch (serial +
+                # parallel); the remote branches are left intact as PR backing.
+                seen: set[str] = set()
+                for pr in record.prs:
+                    if not pr.branch or pr.branch in seen:
+                        continue
+                    seen.add(pr.branch)
+                    print(f"Removing local feature branch {pr.branch}...")
+                    git_ops.delete_branch(pr.branch, cwd=anchor, force=True)
+                    output.info(
+                        f"Remote feature branch '{pr.branch}' left intact on "
+                        f"{repo.remote} -- it backs the PR and is the recovery source."
+                    )
 
             wt_dir = Path(worktree_path)
             if wt_dir.exists():

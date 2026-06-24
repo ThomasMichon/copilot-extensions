@@ -301,7 +301,15 @@ feature branch off `worktree/{id}`, resets the worktree base to the upstream
 tip, checks out the feature branch, and **pushes the feature branch**. Records
 `pr.state` and prints the branch, base/head SHAs, and provider. Add `--json`
 to capture the metadata, or `--branch NAME` to override the generated name.
-`create-pr` is idempotent -- safe to re-run.
+Use `--repo owner/name` to target a different repo than the worktree's own,
+and `--new` to force a brand-new PR even when one is already open (parallel
+PRs). `create-pr` is idempotent -- safe to re-run.
+
+A worktree can track **multiple PRs** over its life. When the active PR is
+already **merged or closed**, `create-pr` automatically opens a *fresh* PR
+(new branch off the current default-branch tip) instead of reusing the merged
+branch -- so landing a second change from the same worktree just works. See
+*Multiple PRs per worktree* below.
 
 ### Step 2: Delegate PR creation to the provider sub-agent
 
@@ -326,6 +334,28 @@ agent-worktrees set-pr --url <URL> --number <N>
 ```
 
 Inspect tracked PR state any time with `agent-worktrees pr-status [--json]`.
+Add `--all` to list every tracked PR (serial/parallel), not just the active
+one. When a worktree tracks several PRs, `set-pr` updates the **active** PR by
+default; target a specific one with `--pr <number>` or
+`--select-branch <branch>`.
+
+### Multiple PRs per worktree (serial & parallel)
+
+One worktree can track more than one PR -- recorded as a `prs:` list in the
+tracking YAML, each entry self-describing (its own `state`, `branch`, target
+`repo`, timestamps). The **active** PR (what no-selector commands target) is
+the most recent non-terminal (open/creating) PR, or the most recent overall
+when none are live.
+
+- **Serial (the common case):** land a PR, then start the next change in the
+  same worktree. Once the first PR is merged, just run `create-pr` again --
+  it appends a fresh PR with a new branch and a current base, never reusing
+  the merged branch.
+- **Parallel:** keep one PR open and open another from the same worktree with
+  `create-pr --new`. Address a specific one with `push-changes` (from its
+  feature branch) or `set-pr --pr <n>`.
+- **Cleanup safety:** a worktree with any **open** PR is never reaped by
+  cleanup, even if its current HEAD's content is already on master.
 
 ### Iterating on review feedback (keep-alive disposition)
 

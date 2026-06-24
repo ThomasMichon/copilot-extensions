@@ -467,3 +467,133 @@ class TestPRRequiredEnforcement:
         assert ok is True
 
 
+
+
+# ---------------------------------------------------------------------------
+# Multi-PR worktree tracking (#1107)
+# ---------------------------------------------------------------------------
+
+class TestMultiPR:
+    def test_serial_re_pr_after_merge_opens_fresh_pr(self, pr_repo):
+        """The #1088->#1104 regression: a merged PR must NOT be reused."""
+        config, wid, wt_path, _ = pr_repo
+        r1 = pr_ops.create_pr(wid, config, title="Add feature")
+        assert r1["success"], r1
+        assert r1["branch"] == "feature/add-feature-aaaa"
+        pr_ops.set_pr(wid, number=1, state="merged")
+
+        # Back to the base branch; do new work for a second PR.
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "d.txt").write_text("second\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "second work", cwd=wt_path)
+
+        r2 = pr_ops.create_pr(wid, config, title="Second feature")
+        assert r2["success"], r2
+        assert "rerun" not in r2  # NOT the reuse path
+        assert r2["branch"] == "feature/second-feature-aaaa"
+
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert len(rec.prs) == 2
+        assert rec.prs[0].state == "merged"
+        assert rec.prs[0].branch == "feature/add-feature-aaaa"
+        assert rec.prs[1].state == "open"
+        assert rec.prs[1].branch == "feature/second-feature-aaaa"
+        assert rec.active_pr().branch == "feature/second-feature-aaaa"
+        # Fresh base_sha = current origin/master, not the first PR's stale base.
+        assert rec.prs[1].base_sha == _git("rev-parse", "origin/master", cwd=wt_path)
+
+    def test_new_flag_forces_parallel_pr_while_open(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")  # PR #1 open
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "e.txt").write_text("parallel\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "parallel work", cwd=wt_path)
+
+        r = pr_ops.create_pr(wid, config, title="Parallel feature", new=True)
+        assert r["success"], r
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert len(rec.prs) == 2
+        assert {p.state for p in rec.prs} == {"open"}
+        assert rec.prs[1].branch == "feature/parallel-feature-aaaa"
+
+    def test_create_pr_records_target_repo(self, pr_repo):
+        config, wid, _wt, _ = pr_repo
+        r = pr_ops.create_pr(wid, config, title="Add feature", target_repo="owner/other")
+        assert r["success"], r
+        assert r["repo"] == "owner/other"
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.prs[0].repo == "owner/other"
+
+    def test_create_pr_defaults_repo_to_worktree_repo(self, pr_repo):
+        config, wid, _wt, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.prs[0].repo == rec.repo  # "ext"
+
+    def test_set_pr_selects_by_number_and_stamps_closed_at(self, pr_repo):
+        config, wid, _wt, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        pr_ops.set_pr(wid, number=42, state="open")
+        res = pr_ops.set_pr(wid, select_number=42, state="merged")
+        assert res["success"], res
+        assert res["state"] == "merged"
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.prs[0].closed_at  # terminal -> stamped
+
+    def test_set_pr_unknown_selector_errors(self, pr_repo):
+        config, wid, _wt, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        res = pr_ops.set_pr(wid, select_number=999, state="merged")
+        assert res["success"] is False
+        assert "999" in res["error"]
+
+    def test_pr_status_all_lists_history(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        pr_ops.set_pr(wid, number=1, state="merged")
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "f.txt").write_text("again\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "more", cwd=wt_path)
+        pr_ops.create_pr(wid, config, title="Another feature")
+
+        res = pr_ops.pr_status(wid, all_prs=True)
+        assert res["pr_count"] == 2
+        assert len(res["prs"]) == 2
+        # active = the open one
+        assert res["state"] == "open"
+        assert res["branch"] == "feature/another-feature-aaaa"
+
+
+# ---------------------------------------------------------------------------
+# _worktree_to_dict PR exposure (#1107)
+# ---------------------------------------------------------------------------
+
+class TestWorktreeToDictPRs:
+    def _rec(self, prs):
+        return tracking.WorktreeRecord(
+            worktree_id="wt-001", branch="worktree/wt-001",
+            worktree_path="/tmp/wt", repo="ext", machine="m", platform="wsl",
+            started_at="2026-06-01T10:00:00", last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+            handoff_prompt=None, sessions=None, prs=prs,
+        )
+
+    def test_no_prs_omits_pr_keys(self):
+        from agent_worktrees.__main__ import _worktree_to_dict
+        d = _worktree_to_dict(self._rec([]))
+        assert "pr" not in d and "prs" not in d and "pr_count" not in d
+
+    def test_prs_exposed_with_active_and_count(self):
+        from agent_worktrees.__main__ import _worktree_to_dict
+        from agent_worktrees.tracking import PRRecord
+        rec = self._rec([
+            PRRecord(state="merged", branch="a", number=1),
+            PRRecord(state="open", branch="b", number=2),
+        ])
+        d = _worktree_to_dict(rec)
+        assert d["pr_count"] == 2
+        assert d["pr"]["number"] == 2  # active = the open one
+        assert [p["number"] for p in d["prs"]] == [1, 2]

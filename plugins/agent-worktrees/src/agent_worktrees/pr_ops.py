@@ -67,6 +67,8 @@ def create_pr(
     *,
     title: str | None = None,
     branch: str | None = None,
+    target_repo: str | None = None,
+    new: bool = False,
     dry_run: bool = False,
 ) -> dict:
     """Squash worktree commits, create + push a feature branch for a PR.
@@ -74,6 +76,14 @@ def create_pr(
     Returns a JSON-friendly result dict.  On success it includes ``branch``,
     ``remote``, ``base_sha``, ``head_sha``, ``provider`` and ``default_branch``
     so the agent can delegate PR creation to the right provider sub-agent.
+
+    A worktree can track multiple PRs.  When the active PR is **terminal**
+    (merged/closed) -- or ``new`` is set, or none exists -- a *fresh* PR is
+    appended (new branch off the current default-branch tip).  When a **live**
+    (open/creating) PR exists, its branch is reused and the call iterates it.
+
+    ``target_repo`` (``--repo owner/name``) records the PR's target repo;
+    it defaults to the worktree's own repo.
 
     Idempotent: safe to re-run.  If the worktree is already on the feature
     branch (a prior run pushed it or failed after checkout), the branch is
@@ -111,11 +121,17 @@ def create_pr(
 
     eff_title = title or (record.title if record else None) or worktree_id
 
-    # Resolve the feature branch name: explicit > already-recorded > derived.
+    # Resolve the active PR and whether it is still live (can receive pushes).
+    # A *terminal* active PR (merged/closed) must NOT have its branch reused --
+    # pushing onto a merged branch does not reopen it (the #1088->#1104 bug).
+    active = record.active_pr() if record else None
+    active_is_live = active is not None and not tracking._pr_is_terminal(active)
+
+    # Resolve the feature branch name: explicit > live active PR > derived.
     if branch:
         feature_branch = branch
-    elif record and record.pr and record.pr.branch:
-        feature_branch = record.pr.branch
+    elif active_is_live and not new and active.branch:
+        feature_branch = active.branch
     else:
         feature_branch = feature_branch_name(prcfg.branch_prefix, eff_title, worktree_id)
 
@@ -153,7 +169,7 @@ def create_pr(
             f"Checkout '{wt_branch}' before create-pr."
         )}
 
-    reusing = bool(record and record.pr and record.pr.branch == feature_branch)
+    reusing = bool(active_is_live and not new and active and active.branch == feature_branch)
     if not reusing:
         if git_ops.local_branch_exists(feature_branch, cwd=worktree_path) or \
                 git_ops.remote_branch_exists(remote, feature_branch, cwd=worktree_path):
@@ -171,10 +187,29 @@ def create_pr(
 
     orig_sha = _rev(wt_branch, cwd=worktree_path)
 
-    # Record the transitional 'creating' state up front so a later failure is
-    # recoverable.
+    # Resolve the target PRRecord: reuse the live active PR, or append a fresh
+    # one (serial re-PR / parallel / explicit --new).  Record the transitional
+    # 'creating' state up front so a later failure is recoverable.
+    default_pr_repo = target_repo or (record.repo if record else "") or ""
+    target_pr: PRRecord | None = None
     if record is not None:
-        record.pr = PRRecord(state="creating", branch=feature_branch, provider=prcfg.provider)
+        if reusing and active is not None:
+            target_pr = active
+            target_pr.state = "creating"
+            target_pr.branch = feature_branch
+            if not target_pr.provider:
+                target_pr.provider = prcfg.provider
+            if target_repo:
+                target_pr.repo = target_repo
+            if not target_pr.opened_at:
+                target_pr.opened_at = tracking._now_iso()
+        else:
+            target_pr = PRRecord(
+                state="creating", branch=feature_branch,
+                provider=prcfg.provider, repo=default_pr_repo,
+                opened_at=tracking._now_iso(),
+            )
+            record.prs.append(target_pr)
         tracking.save_record(record)
 
     # 1. Squash all worktree commits into one (always, regardless of strategy).
@@ -226,15 +261,15 @@ def create_pr(
             f"retry (re-run create-pr)."
         )}
 
-    # 7. Record the open state.
-    prev_url = record.pr.url if record and record.pr else ""
-    prev_num = record.pr.number if record and record.pr else None
-    if record is not None:
-        record.pr = PRRecord(
-            state="open", branch=feature_branch, base_sha=base_sha,
-            head_sha=head_sha, url=prev_url, number=prev_num,
-            provider=prcfg.provider,
-        )
+    # 7. Record the open state on the target PR (preserving any url/number
+    #    already recorded for a reused live PR).
+    if record is not None and target_pr is not None:
+        target_pr.state = "open"
+        target_pr.branch = feature_branch
+        target_pr.base_sha = base_sha
+        target_pr.head_sha = head_sha
+        if not target_pr.provider:
+            target_pr.provider = prcfg.provider
         tracking.save_record(record)
 
     git_ops.delete_backup_ref(cwd=worktree_path)
@@ -244,6 +279,8 @@ def create_pr(
         "branch": feature_branch, "remote": remote,
         "base_sha": base_sha, "head_sha": head_sha,
         "provider": prcfg.provider, "default_branch": repo.default_branch,
+        "repo": (target_pr.repo if target_pr else default_pr_repo),
+        "pr_count": len(record.prs) if record else 0,
     }
 
 
@@ -268,12 +305,15 @@ def set_pr(
     state: str | None = None,
     provider: str | None = None,
     branch: str | None = None,
+    select_number: int | None = None,
+    select_branch: str | None = None,
 ) -> dict:
     """Record PR metadata (URL/number/state/provider) on a worktree record.
 
-    Called by the agent after a provider sub-agent creates the PR.  Merges
-    into any existing ``pr`` block rather than replacing it, so create-pr's
-    branch/base/head SHAs are preserved.
+    Called by the agent after a provider sub-agent creates the PR.  Updates
+    the **active** PR by default, or a specific one selected by ``--pr`` /
+    ``--branch``, so create-pr's branch/base/head SHAs are preserved.  When a
+    state transition reaches a terminal state, ``closed_at`` is stamped.
     """
     base: dict = {"success": False, "worktree_id": worktree_id}
     record = _load_record_or_none(worktree_id)
@@ -286,7 +326,26 @@ def set_pr(
             f"{', '.join(_VALID_PR_STATES)}."
         )}
 
-    pr = record.pr or PRRecord()
+    # Select which PR to update: explicit selector > active > new.
+    pr: PRRecord | None
+    if select_number is not None:
+        pr = next((p for p in record.prs if p.number == select_number), None)
+        if pr is None:
+            return {**base, "error": (
+                f"No tracked PR #{select_number} for '{worktree_id}'."
+            )}
+    elif select_branch is not None:
+        pr = next((p for p in record.prs if p.branch == select_branch), None)
+        if pr is None:
+            return {**base, "error": (
+                f"No tracked PR on branch '{select_branch}' for '{worktree_id}'."
+            )}
+    else:
+        pr = record.active_pr()
+        if pr is None:
+            pr = PRRecord()
+            record.prs.append(pr)
+
     if url is not None:
         pr.url = url
     if number is not None:
@@ -300,22 +359,34 @@ def set_pr(
     elif not pr.state:
         # First time recording metadata with no explicit state -> open.
         pr.state = "open"
+    if not pr.opened_at:
+        pr.opened_at = tracking._now_iso()
+    if tracking._pr_is_terminal(pr) and not pr.closed_at:
+        pr.closed_at = tracking._now_iso()
 
-    record.pr = pr
     tracking.save_record(record)
     return {**base, "success": True, **_pr_to_dict(pr)}
 
 
-def pr_status(worktree_id: str) -> dict:
-    """Return the tracked PR metadata for a worktree (for pr-status)."""
+def pr_status(worktree_id: str, *, all_prs: bool = False) -> dict:
+    """Return the tracked PR metadata for a worktree (for pr-status).
+
+    Returns the **active** PR by default.  With ``all_prs`` the full ``prs``
+    history is included alongside the active one.  ``pr_count`` is always
+    present so the orphan-detection probe can key on existence.
+    """
     base: dict = {"worktree_id": worktree_id}
     record = _load_record_or_none(worktree_id)
     if record is None:
-        return {**base, "has_pr": False,
+        return {**base, "has_pr": False, "pr_count": 0,
                 "error": f"No tracking record found for '{worktree_id}'."}
-    if record.pr is None:
-        return {**base, "has_pr": False}
-    return {**base, "has_pr": True, **_pr_to_dict(record.pr)}
+    active = record.active_pr()
+    result = {**base, "has_pr": active is not None, "pr_count": len(record.prs)}
+    if active is not None:
+        result.update(_pr_to_dict(active))
+    if all_prs:
+        result["prs"] = [_pr_to_dict(p) for p in record.prs]
+    return result
 
 
 def _pr_to_dict(pr: PRRecord) -> dict:
@@ -327,6 +398,9 @@ def _pr_to_dict(pr: PRRecord) -> dict:
         "url": pr.url,
         "number": pr.number,
         "provider": pr.provider,
+        "repo": pr.repo,
+        "opened_at": pr.opened_at,
+        "closed_at": pr.closed_at,
     }
 
 
@@ -347,16 +421,23 @@ def _push_existing_feature(
         return {**base, "error": (
             f"Failed to (re)push '{feature_branch}' to '{remote}'."
         )}
-    base_sha = record.pr.base_sha if record and record.pr else ""
-    prev_url = record.pr.url if record and record.pr else ""
-    prev_num = record.pr.number if record and record.pr else None
+    # Match the PRRecord for this branch (a worktree may track several); update
+    # it in place rather than clobbering an unrelated active PR.
+    target: PRRecord | None = None
     if record is not None:
-        record.pr = PRRecord(
-            state="open", branch=feature_branch, base_sha=base_sha,
-            head_sha=head_sha, url=prev_url, number=prev_num,
-            provider=prcfg.provider,
-        )
+        target = next((p for p in record.prs if p.branch == feature_branch), None)
+        if target is None:
+            target = PRRecord(
+                branch=feature_branch, provider=prcfg.provider,
+                repo=record.repo or "", opened_at=tracking._now_iso(),
+            )
+            record.prs.append(target)
+        target.state = "open"
+        target.head_sha = head_sha
+        if not target.provider:
+            target.provider = prcfg.provider
         tracking.save_record(record)
+    base_sha = target.base_sha if target else ""
     return {
         **base, "success": True, "state": "open", "rerun": True,
         "branch": feature_branch, "remote": remote,
