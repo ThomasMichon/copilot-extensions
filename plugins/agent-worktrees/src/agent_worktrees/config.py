@@ -97,12 +97,15 @@ class PRConfig:
     # the public API. ``token_command`` (a shell command that prints a token,
     # e.g. a vault fetch) takes precedence over ``token_env`` (an env var
     # name); GitHub falls back to ``gh`` auth when neither is set. ``labels``
-    # are applied to every opened PR (``{machine}`` is templated).
+    # are applied to every opened PR (``{machine}`` is templated). ``auto_open``
+    # is **opt-in** (default False): only when a repo sets it true does
+    # ``create-pr`` open the PR via the provider; otherwise the branch is just
+    # pushed and PR creation is left to the agent (manual flow).
     api_base: str = ""
     token_env: str = ""
     token_command: str = ""
     labels: tuple[str, ...] = ()
-    auto_open: bool = True         # open the PR via the provider after push
+    auto_open: bool = False        # opt-in: open the PR via the provider after push
 
 
 @dataclass(frozen=True)
@@ -685,7 +688,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         token_env=str(raw.get("token_env", "")),
         token_command=str(raw.get("token_command", "")),
         labels=labels,
-        auto_open=bool(raw.get("auto_open", True)),
+        auto_open=bool(raw.get("auto_open", False)),
     )
 
 

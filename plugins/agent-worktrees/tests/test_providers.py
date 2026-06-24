@@ -262,3 +262,31 @@ class TestCreatePRAutoOpen:
         scope = fake.captured["scope"]
         assert attr.parse_marker(scope.body) is None
         assert scope.body == "Hello"
+
+
+class TestAutoOpenDefault:
+    def test_auto_open_is_opt_in(self):
+        from agent_worktrees.config import _parse_pr
+        assert cfg.PRConfig().auto_open is False
+        assert _parse_pr({"provider": "gitea"}).auto_open is False
+        assert _parse_pr({"auto_open": True}).auto_open is True
+
+    def test_create_pr_skips_provider_by_default(self, pr_repo, monkeypatch):
+        # Default config (no auto_open) must NOT attempt to open a PR.
+        import dataclasses
+        config, wid, _wt, _ = pr_repo
+        repo = config.repos["ext"]
+        # Re-enable a default PRConfig (auto_open defaults False).
+        pr = cfg.PRConfig(enabled=True, provider="gitea", branch_prefix="feature")
+        config = dataclasses.replace(
+            config, repos={"ext": dataclasses.replace(repo, pr=pr)}
+        )
+
+        def _boom(name):
+            raise AssertionError("provider must not be called when auto_open is default-off")
+
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", _boom)
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+        assert res["success"] is True
+        assert "pr_opened" not in res
+        assert "pr_open_error" not in res
