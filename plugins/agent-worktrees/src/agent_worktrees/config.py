@@ -22,13 +22,27 @@ import yaml
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 
-# In-repo, committed config file carrying *repo-level policy* (shared across
-# every machine that checks out the repo), as opposed to the machine-local
-# ~/.{project}/config.yaml which carries machine-specific paths. Currently
-# scopes the ``pr:`` block so PR-workflow policy (enabled/required/provider/
-# strategy/branch_prefix) lives with the code and needs no per-machine
-# replication. Lives at the repo root (the anchor checkout).
-INREPO_CONFIG_FILENAME = ".agent-worktrees.yaml"
+# In-repo, committed config carrying *repo-level policy/settings* (shared
+# across every machine that checks out the repo), as opposed to the
+# machine-local ``~/.{project}/config.yaml`` which carries machine-specific
+# paths. It is the **base** layer for a repo's settings; the machine-local
+# ``repos.<name>`` block overrides it per key, and a global ``repo_defaults``
+# block underlies it. The schema is **flat repo-settings** (no ``anchor`` /
+# ``worktree_root`` -- those are machine paths -- and no ``repos:`` map).
+#
+# Preferred location is the **directory form**
+# ``<anchor>/.agent-worktrees/config.yaml``; the legacy single-file
+# ``<anchor>/.agent-worktrees.yaml`` (which carried only a ``pr:`` block) is
+# still read as a back-compat fallback.
+INREPO_CONFIG_DIRNAME = ".agent-worktrees"        # <anchor>/.agent-worktrees/config.yaml
+INREPO_CONFIG_FILENAME = ".agent-worktrees.yaml"  # legacy single-file fallback
+
+# Global, machine-wide defaults shared across every project on this machine:
+# top-level ``srcroot`` / ``machine`` / ``platform`` / ``copilot_profiles`` /
+# ``auto_fast_forward`` / ``headless``, plus an optional ``repo_defaults`` flat
+# block that underlies every repo's settings (lowest precedence). Lives at
+# ``~/.agent-worktrees/config.yaml`` (the shared runtime root).
+GLOBAL_CONFIG_FILENAME = "config.yaml"
 
 @dataclass(frozen=True)
 class CopilotProfile:
@@ -349,140 +363,287 @@ def project_dir(name: str | None = None) -> Path:
 
 
 def default_config_path() -> Path:
-    """Return the config path for the active project."""
+    """Return the machine-local config path for the active project."""
     return project_dir() / "config.yaml"
 
 
+def global_config_path() -> Path:
+    """Return the global, machine-wide config path (lowest config tier)."""
+    return install_dir() / GLOBAL_CONFIG_FILENAME
+
+
+def inrepo_config_path(anchor: str | Path) -> Path:
+    """Return the preferred in-repo config path (directory form) for an anchor."""
+    return Path(anchor) / INREPO_CONFIG_DIRNAME / GLOBAL_CONFIG_FILENAME
+
+
 def load_config(path: Path | None = None) -> Config:
-    """Load and parse the project config YAML.
+    """Load and parse the layered project config.
+
+    Merges three tiers (highest precedence wins):
+
+    1. ``~/.<project>/config.yaml`` (machine-local; ``path``) -- per-machine,
+       per-repo overrides and machine paths. **Optional**: a repo designed for
+       this system carries its settings in-repo and needs no machine-local
+       file; machine-local config is the adapter that makes *foreign* repos
+       compatible.
+    2. ``<anchor>/.agent-worktrees/config.yaml`` (in-repo; the repo's own
+       committed config -- the base for its settings).
+    3. ``~/.agent-worktrees/config.yaml`` (global; machine-wide defaults).
+
+    Top-level fields (``srcroot``/``machine``/``platform``/``copilot_profiles``
+    /``headless``/``auto_fast_forward``) resolve machine-local > global >
+    detected. Per-repo settings merge global ``repo_defaults`` < in-repo flat
+    settings < machine-local ``repos.<name>`` block. Anchors come from the
+    machine-local file or, when absent, from ``~/.agent-worktrees/repos.yaml``.
 
     Args:
-        path: Path to config.yaml. Uses default if None.
+        path: Machine-local config path. Uses the default if None.
 
     Returns:
         Parsed Config object.
 
     Raises:
-        FileNotFoundError: If config file doesn't exist.
-        ValueError: If config is malformed.
+        ValueError: If no repo can be resolved (no machine-local repos and no
+            registry anchor for the active project).
     """
     if path is None:
         path = default_config_path()
 
-    if not path.exists():
-        raise FileNotFoundError(
-            f"No config found at {path}.\n"
-            "Run the installer first:\n"
+    # Tier 1 (lowest): global machine-wide defaults.
+    global_raw = _load_yaml_safe(global_config_path())
+    # Tier 3 (highest): machine-local. Optional -- absent is fine.
+    machine_raw = _load_yaml_safe(path)
+
+    # Resolved top-level fields: machine-local > global > detected.
+    platform = (
+        machine_raw.get("platform")
+        or global_raw.get("platform")
+        or detect_platform()
+    )
+    machine = (
+        machine_raw.get("machine")
+        or global_raw.get("machine")
+        or detect_machine()
+    )
+    srcroot = machine_raw.get("srcroot") or global_raw.get("srcroot") or ""
+
+    # Active project / default repo name.
+    repo_name = (
+        machine_raw.get("repo_name")
+        or global_raw.get("repo_name")
+        or _project_name_safe()
+    )
+
+    # Per-repo defaults that underlie every repo (lowest precedence).
+    global_repo_defaults = global_raw.get("repo_defaults") or {}
+    if not isinstance(global_repo_defaults, dict):
+        global_repo_defaults = {}
+
+    machine_repos = machine_raw.get("repos") or {}
+    if not isinstance(machine_repos, dict):
+        machine_repos = {}
+
+    # Build the set of repos to resolve: those named in the machine-local file,
+    # plus the active project (so a convention-adopted repo with no
+    # machine-local block still loads, with its anchor from the registry).
+    names = [n for n in machine_repos if isinstance(machine_repos[n], dict)]
+    if repo_name and repo_name not in names:
+        names.append(repo_name)
+
+    repos: dict[str, RepoConfig] = {}
+    for name in names:
+        machine_repo = machine_repos.get(name) or {}
+        if not isinstance(machine_repo, dict):
+            machine_repo = {}
+
+        anchor = machine_repo.get("anchor") or _resolve_anchor_from_registry(
+            name, platform
+        )
+        if not anchor:
+            # No anchor anywhere -- can't manage this repo. Skip silently unless
+            # it was the only candidate (validated after the loop).
+            continue
+
+        worktree_root = machine_repo.get("worktree_root") or derive_worktree_root(
+            anchor
+        )
+
+        # Tier 2: the repo's own in-repo flat settings (base for repo settings).
+        inrepo_settings = _load_inrepo_config(anchor)
+
+        # Merge per-repo settings: global defaults < in-repo < machine-local.
+        merged = _deep_merge(global_repo_defaults, inrepo_settings)
+        merged = _deep_merge(merged, machine_repo)
+
+        repos[name] = _build_repo_config(merged, anchor, str(worktree_root))
+
+    if not repos:
+        raise ValueError(
+            f"No repo could be resolved for project {repo_name or '?'!r}.\n"
+            f"Checked machine-local config ({path}) and the repos registry "
+            f"({install_dir() / 'repos.yaml'}).\n"
+            "Run the installer / register the repo first:\n"
             "  pwsh -File <repo>/plugins/agent-worktrees/scripts/install.ps1 install"
         )
 
-    with open(path, encoding="utf-8") as f:
-        raw: dict[str, Any] = yaml.safe_load(f)
-
-    if not raw:
-        raise ValueError(f"Config at {path} is empty")
-
-    repos: dict[str, RepoConfig] = {}
-    for name, repo_data in raw.get("repos", {}).items():
-        if isinstance(repo_data, dict):
-            # Parse launch commands (optional)
-            launch: dict[str, list[str]] = {}
-            launch_recovery: dict[str, list[str]] = {}
-            for plat_key, cmd_list in repo_data.get("launch", {}).items():
-                if isinstance(cmd_list, list):
-                    launch[plat_key] = [str(c) for c in cmd_list]
-            for plat_key, cmd_list in repo_data.get("launch_recovery", {}).items():
-                if isinstance(cmd_list, list):
-                    launch_recovery[plat_key] = [str(c) for c in cmd_list]
-
-            # Parse validate_paths (optional list of repo-relative dirs)
-            raw_vpaths = repo_data.get("validate_paths", [])
-            validate_paths = (
-                [str(p) for p in raw_vpaths] if isinstance(raw_vpaths, list) else []
-            )
-
-            # Parse validate_hook (optional platform-keyed command lists)
-            validate_hook: dict[str, list[str]] = {}
-            for plat_key, cmd_list in repo_data.get("validate_hook", {}).items():
-                if isinstance(cmd_list, list):
-                    validate_hook[plat_key] = [str(c) for c in cmd_list]
-
-            # Parse service_paths (optional list of glob patterns)
-            raw_spaths = repo_data.get("service_paths", [])
-            service_paths = (
-                [str(p) for p in raw_spaths] if isinstance(raw_spaths, list) else []
-            )
-
-            # Parse post_install_hook (optional platform-keyed command lists)
-            post_install_hook: dict[str, list[str]] = {}
-            raw_pih = repo_data.get("post_install_hook", {})
-            if isinstance(raw_pih, dict):
-                for plat_key, cmd_list in raw_pih.items():
-                    if isinstance(cmd_list, list):
-                        post_install_hook[plat_key] = [str(c) for c in cmd_list]
-
-            # Parse pr config. Repo-level PR policy may live in the in-repo
-            # .agent-worktrees.yaml (shared across machines); when present it
-            # overrides the machine-local ``pr`` block entirely.
-            inrepo_pr = _load_inrepo_pr(repo_data["anchor"])
-            pr_source = inrepo_pr if inrepo_pr is not None else repo_data.get("pr")
-            pr_cfg = _parse_pr(pr_source)
-
-            repos[name] = RepoConfig(
-                anchor=repo_data["anchor"],
-                worktree_root=(
-                    repo_data.get("worktree_root")
-                    or derive_worktree_root(repo_data["anchor"])
-                ),
-                default_branch=repo_data.get("default_branch", "master"),
-                remote=repo_data.get("remote", "origin"),
-                launch=launch,
-                launch_recovery=launch_recovery,
-                validate_paths=validate_paths,
-                validate_hook=validate_hook,
-                service_paths=service_paths,
-                post_install_hook=post_install_hook,
-                pr=pr_cfg,
-                base_repo=bool(repo_data.get("base_repo", False)),
-            )
-
-    repo_name = raw.get("repo_name")
-    if not repo_name:
-        repo_name = project_name()
+    # copilot_profiles: machine-local if present, else global.
+    profiles_raw = (
+        machine_raw.get("copilot_profiles")
+        if "copilot_profiles" in machine_raw
+        else global_raw.get("copilot_profiles", [])
+    )
 
     return Config(
-        srcroot=raw.get("srcroot", ""),
-        machine=raw.get("machine", detect_machine()),
-        platform=raw.get("platform", detect_platform()),
+        srcroot=srcroot,
+        machine=machine,
+        platform=platform,
         repo_name=repo_name,
         repos=repos,
-        copilot_profiles=_parse_profiles(raw.get("copilot_profiles", [])),
-        headless=bool(raw.get("headless", False)),
-        auto_fast_forward=bool(raw.get("auto_fast_forward", True)),
+        copilot_profiles=_parse_profiles(profiles_raw or []),
+        headless=bool(
+            machine_raw.get("headless", global_raw.get("headless", False))
+        ),
+        auto_fast_forward=bool(
+            machine_raw.get(
+                "auto_fast_forward", global_raw.get("auto_fast_forward", True)
+            )
+        ),
     )
 
 
-def _load_inrepo_pr(anchor: str) -> dict[str, Any] | None:
-    """Return the ``pr`` block from the repo's in-repo config, or None.
+def _load_yaml_safe(path: Path) -> dict[str, Any]:
+    """Load a YAML file into a dict, returning ``{}`` on any problem.
 
-    Reads ``<anchor>/.agent-worktrees.yaml`` -- the committed, repo-level
-    policy file shared across every machine. Returns the ``pr`` mapping when
-    the file exists and carries one; otherwise None (caller falls back to the
-    machine-local ``pr`` block). Never raises: a missing or malformed in-repo
-    file degrades to None so config loading -- on the critical path of every
-    command -- cannot be broken by a bad committed file.
+    Never raises: config loading is on the critical path of every command, so a
+    missing, empty, or malformed file degrades to an empty mapping rather than
+    breaking the whole CLI.
     """
     try:
-        path = Path(anchor) / INREPO_CONFIG_FILENAME
         if not path.exists():
-            return None
+            return {}
         with open(path, encoding="utf-8") as f:
             raw = yaml.safe_load(f)
-        if isinstance(raw, dict) and isinstance(raw.get("pr"), dict):
-            return raw["pr"]
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Return ``base`` deep-merged with ``override`` (override wins).
+
+    Nested dicts merge recursively; every other value (scalars, lists) is
+    replaced wholesale by ``override``. Inputs are not mutated.
+    """
+    result: dict[str, Any] = dict(base)
+    for key, ov in override.items():
+        bv = result.get(key)
+        if isinstance(bv, dict) and isinstance(ov, dict):
+            result[key] = _deep_merge(bv, ov)
+        else:
+            result[key] = ov
+    return result
+
+
+def _project_name_safe() -> str:
+    """Return the active project name, or ``""`` if ``$WORKTREE_PROJECT`` unset.
+
+    Unlike :func:`project_name`, never raises -- used where an absent project is
+    a tolerable condition (e.g. tests that pass an explicit config).
+    """
+    try:
+        return project_name()
+    except Exception:
+        return ""
+
+
+def _resolve_anchor_from_registry(name: str, platform: str) -> str | None:
+    """Return the anchor path for ``name`` from ``repos.yaml``, or None.
+
+    Lets a convention-adopted repo load with no machine-local config: the
+    machine-specific path comes from the registry, the settings from the
+    repo's own in-repo config. Never raises.
+    """
+    try:
+        from . import repos as repos_mod
+
+        registry = repos_mod.read_registry()
+        entry = registry.repos.get(name)
+        if entry is None:
+            return None
+        return entry.local_path(platform) or None
     except Exception:
         return None
-    return None
+
+
+def _build_repo_config(
+    data: dict[str, Any], anchor: str, worktree_root: str
+) -> RepoConfig:
+    """Build a RepoConfig from a merged repo-settings dict + resolved paths.
+
+    ``data`` is the per-repo settings after the three-tier merge; ``anchor``
+    and ``worktree_root`` are the machine paths (resolved separately, since
+    they never come from the shared in-repo config).
+    """
+    launch: dict[str, list[str]] = {}
+    for plat_key, cmd_list in (data.get("launch") or {}).items():
+        if isinstance(cmd_list, list):
+            launch[plat_key] = [str(c) for c in cmd_list]
+
+    launch_recovery: dict[str, list[str]] = {}
+    for plat_key, cmd_list in (data.get("launch_recovery") or {}).items():
+        if isinstance(cmd_list, list):
+            launch_recovery[plat_key] = [str(c) for c in cmd_list]
+
+    raw_vpaths = data.get("validate_paths", [])
+    validate_paths = (
+        [str(p) for p in raw_vpaths] if isinstance(raw_vpaths, list) else []
+    )
+
+    validate_hook: dict[str, list[str]] = {}
+    for plat_key, cmd_list in (data.get("validate_hook") or {}).items():
+        if isinstance(cmd_list, list):
+            validate_hook[plat_key] = [str(c) for c in cmd_list]
+
+    raw_spaths = data.get("service_paths", [])
+    service_paths = (
+        [str(p) for p in raw_spaths] if isinstance(raw_spaths, list) else []
+    )
+
+    post_install_hook: dict[str, list[str]] = {}
+    for plat_key, cmd_list in (data.get("post_install_hook") or {}).items():
+        if isinstance(cmd_list, list):
+            post_install_hook[plat_key] = [str(c) for c in cmd_list]
+
+    return RepoConfig(
+        anchor=str(anchor),
+        worktree_root=str(worktree_root or derive_worktree_root(anchor)),
+        default_branch=data.get("default_branch", "master"),
+        remote=data.get("remote", "origin"),
+        launch=launch,
+        launch_recovery=launch_recovery,
+        validate_paths=validate_paths,
+        validate_hook=validate_hook,
+        service_paths=service_paths,
+        post_install_hook=post_install_hook,
+        pr=_parse_pr(data.get("pr")),
+        base_repo=bool(data.get("base_repo", False)),
+    )
+
+
+def _load_inrepo_config(anchor: str) -> dict[str, Any]:
+    """Return the repo's in-repo flat settings dict, or ``{}``.
+
+    Reads ``<anchor>/.agent-worktrees/config.yaml`` (preferred, directory form).
+    Falls back to the legacy single-file ``<anchor>/.agent-worktrees.yaml``
+    (which carried only a ``pr:`` block -- still a valid, minimal flat
+    settings dict). Never raises: a missing or malformed file degrades to an
+    empty mapping so config loading cannot be broken by a bad committed file.
+    """
+    dir_form = _load_yaml_safe(inrepo_config_path(anchor))
+    if dir_form:
+        return dir_form
+    return _load_yaml_safe(Path(anchor) / INREPO_CONFIG_FILENAME)
 
 
 def _parse_pr(raw: Any) -> PRConfig:

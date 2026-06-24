@@ -5850,7 +5850,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         try:
             return handler(args)
-        except FileNotFoundError as e:
+        except (FileNotFoundError, ValueError) as e:
             output.err(str(e))
             return 1
         except KeyboardInterrupt:
