@@ -47,6 +47,15 @@ filtering. Targets implement a small `Target` interface
 | `ssh` / `ssh-tunnel` | rsync over SSH, optionally via a jump host |
 | `ingest` | an rsync-daemon sink with an optional HTTP notify |
 
+**Post-push notify (target-independent).** A `sync.notify.url` fires a
+best-effort HTTP `POST` (JSON `{"machine": <machine>}`; `{machine}` in the URL
+is also substituted, optional bearer token) after **any** successful push,
+regardless of target — so a downstream consumer can crunch immediately. It is
+facility-neutral: point it at a processing service directly, or at a public
+webhook callback (e.g. a Home Assistant webhook that relays to a private
+service). The `ingest` target's own `notify_url` option remains for back-compat
+and now shares the same best-effort helper (`agent_logger.sync.notify`).
+
 Deployed as a 4-hourly **Scheduled Task** (Windows) or **systemd user
 timer** (Linux) via `scripts/install.ps1` / `install.sh`. Configure with the
 `session-sync-setup` skill.
