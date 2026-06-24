@@ -311,6 +311,29 @@ def _json_error(message: str, exit_code: int = 1) -> int:
     return exit_code
 
 
+def _sync_status_tag(info: git_ops.WorktreeStateInfo) -> str:
+    """Build the picker's inline sync tag (``↑ahead`` / ``↓behind``).
+
+    Surfaces stale worktrees (``↓N``) at a glance so they can be updated
+    before resuming.  Counts reflect the last fetch.
+
+    For a COMPLETED worktree the ahead-count is misleading: its content is
+    already on the default branch (git-cherry / blob comparison confirmed
+    it), but a squash-merge leaves the local branch carrying the pre-squash
+    commits, so the raw ``ahead`` stays > 0.  Suppress the ``↑ahead`` half
+    there so a merged-but-not-yet-cleaned worktree no longer renders as
+    diverged (#1106).
+    """
+    show_ahead = bool(info.ahead) and info.state != git_ops.WorktreeState.COMPLETED
+    if show_ahead and info.behind:
+        return f" ↑{info.ahead}↓{info.behind}"
+    if info.behind:
+        return f" ↓{info.behind}"
+    if show_ahead:
+        return f" ↑{info.ahead}"
+    return ""
+
+
 def _worktree_to_dict(
     rec: tracking.WorktreeRecord,
     *,
@@ -880,15 +903,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                     drift_tag = f" ⚠ {info.current_branch}"
 
                 # Inline sync status vs the default branch: ↑ahead / ↓behind.
-                # Surfaces stale worktrees (↓N) at a glance so they can be
-                # updated before resuming.  Counts reflect the last fetch.
-                sync_tag = ""
-                if info.ahead and info.behind:
-                    sync_tag = f" ↑{info.ahead}↓{info.behind}"
-                elif info.behind:
-                    sync_tag = f" ↓{info.behind}"
-                elif info.ahead:
-                    sync_tag = f" ↑{info.ahead}"
+                sync_tag = _sync_status_tag(info)
 
                 state_tag = (
                     f" [{info.state.value}]"

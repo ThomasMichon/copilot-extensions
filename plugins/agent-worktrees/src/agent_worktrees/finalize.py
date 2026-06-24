@@ -495,6 +495,66 @@ def _is_content_on_upstream(
     return True
 
 
+def _reconcile_merged_pointers(
+    repo,
+    worktree_path: str,
+    anchor: str,
+    branch: str,
+) -> None:
+    """Align local branch pointers with origin after a finalize (#1106).
+
+    Once a worktree's content is confirmed on ``origin/<default>`` (the PR
+    merged, or direct work pushed), this leaves the local refs reconciled so
+    the picker stops rendering a merged worktree as ``↑ahead↓behind``:
+
+    1. Fast-forward the anchor's local default branch to ``origin/<default>``.
+    2. Realign the worktree base branch (``worktree/<id>``) with the origin
+       tip when it is not the live checkout -- after ``create-pr`` the worktree
+       HEAD is the feature branch, so ``worktree/<id>`` is a free pointer that
+       can move to origin without touching any working tree.
+
+    Best-effort and non-destructive: fast-forward / pointer-reset only, never
+    on a dirty tree, never discarding unmerged commits.  All failures are
+    swallowed -- reconciliation is a tidiness pass, not a correctness gate.
+    """
+    upstream = f"{repo.remote}/{repo.default_branch}"
+    if not git_ops.ref_exists(upstream, cwd=anchor):
+        return
+
+    # 1. Fast-forward the anchor's checked-out default branch to origin.
+    try:
+        if (
+            git_ops._get_current_branch_safe(anchor) == repo.default_branch
+            and git_ops.is_clean(cwd=anchor)
+        ):
+            git_ops.merge_ff(upstream, cwd=anchor)
+    except Exception:
+        pass
+
+    # 2. Realign worktree/<id> with the origin tip when it is safe to do so:
+    #    it is not the live checkout (HEAD is on the feature branch) and all of
+    #    its content is already on upstream (so moving the pointer loses no
+    #    work).
+    try:
+        wt_head = (
+            git_ops._get_current_branch_safe(worktree_path)
+            if Path(worktree_path).exists()
+            else None
+        )
+        if wt_head != branch and _is_content_on_upstream(
+            branch, upstream, cwd=anchor
+        ):
+            up_sha = git_ops.git(
+                "rev-parse", upstream, cwd=anchor, check=False
+            ).stdout.strip()
+            if up_sha:
+                git_ops.git(
+                    "branch", "-f", branch, up_sha, cwd=anchor, check=False
+                )
+    except Exception:
+        pass
+
+
 def _push_changes_pr(
     worktree_id: str,
     config: Config,
@@ -618,6 +678,18 @@ def _pr_finalize_precondition(
     remote = repo.remote
     feature = record.pr.branch
     cwd = worktree_path if Path(worktree_path).exists() else anchor
+    upstream = f"{remote}/{repo.default_branch}"
+
+    # #1045: If the feature branch's content is already on origin/<default>
+    # (the PR was merged), the work is safely upstream -- regardless of a
+    # stale origin/<feature> ref (which lags at the pre-merge head after a
+    # squash-merge) or whether the remote feature branch was deleted on merge.
+    # Treat as safe so finalize does not false-block a merged PR and send the
+    # user to push-changes (which would re-push an already-merged branch).
+    if git_ops.ref_exists(upstream, cwd=cwd) and _is_content_on_upstream(
+        feature, upstream, cwd=cwd
+    ):
+        return True, None
 
     if not git_ops.remote_branch_exists(remote, feature, cwd=cwd):
         return False, (
@@ -760,6 +832,11 @@ def validate_and_finalize(
         # Cleanup -- remove worktree and branch
         inside_worktree = git_ops.is_cwd_inside(worktree_path)
         has_live_session = _has_live_session(worktree_path)
+
+        # Reconcile local branch pointers with origin now that the content is
+        # verified upstream, so a merged-but-not-yet-cleaned worktree stops
+        # rendering as diverged in the picker (#1106).
+        _reconcile_merged_pointers(repo, worktree_path, anchor, branch)
 
         if inside_worktree or has_live_session:
             reason = (
