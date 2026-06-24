@@ -200,7 +200,13 @@ def create_pr(
     # Resolve the target PRRecord: reuse the live active PR, or append a fresh
     # one (serial re-PR / parallel / explicit --new).  Record the transitional
     # 'creating' state up front so a later failure is recoverable.
-    default_pr_repo = target_repo or (record.repo if record else "") or ""
+    # Resolve the PR's target repo as the hosting ``owner/name`` slug (what the
+    # provider API needs), in order: explicit --repo > the remote's slug > a
+    # previously-recorded value > the local project name (last-resort).
+    host_slug = git_ops.remote_slug(remote, cwd=worktree_path)
+    default_pr_repo = (
+        target_repo or host_slug or (record.repo if record else "") or ""
+    )
     target_pr: PRRecord | None = None
     if record is not None:
         if reusing and active is not None:
@@ -299,7 +305,9 @@ def create_pr(
     #    the branch is already pushed, so the agent can fall back to a manual
     #    provider sub-agent + set-pr.
     want_open = prcfg.auto_open if open_pr is None else open_pr
-    if want_open and target_pr is not None:
+    # Only auto-open a PR that has not been opened on the provider yet -- never
+    # re-create one when iterating an already-open PR (it has a number/url).
+    if want_open and target_pr is not None and target_pr.number is None:
         _open_via_provider(
             result, config, record, target_pr, eff_title, body, worktree_id,
             head_sha, attribution=attribution,
