@@ -21,6 +21,9 @@ multi-transport, multi-auth bridge.
   Copilot CLI can't perform itself.
 - You want to wrap a third-party stdio MCP and feed it a host-acquired token.
 - You want to allow/deny which upstream tools are exposed.
+- You want to **reshape a large or partner MCP**: shrink a 100+ tool catalog
+  behind a tool-finder, namespace/rename tools, expose a typed `run_code` tool,
+  or relay big payloads through a stream buffer — see [Decorator stack](#decorator-stack).
 - You want a **repo-scoped sub-agent** (e.g. `@ado-data`) whose MCP tools come
   from an authenticated upstream -- see the setup flow below.
 
@@ -135,6 +138,46 @@ auth:
     parse: raw
     target_env: UNIFI_API_KEY
 ```
+
+## Decorator stack
+
+Beyond transport + auth, a bridge can apply an ordered **decorator stack** — MCP
+middleware that rewrites the JSON-RPC traffic in both directions. Add a
+`decorators:` list to the bridge config (entries are listed **client → upstream**,
+outermost first):
+
+```yaml
+server: { type: http, url: https://mcp.example.com }
+auth:   { kind: entra, resource: <guid> }
+decorators:
+  - type: defer            # hide a 100+ tool catalog behind find_tool/execute_tool
+    mode: lazy             #   lazy (default) | eager | meta_only
+    expose: ["search_*"]
+  - type: rename           # namespace/prefix/suffix/regex on names + descriptions
+    namespace: partner
+  - type: filter           # allow/deny tools (also rejects hidden tools/call)
+    deny: ["*_delete", "*_admin"]
+  - type: code-mode        # one typed run_code tool (TS interface) instead of N defs
+    tool: run_code
+  - type: storage          # relay large tool I/O through a file/http stream buffer
+    backend: file
+    threshold: 8192
+```
+
+| Decorator | What it does |
+|-----------|--------------|
+| `filter` | Prune `tools/list` and reject calls to hidden tools (`allow`/`deny` globs). |
+| `rename` | Rewrite tool names/descriptions (`namespace`/`prefix`/`suffix`/regex `patterns`); routes calls back to real names. |
+| `defer` | Expose `find_tool`/`execute_tool` (+`load_tools` in lazy mode) over a large catalog. The UniFi MCP pattern. |
+| `code-mode` | Expose a `run_code` tool with a generated TypeScript `Tools` interface; snippets run in Node and chain tool calls. Adds `find_tool` for typed signatures on big catalogs. Needs Node on `PATH`. |
+| `storage` | Externalize large outputs to `mcpstream://…` handles; rehydrate handle inputs; `read_stream` fetches them. **Field-level `rules:`** target specific tool input/output JSON paths, attach a summary (count + schema + head, or a command), and rewrite a stream-mode input param's schema to a URL. |
+| `transform` | Reshape tool results per tool: `extract`/`pick`/`drop` dotted paths (literal-dotted keys like ADO `fields.System.Title` supported) or a `command` (jq-style) filter. |
+
+Decorators compose because each calls *through* the ones below it. Recommended
+order: `defer`/`code-mode` outermost, then `rename`, then `filter`, with
+`storage` innermost. The legacy `tools:` filter still works (applied as an
+implicit `filter`). Full reference + per-decorator options:
+[README → Decorator stack](../../README.md#decorator-stack).
 
 ## Commands
 

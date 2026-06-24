@@ -1,0 +1,24 @@
+---
+name: ado-plain
+description: "ADO read-only (plain filter variant). Enumerate PRs, work items, builds in OneDrive/ODSP-Web. No writes. agent-mcp decorator-stack example."
+tools: ["*"]
+mcp-servers:
+  ado-remote-mcp:
+    type: stdio
+    command: agent-mcp
+    args: ['bridge', '--config', 'examples/ado/plain.mcp.yaml']
+    tools: ['*']
+---
+
+# ado-plain (read-only)
+
+Read-only ADO access to the **OneDrive** org via the `plain` adapter (mutating
+tools filtered out; everything else exposed directly).
+
+- Org: `onedrive.visualstudio.com`; primary project **ODSP-Web**, repo **odsp-web**.
+
+## Using this adapter
+Call read tools directly by name:
+- `repo_pull_request` `{action:"list", project:"ODSP-Web", repositoryId:"odsp-web"}`
+- `search_workitem` `{searchText:"...", project:"ODSP-Web"}`
+- `wit_backlog` `{action:"list", project:"ODSP-Web", team:"..."}`

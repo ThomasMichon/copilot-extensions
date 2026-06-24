@@ -17,6 +17,10 @@ multi-auth bridge packaged as a Copilot CLI plugin.
 - **Auth injector** — declares *what form of auth to inject*. Token acquisition
   reuses the `credential-relay` host-credential sources (`az_login`, `gh_auth`,
   `git_credential`) — this plugin does not re-implement `az`/`gh`/GCM shell-outs.
+- **Decorator stack** — an ordered list of middleware that transforms the MCP
+  traffic in both directions: filter, rename, defer behind a tool-finder,
+  expose a typed `run_code` tool, or relay large payloads through a stream
+  buffer. See [Decorator stack](#decorator-stack).
 
 | `auth.kind` | Source | http injects | stdio injects |
 |-------------|--------|--------------|---------------|
@@ -139,14 +143,245 @@ auth:
     target_env: SERVICE_API_KEY
 ```
 
-## CLI
+## Decorator stack
 
+Beyond transport + auth, a bridge can apply an ordered **decorator stack** — MCP
+middleware that rewrites the JSON-RPC traffic in both directions. This turns
+`agent-mcp` into a general MCP adapter: shrink a 100+ tool catalog, namespace a
+partner's tools, expose a typed code-execution tool, or relay large payloads out
+of the model's context.
+
+> **Worked example:** [`examples/ado/`](examples/ado/) adapts the real Azure
+> DevOps MCP six ways and hands each variant to a dedicated read-only agent,
+> with live measurements (`tools/list` 74 KB → 1.4 KB; a 100-PR list 51 KB →
+> 451 B). Start there for a concrete, runnable tour.
+
+
+```yaml
+server: { type: http, url: https://mcp.example.com }
+auth:   { kind: entra, resource: <guid> }
+decorators:                 # listed client -> upstream (outermost first)
+  - type: defer             # hide a big catalog behind find_tool/execute_tool
+    mode: lazy
+    expose: ["search_*"]
+  - type: rename            # namespace what remains
+    namespace: partner
+  - type: filter            # drop tools entirely
+    deny: ["*_delete", "*_admin"]
+  - type: storage           # relay large results through a stream buffer
+    backend: file
+    threshold: 8192
 ```
-agent-mcp bridge <name>            # run a named bridge (~/.agent-mcp/bridges/<name>.*)
-agent-mcp bridge --config <file>   # run an explicit config file
-agent-mcp validate <name|file>     # parse + schema-check, no run
-agent-mcp status                   # prerequisites + available bridges
+
+**Ordering.** Decorators are listed **client → upstream**. A request flows *down*
+the list (first entry first); the response bubbles back *up* (last entry first).
+Each decorator reaches the upstream by calling the next link, and may transform
+the request, transform the response, or **synthesize a response** for a tool it
+owns (e.g. `find_tool`) without calling upstream. Recommended order:
+context-reducers that add their own tools (`defer`, `code-mode`) **outermost**,
+then `rename`, then `filter`, with `storage` **innermost** (closest to upstream,
+so it sees real payloads). The legacy top-level `tools:` filter, if present, is
+applied as an implicit `filter` at the upstream end.
+
+> **Composition just works** because each decorator calls *through* the ones
+> below it: a `defer` `execute_tool` for a renamed name still passes back down
+> through `rename`, which restores the real upstream name.
+
+### `filter` — allow/deny tools
+
+Prune `tools/list` *and* reject `tools/call` for hidden tools (so a hidden name
+can't be invoked even if it leaks). `deny` wins over `allow`; patterns are
+shell-style globs.
+
+```yaml
+- type: filter
+  allow: ["repo_*", "wit_*"]   # set allow OR deny, not both
+  # deny: ["*_delete"]
 ```
+
+### `rename` — namespace / prefix / suffix / regex
+
+Rewrite tool **names** and **descriptions**; calls to the rewritten name are
+mapped back to the real upstream name. Namespace/prefix/suffix are reversible by
+construction; regex renames are learned from `tools/list` (clients list first).
+
+```yaml
+- type: rename
+  namespace: ado          # get -> ado__get   (separator: "__")
+  prefix: ""              # prepended to the name
+  suffix: ""              # appended to the name
+  patterns:               # regex substitutions on names
+    - { match: "^wit_", replace: "workitem_" }
+  description:
+    prefix: "[ADO] "
+    suffix: ""
+    patterns:
+      - { match: "internal", replace: "" }
+```
+
+### `defer` — hide a large catalog behind meta-tools
+
+Models choke on 100+ tool definitions. `defer` exposes a few **meta-tools** and
+keeps the real catalog searchable (the [UniFi MCP](https://github.com/sirkirby/unifi-mcp)
+pattern):
+
+- `find_tool` — search the catalog by `query`/`category`; returns compact
+  `{name, description}` (set `include_schemas: true` for input schemas).
+- `execute_tool` — invoke any catalog tool by `tool` name + `arguments`.
+- `load_tools` *(lazy mode)* — promote named tools into `tools/list` and emit
+  `notifications/tools/list_changed` so capable clients can call them directly.
+
+```yaml
+- type: defer
+  mode: lazy              # lazy (default) | eager | meta_only
+  expose: ["search_*"]    # always-visible tools (optional)
+  max_results: 20
+  # find_tool / execute_tool / load_tool: override the meta-tool names
+```
+
+| Mode | `tools/list` shows |
+|------|--------------------|
+| `lazy` | exposed + loaded tools + `find_tool`/`execute_tool`/`load_tools` |
+| `eager` | the full catalog + `find_tool`/`execute_tool` |
+| `meta_only` | exposed tools + `find_tool`/`execute_tool` only |
+
+### `code-mode` — a typed `run_code` tool
+
+Instead of N tool defs, expose a single `run_code` tool whose description carries
+a generated **TypeScript `Tools` interface** for the whole catalog. The model
+writes a short JS/TS snippet that calls tools as async methods and chains results
+in **one** round-trip; the snippet runs in a Node child and each call is relayed
+upstream. A companion `code_apis` tool returns the interface on demand.
+
+```yaml
+- type: code-mode
+  tool: run_code          # the execution tool name
+  apis_tool: code_apis    # returns the TS interface text
+  runtime: node           # Node executable
+  timeout: 30
+  expose: []              # tools to also list directly (optional)
+```
+
+```js
+// example run_code body the model writes:
+const clients = await tools.list_clients({ limit: 50 });
+const offline = clients.filter(c => !c.online);
+return { offlineCount: offline.length, names: offline.map(c => c.name) };
+```
+
+Requires Node on `PATH` (or set `runtime:` to a Node path). `console.log` is
+captured; a lone JSON tool result is auto-parsed for ergonomic chaining.
+
+For a large catalog, code-mode also exposes **`find_tool`**: rather than embedding
+every signature in `run_code`'s description, the model calls `find_tool(query)` to
+get the typed TS signatures for just the tools it needs, then writes `run_code`.
+The full interface is embedded inline only when the catalog is at/below
+`interface_limit` (default 40).
+
+### `storage` — relay large I/O through a stream buffer
+
+Keep big payloads out of the model's context:
+
+- **Outputs** larger than `threshold` bytes are written to a backing store; the
+  client gets a short preview + a `mcpstream://…` **handle**.
+- **Inputs** containing a handle (a bare handle string, or `{"$stream": "<handle>"}`)
+  are rehydrated to the stored value before the call is forwarded — so one tool's
+  output pipes into another's input without passing through the model.
+- A `read_stream` meta-tool fetches a stored value (optionally a slice).
+
+```yaml
+- type: storage
+  backend: file                  # file (default) | http
+  dir: ~/.agent-mcp/storage      # file backend
+  # url: https://buffer.example  # http backend (POST to store, GET to read)
+  threshold: 8192                # bytes; outputs above this are externalized
+  max_preview: 200               # preview chars left inline
+  read_tool: read_stream
+```
+
+#### Field-level rules (per-tool, per-field)
+
+The blanket `threshold` externalizes whole text blocks. For finer control, add
+`rules:` that target **specific tools** (glob) and **specific JSON paths** within
+their inputs/outputs — exactly the parts worth streaming:
+
+```yaml
+- type: storage
+  rules:
+    - tool: get_list_items          # glob over tool names
+      outputs:
+        - path: items               # dotted path into the result (structuredContent
+          summary: { head: 3 }      #   or a JSON text block); summary is on by default
+      inputs:
+        - path: filter              # this input becomes a stream URL (schema rewritten)
+          note: a query filter object
+```
+
+**Output field externalization.** For each `outputs[].path`, the value at that
+path is replaced with `{"$stream": "<handle>", "bytes": N, "summary": {…}}`, while
+siblings are left intact. For the example above, a `get_list_items` result of
+`{"items": [ …1000s… ], "total": 1240}` becomes:
+
+```json
+{"items": {"$stream": "mcpstream://…", "bytes": 98231,
+           "summary": {"count": 1240,
+                       "schema": {"type": "array", "items": {"type": "object", …}},
+                       "head": [ {…}, {…}, {…} ]}},
+ "total": 1240}
+```
+
+so the model can reason over the **schema + count + first rows** and decide what
+to do with the full stream (fetch via `read_stream`, or pipe the handle into
+another tool). Summary is on by default (`count` + inferred `schema` + first 3);
+customize with `summary: {count, schema, head}` or disable with `summary: false`.
+Use a **command summarizer** for custom logic — the value is piped to its stdin
+and stdout becomes the summary:
+
+```yaml
+      outputs:
+        - path: items
+          summary: { command: ["jq", "{count: length, ids: [.[].id]}"] }
+```
+
+**Input param → stream URL.** For each `inputs[].path`, that property's schema in
+`tools/list` is rewritten to a stream-URL string and its description annotated
+(*"URL to a stream containing a JSON-serialized object…"*), preserving the
+original type/description. At call time a handle passed for that param is
+rehydrated to the original value. An externalized output handle can be passed
+straight back in (`{"$stream": "<handle>", …}`), so large data flows tool→tool
+entirely by reference.
+
+### `transform` — reshape tool results
+
+Slim deeply-nested or enveloped results before they reach the model. Each rule
+targets a tool (glob) and applies ops to its JSON document (`structuredContent`
+and/or a JSON text block):
+
+```yaml
+- type: transform
+  rules:
+    - tool: repo_list_pull_requests
+      extract: value                      # unwrap {count, value:[...]} -> [...]
+    - tool: wit_get_work_item
+      pick: ["id", "fields.System.Title", "fields.System.State"]   # keep only these
+    - tool: "*"
+      drop: ["_links", "url"]             # strip noise everywhere
+    - tool: noisy_tool
+      command: ["jq", "{n: (.items|length)}"]   # jq-style escape hatch (stdin->stdout)
+```
+
+- `extract: <path>` — replace the result with the value at a path.
+- `pick: [paths]` — keep only these dotted paths (matched key shape preserved).
+- `drop: [paths]` — remove these dotted paths.
+- `command: [argv]` — pipe the result JSON to a filter's stdin; its stdout
+  (parsed as JSON) replaces the result.
+
+Dotted paths match **literal dotted keys** too (e.g. ADO `fields.System.Title`
+where `fields` is `{"System.Title": …}`) as well as genuine nesting. Ops apply
+`extract → pick → drop` (or `command` alone); multiple rules for a tool chain in
+order. A single inline rule may be written without the `rules:` wrapper.
+
+
 
 ## Use from a Copilot agent
 
@@ -178,12 +413,21 @@ mcp-servers:
 ## Architecture
 
 ```
-stdin/stdout (JSON-RPC)  <->  Bridge core  <->  Transport (http | stdio)  <->  upstream MCP
-                                   |                  ^
-                              tool filter        Auth injector  ->  credential-relay sources
+stdin/stdout        Bridge        Decorator pipeline           UpstreamClient        Transport
+(JSON-RPC)   <->   loop   <->   d0 <-> d1 <-> ... <-> dN  <->  (id correlation)  <->  (http|stdio)  <->  upstream MCP
+                                 ^                                                         ^
+                          filter/rename/defer/                                      Auth injector -> credential-relay
+                          code-mode/storage
 ```
 
-- `config.py` — load + validate the per-bridge config file.
+- `config.py` — load + validate the per-bridge config file (incl. `decorators:`).
 - `auth/` — `AuthInjector` protocol + injectors (reuse `credential_relay.sources`).
 - `transports/` — `http` (Streamable HTTP + SSE) and `stdio` (child process).
-- `bridge.py` — stdio framing, request forwarding, `tools/list` filtering.
+- `pipeline.py` — `UpstreamClient` (JSON-RPC id correlation over a transport) +
+  `Pipeline` (compose decorators around the upstream core call).
+- `decorators/` — `base` (Decorator + BridgeContext), `_catalog` (catalog
+  pagination + JSON-Schema→TS), and the `filter`/`rename`/`defer`/`code-mode`/
+  `storage` decorators.
+- `bridge.py` — stdio framing, per-request dispatch through the pipeline,
+  unsolicited-message passthrough.
+
