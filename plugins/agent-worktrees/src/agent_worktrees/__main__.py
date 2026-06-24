@@ -4690,6 +4690,243 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
     return 1
 
 
+def _related_usage() -> None:
+    """Print related subcommand usage."""
+    project = cfg.project_name()
+    print(f"Usage: {project} related <command>")
+    print()
+    print("Per-project, directional 'related repos' index (this repo's POV),")
+    print("committed at <repo>/.agent-worktrees/related.yaml. Keys reference the")
+    print("global repos registry; entries add role + locus + delegate + a narrative.")
+    print()
+    print("Commands:")
+    print("  list [--role R] [--json]            List related repos (and the primary)")
+    print("  show <name> [--json]                Show a related repo (+ registry context)")
+    print("  add <name>                          Link a related repo + scaffold its doc")
+    print("     [--role R] [--summary S] [--doc PATH] [--delegate D]")
+    print("     [--locus L] [--machines a,b] [--primary] [--no-scaffold]")
+    print("  remove <name>                       Unlink (leaves the narrative doc)")
+    print("  doc <name>                          Print (scaffold if missing) the narrative")
+    print("  primary [<name>]                    Show or set the primary related repo")
+    print()
+    print("Any command takes [--repo PATH] to target a specific checkout")
+    print("(default: the git repo containing the current directory).")
+    print()
+    print("Locus (where work happens): local | machine:<key> | codespace")
+    print("Delegate (how to hand off): agent-bridge | agent-codespaces | none")
+
+
+def _related_opt(rest: list[str], flag: str, default: str | None = None) -> str | None:
+    """Return the value following ``flag`` in ``rest`` (or ``default``)."""
+    if flag in rest:
+        i = rest.index(flag)
+        if i + 1 < len(rest):
+            return rest[i + 1]
+    return default
+
+
+def _related_anchor(rest: list[str]) -> str | None:
+    """Resolve the repo to operate on: --repo > git toplevel of cwd > project anchor."""
+    explicit = _related_opt(rest, "--repo")
+    if explicit:
+        return explicit
+    try:
+        cp = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if cp.returncode == 0 and cp.stdout.strip():
+            return cp.stdout.strip()
+    except Exception:
+        pass
+    try:
+        return cfg.load_config().default_repo.anchor
+    except Exception:
+        return None
+
+
+def cmd_related_dispatch(argv: list[str]) -> int:
+    """Route related subcommands (per-project related-repos index)."""
+    from . import related, repos
+
+    if not argv or argv[0] in ("--help", "-h"):
+        _related_usage()
+        return 0 if argv else 1
+
+    sub = argv[0]
+    rest = argv[1:]
+    if "--help" in rest or "-h" in rest:
+        _related_usage()
+        return 0
+
+    anchor = _related_anchor(rest)
+    if not anchor:
+        output.err(
+            "Could not resolve the current repo. Run inside a repo, or pass "
+            "--repo <path>."
+        )
+        return 1
+
+    json_out = "--json" in rest
+
+    if sub == "list":
+        role = _related_opt(rest, "--role")
+        entries = related.list_related(anchor, role=role)
+        primary = related.get_primary(anchor)
+        if json_out:
+            _json_output({
+                "primary": primary,
+                "related": [
+                    {
+                        "name": e.name, "role": e.role, "summary": e.summary,
+                        "doc": e.doc, "delegate": e.delegate,
+                        "locus": {
+                            "preferred": e.locus.preferred,
+                            "machines": e.locus.machines,
+                            "codespace": e.locus.codespace,
+                        },
+                    }
+                    for e in entries
+                ],
+            })
+        elif not entries:
+            print("No related repos linked.")
+            print(f"Link one with: {cfg.project_name()} related add <name>")
+        else:
+            output.header("Related Repos")
+            for e in entries:
+                star = "  *primary" if e.name == primary else ""
+                loc = e.locus.preferred or "-"
+                print(f"  {e.name:<24} {e.role or '-':<11} locus={loc}{star}")
+        return 0
+
+    if sub == "show":
+        if not rest or rest[0].startswith("-"):
+            output.err("Usage: related show <name>")
+            return 1
+        name = rest[0]
+        e = related.get_related(anchor, name)
+        if e is None:
+            output.err(f"'{name}' is not a related repo.")
+            return 1
+        reg = repos.find_repo(name)
+        if json_out:
+            _json_output({
+                "name": e.name, "role": e.role, "summary": e.summary,
+                "doc": e.doc, "delegate": e.delegate,
+                "locus": {
+                    "preferred": e.locus.preferred,
+                    "machines": e.locus.machines,
+                    "codespace": e.locus.codespace,
+                },
+                "registry": None if reg is None else {
+                    "class": reg.repo_class, "remote": reg.remote,
+                    "path": reg.local_path(),
+                },
+            })
+            return 0
+        output.header(f"Related: {e.name}")
+        print(f"  role:     {e.role or '-'}")
+        print(f"  summary:  {e.summary or '-'}")
+        print(f"  locus:    {e.locus.preferred or '-'}"
+              + (f"  machines={e.locus.machines}" if e.locus.machines else "")
+              + (f"  codespace={e.locus.codespace}" if e.locus.codespace else ""))
+        print(f"  delegate: {e.delegate or '-'}")
+        print(f"  doc:      {related.doc_abs_path(anchor, e)}")
+        if reg is None:
+            output.warn(f"'{name}' is not in the repos registry "
+                        f"(add it with: repos add {name} <path> --class <class>)")
+        else:
+            print(f"  registry: [{reg.repo_class}] {reg.local_path() or '(no local path)'}")
+            if reg.remote:
+                print(f"            {reg.remote}")
+        return 0
+
+    if sub == "add":
+        if not rest or rest[0].startswith("-"):
+            output.err("Usage: related add <name> [--role ...] [--locus ...] ...")
+            return 1
+        name = rest[0]
+        machines_csv = _related_opt(rest, "--machines", "") or ""
+        machines = [m.strip() for m in machines_csv.split(",") if m.strip()]
+        entry = related.RelatedEntry(
+            name=name,
+            role=related.normalize_role(_related_opt(rest, "--role", "")),
+            summary=_related_opt(rest, "--summary", "") or "",
+            doc=_related_opt(rest, "--doc", "") or "",
+            locus=related.Locus(
+                preferred=(_related_opt(rest, "--locus", "") or "").strip(),
+                machines=machines,
+            ),
+            delegate=related.normalize_delegate(_related_opt(rest, "--delegate", "")),
+        )
+        if repos.find_repo(name) is None:
+            output.warn(
+                f"'{name}' is not in the repos registry. Link recorded anyway; "
+                f"register it with: {cfg.project_name()} repos add {name} <path> "
+                "--class <class>"
+            )
+        related.upsert_related(anchor, entry)
+        if "--primary" in rest:
+            related.set_primary(anchor, name)
+        output.ok(f"Linked related repo '{name}'.")
+        if "--no-scaffold" not in rest:
+            saved = related.get_related(anchor, name) or entry
+            path, created = related.scaffold_doc(anchor, saved)
+            if created:
+                output.ok(f"Scaffolded narrative: {path}")
+            else:
+                output.info(f"Narrative exists: {path}")
+        return 0
+
+    if sub == "remove":
+        if not rest or rest[0].startswith("-"):
+            output.err("Usage: related remove <name>")
+            return 1
+        name = rest[0]
+        if related.remove_related(anchor, name):
+            output.ok(f"Unlinked related repo '{name}' (narrative doc left in place).")
+            return 0
+        output.err(f"'{name}' is not a related repo.")
+        return 1
+
+    if sub == "doc":
+        if not rest or rest[0].startswith("-"):
+            output.err("Usage: related doc <name>")
+            return 1
+        name = rest[0]
+        e = related.get_related(anchor, name)
+        if e is None:
+            output.err(f"'{name}' is not a related repo. Link it first: "
+                       f"related add {name}")
+            return 1
+        path, created = related.scaffold_doc(anchor, e)
+        print(path)
+        if created:
+            output.ok("(scaffolded)")
+        return 0
+
+    if sub == "primary":
+        if rest and not rest[0].startswith("-"):
+            name = rest[0]
+            if related.get_related(anchor, name) is None:
+                output.err(f"'{name}' is not a related repo. Link it first.")
+                return 1
+            related.set_primary(anchor, name)
+            output.ok(f"primary = {name}")
+        else:
+            print(related.get_primary(anchor) or "(unset)")
+        return 0
+
+    if sub == "resolve":
+        output.err("'related resolve' is not implemented yet (Phase 3).")
+        return 1
+
+    output.err(f"Unknown related subcommand: {sub}")
+    _related_usage()
+    return 1
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Bootstrap services that must be current before launching a session.
@@ -5214,6 +5451,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     # repos -- dispatched pre-argparse (see cmd_repos_dispatch)
     sub.add_parser("repos", help="Repos registry and source roots (run 'repos' for usage)")
+
+    # related -- dispatched pre-argparse (see cmd_related_dispatch)
+    sub.add_parser("related", help="Per-project related repos (run 'related' for usage)")
 
     # pre-launch (two-pass self-update protocol)
     sub.add_parser("pre-launch", help="Check bootstrap staleness (JSON output)")
@@ -5983,6 +6223,14 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] == "repos":
         try:
             return cmd_repos_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # Related (per-project related repos) -- manual dispatch.
+    if args_list[0] == "related":
+        try:
+            return cmd_related_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
