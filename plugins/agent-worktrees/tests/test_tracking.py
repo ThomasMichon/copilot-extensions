@@ -101,7 +101,7 @@ class TestSaveLoadRoundTrip:
         from agent_worktrees.tracking import PRRecord
 
         rec = self._make_record(
-            pr=PRRecord(
+            prs=[PRRecord(
                 state="open",
                 branch="feature/fix-auth-abc123",
                 base_sha="abc123",
@@ -109,7 +109,7 @@ class TestSaveLoadRoundTrip:
                 url="https://example/pulls/42",
                 number=42,
                 provider="gitea",
-            )
+            )]
         )
         path = tmp_path / "wt.yaml"
         save_record(rec, path)
@@ -126,13 +126,142 @@ class TestSaveLoadRoundTrip:
     def test_pr_record_number_optional(self, tmp_path: Path):
         from agent_worktrees.tracking import PRRecord
 
-        rec = self._make_record(pr=PRRecord(state="creating", branch="feature/x"))
+        rec = self._make_record(prs=[PRRecord(state="creating", branch="feature/x")])
         path = tmp_path / "wt.yaml"
         save_record(rec, path)
         loaded = load_record(path)
         assert loaded.pr is not None
         assert loaded.pr.state == "creating"
         assert loaded.pr.number is None
+
+    # --- multi-PR schema (#1107) --------------------------------------------
+
+    def test_legacy_pr_block_loads_as_one_element_list(self, tmp_path: Path):
+        # A record written by an older tool (single `pr:` block, no `prs:`)
+        # must load as a one-element prs list, with repo defaulted to the
+        # worktree repo.
+        path = tmp_path / "legacy.yaml"
+        path.write_text(
+            "worktree_id: wt-001\n"
+            "branch: worktree/wt-001\n"
+            "worktree_path: /tmp/wt\n"
+            "repo: owner/thing\n"
+            "machine: m\n"
+            "platform: wsl\n"
+            "started_at: 2026-06-01T10:00:00\n"
+            "last_resumed_at: 2026-06-01T10:00:00\n"
+            "resume_count: 0\n"
+            "title: null\n"
+            "status: active\n"
+            "completed_at: null\n"
+            "handoff_prompt: null\n"
+            "pr:\n"
+            "  state: open\n"
+            "  branch: feature/legacy-abc\n"
+            "  number: 7\n"
+            "  provider: gitea\n",
+            encoding="utf-8",
+        )
+        loaded = load_record(path)
+        assert len(loaded.prs) == 1
+        assert loaded.prs[0].branch == "feature/legacy-abc"
+        assert loaded.prs[0].number == 7
+        assert loaded.prs[0].repo == "owner/thing"  # defaulted from worktree repo
+        assert loaded.pr is loaded.prs[0]
+
+    def test_multi_pr_round_trip(self, tmp_path: Path):
+        from agent_worktrees.tracking import PRRecord
+
+        rec = self._make_record(prs=[
+            PRRecord(state="merged", branch="feature/one-abc", number=10,
+                     provider="gitea", repo="owner/a",
+                     opened_at="2026-06-01T10:00:00",
+                     closed_at="2026-06-01T11:00:00"),
+            PRRecord(state="open", branch="feature/two-abc", number=11,
+                     provider="github", repo="owner/b",
+                     opened_at="2026-06-01T12:00:00"),
+        ])
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        loaded = load_record(path)
+        assert [p.number for p in loaded.prs] == [10, 11]
+        assert loaded.prs[0].repo == "owner/a"
+        assert loaded.prs[1].provider == "github"
+        # active = most recent non-terminal -> the open one (#11)
+        assert loaded.pr.number == 11
+
+    def test_active_pr_rule(self):
+        from agent_worktrees.tracking import PRRecord
+
+        # No live PR -> most recent overall (last by opened_at).
+        rec = self._make_record(prs=[
+            PRRecord(state="merged", branch="a", opened_at="2026-06-01T10:00:00"),
+            PRRecord(state="closed", branch="b", opened_at="2026-06-01T12:00:00"),
+        ])
+        assert rec.active_pr().branch == "b"
+        # A live PR wins over a more-recent terminal one.
+        rec2 = self._make_record(prs=[
+            PRRecord(state="open", branch="live", opened_at="2026-06-01T10:00:00"),
+            PRRecord(state="merged", branch="done", opened_at="2026-06-01T12:00:00"),
+        ])
+        assert rec2.active_pr().branch == "live"
+        # Empty -> None.
+        assert self._make_record(prs=[]).active_pr() is None
+
+    def test_has_live_pr(self):
+        from agent_worktrees.tracking import PRRecord
+        assert self._make_record(prs=[]).has_live_pr() is False
+        assert self._make_record(prs=[
+            PRRecord(state="merged", branch="a"),
+            PRRecord(state="closed", branch="b"),
+        ]).has_live_pr() is False
+        assert self._make_record(prs=[
+            PRRecord(state="merged", branch="a"),
+            PRRecord(state="open", branch="b"),
+        ]).has_live_pr() is True
+
+    def test_pr_setter_replaces_active(self):
+        from agent_worktrees.tracking import PRRecord
+
+        rec = self._make_record(prs=[PRRecord(state="creating", branch="feature/x")])
+        rec.pr = PRRecord(state="open", branch="feature/x", number=5)
+        assert len(rec.prs) == 1
+        assert rec.prs[0].state == "open"
+        assert rec.prs[0].number == 5
+
+    def test_pr_setter_appends_when_empty_and_clears(self):
+        from agent_worktrees.tracking import PRRecord
+
+        rec = self._make_record(prs=[])
+        rec.pr = PRRecord(state="open", branch="feature/x")
+        assert len(rec.prs) == 1
+        rec.pr = None
+        assert rec.prs == []
+
+    def test_save_mirrors_active_to_legacy_pr_block(self, tmp_path: Path):
+        from agent_worktrees.tracking import PRRecord
+
+        rec = self._make_record(prs=[
+            PRRecord(state="merged", branch="a", number=1),
+            PRRecord(state="open", branch="b", number=2),
+        ])
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        text = path.read_text(encoding="utf-8")
+        assert "prs:" in text
+        # Mirrored legacy pr: block points at the active PR (#2).
+        import yaml as _yaml
+        data = _yaml.safe_load(text)
+        assert data["pr"]["number"] == 2
+        assert [p["number"] for p in data["prs"]] == [1, 2]
+
+    def test_zero_pr_emits_neither_block(self, tmp_path: Path):
+        rec = self._make_record(prs=[])
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        text = path.read_text(encoding="utf-8")
+        assert "\npr:" not in text
+        assert "prs:" not in text
 
 
 # ---------------------------------------------------------------------------

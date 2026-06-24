@@ -385,6 +385,13 @@ def _worktree_to_dict(
         norm = _normalize_path(rec.worktree_path)
         d["turn_count"] = session_ctx.turn_count.get(norm, 0)
         d["session_count"] = session_ctx.session_count.get(norm, 0)
+    # PR metadata: the active PR (back-compat ``pr``) plus the full list and a
+    # count so consumers can see serial/parallel PRs at a glance.
+    if rec.prs:
+        active = rec.active_pr()
+        d["pr"] = pr_ops._pr_to_dict(active) if active is not None else None
+        d["prs"] = [pr_ops._pr_to_dict(p) for p in rec.prs]
+        d["pr_count"] = len(rec.prs)
     return d
 
 
@@ -1275,11 +1282,15 @@ def _system_cleanup(config: cfg.Config) -> int | None:
             info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
 
         if info.state == git_ops.WorktreeState.COMPLETED:
-            cleanable.append((rec, info))
+            # A worktree with a still-open PR is never reapable, even when its
+            # current HEAD's content is on master (a sibling PR merged): the
+            # open PR is still in review and its branch is the recovery source.
+            if not rec.has_live_pr():
+                cleanable.append((rec, info))
         elif info.state == git_ops.WorktreeState.GONE:
-            if not rec.branch or git_ops.is_branch_merged(
+            if not rec.has_live_pr() and (not rec.branch or git_ops.is_branch_merged(
                 rec.branch, upstream, cwd=repo.anchor,
-            ):
+            )):
                 cleanable.append((rec, info))
         elif info.state == git_ops.WorktreeState.UNUSED:
             unused.append((rec, info))
@@ -2287,6 +2298,8 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             worktree_id, config,
             title=args.title,
             branch=args.branch,
+            target_repo=getattr(args, "repo", None),
+            new=getattr(args, "new", False),
             dry_run=args.dry_run,
         )
 
@@ -2342,6 +2355,8 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
         state=args.state,
         provider=args.provider,
         branch=args.branch,
+        select_number=getattr(args, "pr", None),
+        select_branch=getattr(args, "select_branch", None),
     )
     if use_json:
         _json_output(result)
@@ -2371,7 +2386,7 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         return _json_error(msg) if use_json else (output.err(msg) or 1)
     worktree_id = _resolve_worktree_id(worktree_id)
 
-    result = pr_ops.pr_status(worktree_id)
+    result = pr_ops.pr_status(worktree_id, all_prs=getattr(args, "all", False))
     if use_json:
         _json_output(result)
         return 0 if result.get("has_pr") or "error" not in result else 1
@@ -2381,12 +2396,20 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
     if not result.get("has_pr"):
         print(f"{worktree_id}: no PR recorded (direct-push or not yet created).")
         return 0
-    print(f"PR for {worktree_id}:")
+    count = result.get("pr_count", 1)
+    print(f"PR for {worktree_id} (active of {count}):")
     print(f"  state:    {result.get('state')}")
     print(f"  branch:   {result.get('branch')}")
     print(f"  number:   {result.get('number')}")
     print(f"  url:      {result.get('url')}")
     print(f"  provider: {result.get('provider')}")
+    if result.get("repo"):
+        print(f"  repo:     {result.get('repo')}")
+    if getattr(args, "all", False) and result.get("prs"):
+        print(f"  all PRs ({count}):")
+        for p in result["prs"]:
+            num = f"#{p['number']}" if p.get("number") else "(unnumbered)"
+            print(f"    - {num} [{p.get('state')}] {p.get('branch')}")
     return 0
 
 
@@ -4968,6 +4991,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Title for the squashed commit / PR slug")
     p.add_argument("--branch", default=None,
                    help="Override the generated feature branch name")
+    p.add_argument("--repo", default=None,
+                   help="Target repo 'owner/name' for the PR (default: the worktree repo)")
+    p.add_argument("--new", action="store_true",
+                   help="Force a brand-new PR (fresh branch) even if a live PR is open")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
@@ -4983,12 +5010,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="PR lifecycle state")
     p.add_argument("--provider", default=None, help="PR provider (gitea|github|azure-devops)")
     p.add_argument("--branch", default=None, help="Feature branch name (if not already recorded)")
+    p.add_argument("--pr", type=int, default=None,
+                   help="Select which tracked PR to update by number (default: the active PR)")
+    p.add_argument("--select-branch", default=None, dest="select_branch",
+                   help="Select which tracked PR to update by feature branch")
     p.add_argument("--json", action="store_true", help="JSON output mode")
     p.add_argument("--config", default=None)
 
     # pr-status (read tracked PR metadata)
     p = sub.add_parser("pr-status", help="Show tracked PR metadata for a worktree")
     p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("--all", action="store_true",
+                   help="List every tracked PR, not just the active one")
     p.add_argument("--json", action="store_true", help="JSON output mode")
     p.add_argument("--config", default=None)
 

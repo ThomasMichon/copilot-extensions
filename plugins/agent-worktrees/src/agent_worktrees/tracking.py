@@ -42,7 +42,9 @@ class PRRecord:
     """Pull-request metadata nested under a worktree record (PR mode).
 
     Present only when the worktree has entered the PR workflow.  ``state``
-    tracks the PR lifecycle; ``branch`` is the pushed feature branch.
+    tracks the PR lifecycle; ``branch`` is the pushed feature branch.  A
+    worktree may carry several of these over its life (serial re-PRs) or at
+    once (parallel PRs) -- see ``WorktreeRecord.prs``.
     """
 
     state: str = ""          # creating | open | merged | closed
@@ -52,6 +54,19 @@ class PRRecord:
     url: str = ""
     number: int | None = None
     provider: str = ""
+    repo: str = ""           # target repo "owner/name"; default = worktree repo
+    opened_at: str = ""      # ISO timestamp the PR record was opened
+    closed_at: str = ""      # ISO timestamp the PR reached a terminal state
+
+
+# PR lifecycle states that are still live (the PR can still receive pushes).
+# Anything else (merged/closed) is terminal.
+_PR_NON_TERMINAL = ("", "creating", "open")
+
+
+def _pr_is_terminal(pr: PRRecord) -> bool:
+    """Return True when a PR has reached a terminal (merged/closed) state."""
+    return pr.state not in _PR_NON_TERMINAL
 
 
 @dataclass
@@ -72,9 +87,61 @@ class WorktreeRecord:
     completed_at: str | None
     handoff_prompt: str | None  # deprecated, kept for YAML compat
     sessions: list[SessionEntry] | None = field(default=None)
-    pr: PRRecord | None = field(default=None)
+    # PR records (PR mode).  A worktree can track multiple PRs -- serially
+    # (re-PR after a merge) or in parallel -- each self-describing (including
+    # its target ``repo``).  Empty when the worktree has not entered the PR
+    # workflow.  The legacy single ``pr:`` YAML block loads as a one-element
+    # list; the ``pr`` property below preserves the old single-PR accessor.
+    prs: list[PRRecord] = field(default_factory=list)
     kind: WorktreeKind = "session"
     owner: str | None = None  # owning service name, for system worktrees
+
+    def active_pr(self) -> PRRecord | None:
+        """Return the PR a no-selector command should target.
+
+        Rule (see the multi-PR effort): the most recent **non-terminal**
+        (creating/open) PR; if none are live, the most recent overall.
+        "Most recent" is by ``opened_at`` then list order, so a record with
+        no timestamps resolves deterministically to the last-appended PR.
+        """
+        if not self.prs:
+            return None
+        pool = [p for p in self.prs if not _pr_is_terminal(p)] or self.prs
+        return max(pool, key=lambda p: (p.opened_at or "", self.prs.index(p)))
+
+    def has_live_pr(self) -> bool:
+        """Return True if any tracked PR is still non-terminal (open/creating).
+
+        A worktree with a live PR must not be reaped by cleanup -- the PR is
+        still in review and its feature branch is the recovery source.
+        """
+        return any(not _pr_is_terminal(p) for p in self.prs)
+
+    @property
+    def pr(self) -> PRRecord | None:
+        """Back-compat accessor: the active PR (see :meth:`active_pr`)."""
+        return self.active_pr()
+
+    @pr.setter
+    def pr(self, value: PRRecord | None) -> None:
+        """Back-compat mutator: replace the active PR, or append/clear.
+
+        Mirrors the old single-slot semantics for call sites that still do
+        ``record.pr = PRRecord(...)``: with an active PR present the value
+        replaces it in place (preserving list position); with none, the value
+        is appended.  Assigning ``None`` drops the active PR from the list.
+        Write sites that intend a *new* PR (serial/parallel) mutate ``prs``
+        directly instead.
+        """
+        active = self.active_pr()
+        if value is None:
+            if active is not None:
+                self.prs = [p for p in self.prs if p is not active]
+            return
+        if active is not None:
+            self.prs[self.prs.index(active)] = value
+        else:
+            self.prs.append(value)
 
     @property
     def yaml_path(self) -> Path:
@@ -105,6 +172,52 @@ def _atomic_write(path: Path, content: str) -> None:
         except OSError:
             pass
         raise
+
+
+def _parse_pr_mapping(raw: dict, default_repo: str) -> PRRecord:
+    """Parse one PR mapping (from a ``prs:`` item or legacy ``pr:`` block)."""
+    num = raw.get("number")
+    if num in (None, "", "null"):
+        num_val: int | None = None
+    else:
+        try:
+            num_val = int(num)
+        except (TypeError, ValueError):
+            num_val = None
+    return PRRecord(
+        state=str(raw.get("state", "")),
+        branch=str(raw.get("branch", "")),
+        base_sha=str(raw.get("base_sha", "")),
+        head_sha=str(raw.get("head_sha", "")),
+        url=str(raw.get("url", "")),
+        number=num_val,
+        provider=str(raw.get("provider", "")),
+        # A legacy record without a per-PR repo targets the worktree's repo.
+        repo=str(raw.get("repo", "")) or default_repo,
+        opened_at=str(raw.get("opened_at", "")),
+        closed_at=str(raw.get("closed_at", "")),
+    )
+
+
+def _pr_to_yaml_dict(pr: PRRecord) -> dict[str, object]:
+    """Serialize a PRRecord to a YAML-friendly mapping (lean: omit empties)."""
+    d: dict[str, object] = {
+        "state": pr.state,
+        "branch": pr.branch,
+        "base_sha": pr.base_sha,
+        "head_sha": pr.head_sha,
+        "url": pr.url,
+    }
+    if pr.number is not None:
+        d["number"] = pr.number
+    d["provider"] = pr.provider
+    if pr.repo:
+        d["repo"] = pr.repo
+    if pr.opened_at:
+        d["opened_at"] = pr.opened_at
+    if pr.closed_at:
+        d["closed_at"] = pr.closed_at
+    return d
 
 
 def load_record(path: Path) -> WorktreeRecord:
@@ -155,27 +268,18 @@ def load_record(path: Path) -> WorktreeRecord:
                         ended_at=str(ea) if ea else None,
                     ))
 
-    # Parse nested pr block -- present only in PR-workflow mode.
-    raw_pr = data.get("pr")
-    pr_obj: PRRecord | None = None
-    if isinstance(raw_pr, dict):
-        num = raw_pr.get("number")
-        if num in (None, "", "null"):
-            num_val: int | None = None
-        else:
-            try:
-                num_val = int(num)
-            except (TypeError, ValueError):
-                num_val = None
-        pr_obj = PRRecord(
-            state=str(raw_pr.get("state", "")),
-            branch=str(raw_pr.get("branch", "")),
-            base_sha=str(raw_pr.get("base_sha", "")),
-            head_sha=str(raw_pr.get("head_sha", "")),
-            url=str(raw_pr.get("url", "")),
-            number=num_val,
-            provider=str(raw_pr.get("provider", "")),
-        )
+    # Parse PR records -- the multi-PR ``prs:`` list (preferred) or a legacy
+    # single ``pr:`` mapping (loaded as a one-element list).  Absent in
+    # non-PR worktrees.
+    default_repo = data.get("repo") or cfg.project_name()
+    prs_list: list[PRRecord] = []
+    raw_prs = data.get("prs")
+    if isinstance(raw_prs, list):
+        for raw in raw_prs:
+            if isinstance(raw, dict):
+                prs_list.append(_parse_pr_mapping(raw, default_repo))
+    elif isinstance(data.get("pr"), dict):
+        prs_list.append(_parse_pr_mapping(data["pr"], default_repo))
 
     # Owner class -- absent (legacy records) defaults to "session".
     kind_raw = data.get("kind")
@@ -188,7 +292,7 @@ def load_record(path: Path) -> WorktreeRecord:
         worktree_id=data["worktree_id"],
         branch=data["branch"],
         worktree_path=data.get("worktree_path", ""),
-        repo=data.get("repo") or cfg.project_name(),
+        repo=default_repo,
         machine=data.get("machine", ""),
         platform=data.get("platform", ""),
         started_at=str(started_at_raw),
@@ -199,7 +303,7 @@ def load_record(path: Path) -> WorktreeRecord:
         completed_at=str(completed_raw) if completed_raw else None,
         handoff_prompt=data.get("handoff_prompt") or None,
         sessions=sessions_list,
-        pr=pr_obj,
+        prs=prs_list,
         kind=kind_val,
         owner=str(owner_raw) if owner_raw else None,
     )
@@ -239,23 +343,23 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         if record.owner:
             content += f"owner: {record.owner}\n"
 
-    # Serialize nested pr block -- only when in PR-workflow mode.
-    if record.pr is not None:
-        pr_data: dict[str, object] = {
-            "state": record.pr.state,
-            "branch": record.pr.branch,
-            "base_sha": record.pr.base_sha,
-            "head_sha": record.pr.head_sha,
-            "url": record.pr.url,
-        }
-        if record.pr.number is not None:
-            pr_data["number"] = record.pr.number
-        pr_data["provider"] = record.pr.provider
+    # Serialize PR records.  Emit the multi-PR ``prs:`` list and mirror the
+    # active PR to a legacy ``pr:`` block for one release, so a same-machine
+    # tool *downgrade* still finds the active PR.  Zero-PR worktrees emit
+    # neither, keeping the common-case YAML byte-identical.
+    if record.prs:
         content += yaml.safe_dump(
-            {"pr": pr_data},
+            {"prs": [_pr_to_yaml_dict(p) for p in record.prs]},
             default_flow_style=False,
             sort_keys=False,
         )
+        active = record.active_pr()
+        if active is not None:
+            content += yaml.safe_dump(
+                {"pr": _pr_to_yaml_dict(active)},
+                default_flow_style=False,
+                sort_keys=False,
+            )
 
     # Serialize sessions list -- None omitted (not yet indexed),
     # [] written as empty list (indexed, no sessions).
