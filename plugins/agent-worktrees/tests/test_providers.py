@@ -30,7 +30,9 @@ class TestResolveToken:
 
     def test_token_command_precedence(self, monkeypatch):
         monkeypatch.setenv("MY_TOKEN", "from-env")
-        prcfg = cfg.PRConfig(token_env="MY_TOKEN", token_command="printf cmd-tok")
+        # `echo` is portable across the Windows (cmd.exe) and POSIX shells the
+        # test may run under; `printf` is not a cmd.exe builtin.
+        prcfg = cfg.PRConfig(token_env="MY_TOKEN", token_command="echo cmd-tok")
         assert base.resolve_token(prcfg) == "cmd-tok"
 
     def test_none_when_unset(self):
