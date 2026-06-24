@@ -470,15 +470,16 @@ BINSTUB_BODY
 }
 
 deploy_global_config() {
-    # Write the global machine-wide config (~/.agent-worktrees/config.yaml),
-    # the lowest config tier. Idempotent: never clobbers an existing file (which
-    # may carry user-authored copilot_profiles) unless --force.
+    # Scaffold the global machine-wide config (~/.agent-worktrees/config.yaml),
+    # the user-owned base tier. Created once when missing, then NEVER
+    # overwritten -- not even with --force (which targets installer-owned
+    # artifacts). Only a deliberate schema migration should rewrite it.
     local machine="$1"
     local platform="$2"
     local global_path="$INSTALL_DIR/config.yaml"
 
-    if [[ -f "$global_path" ]] && ! $FORCE; then
-        skipped "Global config exists at $global_path"
+    if [[ -f "$global_path" ]]; then
+        skipped "Global config exists at $global_path (user-owned, left as-is)"
         return 0
     fi
     local src_root=""
