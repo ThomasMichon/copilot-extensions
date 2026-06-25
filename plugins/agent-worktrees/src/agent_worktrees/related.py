@@ -449,3 +449,139 @@ def scaffold_doc(
     )
     path.write_text(body, encoding="utf-8")
     return (path, True)
+
+
+# ---------------------------------------------------------------------------
+# Locus resolution -- "how do I work on this repo, from here, on this machine?"
+# ---------------------------------------------------------------------------
+
+def machine_matches(key: str, current: str) -> bool:
+    """Loosely match a locus machine key against the current machine name.
+
+    Locus keys are short (``dev6``); the detected machine is often the full
+    hostname (``tmichon-dev6``).  A key matches when it equals the current
+    name, is its ``-``-suffix, or equals its last ``-``-segment
+    (case-insensitive).
+    """
+    k = (key or "").strip().lower()
+    c = (current or "").strip().lower()
+    if not k or not c:
+        return False
+    return c == k or c.endswith("-" + k) or c.split("-")[-1] == k
+
+
+@dataclass
+class Resolution:
+    """A plan for how to work on a related repo from the current machine."""
+
+    name: str
+    locus_kind: str = "local"        # local | machine | codespace
+    target_machine: str = ""         # for the ``machine`` kind
+    available_here: bool = True
+    editing_model: str = ""          # read-only | anchor | worktree | worktree-unadopted
+    delegate_via: str = ""           # agent-bridge | agent-codespaces | none
+    steps: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+def build_resolution(
+    entry: RelatedEntry,
+    *,
+    current_machine: str,
+    repo_class: str | None,
+    repo_path: str | None,
+    adopted: bool,
+) -> Resolution:
+    """Compute how to work on ``entry`` from the current machine.
+
+    Pure planner -- the caller injects the current machine, the global-registry
+    class/path, and whether the repo is adopted (has a launch binstub).  It
+    emits a structured plan (kind, availability, editing model, delegation,
+    concrete steps) but never executes anything.
+    """
+    name = entry.name
+    kind, target = parse_preferred(entry.locus.preferred)
+    if not kind:
+        kind = "local"
+    machines = entry.locus.machines
+
+    res = Resolution(name=name, locus_kind=kind, target_machine=target,
+                     delegate_via=entry.delegate)
+
+    # Local editing model from the global registry class.
+    cls = (repo_class or "").lower()
+    if cls == "reference":
+        res.editing_model = "read-only"
+    elif cls == "singleton":
+        res.editing_model = "anchor"
+    elif cls == "worktree":
+        res.editing_model = "worktree" if adopted else "worktree-unadopted"
+    else:
+        res.editing_model = "unknown"
+
+    def _local_edit_steps() -> list[str]:
+        if cls == "reference":
+            return [f"Read-only (reference). Resolve the path with "
+                    f"`agent-worktrees repos find {name}`; do not edit it."]
+        if cls == "singleton":
+            loc = repo_path or f"(run `agent-worktrees repos find {name}`)"
+            return [f"Edit the anchor checkout directly at {loc} "
+                    "(singleton: one flow at a time)."]
+        if cls == "worktree":
+            if adopted:
+                return [f"Create an isolated worktree: `{name} --new`, then "
+                        f"`{name} push-changes` / `{name} finalize`."]
+            return [f"Adopt first: `agent-worktrees register {name}`, then "
+                    f"`{name} --new`."]
+        return [f"Resolve the checkout with `agent-worktrees repos find {name}`."]
+
+    if kind == "codespace":
+        res.available_here = True  # CodeSpaces are driven from any machine
+        cs = entry.locus.codespace or {}
+        repo = cs.get("repo", "<codespace-repo>")
+        mach = cs.get("machine", "")
+        loc = cs.get("location", "")
+        create = f"gh cs create -R {repo}"
+        if mach:
+            create += f" -m {mach}"
+        if loc:
+            create += f" -l {loc}"
+        res.steps = [
+            f"Preferred locus is a CodeSpace (delegate via "
+            f"{entry.delegate or 'agent-codespaces'}).",
+            f"Provision/reuse: {create}",
+            "Dispatch work: `agent-bridge send codespace:<name> \"<task>\"` "
+            "(or `agent-codespaces ssh <name>`).",
+        ]
+        return res
+
+    if kind == "machine":
+        res.available_here = machine_matches(target, current_machine)
+        if res.available_here:
+            res.steps = _local_edit_steps()
+        else:
+            via = entry.delegate or "agent-bridge"
+            res.steps = [
+                f"Preferred locus is machine '{target}' (you are on "
+                f"'{current_machine}').",
+                f"Delegate via {via}: `agent-bridge send {target} \"<task>\"`.",
+            ]
+        return res
+
+    # kind == "local"
+    if machines and not any(machine_matches(m, current_machine) for m in machines):
+        res.available_here = False
+        via = entry.delegate or "agent-bridge"
+        res.notes.append(
+            f"Not checked out on '{current_machine}'. Available on: "
+            f"{', '.join(machines)}."
+        )
+        res.steps = [
+            f"Delegate via {via} to one of [{', '.join(machines)}]: "
+            f"`agent-bridge send <machine> \"<task>\"`.",
+        ]
+        return res
+
+    res.available_here = True
+    res.steps = _local_edit_steps()
+    return res

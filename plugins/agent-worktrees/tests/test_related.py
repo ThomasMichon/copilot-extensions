@@ -285,3 +285,128 @@ def test_cli_errors(tmp_path: Path):
     assert run(["show", "nope", "--repo", str(tmp_path)]) == 1   # not a related repo
     assert run(["remove", "nope", "--repo", str(tmp_path)]) == 1
     assert run(["primary", "nope", "--repo", str(tmp_path)]) == 1  # link first
+
+
+# ---------------------------------------------------------------------------
+# locus resolution
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("key,current,expected", [
+    ("dev6", "tmichon-dev6", True),
+    ("dev6", "dev6", True),
+    ("dev6", "DEV6", True),
+    ("cloud1", "tmichon-dev6", False),
+    ("dev6", "tmichon-dev6-wsl", False),   # last segment is 'wsl'
+    ("", "tmichon-dev6", False),
+])
+def test_machine_matches(key, current, expected):
+    assert related.machine_matches(key, current) is expected
+
+
+def test_resolve_local_worktree_adopted(tmp_path: Path):
+    e = RelatedEntry(name="ce", locus=Locus(preferred="local"))
+    r = related.build_resolution(
+        e, current_machine="tmichon-dev6", repo_class="worktree",
+        repo_path="D:/Src/ce", adopted=True,
+    )
+    assert r.locus_kind == "local"
+    assert r.available_here is True
+    assert r.editing_model == "worktree"
+    assert any("ce --new" in s for s in r.steps)
+
+
+def test_resolve_worktree_unadopted_suggests_register(tmp_path: Path):
+    e = RelatedEntry(name="aih")
+    r = related.build_resolution(
+        e, current_machine="tmichon-dev6", repo_class="worktree",
+        repo_path=None, adopted=False,
+    )
+    assert r.editing_model == "worktree-unadopted"
+    assert any("register aih" in s for s in r.steps)
+
+
+def test_resolve_reference_is_read_only(tmp_path: Path):
+    e = RelatedEntry(name="wiki")
+    r = related.build_resolution(
+        e, current_machine="m", repo_class="reference",
+        repo_path="/x", adopted=False,
+    )
+    assert r.editing_model == "read-only"
+    assert any("Read-only" in s for s in r.steps)
+
+
+def test_resolve_machine_elsewhere_delegates(tmp_path: Path):
+    e = RelatedEntry(name="x", locus=Locus(preferred="machine:cloud1"),
+                     delegate="agent-bridge")
+    r = related.build_resolution(
+        e, current_machine="tmichon-dev6", repo_class="worktree",
+        repo_path=None, adopted=True,
+    )
+    assert r.locus_kind == "machine"
+    assert r.target_machine == "cloud1"
+    assert r.available_here is False
+    assert any("agent-bridge send cloud1" in s for s in r.steps)
+
+
+def test_resolve_machine_here_is_local(tmp_path: Path):
+    e = RelatedEntry(name="x", locus=Locus(preferred="machine:dev6"))
+    r = related.build_resolution(
+        e, current_machine="tmichon-dev6", repo_class="singleton",
+        repo_path="D:/Git/x", adopted=False,
+    )
+    assert r.available_here is True
+    assert r.editing_model == "anchor"
+    assert any("anchor checkout directly" in s for s in r.steps)
+
+
+def test_resolve_codespace(tmp_path: Path):
+    e = RelatedEntry(
+        name="odsp-web", delegate="agent-codespaces",
+        locus=Locus(preferred="codespace",
+                    codespace={"repo": "org/odsp-web-codespaces",
+                               "machine": "largePremiumLinux256gb",
+                               "location": "EastUs"}),
+    )
+    r = related.build_resolution(
+        e, current_machine="tmichon-dev6", repo_class="reference",
+        repo_path=None, adopted=False,
+    )
+    assert r.locus_kind == "codespace"
+    assert r.available_here is True
+    assert any("gh cs create -R org/odsp-web-codespaces" in s for s in r.steps)
+    assert any("agent-bridge send codespace:" in s for s in r.steps)
+
+
+def test_resolve_local_unavailable_on_this_machine(tmp_path: Path):
+    e = RelatedEntry(name="x", locus=Locus(machines=["cloud1", "book2"]),
+                     delegate="agent-bridge")
+    r = related.build_resolution(
+        e, current_machine="tmichon-dev6", repo_class="worktree",
+        repo_path=None, adopted=False,
+    )
+    assert r.available_here is False
+    assert any("cloud1" in n for n in r.notes)
+
+
+def test_cli_resolve_uses_primary_when_no_name(tmp_path: Path, capfd):
+    from agent_worktrees.__main__ import cmd_related_dispatch as run
+
+    run(["add", "ce", "--repo", str(tmp_path), "--locus", "local", "--no-scaffold"])
+    run(["primary", "ce", "--repo", str(tmp_path)])
+    capfd.readouterr()
+    assert run(["resolve", "--repo", str(tmp_path)]) == 0   # no name -> primary
+    out = capfd.readouterr().out
+    assert "ce" in out and "Plan" in out
+
+
+def test_cli_add_codespace_flags(tmp_path: Path):
+    from agent_worktrees.__main__ import cmd_related_dispatch as run
+
+    rc = run(["add", "odsp-web", "--repo", str(tmp_path), "--locus", "codespace",
+              "--cs-repo", "org/odsp-web-codespaces", "--cs-machine", "big",
+              "--cs-location", "EastUs", "--no-scaffold"])
+    assert rc == 0
+    e = related.get_related(tmp_path, "odsp-web")
+    assert e.locus.preferred == "codespace"
+    assert e.locus.codespace == {"repo": "org/odsp-web-codespaces",
+                                 "machine": "big", "location": "EastUs"}
