@@ -163,8 +163,13 @@ class CodespaceResolver:
 
         config = load_merged_config()
         # Always spawn against the RAW codespace name (gh requires it), even if
-        # the caller addressed it by friendly name.
-        spawn_cmd = _build_spawn_command(cs.name, config.effective_acp_command)
+        # the caller addressed it by friendly name. Resolve the launch command
+        # per CodeSpace *repository* so the agent lands in the right checkout
+        # (e.g. odsp-web-codespaces -> /workspaces/odsp-web), not the global
+        # default workspace folder.
+        spawn_cmd = _build_spawn_command(
+            cs.name, config.effective_acp_command_for(cs.repository)
+        )
         log.info("Resolved codespace:%s -> %s", cs.name, " ".join(spawn_cmd))
 
         return SpawnTarget(

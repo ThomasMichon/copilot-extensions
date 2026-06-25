@@ -64,9 +64,21 @@ class RepoConfig:
     Keyed by the CodeSpace repository (e.g.
     ``my-org/my-codespaces-repo``). ``provision`` hooks declared
     here apply only to CodeSpaces of this repo.
+
+    A CodeSpaces repo frequently differs from the product checkout it hosts
+    (e.g. ``my-org/odsp-web-codespaces`` serves a ``/workspaces/odsp-web``
+    checkout). The directional "consume-from" relationship -- *we consume
+    CodeSpaces from this repo for product repo X* -- is recorded with
+    ``workspace_repo``, mirroring agent-worktrees' "related repos" concept.
+    The remote workspace folder then derives from it
+    (``/workspaces/<basename(workspace_repo)>``) unless an explicit
+    ``workspace_folder`` overrides it. This is what makes an agent launched
+    for ``odsp-web-codespaces`` land in ``/workspaces/odsp-web`` rather than
+    the (wrong) ``/workspaces/odsp-web-codespaces``.
     """
 
     workspace_repo: str | None = None
+    workspace_folder: str | None = None
     machine_type: str | None = None
     location: str | None = None
     bootstrap_post_create: str | None = None
@@ -145,12 +157,49 @@ class CodespacesConfig:
 
     @property
     def effective_acp_command(self) -> str:
-        """Return the resolved remote agent command.
+        """Return the resolved remote agent command (global / no repo context).
+
+        Equivalent to ``effective_acp_command_for(None)`` -- see that method
+        for the full resolution order. Retained for callers with no CodeSpace
+        repository in hand.
+        """
+        return self.effective_acp_command_for(None)
+
+    def workspace_folder_for(self, repo: str | None) -> str | None:
+        """Resolve the remote workspace folder for a CodeSpace repository.
+
+        Resolution order (most specific wins):
+
+        1. ``repos.<repo>.workspace_folder`` -- explicit per-repo override.
+        2. ``repos.<repo>.workspace_repo`` -- the product repo this CodeSpace
+           hosts; the folder derives as ``/workspaces/<basename>`` (the
+           GitHub Codespaces checkout convention). This is the "related
+           repo" link: it lets ``odsp-web-codespaces`` map to
+           ``/workspaces/odsp-web`` without restating the path.
+        3. ``defaults.workspace_folder`` -- the global fallback.
+
+        Returns ``None`` when nothing is configured, so the caller falls back
+        to the remote-resolved workspace (see ``_WORKSPACE_CD``).
+        """
+        repo_cfg = self.repos.get(repo) if repo else None
+        if repo_cfg is not None:
+            if repo_cfg.workspace_folder:
+                return repo_cfg.workspace_folder
+            if repo_cfg.workspace_repo:
+                basename = repo_cfg.workspace_repo.rstrip("/").split("/")[-1]
+                if basename:
+                    return f"/workspaces/{basename}"
+        return self.workspace_folder
+
+    def effective_acp_command_for(self, repo: str | None) -> str:
+        """Return the resolved remote agent command for a CodeSpace repo.
 
         Priority:
-        1. Explicit ``acp_command`` if set.
+        1. Explicit ``acp_command`` if set (a complete custom override).
         2. ``cd <workspace_folder> && copilot --acp --stdio --allow-all-tools``
-           when ``workspace_folder`` is configured.
+           when a workspace folder resolves for ``repo`` (see
+           ``workspace_folder_for`` -- per-repo override, then the
+           ``workspace_repo`` related-repo link, then the global default).
         3. ``cd "<remote-resolved workspace>" && copilot ...`` otherwise -- the
            directory is resolved *on the CodeSpace* at launch from a fallback
            chain of env vars (see ``_WORKSPACE_CD``) so a session lands in the
@@ -166,8 +215,9 @@ class CodespacesConfig:
         if self.acp_command:
             return self.acp_command
         copilot = "copilot --acp --stdio --allow-all-tools"
-        if self.workspace_folder:
-            return f"cd {self.workspace_folder} && {copilot}"
+        workspace_folder = self.workspace_folder_for(repo)
+        if workspace_folder:
+            return f"cd {workspace_folder} && {copilot}"
         return f"{_WORKSPACE_CD} && {copilot}"
 
     def provision_for_repo(self, repo: str | None) -> ProvisionConfig:
@@ -273,6 +323,7 @@ def _parse_repo_config(raw: dict[str, Any], repo_dir: Path | None = None) -> Rep
     provision_raw = raw.get("provision")
     return RepoConfig(
         workspace_repo=raw.get("workspace_repo"),
+        workspace_folder=raw.get("workspace_folder"),
         machine_type=raw.get("machine_type"),
         location=raw.get("location"),
         bootstrap_post_create=bootstrap.get("post_create"),
