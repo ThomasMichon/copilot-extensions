@@ -4705,9 +4705,11 @@ def _related_usage() -> None:
     print("  add <name>                          Link a related repo + scaffold its doc")
     print("     [--role R] [--summary S] [--doc PATH] [--delegate D]")
     print("     [--locus L] [--machines a,b] [--primary] [--no-scaffold]")
+    print("     [--cs-repo R] [--cs-machine M] [--cs-location L]   (codespace locus)")
     print("  remove <name>                       Unlink (leaves the narrative doc)")
     print("  doc <name>                          Print (scaffold if missing) the narrative")
     print("  primary [<name>]                    Show or set the primary related repo")
+    print("  resolve [<name>]                    How to work on it from here (locus plan)")
     print()
     print("Any command takes [--repo PATH] to target a specific checkout")
     print("(default: the git repo containing the current directory).")
@@ -4849,6 +4851,12 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         name = rest[0]
         machines_csv = _related_opt(rest, "--machines", "") or ""
         machines = [m.strip() for m in machines_csv.split(",") if m.strip()]
+        codespace: dict[str, str] = {}
+        for flag, key in (("--cs-repo", "repo"), ("--cs-machine", "machine"),
+                          ("--cs-location", "location")):
+            v = _related_opt(rest, flag)
+            if v:
+                codespace[key] = v
         entry = related.RelatedEntry(
             name=name,
             role=related.normalize_role(_related_opt(rest, "--role", "")),
@@ -4857,6 +4865,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             locus=related.Locus(
                 preferred=(_related_opt(rest, "--locus", "") or "").strip(),
                 machines=machines,
+                codespace=codespace,
             ),
             delegate=related.normalize_delegate(_related_opt(rest, "--delegate", "")),
         )
@@ -4919,8 +4928,64 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         return 0
 
     if sub == "resolve":
-        output.err("'related resolve' is not implemented yet (Phase 3).")
-        return 1
+        from . import doctor
+        name = (rest[0] if rest and not rest[0].startswith("-")
+                else related.get_primary(anchor))
+        if not name:
+            output.err("Usage: related resolve <name>  (or set a primary first)")
+            return 1
+        entry = related.get_related(anchor, name)
+        if entry is None:
+            output.err(f"'{name}' is not a related repo.")
+            return 1
+        reg = repos.find_repo(name)
+        try:
+            current_machine = cfg.detect_machine(anchor)
+        except Exception:
+            current_machine = ""
+        try:
+            adopted = name in doctor._read_projects()
+        except Exception:
+            adopted = False
+        resn = related.build_resolution(
+            entry,
+            current_machine=current_machine,
+            repo_class=(reg.repo_class if reg else None),
+            repo_path=(reg.local_path() if reg else None),
+            adopted=adopted,
+        )
+        if json_out:
+            _json_output({
+                "name": resn.name,
+                "locus_kind": resn.locus_kind,
+                "target_machine": resn.target_machine,
+                "available_here": resn.available_here,
+                "editing_model": resn.editing_model,
+                "delegate_via": resn.delegate_via,
+                "current_machine": current_machine,
+                "steps": resn.steps,
+                "notes": resn.notes,
+            })
+            return 0
+        output.header(f"Resolve: {resn.name}")
+        if entry.summary:
+            print(f"  {entry.summary}")
+        avail = "" if resn.available_here else "  (not available here)"
+        print(f"  locus:    {entry.locus.preferred or 'local'}{avail}")
+        print(f"  class:    {reg.repo_class if reg else '(not in registry)'}"
+              + (f"  [{resn.editing_model}]" if resn.editing_model else ""))
+        if reg and reg.local_path():
+            print(f"  path:     {reg.local_path()}")
+        if resn.delegate_via:
+            print(f"  delegate: {resn.delegate_via}")
+        print(f"  machine:  {current_machine or '(unknown)'}")
+        for n in resn.notes:
+            output.warn(n)
+        print()
+        print("  Plan:")
+        for s in resn.steps:
+            print(f"    - {s}")
+        return 0
 
     output.err(f"Unknown related subcommand: {sub}")
     _related_usage()
