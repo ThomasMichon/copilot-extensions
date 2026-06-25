@@ -298,18 +298,71 @@ function Get-RunningProcess {
     return $null
 }
 
+function Test-HealthOnce {
+    # Single-shot health probe (no retry/sleep). Used by readiness loops that do
+    # their own pacing, so the loop interval is not multiplied by an inner retry.
+    try {
+        Invoke-RestMethod -Uri "http://127.0.0.1:${Port}/health" `
+            -TimeoutSec 2 -ErrorAction Stop | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 function Test-HealthCheck {
     $retries = 5
     for ($i = 1; $i -le $retries; $i++) {
-        try {
-            $response = Invoke-RestMethod -Uri "http://127.0.0.1:${Port}/health" `
-                -TimeoutSec 2 -ErrorAction Stop
-            return $true
-        } catch {
-            Start-Sleep -Seconds 2
-        }
+        if (Test-HealthOnce) { return $true }
+        Start-Sleep -Seconds 2
     }
     return $false
+}
+
+function Get-PortListeners {
+    # Return the (unique) owning PIDs of every LISTEN socket on a port.
+    param([int]$P)
+    return @(
+        Get-NetTCPConnection -LocalPort $P -ErrorAction SilentlyContinue |
+            Where-Object { $_.State -eq 'Listen' } |
+            Select-Object -ExpandProperty OwningProcess -Unique
+    )
+}
+
+function Stop-DaemonProcesses {
+    # Drain EVERY agent-bridge daemon plus any occupant of the service/relay
+    # ports, looping until both ports are free (or attempts exhausted). A single
+    # Stop-Process is not enough: duplicate/orphaned daemons (e.g. a racer that
+    # re-bound the port between stop and start, or a leftover from a botched
+    # update) otherwise survive and defeat the restart, leaving the new code
+    # unable to bind. Returns $true once $Port and $RelayPort are both free.
+    param([int]$MaxAttempts = 10)
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        $victims = New-Object 'System.Collections.Generic.HashSet[int]'
+
+        # Every process running THIS venv's python (the `-m agent_bridge` daemons).
+        if (Test-Path $VenvPython) {
+            foreach ($p in (Get-Process -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Path -eq $VenvPython })) {
+                [void]$victims.Add([int]$p.Id)
+            }
+        }
+        # Every occupant of the service port and the (in-process) relay port.
+        foreach ($pt in @($Port, $RelayPort)) {
+            foreach ($procId in (Get-PortListeners $pt)) { [void]$victims.Add([int]$procId) }
+        }
+
+        if ($victims.Count -eq 0) { return $true }
+
+        foreach ($procId in $victims) {
+            Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+        }
+        Start-Sleep -Milliseconds 800
+    }
+
+    # Final verdict: both ports must be free.
+    return ((Get-PortListeners $Port).Count -eq 0 -and (Get-PortListeners $RelayPort).Count -eq 0)
 }
 
 function Get-GitInfo {
@@ -718,19 +771,32 @@ function Get-PwshPath {
 }
 
 function Invoke-Start {
+    # -Fresh: used by `update` -- never adopt a pre-existing daemon (it may be the
+    # OLD version, or a racer that grabbed the port). Drain first, then spawn the
+    # freshly-installed code and gate success on an actual health response.
+    param([switch]$Fresh)
+
     if (-not (Test-Path $VenvPython)) {
         Write-Fail 'agent-bridge not installed. Run: install.ps1 install'
         exit 1
     }
 
-    # Check if already running
+    # Decide what to do about anything already serving.
     $proc = Get-RunningProcess
     if ($proc) {
-        Write-Warn "agent-bridge is already running (pid=$($proc.Id))"
-        return
+        if ($Fresh) {
+            Write-Step "Draining existing daemon (pid=$($proc.Id)) to start fresh..."
+            Stop-DaemonProcesses | Out-Null
+        } elseif (Test-HealthOnce) {
+            Write-Warn "agent-bridge is already running (pid=$($proc.Id))"
+            return
+        } else {
+            # Process exists but the port does not answer -- a wedged/zombie
+            # daemon. Replace it rather than leaving the service unhealthy.
+            Write-Warn "agent-bridge process found (pid=$($proc.Id)) but not responding -- restarting"
+            Stop-DaemonProcesses | Out-Null
+        }
     }
-
-    Write-Step 'Starting agent-bridge...'
 
     $logFile = Join-Path $InstallDir 'agent-bridge.log'
     $errFile = Join-Path $InstallDir 'agent-bridge-err.log'
@@ -747,36 +813,45 @@ function Invoke-Start {
 Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
 "@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
-
-    # Launch the detached, hidden pwsh through conhost --headless so Windows
-    # Terminal (when configured as the default terminal app) cannot capture it
-    # as a visible window/tab -- -WindowStyle Hidden alone is ignored by the
-    # DefTerm handoff. ShellExecute (no -NoNewWindow / no redirection on THIS
-    # call) is preserved so the long-lived python.exe (-m agent_bridge) does not
-    # inherit the installer's std handles; it inherits conhost's headless pseudoconsole.
     $pwshForHeadless = Get-PwshPath
-    Start-Process -FilePath 'conhost.exe' `
-        -ArgumentList @('--headless', "`"$pwshForHeadless`"", '-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded) `
-        -WindowStyle Hidden | Out-Null
 
-    # The detached launcher writes the pid file once the service is spawned.
-    $rp = $null
-    for ($i = 0; $i -lt 20; $i++) {
-        Start-Sleep -Seconds 1
-        $rp = Get-RunningProcess
-        if ($rp) { break }
-    }
+    # Spawn + health-gate, retrying a few times. A single slow/failed spawn must
+    # NOT leave the service down (the previous single-attempt logic exited here,
+    # killing the daemon mid-update). Each attempt drains any half-started
+    # process before respawning so a stuck port-bind cannot wedge the retry.
+    $maxAttempts = 3
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        $label = if ($attempt -gt 1) { " (attempt $attempt/$maxAttempts)" } else { '' }
+        Write-Step "Starting agent-bridge$label..."
 
-    if ($rp) {
-        if (Test-HealthCheck) {
-            Write-Ok "agent-bridge started (pid=$($rp.Id), port=$Port)"
-        } else {
-            Write-Warn "agent-bridge started (pid=$($rp.Id)) but health check failed -- check agent-bridge.log"
+        # Launch the detached, hidden pwsh through conhost --headless so Windows
+        # Terminal (when configured as the default terminal app) cannot capture it
+        # as a visible window/tab -- -WindowStyle Hidden alone is ignored by the
+        # DefTerm handoff. ShellExecute (no -NoNewWindow / no redirection on THIS
+        # call) is preserved so the long-lived python.exe (-m agent_bridge) does
+        # not inherit the installer's std handles.
+        Start-Process -FilePath 'conhost.exe' `
+            -ArgumentList @('--headless', "`"$pwshForHeadless`"", '-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded) `
+            -WindowStyle Hidden | Out-Null
+
+        # Success == the port actually answers /health (not merely "a process
+        # exists"). Single-shot probe per second so the loop paces at ~1s.
+        for ($i = 0; $i -lt 25; $i++) {
+            Start-Sleep -Seconds 1
+            if (Test-HealthOnce) {
+                $rp = Get-RunningProcess
+                $pidTxt = if ($rp) { "pid=$($rp.Id), " } else { '' }
+                Write-Ok ("agent-bridge started ({0}port={1})" -f $pidTxt, $Port)
+                return
+            }
         }
-    } else {
-        Write-Fail 'agent-bridge failed to start -- check agent-bridge.log'
-        exit 1
+
+        Write-Warn "agent-bridge did not become healthy within 25s$label -- draining and retrying"
+        Stop-DaemonProcesses | Out-Null
     }
+
+    Write-Fail 'agent-bridge failed to start -- check agent-bridge.log / agent-bridge-err.log'
+    exit 1
 }
 
 function Invoke-Stop {
