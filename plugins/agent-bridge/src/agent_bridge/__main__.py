@@ -175,9 +175,33 @@ def _cmd_start(args: argparse.Namespace) -> None:
     if idle is not None:
         cfg.idle_shutdown_seconds = idle
 
+    # Single-instance guard: refuse to start a duplicate daemon for this config
+    # dir. Acquired BEFORE binding the port so a racing/duplicate start exits
+    # cleanly instead of half-spawning a zombie that re-binds the relay/service
+    # port and defeats restarts (#129). The kernel frees this lock automatically
+    # if we die, so there is never a stale lock to reclaim. Keep `singleton`
+    # referenced for the daemon's whole lifetime (GC would release the lock).
+    from .singleton import AlreadyRunningError, SingleInstance
+
+    singleton = SingleInstance(config_dir())
+    try:
+        singleton.acquire()
+    except AlreadyRunningError as exc:
+        holder = f" (pid {exc.holder_pid})" if exc.holder_pid else ""
+        print(
+            f"[agent-bridge] Another daemon is already running{holder} for "
+            f"{config_dir()} -- not starting a duplicate.",
+            file=sys.stderr,
+        )
+        logging.getLogger("agent-bridge").info(
+            "Singleton guard: %s -- exiting", exc
+        )
+        return
+
     from .app import create_app
 
     app = create_app(config=cfg, token=token)
+    app.state.single_instance = singleton
 
     print(f"[agent-bridge] Starting on {cfg.bind}:{cfg.port}")
     print(f"[agent-bridge] Auth token: {token[:8]}...")
@@ -199,7 +223,10 @@ def _cmd_start(args: argparse.Namespace) -> None:
     )
     server = uvicorn.Server(config)
     app.state.uvicorn_server = server
-    server.run()
+    try:
+        server.run()
+    finally:
+        singleton.release()
 
 
 def _cmd_status(args: argparse.Namespace) -> None:
