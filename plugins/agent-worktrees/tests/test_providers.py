@@ -148,6 +148,45 @@ class TestGiteaProvider:
         with pytest.raises(ProviderError, match="HTTP 422"):
             gitea.GiteaProvider().create_pull(scope, token="tok")
 
+    def test_apply_labels_paginates_label_lookup(self, monkeypatch):
+        # A label past the first label-list page must still resolve + attach.
+        # Gitea returns one page (default 30) per GET; we page with limit=50.
+        # Page 1 is a FULL page (50 labels) that does NOT contain the target;
+        # the target only appears on page 2. A single-page fetch (the old bug)
+        # would silently drop it -- e.g. a freshly-created source:<machine>.
+        from agent_worktrees.providers import gitea
+
+        page1 = [{"name": f"x{i}", "id": i} for i in range(1, 51)]   # full page
+        page2 = [{"name": "source:wheatley", "id": 228}]            # short -> stop
+        label_post: dict = {}
+
+        def fake_run(args, **kw):
+            url = next((a for a in args if isinstance(a, str)
+                        and a.startswith("http")), "")
+            if "/pulls" in url:
+                return _proc(stdout=json.dumps(
+                    {"html_url": "https://h/gitea/o/r/pulls/42",
+                     "number": 42, "state": "open"}) + "\n201")
+            if "/labels?" in url and "page=1" in url:
+                return _proc(stdout=json.dumps(page1) + "\n200")
+            if "/labels?" in url and "page=2" in url:
+                return _proc(stdout=json.dumps(page2) + "\n200")
+            if "/issues/42/labels" in url:
+                # Capture the ids POSTed to attach.
+                idx = args.index("-d")
+                label_post.update(json.loads(args[idx + 1]))
+                return _proc(stdout="[]\n200")
+            return _proc(stdout="[]\n200")
+
+        monkeypatch.setattr(gitea, "run_cli", fake_run)
+        scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
+                        body="B", api_base="https://h/gitea",
+                        labels=["source:wheatley"])
+        res = gitea.GiteaProvider().create_pull(scope, token="tok")
+        assert res.number == 42
+        # The page-2 label id was resolved and attached.
+        assert label_post == {"labels": [228]}
+
 
 # ---------------------------------------------------------------------------
 # GitHub provider (gh seam mocked)
