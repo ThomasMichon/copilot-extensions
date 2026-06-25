@@ -125,7 +125,7 @@ def test_ensure_running_headless_when_task_registered(monkeypatch, tmp_path):
 
 def test_ensure_running_clears_zombie_task(monkeypatch, tmp_path):
     # Task registered but port down (zombie): the stale instance must be ended
-    # (reaping the orphaned relay) before /run, and with no UAC bootstrap.
+    # before /run, and with no UAC bootstrap.
     state = _stub_start(monkeypatch, tmp_path)
     monkeypatch.setattr(elevated, "_task_registered", lambda: True)
     order = []
@@ -196,3 +196,16 @@ def test_launcher_passes_idle_shutdown(monkeypatch, tmp_path):
     body = launcher.read_text()
     assert f"--idle-shutdown {elevated.IDLE_SHUTDOWN_SECONDS}" in body
     assert "-m agent_bridge start --port 9281" in body
+
+
+def test_seed_config_disables_credential_relay(monkeypatch, tmp_path):
+    # The elevated sub-daemon must NOT host its own credential relay: it would
+    # collide with (and evict) the primary daemon's relay on shared port 9857,
+    # killing the primary. _seed_config seeds enable_credential_relay=False.
+    import yaml as _yaml
+
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+    ed = elevated._seed_config(elevated.ELEVATED_PORT)
+    data = _yaml.safe_load((ed / "config.yaml").read_text())
+    assert data["enable_credential_relay"] is False
+    assert data["port"] == elevated.ELEVATED_PORT
