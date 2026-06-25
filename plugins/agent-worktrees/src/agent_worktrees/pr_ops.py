@@ -134,6 +134,11 @@ def create_pr(
     # Resolve the active PR and whether it is still live (can receive pushes).
     # A *terminal* active PR (merged/closed) must NOT have its branch reused --
     # pushing onto a merged branch does not reopen it (the #1088->#1104 bug).
+    # First reconcile the active PR's state against the provider: a PR merged
+    # *externally* (e.g. Gitea API + auto-merge label) leaves the local record
+    # stale at 'open', which would otherwise reuse + force-push a merged branch
+    # and open no new PR (#1163).
+    _reconcile_active_pr(record, config)
     active = record.active_pr() if record else None
     active_is_live = active is not None and not tracking._pr_is_terminal(active)
 
@@ -170,7 +175,9 @@ def create_pr(
     # --- Re-run path: already on the feature branch -> (re)push + record. ---
     if head_branch == feature_branch:
         return _push_existing_feature(
-            worktree_path, feature_branch, remote, repo, prcfg, record, base
+            worktree_path, feature_branch, remote, repo, prcfg, record, base,
+            config=config, worktree_id=worktree_id, title=eff_title, body=body,
+            open_pr=open_pr, attribution=attribution,
         )
 
     if head_branch != wt_branch:
@@ -303,15 +310,14 @@ def create_pr(
     #    open the PR, embed the source-worktree attribution marker, and
     #    auto-record the url/number on the worktree. Non-fatal on failure --
     #    the branch is already pushed, so the agent can fall back to a manual
-    #    provider sub-agent + set-pr.
-    want_open = prcfg.auto_open if open_pr is None else open_pr
-    # Only auto-open a PR that has not been opened on the provider yet -- never
-    # re-create one when iterating an already-open PR (it has a number/url).
-    if want_open and target_pr is not None and target_pr.number is None:
-        _open_via_provider(
-            result, config, record, target_pr, eff_title, body, worktree_id,
-            head_sha, attribution=attribution,
-        )
+    #    provider sub-agent + set-pr. If the target PR is already open on the
+    #    provider, its number/url is surfaced (never re-created) so the caller
+    #    does not open a duplicate.
+    _finish_auto_open(
+        result, config, record, target_pr, title=eff_title, body=body,
+        worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
+        attribution=attribution,
+    )
 
     return result
 
@@ -368,6 +374,97 @@ def _open_via_provider(
     result["url"] = pull.url
     result["number"] = pull.number
     result["state"] = pull.state or result.get("state")
+
+
+def _finish_auto_open(
+    result: dict,
+    config: Config,
+    record: tracking.WorktreeRecord | None,
+    target_pr: PRRecord | None,
+    *,
+    title: str,
+    body: str | None,
+    worktree_id: str,
+    head_sha: str,
+    open_pr: bool | None,
+    attribution: bool,
+) -> None:
+    """Open the PR (when pending) or surface an already-open PR's number/url.
+
+    Shared by the first-run and the re-run paths so neither silently leaves a
+    pushed branch without reporting its PR:
+
+    * ``open_pr``/``pr.auto_open`` off -> no-op (manual flow).
+    * target PR has no number yet      -> open it via the provider.
+    * target PR already opened          -> surface its number/url on ``result``
+                                           (never re-create -> no duplicate, #1167).
+    """
+    prcfg = config.default_repo.pr
+    want_open = prcfg.auto_open if open_pr is None else open_pr
+    if not want_open or target_pr is None:
+        return
+    if target_pr.number is None:
+        _open_via_provider(
+            result, config, record, target_pr, title, body, worktree_id,
+            head_sha, attribution=attribution,
+        )
+        return
+    # The PR is already open on the provider -- report it so the caller trusts
+    # create-pr's result and does not open a second PR for the same branch.
+    result["pr_opened"] = True
+    result["number"] = target_pr.number
+    if target_pr.url:
+        result["url"] = target_pr.url
+    if target_pr.state:
+        result["state"] = target_pr.state
+
+
+def _reconcile_active_pr(
+    record: tracking.WorktreeRecord | None,
+    config: Config,
+) -> None:
+    """Refresh the active PR's state from the provider (best-effort).
+
+    A PR merged or closed *externally* (e.g. via the Gitea API + the
+    ``auto-merge`` label, bypassing ``finalize``/``pr-watch``) leaves the local
+    record stale at ``open``.  Branch selection in :func:`create_pr` would then
+    reuse and force-push that already-merged branch and open no new PR (#1163).
+    Querying the provider and writing back a terminal state makes the active PR
+    correctly *terminal* so the append-a-fresh-PR path is taken instead.
+
+    No-op (falls back to the local state) when there is no active PR, it has no
+    number yet, it is already terminal, or the provider is unconfigured/
+    unreachable.
+    """
+    if record is None:
+        return
+    active = record.active_pr()
+    if active is None or active.number is None:
+        return
+    if tracking._pr_is_terminal(active):
+        return
+    prcfg = config.default_repo.pr
+    provider_name = active.provider or prcfg.provider
+    target_repo = active.repo or (record.repo or "")
+    try:
+        from . import providers
+
+        provider = providers.get_provider(provider_name)
+        token = providers.resolve_token(prcfg)
+        pull = provider.get_pull(
+            target_repo, active.number,
+            api_base=getattr(prcfg, "api_base", "") or "", token=token,
+        )
+    except Exception:
+        # Provider unconfigured/unreachable -- keep the local state rather than
+        # guessing.  (Conservative: an unverifiable open PR is still iterated.)
+        return
+    state = (pull.state or "").strip().lower()
+    if state and state not in tracking._PR_NON_TERMINAL:
+        active.state = state
+        if not active.closed_at:
+            active.closed_at = tracking._now_iso()
+        tracking.save_record(record)
 
 
 def _load_record_or_none(worktree_id: str) -> tracking.WorktreeRecord | None:
@@ -498,8 +595,21 @@ def _push_existing_feature(
     prcfg,
     record: tracking.WorktreeRecord | None,
     base: dict,
+    *,
+    config: Config,
+    worktree_id: str,
+    title: str,
+    body: str | None,
+    open_pr: bool | None,
+    attribution: bool,
 ) -> dict:
-    """Re-run helper: push an already-created feature branch and record state."""
+    """Re-run helper: push an already-created feature branch and record state.
+
+    Also completes auto-open: if the matched PR has not been opened yet it is
+    opened now; if it is already open its number/url is surfaced.  This keeps a
+    re-run from leaving a pushed branch with no reported PR -- which otherwise
+    leads the agent to open a duplicate (#1167).
+    """
     head_sha = _rev("HEAD", cwd=worktree_path)
     with hooks.allow_pr_push():
         pushed = git_ops.push(remote, feature_branch, cwd=worktree_path, force_with_lease=True)
@@ -518,15 +628,24 @@ def _push_existing_feature(
                 repo=record.repo or "", opened_at=tracking._now_iso(),
             )
             record.prs.append(target)
-        target.state = "open"
+        if not tracking._pr_is_terminal(target):
+            target.state = "open"
         target.head_sha = head_sha
         if not target.provider:
             target.provider = prcfg.provider
         tracking.save_record(record)
     base_sha = target.base_sha if target else ""
-    return {
+    result = {
         **base, "success": True, "state": "open", "rerun": True,
         "branch": feature_branch, "remote": remote,
         "base_sha": base_sha, "head_sha": head_sha,
         "provider": prcfg.provider, "default_branch": repo.default_branch,
+        "repo": (target.repo if target else ""),
+        "pr_count": len(record.prs) if record else 0,
     }
+    _finish_auto_open(
+        result, config, record, target, title=title, body=body,
+        worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
+        attribution=attribution,
+    )
+    return result
