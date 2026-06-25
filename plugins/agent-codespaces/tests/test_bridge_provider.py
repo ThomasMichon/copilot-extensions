@@ -132,6 +132,29 @@ class TestBuildAgentConfigs:
         assert payload in cmd
         assert cmd[cmd.index("--remote-cmd") + 1] == payload
 
+    def test_spawn_command_per_repo_workspace_folder(self):
+        """Each agent's command uses ITS repo's workspace folder, not a single
+        global default. A CodeSpaces repo (org/other-repo) mapped via
+        workspace_repo lands in the product checkout; an unmapped one falls
+        back to the remote-resolved workspace."""
+        from agent_codespaces.config import CodespacesConfig, RepoConfig
+
+        mock_config = CodespacesConfig(
+            repos={"org/other-repo": RepoConfig(workspace_repo="odsp-web")}
+        )
+        with patch(
+            "agent_codespaces.config.load_merged_config",
+            return_value=mock_config,
+        ):
+            agents = build_agent_configs(SAMPLE_CODESPACES)
+
+        by_name = {a["name"]: a for a in agents}
+        mapped = " ".join(by_name["cs-shiny-potato-def456"]["spawn_command"])
+        assert "cd /workspaces/odsp-web && copilot --acp --stdio" in mapped
+
+        unmapped = " ".join(by_name["cs-fuzzy-adventure-abc123"]["spawn_command"])
+        assert "CODESPACE_VSCODE_FOLDER" in unmapped
+
     def test_empty_codespace_list(self):
         agents = build_agent_configs([])
         assert agents == []

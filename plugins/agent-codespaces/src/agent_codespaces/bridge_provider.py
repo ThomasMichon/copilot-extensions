@@ -69,7 +69,6 @@ def build_agent_configs(
         codespaces = list_codespaces()
 
     config = load_merged_config()
-    acp_command = config.effective_acp_command
 
     agents = []
     for cs in codespaces:
@@ -80,6 +79,13 @@ def build_agent_configs(
                 "Skipping codespace '%s' (state=%s)", cs.name, cs.state,
             )
             continue
+
+        # Resolve the launch command per CodeSpace *repository* so each agent
+        # lands in the right checkout. A CodeSpaces repo often differs from the
+        # product checkout it hosts (e.g. odsp-web-codespaces ->
+        # /workspaces/odsp-web); ``effective_acp_command_for`` applies the
+        # per-repo workspace_folder / workspace_repo mapping (see config).
+        acp_command = config.effective_acp_command_for(cs.repository)
 
         # Build the spawn command. Invoke the module directly
         # (python -m agent_codespaces), never the .cmd binstub, so

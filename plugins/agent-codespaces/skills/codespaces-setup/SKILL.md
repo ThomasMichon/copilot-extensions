@@ -129,8 +129,8 @@ agent-codespaces config show
 | `location` | string | `EastUs` | Default Azure region |
 | `dotfiles_repo` | string | -- | Dotfiles repo for CodeSpace provisioning |
 | `ssh_user` | string | `vscode` | SSH user on CodeSpaces |
-| `workspace_folder` | string | -- | Workspace root on CodeSpace (e.g., `/workspaces/<your-repo>`). Used to `cd` before launching Copilot, preventing CWD race conditions during cold starts. |
-| `acp_command` | string | -- | Explicit override for the remote agent command. If omitted, built automatically from `workspace_folder`. |
+| `workspace_folder` | string | -- | **Global** workspace root applied to every CodeSpace (e.g., `/workspaces/<your-repo>`). Used to `cd` before launching Copilot, preventing CWD race conditions during cold starts. When you adopt more than one CodeSpaces repo, prefer per-repo `repos.<repo>.workspace_repo`/`workspace_folder` instead (see `repos`). |
+| `acp_command` | string | -- | Explicit override for the remote agent command. If omitted, built automatically from the resolved workspace folder. |
 
 #### `workspace_folder`
 
@@ -227,7 +227,8 @@ potential. Use only with trusted CodeSpaces and narrow resource scopes.
 
 ### `repos`
 
-Per-target-repo overrides. Keys are `org/repo` identifiers:
+Per-target-repo overrides. Keys are `org/repo` identifiers -- **the CodeSpaces
+repository** (the repo your CodeSpaces are created from):
 
 ```yaml
 repos:
@@ -235,6 +236,38 @@ repos:
     machine_type: largePremiumLinux256gb   # Override default
     location: WestUs2                      # Override default
 ```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `machine_type` | string | from `defaults` | VM size for this repo's CodeSpaces |
+| `location` | string | from `defaults` | Azure region for this repo's CodeSpaces |
+| `workspace_repo` | string | -- | The **product repo** this CodeSpaces repo hosts. Records the directional "we consume CodeSpaces from here for repo X" link (mirrors agent-worktrees' *related repos*). The remote workspace folder derives from it as `/workspaces/<basename>`. |
+| `workspace_folder` | string | from `workspace_repo`, then `defaults` | Explicit per-repo workspace root override. Use when the checkout path isn't `/workspaces/<basename(workspace_repo)>`. |
+| `provision` | map | -- | Repo-specific provision hooks (see Provisioning). |
+
+#### Per-repo workspace folder (CodeSpaces repo ≠ checkout)
+
+A CodeSpaces repo frequently differs from the product checkout it hosts:
+`org/odsp-web-codespaces` serves a `/workspaces/odsp-web` checkout. Deriving the
+folder from the CodeSpaces repo name would give the **wrong**
+`/workspaces/odsp-web-codespaces`. Record the relationship once with
+`workspace_repo`; agents launched for that CodeSpace (via agent-bridge or the
+`codespace:` resolver) then land in the right directory:
+
+```yaml
+repos:
+  odsp-microsoft/odsp-web-codespaces:
+    machine_type: largePremiumLinux256gb
+    workspace_repo: odsp-web        # -> agents launch in /workspaces/odsp-web
+```
+
+Resolution order for a CodeSpace's workspace folder (most specific wins):
+`repos.<repo>.workspace_folder` > derived from `repos.<repo>.workspace_repo`
+(`/workspaces/<basename>`) > global `defaults.workspace_folder` > the
+remote-resolved fallback (`$CODESPACE_VSCODE_FOLDER`/`$VM_REPO_PATH`). Prefer a
+per-repo `workspace_repo` over a global `defaults.workspace_folder` whenever you
+adopt more than one CodeSpaces repo -- the global default applies to **every**
+CodeSpace regardless of repo.
 
 ## Multi-Repo Adoption
 

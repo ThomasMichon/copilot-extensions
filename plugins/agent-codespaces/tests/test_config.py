@@ -211,3 +211,93 @@ class TestEffectiveAcpCommand:
         config = load_merged_config()
         assert config.workspace_folder == "/workspaces/my-repo"
         assert "cd /workspaces/my-repo" in config.effective_acp_command
+
+
+class TestPerRepoWorkspaceFolder:
+    """Per-CodeSpace-repo workspace folder resolution (the related-repo link).
+
+    A CodeSpaces repo (e.g. ``org/odsp-web-codespaces``) often differs from the
+    product checkout it hosts (``/workspaces/odsp-web``). These verify that the
+    folder resolves per repo rather than from a single global default.
+    """
+
+    def _config(self, **repo_kwargs) -> CodespacesConfig:
+        from agent_codespaces.config import RepoConfig
+
+        return CodespacesConfig(
+            repos={"org/odsp-web-codespaces": RepoConfig(**repo_kwargs)}
+        )
+
+    def test_workspace_repo_derives_folder(self):
+        """``workspace_repo`` derives ``/workspaces/<basename>``."""
+        config = self._config(workspace_repo="odsp-web")
+        assert config.workspace_folder_for("org/odsp-web-codespaces") == (
+            "/workspaces/odsp-web"
+        )
+        assert config.effective_acp_command_for("org/odsp-web-codespaces") == (
+            "cd /workspaces/odsp-web && copilot --acp --stdio --allow-all-tools"
+        )
+
+    def test_workspace_repo_with_owner_is_basenamed(self):
+        config = self._config(workspace_repo="odsp-microsoft/odsp-web")
+        assert config.workspace_folder_for("org/odsp-web-codespaces") == (
+            "/workspaces/odsp-web"
+        )
+
+    def test_explicit_workspace_folder_overrides_workspace_repo(self):
+        config = self._config(
+            workspace_repo="odsp-web", workspace_folder="/custom/checkout"
+        )
+        assert config.workspace_folder_for("org/odsp-web-codespaces") == (
+            "/custom/checkout"
+        )
+
+    def test_per_repo_overrides_global_default(self):
+        config = CodespacesConfig(workspace_folder="/workspaces/global")
+        from agent_codespaces.config import RepoConfig
+
+        config.repos["org/odsp-web-codespaces"] = RepoConfig(
+            workspace_repo="odsp-web"
+        )
+        # The mapped repo gets its own folder...
+        assert config.workspace_folder_for("org/odsp-web-codespaces") == (
+            "/workspaces/odsp-web"
+        )
+        # ...while an unmapped repo falls back to the global default.
+        assert config.workspace_folder_for("org/other") == "/workspaces/global"
+
+    def test_unknown_repo_falls_back_to_global(self):
+        config = CodespacesConfig(workspace_folder="/workspaces/global")
+        assert config.workspace_folder_for(None) == "/workspaces/global"
+        assert config.workspace_folder_for("org/unknown") == "/workspaces/global"
+
+    def test_no_mapping_resolves_remote_workspace(self):
+        config = self._config(workspace_repo="odsp-web")
+        # A repo with no per-repo entry and no global default → remote-resolved.
+        cmd = config.effective_acp_command_for("org/unmapped")
+        assert "CODESPACE_VSCODE_FOLDER" in cmd and "VM_REPO_PATH" in cmd
+
+    def test_global_acp_command_still_overrides(self):
+        config = self._config(workspace_repo="odsp-web")
+        config.acp_command = "custom --acp"
+        assert config.effective_acp_command_for("org/odsp-web-codespaces") == (
+            "custom --acp"
+        )
+
+    def test_merged_from_yaml(self, config_dir):
+        repo = config_dir / "repo"
+        _write_codespaces_yaml(repo, {
+            "repos": {
+                "org/odsp-web-codespaces": {
+                    "machine_type": "largePremiumLinux256gb",
+                    "workspace_repo": "odsp-web",
+                },
+            },
+        })
+        save_adopted_repos([AdoptedRepo(path=repo)])
+        config = load_merged_config()
+        rc = config.repos["org/odsp-web-codespaces"]
+        assert rc.workspace_repo == "odsp-web"
+        assert config.effective_acp_command_for("org/odsp-web-codespaces") == (
+            "cd /workspaces/odsp-web && copilot --acp --stdio --allow-all-tools"
+        )
