@@ -38,7 +38,27 @@ Copilot CLI sessions (multiple)
 | Events | `events.py` | SSE event log with durable IDs |
 | Config | `config.py` | Config loading, topology management |
 | Client | `client.py` | HTTP client for CLI commands |
+| Single-instance guard | `singleton.py` | OS-level lock: one daemon per config dir |
+| Elevated sub-daemon | `elevated.py` | Windows admin sub-daemon launcher (port 9281) |
 | CLI | `__main__.py` | Command-line interface |
+
+## Single-Instance Guard
+
+At most **one daemon may run per config dir**. On startup (`_cmd_start` in
+`__main__.py`), before binding any port, the daemon takes an OS-level
+**exclusive, non-blocking** lock on `<config_dir>/agent-bridge.lock`
+(`singleton.py`). A second `agent-bridge start` for the same config dir refuses
+cleanly and exits instead of spawning a duplicate daemon -- duplicate daemons
+otherwise accumulate as zombies that re-bind the service/relay ports and defeat
+restarts.
+
+The lock is an OS byte-range lock (`fcntl.flock` on POSIX,
+`msvcrt.locking` on Windows), so the kernel **releases it automatically when the
+holder dies** (graceful exit, crash, kill, or power loss) -- there is never a
+stale lock to detect or reclaim. It is keyed on the **config dir**, not the
+plugin/venv folder: the primary daemon (`~/.agent-bridge`) and the Windows
+elevated sub-daemon (`~/.agent-bridge/elevated`) have distinct config dirs, so
+each gets its own single instance while two *primaries* can never coexist.
 
 ## Credential Relay
 
@@ -56,6 +76,13 @@ available inside remote agent sessions without separate relay setup.
 The relay speaks the git credential protocol over TCP and supports the
 standard `get`, `store`, and `erase` actions plus `get-access-token`,
 which returns a raw ADO PAT for callers that need an access token.
+
+**Single owner of port 9857.** Only the **primary** daemon hosts the relay. The
+Windows elevated sub-daemon sets `enable_credential_relay: false` in its seeded
+config (`elevated.py` -> `_seed_config`), so it never re-binds -- and thus never
+evicts -- the primary's relay; local elevated agents reuse the primary's relay on
+the same host. The `enable_credential_relay` config flag (default `true`) gates
+relay startup in the `app.py` lifespan.
 
 ## HTTP API
 
