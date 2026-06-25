@@ -75,13 +75,22 @@ def _venv_python() -> str:
 
 def _seed_config(port: int) -> Path:
     """Write the sub-daemon's isolated config.yaml (own port + db; shared
-    topologies so the same agents are discovered). Returns the elevated dir."""
+    topologies so the same agents are discovered). Returns the elevated dir.
+
+    The sub-daemon explicitly disables the credential relay
+    (``enable_credential_relay=False``): the relay binds a fixed shared loopback
+    port (9857) that the **primary** daemon already owns, so a second binder
+    would collide and (via the relay's reclaim logic) evict the live primary --
+    killing it. Local elevated agents reuse the primary daemon's relay on the
+    same host, so the sub-daemon never needs its own.
+    """
     ed = elevated_dir()
     primary = load_config()
     data = primary.model_dump(exclude_defaults=False)
     data["port"] = port
     data["bind"] = "127.0.0.1"
     data["db_path"] = str(ed / "sessions.db")
+    data["enable_credential_relay"] = False
     (ed / "config.yaml").write_text(
         yaml.dump(data, default_flow_style=False, sort_keys=False)
     )
@@ -290,10 +299,11 @@ def ensure_running(port: int = ELEVATED_PORT, *, wait: float = 60.0) -> str:
     if _task_registered():
         # The task may be a zombie: schtasks reports the instance "Running"
         # while the daemon has actually idle-shut-down or died, leaving the
-        # port dead and the credential-relay child orphaned (holding 9857).
-        # `schtasks /run` refuses to start a second instance, so clear any
-        # stale instance first. `/end` terminates the task's whole process
-        # tree, which also reaps the orphaned relay so the restart can rebind.
+        # port dead. `schtasks /run` refuses to start a second instance, so
+        # clear any stale instance first. `/end` terminates the task's whole
+        # process tree so the restart can rebind the API port cleanly. (The
+        # sub-daemon no longer hosts the credential relay, so there is no
+        # orphaned 9857 relay child to reap -- see _seed_config.)
         if not is_up(port):
             _end_task()
             time.sleep(0.5)

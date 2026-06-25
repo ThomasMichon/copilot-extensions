@@ -47,6 +47,13 @@ class TestSaveConfig:
         assert loaded.port == 9999
         assert loaded.bind == "0.0.0.0"
 
+    def test_credential_relay_default_and_roundtrip(self, config_home):
+        # Defaults on (primary daemon owns the relay); the elevated sub-daemon
+        # seeds it off so it never re-binds/evicts the primary's relay.
+        assert ServiceConfig().enable_credential_relay is True
+        save_config(ServiceConfig(enable_credential_relay=False))
+        assert load_config().enable_credential_relay is False
+
 
 class TestAdoptTopology:
     def test_auto_discovers_files(self, config_home, fake_repo):

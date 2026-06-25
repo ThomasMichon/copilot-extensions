@@ -303,3 +303,11 @@ class ServiceConfig(BaseModel):
         "once no host needs it; the persistent task restarts it headlessly. "
         "0 disables (the primary daemon stays up indefinitely).",
     )
+    enable_credential_relay: bool = Field(
+        default=True,
+        description="If True, this daemon starts the shared credential relay "
+        "(loopback port 9857) during startup. The primary daemon owns the relay; "
+        "the elevated sub-daemon seeds this False so it never re-binds (and thus "
+        "never evicts) the primary's relay -- local elevated agents reuse the "
+        "primary's relay on the same host.",
+    )

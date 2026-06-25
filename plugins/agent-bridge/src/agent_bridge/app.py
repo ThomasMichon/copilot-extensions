@@ -70,30 +70,39 @@ async def lifespan(app: FastAPI):
     # Start credential relay server for auth forwarding over SSH tunnels and
     # container connections. agent-bridge owns/runs the relay; provider plugins
     # inject their per-target source profiles (see register_credential_sources).
+    # The elevated sub-daemon disables this (enable_credential_relay=False) so it
+    # never re-binds -- and thus never evicts -- the primary daemon's relay on the
+    # shared loopback port 9857; local elevated agents reuse the primary's relay.
     relay_server = None
-    try:
-        from credential_relay import RelayBuilder
+    if not getattr(cfg, "enable_credential_relay", True):
+        log.info(
+            "Credential relay disabled for this daemon "
+            "(enable_credential_relay=False) -- reusing the primary daemon's relay"
+        )
+    else:
+        try:
+            from credential_relay import RelayBuilder
 
-        from .agent_registry import register_credential_sources
+            from .agent_registry import register_credential_sources
 
-        builder = RelayBuilder()
-        register_credential_sources(builder)
+            builder = RelayBuilder()
+            register_credential_sources(builder)
 
-        if not builder.empty:
-            relay_server = builder.build()
-            await relay_server.start()
-            app.state.credential_relay = relay_server
-            log.info(
-                "Credential relay started on port %d (%d sources)",
-                relay_server.port,
-                len(builder.sources),
-            )
-        else:
-            log.debug("No credential-relay sources registered -- relay disabled")
-    except ImportError:
-        log.debug("credential-relay lib not installed -- credential relay disabled")
-    except OSError as exc:
-        log.warning("Credential relay failed to start: %s", exc)
+            if not builder.empty:
+                relay_server = builder.build()
+                await relay_server.start()
+                app.state.credential_relay = relay_server
+                log.info(
+                    "Credential relay started on port %d (%d sources)",
+                    relay_server.port,
+                    len(builder.sources),
+                )
+            else:
+                log.debug("No credential-relay sources registered -- relay disabled")
+        except ImportError:
+            log.debug("credential-relay lib not installed -- credential relay disabled")
+        except OSError as exc:
+            log.warning("Credential relay failed to start: %s", exc)
 
     log.info(
         "agent-bridge started (port=%s, db=%s, sessions=%d)",
