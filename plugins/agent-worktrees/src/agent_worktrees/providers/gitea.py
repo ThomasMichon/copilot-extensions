@@ -93,6 +93,41 @@ class GiteaProvider:
             self._apply_labels(scope, result.number, token)
         return result
 
+    def _all_labels(self, scope: PRScope, token: str) -> dict[str, int]:
+        """Resolve ``label-name (lowercased) -> id`` for the repo, **paginated**.
+
+        Gitea's ``GET /repos/{repo}/labels`` returns a single page (default 30),
+        so a repo with more labels than fit on page 1 leaves later labels
+        invisible. A previous single-page fetch here silently dropped any
+        configured label past that boundary (e.g. a freshly-created
+        ``source:<machine>``). We page with an explicit ``limit`` until a short
+        page, so every label resolves. Returns ``{}`` on the first non-200.
+        """
+        by_name: dict[str, int] = {}
+        page = 1
+        page_size = 50
+        while True:
+            status, body = self._curl(
+                "GET",
+                self._api(
+                    scope.api_base,
+                    f"/repos/{scope.repo}/labels?limit={page_size}&page={page}",
+                ),
+                token,
+            )
+            if status != 200:
+                return {} if page == 1 else by_name
+            batch = json.loads(body)
+            if not isinstance(batch, list):
+                break
+            for lbl in batch:
+                if isinstance(lbl, dict) and lbl.get("name") and lbl.get("id") is not None:
+                    by_name[str(lbl["name"]).lower()] = lbl["id"]
+            if len(batch) < page_size:
+                break
+            page += 1
+        return by_name
+
     def _apply_labels(self, scope: PRScope, number: int, token: str) -> None:
         """Best-effort: resolve label names to ids and attach them.
 
@@ -102,16 +137,7 @@ class GiteaProvider:
         caller's verification step).
         """
         try:
-            status, body = self._curl(
-                "GET", self._api(scope.api_base, f"/repos/{scope.repo}/labels"), token,
-            )
-            if status != 200:
-                return
-            by_name = {
-                str(lbl.get("name", "")).lower(): lbl.get("id")
-                for lbl in json.loads(body)
-                if isinstance(lbl, dict)
-            }
+            by_name = self._all_labels(scope, token)
             ids = [by_name[name.lower()] for name in scope.labels
                    if name.lower() in by_name and by_name[name.lower()] is not None]
             if not ids:
