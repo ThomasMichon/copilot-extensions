@@ -226,3 +226,50 @@ copilot_profiles:         # machine-wide backend profiles (Tab-cycle in picker)
 A convention-adopted repo with its anchor in `~/.agent-worktrees/repos.yaml`,
 its settings in the in-repo config, and machine defaults here needs **no**
 `~/.{project}/config.yaml` at all.
+
+---
+
+## Related repos -- `<anchor>/.agent-worktrees/related.yaml`
+
+A separate **committed, in-repo** file (a sibling of the in-repo `config.yaml`)
+that records, **from this repo's point of view**, the OTHER repos relevant to
+it. It is *directional* and *per-project* -- distinct from the global,
+machine-wide `repos.yaml` registry. Keys reference **global-registry names**;
+the file adds only relationship + locus + delegate, never checkout paths (those
+still resolve from `repos.yaml`).
+
+Managed by `agent-worktrees related ...`; see the **`agent-worktrees-related`**
+skill (authoring the index) and **`working-cross-repo`** skill (using it).
+
+```yaml
+# <anchor>/.agent-worktrees/related.yaml
+primary: odsp-web                  # the default/primary related repo
+related:
+  odsp-web:
+    role: product                  # product|dependency|consumer|tooling|docs|sibling
+    summary: "Primary product monorepo we ship changes to."
+    doc: related/odsp-web.md       # narrative, relative to .agent-worktrees/
+    locus:
+      preferred: codespace         # local | machine:<key> | codespace
+      machines: [dev6]             # boxes the repo is available on (optional)
+      codespace: { repo: org/odsp-web-codespaces,
+                   machine: largePremiumLinux256gb, location: EastUs }
+    delegate: { via: agent-codespaces }   # agent-bridge | agent-codespaces | none
+```
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `primary` | string | The default related repo (`related resolve` with no name uses it). |
+| `related.<name>` | map | One related repo, keyed by its **global-registry** name. |
+| `related.<name>.role` | string | `product` \| `dependency` \| `consumer` \| `tooling` \| `docs` \| `sibling` (free-form; stored verbatim). |
+| `related.<name>.summary` | string | One line: why the repo matters to this one. |
+| `related.<name>.doc` | string | Narrative-doc path, relative to `.agent-worktrees/` (default `related/<name>.md`). |
+| `related.<name>.locus.preferred` | string | Where work happens: `local` \| `machine:<key>` \| `codespace`. |
+| `related.<name>.locus.machines` | list | Machine keys the repo is available on (per-machine availability the per-platform registry can't express). |
+| `related.<name>.locus.codespace` | map | `repo` / `machine` / `location` provisioning hints for a CodeSpace locus. |
+| `related.<name>.delegate.via` | string | How to hand off work: `agent-bridge` \| `agent-codespaces` \| `none`. |
+
+Reads degrade safely (a missing/malformed file yields an empty index); a bare
+`name:` is a valid minimal link. Writes emit only non-empty fields, keeping the
+committed file minimal.
+
