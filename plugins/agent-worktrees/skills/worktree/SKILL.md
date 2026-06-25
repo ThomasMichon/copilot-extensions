@@ -308,8 +308,12 @@ PRs). `create-pr` is idempotent -- safe to re-run.
 A worktree can track **multiple PRs** over its life. When the active PR is
 already **merged or closed**, `create-pr` automatically opens a *fresh* PR
 (new branch off the current default-branch tip) instead of reusing the merged
-branch -- so landing a second change from the same worktree just works. See
-*Multiple PRs per worktree* below.
+branch -- so landing a second change from the same worktree just works. This
+holds even when the prior PR was merged **externally** (e.g. via the provider
+API + an auto-merge label, without `finalize`/`pr-watch` updating the local
+record): `create-pr` reconciles the active PR's state against the provider
+before choosing a branch, so a stale local `open` never causes a force-push
+onto a merged branch. See *Multiple PRs per worktree* below.
 
 **Auto-open (provider plugins).** When the repo config sets `pr.provider` with
 credentials (`pr.api_base`, `pr.token_command`/`pr.token_env`) and
@@ -323,11 +327,23 @@ branch is still pushed, and the result carries `pr_open_error` so you can fall
 back to Steps 2-3 below. A repo **without** provider credentials configured
 uses the manual flow unchanged.
 
+> **Trust the result -- do not open a second PR.** When `create-pr` returns
+> `pr_opened: true` (or any `number`/`url`), the PR is already open and recorded
+> -- **skip Steps 2-3 entirely**; opening another PR yourself produces a
+> duplicate. This applies to re-runs too: a re-run on an already-pushed branch
+> **surfaces the existing PR's number/url** (and opens a still-pending PR),
+> rather than silently succeeding with no PR. Only fall back to Steps 2-3 when
+> the result carries a `pr_open_error`, or when `pr.auto_open` is off / no
+> provider creds are configured.
+
 ### Step 2: Delegate PR creation to the provider sub-agent
 
-*(Manual fallback -- used when `pr.auto_open` is off or no provider creds are
-configured.)* The CLI does **not** call any provider API -- you do, via the
-matching sub-agent. Read the provider and route accordingly:
+*(Manual fallback -- used only when `create-pr` did **not** open the PR: i.e.
+the result carries a `pr_open_error`, `pr.auto_open` is off, or no provider
+creds are configured. If `create-pr` already reported `pr_opened: true` /
+a `number`, do not run this step -- the PR exists.)* The CLI does **not** call
+any provider API in this path -- you do, via the matching sub-agent. Read the
+provider and route accordingly:
 
 | Provider | How to create the PR |
 |----------|----------------------|
@@ -363,7 +379,8 @@ when none are live.
 - **Serial (the common case):** land a PR, then start the next change in the
   same worktree. Once the first PR is merged, just run `create-pr` again --
   it appends a fresh PR with a new branch and a current base, never reusing
-  the merged branch.
+  the merged branch. Works even when the prior PR was merged externally:
+  `create-pr` reconciles the tracked PR's state against the provider first.
 - **Parallel:** keep one PR open and open another from the same worktree with
   `create-pr --new`. Address a specific one with `push-changes` (from its
   feature branch) or `set-pr --pr <n>`.

@@ -136,8 +136,13 @@ class GiteaProvider:
         if status != 200:
             raise ProviderError(f"Gitea PR #{number} lookup failed (HTTP {status}).")
         data = json.loads(body)
+        # Gitea reports a merged PR as state "closed" + ``merged: true``; surface
+        # the distinct "merged" state so reconciliation records it faithfully.
+        state = str(data.get("state", "")) or "open"
+        if data.get("merged"):
+            state = "merged"
         return PullResult(
             url=str(data.get("html_url", "")),
             number=int(data.get("number", number)),
-            state=str(data.get("state", "")) or "open",
+            state=state,
         )

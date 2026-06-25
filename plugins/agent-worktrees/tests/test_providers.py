@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import pr_ops, tracking
+from agent_worktrees import git_ops, pr_ops, tracking
 from agent_worktrees.providers import (
     ProviderError,
     PRScope,
@@ -292,3 +292,185 @@ class TestAutoOpenDefault:
         assert res["success"] is True
         assert "pr_opened" not in res
         assert "pr_open_error" not in res
+
+
+# ---------------------------------------------------------------------------
+# Provider PR-state reconciliation + rerun auto-open (issues #1163, #1167)
+# ---------------------------------------------------------------------------
+
+def _g(*args: str, cwd) -> str:
+    return git_ops.git(*args, cwd=str(cwd)).stdout.strip()
+
+
+class _StatefulFakeProvider:
+    """A fake provider that hands out incrementing PR numbers and lets a test
+    drive what ``get_pull`` reports (to simulate an externally-merged PR)."""
+
+    name = "gitea"
+
+    def __init__(self) -> None:
+        self._next = 100
+        self.pull_states: dict[int, str] = {}   # number -> state get_pull reports
+        self.create_calls = 0
+        self.captured: list = []
+
+    def create_pull(self, scope, *, token=None):
+        self.create_calls += 1
+        n = self._next
+        self._next += 1
+        self.captured.append(scope)
+        self.pull_states[n] = "open"
+        return PullResult(
+            url=f"https://h/gitea/ext/pulls/{n}", number=n, state="open",
+        )
+
+    def get_pull(self, repo, number, *, api_base="", token=None):
+        return PullResult(
+            url=f"https://h/gitea/ext/pulls/{number}", number=number,
+            state=self.pull_states.get(number, "open"),
+        )
+
+
+class TestCreatePRReconcile:
+    """create-pr must reconcile the active PR against the provider before
+    deciding to reuse its branch -- an externally-merged PR (whose local state
+    is stale ``open``) must not be reused/force-pushed (#1163)."""
+
+    def _enable_open(self, config):
+        import dataclasses
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(
+            repo.pr, auto_open=True, api_base="https://h/gitea",
+            token_env="EXT_TOKEN", labels=("auto-merge",),
+        )
+        return dataclasses.replace(
+            config, repos={"ext": dataclasses.replace(repo, pr=pr)}
+        )
+
+    def test_merged_active_pr_is_reconciled_not_reused(self, pr_repo, monkeypatch):
+        config, wid, wt_path, _ = pr_repo
+        config = self._enable_open(config)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _StatefulFakeProvider()
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake
+        )
+
+        r1 = pr_ops.create_pr(wid, config, title="Add feature")
+        assert r1["pr_opened"] is True, r1
+        n1 = r1["number"]
+
+        # Externally merged (Gitea API + auto-merge label), so the provider now
+        # reports the PR as merged while the LOCAL record still says 'open'.
+        fake.pull_states[n1] = "merged"
+
+        # New work on the base branch for a second PR.
+        _g("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "d.txt").write_text("second\n")
+        _g("add", "-A", cwd=wt_path)
+        _g("commit", "-m", "second work", cwd=wt_path)
+
+        r2 = pr_ops.create_pr(wid, config, title="Second feature")
+        assert r2["success"], r2
+        assert "rerun" not in r2                       # NOT the reuse path
+        assert r2["branch"] == "feature/second-feature-aaaa"
+        assert r2["number"] != n1                      # a fresh PR, not the merged one
+        assert r2["pr_opened"] is True
+
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert len(rec.prs) == 2
+        assert rec.prs[0].state == "merged"            # reconciled from provider
+        assert rec.prs[0].branch == "feature/add-feature-aaaa"
+        assert rec.prs[1].state == "open"
+        assert rec.prs[1].branch == "feature/second-feature-aaaa"
+
+    def test_open_active_pr_still_reused_when_provider_agrees(self, pr_repo, monkeypatch):
+        # Reconciliation must NOT break the legitimate iterate-an-open-PR path:
+        # when the provider confirms the active PR is still open, the branch is
+        # reused (force-with-lease) and no second PR is opened.
+        config, wid, wt_path, _ = pr_repo
+        config = self._enable_open(config)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _StatefulFakeProvider()
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake
+        )
+
+        r1 = pr_ops.create_pr(wid, config, title="Add feature")
+        n1 = r1["number"]
+        # Provider still reports open (default). Iterate: new work, push-changes
+        # would normally do this, but a re-create on the open PR must reuse.
+        _g("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "more.txt").write_text("more\n")
+        _g("add", "-A", cwd=wt_path)
+        _g("commit", "-m", "more work", cwd=wt_path)
+
+        r2 = pr_ops.create_pr(wid, config, title="Add feature")
+        assert r2["success"], r2
+        assert r2["branch"] == "feature/add-feature-aaaa"   # reused
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert len(rec.prs) == 1                            # no duplicate PR
+        assert fake.create_calls == 1                       # provider not re-called
+        assert rec.prs[0].number == n1
+
+
+class TestRerunAutoOpen:
+    """The create-pr re-run path (already on the feature branch) must complete
+    auto-open for a still-pending PR and surface an already-opened PR's number,
+    so the agent never opens a duplicate (#1167)."""
+
+    def _enable_open(self, config):
+        import dataclasses
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(
+            repo.pr, auto_open=True, api_base="https://h/gitea",
+            token_env="EXT_TOKEN", labels=("auto-merge",),
+        )
+        return dataclasses.replace(
+            config, repos={"ext": dataclasses.replace(repo, pr=pr)}
+        )
+
+    def test_rerun_opens_pending_pr(self, pr_repo, monkeypatch):
+        config, wid, wt_path, _ = pr_repo
+        config = self._enable_open(config)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _StatefulFakeProvider()
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake
+        )
+
+        # First run pushes the branch but does NOT open the PR.
+        r1 = pr_ops.create_pr(wid, config, title="Add feature", open_pr=False)
+        assert r1["success"], r1
+        assert "pr_opened" not in r1
+
+        # HEAD is now on the feature branch -> re-run should finish auto-open.
+        r2 = pr_ops.create_pr(wid, config, title="Add feature")
+        assert r2.get("rerun") is True, r2
+        assert r2["pr_opened"] is True
+        assert r2["number"]
+        assert fake.create_calls == 1
+
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.active_pr().number == r2["number"]
+
+    def test_rerun_surfaces_existing_pr_no_duplicate(self, pr_repo, monkeypatch):
+        config, wid, wt_path, _ = pr_repo
+        config = self._enable_open(config)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _StatefulFakeProvider()
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake
+        )
+
+        r1 = pr_ops.create_pr(wid, config, title="Add feature")  # opens #100
+        n1 = r1["number"]
+        assert n1
+
+        # Re-run while still on the feature branch: must surface the existing PR
+        # (so the caller does not open a second one), not silently omit it.
+        r2 = pr_ops.create_pr(wid, config, title="Add feature")
+        assert r2.get("rerun") is True, r2
+        assert r2["number"] == n1
+        assert r2["pr_opened"] is True
+        assert fake.create_calls == 1                       # no duplicate PR opened
