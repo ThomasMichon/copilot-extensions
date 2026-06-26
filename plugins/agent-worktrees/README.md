@@ -57,6 +57,15 @@ idle-*looking* tree that actually holds work is never mistaken for unused.
 See the [CLI Reference](docs/cli-reference.md#status-bar-segment-tmux--psmux)
 for the full state table and flags.
 
+On Linux/WSL the bar is applied **per tmux session** by the launcher --
+agent-worktrees does not deploy, overwrite, or delete your global
+`~/.tmux.conf`. Server-global tuning that can't be session-scoped (keystroke
+passthrough, `escape-time`) is an **opt-in** `apply-mux-keybinds.sh` you run
+yourself; it persists a clearly-marked managed block in `~/.tmux.conf` (so it
+survives restarts) and applies to any running server. (The Windows/psmux side
+still uses a deployed `~/.psmux.conf` for now.) See the CLI Reference's
+*Per-session, not global* note for details.
+
 ## Getting Started
 
 See [Getting Started](docs/getting-started.md) for install, repo

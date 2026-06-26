@@ -108,8 +108,9 @@ infrastructure.
 
 | File | Platform | Description |
 |------|----------|-------------|
+| `session-options.sh` | Linux/WSL | Per-session tmux options the launcher stamps onto each session (status bar + behaviors); replaces a global `~/.tmux.conf` |
+| `apply-mux-keybinds.sh` | Linux/WSL | **Opt-in** server-global tmux tuning (keystroke passthrough + `escape-time`); run by the user or a machine-restore flow |
 | `psmux.conf` | Windows | psmux multiplexer config |
-| `tmux.conf` | Linux/WSL | tmux session config |
 | `tabby-template.yaml` | Linux | Tabby terminal profile template |
 
 The Windows installer generates **Windows Terminal fragments** at

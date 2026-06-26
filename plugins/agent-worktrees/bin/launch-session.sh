@@ -406,11 +406,29 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
         TMUX_SESS="wt-${WORKTREE_ID:-base}"
         setup_log INFO "tmux: looking for session $TMUX_SESS"
 
+        # Per-session status bar + behaviors. agent-worktrees does NOT own your
+        # global ~/.tmux.conf; instead we stamp these onto each session we
+        # create/join, scoped to that session (`tmux set -t`, no -g), leaving
+        # your personal config and any ad-hoc tmux sessions untouched.
+        _AW_SESSION_OPTS="$HOME/.agent-worktrees/bin/session-options.sh"
+        if [[ -r "$_AW_SESSION_OPTS" ]]; then
+            # shellcheck source=/dev/null
+            source "$_AW_SESSION_OPTS"
+        fi
+        _aw_apply_session_opts() {
+            if declare -F aw_apply_tmux_session_options >/dev/null 2>&1; then
+                aw_apply_tmux_session_options "$1" || true
+            fi
+        }
+
         # If a tmux session already exists for this worktree, join it.
         # The attacher gets the shared view; no post-exit responsibility.
         if tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
             echo "Joining existing session: $TMUX_SESS"
             activity_log mux_attached "$WORKTREE_ID" mux=join
+            # Refresh per-session options on (re)connect so a long-lived
+            # session picks up the current bar without us owning the global.
+            _aw_apply_session_opts "$TMUX_SESS"
             if [[ -n "${TMUX:-}" ]]; then
                 exec tmux switch-client -t "=$TMUX_SESS"
             else
@@ -472,6 +490,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
         else
 
             activity_log mux_attached "$WORKTREE_ID" mux=create
+            _aw_apply_session_opts "$TMUX_SESS"
             if [[ -n "${TMUX:-}" ]]; then
                 tmux switch-client -t "=$TMUX_SESS"
             else
@@ -505,6 +524,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
                             set +e
                             tmux new-session -d -s "$TMUX_SESS" -c "$WORK_DIR" "${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}" "${HANDOFF_PANE_CMD[@]}"
                             if [[ $? -eq 0 ]]; then
+                                _aw_apply_session_opts "$TMUX_SESS"
                                 if [[ -n "${TMUX:-}" ]]; then
                                     tmux switch-client -t "=$TMUX_SESS"
                                 else

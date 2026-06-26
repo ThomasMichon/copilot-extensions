@@ -87,12 +87,14 @@ continue to work unchanged.
 
 `status-segment` prints a **single styled line** classifying the worktree at
 the current directory (or `--path`) relative to its upstream default branch,
-for polling from a multiplexer status line. The worktree's tmux/psmux config
-(deployed by the installer) wires it up automatically:
+for polling from a multiplexer status line. On Linux/WSL the launcher wires it
+up **per session** when it creates (or rejoins) a worktree session --
+agent-worktrees does **not** own your global `~/.tmux.conf`. The applied option
+is the session-scoped equivalent of:
 
 ```tmux
-set -g status-interval 15
-set -g status-right '#(agent-worktrees status-segment) %H:%M '
+set status-interval 15
+set status-right '#(agent-worktrees status-segment) %H:%M '
 ```
 
 The `#()` job runs in the pane's current directory, so the segment classifies
@@ -124,12 +126,12 @@ behind-counts from the remote -- off by default so the poll stays cheap),
 ### Left segment: worktree identity
 
 `status-context` prints the **left** side of the bar -- the worktree's
-identity rather than its git state. The installer-deployed config wires it
+identity rather than its git state. The launcher applies it **per session**
 alongside the right segment:
 
 ```tmux
-set -g status-left-length 100
-set -g status-left '#(agent-worktrees status-context) '
+set status-left-length 100
+set status-left '#(agent-worktrees status-context) '
 ```
 
 It renders three fields:
@@ -145,6 +147,29 @@ so the fields describe the worktree the pane is actually in. Outside a
 tracked worktree it falls back to live machine/platform detection and omits
 the `repo:id4` field. Flags: `--path PATH`, `--plain` (no `#[style]`
 directives).
+
+### Per-session, not global (Linux/WSL)
+
+agent-worktrees does **not** deploy, overwrite, or delete your global
+`~/.tmux.conf`. The launcher applies the bar and session behaviors with
+`tmux set -t <session>` (session-scoped, no `-g`) when it creates or rejoins a
+worktree session, so your personal tmux config and any ad-hoc tmux sessions
+sharing the same server are left untouched. The single source of truth is the
+deployed `~/.agent-worktrees/bin/session-options.sh`.
+
+Settings that **cannot** be session-scoped -- server-global `escape-time` and
+the keystroke-passthrough root key table -- are **not** applied automatically
+(they would leak onto every session on the server). They live in the opt-in
+`~/.agent-worktrees/bin/apply-mux-keybinds.sh`. Run it once per machine, or wire
+it into a machine-restore flow, if you want that behavior: it persists a
+clearly-marked managed block in `~/.tmux.conf` (so it survives server restarts)
+**and** applies to any running server. The installer never touches
+`~/.tmux.conf` -- only this script does, and only when you elect to run it
+(`--no-persist` tunes the running server without writing the file; deleting the
+marked block removes the settings).
+
+> psmux / Windows still uses a deployed `~/.psmux.conf` for now; the per-session
+> model is being mirrored there in a follow-up.
 
 
 ## Keeping worktrees current
