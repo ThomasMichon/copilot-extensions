@@ -1,0 +1,23 @@
+# ~/.agent-worktrees/repos.yaml -- worktrees repo registry (reference example)
+#
+# Canonical, copy-pasteable example of the global, machine-wide repo registry.
+# Field docs: the agent-worktrees-repos SKILL.md "Schema" section.
+
+srcroot:
+  windows: D:\Src
+  wsl: ~/src
+
+repos:
+  copilot-extensions:
+    class: worktree                # reference | singleton | worktree
+    remote: "https://github.com/ThomasMichon/copilot-extensions.git"
+    default_branch: main
+    tags: [facility]               # filter tags for batch ops
+    contributing: CONTRIBUTING.md  # read before editing
+    windows: D:\Src\copilot-extensions   # per-platform checkout paths
+    wsl: ~/src/copilot-extensions
+
+  some-upstream-dep:
+    class: reference
+    remote: "https://github.com/org/some-dep.git"
+    windows: D:\Src\some-dep

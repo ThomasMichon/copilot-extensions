@@ -145,70 +145,11 @@ copilot @CopilotArgs
 
 ## Full Examples
 
-### PowerShell (setup.ps1)
-
-```powershell
-# setup.ps1
-param(
-    [string]$Machine = $env:COMPUTERNAME,
-    [switch]$Recovery,
-    [Parameter(ValueFromRemainingArguments)]
-    [string[]]$CopilotArgs
-)
-
-$IsAcp = $CopilotArgs -contains '--acp'
-
-# 1. Environment setup
-$env:MY_API_KEY = "..."
-
-# 2. Dependencies (skip in ACP mode for speed)
-if (-not $IsAcp) {
-    if (-not (Test-Path node_modules)) { npm ci --quiet }
-}
-
-# 3. Welcome banner (skip in ACP mode)
-if (-not $IsAcp) {
-    Write-Host "[>] Ready: $env:WORKTREE_PROJECT on $Machine"
-    if ($Recovery) { Write-Host "[!] RECOVERY MODE" }
-}
-
-# 4. Launch Copilot (REQUIRED -- must be last)
-copilot @CopilotArgs
-```
-
-### Bash (setup.sh)
-
-```bash
-#!/usr/bin/env bash
-# setup.sh
-MACHINE="${HOSTNAME}"
-IS_ACP=false
-COPILOT_ARGS=()
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --machine)  MACHINE="$2"; shift 2 ;;
-        --recovery) shift ;;
-        --acp)      IS_ACP=true; COPILOT_ARGS+=("$1"); shift ;;
-        *)          COPILOT_ARGS+=("$1"); shift ;;
-    esac
-done
-
-# 1. Environment
-export MY_API_KEY="..."
-
-# 2. Dependencies (skip in ACP mode)
-if [[ "$IS_ACP" != "true" ]]; then
-    [[ -d node_modules ]] || npm ci --quiet
-fi
-
-# 3. Banner (skip in ACP mode)
-if [[ "$IS_ACP" != "true" ]]; then
-    echo "[>] Ready: ${WORKTREE_PROJECT:-unknown} on $MACHINE"
-fi
-
-# 4. Launch Copilot (REQUIRED -- must be last)
-exec copilot "${COPILOT_ARGS[@]}"
-```
+Copy-pasteable starting points:
+[`references/setup.ps1`](references/setup.ps1) (PowerShell) and
+[`references/setup.sh`](references/setup.sh) (Bash). Both follow the convention:
+parse `--machine`/`--recovery`, detect ACP mode to skip banners and heavy deps,
+and **launch Copilot last** (passing through the remaining args).
 
 ## Generation Flow
 

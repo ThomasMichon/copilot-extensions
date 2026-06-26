@@ -31,25 +31,16 @@ restarts them, `rm` removes them.
 ## Configuration (`containers.yaml`)
 
 Looked up from `$AGENT_CONTAINERS_CONFIG`, `./containers.yaml`, or
-`~/.agent-containers/containers.yaml`. A fleet built from a devcontainer spec:
+`~/.agent-containers/containers.yaml`. Copy the full annotated example,
+[`references/containers.yaml`](references/containers.yaml), and adapt. A fleet
+built from a devcontainer spec, at a glance:
 
 ```yaml
-# Optional: reproduce a designated dotfiles repo inside every fleet container,
-# Codespaces-style (bind-mount read-only, copy to target, run install.sh).
-# Per-user / optional — omit `repo` to skip entirely.
-dotfiles:
-  repo: D:/Src/dotfiles            # host path to the dotfiles repo
-  target: /workspaces/.codespaces/.persistedshare/dotfiles   # default
-  install_command: bash install.sh # run in `target` as the remote user; "" skips
-
 fleets:
   myrepo:
     repo: your-org/your-repo
     devcontainer_path: D:/Src/myrepo-devcontainer   # dir holding .devcontainer/
-    # Needed when the spec is NOT at the default
-    # .devcontainer/devcontainer.json — passed to the devcontainer CLI as
-    # --config. Relative paths resolve against devcontainer_path.
-    devcontainer_config: .devcontainer/docker/devcontainer.json
+    devcontainer_config: .devcontainer/docker/devcontainer.json   # if non-default
     size: 1
 ```
 

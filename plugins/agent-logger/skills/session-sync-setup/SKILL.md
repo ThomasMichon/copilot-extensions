@@ -35,48 +35,21 @@ the same layout. Configuration lives at `~/.agent-logger/config.yaml`
 
 ## Configure
 
-Edit `~/.agent-logger/config.yaml`. Examples:
+Edit `~/.agent-logger/config.yaml`. Copy the full annotated example showing
+every target, [`references/config.yaml`](references/config.yaml), and keep the
+one block you need. The local default at a glance:
 
-**Local (default) -- explicit path:**
 ```yaml
 sync:
-  target: local
+  target: local             # local | onedrive | ssh | ssh-tunnel | ingest
   retention_days: 90        # or "infinite" to keep everything
   targets:
     local:
       path: ~/SessionArchive
 ```
 
-**OneDrive hub:**
-```yaml
-sync:
-  target: onedrive
-  targets:
-    onedrive:
-      subfolder: Apps/agent-logger/sessions
-```
-
-**SSH:**
-```yaml
-sync:
-  target: ssh
-  targets:
-    ssh:
-      host: user@hub.example.com
-      remote_path: /srv/copilot-sessions
-      proxy_jump: jump.example.com   # optional
-```
-
-**Ingest (rsync daemon + optional notify):**
-```yaml
-sync:
-  target: ingest
-  targets:
-    ingest:
-      url: rsync://hub.example.com/sessions
-      password_file: ~/.agent-logger/rsync.pass   # optional
-      notify_url: https://hub.example.com/api/notify?machine={machine}  # optional
-```
+See [`references/config.yaml`](references/config.yaml) for the `onedrive`,
+`ssh`, `ssh-tunnel`, and `ingest` target blocks.
 
 ## Verify
 

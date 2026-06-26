@@ -43,6 +43,9 @@ never restate them here.
 
 ## The model
 
+Full annotated example: [`references/related.yaml`](references/related.yaml).
+At a glance:
+
 ```yaml
 # <repo>/.agent-worktrees/related.yaml
 primary: odsp-web                 # the default/primary related repo
@@ -50,18 +53,11 @@ related:
   odsp-web:
     role: product                 # product|dependency|consumer|tooling|docs|sibling
     summary: "Primary product monorepo we ship changes to."
-    doc: related/odsp-web.md
     locus:
       preferred: codespace        # local | machine:<key> | codespace
       codespace: { repo: org/odsp-web-codespaces,
                    machine: largePremiumLinux256gb, location: EastUs }
     delegate: { via: agent-codespaces }
-  copilot-extensions:
-    role: tooling
-    summary: "Source of the plugins this control plane drives."
-    doc: related/copilot-extensions.md
-    locus: { preferred: machine:dev6, machines: [dev6, cloud1] }
-    delegate: { via: agent-bridge }
 ```
 
 - **`role`** -- what the repo is to this one (free-form; common values above).

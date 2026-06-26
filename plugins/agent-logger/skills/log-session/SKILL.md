@@ -38,18 +38,15 @@ and `digest_dir`.
 
 ### 2. Build a one-session manifest
 
-Write a manifest JSON to a temp file using the prep output:
+Write a manifest JSON to a temp file using the prep output -- shape (full
+example: [`references/manifest.json`](references/manifest.json)):
 
 ```json
 {
   "mode": "single",
   "return": "result",
   "sessions": [
-    {
-      "session_id": "<session_id>",
-      "machine": "<machine>",
-      "session_path": "<session_dir>"
-    }
+    { "session_id": "<session_id>", "machine": "<machine>", "session_path": "<session_dir>" }
   ],
   "output_root": "<repo logs root, e.g. logs>",
   "closing_remark": null

@@ -47,6 +47,8 @@ will be skipped.
 
 ### 3. Build a batch manifest
 
+Full example: [`references/manifest.json`](references/manifest.json). Shape:
+
 ```json
 {
   "mode": "batch",
