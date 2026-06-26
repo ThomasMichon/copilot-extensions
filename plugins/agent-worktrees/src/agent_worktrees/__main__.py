@@ -5890,6 +5890,9 @@ def build_parser() -> argparse.ArgumentParser:
     # related -- dispatched pre-argparse (see cmd_related_dispatch)
     sub.add_parser("related", help="Per-project related repos (run 'related' for usage)")
 
+    # git -- dispatched pre-argparse (see cmd_git_dispatch)
+    sub.add_parser("git", help="Git collaboration primitives (run 'git' for usage)")
+
     # pre-launch (two-pass self-update protocol)
     sub.add_parser("pre-launch", help="Check bootstrap staleness (JSON output)")
 
@@ -6566,6 +6569,90 @@ def cmd_headless_bare() -> int:
     return rc
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# git -- collaboration primitives (sync / feature-branch / merge-to-feature)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _git_usage() -> None:
+    output.header("agent-worktrees git -- collaboration primitives")
+    print("  Usage: agent-worktrees git <command> [options]")
+    print()
+    print("  Commands:")
+    print("    sync    Rebase the worktree branch forward onto the updated remote")
+    print("            default branch (build on top of a just-merged PR).")
+    print("            Mid-flight: never finalizes, prunes, or pushes.")
+    print()
+    print("  See the 'git-collaboration' skill for the full boundary -- which git")
+    print("  operations to wrap vs. run directly.")
+
+
+def cmd_git_sync(rest: list[str]) -> int:
+    if "--help" in rest or "-h" in rest:
+        print(
+            "Usage: agent-worktrees git sync "
+            "[--worktree-id ID] [--config PATH] [--dry-run] [--json]"
+        )
+        return 0
+
+    worktree_id_arg: str | None = None
+    config_arg: str | None = None
+    dry_run = "--dry-run" in rest
+    use_json = "--json" in rest
+    if "--worktree-id" in rest:
+        i = rest.index("--worktree-id")
+        if i + 1 < len(rest):
+            worktree_id_arg = rest[i + 1]
+    if "--config" in rest:
+        i = rest.index("--config")
+        if i + 1 < len(rest):
+            config_arg = rest[i + 1]
+
+    from . import git_collab
+
+    ctx = output.stdout_to_stderr() if use_json else None
+    if ctx is not None:
+        ctx.__enter__()
+    try:
+        try:
+            config = cfg.load_config(Path(config_arg) if config_arg else None)
+        except Exception as e:
+            if use_json:
+                return _json_error(str(e))
+            raise
+        worktree_id = _infer_worktree_id(worktree_id_arg, config)
+        if not worktree_id:
+            msg = (
+                "Could not determine worktree ID. Pass --worktree-id or run "
+                "from inside a worktree."
+            )
+            if use_json:
+                return _json_error(msg)
+            output.err(msg)
+            return 1
+        worktree_id = _resolve_worktree_id(worktree_id)
+        ok = git_collab.sync_forward(worktree_id, config, dry_run=dry_run)
+        if use_json:
+            _json_output({"worktree_id": worktree_id, "synced": ok})
+        return 0 if ok else 1
+    finally:
+        if ctx is not None:
+            ctx.__exit__(None, None, None)
+
+
+def cmd_git_dispatch(argv: list[str]) -> int:
+    """Route `git` sub-group verbs (git-collaboration primitives)."""
+    if not argv or argv[0] in ("--help", "-h"):
+        _git_usage()
+        return 0 if argv else 1
+    sub = argv[0]
+    rest = argv[1:]
+    if sub == "sync":
+        return cmd_git_sync(rest)
+    output.err(f"Unknown git subcommand: {sub}")
+    _git_usage()
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
@@ -6668,6 +6755,14 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] == "related":
         try:
             return cmd_related_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # git -- collaboration primitives (manual dispatch).
+    if args_list[0] == "git":
+        try:
+            return cmd_git_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
