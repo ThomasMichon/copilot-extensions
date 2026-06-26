@@ -52,11 +52,11 @@ high-level sign-off flow (`push-changes` / `create-pr` / `finalize`, owned by th
 | `fetch` | **plain git** | read-only; updates remote-tracking refs only |
 | Advance the worktree onto the merged default ("pull forward") | `agent-worktrees git sync` | must drop squash-merged commits cleanly without losing genuine local work |
 | Create / update / push a **shared** feature branch | `agent-worktrees git feature-branch ...` | a real remote branch many agents build on; push auth + naming + host ownership |
-| Merge a delegate's slice into the shared feature branch | `agent-worktrees git merge-to-feature ...` | must be **ff-only** (no two-parent nodes), from the right base |
+| Merge a delegate's slice into the shared feature branch | `agent-worktrees git merge-to-feature ...` | must be **ff-only** (no two-parent nodes), from the right base, then ff-pushed |
 | Push to the remote **default** branch / open a PR | `push-changes` * `create-pr` * `finalize` | the lifecycle/sign-off flow (see the `worktree` skill) |
 | Bare `git push` of a `worktree/*` branch | **forbidden** | `worktree/*` refs must never reach the remote |
 | Manual merge to the default branch | **forbidden** | breaks linear, one-commit-per-worktree history -- use `finalize` |
-| A **delegate** pushing a PR or the shared feature branch | **forbidden** | only the **host** opens PRs and pushes the shared branch (below) |
+| A **delegate** opening or merging a **PR** | **forbidden** | only the **host** opens PRs from the shared branch (below) |
 | Force-push of shared history (default or shared feature branch) | **forbidden** | rewrites history other agents have built on |
 
 Rule of thumb: **if a parser, a remote, or another agent will consume the
@@ -114,9 +114,12 @@ When several agents collaborate on one effort over a single branch:
 
 ### Host-only PRs
 
-**Only the host opens PRs** for a shared feature branch. Delegates commit and
-`merge-to-feature`; they never `create-pr` or push the shared branch. One PR
-owner keeps review and merge coherent.
+**Only the host opens PRs** for a shared feature branch. Delegates **do**
+ff-push their slices to the shared branch (that is the handoff -- `merge-to-feature`
+ff-pushes by default, so the host can sync forward and see the work). What a
+delegate must never do is **open or merge a PR** from the shared branch, or
+**force-push** it. One PR owner -- the host -- keeps review and merge coherent;
+many delegates fast-forward the branch underneath it.
 
 ### When you don't need a shared branch
 
