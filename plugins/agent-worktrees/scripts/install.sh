@@ -1143,6 +1143,9 @@ case "$ACTION" in
         deploy_copilot_plugin
         ensure_copilot_experimental
         assert_path
+        # Machine-wide terminal integration (see update path): deploy the
+        # multiplexer config regardless of project context.
+        deploy_tmux_config
 
         # -- Project-specific (only when adopting) --
         if $HAS_PROJECT; then
@@ -1150,7 +1153,6 @@ case "$ACTION" in
             deploy_binstub
             register_project
             deploy_tabby_profile "$platform" "$machine"
-            deploy_tmux_config
             deploy_git_hooks_path
 
             if [[ -n "$REPO_DIR" ]]; then
@@ -1378,13 +1380,17 @@ case "$ACTION" in
         remove_legacy_binstubs
         deploy_copilot_plugin
         ensure_copilot_experimental
+        # Machine-wide terminal integration: ~/.tmux.conf is global (the
+        # status segments auto-detect the repo at runtime), so deploy it
+        # regardless of project context -- a project-less update must still
+        # refresh the multiplexer config.
+        deploy_tmux_config
 
         # -- Project-specific (only when a project is known) --
         if $HAS_PROJECT; then
             deploy_binstub
             register_project
             deploy_tabby_profile "$(detect_platform)" "$(resolve_machine)"
-            deploy_tmux_config
             deploy_git_hooks_path
 
             if [[ -n "$REPO_DIR" ]]; then

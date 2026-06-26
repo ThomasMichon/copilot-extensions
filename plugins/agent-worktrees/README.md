@@ -16,6 +16,47 @@ The plugin installs via the Copilot CLI marketplace. The runtime installs
 separately via init scripts and provides the `agent-worktrees` CLI and
 per-project binstubs.
 
+## Status Bar at a Glance
+
+Every worktree session runs inside a multiplexer (psmux on Windows, tmux on
+Linux/WSL) with a status bar that reads the worktree's identity and git
+disposition **live, per pane** -- the `#()` jobs run in each pane's own
+directory, so a split or second window reports its own worktree, not the
+session's.
+
+**Left segment** (`status-context`) -- who and where you are:
+
+```
+ lambda-core  [ win ]  aperture-labs:8e45
+```
+
+- **Machine** -- the host designation (black)
+- **Environment** -- platform as a color-coded badge keyed on OS type
+  (win = blue, wsl = purple, linux = orange), so a Windows pane and a WSL
+  pane are distinguishable at a glance
+- **Repo : id4** -- repo name plus the worktree id's last 4 hex (bold), so
+  you always know which of several parallel worktrees a pane belongs to
+
+**Right segment** (`status-segment`) -- what state the work is in:
+
+| Block | Meaning |
+|-------|---------|
+| `DIRTY` (red) | Uncommitted changes in the working tree |
+| `WIP` (amber) | Clean; committed work not yet on the default branch |
+| `FINAL` (green) | Clean; work landed / fast-forwardable upstream |
+| `CONVO N💬` (teal) | No commits, but the session held *N* conversation turns -- real work that an `UNUSED` label would hide |
+| `UNUSED` (grey) | No commits **and** no conversation since the fork point |
+| `ORPHAN` (magenta) | No merge base with upstream |
+
+The state is classified content-aware (squash-merged work reads `FINAL`, not
+`WIP`) and is annotated with a `↑ahead`/`↓behind` sync tag. The `CONVO` state
+draws on the same turn-count detection that keeps `cleanup` from reaping a
+worktree whose session held conversation but no commits -- so an
+idle-*looking* tree that actually holds work is never mistaken for unused.
+
+See the [CLI Reference](docs/cli-reference.md#status-bar-segment-tmux--psmux)
+for the full state table and flags.
+
 ## Getting Started
 
 See [Getting Started](docs/getting-started.md) for install, repo
