@@ -524,6 +524,55 @@ agent-bridge create <agent> "<same idempotent prompt>"
 Because the prompt is idempotent and the agent pushed incrementally, the new
 session continues from the remote with minimal rework.
 
+## Delegating an Effort Slice (multi-agent coordination)
+
+When an **effort** (see the `planning-efforts` skill) is worked by more than one
+agent, agent-bridge is the dispatch layer and the **effort README's
+`## Coordination` section** is the shared contract. The git mechanics are turn-key
+helpers in the `agent-worktrees` **`git-collaboration`** skill -- this section is
+only the *choreography*; it adds no new mechanics.
+
+> **A delegate is a real agent-bridge session, not a Copilot sub-agent.** Each
+> delegate is a separate Copilot CLI session (local or SSH) with **its own
+> worktree** that can `git commit` and ff-push. In-process sub-agents (the Task
+> tool) share your context, have no branch of their own, and cannot take a slice.
+
+Two topologies -- pick per how interdependent the slices are:
+
+### A. Shared feature branch (interdependent slices)
+
+The slices must integrate before any can merge, so they share one branch and the
+**host owns the PR**.
+
+1. **Host** publishes the shared branch from its worktree:
+   `agent-worktrees git feature-branch <name> --push`.
+2. **Host** dispatches each slice with a complete, idempotent prompt (per
+   *Dispatching Long Autonomous Work* above) that tells the delegate to:
+   - sync to the branch -- `agent-worktrees git feature-branch <name> --sync`;
+   - do its assigned `## Coordination` section, committing on its worktree branch;
+   - **write back its slice of the effort README**;
+   - hand off -- `agent-worktrees git merge-to-feature <name>` (ff-pushes).
+3. **Host** syncs forward as slices land (`git feature-branch <name> --sync`),
+   journaling each dispatch + landing in the effort.
+4. When coordination is done, **only the host** opens the PR(s) from the shared
+   branch. Delegates never open or merge PRs, and never force-push it.
+
+### B. Independent worktrees, per-slice PRs (well-componentized work)
+
+When each slice leaves the default branch **green on its own**, skip the shared
+branch: each delegate works in its **own** worktree and opens its **own** PR
+(its repo's normal `create-pr` flow). The host watches remote PR state to
+sequence follow-ups -- it sees the merge land and moves to the next task. Use
+this only when the pieces are truly independent; otherwise use topology A.
+
+### Either way
+
+- Keep the effort README **ahead of the conversation** -- dispatches, landings,
+  and blockers are journaled there so a fresh host (or a recovering one) resumes
+  from the file. Batch effort edits (each costs a PR) per the `planning-efforts`
+  in-flight discipline.
+- Clean up dispatched worktrees afterward (see *Remote Worktree Lifecycle* below).
+
 ## Agent Names
 
 Agent names come from `acp-agents.json` in your project repo. Use
