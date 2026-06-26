@@ -89,6 +89,68 @@ files in this repo.**
   failing validation captured first, fix to follow.
 - File **sub-issues** for discrete tracked work; link them in the header.
 
+## Submit for review, then execute (the review gate)
+
+Between **planning** and **execution** sits a gate: an effort's plan should be
+*reviewed* before work starts against it. After the operator's own review rounds
+(this is where a rubber-duck pass normally lands), **if the control repo offers
+automated PR review**, submit the effort itself as a PR and let it clear that
+gate before executing:
+
+1. **Submit the effort PR** — open a PR for the effort folder, with the
+   provider's **auto-merge** enabled so an approving review lands it hands-off.
+2. **Await approval + merge** — the automated reviewer (and/or the operator)
+   approves; auto-merge merges it.
+3. **Sync forward** — pull the worktree onto the merged (squashed) default branch
+   so execution builds *on top of* the reviewed plan: `agent-worktrees git sync`
+   (see the `git-collaboration` skill). Then begin executing the Plan.
+
+**The operator may waive their *own* review — but the agent's review-gate is
+non-optional when automated review is available.** Always route the plan through
+it before starting the project. Three reasons this matters:
+
+- **Reviewed plan** — execution proceeds from a plan something checked, not a
+  first draft.
+- **Cross-agent visibility** — a committed, merged effort is visible to *other*
+  agents, who can dedupe against it or co-work on it instead of starting parallel
+  work.
+- **Crash recovery** — if the driving agent dies, the committed effort is a
+  recovery point; work resumes from the file.
+
+**Graceful degradation:** if the repo has no automated PR review (or isn't
+PR-gated at all), the gate collapses to "commit the plan, then execute" — there
+is nothing to wait on. Don't block on a gate the repo doesn't provide.
+
+## Keep the effort current (while executing)
+
+The README is the shared contract — keep it **ahead of the conversation**. But
+**every effort edit that lands upstream costs its own PR**, so don't thrash it:
+
+- **Batch updates** to moments that matter — a **major research or direction
+  change**, a phase boundary, or when there are **other concurrent commits that
+  need pushing anyway**. Routine checkbox ticks can ride along with the next
+  substantive change.
+- **Annotate as you go:** mark Plan items complete, adjust pending designs,
+  re-prioritize on feedback, and journal decisions/blockers/dispatches.
+- **By code-complete**, the README reflects the coding-done state and, at most,
+  names the *next* effort that carries the work forward (deploy / smoke-test /
+  delegation) — it does not try to own that next stretch.
+- **Record merged PRs, not in-flight ones.** Listing a PR that the *current*
+  commit is itself opening is a catch-22; record a PR only once it has merged.
+  Remark open issues the effort spawned or still blocks on.
+
+### Cross-repo & tracking-only efforts
+
+An effort may coordinate work that lands in **another** repo (the effort folder
+tracks; the real changes happen elsewhere). Same discipline, with one ordering
+rule: **propose before you do.** Reviewers can't meaningfully comment on external
+work that's already committed, so:
+
+1. Submit the **proposal** (the not-yet-done plan) to PR first; await review.
+2. Make the external changes once the plan clears.
+3. Report completion as a **separate delta** ("this is now done"), which reviews
+   easily because the only change is status.
+
 ## Resume an effort
 
 1. Pull latest so the Journal is current, then **read the README** — Status,
@@ -124,3 +186,10 @@ files in this repo.**
 - ❌ Naming an effort `feature-*` / `bug-*` / `task-*`.
 - ❌ Putting participant-specific mechanics in the core schema — keep them in
   `## Participants` and the addendum, so the pattern stays portable.
+- ❌ Starting execution before the plan clears its review gate when automated
+  review is available (submit the effort PR → merge → sync forward → *then*
+  execute).
+- ❌ Recording an in-flight PR the current commit is itself opening (a catch-22) —
+  record a PR only once it has merged.
+- ❌ Thrashing the effort with a PR per checkbox — batch edits to direction
+  changes, phase boundaries, or commits that need pushing anyway.
