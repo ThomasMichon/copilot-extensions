@@ -968,25 +968,25 @@ deploy_git_hooks_path() {
     changed "Set git core.hooksPath = tools/hooks"
 }
 
-deploy_tmux_config() {
-    local src="$PLUGIN_DIR/terminal/tmux.conf"
-    local dst="$HOME/.tmux.conf"
-
-    if [[ ! -f "$src" ]]; then
-        echo "  ⚠ tmux.conf template not found at $src" >&2
-        return
-    fi
-
-    if [[ -f "$dst" ]] && ! $FORCE; then
-        if diff -q "$src" "$dst" >/dev/null 2>&1; then
-            skipped "tmux config up to date"
-            return
+deploy_terminal_scripts() {
+    # Deploy the terminal-integration scripts to BIN_DIR. agent-worktrees no
+    # longer owns ~/.tmux.conf: the launcher applies the status bar + behaviors
+    # per-session from session-options.sh, and apply-mux-keybinds.sh is an
+    # opt-in server-global tuning script the user (or a restore flow) may run.
+    local src_dir="$PLUGIN_DIR/terminal"
+    local script src tmp
+    for script in session-options.sh apply-mux-keybinds.sh; do
+        src="$src_dir/$script"
+        if [[ ! -f "$src" ]]; then
+            echo "  ⚠ terminal script not found at $src" >&2
+            continue
         fi
-        changed "tmux config drift detected -- updating"
-    fi
-
-    cp "$src" "$dst"
-    changed "tmux config deployed to $dst"
+        tmp="$(mktemp "$BIN_DIR/$script.XXXXXX")"
+        cp "$src" "$tmp"
+        chmod +x "$tmp"
+        mv -f "$tmp" "$BIN_DIR/$script"
+        ok "Terminal script: $script"
+    done
 }
 
 deploy_copilot_plugin() {
@@ -1143,9 +1143,10 @@ case "$ACTION" in
         deploy_copilot_plugin
         ensure_copilot_experimental
         assert_path
-        # Machine-wide terminal integration (see update path): deploy the
-        # multiplexer config regardless of project context.
-        deploy_tmux_config
+        # Machine-wide terminal integration: deploy the per-session options +
+        # opt-in keybind scripts. We do NOT touch ~/.tmux.conf -- the launcher
+        # applies the status bar per-session at runtime.
+        deploy_terminal_scripts
 
         # -- Project-specific (only when adopting) --
         if $HAS_PROJECT; then
@@ -1213,17 +1214,19 @@ case "$ACTION" in
             changed "Removed package: $LIB_DIR"
         fi
 
-        # Remove wrappers
-        for wrapper in launch-session.cmd launch-session.sh; do
+        # Remove wrappers + terminal-integration scripts
+        for wrapper in launch-session.cmd launch-session.sh \
+                       session-options.sh apply-mux-keybinds.sh; do
             rm -f "$BIN_DIR/$wrapper"
         done
         remove_legacy_scripts
         changed "Removed wrappers from $BIN_DIR"
 
-        # Remove tmux config
+        # ~/.tmux.conf is intentionally left alone: agent-worktrees no longer
+        # owns it (sessions are configured per-session at launch), so uninstall
+        # must not delete a file that may now be the user's own.
         if [[ -f "$HOME/.tmux.conf" ]]; then
-            rm -f "$HOME/.tmux.conf"
-            changed "Removed tmux config (~/.tmux.conf)"
+            skipped "Left ~/.tmux.conf in place (no longer managed by agent-worktrees)"
         fi
 
         if $REMOVE_CONFIG; then
@@ -1315,11 +1318,11 @@ case "$ACTION" in
             skipped "Project status skipped (no project specified)"
         fi
 
-        # tmux config
-        if [[ -f "$HOME/.tmux.conf" ]]; then
-            ok "tmux config at ~/.tmux.conf"
+        # Terminal-integration scripts (per-session options; opt-in keybinds)
+        if [[ -x "$BIN_DIR/session-options.sh" ]]; then
+            ok "terminal scripts at $BIN_DIR (session-options.sh)"
         else
-            echo "  ! tmux config missing -- run 'update' to deploy" >&2
+            echo "  ! terminal scripts missing -- run 'update' to deploy" >&2
         fi
 
         assert_path
@@ -1380,11 +1383,11 @@ case "$ACTION" in
         remove_legacy_binstubs
         deploy_copilot_plugin
         ensure_copilot_experimental
-        # Machine-wide terminal integration: ~/.tmux.conf is global (the
-        # status segments auto-detect the repo at runtime), so deploy it
-        # regardless of project context -- a project-less update must still
-        # refresh the multiplexer config.
-        deploy_tmux_config
+        # Machine-wide terminal integration: redeploy the per-session options +
+        # opt-in keybind scripts regardless of project context. agent-worktrees
+        # no longer owns ~/.tmux.conf (the launcher configures each session at
+        # runtime), so a project-less update just refreshes these scripts.
+        deploy_terminal_scripts
 
         # -- Project-specific (only when a project is known) --
         if $HAS_PROJECT; then
