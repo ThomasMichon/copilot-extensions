@@ -71,6 +71,7 @@ same file. It — not the conversation transcript — is the source of truth.
 | **Header** | slug, repo, branch(es), created date, status, umbrella + sub-issues |
 | **Guiding Intent** | the north star — what success looks like, why it matters |
 | **Participants** | who/what does the work (the executor seam — see below) |
+| **Coordination** | optional; multi-agent branch topology + host/delegate roles + PR ownership (the *branches* binding) |
 | **Context** | background, source issue/plan/idea, prior decisions, references |
 | **Request** | the operator's ask, captured verbatim |
 | **Plan** | phased implementation plan with checklists |
@@ -103,7 +104,14 @@ repo binds it to its own executor provider:
 | machine fleet | a workstation / server | SSH alias, agent-bridge |
 | CodeSpaces | a GitHub CodeSpace | `agent-codespaces` |
 | containers | a local dev container | `agent-containers` |
-| branches | a working branch | git |
+| branches | a shared feature branch several agents build on | git -- the `agent-worktrees` **`git-collaboration`** skill (turn-key `git sync` / `feature-branch` / `merge-to-feature` helpers); delegates dispatched via **agent-bridge** |
+
+When the binding is **branches**, the effort README's `## Coordination` section
+holds the topology: a **shared feature branch** (delegates ff-push slices; the
+**host** owns PRs) for interdependent work, or **independent worktrees with
+per-slice PRs** when each PR leaves the default branch green on its own. The
+mechanics are turn-key helpers in the `git-collaboration` skill -- the effort
+records only the plan and who owns what.
 
 The effort README is where multi-participant coordination is planned and
 journaled, so a fresh agent can pick up the effort from the file alone. Keep
@@ -119,10 +127,25 @@ separation is what lets one plugin serve many repos and many executor plugins.
    umbrella issue if the work warrants tracking, and cross-link it.
 2. **Plan** — fill in Context, Plan, and Validation Plan. File sub-issues for
    discrete tracked work and link them.
-3. **Execute** — do the work on a working branch; keep the **Journal** current.
+3. **Review gate** — before executing, route the *plan* through review. After the
+   operator's own review rounds, **if the control repo offers automated PR
+   review**, submit the effort as a PR (with auto-merge), let it be approved +
+   merged, then **pull the worktree forward onto the merged plan** (the
+   `git-collaboration` skill's `git sync` helper) and execute on top. The operator
+   may waive their own review; the agent's gate is non-optional when automated
+   review exists. It guarantees a reviewed plan, makes the effort visible to other
+   agents (dedupe / co-work), and leaves a crash-recovery point. Where no
+   automated review exists, the gate collapses to "commit the plan, then execute."
+4. **Execute** — do the work on a working branch; keep the **Journal** current.
    Record participant dispatches, decisions, and blockers. The README stays
-   ahead of the conversation.
-4. **Archive** — when the effort is done (or abandoned), move
+   ahead of the conversation, but **batch effort edits** (each upstream edit costs
+   a PR) to direction changes, phase boundaries, or commits that need pushing
+   anyway. By **code-complete**, the README reflects the done state and names the
+   *next* carry-forward effort; record **merged** PRs only (never the in-flight
+   one the current commit is opening). For **cross-repo / tracking-only** efforts,
+   propose-before-you-do: PR the not-yet-done plan first, make the external
+   changes after it clears, then report completion as a separate delta.
+5. **Archive** — when the effort is done (or abandoned), move
    `efforts/active/<slug>/` to the dated archive path, set the header
    **Status**, and write a closing Journal entry. Update the active index in
    `efforts/README.md`. Promote any durable "what is" truth into docs.

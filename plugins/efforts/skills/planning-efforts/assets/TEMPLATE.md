@@ -35,6 +35,29 @@
 |-------------|---------------------|-------------|
 | <name> | <what it does here> | <ssh alias / codespace / container / branch> |
 
+## Coordination
+
+<!-- OPTIONAL — multi-agent efforts only. Omit for solo/local efforts. When more
+     than one agent collaborates on this effort, record the branch topology and
+     who owns what, so a fresh agent (or a recovering host) can pick up the
+     coordination from the file alone. This is the "branches" participant binding
+     — its mechanics live in the agent-worktrees `git-collaboration` skill (the
+     turn-key `git sync` / `feature-branch` / `merge-to-feature` helpers); keep
+     only the plan here.
+
+     Two topologies:
+       - Shared feature branch: delegates ff-push slices to one branch; the HOST
+         owns the PR(s). Use when slices are interdependent.
+       - Independent worktrees + per-slice PRs: only when each PR leaves the
+         default branch green on its own; the host watches remote PR state.
+-->
+
+- **Topology:** <shared feature branch `feature/<name>` | independent per-slice PRs>
+- **Host (owns PRs):** <agent/machine>
+- **Delegates:** <agent/machine — assigned section(s)>
+- **Handoff:** delegates ff-merge to the shared branch (`git merge-to-feature`);
+  host syncs forward (`git feature-branch <name> --sync`). Only the host opens PRs.
+
 ## Context
 
 <!-- Background a fresh agent needs: which issue/plan/idea this effort started
