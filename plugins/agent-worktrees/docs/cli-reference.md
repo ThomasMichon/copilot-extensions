@@ -78,6 +78,7 @@ continue to work unchanged.
 | `cleanup` | List and remove orphaned or finalized worktrees |
 | `status` | Show worktree git status |
 | `status-segment` | Print a styled status-bar segment for the worktree at the cwd (for a tmux/psmux status line) |
+| `status-context` | Print a styled left status-bar segment: machine, environment, and repo:id4 for the worktree at the cwd |
 | `list` | List worktrees from tracking records |
 | `handoff` | Manage handoff prompt state on a worktree |
 
@@ -100,19 +101,50 @@ followed by a colored state block:
 
 | State | Color | Meaning |
 |-------|-------|---------|
-| `DIRTY` | red | Uncommitted changes, or commits ahead of upstream |
+| `DIRTY` | red | Working tree has uncommitted changes (modified, staged, or untracked) |
 | `FINAL` | green | Clean; work landed / fast-forwardable to upstream |
-| `UNUSED` | grey | Clean; no work since the fork point |
+| `UNUSED` | grey | Clean; no commits **and no conversation** since the fork point |
+| `CONVO` | teal | Clean; no commits, but the session held conversation turns (annotated with the turn count, e.g. `CONVO 12💬`) |
 | `WIP` | amber | Clean; ahead with content not yet on upstream |
 | `ORPHAN` | magenta | No merge base with upstream |
 
 A trailing `↑ahead`/`↓behind` tag mirrors the picker's inline sync status. The
-upstream default branch (`main`/`master`) is auto-detected per repo, so the
-segment works regardless of which project the binstub belongs to.
+`CONVO` state refines `UNUSED` using session turn-count detection: a worktree
+with no committed work is only truly *unused* when its session also held zero
+turns; once it has held conversation, it renders as `CONVO` with the turn
+count (mirroring the picker's `💬` annotation and `cleanup`'s
+"conversation-only" preservation). The upstream default branch (`main`/`master`)
+is auto-detected per repo, so the segment works regardless of which project the
+binstub belongs to.
 
 Flags: `--path PATH` (classify another worktree), `--fetch` (refresh
 behind-counts from the remote -- off by default so the poll stays cheap),
 `--plain` (no `#[style]` directives), `--no-title` (state block only).
+
+### Left segment: worktree identity
+
+`status-context` prints the **left** side of the bar -- the worktree's
+identity rather than its git state. The installer-deployed config wires it
+alongside the right segment:
+
+```tmux
+set -g status-left-length 100
+set -g status-left '#(agent-worktrees status-context) '
+```
+
+It renders three fields:
+
+| Field | Style | Source | Example |
+|-------|-------|--------|---------|
+| Machine | Black, bold | Tracking record `machine` (else live host detection) | `lambda-core` |
+| Environment | Badge: white on an OS-keyed background (win=blue, wsl=purple, linux=orange) | Platform short code, matching the worktree id | `win` |
+| Repo : id4 | Black | Record `repo` + the worktree id's 4-char suffix | `copilot-extensions:8e45` |
+
+Like the right segment, the `#()` job runs in the pane's current directory,
+so the fields describe the worktree the pane is actually in. Outside a
+tracked worktree it falls back to live machine/platform detection and omits
+the `repo:id4` field. Flags: `--path PATH`, `--plain` (no `#[style]`
+directives).
 
 
 ## Keeping worktrees current

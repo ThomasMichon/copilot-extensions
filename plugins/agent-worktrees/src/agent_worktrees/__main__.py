@@ -2642,6 +2642,11 @@ _SEGMENT_STYLE: dict[git_ops.WorktreeState, tuple[str, str]] = {
 
 _SEGMENT_TITLE_MAX = 48
 
+# Conversation-only refinement of UNUSED: a worktree with no commits whose
+# session nonetheless held >0 turns is not idle -- render it as a distinct
+# teal "CONVO" block (style, label) so it reads apart from grey UNUSED.
+_SEGMENT_CONVO_STYLE: tuple[str, str] = ("colour037", "CONVO")  # teal
+
 
 def _find_record_for_path(path: str) -> tracking.WorktreeRecord | None:
     """Return the tracking record whose worktree path matches ``path``."""
@@ -2693,19 +2698,22 @@ def _resolve_segment_title(
     rec: tracking.WorktreeRecord | None,
     path: str,
     info: git_ops.WorktreeStateInfo,
+    ctx: "sessions.SessionContext | None" = None,
 ) -> str:
     """Resolve a worktree's display title cheaply (single-record scan).
 
     Priority: explicit tracking title -> latest session summary -> last
     commit subject.  Returns "" when nothing is available.  Truncated to
-    keep the status bar readable.
+    keep the status bar readable.  Pass a precomputed ``ctx`` (from
+    :func:`sessions.scan_sessions_fast`) to avoid a second scan.
     """
     title = ""
     if rec and rec.title and rec.title != "null":
         title = rec.title
     if not title and rec is not None:
         try:
-            ctx = sessions.scan_sessions_fast([rec])
+            if ctx is None:
+                ctx = sessions.scan_sessions_fast([rec])
             title = ctx.latest_summary.get(_normalize_path(path), "") or ""
         except Exception:
             title = ""
@@ -2730,10 +2738,11 @@ def cmd_status_segment(args: argparse.Namespace) -> int:
 
     States: ``DIRTY`` (uncommitted changes or commits ahead of upstream),
     ``FINAL`` (clean, work landed / fast-forwardable to upstream),
-    ``UNUSED`` (clean, no work since the fork point), ``WIP`` (clean,
-    commits ahead whose content is not yet upstream), ``ORPHAN`` (no merge
-    base with upstream).  ``<sync>`` is the picker's ``↑ahead``/``↓behind``
-    tag.
+    ``UNUSED`` (clean, no work and no conversation since the fork point),
+    ``CONVO`` (clean, no commits but the session held conversation turns --
+    annotated with the turn count), ``WIP`` (clean, commits ahead whose
+    content is not yet upstream), ``ORPHAN`` (no merge base with upstream).
+    ``<sync>`` is the picker's ``↑ahead``/``↓behind`` tag.
 
     Fetch-free by default so it is cheap enough to poll on a short
     ``status-interval``; pass ``--fetch`` to refresh behind-counts from the
@@ -2774,23 +2783,118 @@ def cmd_status_segment(args: argparse.Namespace) -> int:
     if rec is not None:
         info = _apply_tracking_override(rec, info)
 
-    bg, label = _SEGMENT_STYLE.get(
-        info.state, ("colour238", info.state.value.upper())
-    )
+    # Session activity: scan once and reuse for both the turn-count
+    # refinement and the title.  An UNUSED worktree (no commits) that held
+    # conversation turns is "conversation-only" -- surface it distinctly so
+    # it isn't mistaken for an idle/unused tree.
+    ctx = None
+    turns = 0
+    if rec is not None:
+        try:
+            ctx = sessions.scan_sessions_fast([rec])
+            turns = ctx.turn_count.get(_normalize_path(target), 0)
+        except Exception:
+            ctx, turns = None, 0
+
     sync = _sync_status_tag(info)
+    convo = info.state == git_ops.WorktreeState.UNUSED and turns > 0
+
+    if convo:
+        bg, label = _SEGMENT_CONVO_STYLE
+        tag = f" {turns}\U0001f4ac"  # turn count + speech-balloon glyph
+    else:
+        bg, label = _SEGMENT_STYLE.get(
+            info.state, ("colour238", info.state.value.upper())
+        )
+        tag = sync
 
     if args.plain:
-        block = f"[{label}{sync}]"
+        block = f"[{label}{tag}]"
     else:
-        block = f"#[bg={bg},fg=colour015,bold] {label}{sync} #[default]"
+        block = f"#[bg={bg},fg=colour015,bold] {label}{tag} #[default]"
 
     parts: list[str] = []
     if not args.no_title:
-        title = _resolve_segment_title(rec, target, info)
+        title = _resolve_segment_title(rec, target, info, ctx)
         if title:
             parts.append(title)
     parts.append(block)
     print(" ".join(parts))
+    return 0
+
+
+def _platform_short(platform: str) -> str:
+    """Map a stored platform name to its short worktree-id code.
+
+    Mirrors the ``plat_short`` used when minting worktree ids
+    (``windows`` -> ``win``; ``wsl`` / ``linux`` unchanged) so the status
+    bar's environment label matches the id on disk.
+    """
+    return "win" if platform == "windows" else platform
+
+
+# Environment badge background by OS type (darker colors -- white text on
+# top stays readable).  Keyed on the short platform code from
+# ``_platform_short``; unknown environments fall back to dark grey.
+_ENV_BG: dict[str, str] = {
+    "win":   "colour025",  # Windows -- dark blue
+    "wsl":   "colour055",  # WSL -- purple
+    "linux": "colour130",  # Linux -- dark orange
+}
+
+
+def cmd_status_context(args: argparse.Namespace) -> int:
+    """Print the left status-bar segment: machine, environment, repo:id.
+
+    Intended to be polled from a multiplexer status line::
+
+        set -g status-left '#(agent-worktrees status-context) '
+
+    Renders three identity fields for the worktree the pane is in::
+
+        <machine>  <env-badge>  <repo>:<id4>
+
+    where ``<machine>`` is the host designation (black text), ``<env>`` is
+    the platform short code (``win``/``wsl``/``linux``, matching the
+    worktree id) rendered as a colored badge keyed on OS type, and
+    ``<id4>`` is the worktree id's 4-char suffix (its "last 4 digits").
+    Values come from the worktree's tracking record when the pane is
+    inside a tracked worktree, falling back to live host detection
+    otherwise.  Prints nothing problematic outside a worktree so a
+    misconfigured status line never spams the bar.
+    """
+    target = str(Path(args.path).resolve()) if args.path else os.getcwd()
+    rec = _find_record_for_path(target)
+
+    machine = (rec.machine if rec and rec.machine else "") \
+        or cfg.detect_machine()
+    platform = (rec.platform if rec and rec.platform else "") \
+        or cfg.detect_platform()
+    env = _platform_short(platform)
+
+    repo = rec.repo if rec else ""
+    suffix = rec.worktree_id.rsplit("-", 1)[-1] if rec and rec.worktree_id \
+        else ""
+    locus = f"{repo}:{suffix}" if repo and suffix else (repo or "")
+
+    fields = [f for f in (machine, env, locus) if f]
+    if not fields:
+        return 0
+
+    if args.plain:
+        print("  ".join(fields))
+        return 0
+
+    bg = _ENV_BG.get(env, "colour238")
+    styled: list[str] = []
+    if machine:
+        styled.append(f"#[fg=colour016,nobold]{machine}#[default]")
+    if env:
+        styled.append(f"#[bg={bg},fg=colour015,bold] {env} #[default]")
+    if locus:
+        styled.append(f"#[fg=colour016,bold]{locus}#[default]")
+    # Lead with a style directive so the 1-char left padding is not trimmed.
+    print("#[default] " + " ".join(styled))
     return 0
 
 
@@ -4152,6 +4256,7 @@ _WORKTREE_VERBS = {
     "list": "list",
     "status": "status",
     "status-segment": "status-segment",
+    "status-context": "status-context",
     "push": "push-changes",
     "push-changes": "push-changes",
     "create-pr": "create-pr",
@@ -5655,7 +5760,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-title", action="store_true",
                    help="Omit the worktree title; show only the state block")
 
-    # list (lightweight inventory from tracking records)
+    # status-context (left status-bar segment: machine / env / repo:id)
+    p = sub.add_parser(
+        "status-context",
+        help="Print a tmux/psmux left status segment (machine, env, repo:id)",
+    )
+    p.add_argument("--path", default=None,
+                   help="Worktree path to describe (default: current directory)")
+    p.add_argument("--plain", action="store_true",
+                   help="Plain text without tmux #[style] directives")
     p = sub.add_parser("list", help="List worktrees from tracking records")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
@@ -6145,6 +6258,7 @@ COMMAND_MAP = {
     "mark-complete": cmd_mark_complete,
     "status": cmd_status,
     "status-segment": cmd_status_segment,
+    "status-context": cmd_status_context,
     "list": cmd_list,
     "create": cmd_create,
     "remove-system": cmd_remove_system,

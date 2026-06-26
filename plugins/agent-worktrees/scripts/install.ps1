@@ -1738,6 +1738,11 @@ switch ($Action) {
         Ensure-CopilotExperimental
         Assert-PathIncludes $LocalBin
         Remove-LegacyBinstubs
+        # Machine-wide terminal integration: ~/.psmux.conf is global (the
+        # status segments auto-detect the repo at runtime), so deploy it
+        # regardless of project context -- a project-less update must still
+        # refresh the multiplexer config.
+        Deploy-PsmuxConfig
 
         # -- Project-specific (only when adopting) --
         if ($HasProject) {
@@ -1746,7 +1751,6 @@ switch ($Action) {
             Register-ProjectEntry
             if ($RepoDir) { Deploy-Icon }
             Deploy-Shortcuts -Machine $machine
-            Deploy-PsmuxConfig
             if ($RepoDir) { Deploy-GitHooksPath }
 
             # Deploy machine.instructions.md + AGENTS.md from machines.yaml
@@ -2005,6 +2009,9 @@ switch ($Action) {
         Deploy-GlobalBinstub
         Ensure-CopilotExperimental
         Remove-LegacyBinstubs
+        # Machine-wide terminal integration (see install path): deploy the
+        # multiplexer config regardless of project context.
+        Deploy-PsmuxConfig
 
         # -- Project-specific (only when a project is known) --
         if ($HasProject) {
@@ -2021,7 +2028,6 @@ switch ($Action) {
                 } catch { }
             }
             Deploy-Shortcuts -Machine $updateMachine
-            Deploy-PsmuxConfig
             if ($RepoDir) { Deploy-GitHooksPath }
 
             # Deploy machine.instructions.md + AGENTS.md from machines.yaml
