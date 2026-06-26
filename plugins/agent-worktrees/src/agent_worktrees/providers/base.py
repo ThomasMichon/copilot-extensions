@@ -44,6 +44,13 @@ class PullResult:
     url: str = ""
     number: int | None = None
     state: str = "open"
+    merged: bool = False
+    """True when the PR has been merged (its content is on the base branch).
+
+    Distinct from ``state``: a squash-merged PR reports ``state="closed"`` on
+    some providers, so ``merged`` is the authoritative "did the work land"
+    signal for prune-safety reconciliation.
+    """
 
 
 @runtime_checkable

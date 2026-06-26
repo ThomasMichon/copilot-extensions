@@ -59,7 +59,7 @@ from pathlib import Path
 
 import yaml
 
-from . import activity, git_ops, output, permissions, pr_ops, sessions, tracking
+from . import activity, git_ops, output, permissions, pr_ops, prune, sessions, tracking
 from . import config as cfg
 from . import finalize as fin
 from . import installer as inst
@@ -265,6 +265,29 @@ def _apply_tracking_override(
     if info.state == git_ops.WorktreeState.UNUSED and rec.status == "finalized":
         return dataclasses.replace(info, state=git_ops.WorktreeState.COMPLETED)
     return info
+
+
+def _make_pr_lookup(config):
+    """Build a ``lookup(repo, number) -> PullResult|None`` over the configured
+    provider, for prune PR-state reconciliation. Returns None-yielding on any
+    error so reconciliation is best-effort (keeps the local state)."""
+    from . import providers
+
+    prcfg = config.default_repo.pr
+    try:
+        token = providers.resolve_token(prcfg)
+    except Exception:
+        token = None
+    api_base = getattr(prcfg, "api_base", "") or ""
+
+    def lookup(repo, number):
+        try:
+            provider = providers.get_provider(prcfg.provider)
+            return provider.get_pull(repo, number, api_base=api_base, token=token)
+        except Exception:
+            return None
+
+    return lookup
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2970,6 +2993,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     to_clean: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo]] = []
     skipped: list[tuple[tracking.WorktreeRecord, str]] = []
     unused_count = 0
+    conversation_count = 0
     dirty_count = 0
     wip_count = 0
 
@@ -2986,7 +3010,12 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     upstream = f"{repo.remote}/{repo.default_branch}"
 
     # Scan for live Copilot sessions and mux sessions
-    active_paths = _build_active_paths(records)
+    session_ctx = sessions.scan_sessions_fast(records)
+    active_paths = _build_active_paths(records, session_ctx)
+
+    # Optional: heal stale tracked PR state from the provider (network) so a
+    # PR merged externally (local record still "open") is recognized as landed.
+    pr_lookup = _make_pr_lookup(config) if getattr(args, "reconcile_prs", False) else None
 
     for rec in records:
         if rec.worktree_path and Path(rec.worktree_path).exists():
@@ -3007,9 +3036,26 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         age = _age_str(rec.started_at)
         path_display = rec.worktree_path if Path(rec.worktree_path).exists() else "(gone)"
 
-        # Annotate state with dirty indicator when relevant
+        # Compute prune-safety verdict (combines git state, PR records, and
+        # session activity) -- drives the cleanup decision and enriches display.
+        norm = _normalize_path(rec.worktree_path)
+        turns = session_ctx.turn_count.get(norm, 0)
+
+        # Heal stale PR state from the provider before assessing (opt-in).
+        if pr_lookup is not None and rec.prs:
+            if prune.reconcile_pr_states(rec, pr_lookup):
+                try:
+                    tracking.save_record(rec)
+                except OSError:
+                    pass
+
+        verdict = prune.assess(rec, info, turn_count=turns)
+
+        # Annotate state with dirty indicator / turn count when relevant
         if info.dirty > 0 and info.state != git_ops.WorktreeState.DIRTY:
             state_display = f"{state_str} ({info.dirty}△)"
+        elif verdict.category == "conversation-only":
+            state_display = f"{state_str} ({turns}💬)"
         else:
             state_display = state_str
         print(f"{rec.worktree_id:<50} {state_display:<12} {age:<12} {path_display}")
@@ -3017,28 +3063,37 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         # Determine if cleanable
         cleanable = False
         skip_reason = ""
+        include_conversations = getattr(args, "include_conversations", False)
 
-        # Hard rule: never clean a worktree with a live session
-        if info.state == git_ops.WorktreeState.ACTIVE:
-            skip_reason = "active Copilot session in use"
-        elif rec.status == "finalized" or info.state == git_ops.WorktreeState.COMPLETED:
-            cleanable = True
-        elif info.state == git_ops.WorktreeState.GONE:
-            # Safety: verify branch content is on master before deleting
+        if info.state == git_ops.WorktreeState.GONE:
+            # Directory missing -- verify branch content is on master first.
             if rec.branch and not git_ops.is_branch_merged(
                 rec.branch, upstream, cwd=repo.anchor,
             ):
                 skip_reason = "branch has unmerged commits (worktree dir missing)"
             else:
                 cleanable = True
-        elif info.state == git_ops.WorktreeState.UNUSED:
-            unused_count += 1
-            if args.include_unused:
-                cleanable = True
-        elif info.state == git_ops.WorktreeState.DIRTY:
-            dirty_count += 1
-        elif info.state == git_ops.WorktreeState.WIP:
-            wip_count += 1
+        else:
+            disp = prune.cleanup_disposition(
+                rec, info, turn_count=turns,
+                include_unused=args.include_unused,
+                include_conversations=include_conversations,
+            )
+            cleanable = disp.cleanable
+            if disp.bucket == "active":
+                skip_reason = "active Copilot session in use"
+            elif disp.bucket == "open-pr":
+                skip_reason = disp.reason
+            elif disp.bucket == "closed-unmerged":
+                skip_reason = disp.reason
+            elif disp.bucket == "unused" and not cleanable:
+                unused_count += 1
+            elif disp.bucket == "conversation" and not cleanable:
+                conversation_count += 1
+            elif disp.bucket == "dirty":
+                dirty_count += 1
+            elif disp.bucket == "wip":
+                wip_count += 1
 
         if cleanable:
             to_clean.append((rec, info))
@@ -3052,7 +3107,8 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
             output.warn(f"Skipping {rec.worktree_id}: {reason}")
         print()
 
-    if not to_clean and unused_count == 0 and dirty_count == 0 and wip_count == 0 and not skipped:
+    if (not to_clean and unused_count == 0 and conversation_count == 0
+            and dirty_count == 0 and wip_count == 0 and not skipped):
         print("Nothing to clean.")
         return 0
 
@@ -3063,6 +3119,13 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         print(
             f"{unused_count} unused worktree(s) preserved -- no commits, "
             "no uncommitted changes (pass --include-unused to also clean)."
+        )
+
+    if not getattr(args, "include_conversations", False) and conversation_count > 0:
+        print(
+            f"{conversation_count} conversation-only worktree(s) preserved -- "
+            "no commits, but the session held conversation turns (pass "
+            "--include-conversations to also clean)."
         )
 
     if dirty_count > 0 or wip_count > 0:
@@ -5627,7 +5690,16 @@ def build_parser() -> argparse.ArgumentParser:
     # cleanup
     p = sub.add_parser("cleanup", help="List and clean orphaned worktrees")
     p.add_argument("--clean", action="store_true")
-    p.add_argument("--include-unused", action="store_true")
+    p.add_argument("--include-unused", action="store_true",
+                   help="Also clean truly-empty worktrees (no commits, "
+                        "zero conversation turns)")
+    p.add_argument("--include-conversations", action="store_true",
+                   help="Also clean conversation-only worktrees (no commits "
+                        "but the session held turns); implies --include-unused")
+    p.add_argument("--reconcile-prs", action="store_true",
+                   help="Refresh tracked PR state from the provider before "
+                        "deciding (heals stale 'open' PRs merged externally); "
+                        "requires network + provider credentials")
     p.add_argument("--max-age-days", type=int, default=7)
 
     # validate

@@ -148,6 +148,41 @@ class TestGiteaProvider:
         with pytest.raises(ProviderError, match="HTTP 422"):
             gitea.GiteaProvider().create_pull(scope, token="tok")
 
+    def test_get_pull_merged_sets_flag_and_state(self, monkeypatch):
+        # Gitea reports a squash-merged PR as state "closed" + merged: true.
+        from agent_worktrees.providers import gitea
+        body = json.dumps({"html_url": "https://h/gitea/o/r/pulls/9",
+                           "number": 9, "state": "closed", "merged": True})
+        monkeypatch.setattr(gitea, "run_cli",
+                            lambda args, **kw: _proc(stdout=body + "\n200"))
+        res = gitea.GiteaProvider().get_pull("o/r", 9,
+                                             api_base="https://h/gitea", token="tok")
+        assert res.merged is True
+        assert res.state == "merged"
+
+    def test_get_pull_open_is_not_merged(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+        body = json.dumps({"html_url": "https://h/gitea/o/r/pulls/9",
+                           "number": 9, "state": "open", "merged": False})
+        monkeypatch.setattr(gitea, "run_cli",
+                            lambda args, **kw: _proc(stdout=body + "\n200"))
+        res = gitea.GiteaProvider().get_pull("o/r", 9,
+                                             api_base="https://h/gitea", token="tok")
+        assert res.merged is False
+        assert res.state == "open"
+
+    def test_get_pull_closed_unmerged_is_not_merged(self, monkeypatch):
+        # The #1151 shape: closed without merging -- must NOT read as merged.
+        from agent_worktrees.providers import gitea
+        body = json.dumps({"html_url": "https://h/gitea/o/r/pulls/9",
+                           "number": 9, "state": "closed", "merged": False})
+        monkeypatch.setattr(gitea, "run_cli",
+                            lambda args, **kw: _proc(stdout=body + "\n200"))
+        res = gitea.GiteaProvider().get_pull("o/r", 9,
+                                             api_base="https://h/gitea", token="tok")
+        assert res.merged is False
+        assert res.state == "closed"
+
     def test_apply_labels_paginates_label_lookup(self, monkeypatch):
         # A label past the first label-list page must still resolve + attach.
         # Gitea returns one page (default 30) per GET; we page with limit=50.
@@ -203,6 +238,51 @@ class TestGitHubProvider:
         res = github.GitHubProvider().create_pull(scope, token=None)
         assert res.url == "https://github.com/o/r/pull/7"
         assert res.number == 7
+
+    def test_get_pull_merged_state_sets_flag(self, monkeypatch):
+        # gh reports a merged PR as state MERGED.
+        from agent_worktrees.providers import github
+        body = json.dumps({"url": "https://github.com/o/r/pull/7",
+                           "number": 7, "state": "MERGED"})
+        monkeypatch.setattr(github, "run_cli",
+                            lambda args, **kw: _proc(stdout=body))
+        res = github.GitHubProvider().get_pull("o/r", 7)
+        assert res.merged is True
+        assert res.state == "merged"
+
+    def test_get_pull_closed_is_not_merged(self, monkeypatch):
+        from agent_worktrees.providers import github
+        body = json.dumps({"url": "https://github.com/o/r/pull/7",
+                           "number": 7, "state": "CLOSED"})
+        monkeypatch.setattr(github, "run_cli",
+                            lambda args, **kw: _proc(stdout=body))
+        res = github.GitHubProvider().get_pull("o/r", 7)
+        assert res.merged is False
+        assert res.state == "closed"
+
+
+class TestAzureDevOpsProvider:
+    def test_get_pull_completed_is_merged(self, monkeypatch):
+        # Azure status "completed" == merged; canonicalize state to "merged".
+        from agent_worktrees.providers import azure_devops as azure
+        body = json.dumps({"status": "completed"})
+        monkeypatch.setattr(azure, "run_cli",
+                            lambda args, **kw: _proc(stdout=body))
+        res = azure.AzureDevOpsProvider().get_pull(
+            "proj/repo", 5, api_base="https://dev.azure.com/org")
+        assert res.merged is True
+        assert res.state == "merged"
+
+    def test_get_pull_abandoned_and_active(self, monkeypatch):
+        from agent_worktrees.providers import azure_devops as azure
+        for status, exp_state in (("abandoned", "closed"), ("active", "open")):
+            monkeypatch.setattr(
+                azure, "run_cli",
+                lambda args, **kw: _proc(stdout=json.dumps({"status": status})))
+            res = azure.AzureDevOpsProvider().get_pull(
+                "proj/repo", 5, api_base="https://dev.azure.com/org")
+            assert res.merged is False
+            assert res.state == exp_state
 
 
 # ---------------------------------------------------------------------------

@@ -93,8 +93,15 @@ class AzureDevOpsProvider:
                 f"az repos pr show #{number} failed for {repo}: {proc.stderr.strip()}"
             )
         data = json.loads(proc.stdout)
+        # Azure DevOps PR status: active | completed | abandoned. "completed"
+        # means merged; canonicalize to the open|merged|closed vocab the
+        # tracking record uses and expose the authoritative merged signal.
+        status = str(data.get("status", "active")).lower()
+        merged = (status == "completed")
+        state = {"completed": "merged", "abandoned": "closed"}.get(status, "open")
         return PullResult(
             url=self._web_url(api_base, project, name, number),
             number=number,
-            state=str(data.get("status", "active")).lower(),
+            state=state,
+            merged=merged,
         )
