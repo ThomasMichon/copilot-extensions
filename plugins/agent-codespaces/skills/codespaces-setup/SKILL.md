@@ -63,7 +63,9 @@ CodeSpaces, it writes a generic template to fill in.
 > All org/account/URL values live in **your** repo's `codespaces.yaml`, derived
 > at runtime from your own `gh` account -- never hardcoded in the plugin.
 
-**Or author it by hand:**
+**Or author it by hand:** copy the full annotated example,
+[`references/codespaces.yaml`](references/codespaces.yaml), into your repo root
+and adapt it. Its shape at a glance:
 
 ```yaml
 # codespaces.yaml -- CodeSpace defaults and credential relay config
@@ -71,35 +73,22 @@ defaults:
   machine_type: largePremiumLinux     # gh codespace machine type
   location: EastUs                     # Azure region
   ssh_user: vscode                     # SSH user (match CodeSpace user)
-  workspace_folder: /workspaces/<your-repo>  # repo root on CodeSpace
-  # dotfiles_repo: <your-user>/<your-dotfiles>   # Optional dotfiles repo
 
 credentials:
   relay_port: 9857                     # TCP port for credential relay
-  # ado_host: <your-org>.visualstudio.com   # default host for bare
-  #                                          # get-access-token requests
   sources:
-    git-credential:
-      enabled: true
-      allowed_hosts:
-        - "github.com"
-        - "*.github.com"
-        - "dev.azure.com"
-        - "*.visualstudio.com"
-    gh-auth:
-      enabled: true
-      allowed_hosts:
-        - "github.com"
-    # az-login:                        # Azure token relay (DISABLED by default)
-    #   enabled: false
-    #   allowed_resources:
-    #     - "https://management.azure.com/"
+    git-credential: { enabled: true, allowed_hosts: ["github.com", "*.visualstudio.com"] }
+    gh-auth:        { enabled: true, allowed_hosts: ["github.com"] }
 
 repos:
-  <your-org>/<your-repo>:
+  <your-org>/<your-repo>-codespaces:
     machine_type: largePremiumLinux256gb
-    location: EastUs
+    workspace_repo: <your-repo>        # -> agents launch in /workspaces/<your-repo>
 ```
+
+See [`references/codespaces.yaml`](references/codespaces.yaml) for every field
+(credential sources, per-repo provisioning, `workspace_folder` overrides) with
+inline comments. The per-field reference is in **Config Reference** below.
 
 ### 2. Adopt the repo
 

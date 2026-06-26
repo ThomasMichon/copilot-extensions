@@ -1,0 +1,18 @@
+{
+  "mode": "batch",
+  "return": "result",
+  "sessions": [
+    {
+      "session_id": "<id>",
+      "machine": "<machine>",
+      "session_path": "<abs path to session-state/<id>>",
+      "repository": "<owner/repo>",
+      "branch": "<branch>",
+      "summary": "<auto-summary>",
+      "created_at": "<iso>",
+      "updated_at": "<iso>"
+    }
+  ],
+  "output_root": "<logs root>",
+  "closing_remark": null
+}

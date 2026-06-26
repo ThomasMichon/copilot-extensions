@@ -1,0 +1,29 @@
+# .github/agents/ado.mcp.yaml -- agent-mcp bridge config (reference example)
+#
+# Canonical, copy-pasteable example of a repo-scoped MCP bridge config. Place it
+# next to the sub-agent at .github/agents/<name>.mcp.yaml and point the agent's
+# `mcp-servers` block at it (see the agent-mcp SKILL.md). Validate with:
+#   agent-mcp validate .github/agents/ado.mcp.yaml
+
+server:
+  type: http                       # http | stdio
+  url: https://mcp.dev.azure.com/your-org
+  # For a stdio upstream instead:
+  # type: stdio
+  # command: ["some-mcp-server", "--flag"]
+
+auth:
+  kind: entra                      # entra|az | gh | git-credential | env|static | command | none
+  resource: 2a72489c-aab2-4b65-b93a-a91edccf33b8   # az resource/scope (Entra)
+  # target_env: SOME_TOKEN         # for kind: env/static/command -- env var injected into the child
+
+# Optional upstream tool filter (allow/deny globs).
+tools: { allow: ["repo_*", "wit_*"], deny: [] }
+
+# Optional ordered decorator stack (client -> upstream, outermost first).
+# decorators:
+#   - type: defer            # hide a large tool catalog behind find_tool/execute_tool
+#     mode: lazy             #   lazy (default) | eager | meta_only
+#     expose: ["search_*"]
+#   - type: filter           # allow/deny tools (also rejects hidden tools/call)
+#     deny: ["*_delete", "*_admin"]

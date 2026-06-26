@@ -115,31 +115,18 @@ summarize what was worked on, or look for a
 ## Handoff File Template
 
 Write this (via `save_handoff_prompt`) to
-`~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md`:
+`~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md`. Full
+template: [`references/handoff-template.md`](references/handoff-template.md).
+Its sections:
 
 ```markdown
 ## Session Continuation
-
 ### Original Request
-<The user's original ask — preserve the session's core topic>
-
 ### Direction & Motivation
-<Where the work is heading and WHY — the rationale behind the approach and
-key decisions, so they aren't re-litigated.>
-
-### Progress
-- [x] Completed items (with key file paths)
-- [ ] In-progress / remaining items
-
-### Next Action Items
-1. <Immediate next action>
-2. <Follow-up actions>
-
-### Target Goals
-<The end state this work is driving toward — done-ness criteria.>
-
-### Gotchas
-<Approaches that failed, workarounds discovered, non-obvious context>
+### Progress           (- [x] done / - [ ] remaining, with file paths)
+### Next Action Items  (1. immediate next, 2. follow-ups)
+### Target Goals       (done-ness criteria)
+### Gotchas            (failed approaches, workarounds, non-obvious context)
 ```
 
 ---

@@ -48,7 +48,9 @@ tools -- e.g. an `@ado-data` agent backed by the Azure DevOps MCP.
 
 **1. Write the bridge config in the repo**, next to the agent
 (`.github/agents/<name>.mcp.yaml`). It holds the upstream `server` launch info
-(same shape as a `.mcp.json` entry) plus `auth` and overrides:
+(same shape as a `.mcp.json` entry) plus `auth` and overrides. Copy the full
+annotated example, [`references/ado.mcp.yaml`](references/ado.mcp.yaml), and
+adapt -- at a glance:
 
 ```yaml
 # .github/agents/ado.mcp.yaml

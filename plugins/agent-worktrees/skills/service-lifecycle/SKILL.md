@@ -123,47 +123,15 @@ and flags across PowerShell and Bash.
 | `--purge` | On uninstall: remove everything (config + data) |
 | `--force` | Skip drift confirmation — overwrite runtime config |
 
-### Installer Skeleton (PowerShell)
+### Installer Skeletons
 
-```powershell
-param(
-    [Parameter(Position=0)]
-    [ValidateSet('install','uninstall','start','stop','status','update-config','update')]
-    [string]$Action = 'status',
-    [switch]$RemoveConfig,
-    [switch]$Force
-)
+Copy-pasteable starting points:
+[`references/install.ps1`](references/install.ps1) (PowerShell) and
+[`references/install.sh`](references/install.sh) (Bash). Both dispatch the
+standard lifecycle actions:
 
-switch ($Action) {
-    'install'       { Install-Service }
-    'uninstall'     { Uninstall-Service -RemoveConfig:$RemoveConfig }
-    'start'         { Start-Service }
-    'stop'          { Stop-Service }
-    'status'        { Get-ServiceStatus }
-    'update-config' { Update-ServiceConfig -Force:$Force }
-    'update'        { Update-Service -Force:$Force }
-}
-```
-
-### Installer Skeleton (Bash)
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="/opt/my-service"
-SERVICE_USER="${USER}"   # real user, not root
-
-case "${1:-status}" in
-    install)       do_install ;;
-    uninstall)     do_uninstall "$@" ;;
-    start)         do_start ;;
-    stop)          do_stop ;;
-    status)        do_status ;;
-    update-config) do_update_config "$@" ;;
-    update)        do_update "$@" ;;
-esac
+```text
+install | uninstall | start | stop | status | update-config | update
 ```
 
 ---
@@ -224,7 +192,8 @@ On `install` or `update-config` actions:
 
 Each deployment writes a `deploy-manifest.json` to the install directory
 as the **final step** of a successful install or update. This provides
-runtime provenance.
+runtime provenance. Full example:
+[`references/deploy-manifest.json`](references/deploy-manifest.json).
 
 ```json
 {
@@ -234,7 +203,6 @@ runtime provenance.
   "commit": "abc1234...",
   "branch": "main",
   "dirty": false,
-  "dirty_files": [],
   "deployed_at": "2026-04-13T07:25:00Z",
   "deployed_by": "my-machine",
   "source_paths": ["services/my-service/"],

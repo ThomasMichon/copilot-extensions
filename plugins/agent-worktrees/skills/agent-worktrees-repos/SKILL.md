@@ -149,27 +149,20 @@ never force-updates or creates merge commits.
 
 ## Data File
 
-The registry lives at `~/.agent-worktrees/repos.yaml`:
+The registry lives at `~/.agent-worktrees/repos.yaml`. Full annotated example:
+[`references/repos.yaml`](references/repos.yaml). At a glance:
 
 ```yaml
 srcroot:
   windows: D:\Src
   wsl: ~/src
-
 repos:
   copilot-extensions:
-    class: worktree
+    class: worktree                # reference | singleton | worktree
     remote: "https://github.com/ThomasMichon/copilot-extensions.git"
     default_branch: main
-    tags: [facility]
-    contributing: CONTRIBUTING.md
     windows: D:\Src\copilot-extensions
     wsl: ~/src/copilot-extensions
-
-  some-upstream-dep:
-    class: reference
-    remote: "https://github.com/org/some-dep.git"
-    windows: D:\Src\some-dep
 ```
 
 ### Schema

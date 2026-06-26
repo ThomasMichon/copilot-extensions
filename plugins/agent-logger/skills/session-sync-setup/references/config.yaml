@@ -1,0 +1,37 @@
+# ~/.agent-logger/config.yaml -- session-sync configuration (reference example)
+#
+# Canonical, copy-pasteable example showing every sync target. Pick ONE with
+# `sync.target` and keep the matching block under `sync.targets`. Field docs:
+# the session-sync-setup SKILL.md. Verify with `session-sync doctor`.
+
+sync:
+  target: local                 # local | onedrive | ssh | ssh-tunnel | ingest
+  retention_days: 90            # or "infinite" to keep everything
+
+  targets:
+    # Local (default) -- explicit path.
+    local:
+      path: ~/SessionArchive
+
+    # OneDrive hub.
+    onedrive:
+      subfolder: Apps/agent-logger/sessions
+      # root: C:/Users/<you>/OneDrive   # set if no OneDrive* env var / ~/OneDrive
+
+    # SSH to a host you control.
+    ssh:
+      host: user@hub.example.com
+      remote_path: /srv/copilot-sessions
+      proxy_jump: jump.example.com      # optional
+
+    # SSH routed through a jump host.
+    ssh-tunnel:
+      host: user@hub.example.com
+      remote_path: /srv/copilot-sessions
+      tunnel_host: jump.example.com
+
+    # Ingest -- push to a processing service's rsync-daemon sink.
+    ingest:
+      url: rsync://hub.example.com/sessions       # or host::module/path
+      password_file: ~/.agent-logger/rsync.pass   # optional
+      notify_url: https://hub.example.com/api/notify?machine={machine}  # optional

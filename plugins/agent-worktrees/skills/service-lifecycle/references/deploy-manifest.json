@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "service": "my-service",
+  "environment": "my-machine-windows",
+  "commit": "abc1234...",
+  "branch": "main",
+  "dirty": false,
+  "dirty_files": [],
+  "deployed_at": "2026-04-13T07:25:00Z",
+  "deployed_by": "my-machine",
+  "source_paths": ["services/my-service/"],
+  "installer_path": "services/my-service/install.ps1"
+}
