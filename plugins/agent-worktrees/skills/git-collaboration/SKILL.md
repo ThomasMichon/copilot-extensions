@@ -26,41 +26,49 @@ description: >
 
 # Git Collaboration
 
-This skill covers the **git collaboration primitives** that sit *below* the
-high-level sign-off flow (`push-changes` / `create-pr` / `finalize`, owned by the
-**`worktree`** skill) and *above* raw git. Three things live here:
+This skill covers the **git collaboration flows** that sit *below* the high-level
+sign-off flow (`push-changes` / `create-pr` / `finalize`, owned by the
+**`worktree`** skill) and *above* raw git. Three flows live here:
 
 1. **Pull forward / build on top** -- after a PR merges, advance the worktree
    onto the updated default branch and keep working on top of it.
 2. **Shared feature branch** -- a durable branch several agents commit to, with
    one host that owns PRs.
-3. **The boundary** -- which git operations must be wrapped, and which you should
-   just run directly.
+3. **The boundary** -- which git you should just run directly, and which steps
+   have a turn-key helper.
+
+**The flows are the point; the commands are turn-key helpers.** Each
+`agent-worktrees git ...` verb just wraps a short git sequence you *could* run by
+hand -- it exists so the common path is one safe step that can't silently break a
+shared invariant. Reach for the helper when a flow below calls for it; otherwise
+use plain git.
 
 > **Don't fully wrap git.** Wrapping every git command destroys the
-> intuitiveness of the tool everyone already knows. The wrappers exist *only* to
-> protect invariants raw git would silently break. Everything else is plain git
-> -- and this skill says so explicitly, so you don't reach for a wrapper that
-> isn't needed.
+> intuitiveness of the tool everyone already knows. The helpers exist *only* for
+> the steps that protect a shared invariant raw git would silently break.
+> Everything else is plain git -- and this skill says so explicitly, so you don't
+> reach for a helper that isn't needed.
 
-## The boundary -- forbidden vs. wrapped vs. blessed-direct
+## The boundary -- plain git vs. turn-key helper vs. forbidden
 
 | Operation | Do it via | Why |
 |-----------|-----------|-----|
 | `status`, `log`, `diff`, `show`, `branch -v` | **plain git** | read-only inspection; no shared state |
 | `add`, `commit`, `restore`, `stash`, local `switch`, `rebase -i` **on your own worktree branch** | **plain git** | local history; disposable until it lands |
 | `fetch` | **plain git** | read-only; updates remote-tracking refs only |
-| Advance the worktree onto the merged default ("pull forward") | `agent-worktrees git sync` | must drop squash-merged commits cleanly without losing genuine local work |
-| Create / update / push a **shared** feature branch | `agent-worktrees git feature-branch ...` | a real remote branch many agents build on; push auth + naming + host ownership |
-| Merge a delegate's slice into the shared feature branch | `agent-worktrees git merge-to-feature ...` | must be **ff-only** (no two-parent nodes), from the right base, then ff-pushed |
-| Push to the remote **default** branch / open a PR | `push-changes` * `create-pr` * `finalize` | the lifecycle/sign-off flow (see the `worktree` skill) |
+| Advance the worktree onto the merged default ("pull forward") | helper: `agent-worktrees git sync` | wraps fetch + rebase; drops squash-merged commits without losing local work |
+| Create / update / push a **shared** feature branch | helper: `agent-worktrees git feature-branch ...` | wraps create + ff + push; a real remote branch many agents build on |
+| Merge a delegate's slice into the shared feature branch | helper: `agent-worktrees git merge-to-feature ...` | wraps rebase + ff + push; must be **ff-only** (no two-parent nodes) |
+| Push to the remote **default** branch / open a PR | flow: `push-changes` * `create-pr` * `finalize` | the lifecycle/sign-off flow (see the `worktree` skill) |
 | Bare `git push` of a `worktree/*` branch | **forbidden** | `worktree/*` refs must never reach the remote |
 | Manual merge to the default branch | **forbidden** | breaks linear, one-commit-per-worktree history -- use `finalize` |
 | A **delegate** opening or merging a **PR** | **forbidden** | only the **host** opens PRs from the shared branch (below) |
 | Force-push of shared history (default or shared feature branch) | **forbidden** | rewrites history other agents have built on |
 
 Rule of thumb: **if a parser, a remote, or another agent will consume the
-result, wrap it; if only you and your local branch see it, just run git.**
+result, reach for the helper; if only you and your local branch see it, just run
+git.** The helper never does anything you couldn't do by hand -- it just does the
+invariant-bearing steps the same way every time.
 
 ## Pull forward -- build on top of a merged PR
 
@@ -68,8 +76,16 @@ After a PR merges (especially a **squash** merge), the worktree branch still
 carries the now-upstreamed commits. To keep working, advance onto the new
 default and stack new work on top -- **do not** start a fresh worktree.
 
+The flow is plain git you could run by hand:
+
 ```
-agent-worktrees git sync
+git fetch origin && git rebase origin/<default>     # the manual flow
+```
+
+The turn-key helper does exactly that, plus the guards:
+
+```
+agent-worktrees git sync                            # the helper
 ```
 
 `sync` fetches the remote and rebases the worktree branch onto
