@@ -86,6 +86,15 @@ it's reviewed + merged -> `git sync` -> build Phase work on top.
 
 When several agents collaborate on one effort over a single branch:
 
+> **"Agent" here means an agent-bridge agent, not a Copilot sub-agent.** Multi-
+> agent coordination in this skill is **always** via **agent-bridge** -- each
+> delegate is a *separate Copilot CLI session* (local or over SSH) with **its own
+> worktree** that can commit, push, and ff-merge on the shared branch. Copilot's
+> in-process sub-agents (the Task tool) are **not** delegates here: they share the
+> host's context, have no worktree or branch of their own, and cannot participate
+> in a shared-branch handoff. If a "delegate" can't `git commit` in its own
+> checkout, it's the wrong mechanism -- dispatch through agent-bridge.
+
 1. **Host** drafts the effort and gets it reviewed/approved (the effort PR).
 2. **Host** creates and pushes the shared feature branch:
    ```
@@ -125,5 +134,7 @@ and must integrate before any of them can merge.
 - **`planning-efforts`** -- efforts bind their **"branches" participant** to this
   skill. Multi-agent coordination over a feature branch is planned and journaled
   in the effort README's `## Coordination` section; the mechanics live here.
-- **`agent-bridge`** -- how the host dispatches a slice to a delegate agent. This
-  skill owns the git; agent-bridge owns the conversation.
+- **`agent-bridge`** -- how the host dispatches a slice to a delegate agent, and
+  **the only** multi-agent coordination mechanism this skill uses. A delegate is
+  an agent-bridge session with its own worktree -- never a Copilot in-process
+  sub-agent. This skill owns the git; agent-bridge owns the conversation.
