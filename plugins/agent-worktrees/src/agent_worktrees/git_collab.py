@@ -71,7 +71,7 @@ def sync_forward(worktree_id: str, config: Config, *, dry_run: bool = False) -> 
     print(f"Fetching from {remote}...")
     try:
         git_ops.fetch(remote, cwd=worktree_path)
-    except Exception as e:  # noqa: BLE001 -- surface any fetch failure to the agent
+    except Exception as e:
         output.err(f"Fetch from {remote} failed: {e}")
         return False
 
@@ -180,7 +180,7 @@ def manage_feature_branch(
         print(f"Fetching from {remote}...")
         try:
             git_ops.fetch(remote, cwd=worktree_path)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             output.err(f"Fetch from {remote} failed: {e}")
             return False
         if not git_ops.ref_exists(remote_feature, cwd=worktree_path):
@@ -300,7 +300,7 @@ def merge_to_feature(
     print(f"Fetching from {remote}...")
     try:
         git_ops.fetch(remote, cwd=worktree_path)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         output.err(f"Fetch from {remote} failed: {e}")
         return False
     if not git_ops.remote_branch_exists(remote, feature, cwd=worktree_path):
