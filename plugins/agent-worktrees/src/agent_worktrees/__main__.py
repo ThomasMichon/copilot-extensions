@@ -2698,7 +2698,7 @@ def _resolve_segment_title(
     rec: tracking.WorktreeRecord | None,
     path: str,
     info: git_ops.WorktreeStateInfo,
-    ctx: "sessions.SessionContext | None" = None,
+    ctx: sessions.SessionContext | None = None,
 ) -> str:
     """Resolve a worktree's display title cheaply (single-record scan).
 
