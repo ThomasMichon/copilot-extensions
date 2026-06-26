@@ -6578,12 +6578,72 @@ def _git_usage() -> None:
     print("  Usage: agent-worktrees git <command> [options]")
     print()
     print("  Commands:")
-    print("    sync    Rebase the worktree branch forward onto the updated remote")
-    print("            default branch (build on top of a just-merged PR).")
-    print("            Mid-flight: never finalizes, prunes, or pushes.")
+    print("    sync                  Rebase the worktree branch forward onto the")
+    print("                          updated remote default branch (build on top")
+    print("                          of a just-merged PR). Mid-flight: no push.")
+    print("    feature-branch <name> Create/update [--push] or --sync a durable")
+    print("                          shared feature branch (feature/<name>).")
+    print("    merge-to-feature <name>")
+    print("                          Rebase + ff-merge this worktree's branch into")
+    print("                          the shared feature branch and push it (the")
+    print("                          delegate handoff). --no-push to stop at ff.")
+    print()
+    print("  Common options: [--worktree-id ID] [--config PATH] [--dry-run] [--json]")
     print()
     print("  See the 'git-collaboration' skill for the full boundary -- which git")
     print("  operations to wrap vs. run directly.")
+
+
+def _git_resolve_target(rest: list[str], use_json: bool):
+    """Resolve (config, worktree_id) for a git sub-group command.
+
+    Returns ``(config, worktree_id)`` or ``(None, <rc>)`` on error -- callers
+    check ``config is None`` and return the int.
+    """
+    config_arg = None
+    worktree_id_arg = None
+    if "--config" in rest:
+        i = rest.index("--config")
+        if i + 1 < len(rest):
+            config_arg = rest[i + 1]
+    if "--worktree-id" in rest:
+        i = rest.index("--worktree-id")
+        if i + 1 < len(rest):
+            worktree_id_arg = rest[i + 1]
+    try:
+        config = cfg.load_config(Path(config_arg) if config_arg else None)
+    except Exception as e:
+        if use_json:
+            return None, _json_error(str(e))
+        raise
+    worktree_id = _infer_worktree_id(worktree_id_arg, config)
+    if not worktree_id:
+        msg = (
+            "Could not determine worktree ID. Pass --worktree-id or run from "
+            "inside a worktree."
+        )
+        if use_json:
+            return None, _json_error(msg)
+        output.err(msg)
+        return None, 1
+    return config, _resolve_worktree_id(worktree_id)
+
+
+def _git_positional(rest: list[str]) -> str | None:
+    """First non-flag, non-option-value token (the <name> argument)."""
+    value_flags = {"--worktree-id", "--config"}
+    skip = False
+    for tok in rest:
+        if skip:
+            skip = False
+            continue
+        if tok in value_flags:
+            skip = True
+            continue
+        if tok.startswith("-"):
+            continue
+        return tok
+    return None
 
 
 def cmd_git_sync(rest: list[str]) -> int:
@@ -6593,46 +6653,90 @@ def cmd_git_sync(rest: list[str]) -> int:
             "[--worktree-id ID] [--config PATH] [--dry-run] [--json]"
         )
         return 0
-
-    worktree_id_arg: str | None = None
-    config_arg: str | None = None
     dry_run = "--dry-run" in rest
     use_json = "--json" in rest
-    if "--worktree-id" in rest:
-        i = rest.index("--worktree-id")
-        if i + 1 < len(rest):
-            worktree_id_arg = rest[i + 1]
-    if "--config" in rest:
-        i = rest.index("--config")
-        if i + 1 < len(rest):
-            config_arg = rest[i + 1]
-
     from . import git_collab
 
     ctx = output.stdout_to_stderr() if use_json else None
     if ctx is not None:
         ctx.__enter__()
     try:
-        try:
-            config = cfg.load_config(Path(config_arg) if config_arg else None)
-        except Exception as e:
-            if use_json:
-                return _json_error(str(e))
-            raise
-        worktree_id = _infer_worktree_id(worktree_id_arg, config)
-        if not worktree_id:
-            msg = (
-                "Could not determine worktree ID. Pass --worktree-id or run "
-                "from inside a worktree."
-            )
-            if use_json:
-                return _json_error(msg)
-            output.err(msg)
-            return 1
-        worktree_id = _resolve_worktree_id(worktree_id)
-        ok = git_collab.sync_forward(worktree_id, config, dry_run=dry_run)
+        config, wid = _git_resolve_target(rest, use_json)
+        if config is None:
+            return wid
+        ok = git_collab.sync_forward(wid, config, dry_run=dry_run)
         if use_json:
-            _json_output({"worktree_id": worktree_id, "synced": ok})
+            _json_output({"worktree_id": wid, "synced": ok})
+        return 0 if ok else 1
+    finally:
+        if ctx is not None:
+            ctx.__exit__(None, None, None)
+
+
+def cmd_git_feature_branch(rest: list[str]) -> int:
+    if "--help" in rest or "-h" in rest:
+        print(
+            "Usage: agent-worktrees git feature-branch <name> [--push] [--sync] "
+            "[--worktree-id ID] [--config PATH] [--dry-run] [--json]"
+        )
+        return 0
+    name = _git_positional(rest)
+    if not name:
+        output.err("Usage: agent-worktrees git feature-branch <name> [--push] [--sync]")
+        return 1
+    push = "--push" in rest
+    sync = "--sync" in rest
+    dry_run = "--dry-run" in rest
+    use_json = "--json" in rest
+    if push and sync:
+        output.err("--push and --sync are mutually exclusive.")
+        return 1
+    from . import git_collab
+
+    ctx = output.stdout_to_stderr() if use_json else None
+    if ctx is not None:
+        ctx.__enter__()
+    try:
+        config, wid = _git_resolve_target(rest, use_json)
+        if config is None:
+            return wid
+        ok = git_collab.manage_feature_branch(
+            wid, config, name, push=push, sync=sync, dry_run=dry_run,
+        )
+        if use_json:
+            _json_output({"worktree_id": wid, "feature": name, "ok": ok})
+        return 0 if ok else 1
+    finally:
+        if ctx is not None:
+            ctx.__exit__(None, None, None)
+
+
+def cmd_git_merge_to_feature(rest: list[str]) -> int:
+    if "--help" in rest or "-h" in rest:
+        print(
+            "Usage: agent-worktrees git merge-to-feature <name> [--no-push] "
+            "[--worktree-id ID] [--config PATH] [--dry-run] [--json]"
+        )
+        return 0
+    name = _git_positional(rest)
+    if not name:
+        output.err("Usage: agent-worktrees git merge-to-feature <name> [--no-push]")
+        return 1
+    push = "--no-push" not in rest
+    dry_run = "--dry-run" in rest
+    use_json = "--json" in rest
+    from . import git_collab
+
+    ctx = output.stdout_to_stderr() if use_json else None
+    if ctx is not None:
+        ctx.__enter__()
+    try:
+        config, wid = _git_resolve_target(rest, use_json)
+        if config is None:
+            return wid
+        ok = git_collab.merge_to_feature(wid, config, name, push=push, dry_run=dry_run)
+        if use_json:
+            _json_output({"worktree_id": wid, "feature": name, "merged": ok})
         return 0 if ok else 1
     finally:
         if ctx is not None:
@@ -6648,6 +6752,10 @@ def cmd_git_dispatch(argv: list[str]) -> int:
     rest = argv[1:]
     if sub == "sync":
         return cmd_git_sync(rest)
+    if sub == "feature-branch":
+        return cmd_git_feature_branch(rest)
+    if sub == "merge-to-feature":
+        return cmd_git_merge_to_feature(rest)
     output.err(f"Unknown git subcommand: {sub}")
     _git_usage()
     return 1
