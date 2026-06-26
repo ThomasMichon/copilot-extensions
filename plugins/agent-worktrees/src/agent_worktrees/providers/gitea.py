@@ -164,11 +164,13 @@ class GiteaProvider:
         data = json.loads(body)
         # Gitea reports a merged PR as state "closed" + ``merged: true``; surface
         # the distinct "merged" state so reconciliation records it faithfully.
+        merged = bool(data.get("merged"))
         state = str(data.get("state", "")) or "open"
-        if data.get("merged"):
+        if merged:
             state = "merged"
         return PullResult(
             url=str(data.get("html_url", "")),
             number=int(data.get("number", number)),
             state=state,
+            merged=merged,
         )

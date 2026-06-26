@@ -64,8 +64,12 @@ class GitHubProvider:
                 f"gh pr view #{number} failed for {repo}: {proc.stderr.strip()}"
             )
         data = json.loads(proc.stdout)
+        # gh reports state as OPEN | CLOSED | MERGED; "merged" is the
+        # authoritative landed signal.
+        state = str(data.get("state", "open")).lower() or "open"
         return PullResult(
             url=str(data.get("url", "")),
             number=int(data.get("number", number)),
-            state=str(data.get("state", "open")).lower() or "open",
+            state=state,
+            merged=(state == "merged"),
         )
