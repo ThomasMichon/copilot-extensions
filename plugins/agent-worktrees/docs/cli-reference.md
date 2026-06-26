@@ -77,8 +77,42 @@ continue to work unchanged.
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
 | `cleanup` | List and remove orphaned or finalized worktrees |
 | `status` | Show worktree git status |
+| `status-segment` | Print a styled status-bar segment for the worktree at the cwd (for a tmux/psmux status line) |
 | `list` | List worktrees from tracking records |
 | `handoff` | Manage handoff prompt state on a worktree |
+
+
+## Status bar segment (tmux / psmux)
+
+`status-segment` prints a **single styled line** classifying the worktree at
+the current directory (or `--path`) relative to its upstream default branch,
+for polling from a multiplexer status line. The worktree's tmux/psmux config
+(deployed by the installer) wires it up automatically:
+
+```tmux
+set -g status-interval 15
+set -g status-right '#(agent-worktrees status-segment) %H:%M '
+```
+
+The `#()` job runs in the pane's current directory, so the segment classifies
+the worktree the pane is actually in. Output is the resolved session title
+followed by a colored state block:
+
+| State | Color | Meaning |
+|-------|-------|---------|
+| `DIRTY` | red | Uncommitted changes, or commits ahead of upstream |
+| `FINAL` | green | Clean; work landed / fast-forwardable to upstream |
+| `UNUSED` | grey | Clean; no work since the fork point |
+| `WIP` | amber | Clean; ahead with content not yet on upstream |
+| `ORPHAN` | magenta | No merge base with upstream |
+
+A trailing `↑ahead`/`↓behind` tag mirrors the picker's inline sync status. The
+upstream default branch (`main`/`master`) is auto-detected per repo, so the
+segment works regardless of which project the binstub belongs to.
+
+Flags: `--path PATH` (classify another worktree), `--fetch` (refresh
+behind-counts from the remote -- off by default so the poll stays cheap),
+`--plain` (no `#[style]` directives), `--no-title` (state block only).
 
 
 ## Keeping worktrees current

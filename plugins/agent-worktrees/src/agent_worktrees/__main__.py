@@ -2602,6 +2602,176 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# status-segment -- one styled line for a tmux/psmux status bar
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Git state -> (256-color background, short label) for the status-bar block.
+_SEGMENT_STYLE: dict[git_ops.WorktreeState, tuple[str, str]] = {
+    git_ops.WorktreeState.DIRTY:     ("colour160", "DIRTY"),   # red
+    git_ops.WorktreeState.WIP:       ("colour178", "WIP"),     # amber
+    git_ops.WorktreeState.COMPLETED: ("colour034", "FINAL"),   # green
+    git_ops.WorktreeState.UNUSED:    ("colour244", "UNUSED"),  # grey
+    git_ops.WorktreeState.ORPHAN:    ("colour129", "ORPHAN"),  # magenta
+    git_ops.WorktreeState.ACTIVE:    ("colour039", "ACTIVE"),  # blue
+    git_ops.WorktreeState.GONE:      ("colour238", "GONE"),    # dark grey
+    git_ops.WorktreeState.UNKNOWN:   ("colour238", "?"),       # dark grey
+}
+
+_SEGMENT_TITLE_MAX = 48
+
+
+def _find_record_for_path(path: str) -> tracking.WorktreeRecord | None:
+    """Return the tracking record whose worktree path matches ``path``."""
+    try:
+        norm = _normalize_path(path)
+        for r in tracking.list_records(cfg.tracking_dir()):
+            if r.worktree_path and _normalize_path(r.worktree_path) == norm:
+                return r
+    except Exception:
+        pass
+    return None
+
+
+def _detect_upstream_branch(
+    path: str, remote: str, config_default: str | None,
+) -> str | None:
+    """Detect the repo's upstream default branch (``main``/``master``/...).
+
+    The status segment runs in arbitrary repos, so it cannot trust the
+    ambient project config's default branch (e.g. a ``master`` project
+    binstub polling a ``main`` repo).  Resolution order:
+
+    1. The config default, if ``<remote>/<default>`` actually exists.
+    2. ``<remote>/HEAD`` symbolic ref (the remote's own default).
+    3. First of ``main`` / ``master`` that exists as a remote branch.
+    4. The config default as a last-resort hint (may be stale).
+    """
+    def _has(ref: str) -> bool:
+        r = git_ops.git("rev-parse", "--verify", "--quiet", ref,
+                        cwd=path, check=False)
+        return r.returncode == 0
+
+    if config_default and _has(f"{remote}/{config_default}"):
+        return config_default
+
+    head = git_ops.git("symbolic-ref", f"refs/remotes/{remote}/HEAD",
+                        cwd=path, check=False)
+    if head.returncode == 0 and head.stdout.strip():
+        return head.stdout.strip().rsplit("/", 1)[-1]
+
+    for cand in ("main", "master"):
+        if _has(f"{remote}/{cand}"):
+            return cand
+
+    return config_default
+
+
+def _resolve_segment_title(
+    rec: tracking.WorktreeRecord | None,
+    path: str,
+    info: git_ops.WorktreeStateInfo,
+) -> str:
+    """Resolve a worktree's display title cheaply (single-record scan).
+
+    Priority: explicit tracking title -> latest session summary -> last
+    commit subject.  Returns "" when nothing is available.  Truncated to
+    keep the status bar readable.
+    """
+    title = ""
+    if rec and rec.title and rec.title != "null":
+        title = rec.title
+    if not title and rec is not None:
+        try:
+            ctx = sessions.scan_sessions_fast([rec])
+            title = ctx.latest_summary.get(_normalize_path(path), "") or ""
+        except Exception:
+            title = ""
+    if not title:
+        title = info.title or ""
+    if len(title) > _SEGMENT_TITLE_MAX:
+        title = title[: _SEGMENT_TITLE_MAX - 1].rstrip() + "\u2026"
+    return title
+
+
+def cmd_status_segment(args: argparse.Namespace) -> int:
+    """Print one styled status-bar segment for the worktree at the path/cwd.
+
+    Intended to be polled from a multiplexer status line::
+
+        set -g status-right '#(agent-worktrees status-segment)'
+
+    Classifies the worktree's git disposition relative to its upstream
+    default branch -- independent of any live session -- and prints::
+
+        <title> #[bg=<color>] <STATE><sync> #[default]
+
+    States: ``DIRTY`` (uncommitted changes or commits ahead of upstream),
+    ``FINAL`` (clean, work landed / fast-forwardable to upstream),
+    ``UNUSED`` (clean, no work since the fork point), ``WIP`` (clean,
+    commits ahead whose content is not yet upstream), ``ORPHAN`` (no merge
+    base with upstream).  ``<sync>`` is the picker's ``↑ahead``/``↓behind``
+    tag.
+
+    Fetch-free by default so it is cheap enough to poll on a short
+    ``status-interval``; pass ``--fetch`` to refresh behind-counts from the
+    remote.  Prints nothing (exit 0) outside a git worktree so a
+    misconfigured status line never spams errors into the bar.
+    """
+    target = str(Path(args.path).resolve()) if args.path else os.getcwd()
+
+    # Remote / default-branch.  The config gives a hint, but the segment may
+    # run in any repo, so the real upstream branch is detected from git
+    # (a `master` project binstub must still classify a `main` repo).
+    remote, config_default = "origin", None
+    try:
+        repo = cfg.load_config().default_repo
+        remote, config_default = repo.remote, repo.default_branch
+    except Exception:
+        pass
+    default_branch = _detect_upstream_branch(target, remote, config_default) \
+        or config_default or "master"
+
+    rec = _find_record_for_path(target)
+    branch = rec.branch if rec else (
+        git_ops._get_current_branch_safe(target) or "HEAD"
+    )
+
+    try:
+        info = git_ops.classify_worktree(
+            target, branch, fetch=bool(args.fetch),
+            remote=remote, default_branch=default_branch,
+            active_paths=None,  # raw git disposition -- never ACTIVE
+        )
+    except Exception:
+        return 0  # not a worktree / git failure -> empty bar, no noise
+
+    if info.state == git_ops.WorktreeState.GONE:
+        return 0
+
+    if rec is not None:
+        info = _apply_tracking_override(rec, info)
+
+    bg, label = _SEGMENT_STYLE.get(
+        info.state, ("colour238", info.state.value.upper())
+    )
+    sync = _sync_status_tag(info)
+
+    if args.plain:
+        block = f"[{label}{sync}]"
+    else:
+        block = f"#[bg={bg},fg=colour015,bold] {label}{sync} #[default]"
+
+    parts: list[str] = []
+    if not args.no_title:
+        title = _resolve_segment_title(rec, target, info)
+        if title:
+            parts.append(title)
+    parts.append(block)
+    print(" ".join(parts))
+    return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # list -- lightweight inventory from tracking records
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -3918,6 +4088,7 @@ _WORKTREE_VERBS = {
     "remove-system": "remove-system",
     "list": "list",
     "status": "status",
+    "status-segment": "status-segment",
     "push": "push-changes",
     "push-changes": "push-changes",
     "create-pr": "create-pr",
@@ -5407,6 +5578,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mux-details", action="store_true",
                    help="Include mux session attached/detached status (JSON only)")
 
+    # status-segment (one styled line for a tmux/psmux status bar)
+    p = sub.add_parser(
+        "status-segment",
+        help="Print a tmux/psmux status-bar segment for the worktree at cwd",
+    )
+    p.add_argument("--path", default=None,
+                   help="Worktree path to classify (default: current directory)")
+    p.add_argument("--fetch", action="store_true",
+                   help="Fetch before classifying (refreshes behind-counts; slower)")
+    p.add_argument("--plain", action="store_true",
+                   help="Plain text without tmux #[style] directives")
+    p.add_argument("--no-title", action="store_true",
+                   help="Omit the worktree title; show only the state block")
+
     # list (lightweight inventory from tracking records)
     p = sub.add_parser("list", help="List worktrees from tracking records")
     p.add_argument("--json", action="store_true",
@@ -5887,6 +6072,7 @@ COMMAND_MAP = {
     "pr-status": cmd_pr_status,
     "mark-complete": cmd_mark_complete,
     "status": cmd_status,
+    "status-segment": cmd_status_segment,
     "list": cmd_list,
     "create": cmd_create,
     "remove-system": cmd_remove_system,
