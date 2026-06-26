@@ -381,6 +381,12 @@ when none are live.
   it appends a fresh PR with a new branch and a current base, never reusing
   the merged branch. Works even when the prior PR was merged externally:
   `create-pr` reconciles the tracked PR's state against the provider first.
+
+  **After a PR merges, pull the worktree forward and build on top of it.** Run
+  `agent-worktrees git sync` to rebase the worktree branch onto the updated
+  default branch -- it drops the just-merged (squashed) commits and keeps any
+  newer local work, so you continue *on top of* the merge rather than starting a
+  fresh worktree. See the **`git-collaboration`** skill.
 - **Parallel:** keep one PR open and open another from the same worktree with
   `create-pr --new`. Address a specific one with `push-changes` (from its
   feature branch) or `set-pr --pr <n>`.
