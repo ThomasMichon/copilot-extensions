@@ -80,6 +80,22 @@ class SessionBusyError(Exception):
         )
 
 
+class DaemonDrainingError(Exception):
+    """Raised when new work is refused because the daemon is draining.
+
+    During a zero-downtime handoff the daemon stops accepting new sessions and
+    new turns so in-flight work can settle before it exits. Callers should
+    retry against the routing-table endpoint -- by the time they retry, the
+    successor daemon owns the route and answers.
+    """
+
+    def __init__(self, what: str = "request") -> None:
+        self.what = what
+        super().__init__(
+            f"agent-bridge is draining for a redeploy and is not accepting a "
+            f"new {what}; retry shortly (the successor daemon will answer)."
+        )
+
 
 def _workspace_key(
     agent_name: str | None,
@@ -303,7 +319,82 @@ class SessionManager:
         self._thresholds = context_thresholds or ContextThresholds()
         self._timeouts = timeouts or PhasedTimeouts()
         self._retention = retention or RetentionConfig()
+        # Drain gate: when True the daemon refuses *new* sessions and *new*
+        # turns so in-flight work can settle before a zero-downtime handoff.
+        # Set via drain(); never persisted (a fresh daemon starts un-drained).
+        self._draining = False
         self._rehydrate()
+
+    @property
+    def is_draining(self) -> bool:
+        """True once drain() has begun -- new sessions/turns are refused."""
+        return self._draining
+
+    def set_draining(self, value: bool) -> None:
+        """Open (True) or release (False) the drain gate."""
+        self._draining = bool(value)
+
+    def busy_sessions(self) -> list[str]:
+        """Session IDs that must not be torn down: actively streaming a turn
+        (RUNNING) or hosting active background sub-agents (the dev57 busy
+        oracle). This is the signal drain() waits on."""
+        busy: list[str] = []
+        for sid, session in self._sessions.items():
+            if session.status == SessionStatus.RUNNING or \
+                    session.has_active_background_tasks:
+                busy.append(sid)
+        return busy
+
+    async def drain(
+        self,
+        *,
+        timeout: float = 300.0,
+        poll: float = 1.0,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Open the drain gate and wait for in-flight work to settle.
+
+        Refuses new sessions/turns immediately, then blocks until no session is
+        busy (see busy_sessions) or ``timeout`` seconds elapse. The OS service
+        manager (systemd ExecStop / the Windows pre-stop hook) and the cutover
+        orchestrator call this *before* the process exits so an active turn is
+        never hard-killed. Returns a summary; ``drained`` is False on timeout
+        unless ``force`` is set (the caller accepts interrupting the laggards).
+        """
+        import asyncio as _asyncio
+
+        self.set_draining(True)
+        deadline = time.monotonic() + max(0.0, timeout)
+        busy = self.busy_sessions()
+        log.info(
+            "Drain started: %d session(s) busy, timeout=%.0fs%s",
+            len(busy), timeout, " (force)" if force else "",
+        )
+        while busy and time.monotonic() < deadline:
+            await _asyncio.sleep(poll)
+            busy = self.busy_sessions()
+
+        drained = not busy
+        if drained:
+            log.info("Drain complete: no busy sessions remain")
+        elif force:
+            log.warning(
+                "Drain timed out after %.0fs with %d busy session(s) -- "
+                "forcing past: %s", timeout, len(busy), ", ".join(busy),
+            )
+        else:
+            log.warning(
+                "Drain timed out after %.0fs; %d session(s) still busy: %s",
+                timeout, len(busy), ", ".join(busy),
+            )
+        return {
+            "drained": drained or force,
+            "clean": drained,
+            "forced": bool(force and not drained),
+            "busy_sessions": busy,
+            "timeout": timeout,
+        }
+
 
     @property
     def db(self) -> Database:
@@ -521,6 +612,8 @@ class SessionManager:
                 requests. Signature: (session_id, options, tool_call) ->
                 RequestPermissionResponse. If set, auto_approve is disabled.
         """
+        if self._draining:
+            raise DaemonDrainingError("session")
         session_id = str(uuid.uuid4())[:12]
         name = _generate_name()
         now = time.time()
@@ -861,6 +954,8 @@ class SessionManager:
         automatically re-spawned and the session resumed before
         delivering the prompt.
         """
+        if self._draining:
+            raise DaemonDrainingError("turn")
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:

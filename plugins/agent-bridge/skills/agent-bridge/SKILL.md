@@ -237,7 +237,42 @@ agent-bridge status
 agent-bridge version
 ```
 
-### ACP Agent Mode
+### Zero-Downtime Redeploy (routing table + drain + cutover)
+
+A redeploy no longer has to hard-kill live work. Clients resolve the daemon
+through a **routing table** (`~/.agent-bridge/active.json`) instead of the
+static config port: `BridgeClient.from_config()` reads the table first and falls
+back to `config.yaml` when it is absent (so the table is inert until a daemon
+publishes it). This lets a new daemon come up on a fresh port, the table flip to
+it, and the old daemon retire -- with no client ever dialing a dead port.
+
+```bash
+# Stop accepting new sessions/turns and wait for in-flight work to settle
+# (the busy oracle: streaming turns + active background sub-agents). Bounded by
+# --timeout; --force proceeds anyway at timeout. Exit 0 = clean, 2 = still busy.
+agent-bridge drain --timeout 300
+agent-bridge undrain                 # release the gate (rollback)
+
+# Active/passive cutover: spawn the new daemon on a free port, flip the routing
+# table, drain + retire the old one. Rolls back on any pre-commit failure.
+agent-bridge deploy --drain-timeout 300 [--force]
+```
+
+The installer `update` path drains before stopping by default (no hard-killed
+turns up to `AGENT_BRIDGE_DRAIN_TIMEOUT`). Full zero-downtime cutover is opt-in
+while service-manager reconciliation is validated:
+
+```bash
+AGENT_BRIDGE_ZERO_DOWNTIME=1 aperture-labs services agent-bridge update
+```
+
+> A passive instance (`agent-bridge start --passive`) does not self-publish the
+> routing table or bind the credential relay (9857) -- the deploy orchestrator
+> flips the table after a health check and calls `/api/v1/relay/adopt` once the
+> old daemon releases the relay port. The port-keyed singleton lock lets the
+> active and passive daemons coexist on one config dir during the overlap.
+
+
 
 ```bash
 # Run as an ACP agent on stdio (for chat UIs / upstream ACP clients)

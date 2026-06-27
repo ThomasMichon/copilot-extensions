@@ -38,6 +38,41 @@ def _count_active_sessions(mgr) -> int:
     return n
 
 
+async def _start_credential_relay(app: FastAPI):
+    """Build and start the in-process credential relay; return the server or None.
+
+    Extracted so both lifespan startup and the post-cutover relay-adopt endpoint
+    can (re)bind the shared relay port (9857). Idempotent: if a relay is already
+    running on this app it is returned unchanged.
+    """
+    existing = getattr(app.state, "credential_relay", None)
+    if existing is not None and getattr(existing, "running", False):
+        return existing
+    try:
+        from credential_relay import RelayBuilder
+
+        from .agent_registry import register_credential_sources
+
+        builder = RelayBuilder()
+        register_credential_sources(builder)
+        if builder.empty:
+            log.debug("No credential-relay sources registered -- relay disabled")
+            return None
+        relay_server = builder.build()
+        await relay_server.start()
+        app.state.credential_relay = relay_server
+        log.info(
+            "Credential relay started on port %d (%d sources)",
+            relay_server.port, len(builder.sources),
+        )
+        return relay_server
+    except ImportError:
+        log.debug("credential-relay lib not installed -- credential relay disabled")
+    except OSError as exc:
+        log.warning("Credential relay failed to start: %s", exc)
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan -- initialize DB, topology, and session manager."""
@@ -80,29 +115,17 @@ async def lifespan(app: FastAPI):
             "(enable_credential_relay=False) -- reusing the primary daemon's relay"
         )
     else:
-        try:
-            from credential_relay import RelayBuilder
+        relay_server = await _start_credential_relay(app)
 
-            from .agent_registry import register_credential_sources
+    # Expose a relay-adoption hook so a passive cutover instance can bind the
+    # shared relay port *after* the retiring daemon releases it (the relay is a
+    # singleton on 9857). The /api/v1/relay/adopt endpoint calls this.
+    async def _adopt_relay():
+        nonlocal relay_server
+        relay_server = await _start_credential_relay(app)
+        return relay_server is not None and getattr(relay_server, "running", False)
 
-            builder = RelayBuilder()
-            register_credential_sources(builder)
-
-            if not builder.empty:
-                relay_server = builder.build()
-                await relay_server.start()
-                app.state.credential_relay = relay_server
-                log.info(
-                    "Credential relay started on port %d (%d sources)",
-                    relay_server.port,
-                    len(builder.sources),
-                )
-            else:
-                log.debug("No credential-relay sources registered -- relay disabled")
-        except ImportError:
-            log.debug("credential-relay lib not installed -- credential relay disabled")
-        except OSError as exc:
-            log.warning("Credential relay failed to start: %s", exc)
+    app.state.adopt_relay = _adopt_relay
 
     log.info(
         "agent-bridge started (port=%s, db=%s, sessions=%d)",
@@ -163,7 +186,58 @@ async def lifespan(app: FastAPI):
             idle_secs,
         )
 
+    # Routing-table publish-on-ready -- a normal daemon announces its endpoint
+    # to active.json once it is actually listening, so CLI clients discover it
+    # via the routing table. A passive cutover instance leaves publish_on_ready
+    # False; the deploy orchestrator flips the table after its own health check.
+    publish_task = None
+    if getattr(app.state, "publish_on_ready", False):
+        async def _publish_when_listening() -> None:
+            import os as _os
+
+            from . import __version__ as _ver
+            from . import routing
+            from .config import config_dir
+
+            server = getattr(app.state, "uvicorn_server", None)
+            # Wait for uvicorn to actually bind the socket before announcing.
+            for _ in range(600):  # ~60s ceiling
+                if server is not None and getattr(server, "started", False):
+                    break
+                await asyncio.sleep(0.1)
+            try:
+                await asyncio.to_thread(
+                    routing.publish_active,
+                    config_dir(),
+                    bind=cfg.bind,
+                    port=cfg.port,
+                    pid=_os.getpid(),
+                    version=_ver,
+                    demote_existing=True,
+                )
+            except Exception:
+                log.warning("Failed to publish routing table", exc_info=True)
+
+        publish_task = asyncio.create_task(_publish_when_listening())
+
     yield
+
+    # Shutdown: retract our routing-table claim so clients fall back (or follow
+    # a successor that already flipped the table). Done first so no new client
+    # is routed to us while we tear sessions down.
+    if publish_task is not None:
+        publish_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await publish_task
+    if getattr(app.state, "publish_on_ready", False):
+        import os as _os
+
+        from . import routing
+        from .config import config_dir
+        try:
+            await asyncio.to_thread(routing.clear_if_owner, config_dir(), _os.getpid())
+        except Exception:
+            log.debug("Routing-table clear-on-shutdown skipped", exc_info=True)
 
     # Shutdown: stop the idle-shutdown monitor
     if idle_task is not None:

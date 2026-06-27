@@ -84,3 +84,39 @@ def test_release_is_idempotent(tmp_path):
 
 def test_read_holder_pid_missing_returns_none(tmp_path):
     assert _read_holder_pid(tmp_path / "does-not-exist.lock") is None
+
+
+def test_distinct_ports_coexist_on_same_config_dir(tmp_path):
+    """An active and a passive daemon share a config dir but bind different
+    ports -- the port-keyed lock must let both acquire simultaneously."""
+    active = SingleInstance(tmp_path, port=9281)
+    passive = SingleInstance(tmp_path, port=9282)
+    active.acquire()
+    try:
+        # Different port -> different lock file -> no contention.
+        passive.acquire()
+        passive.release()
+        assert active.lock_path != passive.lock_path
+        assert "9281" in str(active.lock_path)
+        assert "9282" in str(passive.lock_path)
+    finally:
+        active.release()
+
+
+def test_same_port_same_dir_still_refused(tmp_path):
+    """Two starts on the *same* port still collide (the #129 duplicate guard)."""
+    first = SingleInstance(tmp_path, port=9281)
+    first.acquire()
+    try:
+        second = SingleInstance(tmp_path, port=9281)
+        with pytest.raises(AlreadyRunningError):
+            second.acquire()
+    finally:
+        first.release()
+
+
+def test_port_none_uses_legacy_lock_filename(tmp_path):
+    guard = SingleInstance(tmp_path)
+    assert guard.lock_path.name == "agent-bridge.lock"
+    guard_port = SingleInstance(tmp_path, port=9281)
+    assert guard_port.lock_path.name == "agent-bridge.9281.lock"
