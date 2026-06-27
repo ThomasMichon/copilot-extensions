@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-import tempfile
 from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import time
 
 import pytest
 
-from agent_bridge.config import load_or_create_auth_token
 from agent_bridge.db import Database
 from agent_bridge.events import EventLog
 from agent_bridge.models import ServiceConfig
@@ -69,6 +66,11 @@ def mock_acp_client():
     })
     client.cancel_prompt = AsyncMock()
     client.shutdown = AsyncMock()
+    # No background sub-agents by default; tests that exercise the teardown
+    # gate set these explicitly. Without an explicit default a bare MagicMock
+    # attribute is truthy, which would spuriously trip the busy gate.
+    client.has_active_background_tasks = False
+    client.active_background_tasks = []
     return client
 
 

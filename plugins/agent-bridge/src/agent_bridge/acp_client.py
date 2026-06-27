@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import signal
 import sys
 from collections.abc import Callable
@@ -58,6 +59,43 @@ _TERMINAL_TOOL_STATUSES = frozenset(
     {
         "completed", "complete", "success", "succeeded",
         "failed", "error", "cancelled", "canceled",
+    }
+)
+
+# -- Background-task (sub-agent) detection --------------------------------------
+#
+# Copilot's `task` tool can launch a sub-agent in *background* mode. The
+# orchestrator turn then returns ``end_turn`` while the sub-agent keeps running
+# in the same Copilot process (its bash/tool calls stream in after the turn
+# settles, and the orchestrator auto-wakes when it completes). Tearing the
+# process down in that window kills in-flight background work -- exactly what a
+# conversation "waiting on the PR daemon or another agent session" must not
+# suffer. There is no structured ACP field for this, so we parse the `task`
+# tool's human-readable output (the only authoritative signal Copilot emits):
+#
+#   launch     -> "Agent started in background with agent_id: <id>. ..."
+#   completion -> a later read_agent / task-wait result naming the same
+#                 ``agent_id: <id>`` with ``status: completed|failed|...``
+#                 (or "Agent is idle (waiting for messages). ... status: idle").
+#
+# An agent is "active background work" from launch until the first time we
+# observe it in a terminal-or-idle status. Idle counts as not-active: an idle
+# sub-agent is parked waiting for messages, not making progress, so it does not
+# need the connection held open. The match is deliberately tolerant (the phrase
+# is product copy that can drift); a missed completion only over-counts, which
+# `force` teardown overrides -- it never silently kills live work.
+_BG_TASK_LAUNCH_RE = re.compile(
+    r"started in background with agent_id:\s*([A-Za-z0-9][\w-]*)",
+    re.IGNORECASE,
+)
+_BG_TASK_AGENT_ID_RE = re.compile(r"agent_id:\s*([A-Za-z0-9][\w-]*)")
+_BG_TASK_STATUS_RE = re.compile(r"status:\s*([A-Za-z_]+)")
+# Sub-agent statuses that mean "no longer actively running background work".
+_BG_TASK_INACTIVE_STATUSES = frozenset(
+    {
+        "completed", "complete", "succeeded", "success",
+        "failed", "error", "cancelled", "canceled",
+        "idle", "stopped",
     }
 )
 
@@ -246,6 +284,15 @@ class AcpClient:
         self._thought_chunks: list[str] = []
         self._tool_calls: dict[str, ToolCallRecord] = {}
         self._prompt_complete = False
+
+        # Background sub-agent tracking. Keyed by Copilot agent_id; value is the
+        # tool_call_id of the launching `task` call (or "" if unknown). An entry
+        # is present from the moment we see "started in background with
+        # agent_id: <id>" until we observe that id reach an inactive status
+        # (completed/failed/idle/...). See _BG_TASK_* above. Used to keep the
+        # Copilot process alive while sub-agents are doing real work so a
+        # teardown does not kill the PR daemon or another waited-on session.
+        self._background_tasks: dict[str, str] = {}
         self._prompt_error: str | None = None
         self._stop_reason: str | None = None
         self._pending_permission_future: asyncio.Future[RequestPermissionResponse] | None = None
@@ -283,6 +330,26 @@ class AcpClient:
     @property
     def is_running(self) -> bool:
         return self._process is not None and self._process.returncode is None
+
+    @property
+    def active_background_tasks(self) -> list[str]:
+        """Copilot agent_ids of background sub-agents still doing live work.
+
+        An id appears here from launch ("started in background with
+        agent_id: <id>") until it is first seen in an inactive status
+        (completed/failed/idle/...). Sorted for stable output.
+        """
+        return sorted(self._background_tasks)
+
+    @property
+    def has_active_background_tasks(self) -> bool:
+        """True while any background sub-agent is still running.
+
+        Teardown gates on this so the Copilot process -- and the in-process
+        sub-agents it hosts -- survives while a conversation waits on the PR
+        daemon or another agent session.
+        """
+        return bool(self._background_tasks)
 
     # -- Lifecycle -----------------------------------------------------------
 
@@ -408,6 +475,11 @@ class AcpClient:
             await _terminate_process_tree(proc)
         self._process = None
 
+        # The process (and the in-process sub-agents it hosted) is gone; drop
+        # any background-task tracking so a discarded client never reports
+        # stale active tasks.
+        self._background_tasks.clear()
+
     # -- Event emission ------------------------------------------------------
 
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
@@ -501,12 +573,21 @@ class AcpClient:
             # (json.dumps), and SSE fan-out, and the per-event commit backpressures
             # the ACP read loop -- stalling a remote agent over SSH (dotfiles #99).
             terminal = bool(status) and str(status).lower() in _TERMINAL_TOOL_STATUSES
+            raw_output = getattr(update, "raw_output", None) if terminal else None
             self._emit("tool_call_update", {
                 "tool_call_id": update.tool_call_id,
                 "status": status,
                 "content": list(existing.content) if (terminal and existing) else [],
-                "raw_output": getattr(update, "raw_output", None) if terminal else None,
+                "raw_output": raw_output,
             })
+            # A `task` tool's launch/completion is only legible in its terminal
+            # text output, so scan it once the call has settled.
+            if terminal:
+                self._scan_background_tasks(
+                    update.tool_call_id,
+                    existing.content if existing else None,
+                    raw_output,
+                )
 
         elif isinstance(update, UsageUpdate):
             self._emit("usage_update", {
@@ -521,6 +602,70 @@ class AcpClient:
             self._emit("session_info", {
                 "session_id": getattr(update, "session_id", None),
             })
+
+    def _scan_background_tasks(
+        self,
+        tool_call_id: str,
+        content: list[str] | None,
+        raw_output: Any,
+    ) -> None:
+        """Track background sub-agents from a settled `task` tool's output.
+
+        Copilot exposes no structured background-task signal, so the launch and
+        completion of a background sub-agent are recovered from the `task`
+        tool's human-readable result text (see _BG_TASK_* above):
+
+          * launch     -> "...started in background with agent_id: <id>..."
+          * completion -> a later read_agent/task-wait result naming the same
+                          ``agent_id: <id>`` with an inactive ``status:`` (or an
+                          "Agent is idle" line).
+
+        Launch wins ties: a single tool result never both starts and finishes
+        the same id, and the launch phrase has no ``status:`` field, so the two
+        branches are mutually exclusive in practice.
+        """
+        parts: list[str] = []
+        if content:
+            parts.extend(content)
+        if raw_output is not None:
+            parts.append(raw_output if isinstance(raw_output, str) else repr(raw_output))
+        if not parts:
+            return
+        text = "\n".join(parts)
+
+        launched = False
+        for match in _BG_TASK_LAUNCH_RE.finditer(text):
+            agent_id = match.group(1)
+            if agent_id not in self._background_tasks:
+                self._background_tasks[agent_id] = tool_call_id
+                launched = True
+                log.info("background sub-agent started: %s", agent_id)
+                self._emit("background_task_started", {
+                    "agent_id": agent_id,
+                    "tool_call_id": tool_call_id,
+                    "active_background_tasks": self.active_background_tasks,
+                })
+        if launched:
+            return
+
+        # Completion: a status line for an already-tracked agent_id reaching an
+        # inactive state. A `task` result can mention an id without a status
+        # (e.g. a launch confirmation handled above); only act on a status.
+        status_match = _BG_TASK_STATUS_RE.search(text)
+        if not status_match:
+            return
+        status = status_match.group(1).lower()
+        if status not in _BG_TASK_INACTIVE_STATUSES:
+            return
+        for id_match in _BG_TASK_AGENT_ID_RE.finditer(text):
+            agent_id = id_match.group(1)
+            if self._background_tasks.pop(agent_id, None) is not None:
+                log.info("background sub-agent finished (%s): %s", status, agent_id)
+                self._emit("background_task_finished", {
+                    "agent_id": agent_id,
+                    "status": status,
+                    "active_background_tasks": self.active_background_tasks,
+                })
 
     async def _handle_permission_request(
         self,

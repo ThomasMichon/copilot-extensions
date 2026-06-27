@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from agent_bridge.app import create_app
-from agent_bridge.db import Database
 from agent_bridge.models import ServiceConfig, SessionStatus
 from agent_bridge.session_manager import Session, SessionManager
 from agent_bridge.transport import SpawnTarget
@@ -575,3 +573,53 @@ class TestAcpAliasResolution:
     def test_unknown_ref_404s(self, client) -> None:
         resp = client.get("/api/v1/sessions/no-such-ref")
         assert resp.status_code == 404
+
+
+class TestBackgroundTaskTeardownGate:
+    """stop/end refuse (409) while a session hosts active background tasks,
+    unless force=true; status surfaces active_background_tasks."""
+
+    @staticmethod
+    def _inject_busy_session(app, *, sid: str = "bg-sess-1"):
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="local", cwd="/wt")
+        session = Session(sid, "busy-bee", target, "test-agent")
+        session.status = SessionStatus.IDLE
+        client_mock = MagicMock()
+        client_mock.is_running = True
+        client_mock.cancel_prompt = AsyncMock()
+        client_mock.shutdown = AsyncMock()
+        client_mock.has_active_background_tasks = True
+        client_mock.active_background_tasks = ["pr-daemon"]
+        session.client = client_mock
+        mgr._sessions[sid] = session
+        return session
+
+    def test_stop_returns_409_when_busy(self, client, app) -> None:
+        self._inject_busy_session(app)
+        resp = client.post("/api/v1/sessions/bg-sess-1/stop")
+        assert resp.status_code == 409
+        assert "background" in resp.json()["detail"].lower()
+
+    def test_delete_returns_409_when_busy(self, client, app) -> None:
+        self._inject_busy_session(app)
+        resp = client.delete("/api/v1/sessions/bg-sess-1")
+        assert resp.status_code == 409
+
+    def test_force_stop_succeeds_when_busy(self, client, app) -> None:
+        session = self._inject_busy_session(app)
+        resp = client.post("/api/v1/sessions/bg-sess-1/stop?force=true")
+        assert resp.status_code == 204
+        assert session.status == SessionStatus.STOPPED
+
+    def test_force_delete_succeeds_when_busy(self, client, app) -> None:
+        self._inject_busy_session(app)
+        resp = client.delete("/api/v1/sessions/bg-sess-1?force=true")
+        assert resp.status_code == 204
+        assert app.state.session_manager.get_session("bg-sess-1") is None
+
+    def test_status_surfaces_active_background_tasks(self, client, app) -> None:
+        self._inject_busy_session(app)
+        resp = client.get("/api/v1/sessions/bg-sess-1/status")
+        assert resp.status_code == 200
+        assert resp.json()["active_background_tasks"] == ["pr-daemon"]

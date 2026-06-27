@@ -21,7 +21,7 @@ from ..models import (
     SubmitPromptRequest,
     SubmitPromptResponse,
 )
-from ..session_manager import SessionConflictError
+from ..session_manager import SessionBusyError, SessionConflictError
 from ..transport import SpawnTarget
 
 if TYPE_CHECKING:
@@ -277,6 +277,7 @@ async def get_session_status(
         "last_acked_id": last_acked,
         "behind": max(0, head_id - last_acked),
         "active_tool": active,
+        "active_background_tasks": session.active_background_tasks,
         "progress": dict(session.progress),
         "updated_at": datetime.fromtimestamp(
             session.updated_at, tz=timezone.utc
@@ -470,10 +471,12 @@ async def ack_cursor(
 
 
 @router.post("/{session_id}/stop", status_code=204)
-async def stop_session(session_id: str, request: Request):
+async def stop_session(session_id: str, request: Request, force: bool = False):
     mgr: SessionManager = request.app.state.session_manager
     try:
-        await mgr.stop_session(session_id)
+        await mgr.stop_session(session_id, force=force)
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
@@ -495,9 +498,11 @@ async def resume_session(session_id: str, request: Request):
 
 
 @router.delete("/{session_id}", status_code=204)
-async def end_session(session_id: str, request: Request):
+async def end_session(session_id: str, request: Request, force: bool = False):
     mgr: SessionManager = request.app.state.session_manager
     try:
-        await mgr.end_session(session_id)
+        await mgr.end_session(session_id, force=force)
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")

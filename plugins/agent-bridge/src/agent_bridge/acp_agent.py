@@ -479,7 +479,15 @@ class BridgeAgent(Agent):
                 return "end_turn"
 
     async def cleanup(self) -> None:
-        """Stop all owned sessions on disconnect."""
+        """Stop all owned sessions on disconnect.
+
+        A session still hosting active background sub-agents is deliberately
+        left running (SessionBusyError): the owning caller disconnecting must
+        not kill a PR daemon or another agent session that work is waiting on.
+        It stays adopted by the bridge and can be reattached later.
+        """
+        from .session_manager import SessionBusyError
+
         for sid in list(self._owned_sessions):
             session = self._sm.get_session(sid)
             if session and session.status in (
@@ -488,6 +496,12 @@ class BridgeAgent(Agent):
                 try:
                     await self._sm.stop_session(sid)
                     log.info("Stopped owned session %s on cleanup", sid)
+                except SessionBusyError:
+                    log.info(
+                        "Owned session %s has active background tasks -- left "
+                        "running on cleanup", sid,
+                    )
+                    continue
                 except Exception:
                     log.warning("Failed to stop session %s on cleanup", sid, exc_info=True)
         self._owned_sessions.clear()
