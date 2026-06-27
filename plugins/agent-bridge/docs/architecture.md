@@ -44,21 +44,24 @@ Copilot CLI sessions (multiple)
 
 ## Single-Instance Guard
 
-At most **one daemon may run per config dir**. On startup (`_cmd_start` in
+At most **one daemon may run per config dir + port**. On startup (`_cmd_start` in
 `__main__.py`), before binding any port, the daemon takes an OS-level
-**exclusive, non-blocking** lock on `<config_dir>/agent-bridge.lock`
-(`singleton.py`). A second `agent-bridge start` for the same config dir refuses
-cleanly and exits instead of spawning a duplicate daemon -- duplicate daemons
-otherwise accumulate as zombies that re-bind the service/relay ports and defeat
-restarts.
+**exclusive, non-blocking** lock (`singleton.py`). A second `agent-bridge start`
+on the same port refuses cleanly and exits instead of spawning a duplicate
+daemon -- duplicate daemons otherwise accumulate as zombies that re-bind the
+service/relay ports and defeat restarts.
 
 The lock is an OS byte-range lock (`fcntl.flock` on POSIX,
 `msvcrt.locking` on Windows), so the kernel **releases it automatically when the
 holder dies** (graceful exit, crash, kill, or power loss) -- there is never a
-stale lock to detect or reclaim. It is keyed on the **config dir**, not the
-plugin/venv folder: the primary daemon (`~/.agent-bridge`) and the Windows
-elevated sub-daemon (`~/.agent-bridge/elevated`) have distinct config dirs, so
-each gets its own single instance while two *primaries* can never coexist.
+stale lock to detect or reclaim. It is keyed on the **config dir** and, for
+callers that opt in, the **port**: the lock file is `<config_dir>/agent-bridge.lock`
+by default, or `<config_dir>/agent-bridge.<port>.lock` when a port is supplied.
+Port-keying lets an **active and a passive daemon coexist on one config dir**
+(shared db/auth, different ports) during a [zero-downtime cutover](#zero-downtime-redeploy),
+while two starts on the *same* port still collide. The primary daemon
+(`~/.agent-bridge`) and the Windows elevated sub-daemon (`~/.agent-bridge/elevated`)
+also have distinct config dirs, so each gets its own single instance.
 
 ## Credential Relay
 
@@ -116,8 +119,21 @@ re-read already-consumed content and never moves the cursor. See
 ### Health
 
 ```
-GET    /health                           # Service health (no auth required)
+GET    /health                           # Service health (no auth); reports {status, service, draining}
 ```
+
+### Admin / Deployment
+
+```
+POST   /api/v1/drain                     # Open the drain gate; wait for busy sessions to settle
+POST   /api/v1/undrain                   # Release the drain gate (cutover rollback)
+POST   /api/v1/shutdown                  # Clean daemon shutdown (retires its own routing-table entry)
+POST   /api/v1/relay/adopt               # Bind the credential relay (9857) on this daemon
+POST   /api/v1/gc                        # Prune aged terminal/disconnected sessions
+```
+
+These back the zero-downtime redeploy flow -- see
+[Zero-Downtime Redeploy](#zero-downtime-redeploy).
 
 ### Session States
 
@@ -160,8 +176,8 @@ downstream agent.
 | Action | Description |
 |--------|-------------|
 | `install` | Full deploy: venv, package, binstub, service, manifest |
-| `update` | Reinstall package, restart if running |
-| `start` | Start the service |
+| `update` | **Drain-then-swap** by default (drain in-flight work, then reinstall + restart); opt-in **zero-downtime cutover** via `AGENT_BRIDGE_ZERO_DOWNTIME=1`. See [Zero-Downtime Redeploy](#zero-downtime-redeploy). |
+| `start` | Start the service (`--passive` for a cutover spare -- see below) |
 | `stop` | Stop the service |
 | `status` | Show service status |
 | `uninstall` | Remove service (`--remove-config` for config too) |
@@ -173,69 +189,138 @@ The installer writes `~/.agent-bridge/deploy-manifest.json` tracking:
 - Source commit, branch, timestamp
 - Plugin directory path
 
-### Restart Behavior Today (and What Survives)
+### Restart Behavior and What Survives
 
-A version update is a **hard restart**: `update` reinstalls the package and
-bounces the service (systemd `restart` on Linux/WSL; stop + at-logon relaunch on
-Windows). The daemon process is replaced, which has three consequences:
+The daemon process model sets the floor for what a redeploy can preserve. **Each
+session owns a live `copilot --acp` subprocess connected by stdin/stdout pipes to
+the daemon.** The child leads its own process group, but the *pipes* are owned by
+the daemon -- when the daemon exits the pipe breaks and the child dies. A live
+pipe-connected subprocess cannot be serialized or handed to a successor process,
+so a daemon exit inherently tears down every live child. Two things mitigate
+this:
 
 - **Idle / stopped sessions survive transparently.** Session metadata, turns,
   and events are persisted to SQLite, and on startup the daemon `_rehydrate()`s
   them: formerly-RUNNING sessions are marked STOPPED (resumable) and **lazily
   reattach** to their persisted ACP conversation via `load_session()` on next
   access. No work is lost for a parked session.
-- **Actively-streaming turns are lost.** A turn that is mid-flight when the
-  daemon dies is marked `interrupted`; history up to that point survives, the
-  in-flight turn does not.
-- **The HTTP API is connection-refused for the swap window.** Callers
-  (`send`/`wait`/`read`) see a dropped connection until the new daemon binds the
-  port.
+- **Active turns are drained, not killed (default path).** A plain `update`
+  now **drains first** (see below): it opens the drain gate and waits for
+  in-flight turns and active background sub-agents to settle before stopping the
+  daemon, so an actively-streaming turn is no longer hard-killed up to the drain
+  timeout. A *hard* kill (crash, `kill`, drain timeout without enough grace)
+  still marks an in-flight turn `interrupted` -- history up to that point
+  survives, the in-flight turn does not.
 
-The core obstacle to doing better: **each session owns a live `copilot --acp`
-subprocess connected by stdin/stdout pipes to the daemon.** The child leads its
-own process group, but the *pipes* are owned by the daemon -- when the daemon
-exits the pipe breaks and the child dies. A live pipe-connected subprocess
-cannot be serialized or handed to a successor process, so a restart inherently
-tears down every live child.
+The remaining gap a plain drain-then-swap leaves is a brief **API-unavailable
+window** while the old daemon stops and the new one binds the port. The
+zero-downtime cutover path (opt-in) removes even that.
 
-## Zero-Downtime Deployment (Roadmap)
+## Zero-Downtime Redeploy
 
-> **Status: planned, not yet implemented.** The flow below is the *designed*
-> evolution of the restart behavior above. The full plan, validation, and
-> cross-platform adapters are tracked in the aperture-labs effort
-> `agent-bridge-zero-downtime-deploy` (umbrella issue
-> [aperture-labs #1236](https://home.thomasmichon.com/gitea/tmichon/aperture-labs/issues/1236)).
+A redeploy no longer has to hard-kill live work or strand clients on a dead
+port. Three cooperating pieces make this work; all are **OS-agnostic and
+app-level** (the effort's deliberate conclusion: systemd and Windows Scheduled
+Tasks share almost no lifecycle surface, so the drain/handoff logic must not
+live in the service manager). Design and validation are tracked in the
+aperture-labs effort `agent-bridge-zero-downtime-deploy` (umbrella issue
+[aperture-labs #1236](https://home.thomasmichon.com/gitea/tmichon/aperture-labs/issues/1236)).
 
-The goal is **active/passive deployment** with no observable loss to clients or
-in-flight conversations. Because the OS service models diverge sharply
-(systemd offers `ExecReload` / `Type=notify` / socket activation; Windows offers
-none of these and *additionally* force-kills children on daemon exit via the
-`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job object), the drain/handoff
-orchestration is designed to live **in-process and OS-agnostic**, with thin
-per-OS adapters only for socket handoff and the Windows job-breakaway. It builds
-on a primitive already present in the daemon: the **busy oracle**
-(`has_active_background_tasks` / `SessionBusyError`), which already knows when a
-session is mid-work and must not be torn down.
+### 1. Routing table (`<config_dir>/active.json`)
 
-The flow is delivered in three tiers of increasing completeness:
+Clients resolve the daemon endpoint through a **routing table**
+(`~/.agent-bridge/active.json`) instead of a static port, so a redeploy can
+stand up a new daemon on a fresh port, flip the table atomically, and retire the
+old daemon -- with no client ever dialing a dead port (`routing.py`).
 
-| Tier | Flow | Outcome |
-|------|------|---------|
-| **1 -- Graceful drain** | A `drain` command stops accepting new turns/sessions, **waits on the busy oracle** until live turns settle (bounded timeout + `force` override), checkpoints to SQLite, then exits. The listen socket is held across the swap (systemd socket activation on Linux; a small front proxy on Windows). | Not yet zero-downtime, but **no lost active turns**; clients see latency, not connection-refused. |
-| **2 -- Active/passive failover** | A passive daemon starts on a **distinct config dir + port** (the config-dir singleton lock permits this -- see [Single-Instance Guard](#single-instance-guard)). A DB-ownership lease hands writes from old to new; the new daemon re-spawns children and `load_session()`s the drained sessions; a front proxy flips to the new port; the old daemon retires. Relayed cross-machine sessions (relay port) re-home without the remote caller noticing. | Idle sessions seamless across cutover; only a genuinely mid-stream turn is lost. |
-| **3 -- Supervisor/broker split** | The daemon is split into a stable **per-session supervisor** that owns the `copilot --acp` child over an **AF_UNIX socket** (not a pipe), and a **restartable frontend** that serves the API and orchestrates. On restart the new frontend *adopts* the existing supervisors over their sockets. Requires reworking the Windows job object so supervisors **survive** frontend exit (own job / `CREATE_BREAKAWAY_FROM_JOB`). | **True zero-downtime**: children never die, turns never interrupt, even mid-stream. |
+- Records an `active` and (during an overlap) a `previous` endpoint, each with a
+  monotonic `generation` counter. Writes are atomic (tmp + `os.replace`), so a
+  concurrent reader never sees a torn file.
+- **Backward compatible / self-healing.** When the table is absent the caller
+  falls back to the static `config.yaml` port, so the table is inert until a
+  daemon publishes itself. A reader that finds the `active` endpoint dead heals
+  to `previous`, then to the config fallback (bounded by a 0.25s listener
+  probe).
+- A normal `start` self-publishes the table once it is listening; a
+  `start --passive` instance stays **silent** (no self-route, no credential
+  relay) until the cutover orchestrator promotes it.
+- **Why a table, not a front proxy:** a proxy holding a stable port ships in the
+  same plugin payload, so updating *it* reintroduces the very downtime it was
+  meant to remove (and would need socket hand-off between proxy generations --
+  the hardest-on-Windows part of a supervisor split). The table has no
+  long-lived process to update: it is a file, re-read naturally by every
+  short-lived CLI invocation.
 
-Each tier is validated with a "no work lost" proof on **both** platforms
-(Linux/WSL systemd and Windows Scheduled Task + Job Object). Tier 1 is the
-recommended first delivery -- it is cheap, reuses the busy oracle, and converts
-"a redeploy kills active work" into "a redeploy waits for active work to
-settle."
+### 2. Drain (the busy-oracle wait)
+
+`agent-bridge drain [--timeout SECONDS] [--force]` (HTTP `POST /api/v1/drain`)
+opens the **drain gate** -- the daemon immediately refuses *new* sessions and
+*new* turns (`DaemonDrainingError`) -- then blocks until no session is **busy**,
+bounded by `--timeout`. Busy is the dev57 **busy oracle**: a session that is
+actively streaming a turn (RUNNING) **or** hosting active background sub-agents
+(`has_active_background_tasks`). `--force` proceeds past the timeout, accepting
+that the laggards are interrupted. `agent-bridge undrain` (`POST /api/v1/undrain`)
+releases the gate (used by cutover rollback); `/health` reports `draining`.
+
+### 3. Active/passive cutover (`agent-bridge deploy`)
+
+`agent-bridge deploy [--drain-timeout SECONDS] [--force]` runs a reversible
+cutover (`deploy.py`, `CutoverOrchestrator`):
+
+1. pick a free port and spawn the new daemon `--passive` (no self-route, no
+   relay);
+2. wait until it is healthy;
+3. **flip the routing table** -> new `active`, old demoted to `previous`;
+4. **drain** the old daemon (busy-oracle wait, optional `--force`);
+5. **-- commit point --** shut the old daemon down (a clean exit; it
+   `clear_if_owner`s only its own route entry);
+6. best-effort: adopt the credential relay (9857) on the new daemon.
+
+Any failure **before** the commit point rolls back: re-publish the old endpoint
+as active, undrain the old daemon, and terminate the freshly spawned passive. If
+the route was already flipped and the old daemon is gone, the orchestrator
+**commits forward** to the healthy new daemon rather than strand clients. The
+[single-instance guard](#single-instance-guard) is **port-keyed** so an active
+and a passive daemon can coexist on one config dir during the overlap (two starts
+on the *same* port still collide).
+
+### Installer wiring (both platforms)
+
+The installer `update` path on **both** Linux/WSL (`install.sh`) and Windows
+(`install.ps1`) chooses a strategy:
+
+- **Default -- drain-then-swap:** drain in-flight work for a grace window
+  (`AGENT_BRIDGE_DRAIN_TIMEOUT`, default 120s), then stop / reinstall / start.
+  No active turn is hard-killed up to the drain timeout; a brief
+  API-unavailable window remains.
+- **Opt-in -- full cutover** (`AGENT_BRIDGE_ZERO_DOWNTIME=1`): leave the old
+  daemon running, reinstall the venv, then `agent-bridge deploy` stands the new
+  daemon up beside it and retires the old one -- **no** API-unavailable window
+  and **no** hard-killed turns. **Experimental:** the survivor currently runs
+  outside the service manager until service-manager reconciliation lands, so
+  validate before relying on it; it falls back to stop/start on any failure.
+
+### Still future: seamless mid-stream migration
+
+Cutover **drains** in-flight turns (waits for them to finish on the old daemon)
+rather than *migrating* a live, actively-streaming turn to the new daemon --
+because a live pipe-connected `copilot --acp` child still cannot be handed to a
+successor process (see [Restart Behavior](#restart-behavior-and-what-survives)).
+Truly seamless mid-stream cutover would require splitting the daemon into a
+stable **per-session supervisor** that owns the child over an **AF_UNIX socket**
+and a **restartable frontend** that adopts supervisors on restart (and a rework
+of the Windows kill-on-job-close so supervisors survive frontend exit). That
+supervisor/broker split is **not implemented** and remains tracked in effort
+[#1236](https://home.thomasmichon.com/gitea/tmichon/aperture-labs/issues/1236).
 
 ## Persistence
 
 - **Sessions:** SQLite database at `~/.agent-bridge/sessions.db` (WAL mode)
 - **Config:** YAML at `~/.agent-bridge/config.yaml`
 - **Auth:** Bearer token at `~/.agent-bridge/auth.yaml`
+- **Routing table:** `~/.agent-bridge/active.json` -- the client-facing
+  active/previous endpoint table (see [Zero-Downtime Redeploy](#zero-downtime-redeploy));
+  absent until a daemon publishes itself, atomically rewritten on each cutover.
 - **Logs:** Structured logging to stderr (captured by service manager)
 
 ## Development Phases
