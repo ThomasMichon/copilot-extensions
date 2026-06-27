@@ -87,7 +87,27 @@ class BridgeClient:
         elif bind == "::":
             bind = "::1"
 
+        # The static config port is the *fallback*. Prefer the routing table
+        # (active.json) so a zero-downtime redeploy that flipped to a new port
+        # transparently reroutes this client -- without it the CLI would dial a
+        # retired daemon mid-cutover. The table is consulted unless explicitly
+        # overridden; absence falls back to the config port (backward compatible).
         base_url = f"http://{bind}:{port}"
+        explicit = os.environ.get("AGENT_BRIDGE_BASE_URL")
+        if explicit:
+            # Highest priority: the deploy orchestrator dials a *specific*
+            # daemon (old or passive) by URL, bypassing the table entirely.
+            base_url = explicit.rstrip("/")
+        elif os.environ.get("AGENT_BRIDGE_NO_ROUTING_TABLE") not in ("1", "true"):
+            try:
+                from .routing import read_active_endpoint
+
+                ep = read_active_endpoint(config_dir)
+                if ep is not None:
+                    base_url = ep.base_url
+            except Exception:
+                # The routing table is an optimization, never a hard dependency.
+                pass
 
         # Client timeout (seconds) -- configurable, validated
         raw_timeout = data.get("client_timeout", 120) if cfg_path.exists() else 120
@@ -137,6 +157,7 @@ class BridgeClient:
         body: dict[str, Any] | None = None,
         *,
         params: dict[str, str] | None = None,
+        request_timeout: float | None = None,
     ) -> dict[str, Any] | None:
         """Make an authenticated HTTP request. Returns parsed JSON or None for 204."""
         url = f"{self._base}{path}"
@@ -153,11 +174,12 @@ class BridgeClient:
 
         import time as _time
 
+        sock_timeout = request_timeout if request_timeout is not None else self._timeout
         deadline = _time.monotonic() + self._connect_grace
         backoff = 0.25
         while True:
             try:
-                with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                with urllib.request.urlopen(req, timeout=sock_timeout) as resp:
                     if resp.status == 204:
                         return None
                     return json.loads(resp.read().decode())
@@ -358,6 +380,29 @@ class BridgeClient:
     def gc(self) -> dict[str, Any]:
         """POST /api/v1/gc -- prune aged terminal sessions and compact the DB."""
         return self._request("POST", "/api/v1/gc") or {}
+
+    def drain(
+        self, *, timeout: float = 300.0, poll: float = 1.0, force: bool = False
+    ) -> dict[str, Any]:
+        """POST /api/v1/drain -- stop accepting new work and wait for in-flight
+        sessions to settle (the zero-downtime pre-swap step)."""
+        return self._request(
+            "POST", "/api/v1/drain",
+            body={"timeout": timeout, "poll": poll, "force": force},
+            request_timeout=timeout + 30.0,
+        ) or {}
+
+    def undrain(self) -> dict[str, Any]:
+        """POST /api/v1/undrain -- release the drain gate (rollback)."""
+        return self._request("POST", "/api/v1/undrain") or {}
+
+    def adopt_relay(self) -> dict[str, Any]:
+        """POST /api/v1/relay/adopt -- bind the shared credential relay here."""
+        return self._request("POST", "/api/v1/relay/adopt") or {}
+
+    def shutdown(self) -> dict[str, Any]:
+        """POST /api/v1/shutdown -- request graceful daemon shutdown."""
+        return self._request("POST", "/api/v1/shutdown") or {}
 
     def stream_events(
         self,

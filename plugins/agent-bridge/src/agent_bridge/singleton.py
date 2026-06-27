@@ -112,8 +112,21 @@ class SingleInstance:
     collected the underlying handle closes and the OS lock is released.
     """
 
-    def __init__(self, config_dir: str | os.PathLike[str]) -> None:
-        self.lock_path = Path(config_dir) / _LOCK_FILENAME
+    def __init__(
+        self,
+        config_dir: str | os.PathLike[str],
+        port: int | None = None,
+    ) -> None:
+        # Key the lock on the *port*, not just the config dir, so an active and
+        # a passive daemon can coexist on the same config dir (shared db, auth,
+        # routing table) during a zero-downtime cutover -- they bind different
+        # ports, so they take different locks. Two starts on the *same* port
+        # still collide (the duplicate-start guard, #129). ``port=None`` keeps
+        # the legacy single-lock filename for callers that don't opt in.
+        if port is None:
+            self.lock_path = Path(config_dir) / _LOCK_FILENAME
+        else:
+            self.lock_path = Path(config_dir) / f"agent-bridge.{port}.lock"
         self._fh = None
 
     def acquire(self) -> None:

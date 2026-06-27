@@ -392,6 +392,13 @@ class ConnectionManager:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=_creation_flags(),
+            # POSIX: give the ssh child its own session/process group so a
+            # caller that tears it down with os.killpg(os.getpgid(pid), ...)
+            # signals only the ssh process tree -- never the parent's group.
+            # Without this the ssh child inherits the bridge's process group,
+            # and tearing down a remote session SIGTERMs the bridge itself
+            # (uvicorn "Shutting down"). See agent-bridge #1001.
+            start_new_session=(sys.platform != "win32"),
             limit=_STDIO_CHANNEL_LIMIT_BYTES,
         )
 

@@ -175,22 +175,31 @@ def _cmd_start(args: argparse.Namespace) -> None:
     if idle is not None:
         cfg.idle_shutdown_seconds = idle
 
+    # A passive cutover instance never binds the shared credential relay (9857)
+    # -- the active daemon owns it until the flip completes -- mirroring the
+    # elevated sub-daemon's relay-reuse rule.
+    passive = bool(getattr(args, "passive", False))
+    if passive:
+        cfg.enable_credential_relay = False
+
     # Single-instance guard: refuse to start a duplicate daemon for this config
-    # dir. Acquired BEFORE binding the port so a racing/duplicate start exits
-    # cleanly instead of half-spawning a zombie that re-binds the relay/service
-    # port and defeats restarts (#129). The kernel frees this lock automatically
+    # dir + port. Acquired BEFORE binding the port so a racing/duplicate start
+    # exits cleanly instead of half-spawning a zombie that re-binds the relay/
+    # service port and defeats restarts (#129). Keying on the port (not just the
+    # config dir) lets an active and a passive daemon coexist on one config dir
+    # during a zero-downtime cutover. The kernel frees this lock automatically
     # if we die, so there is never a stale lock to reclaim. Keep `singleton`
     # referenced for the daemon's whole lifetime (GC would release the lock).
     from .singleton import AlreadyRunningError, SingleInstance
 
-    singleton = SingleInstance(config_dir())
+    singleton = SingleInstance(config_dir(), port=cfg.port)
     try:
         singleton.acquire()
     except AlreadyRunningError as exc:
         holder = f" (pid {exc.holder_pid})" if exc.holder_pid else ""
         print(
             f"[agent-bridge] Another daemon is already running{holder} for "
-            f"{config_dir()} -- not starting a duplicate.",
+            f"{config_dir()} port {cfg.port} -- not starting a duplicate.",
             file=sys.stderr,
         )
         logging.getLogger("agent-bridge").info(
@@ -202,6 +211,10 @@ def _cmd_start(args: argparse.Namespace) -> None:
 
     app = create_app(config=cfg, token=token)
     app.state.single_instance = singleton
+    # A normal start self-publishes the routing table once it is listening so
+    # CLI clients discover it; a passive instance stays silent until the deploy
+    # orchestrator flips the table after a health check.
+    app.state.publish_on_ready = not passive
 
     print(f"[agent-bridge] Starting on {cfg.bind}:{cfg.port}")
     print(f"[agent-bridge] Auth token: {token[:8]}...")
@@ -643,6 +656,136 @@ def _cmd_machines(args: argparse.Namespace) -> None:
         ("role", "ROLE", 30),
         ("ssh_ready", "SSH", 5),
     ])
+
+
+def _cmd_drain(args: argparse.Namespace) -> None:
+    """Stop accepting new work and wait for in-flight sessions to settle.
+
+    The zero-downtime pre-swap step: refuses new sessions/turns, then blocks
+    until no session is streaming a turn or hosting background sub-agents.
+    Exit 0 when fully drained, 2 on timeout (unless --force)."""
+    from .client import BridgeClientError, BridgeConnectionError
+
+    client = _get_client()
+    try:
+        res = client.drain(
+            timeout=args.timeout, poll=args.poll, force=args.force
+        )
+    except (BridgeClientError, BridgeConnectionError) as exc:
+        detail = getattr(exc, "detail", str(exc))
+        print(f"[FAIL] {detail}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.json:
+        _json_out(res)
+    else:
+        busy = res.get("busy_sessions", [])
+        if res.get("clean"):
+            print("Drain complete: no busy sessions remain.")
+        elif res.get("forced"):
+            print(f"[WARN] Drain forced past {len(busy)} busy session(s): "
+                  f"{', '.join(busy)}")
+        else:
+            print(f"[WARN] Drain timed out; {len(busy)} session(s) still busy: "
+                  f"{', '.join(busy)}")
+    # Non-zero exit on an unclean, non-forced drain so installer/ExecStop logic
+    # can branch on it.
+    if not res.get("drained"):
+        sys.exit(2)
+
+
+def _cmd_undrain(args: argparse.Namespace) -> None:
+    """Release the drain gate -- the daemon resumes accepting new work."""
+    from .client import BridgeClientError, BridgeConnectionError
+
+    client = _get_client()
+    try:
+        client.undrain()
+    except (BridgeClientError, BridgeConnectionError) as exc:
+        detail = getattr(exc, "detail", str(exc))
+        print(f"[FAIL] {detail}", file=sys.stderr)
+        sys.exit(1)
+    print("Drain gate released; accepting new work.")
+
+
+def _cmd_deploy(args: argparse.Namespace) -> None:
+    """Active/passive zero-downtime cutover.
+
+    Stands a new daemon up beside the running one on a fresh port, waits for it
+    to be healthy, flips the routing table so clients follow it, drains the old
+    daemon's in-flight work, then retires the old daemon. Rolls back on any
+    pre-commit failure. Run *after* the new code is installed in the venv."""
+    import socket
+    import subprocess
+    import urllib.request
+
+    from . import __version__
+    from .client import BridgeClient
+    from .config import config_dir, load_config, load_or_create_auth_token
+    from .deploy import CutoverOrchestrator
+
+    cfg = load_config()
+    token = load_or_create_auth_token()
+    host = cfg.bind if cfg.bind not in ("0.0.0.0", "") else "127.0.0.1"
+
+    def pick_free_port() -> int:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind((host, 0))
+        port = s.getsockname()[1]
+        s.close()
+        return port
+
+    def spawn_passive(port: int):
+        # Launch the *currently installed* code (this interpreter's venv) as a
+        # passive instance, detached so it outlives this deploy process.
+        cmd = [sys.executable, "-m", "agent_bridge", "start",
+               "--port", str(port), "--passive"]
+        kwargs: dict = {}
+        if sys.platform == "win32":
+            kwargs["creationflags"] = (
+                subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+                | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
+            )
+        else:
+            kwargs["start_new_session"] = True
+        return subprocess.Popen(cmd, **kwargs)
+
+    def health_check(h: str, port: int) -> bool:
+        try:
+            with urllib.request.urlopen(
+                f"http://{h}:{port}/health", timeout=2
+            ) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+
+    def make_client(base_url: str) -> BridgeClient:
+        return BridgeClient(base_url, token,
+                            timeout=int(args.drain_timeout) + 60)
+
+    orch = CutoverOrchestrator(
+        config_dir(), bind=cfg.bind, version=__version__,
+        spawn_passive=spawn_passive, health_check=health_check,
+        make_client=make_client, pick_free_port=pick_free_port,
+    )
+    res = orch.run(
+        health_timeout=args.health_timeout,
+        drain_timeout=args.drain_timeout,
+        force=args.force,
+    )
+
+    if args.json:
+        _json_out(res.to_dict())
+    else:
+        for step in res.steps:
+            print(f"  - {step}")
+        if res.ok:
+            print(f"Cutover complete: active daemon now on port {res.new_port}.")
+        elif res.rolled_back:
+            print(f"[WARN] Cutover rolled back: {res.error}", file=sys.stderr)
+        else:
+            print(f"[FAIL] Cutover failed: {res.error}", file=sys.stderr)
+    sys.exit(0 if res.ok else 1)
 
 
 def _cmd_gc(args: argparse.Namespace) -> None:
@@ -1874,6 +2017,13 @@ def main(argv: list[str] | None = None) -> None:
         help="Exit after this many seconds with no active sessions "
              "(0 = never). Used by the elevated sub-daemon.",
     )
+    start_p.add_argument(
+        "--passive", action="store_true",
+        help="Start as a passive cutover instance: do NOT self-publish the "
+             "routing table (the deploy orchestrator flips it after a health "
+             "check) and do NOT bind the credential relay (the active daemon "
+             "owns it until cutover completes).",
+    )
     start_p.set_defaults(func=_cmd_start)
 
     # Relay stdio <-> a remote bridge's ACP-over-WebSocket endpoint. Used as a
@@ -1983,6 +2133,53 @@ def main(argv: list[str] | None = None) -> None:
              "the sessions.db (reclaims freelist bloat)",
     )
     gc_p.set_defaults(func=_cmd_gc)
+
+    drain_p = sub.add_parser(
+        "drain",
+        help="Stop accepting new sessions/turns and wait for in-flight work to "
+             "settle (zero-downtime pre-swap step)",
+    )
+    drain_p.add_argument(
+        "--timeout", type=float, default=300.0, metavar="SECONDS",
+        help="Max seconds to wait for busy sessions to settle (default 300).",
+    )
+    drain_p.add_argument(
+        "--poll", type=float, default=1.0, metavar="SECONDS",
+        help="Poll interval while waiting (default 1.0).",
+    )
+    drain_p.add_argument(
+        "--force", action="store_true",
+        help="Proceed (exit 0) even if busy sessions remain at timeout.",
+    )
+    drain_p.add_argument("--json", action="store_true", help="Emit JSON.")
+    drain_p.set_defaults(func=_cmd_drain)
+
+    undrain_p = sub.add_parser(
+        "undrain",
+        help="Release the drain gate -- resume accepting new work (cutover "
+             "rollback)",
+    )
+    undrain_p.set_defaults(func=_cmd_undrain)
+
+    deploy_p = sub.add_parser(
+        "deploy",
+        help="Zero-downtime active/passive cutover: stand up the new daemon on "
+             "a fresh port, flip the routing table, drain + retire the old one",
+    )
+    deploy_p.add_argument(
+        "--health-timeout", type=float, default=60.0, metavar="SECONDS",
+        help="Max seconds to wait for the new daemon to become healthy.",
+    )
+    deploy_p.add_argument(
+        "--drain-timeout", type=float, default=300.0, metavar="SECONDS",
+        help="Max seconds to wait for the old daemon's in-flight work to settle.",
+    )
+    deploy_p.add_argument(
+        "--force", action="store_true",
+        help="Proceed with cutover even if the old daemon does not fully drain.",
+    )
+    deploy_p.add_argument("--json", action="store_true", help="Emit JSON.")
+    deploy_p.set_defaults(func=_cmd_deploy)
 
     send_p = sub.add_parser(
         "send", help="Send a prompt to an agent or session (reuses/resumes "

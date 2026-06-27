@@ -21,7 +21,11 @@ from ..models import (
     SubmitPromptRequest,
     SubmitPromptResponse,
 )
-from ..session_manager import SessionBusyError, SessionConflictError
+from ..session_manager import (
+    DaemonDrainingError,
+    SessionBusyError,
+    SessionConflictError,
+)
 from ..transport import SpawnTarget
 
 if TYPE_CHECKING:
@@ -124,6 +128,16 @@ def _find_reusable_session(mgr, agent_name, caller_id):
 async def start_session(req: StartSessionRequest, request: Request):
     mgr: SessionManager = request.app.state.session_manager
 
+    # Refuse new sessions fast while draining -- before any agent resolution or
+    # spawn work -- so a zero-downtime redeploy stops growing the daemon it is
+    # about to retire. (The manager enforces the same gate as a backstop.)
+    if mgr.is_draining:
+        raise HTTPException(
+            status_code=503,
+            detail="agent-bridge is draining for a redeploy and is not "
+                   "accepting a new session; retry shortly.",
+        )
+
     # Caller-affinity reuse: if the caller supplies a caller_id (e.g. a
     # Neuron-Forge worktree GUID) and an alive session already exists for
     # that (agent, caller_id) pair, return it instead of spawning a new one.
@@ -176,6 +190,8 @@ async def start_session(req: StartSessionRequest, request: Request):
         session = await mgr.start_session(
             target, agent_name=req.agent, caller_id=req.caller_id,
         )
+    except DaemonDrainingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
     except SessionConflictError as exc:
         raise HTTPException(
             status_code=409,
@@ -292,6 +308,8 @@ async def submit_prompt(
     mgr: SessionManager = request.app.state.session_manager
     try:
         turn_index = await mgr.submit_prompt(session_id, req.prompt)
+    except DaemonDrainingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     except ValueError as exc:

@@ -99,6 +99,22 @@ _wait_port_free() {
     return 1
 }
 
+# Best-effort graceful drain before a stop: give in-flight turns a chance to
+# settle so a routine update does not hard-kill an active session (Phase 1
+# zero-downtime). Bounded by --timeout and --force so an update never blocks
+# indefinitely. Non-fatal -- the stop that follows is the backstop.
+_drain_service() {
+    local timeout="${1:-120}"
+    [[ -x "$VENV_DIR/bin/agent-bridge" ]] || return 0
+    _step "Draining in-flight sessions (up to ${timeout}s)..."
+    if "$VENV_DIR/bin/agent-bridge" drain --timeout "$timeout" --force \
+            > /dev/null 2>&1; then
+        _ok "Drain window complete"
+    else
+        _warn "Drain reported busy sessions -- proceeding with swap"
+    fi
+}
+
 # Resolve a vendored library path (libs/<name>) across multiple layouts.
 # Prints the resolved directory path to stdout (nothing else).
 # Returns 0 if found, 1 if not.
@@ -755,8 +771,28 @@ do_update() {
         if _backup_venv; then have_backup=true; fi
     fi
 
-    # Stop running instance -- the in-place reinstall must not race a live bridge.
-    if [[ "$was_running" == true ]]; then
+    # Decide the swap strategy:
+    #   - Zero-downtime cutover (opt-in via AGENT_BRIDGE_ZERO_DOWNTIME=1): leave
+    #     the old daemon RUNNING, reinstall the venv, then `agent-bridge deploy`
+    #     stands the new daemon up beside it on a fresh port, flips the routing
+    #     table, drains the old daemon, and retires it. No API-unavailable
+    #     window and no hard-killed turns. EXPERIMENTAL: the survivor runs
+    #     outside systemd until service-manager reconciliation lands -- validate
+    #     before relying on it. Falls back to stop/start on any failure.
+    #   - Default (drain-then-swap): drain in-flight work for a grace window,
+    #     then stop/reinstall/start. No active turn is hard-killed up to the
+    #     drain timeout, though a brief API-unavailable window remains.
+    local cutover=false
+    if [[ "${AGENT_BRIDGE_ZERO_DOWNTIME:-0}" == "1" && "$was_running" == true \
+          && -x "$VENV_DIR/bin/agent-bridge" ]]; then
+        cutover=true
+    fi
+
+    # Stop the running instance before the in-place reinstall, UNLESS we are
+    # doing a cutover (which keeps the old daemon up and retires it afterward).
+    # Either way, drain first so in-flight turns get a chance to settle.
+    if [[ "$was_running" == true && "$cutover" == false ]]; then
+        _drain_service "${AGENT_BRIDGE_DRAIN_TIMEOUT:-120}"
         do_stop
     fi
 
@@ -767,7 +803,9 @@ do_update() {
             _step "Rolling back to the previous venv..."
             if _restore_venv; then
                 _ok "Previous venv restored"
-                if [[ "$was_running" == true ]]; then
+                # Only restart in the default path -- in cutover mode the old
+                # daemon was never stopped, so it is still serving.
+                if [[ "$was_running" == true && "$cutover" == false ]]; then
                     _step "Restarting the previous service..."
                     do_start
                 fi
@@ -800,9 +838,22 @@ STUB
     # Update deploy manifest
     _write_deploy_manifest
 
-    # (Re)start service -- always ensure running after update
-    _step "Starting service..."
-    do_start
+    # Bring the new version into service.
+    if [[ "$cutover" == true ]]; then
+        _step "Zero-downtime cutover (agent-bridge deploy)..."
+        if "$VENV_DIR/bin/agent-bridge" deploy \
+                --drain-timeout "${AGENT_BRIDGE_DRAIN_TIMEOUT:-300}"; then
+            _ok "Cutover complete -- new daemon active, old retired"
+        else
+            _warn "Cutover failed -- falling back to drain/stop/start"
+            _drain_service 30
+            do_stop
+            do_start
+        fi
+    else
+        _step "Starting service..."
+        do_start
+    fi
 
     _ok "Update complete"
 }

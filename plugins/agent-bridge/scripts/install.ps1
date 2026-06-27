@@ -365,6 +365,24 @@ function Stop-DaemonProcesses {
     return ((Get-PortListeners $Port).Count -eq 0 -and (Get-PortListeners $RelayPort).Count -eq 0)
 }
 
+function Invoke-Drain {
+    # Best-effort graceful drain before a stop: give in-flight turns a window to
+    # settle so a routine update does not hard-kill an active session (the
+    # Windows pre-stop hook -- Phase 1 zero-downtime). Bounded + forced so an
+    # update never blocks indefinitely. Non-fatal; the Stop that follows is the
+    # backstop against the Job Object force-kill on daemon exit.
+    param([int]$TimeoutSec = 120)
+    $bridgeExe = Join-Path $VenvDir 'Scripts\agent-bridge.exe'
+    if (-not (Test-Path $bridgeExe)) { return }
+    Write-Step "Draining in-flight sessions (up to ${TimeoutSec}s)..."
+    try {
+        & $bridgeExe drain --timeout $TimeoutSec --force 2>&1 | Out-Null
+        Write-Ok 'Drain window complete'
+    } catch {
+        Write-Warn 'Drain reported busy sessions -- proceeding with swap'
+    }
+}
+
 function Get-GitInfo {
     param([string]$Path)
     try {
@@ -1035,6 +1053,10 @@ function Invoke-Update {
 
     try {
         if ($wasRunning) {
+            $drainTimeout = if ($env:AGENT_BRIDGE_DRAIN_TIMEOUT) {
+                [int]$env:AGENT_BRIDGE_DRAIN_TIMEOUT
+            } else { 120 }
+            Invoke-Drain -TimeoutSec $drainTimeout
             Invoke-Stop
         }
 
