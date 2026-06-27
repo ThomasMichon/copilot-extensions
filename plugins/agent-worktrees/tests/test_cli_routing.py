@@ -23,6 +23,10 @@ def test_get_pr_keys_values(monkeypatch, capsys):
 
     from agent_worktrees import config as cfg
 
+    # cmd_get resolves cfg.project_dir(), which requires WORKTREE_PROJECT;
+    # pin it so the test does not depend on the ambient environment.
+    monkeypatch.setenv("WORKTREE_PROJECT", "ext")
+
     conf = cfg.Config(
         srcroot="/s", machine="m", platform="linux", repo_name="ext",
         repos={"ext": cfg.RepoConfig(

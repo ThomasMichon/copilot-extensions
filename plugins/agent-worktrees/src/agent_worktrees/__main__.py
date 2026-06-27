@@ -5934,6 +5934,25 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("backfill-sessions",
                    help="Populate empty session registries from session-state data")
 
+    # list-sessions -- enumerate a worktree's Copilot sessions as JSON
+    sp = sub.add_parser(
+        "list-sessions",
+        help="List a worktree's Copilot sessions with metadata (JSON)",
+    )
+    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id", default=None,
+                    help="Worktree ID to scope to (default: all worktrees)")
+    sp.add_argument("--json", action="store_true",
+                    help="Emit JSON (default; accepted for caller compatibility)")
+
+    # session-transcript -- emit a session's renderable events as JSON
+    sp = sub.add_parser(
+        "session-transcript",
+        help="Emit a Copilot session's renderable transcript events (JSON)",
+    )
+    sp.add_argument("session_id", help="Copilot session ID")
+    sp.add_argument("--json", action="store_true",
+                    help="Emit JSON (default; accepted for caller compatibility)")
+
     # anchor-check (anchor repo hygiene)
     sp = sub.add_parser("anchor-check",
                         help="Check anchor repo for uncommitted work and stash entries")
@@ -6190,6 +6209,46 @@ def cmd_backfill_sessions(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_list_sessions(args: argparse.Namespace) -> int:
+    """List a worktree's Copilot sessions with metadata as JSON.
+
+    Scopes to a single worktree with ``--worktree ID``; without it,
+    enumerates sessions across all tracked worktrees.  Each session entry
+    is decorated with its ``worktree_id``.  Always emits the versioned
+    JSON envelope (machine-facing -- consumed by agent-bridge).
+    """
+    tracking_path = cfg.tracking_dir()
+    wt_id = getattr(args, "worktree_id", None)
+    records = tracking.list_records(tracking_path)
+    if wt_id:
+        records = [r for r in records if r.worktree_id == wt_id]
+        if not records:
+            return _json_error(f"No worktree found: {wt_id}")
+
+    result: list[dict] = []
+    for rec in records:
+        for s in sessions.list_worktree_sessions(rec):
+            s["worktree_id"] = rec.worktree_id
+            result.append(s)
+
+    _json_output({"sessions": result})
+    return 0
+
+
+def cmd_session_transcript(args: argparse.Namespace) -> int:
+    """Emit a single session's renderable transcript events as JSON.
+
+    Reads the session's ``events.jsonl`` from local session-state and
+    returns the renderable event subset.  An absent/empty session yields
+    an empty ``events`` list (not an error) so callers can treat "no
+    transcript" uniformly.
+    """
+    session_id = args.session_id
+    events = sessions.read_session_transcript(session_id)
+    _json_output({"session_id": session_id, "events": events})
+    return 0
+
+
 def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
     """Reconcile repo-configured copilot-extensions plugins (JSON action plan).
 
@@ -6281,6 +6340,8 @@ COMMAND_MAP = {
     "register-session": cmd_register_session,
     "deregister-session": cmd_deregister_session,
     "backfill-sessions": cmd_backfill_sessions,
+    "list-sessions": cmd_list_sessions,
+    "session-transcript": cmd_session_transcript,
     "anchor-check": cmd_anchor_check,
     "activity": activity.cmd_activity,
     "activity-log": activity.cmd_activity_log,

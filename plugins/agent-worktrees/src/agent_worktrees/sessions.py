@@ -691,6 +691,170 @@ def backfill_sessions(records: list) -> dict[str, list[str]]:
     return result
 
 
+# Copilot CLI event types that render meaningfully in a transcript view.
+# Mirrors the renderable subset a conversation browser needs (messages,
+# tool calls + results, lifecycle markers) while dropping low-level noise.
+_RENDERABLE_EVENT_TYPES = frozenset({
+    "user.message",
+    "assistant.message",
+    "tool.execution_start",
+    "tool.execution_complete",
+    "session.start",
+    "session.model_change",
+    "session.task_complete",
+    "subagent.started",
+    "subagent.completed",
+    "session.info",
+    "session.warning",
+})
+
+
+def _has_live_session(entry: Path) -> bool:
+    """Whether a session dir has a live Copilot process (via lock files)."""
+    for lock_file in entry.glob("inuse.*.lock"):
+        parts = lock_file.stem.split(".")
+        if len(parts) >= 2:
+            try:
+                lock_pid = int(parts[1])
+            except ValueError:
+                continue
+            if _is_copilot_process(lock_pid):
+                return True
+    return False
+
+
+def _session_meta(session_dir: Path, session_id: str) -> dict | None:
+    """Read one session's display metadata from its session-state directory.
+
+    Returns a dict with id, name (summary/title), cwd, branch, created_at,
+    updated_at, event_count, turn_count, and a live flag -- or None if the
+    directory is missing or is a stale stub (no conversation data).
+    Detached parent-continuation sessions are excluded (return None).
+    """
+    entry = session_dir / session_id
+    if not entry.is_dir():
+        return None
+    if _is_detached_session(entry):
+        return None
+    events_file = entry / "events.jsonl"
+    if not (entry / "session.db").exists() and not events_file.exists():
+        return None
+
+    ws_data: dict = {}
+    ws_file = entry / "workspace.yaml"
+    if ws_file.exists():
+        try:
+            with open(ws_file, encoding="utf-8") as f:
+                loaded = yaml.safe_load(f)
+            if isinstance(loaded, dict):
+                ws_data = loaded
+        except Exception:
+            ws_data = {}
+
+    event_count = 0
+    turn_count = 0
+    if events_file.exists():
+        try:
+            with open(events_file, encoding="utf-8", errors="replace") as ef:
+                for line in ef:
+                    event_count += 1
+                    if '"user.message"' in line:
+                        turn_count += 1
+        except OSError:
+            pass
+
+    _placeholder = ("", "|-", "|", ">-", ">", "null", "Untitled")
+    title = ""
+    summary = ws_data.get("summary", "")
+    if isinstance(summary, str) and summary.strip() and summary not in _placeholder:
+        title = summary.strip()
+    if not title:
+        name = ws_data.get("name", "")
+        if isinstance(name, str) and name.strip() and name not in _placeholder:
+            title = name.strip()
+
+    return {
+        "id": session_id,
+        "name": title,
+        "cwd": str(ws_data.get("cwd", "")),
+        "branch": str(ws_data.get("branch", "")),
+        "created_at": str(ws_data.get("created_at", "")),
+        "updated_at": str(ws_data.get("updated_at", "")),
+        "event_count": event_count,
+        "turn_count": turn_count,
+        "live": _has_live_session(entry),
+    }
+
+
+def list_worktree_sessions(record) -> list[dict]:
+    """Enumerate the Copilot sessions associated with a worktree.
+
+    Uses the worktree's session registry (``record.sessions``) when
+    available; for pre-registry records (``sessions is None``) falls back
+    to a cwd-based scan of session-state.  Each entry carries display
+    metadata (see :func:`_session_meta`).  Sorted newest-first by
+    ``updated_at``.
+    """
+    session_dir = _session_state_dir()
+    if not session_dir.exists() or not record.worktree_path:
+        return []
+
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def _add(sid: str) -> None:
+        if sid in seen:
+            return
+        meta = _session_meta(session_dir, sid)
+        if meta is not None:
+            seen.add(sid)
+            out.append(meta)
+
+    sessions = getattr(record, "sessions", None)
+    if sessions is not None:
+        for entry in sessions:
+            _add(entry.session_id)
+    else:
+        # Pre-registry fallback: match sessions by cwd under the worktree.
+        backfilled = backfill_sessions([record])
+        for sid in backfilled.get(record.worktree_id, []):
+            _add(sid)
+
+    out.sort(key=lambda s: s.get("updated_at", ""), reverse=True)
+    return out
+
+
+def read_session_transcript(session_id: str) -> list[dict]:
+    """Return the renderable events for a single Copilot session.
+
+    Reads ``~/.copilot/session-state/<session_id>/events.jsonl`` and
+    returns the subset of events that render meaningfully in a transcript
+    view (see ``_RENDERABLE_EVENT_TYPES``).  Returns an empty list if the
+    session or its event log is absent.
+    """
+    session_dir = _session_state_dir()
+    events_file = session_dir / session_id / "events.jsonl"
+    if not events_file.is_file():
+        return []
+
+    events: list[dict] = []
+    try:
+        with open(events_file, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(ev, dict) and ev.get("type", "") in _RENDERABLE_EVENT_TYPES:
+                    events.append(ev)
+    except OSError:
+        return []
+    return events
+
+
 @dataclass
 class MuxInfo:
     """Multiplexer session status for a worktree."""

@@ -32,6 +32,13 @@ def env(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         reconcile.cfg, "install_dir", lambda: home / ".agent-worktrees"
     )
+    # Isolate the runtime gate: load_runtime_gate() falls back to the real
+    # aperture-labs external-repos.yaml (resolved via the repos registry) when
+    # the test repo lacks one. Pin resolve_path to None so the gate is derived
+    # solely from the test repo -- otherwise these tests are non-hermetic and
+    # fail on any host where the real manifest gates a tested plugin.
+    from agent_worktrees import repos as _repos_mod
+    monkeypatch.setattr(_repos_mod, "resolve_path", lambda name: None)
     # Pin POSIX semantics so the suite is deterministic regardless of the host
     # OS: these tests create scripts/install.sh payloads and assert bash argv.
     # On Windows, runtime_installer_argv() correctly prefers install.ps1 (absent

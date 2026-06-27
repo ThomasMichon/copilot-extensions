@@ -539,6 +539,95 @@ class TestWorktreeRoutes:
         assert data["acp_session_id"] == "acp-fresh-1"
         mgr.start_session.assert_awaited_once()
 
+    # -- Worktree-scoped session reading (proxied to agent-worktrees) ------
+
+    def _register_agent(self, app, agent_name: str) -> None:
+        """Give the resolver a config for the seeded agent."""
+        from unittest.mock import MagicMock
+
+        from agent_bridge.agent_registry import AgentConfig
+
+        if getattr(app.state, "resolver", None) is None:
+            app.state.resolver = MagicMock(agents={})
+        app.state.resolver.agents[agent_name] = AgentConfig(
+            name=agent_name, project="aperture-labs",
+        )
+
+    def test_list_worktree_sessions_proxies_to_agent(self, client, app) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "lambda-core-wsl-20250101-190000-sess"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        payload = '{"sessions": [{"session_id": "s1", "worktree_id": "%s", "turn_count": 4}]}' % wt_id
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ) as mock_run:
+            resp = client.get(f"/api/v1/worktrees/{wt_id}/sessions")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["worktree_id"] == wt_id
+        assert data["agent_name"] == "test-agent"
+        assert data["sessions"][0]["session_id"] == "s1"
+        # Verify it shelled out to the right subcommand.
+        args = mock_run.call_args.args[-1]
+        assert args == ["list-sessions", "--worktree", wt_id, "--json"]
+
+    def test_list_worktree_sessions_unknown_worktree_404s(self, client) -> None:
+        resp = client.get("/api/v1/worktrees/does-not-exist/sessions")
+        assert resp.status_code == 404
+
+    def test_list_worktree_sessions_502_on_command_failure(
+        self, client, app,
+    ) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "lambda-core-wsl-20250101-191000-fail"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=None),
+        ):
+            resp = client.get(f"/api/v1/worktrees/{wt_id}/sessions")
+        assert resp.status_code == 502
+
+    def test_get_worktree_session_transcript_proxies(self, client, app) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "lambda-core-wsl-20250101-192000-tx"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        payload = (
+            '{"session_id": "s9", "events": '
+            '[{"type": "user.message", "text": "hi"}]}'
+        )
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ) as mock_run:
+            resp = client.get(
+                f"/api/v1/worktrees/{wt_id}/sessions/s9/transcript",
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["session_id"] == "s9"
+        assert data["events"][0]["type"] == "user.message"
+        args = mock_run.call_args.args[-1]
+        assert args == ["session-transcript", "s9", "--json"]
+
+    def test_get_transcript_unknown_worktree_404s(self, client) -> None:
+        resp = client.get(
+            "/api/v1/worktrees/does-not-exist/sessions/s1/transcript",
+        )
+        assert resp.status_code == 404
+
 
 class TestAcpAliasResolution:
     """Session routes accept the ACP session id as an alias key."""
