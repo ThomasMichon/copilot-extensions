@@ -173,6 +173,64 @@ The installer writes `~/.agent-bridge/deploy-manifest.json` tracking:
 - Source commit, branch, timestamp
 - Plugin directory path
 
+### Restart Behavior Today (and What Survives)
+
+A version update is a **hard restart**: `update` reinstalls the package and
+bounces the service (systemd `restart` on Linux/WSL; stop + at-logon relaunch on
+Windows). The daemon process is replaced, which has three consequences:
+
+- **Idle / stopped sessions survive transparently.** Session metadata, turns,
+  and events are persisted to SQLite, and on startup the daemon `_rehydrate()`s
+  them: formerly-RUNNING sessions are marked STOPPED (resumable) and **lazily
+  reattach** to their persisted ACP conversation via `load_session()` on next
+  access. No work is lost for a parked session.
+- **Actively-streaming turns are lost.** A turn that is mid-flight when the
+  daemon dies is marked `interrupted`; history up to that point survives, the
+  in-flight turn does not.
+- **The HTTP API is connection-refused for the swap window.** Callers
+  (`send`/`wait`/`read`) see a dropped connection until the new daemon binds the
+  port.
+
+The core obstacle to doing better: **each session owns a live `copilot --acp`
+subprocess connected by stdin/stdout pipes to the daemon.** The child leads its
+own process group, but the *pipes* are owned by the daemon -- when the daemon
+exits the pipe breaks and the child dies. A live pipe-connected subprocess
+cannot be serialized or handed to a successor process, so a restart inherently
+tears down every live child.
+
+## Zero-Downtime Deployment (Roadmap)
+
+> **Status: planned, not yet implemented.** The flow below is the *designed*
+> evolution of the restart behavior above. The full plan, validation, and
+> cross-platform adapters are tracked in the aperture-labs effort
+> `agent-bridge-zero-downtime-deploy` (umbrella issue
+> [aperture-labs #1236](https://home.thomasmichon.com/gitea/tmichon/aperture-labs/issues/1236)).
+
+The goal is **active/passive deployment** with no observable loss to clients or
+in-flight conversations. Because the OS service models diverge sharply
+(systemd offers `ExecReload` / `Type=notify` / socket activation; Windows offers
+none of these and *additionally* force-kills children on daemon exit via the
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job object), the drain/handoff
+orchestration is designed to live **in-process and OS-agnostic**, with thin
+per-OS adapters only for socket handoff and the Windows job-breakaway. It builds
+on a primitive already present in the daemon: the **busy oracle**
+(`has_active_background_tasks` / `SessionBusyError`), which already knows when a
+session is mid-work and must not be torn down.
+
+The flow is delivered in three tiers of increasing completeness:
+
+| Tier | Flow | Outcome |
+|------|------|---------|
+| **1 -- Graceful drain** | A `drain` command stops accepting new turns/sessions, **waits on the busy oracle** until live turns settle (bounded timeout + `force` override), checkpoints to SQLite, then exits. The listen socket is held across the swap (systemd socket activation on Linux; a small front proxy on Windows). | Not yet zero-downtime, but **no lost active turns**; clients see latency, not connection-refused. |
+| **2 -- Active/passive failover** | A passive daemon starts on a **distinct config dir + port** (the config-dir singleton lock permits this -- see [Single-Instance Guard](#single-instance-guard)). A DB-ownership lease hands writes from old to new; the new daemon re-spawns children and `load_session()`s the drained sessions; a front proxy flips to the new port; the old daemon retires. Relayed cross-machine sessions (relay port) re-home without the remote caller noticing. | Idle sessions seamless across cutover; only a genuinely mid-stream turn is lost. |
+| **3 -- Supervisor/broker split** | The daemon is split into a stable **per-session supervisor** that owns the `copilot --acp` child over an **AF_UNIX socket** (not a pipe), and a **restartable frontend** that serves the API and orchestrates. On restart the new frontend *adopts* the existing supervisors over their sockets. Requires reworking the Windows job object so supervisors **survive** frontend exit (own job / `CREATE_BREAKAWAY_FROM_JOB`). | **True zero-downtime**: children never die, turns never interrupt, even mid-stream. |
+
+Each tier is validated with a "no work lost" proof on **both** platforms
+(Linux/WSL systemd and Windows Scheduled Task + Job Object). Tier 1 is the
+recommended first delivery -- it is cheap, reuses the busy oracle, and converts
+"a redeploy kills active work" into "a redeploy waits for active work to
+settle."
+
 ## Persistence
 
 - **Sessions:** SQLite database at `~/.agent-bridge/sessions.db` (WAL mode)
