@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -23,7 +22,6 @@ from agent_bridge.transport import SpawnTarget
 from acp.schema import (
     AgentMessageChunk,
     AgentThoughtChunk,
-    ClientCapabilities,
     Implementation,
     TextContentBlock,
     ToolCallStart,
@@ -360,6 +358,8 @@ class TestBridgeAgentCleanup:
         session.client.is_running = True
         session.client.cancel_prompt = AsyncMock()
         session.client.shutdown = AsyncMock()
+        session.client.has_active_background_tasks = False
+        session.client.active_background_tasks = []
         sm._sessions["s1"] = session
         sm._db.create_session("s1", "test", None, "/tmp", "local", "idle", time.time())
 
@@ -368,6 +368,33 @@ class TestBridgeAgentCleanup:
 
         assert len(bridge_agent._owned_sessions) == 0
         assert session.status == SessionStatus.STOPPED
+
+    @pytest.mark.asyncio
+    async def test_cleanup_preserves_sessions_with_background_tasks(
+        self, bridge_agent, sm
+    ):
+        """An owned session hosting active background tasks is left running on
+        disconnect rather than torn down."""
+        target = SpawnTarget(type="local", cwd="/tmp")
+        session = Session("s1", "test", target)
+        session.status = SessionStatus.IDLE
+        session.event_log = EventLog()
+        session.client = AsyncMock()
+        session.client.is_running = True
+        session.client.cancel_prompt = AsyncMock()
+        session.client.shutdown = AsyncMock()
+        session.client.has_active_background_tasks = True
+        session.client.active_background_tasks = ["pr-daemon"]
+        sm._sessions["s1"] = session
+        sm._db.create_session("s1", "test", None, "/tmp", "local", "idle", time.time())
+
+        bridge_agent._owned_sessions.add("s1")
+        await bridge_agent.cleanup()
+
+        # Session survives -- background work keeps running.
+        assert session.status == SessionStatus.IDLE
+        assert session.client is not None
+        session.client.shutdown.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

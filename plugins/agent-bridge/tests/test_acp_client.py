@@ -187,3 +187,115 @@ def test_child_exit_during_prompt_emits_error() -> None:
     client._handle_child_exit()
     assert any(t == "error" for t, _ in events)
     assert client._prompt_error is not None
+
+
+def _tool_call(client: AcpClient, tool_call_id: str, title: str = "Run task") -> None:
+    client._handle_session_update(
+        ToolCallStart(
+            session_update="tool_call",
+            tool_call_id=tool_call_id,
+            title=title,
+            kind="execute",
+        )
+    )
+
+
+def _terminal(client: AcpClient, tool_call_id: str, text: str) -> None:
+    """Drive a tool call to a completed terminal update carrying ``text``."""
+    client._handle_session_update(
+        ToolCallProgress(
+            session_update="tool_call_update",
+            tool_call_id=tool_call_id,
+            status="completed",
+            content=[_content_block(text)],
+        )
+    )
+
+
+def test_background_task_launch_tracked() -> None:
+    client, events = _client_with_recorder()
+    assert client.has_active_background_tasks is False
+
+    _tool_call(client, "tc-launch")
+    _terminal(
+        client,
+        "tc-launch",
+        "Agent started in background with agent_id: pr-daemon. "
+        "You'll be notified when it finishes.",
+    )
+
+    assert client.has_active_background_tasks is True
+    assert client.active_background_tasks == ["pr-daemon"]
+    started = [d for t, d in events if t == "background_task_started"]
+    assert started and started[-1]["agent_id"] == "pr-daemon"
+
+
+def test_background_task_completion_clears() -> None:
+    client, events = _client_with_recorder()
+    _tool_call(client, "tc-launch")
+    _terminal(
+        client,
+        "tc-launch",
+        "Agent started in background with agent_id: pr-daemon.",
+    )
+    assert client.has_active_background_tasks is True
+
+    _tool_call(client, "tc-read")
+    _terminal(
+        client,
+        "tc-read",
+        "Agent completed. agent_id: pr-daemon, name: pr-daemon, "
+        "status: completed, duration: 10s",
+    )
+
+    assert client.has_active_background_tasks is False
+    assert client.active_background_tasks == []
+    finished = [d for t, d in events if t == "background_task_finished"]
+    assert finished and finished[-1]["agent_id"] == "pr-daemon"
+    assert finished[-1]["status"] == "completed"
+
+
+def test_background_task_idle_clears() -> None:
+    """An idle sub-agent is parked, not actively working -- it clears."""
+    client, _ = _client_with_recorder()
+    _tool_call(client, "tc1")
+    _terminal(client, "tc1", "Agent started in background with agent_id: chatty.")
+    assert client.has_active_background_tasks is True
+
+    _tool_call(client, "tc2")
+    _terminal(
+        client,
+        "tc2",
+        "Agent is idle (waiting for messages). agent_id: chatty, status: idle",
+    )
+    assert client.has_active_background_tasks is False
+
+
+def test_background_task_running_status_does_not_clear() -> None:
+    """A non-terminal status sighting must NOT clear an active task."""
+    client, _ = _client_with_recorder()
+    _tool_call(client, "tc1")
+    _terminal(client, "tc1", "Agent started in background with agent_id: worker.")
+
+    _tool_call(client, "tc2")
+    _terminal(
+        client,
+        "tc2",
+        "Agent is still running. agent_id: worker, status: running",
+    )
+    assert client.has_active_background_tasks is True
+    assert client.active_background_tasks == ["worker"]
+
+
+def test_background_tasks_multiple_independent() -> None:
+    client, _ = _client_with_recorder()
+    _tool_call(client, "a")
+    _terminal(client, "a", "Agent started in background with agent_id: one.")
+    _tool_call(client, "b")
+    _terminal(client, "b", "Agent started in background with agent_id: two.")
+    assert client.active_background_tasks == ["one", "two"]
+
+    _tool_call(client, "c")
+    _terminal(client, "c", "Agent failed. agent_id: one, status: failed")
+    assert client.active_background_tasks == ["two"]
+    assert client.has_active_background_tasks is True

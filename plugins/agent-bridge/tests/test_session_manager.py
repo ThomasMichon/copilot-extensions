@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -304,6 +303,67 @@ class TestEndSession:
         assert session.client is None
 
 
+class TestBackgroundTaskGate:
+    """Teardown is refused while a session hosts active background sub-agents."""
+
+    @pytest.mark.asyncio
+    async def test_stop_refused_when_background_tasks_active(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
+    ) -> None:
+        from agent_bridge.session_manager import SessionBusyError
+
+        session = await session_manager.start_session(spawn_target)
+        mock_acp_client.has_active_background_tasks = True
+        mock_acp_client.active_background_tasks = ["pr-daemon"]
+
+        with pytest.raises(SessionBusyError):
+            await session_manager.stop_session(session.session_id)
+
+        # Session is left intact -- the background work keeps running.
+        assert session.status == SessionStatus.IDLE
+        assert session.client is mock_acp_client
+
+    @pytest.mark.asyncio
+    async def test_end_refused_when_background_tasks_active(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
+    ) -> None:
+        from agent_bridge.session_manager import SessionBusyError
+
+        session = await session_manager.start_session(spawn_target)
+        sid = session.session_id
+        mock_acp_client.has_active_background_tasks = True
+        mock_acp_client.active_background_tasks = ["pr-daemon"]
+
+        with pytest.raises(SessionBusyError):
+            await session_manager.end_session(sid)
+
+        assert session_manager.get_session(sid) is session
+
+    @pytest.mark.asyncio
+    async def test_force_stop_overrides_background_tasks(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        mock_acp_client.has_active_background_tasks = True
+        mock_acp_client.active_background_tasks = ["pr-daemon"]
+
+        await session_manager.stop_session(session.session_id, force=True)
+        assert session.status == SessionStatus.STOPPED
+        assert session.client is None
+
+    @pytest.mark.asyncio
+    async def test_force_end_overrides_background_tasks(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        sid = session.session_id
+        mock_acp_client.has_active_background_tasks = True
+        mock_acp_client.active_background_tasks = ["pr-daemon"]
+
+        await session_manager.end_session(sid, force=True)
+        assert session_manager.get_session(sid) is None
+
+
 class TestResumeSession:
     """Session resume from STOPPED state."""
 
@@ -354,6 +414,8 @@ class TestResumeSession:
             mock_client.new_session = AsyncMock(return_value="acp-1")
             mock_client.shutdown = AsyncMock()
             mock_client.cancel_prompt = AsyncMock()
+            mock_client.has_active_background_tasks = False
+            mock_client.active_background_tasks = []
             mock_cls.return_value = mock_client
 
             session = await session_manager.start_session(spawn_target)
@@ -497,7 +559,9 @@ class TestRehydrate:
         tmp_db.create_turn("s1", 0, "hello", now)
         # Leave turn incomplete (no completed_at)
 
-        mgr = SessionManager(tmp_db)
+        # Constructing the manager triggers rehydrate, which marks the
+        # incomplete turn as interrupted.
+        SessionManager(tmp_db)
         turn = tmp_db.get_turn("s1", 0)
         assert turn["stop_reason"] == "interrupted"
         assert turn["completed_at"] is not None

@@ -59,6 +59,28 @@ class SessionConflictError(Exception):
         )
 
 
+class SessionBusyError(Exception):
+    """Raised when a stop/end is refused because the session is hosting active
+    background sub-agents.
+
+    Tearing the Copilot process down would kill the in-process background
+    agents it is running (e.g. the PR daemon, or another agent session a
+    conversation is waiting on). Callers that genuinely intend to abandon that
+    work pass ``force=True`` to override.
+    """
+
+    def __init__(self, session_id: str, active_background_tasks: list[str]) -> None:
+        self.session_id = session_id
+        self.active_background_tasks = active_background_tasks
+        tasks = ", ".join(active_background_tasks) or "(unknown)"
+        super().__init__(
+            f"Session {session_id} has active background tasks [{tasks}]; "
+            "tearing it down would kill them. Wait for them to finish or pass "
+            "force=true to override."
+        )
+
+
+
 def _workspace_key(
     agent_name: str | None,
     target: SpawnTarget,
@@ -236,6 +258,21 @@ class Session:
         if self.client and self.client.is_running:
             return self.client.pid
         return None
+
+    @property
+    def active_background_tasks(self) -> list[str]:
+        """Copilot agent_ids of background sub-agents this session is hosting.
+
+        Empty when the client is gone or no sub-agents are running. Surfaced in
+        status and used to gate teardown (see SessionBusyError).
+        """
+        if self.client:
+            return self.client.active_background_tasks
+        return []
+
+    @property
+    def has_active_background_tasks(self) -> bool:
+        return bool(self.client and self.client.has_active_background_tasks)
 
     @property
     def context_pct(self) -> float | None:
@@ -1006,12 +1043,20 @@ class SessionManager:
                 session.session_id, exc_info=True,
             )
 
-    async def stop_session(self, session_id: str) -> None:
-        """Stop a session -- shut down ACP client, preserve state for resume."""
+    async def stop_session(self, session_id: str, *, force: bool = False) -> None:
+        """Stop a session -- shut down ACP client, preserve state for resume.
+
+        Refuses with SessionBusyError when the session is hosting active
+        background sub-agents unless ``force`` is set, so a routine stop does
+        not kill in-flight background work (e.g. the PR daemon).
+        """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+
+        if not force and session.has_active_background_tasks:
+            raise SessionBusyError(session_id, session.active_background_tasks)
 
         await self._quiesce_session(session)
 
@@ -1025,7 +1070,7 @@ class SessionManager:
         session.touch()
         log.info("Session %s (%s) stopped", session_id, session.name)
 
-    async def end_session(self, session_id: str) -> None:
+    async def end_session(self, session_id: str, *, force: bool = False) -> None:
         """End a session -- shut down client and clean up all state.
 
         Always removes the session (even mid-turn): teardown is best-effort so
@@ -1035,11 +1080,18 @@ class SessionManager:
         500. The ENDED status is written *before* the delete so that even if the
         row is not removed, a later restart rehydrate cleans it up rather than
         resurrecting the session as STOPPED/active.
+
+        Refuses with SessionBusyError when the session is hosting active
+        background sub-agents unless ``force`` is set -- ending kills the
+        process and every in-process sub-agent with it.
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+
+        if not force and session.has_active_background_tasks:
+            raise SessionBusyError(session_id, session.active_background_tasks)
 
         await self._quiesce_session(session)
 
