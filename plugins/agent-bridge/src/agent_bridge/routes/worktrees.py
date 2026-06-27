@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 import shlex
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -39,6 +39,8 @@ class _WorktreeEntry:
     title: str | None = None
     started_at: str | None = None
     resume_count: int = 0
+    session_count: int = 0
+    turn_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -51,6 +53,8 @@ class _WorktreeEntry:
             "title": self.title,
             "started_at": self.started_at,
             "resume_count": self.resume_count,
+            "session_count": self.session_count,
+            "turn_count": self.turn_count,
         }
 
 
@@ -184,9 +188,8 @@ class WorktreeDiscoveryCache:
 # -- Subprocess helpers -------------------------------------------------------
 
 
-async def _run_local(project: str) -> str | None:
-    """Run ``<project> list --json`` locally."""
-    import os
+async def _run_local(project: str, args: list[str] | None = None) -> str | None:
+    """Run ``<project> <args>`` locally (defaults to ``list --json``)."""
     from pathlib import Path
 
     home = Path.home()
@@ -197,7 +200,7 @@ async def _run_local(project: str) -> str | None:
     else:
         binstub_str = str(binstub)
 
-    cmd = [binstub_str, "list", "--json"]
+    cmd = [binstub_str, *(args if args is not None else ["list", "--json"])]
     return await _exec(cmd)
 
 
@@ -216,7 +219,7 @@ def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
     hostname = socket.gethostname().lower()
     host_lower = ssh_host.lower()
 
-    from ..agent_registry import _detect_local_machine, _detect_platform
+    from ..agent_registry import _detect_local_machine
     machine, platform = _detect_local_machine(resolver.machines)
     if not machine:
         # If we can't identify our own machine, only match exact hostname
@@ -239,10 +242,13 @@ def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
     return False
 
 
-async def _run_ssh(host: str, user: str | None, project: str) -> str | None:
-    """Run ``<project> list --json`` on a remote machine via SSH."""
+async def _run_ssh(
+    host: str, user: str | None, project: str, args: list[str] | None = None,
+) -> str | None:
+    """Run ``<project> <args>`` on a remote machine via SSH."""
     ssh_target = f"{user}@{host}" if user else host
-    remote_cmd = f"{shlex.quote(project)} list --json"
+    sub = " ".join(shlex.quote(a) for a in (args if args is not None else ["list", "--json"]))
+    remote_cmd = f"{shlex.quote(project)} {sub}"
 
     cmd = [
         "ssh",
@@ -325,6 +331,8 @@ def _parse_worktree_list(raw: str, agent_name: str) -> list[_WorktreeEntry]:
             title=w.get("title"),
             started_at=w.get("started_at"),
             resume_count=w.get("resume_count", 0),
+            session_count=w.get("session_count", 0),
+            turn_count=w.get("turn_count", 0),
         ))
     return entries
 
@@ -481,3 +489,161 @@ async def resume_worktree(worktree_id: str, request: Request) -> SessionInfo:
                 ),
             ) from start_exc
         return _session_info(fresh)
+
+
+# -- Session reading (worktree-scoped) ----------------------------------------
+
+
+async def _run_for_agent(
+    agent_name: str,
+    config: AgentConfig,
+    resolver: AgentResolver,
+    args: list[str],
+) -> str | None:
+    """Run ``<project> <args>`` on the host that owns ``agent_name``.
+
+    Mirrors the host dispatch in ``_crawl_agent`` (local vs SSH, resolved
+    through topology), but with an arbitrary subcommand instead of the
+    hardcoded ``list --json``.
+    """
+    if not config.project:
+        return None
+
+    if not config.host:
+        return await _run_local(config.project, args)
+
+    try:
+        target = resolver.resolve(agent_name)
+    except (KeyError, ValueError) as exc:
+        log.warning("Cannot resolve agent %s for session read: %s", agent_name, exc)
+        return None
+
+    if _is_local_target(target.host, resolver):
+        return await _run_local(config.project, args)
+
+    return await _run_ssh(
+        host=target.host or config.host,
+        user=target.user or config.ssh_user,
+        project=config.project,
+        args=args,
+    )
+
+
+def _owning_agent(
+    worktree_id: str, request: Request,
+) -> tuple[str, AgentConfig] | None:
+    """Resolve which configured agent owns ``worktree_id``.
+
+    Uses the discovery cache to find the agent group that contains the
+    worktree, then looks up that agent's config on the resolver.  Returns
+    ``(agent_name, config)`` or None if the worktree isn't known.
+    """
+    resolver = getattr(request.app.state, "resolver", None)
+    if resolver is None:
+        return None
+
+    cache = get_cache()
+    for agent_name, worktrees in cache.get_all().items():
+        if any(wt.id == worktree_id for wt in worktrees):
+            config = resolver.agents.get(agent_name)
+            if config is not None:
+                return agent_name, config
+    return None
+
+
+@router.get("/api/v1/worktrees/{worktree_id}/sessions")
+async def list_worktree_sessions(
+    worktree_id: str, request: Request,
+) -> dict[str, Any]:
+    """List the CLI sessions belonging to a worktree.
+
+    Shells out to ``<project> list-sessions --worktree <id> --json`` on the
+    machine that owns the worktree (local or via SSH).  This is the
+    authoritative, branch-independent session registry maintained by
+    agent-worktrees -- it counts sessions launched by the picker *and* by
+    agent-bridge / Mission Control (which carry no ``branch`` field).
+    """
+    cache = get_cache()
+    await cache.crawl_if_empty()
+
+    owner = _owning_agent(worktree_id, request)
+    if owner is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Worktree {worktree_id} not found on any agent",
+        )
+    agent_name, config = owner
+    resolver = request.app.state.resolver
+
+    raw = await _run_for_agent(
+        agent_name, config, resolver,
+        ["list-sessions", "--worktree", worktree_id, "--json"],
+    )
+    if raw is None:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to read sessions for worktree {worktree_id}",
+        )
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Invalid session JSON for worktree {worktree_id}",
+        ) from exc
+
+    sessions = data.get("sessions", data) if isinstance(data, dict) else data
+    return {
+        "worktree_id": worktree_id,
+        "agent_name": agent_name,
+        "sessions": sessions if isinstance(sessions, list) else [],
+    }
+
+
+@router.get("/api/v1/worktrees/{worktree_id}/sessions/{session_id}/transcript")
+async def get_worktree_session_transcript(
+    worktree_id: str, session_id: str, request: Request,
+) -> dict[str, Any]:
+    """Return the rendered transcript for a session in a worktree.
+
+    Shells out to ``<project> session-transcript <session_id> --json`` on the
+    machine that owns the worktree.  Lets Neuron Forge (and any other
+    consumer) view a CLI transcript for *any* session in *any* worktree,
+    including ones it did not launch, without crawling session-state itself.
+    """
+    cache = get_cache()
+    await cache.crawl_if_empty()
+
+    owner = _owning_agent(worktree_id, request)
+    if owner is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Worktree {worktree_id} not found on any agent",
+        )
+    agent_name, config = owner
+    resolver = request.app.state.resolver
+
+    raw = await _run_for_agent(
+        agent_name, config, resolver,
+        ["session-transcript", session_id, "--json"],
+    )
+    if raw is None:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to read transcript for session {session_id}",
+        )
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Invalid transcript JSON for session {session_id}",
+        ) from exc
+
+    return {
+        "worktree_id": worktree_id,
+        "agent_name": agent_name,
+        "session_id": session_id,
+        "events": data.get("events", []) if isinstance(data, dict) else [],
+        "meta": data.get("meta") if isinstance(data, dict) else None,
+    }

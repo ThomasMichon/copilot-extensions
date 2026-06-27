@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
-import pytest
 
 from agent_bridge.topology import (
-    MachineConfig,
-    SshEnvironment,
     load_machines_yaml,
     parse_machines_yaml,
 )
