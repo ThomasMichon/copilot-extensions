@@ -31,6 +31,7 @@ dependencies = [
     "agent-client-protocol>=0.10.1,<1",
     "agent-ssh-manager",
     "agent-credential-relay",
+    "agent-zdd",
 ]
 
 [tool.uv.sources]
@@ -41,6 +42,9 @@ dependencies = [
 agent-ssh-manager = { path = "libs/ssh-manager" }
 # credential-relay framework + host-credential sources (module ``credential_relay``).
 agent-credential-relay = { path = "libs/credential-relay" }
+# zero-downtime cutover primitives -- the routing table + cutover orchestrator
+# (module ``zdd``), extracted from this plugin so other services reuse them.
+agent-zdd = { path = "libs/zdd" }
 
 [project.scripts]
 agent-bridge = "agent_bridge.__main__:main"

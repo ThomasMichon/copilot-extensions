@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agent_bridge import routing
+from zdd import routing
 from agent_bridge.client import BridgeClient
 
 

@@ -196,7 +196,7 @@ async def lifespan(app: FastAPI):
             import os as _os
 
             from . import __version__ as _ver
-            from . import routing
+            from zdd import routing
             from .config import config_dir
 
             server = getattr(app.state, "uvicorn_server", None)
@@ -232,7 +232,7 @@ async def lifespan(app: FastAPI):
     if getattr(app.state, "publish_on_ready", False):
         import os as _os
 
-        from . import routing
+        from zdd import routing
         from .config import config_dir
         try:
             await asyncio.to_thread(routing.clear_if_owner, config_dir(), _os.getpid())

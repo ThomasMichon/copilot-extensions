@@ -47,7 +47,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-log = logging.getLogger("agent-bridge")
+log = logging.getLogger("zdd")
 
 _TABLE_FILENAME = "active.json"
 # A loopback connect on a live port returns in well under a millisecond; this

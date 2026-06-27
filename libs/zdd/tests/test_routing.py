@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_bridge import routing
-from agent_bridge.routing import Endpoint
+from zdd import routing
+from zdd.routing import Endpoint
 
 
 @pytest.fixture
