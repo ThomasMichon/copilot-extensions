@@ -30,7 +30,15 @@ param(
     [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update')]
     [string]$Action = 'status',
 
-    [switch]$Purge
+    [switch]$Purge,
+
+    # Opt-in: run the daemon "whether the user is logged on or not" (a headless
+    # boot-triggered S4U task) instead of the default at-logon task that only
+    # runs while the user is interactively signed in. Useful for an always-on
+    # workstation accessed over SSH/RDP with no persistent interactive session.
+    # Can also be set via AGENT_BRIDGE_NONINTERACTIVE=1. Never forced; an
+    # existing non-interactive task is preserved across updates.
+    [switch]$NonInteractive
 )
 
 Set-StrictMode -Version 2.0
@@ -475,11 +483,54 @@ function Write-DeployManifestFor {
     Write-Ok "Deploy manifest written (source: $kind)"
 }
 
+function Resolve-DaemonLogonMode {
+    <# Decide whether the daemon's scheduled task runs non-interactively ("run
+       whether the user is logged on or not", boot-triggered) or in the default
+       at-logon interactive mode. Opt-in only, resolved from (in priority order):
+         1. the -NonInteractive switch or AGENT_BRIDGE_NONINTERACTIVE env var;
+         2. an existing task that is already non-interactive (preserve across
+            updates so an `update` never silently reverts it);
+         3. an interactive desktop install prompt (skipped over SSH/headless).
+       Sets $Script:UseNonInteractive. Never forces the choice. #>
+    $Script:UseNonInteractive = $false
+
+    if ($NonInteractive -or ($env:AGENT_BRIDGE_NONINTERACTIVE -in @('1', 'true', 'yes', 'on'))) {
+        $Script:UseNonInteractive = $true
+        return
+    }
+
+    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($existing -and ($existing.Principal.LogonType -in @('S4U', 'Password'))) {
+        # An operator already opted in; keep it that way on update/reinstall.
+        $Script:UseNonInteractive = $true
+        return
+    }
+
+    # Offer it on a fresh, genuinely interactive desktop install only. Skip the
+    # prompt over SSH (no reliable TTY -- Read-Host would hang) and on update.
+    $overSsh = [bool]($env:SSH_CONNECTION -or $env:SSH_CLIENT)
+    if ($Action -eq 'install' -and [Environment]::UserInteractive -and -not $overSsh) {
+        try {
+            Write-Host ''
+            Write-Host '  Run agent-bridge whether you are logged on or not?' -ForegroundColor Cyan
+            Write-Host '  (headless boot-start; needed for an always-on machine you reach over' -ForegroundColor DarkGray
+            Write-Host '   SSH/RDP with no persistent interactive session). Default: No.' -ForegroundColor DarkGray
+            $answer = Read-Host '  Enable non-interactive mode? [y/N]'
+            if ($answer -match '^(y|yes)$') { $Script:UseNonInteractive = $true }
+        } catch {
+            # No interactive console available -- leave it at the default.
+            $Script:UseNonInteractive = $false
+        }
+    }
+}
+
 function Register-ScheduledTask_ {
     if (-not (Test-Path $VenvPython)) {
         Write-Warn "agent-bridge venv not found -- skipping scheduled task"
         return
     }
+
+    Resolve-DaemonLogonMode
 
     # Create launcher script
     $launcherPath = Join-Path $InstallDir 'start-agent-bridge.ps1'
@@ -523,8 +574,23 @@ Set-Content -Path `$pidFile -Value `$proc.Id
         -Execute 'conhost.exe' `
         -Argument "--headless `"$pwshPath`" -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$launcherPath`""
 
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-    $trigger.Delay = 'PT15S'
+    # Non-interactive mode runs the daemon headless: a boot trigger (fires
+    # without any logon) plus an S4U principal ("run whether the user is logged
+    # on or not", no stored password). S4U is safe for agent-bridge because its
+    # outbound SSH authenticates with key files, not the Windows network token.
+    # Default mode keeps the at-logon trigger that only runs while signed in.
+    if ($Script:UseNonInteractive) {
+        $trigger = New-ScheduledTaskTrigger -AtStartup
+        $trigger.Delay = 'PT15S'
+        $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME `
+            -LogonType S4U -RunLevel Limited
+        $modeLabel = 'at startup, headless (run whether logged on or not)'
+    } else {
+        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+        $trigger.Delay = 'PT15S'
+        $principal = $null
+        $modeLabel = 'at logon, 15s delay'
+    }
 
     $settings = New-ScheduledTaskSettingsSet `
         -AllowStartIfOnBatteries `
@@ -533,17 +599,36 @@ Set-Content -Path `$pidFile -Value `$proc.Id
         -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
         -MultipleInstances IgnoreNew
 
+    # A principal change (interactive <-> S4U) cannot be applied with
+    # Set-ScheduledTask -- unregister and re-register so the logon type sticks.
     $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if ($existing) {
-        Set-ScheduledTask -TaskName $TaskName `
-            -Action $action -Trigger $trigger -Settings $settings | Out-Null
-        Write-Ok "Scheduled task updated (at logon, 15s delay)"
+    $principalChange = $existing -and (
+        ($Script:UseNonInteractive -and ($existing.Principal.LogonType -notin @('S4U', 'Password'))) -or
+        (-not $Script:UseNonInteractive -and ($existing.Principal.LogonType -in @('S4U', 'Password')))
+    )
+    if ($existing -and -not $principalChange) {
+        if ($principal) {
+            Set-ScheduledTask -TaskName $TaskName `
+                -Action $action -Trigger $trigger -Settings $settings -Principal $principal | Out-Null
+        } else {
+            Set-ScheduledTask -TaskName $TaskName `
+                -Action $action -Trigger $trigger -Settings $settings | Out-Null
+        }
+        Write-Ok "Scheduled task updated ($modeLabel)"
     } else {
-        Register-ScheduledTask -TaskName $TaskName `
-            -Action $action -Trigger $trigger -Settings $settings `
-            -Description 'Agent-Bridge -- inter-agent communication service on port 9280.' `
-            | Out-Null
-        Write-Ok "Scheduled task registered (at logon, 15s delay)"
+        if ($principalChange) {
+            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+        }
+        $regArgs = @{
+            TaskName    = $TaskName
+            Action      = $action
+            Trigger     = $trigger
+            Settings    = $settings
+            Description = 'Agent-Bridge -- inter-agent communication service on port 9280.'
+        }
+        if ($principal) { $regArgs['Principal'] = $principal }
+        Register-ScheduledTask @regArgs | Out-Null
+        Write-Ok "Scheduled task registered ($modeLabel)"
     }
 }
 
@@ -818,6 +903,29 @@ function Invoke-Start {
 
     $logFile = Join-Path $InstallDir 'agent-bridge.log'
     $errFile = Join-Path $InstallDir 'agent-bridge-err.log'
+
+    # Headless (non-interactive) mode: the daemon MUST be started by the
+    # scheduled task so it runs in session 0 and survives the installer session
+    # closing. A direct spawn here is parented to the installer (often an SSH
+    # session) and dies when that session ends -- leaving the daemon down until
+    # the next boot trigger. Detect the headless task by its S4U/Password
+    # principal and start it via Start-ScheduledTask, health-gating as usual.
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($task -and ($task.Principal.LogonType -in @('S4U', 'Password'))) {
+        Write-Step 'Starting agent-bridge via scheduled task (headless)...'
+        Start-ScheduledTask -TaskName $TaskName
+        for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 1
+            if (Test-HealthOnce) {
+                $rp = Get-RunningProcess
+                $pidTxt = if ($rp) { "pid=$($rp.Id), " } else { '' }
+                Write-Ok ("agent-bridge started ({0}port={1}, headless)" -f $pidTxt, $Port)
+                return
+            }
+        }
+        Write-Warn 'agent-bridge did not become healthy within 30s via the scheduled task -- check agent-bridge-err.log'
+        return
+    }
 
     # Start the service through a DETACHED, hidden pwsh launched via
     # ShellExecute (no -NoNewWindow / no redirection on THIS call, so handles
