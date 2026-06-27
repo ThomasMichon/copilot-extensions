@@ -40,10 +40,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from . import routing
-from .routing import Endpoint
+from zdd import routing
+from zdd.routing import Endpoint
 
-log = logging.getLogger("agent-bridge")
+log = logging.getLogger("zdd")
 
 
 class CutoverError(Exception):

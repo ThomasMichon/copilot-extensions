@@ -100,7 +100,7 @@ class BridgeClient:
             base_url = explicit.rstrip("/")
         elif os.environ.get("AGENT_BRIDGE_NO_ROUTING_TABLE") not in ("1", "true"):
             try:
-                from .routing import read_active_endpoint
+                from zdd.routing import read_active_endpoint
 
                 ep = read_active_endpoint(config_dir)
                 if ep is not None:

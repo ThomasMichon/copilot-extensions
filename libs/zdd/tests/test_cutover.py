@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent_bridge import routing
-from agent_bridge.deploy import CutoverOrchestrator
+from zdd import routing
+from zdd.cutover import CutoverOrchestrator
 
 
 class FakeHandle:

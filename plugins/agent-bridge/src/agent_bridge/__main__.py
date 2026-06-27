@@ -722,7 +722,7 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
     from . import __version__
     from .client import BridgeClient
     from .config import config_dir, load_config, load_or_create_auth_token
-    from .deploy import CutoverOrchestrator
+    from zdd.cutover import CutoverOrchestrator
 
     cfg = load_config()
     token = load_or_create_auth_token()

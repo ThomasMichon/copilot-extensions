@@ -173,6 +173,8 @@ raise SystemExit(1)
 # Resolve the ssh-manager / credential-relay vendored libs (thin wrappers).
 _resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }
 _resolve_credential_relay() { _resolve_vendored_lib credential-relay; }
+# zero-downtime cutover primitives (module ``zdd``), extracted from this plugin.
+_resolve_zdd() { _resolve_vendored_lib zdd; }
 
 # Check if ssh-manager is already importable in the venv.
 # Returns 0 if the key symbols can be imported successfully.
@@ -185,6 +187,12 @@ _ssh_manager_installed() {
 _credential_relay_installed() {
     [[ -x "$VENV_DIR/bin/python" ]] || return 1
     "$VENV_DIR/bin/python" -c 'from credential_relay import RelayBuilder' 2>/dev/null
+}
+
+# Check if the zdd cutover lib is already importable in the venv.
+_zdd_installed() {
+    [[ -x "$VENV_DIR/bin/python" ]] || return 1
+    "$VENV_DIR/bin/python" -c 'from zdd.cutover import CutoverOrchestrator' 2>/dev/null
 }
 
 # Install sibling plugin packages (e.g. agent-codespaces) into the bridge venv.
@@ -430,6 +438,19 @@ do_install() {
         _fail "Cannot locate credential-relay library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         exit 1
     fi
+    # zdd (zero-downtime cutover primitives: routing table + orchestrator).
+    local zdd_dir
+    if zdd_dir="$(_resolve_zdd)"; then
+        if ! uv pip install --python "$VENV_DIR/bin/python" "$zdd_dir" --quiet; then
+            _fail "zdd install failed"
+            exit 1
+        fi
+    elif _zdd_installed; then
+        _step "zdd already installed in venv (marketplace layout)"
+    else
+        _fail "Cannot locate zdd library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
+        exit 1
+    fi
     if ! uv pip install --python "$VENV_DIR/bin/python" "$PLUGIN_DIR" --quiet; then
         _fail "Package install failed"
         exit 1
@@ -662,7 +683,7 @@ _runtime_healthy() {
     # install before declaring the update good (#52). uvicorn + credential_relay
     # are the modules that went missing in the observed broken-venv outage.
     [[ -x "$VENV_DIR/bin/python" ]] || return 1
-    "$VENV_DIR/bin/python" -c 'import agent_bridge, uvicorn, credential_relay' 2>/dev/null
+    "$VENV_DIR/bin/python" -c 'import agent_bridge, uvicorn, credential_relay, zdd' 2>/dev/null
 }
 
 _backup_venv() {
@@ -726,6 +747,21 @@ _update_core() {
         _step "credential-relay already installed in venv (marketplace layout)"
     else
         _fail "Cannot locate credential-relay library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
+        return 1
+    fi
+    # zdd: force-reinstall so a local code change propagates even without a
+    # version bump (uv otherwise skips a same-version path dep).
+    local zdd_dir
+    if zdd_dir="$(_resolve_zdd)"; then
+        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-zdd \
+                "$zdd_dir" --quiet; then
+            _fail "zdd update failed"
+            return 1
+        fi
+    elif _zdd_installed; then
+        _step "zdd already installed in venv (marketplace layout)"
+    else
+        _fail "Cannot locate zdd library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         return 1
     fi
     if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge \

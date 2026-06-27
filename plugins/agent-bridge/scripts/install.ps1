@@ -155,6 +155,8 @@ raise SystemExit(1)
 # Resolve the ssh-manager / credential-relay vendored libs (thin wrappers).
 function Resolve-SshManager { return (Resolve-VendoredLib -LibName 'ssh-manager') }
 function Resolve-CredentialRelay { return (Resolve-VendoredLib -LibName 'credential-relay') }
+# zero-downtime cutover primitives (module ``zdd``), extracted from this plugin.
+function Resolve-Zdd { return (Resolve-VendoredLib -LibName 'zdd') }
 
 # Check if ssh-manager is already importable in the venv.
 function Test-SshManagerInstalled {
@@ -167,6 +169,13 @@ function Test-SshManagerInstalled {
 function Test-CredentialRelayInstalled {
     if (-not (Test-Path $VenvPython)) { return $false }
     & $VenvPython -c 'from credential_relay import RelayBuilder' 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
+# Check if the zdd cutover lib is already importable in the venv.
+function Test-ZddInstalled {
+    if (-not (Test-Path $VenvPython)) { return $false }
+    & $VenvPython -c 'from zdd.cutover import CutoverOrchestrator' 2>$null
     return $LASTEXITCODE -eq 0
 }
 
@@ -768,6 +777,21 @@ function Invoke-Install {
     } else {
         throw 'Cannot locate credential-relay library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
     }
+    # zdd (zero-downtime cutover primitives: routing table + orchestrator).
+    $ZddDir = Resolve-Zdd
+    if ($ZddDir) {
+        $zddOut = & uv pip install --python $VenvPython "$ZddDir" --quiet 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Fail "zdd install failed (exit $LASTEXITCODE)"
+            if ($zddOut) { Write-Host ($zddOut | Out-String) }
+            throw 'zdd install failed'
+        }
+    } elseif (Test-ZddInstalled) {
+        Write-Step 'zdd already installed in venv (marketplace layout)'
+    } else {
+        throw 'Cannot locate zdd library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
+    }
     $bridgeOut = & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1
     $installResult = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
@@ -1096,7 +1120,7 @@ function Test-RuntimeHealthy {
        missing in the observed broken-venv outage. #>
     param([string]$Python)
     if (-not (Test-Path $Python)) { return $false }
-    & $Python -c 'import agent_bridge, uvicorn, credential_relay' 2>$null
+    & $Python -c 'import agent_bridge, uvicorn, credential_relay, zdd' 2>$null
     return $LASTEXITCODE -eq 0
 }
 
@@ -1220,6 +1244,22 @@ function Invoke-Update {
             Write-Step 'credential-relay already installed in venv (marketplace layout)'
         } else {
             throw 'Cannot locate credential-relay library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
+        }
+        # zdd: force-reinstall so a local code change propagates even without a
+        # version bump (uv otherwise skips a same-version path dep).
+        $ZddDir = Resolve-Zdd
+        if ($ZddDir) {
+            $zddOut = & uv pip install --python $VenvPython --reinstall-package agent-zdd `
+                "$ZddDir" --quiet 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                $ErrorActionPreference = $prevEAP
+                if ($zddOut) { Write-Host ($zddOut | Out-String) }
+                throw "zdd update failed (exit $LASTEXITCODE)"
+            }
+        } elseif (Test-ZddInstalled) {
+            Write-Step 'zdd already installed in venv (marketplace layout)'
+        } else {
+            throw 'Cannot locate zdd library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
         }
         $bridgeOut = & uv pip install --python $VenvPython --reinstall-package agent-bridge `
             "$PluginDir" --quiet 2>&1
