@@ -249,6 +249,30 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "$abDir\scripts\install.ps1" insta
 bash "$ab_dir/scripts/install.sh" install
 ```
 
+### Windows: run the daemon whether you are logged on or not (opt-in)
+
+By default the Windows daemon runs from an **at-logon** scheduled task -- it
+only runs while a user is **interactively signed in**. On an always-on
+workstation that you reach over **SSH/RDP with no persistent interactive
+session** (so the at-logon task never fires, and any SSH-spawned daemon dies
+with the session), install it **non-interactively** instead:
+
+```powershell
+# Headless: a boot-triggered S4U task ("run whether the user is logged on or
+# not", no stored password). Outbound SSH still works (it authenticates with
+# key files, not the Windows token).
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$abDir\scripts\install.ps1" install -NonInteractive
+# or, for an automated/over-SSH install:
+$env:AGENT_BRIDGE_NONINTERACTIVE = '1'
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$abDir\scripts\install.ps1" install
+```
+
+This is **opt-in and never forced**: a plain `install` keeps the at-logon task,
+a genuine interactive desktop install **prompts** for the choice, and an
+existing non-interactive task is **preserved across updates**. `-NonInteractive`
+is accepted on `install` and `update`. Linux/WSL is unaffected (the systemd
+user unit is unrelated to interactive logon).
+
 ### What It Creates
 
 ```
@@ -262,7 +286,8 @@ bash "$ab_dir/scripts/install.sh" install
 ~/.local/bin/
   agent-bridge[.cmd]       Binstub
 
-Windows: "Agent Bridge" scheduled task (at-logon, 15s delay)
+Windows: "Agent Bridge" scheduled task (at-logon, 15s delay; or boot-start
+         S4U with `-NonInteractive`)
 Linux:   ~/.config/systemd/user/agent-bridge.service (enabled)
 ```
 

@@ -220,6 +220,14 @@ agent-bridge service status     # running state + bound port + PID
 > **Note:** plain `agent-bridge stop <session-id>` stops a *session*, not the
 > service. For the daemon, always use `agent-bridge service stop`.
 
+> **Windows headless (run whether logged on or not):** by default the Windows
+> daemon runs from an *at-logon* scheduled task, so it only runs while a user is
+> interactively signed in. For an always-on machine reached over SSH/RDP with no
+> persistent session, (re)install with `install.ps1 install -NonInteractive`
+> (or `AGENT_BRIDGE_NONINTERACTIVE=1`) to register a **boot-triggered S4U** task
+> instead -- opt-in, preserved across updates. See the `copilot-extensions-setup`
+> skill.
+
 `agent-bridge start` (no `service`) runs the server in the **foreground** -- it
 is the entry point the service manager invokes, and is useful for debugging.
 Add `--port` / `--bind` to override the platform default (9280 Windows / 9281
