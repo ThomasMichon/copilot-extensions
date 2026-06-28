@@ -9,6 +9,7 @@ used (the resolve_token None case).
 from __future__ import annotations
 
 import json
+from urllib.parse import quote
 
 from .base import ProviderError, PRScope, PullResult, run_cli
 
@@ -73,3 +74,25 @@ class GitHubProvider:
             state=state,
             merged=(state == "merged"),
         )
+
+    def remove_label(
+        self, repo: str, number: int, label: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        """Remove ``label`` from an existing PR via ``gh api``."""
+        _ = api_base
+        label_path = quote(label, safe="")
+        proc = run_cli(
+            [
+                "gh", "api",
+                "--method", "DELETE",
+                f"/repos/{repo}/issues/{number}/labels/{label_path}",
+            ],
+            env=self._env(token),
+        )
+        if proc.returncode == 0:
+            return ""
+        detail = (proc.stderr.strip() or proc.stdout.strip())
+        if "HTTP 404" in detail or "Not Found" in detail:
+            return ""
+        return f"gh label removal failed for {repo}#{number}: {detail}"

@@ -78,6 +78,13 @@ class PRProvider(Protocol):
         """Look up an existing PR by number (best-effort; may be unsupported)."""
         ...
 
+    def remove_label(
+        self, repo: str, number: int, label: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        """Remove ``label`` from an existing PR; return "" on success."""
+        ...
+
 
 def resolve_token(prcfg) -> str | None:
     """Resolve a provider token from config.

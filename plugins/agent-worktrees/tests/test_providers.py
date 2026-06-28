@@ -412,6 +412,71 @@ class TestGiteaProvider:
         assert "labels not found" in res.label_error
         assert "source:ghost" in res.label_error
 
+    def test_remove_label_resolves_id_and_deletes(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+
+        prov = gitea.GiteaProvider()
+        calls = []
+
+        def fake_retry(method, url, token, *, payload=None):
+            calls.append((method, url, token, payload))
+            if method == "GET" and "page=1" in url:
+                return 200, json.dumps([{"name": "do-not-merge", "id": 321}])
+            if method == "GET" and "page=2" in url:
+                return 200, "[]"
+            if method == "DELETE":
+                return 204, ""
+            return 500, "unexpected"
+
+        monkeypatch.setattr(prov, "_curl_with_retry", fake_retry)
+        err = prov.remove_label(
+            "o/r", 42, "do-not-merge", api_base="https://h/gitea", token="tok",
+        )
+        assert err == ""
+        delete_calls = [c for c in calls if c[0] == "DELETE"]
+        assert len(delete_calls) == 1
+        assert delete_calls[0][1].endswith("/repos/o/r/issues/42/labels/321")
+
+    def test_remove_label_404_is_success(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+
+        prov = gitea.GiteaProvider()
+
+        def fake_retry(method, url, token, *, payload=None):
+            if method == "GET" and "page=1" in url:
+                return 200, json.dumps([{"name": "do-not-merge", "id": 321}])
+            if method == "GET" and "page=2" in url:
+                return 200, "[]"
+            if method == "DELETE":
+                return 404, "label not present"
+            return 500, "unexpected"
+
+        monkeypatch.setattr(prov, "_curl_with_retry", fake_retry)
+        assert prov.remove_label(
+            "o/r", 42, "do-not-merge", api_base="https://h/gitea", token="tok",
+        ) == ""
+
+    def test_remove_label_hard_error_surfaces(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+
+        prov = gitea.GiteaProvider()
+
+        def fake_retry(method, url, token, *, payload=None):
+            if method == "GET" and "page=1" in url:
+                return 200, json.dumps([{"name": "do-not-merge", "id": 321}])
+            if method == "GET" and "page=2" in url:
+                return 200, "[]"
+            if method == "DELETE":
+                return 500, "boom"
+            return 500, "unexpected"
+
+        monkeypatch.setattr(prov, "_curl_with_retry", fake_retry)
+        err = prov.remove_label(
+            "o/r", 42, "do-not-merge", api_base="https://h/gitea", token="tok",
+        )
+        assert err
+        assert "HTTP 500" in err
+
 
 # ---------------------------------------------------------------------------
 # GitHub provider (gh seam mocked)
@@ -468,7 +533,9 @@ class TestAzureDevOpsProvider:
         for status, exp_state in (("abandoned", "closed"), ("active", "open")):
             monkeypatch.setattr(
                 azure, "run_cli",
-                lambda args, **kw: _proc(stdout=json.dumps({"status": status})))
+                lambda args, status=status, **kw: _proc(
+                    stdout=json.dumps({"status": status})
+                ))
             res = azure.AzureDevOpsProvider().get_pull(
                 "proj/repo", 5, api_base="https://dev.azure.com/org")
             assert res.merged is False
@@ -490,6 +557,29 @@ class _FakeProvider:
 
     def get_pull(self, repo, number, *, api_base="", token=None):
         return PullResult(url="", number=number)
+
+    def remove_label(self, repo, number, label, *, api_base="", token=None):
+        return ""
+
+
+@dataclass
+class _FakeReadyProvider:
+    name: str = "gitea"
+    removed: dict | None = None
+
+    def create_pull(self, scope, *, token=None):
+        return PullResult(url="https://h/gitea/ext/pulls/99", number=99, state="open")
+
+    def get_pull(self, repo, number, *, api_base="", token=None):
+        return PullResult(url=f"https://h/gitea/{repo}/pulls/{number}",
+                          number=number, state="open")
+
+    def remove_label(self, repo, number, label, *, api_base="", token=None):
+        self.removed = {
+            "repo": repo, "number": number, "label": label,
+            "api_base": api_base, "token": token,
+        }
+        return ""
 
 
 class TestCreatePRAutoOpen:
@@ -534,6 +624,18 @@ class TestCreatePRAutoOpen:
         assert "source:test" in scope.labels
         assert fake.captured["token"] == "tok"
 
+    def test_auto_open_hold_adds_do_not_merge_label(self, pr_repo, monkeypatch):
+        config, wid, _wt, _ = pr_repo
+        config = self._enable_open(config)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider()
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda name: fake)
+
+        res = pr_ops.create_pr(wid, config, title="Add feature", hold=True)
+        assert res["success"] is True
+        assert res["held"] is True
+        assert pr_ops.HOLD_LABEL in fake.captured["scope"].labels
+
     def test_no_open_skips_provider(self, pr_repo, monkeypatch):
         config, wid, _wt, _ = pr_repo
         config = self._enable_open(config)
@@ -573,6 +675,36 @@ class TestCreatePRAutoOpen:
         scope = fake.captured["scope"]
         assert attr.parse_marker(scope.body) is None
         assert scope.body == "Hello"
+
+    def test_pr_ready_removes_hold_label(self, pr_repo, monkeypatch):
+        import dataclasses
+
+        config, wid, _wt, _ = pr_repo
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(
+            repo.pr, api_base="https://h/gitea", token_env="EXT_TOKEN",
+        )
+        config = dataclasses.replace(
+            config, repos={"ext": dataclasses.replace(repo, pr=pr)}
+        )
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        pr_ops.create_pr(wid, config, title="Add feature")
+        pr_ops.set_pr(
+            wid, url="https://h/gitea/o/r/pulls/99", number=99, provider="gitea",
+        )
+        fake = _FakeReadyProvider()
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda name: fake)
+
+        res = pr_ops.pr_ready(wid, config, target_repo="o/r")
+        assert res["success"] is True
+        assert res["removed"] is True
+        assert fake.removed == {
+            "repo": "o/r",
+            "number": 99,
+            "label": pr_ops.HOLD_LABEL,
+            "api_base": "https://h/gitea",
+            "token": "tok",
+        }
 
 
 class TestAutoOpenDefault:
@@ -740,7 +872,7 @@ class TestRerunAutoOpen:
         )
 
     def test_rerun_opens_pending_pr(self, pr_repo, monkeypatch):
-        config, wid, wt_path, _ = pr_repo
+        config, wid, _wt_path, _ = pr_repo
         config = self._enable_open(config)
         monkeypatch.setenv("EXT_TOKEN", "tok")
         fake = _StatefulFakeProvider()
@@ -764,7 +896,7 @@ class TestRerunAutoOpen:
         assert rec.active_pr().number == r2["number"]
 
     def test_rerun_surfaces_existing_pr_no_duplicate(self, pr_repo, monkeypatch):
-        config, wid, wt_path, _ = pr_repo
+        config, wid, _wt_path, _ = pr_repo
         config = self._enable_open(config)
         monkeypatch.setenv("EXT_TOKEN", "tok")
         fake = _StatefulFakeProvider()
