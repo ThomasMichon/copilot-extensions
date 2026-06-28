@@ -857,6 +857,13 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         tracking_path.mkdir(parents=True, exist_ok=True)
         current_platform = cfg.detect_platform()
 
+        # New Textual picker -- opt-in via AGENT_WORKTREES_NEW_PICKER while the
+        # multi-machine flow is fleshed out. The legacy ANSI picker below stays
+        # the default and the rollback path (AGENT_WORKTREES_LEGACY_PICKER).
+        from . import picker_tui
+        if picker_tui.new_picker_enabled():
+            return _run_new_picker(config, args)
+
         # Picker loop -- re-enters after system menu actions
         while True:
 
@@ -1863,6 +1870,80 @@ def _resolve_base_repo(
         "no_mux": getattr(args, "no_mux", False),
     })
     return 0
+
+
+def _machine_key_for_display(config: cfg.Config, name: str) -> str:
+    """Resolve a picker machine label (display name / key / alias) to its key.
+
+    The TUI labels machines by ``machines.yaml`` display name; the SSH-handoff
+    helpers match by key or alias. Returns *name* unchanged if no entry matches.
+    """
+    repo = config.default_repo
+    try:
+        entries = cfg.load_machines_yaml(repo.anchor)
+    except (FileNotFoundError, ValueError):
+        return name
+    nl = name.lower()
+    for key, entry in entries.items():
+        if (key.lower() == nl
+                or (entry.alias and entry.alias.lower() == nl)
+                or entry.display_name.lower() == nl):
+            return key
+    return name
+
+
+def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
+    """Run the Textual worktree picker and resolve its launch decision.
+
+    Maps the picker's decision dict onto the existing resume/create/remote
+    code paths. Cleanup/sync/profiles actions are still mock in the TUI
+    (pending full design) and never reach here.
+    """
+    from . import picker_tui
+
+    decision = picker_tui.run_tui_picker(live=True)
+    if not decision:
+        print("Cancelled.")
+        _emit_plan({"action": "none", "exit_code": 0})
+        return 0
+
+    action = decision.get("action")
+    profile = _resolve_profile(config, args)
+
+    # A selection on another machine hands off over SSH (the picker re-runs
+    # there); resolving a specific remote worktree directly is deferred.
+    if not decision.get("is_local", True):
+        machine = decision.get("machine") or ""
+        rc = _try_machine_handoff(config, _machine_key_for_display(config, machine))
+        if rc is not None:
+            return rc
+        output.err(f"Unknown or unreachable remote machine: {machine}")
+        return 1
+
+    if action == "resume":
+        wt_id = decision.get("worktree_id")
+        if not wt_id:
+            output.err("Picker returned a resume decision with no worktree id.")
+            return 1
+        wt_id = _resolve_worktree_id(wt_id)
+        yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+        if not yaml_path.exists():
+            output.err(f"Worktree not found: {wt_id}")
+            return 1
+        record = tracking.load_record(yaml_path)
+        return _resolve_resume(record, config, args, profile=profile)
+
+    if action == "new":
+        opts = decision.get("options") or {}
+        if opts.get("no_mux"):
+            args.no_mux = True
+        if opts.get("anchor"):
+            return _resolve_base_repo(config, args, profile=profile)
+        # 'bare' and 'local_model' have no backend yet -- ignored for now.
+        return _resolve_new(config, args, profile=profile)
+
+    output.err(f"Picker returned an unsupported decision: {action!r}")
+    return 1
 
 
 def _resolve_resume(
