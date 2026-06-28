@@ -23,7 +23,7 @@ from textual.widget import Widget
 
 from . import derive
 
-VERSION = "1.5.3-dev64"
+VERSION = "1.5.3-dev65"
 
 # ---- palette (highlight-and-invert; subtle borders) -------------------------
 C_DIM = "grey42"          # subtle separators / borders
@@ -76,8 +76,6 @@ C_ENV = {"Win": "#4aa3ff", "WSL": "#b96bff", "Linux": "#ff9e3b"}
 C_DISPO = {"SAFE": "black on green", "REVIEW": "black on yellow",
            "UNSAFE": "white on red3"}
 DISPO_MARK = {"SAFE": "✓", "REVIEW": "!", "UNSAFE": "✗"}
-# Machines that can host a local model (GPU) -> local-model launch option.
-GPU_HOSTS = {"Lambda-Core", "Borealis"}
 
 
 # ---- column fitter ----------------------------------------------------------
@@ -1689,6 +1687,17 @@ class PickerScreen(Widget):
             if rec:
                 self._decide(self._resume_decision(rec))
 
+    def _local_model_hosts(self):
+        """Machines that can host a local model (the agent runs on their GPU).
+
+        Convention-driven from local-machine config -- intentionally NOT
+        hardcoded. The data source may advertise the capability via
+        ``src.local_model_hosts`` (a set of machine display names); until that
+        convention is wired, this is empty, so the 'Local model' create option
+        does not appear.
+        """
+        return set(getattr(self.src, "local_model_hosts", None) or ())
+
     def _open_optmenu(self):
         tm, te = self.create_target()
         opts = [
@@ -1698,7 +1707,7 @@ class PickerScreen(Widget):
              "hint": "new worktree, no Copilot bootstrap"},
             {"label": "No Mux", "on": False, "hint": "skip PSMux/TMux wrapper"},
         ]
-        if tm in GPU_HOSTS:
+        if tm in self._local_model_hosts():
             opts.append({"label": "Local model", "on": False,
                          "hint": f"run the agent on {tm}'s GPU"})
         self.optmenu = {"target": (tm, te), "idx": 0, "section": 0, "bidx": 0,

@@ -107,9 +107,13 @@ def _bucket_from_raw(w):
 
     Prefers the authoritative ``cleanup_bucket`` emitted by
     ``list --json --classify`` (computed by ``prune.cleanup_disposition``).
-    Falls back to an approximation from the canonical ``state`` + PR for remotes
-    too old to emit it. Buckets: clean / unused / conversation / open-pr /
-    closed-unmerged / dirty / wip / orphan / active / gone.
+
+    When git classification is absent (a remote too old to emit ``--classify``,
+    so there is no ``state`` field), fall back to tracking *status* + PR -- never
+    claim ``unmerged`` on missing evidence. Unknowable cases return ``unknown``
+    (neutral: shown without a chip, never offered for cleanup). With a ``state``
+    present, mirror ``prune``'s mapping. Buckets: clean / unused / conversation /
+    open-pr / closed-unmerged / dirty / wip / orphan / active / gone / unknown.
     """
     b = w.get("cleanup_bucket")
     if b:
@@ -117,6 +121,14 @@ def _bucket_from_raw(w):
     st = (w.get("state") or "").lower()
     pr = (w.get("pr") or {})
     prst = pr.get("state")
+    # No git classification (old remote): trust tracking status + PR only.
+    if not st:
+        status = (w.get("status") or "").lower()
+        if prst == "merged" or status in ("finalized", "pushed"):
+            return "clean"
+        if prst == "open":
+            return "open-pr"
+        return "unknown"
     if st == "active":
         return "active"
     if st == "gone":
@@ -135,7 +147,7 @@ def _bucket_from_raw(w):
         return "wip"
     if st == "unused":
         return "conversation" if w.get("turn_count", 0) > 0 else "unused"
-    return "wip"
+    return "unknown"
 
 
 def _ff_from_raw(w):
@@ -170,6 +182,7 @@ BUCKET_DISPO = {
     "orphan": "UNSAFE",
     "active": "UNSAFE",
     "open-pr": "",
+    "unknown": "",
 }
 
 # Cleanup bucket -> short reason shown in the disposition chip.
@@ -185,6 +198,7 @@ BUCKET_REASON = {
     "orphan": "no merge base",
     "active": "live session",
     "open-pr": "open PR",
+    "unknown": "unclassified (remote needs update)",
 }
 
 
@@ -220,12 +234,21 @@ def for_machine(wts, machine, env):
 
 
 def bucket(wts):
-    """Split into (active, recent, completed), each most-recent-first."""
-    active = sorted((w for w in wts if w["active"]), key=lambda w: w["age_secs"])
+    """Split into (active, recent, completed), each most-recent-first.
+
+    Sections key off the canonical *state*, not the tracking status:
+
+    * **active**    -- in session (state ``ACTIVE``: a live Copilot/mux session
+      owns the worktree). NOT merely "status active / not finalized".
+    * **completed** -- finalized / merged (state ``FINAL``), regardless of age.
+    * **recent**    -- everything else (WIP / UNUSED / CONVO / DIRTY / ORPHAN /
+      GONE): not in session and not final.
+    """
+    active = sorted((w for w in wts if w["state"] == "ACTIVE"),
+                    key=lambda w: w["age_secs"])
+    completed = sorted((w for w in wts if w["state"] == "FINAL"),
+                       key=lambda w: w["age_secs"])
     recent = sorted(
-        (w for w in wts if not w["active"] and w["age"].endswith(("m", "h"))),
-        key=lambda w: w["age_secs"])
-    completed = sorted(
-        (w for w in wts if not w["active"] and w["age"].endswith("d")),
+        (w for w in wts if w["state"] not in ("ACTIVE", "FINAL")),
         key=lambda w: w["age_secs"])
     return active, recent, completed
