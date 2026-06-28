@@ -104,6 +104,73 @@ def test_cleanup_dialog_buckets_and_sync_eligibility():
     asyncio.run(run())
 
 
+def test_run_tui_picker_redirects_stdout_when_captured(monkeypatch):
+    """When stdout is captured (launcher) but stderr is a TTY, Textual must
+    render to stderr while the real stdout stays reserved for the plan."""
+    import io
+    import sys
+
+    import agent_worktrees.picker_tui as pkg
+    from agent_worktrees.picker_tui import engine as eng
+
+    seen = {}
+
+    class _FakeApp:
+        def __init__(self, source, live=False):
+            self.result = {"action": "cancel"}
+
+        def run(self):
+            seen["during"] = sys.__stdout__
+
+    class _Pipe(io.StringIO):
+        def isatty(self):
+            return False
+
+    class _Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    pipe, tty = _Pipe(), _Tty()
+    monkeypatch.setattr(sys, "__stdout__", pipe)
+    monkeypatch.setattr(sys, "stderr", tty)
+    monkeypatch.setattr(eng, "PickerApp", _FakeApp)
+
+    result = pkg.run_tui_picker(source=object(), live=False)
+    assert result == {"action": "cancel"}
+    assert seen["during"] is tty       # Textual rendered to the terminal
+    assert sys.__stdout__ is pipe      # restored: fd1 free for the JSON plan
+
+
+def test_run_tui_picker_no_redirect_in_real_terminal(monkeypatch):
+    """In a normal terminal (stdout is a TTY) no redirect happens."""
+    import io
+    import sys
+
+    import agent_worktrees.picker_tui as pkg
+    from agent_worktrees.picker_tui import engine as eng
+
+    seen = {}
+
+    class _FakeApp:
+        def __init__(self, source, live=False):
+            self.result = None
+
+        def run(self):
+            seen["during"] = sys.__stdout__
+
+    class _Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    tty_out, tty_err = _Tty(), _Tty()
+    monkeypatch.setattr(sys, "__stdout__", tty_out)
+    monkeypatch.setattr(sys, "stderr", tty_err)
+    monkeypatch.setattr(eng, "PickerApp", _FakeApp)
+
+    pkg.run_tui_picker(source=object(), live=False)
+    assert seen["during"] is tty_out   # unchanged -- Textual uses stdout
+
+
 def test_new_picker_flag_gating(monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_NEW_PICKER", raising=False)
     monkeypatch.delenv("AGENT_WORKTREES_LEGACY_PICKER", raising=False)

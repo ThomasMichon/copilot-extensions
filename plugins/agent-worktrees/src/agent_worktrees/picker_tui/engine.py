@@ -23,7 +23,7 @@ from textual.widget import Widget
 
 from . import derive
 
-VERSION = "1.5.3-dev63"
+VERSION = "1.5.3-dev64"
 
 # ---- palette (highlight-and-invert; subtle borders) -------------------------
 C_DIM = "grey42"          # subtle separators / borders
