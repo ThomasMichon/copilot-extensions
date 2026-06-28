@@ -31,7 +31,7 @@ import subprocess
 import threading
 
 from .. import config as cfg
-from . import data_local, derive
+from . import data_local, derive, roster
 
 # Shared display surface so the engine treats this exactly like ``data_local``.
 # ``LOCAL`` is resolved from the actual local source below (so it carries the
@@ -40,6 +40,9 @@ from . import data_local, derive
 LOCAL_LABEL = data_local.LOCAL_LABEL
 bucket = derive.bucket
 for_machine = derive.for_machine
+# Profiles-matrix axes are config-bound from machines.yaml (same roster).
+host_cols = roster.host_cols
+target_envs = roster.target_envs
 
 # machines.yaml environment name -> the picker's short env label (and C_ENV key).
 _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}
@@ -184,6 +187,29 @@ def remote_op_argv(machine, env, op, worktree_id, *, include_unused=False,
     return None
 
 
+def profiles_argv(machine, env, *, action, set_json=None, no_mirror=False):
+    """SSH argv to run ``profiles get|apply`` on a remote host/env.
+
+    Returns the ssh argv, or ``None`` for the local host or an unknown /
+    not-ready target (the caller runs the local op in-process). ``set_json`` is
+    the column payload for ``apply``.
+    """
+    project = _project()
+    for s in _build_sources():
+        if s.machine == machine and s.env == env:
+            if s.local or not s.ready or not s.alias:
+                return None
+            if action == "get":
+                inner = f"{project} profiles get --json"
+            else:  # apply
+                flags = " --no-mirror" if no_mirror else ""
+                payload = (set_json or "[]").replace("'", "'\\''")
+                inner = (f"{project} profiles apply --json{flags} "
+                         f"--set '{payload}'")
+            return _wrap_remote(s.shell, s.alias, inner)
+    return None
+
+
 def machines():
     """Ordered machine-tab descriptors: (label, machine, env, reachable).
 
@@ -195,6 +221,18 @@ def machines():
         (f"{s.machine} {s.env}", s.machine, s.env, s.ready)
         for s in _build_sources()
     ]
+
+
+def load_profile_column(machine, env):
+    """Read a host's terminal-profile column (local in-process / remote SSH)."""
+    from . import profiles_io
+    return profiles_io.load_column(machine, env)
+
+
+def apply_profile_column(machine, env, sels, *, mirror=True):
+    """Persist a host's terminal-profile column. Returns ``(ok, detail)``."""
+    from . import profiles_io
+    return profiles_io.apply_column(machine, env, sels, mirror=mirror)
 
 
 def _resolve_local() -> tuple[str, str]:

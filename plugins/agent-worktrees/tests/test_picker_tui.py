@@ -104,6 +104,133 @@ def test_cleanup_dialog_buckets_and_sync_eligibility():
     asyncio.run(run())
 
 
+def test_maintenance_multiselect_and_actions_menu():
+    """Maintenance: Space toggles selection, group/select-all quick-pick, and
+    Enter opens the actions menu scoped to the selection (#1345)."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.htab = 1
+            scr.sel = scr.default_sel()
+            await pilot.pause()
+
+            # New maintenance stops exist: Select-all, group headers, rows.
+            kinds = {z for z, _ in scr.stops()}
+            assert {"SA", "GH", "C"} <= kinds
+
+            recs = scr.maint_records()
+            assert recs  # grouped, non-empty
+
+            # Space on a focused row toggles just that row.
+            crow = next(s for s in scr.stops() if s[0] == "C")
+            scr.sel = crow
+            scr._toggle_maint(crow[1])
+            assert len(scr.maint_sel) == 1
+
+            # Select-all selects every candidate; again clears.
+            scr._toggle_maint_all()
+            assert scr.maint_sel == scr._maint_ids()
+            scr._toggle_maint_all()
+            assert not scr.maint_sel
+
+            # Enter with nothing selected selects the focused row, opens menu.
+            scr.sel = crow
+            scr._activate()
+            assert scr.maint_menu is not None
+            assert scr.maint_menu["count"] == 1
+            assert "Diagnostics" in scr.maint_menu["actions"]
+            # Enter must NOT have produced a launch/resume decision.
+            assert app.result is None
+
+            # The menu's Cleanup action opens a scope dialog over the selection.
+            acts = scr.maint_menu["actions"]
+            if "Cleanup" in acts:
+                scr.maint_menu_idx = acts.index("Cleanup")
+                scr._key_maint_menu("enter")
+                assert scr.cleanup is not None
+                assert "selected" in scr.cleanup["scope"]
+
+    asyncio.run(run())
+
+
+def _profiles_source():
+    """Fixture source exposing config-bound axes + profile IO hooks (no SSH)."""
+    src = _fixture_source()
+    src.host_cols = lambda: [
+        ("Lambda-Core·Win", "Lambda-Core", "Win"),
+        ("Borealis·Win", "Borealis", "Win"),
+    ]
+    src.target_envs = lambda: [("Lambda-Core", "Win"), ("Borealis", "Win")]
+    # In-memory column store keyed by (machine, env).
+    store: dict = {}
+    applied_calls: list = []
+
+    def load_col(machine, env):
+        from agent_worktrees.profiles import self_diagonal
+        return set(store.get((machine, env), {self_diagonal(machine, env)}))
+
+    def apply_col(machine, env, sels, *, mirror=True):
+        store[(machine, env)] = set(sels)
+        applied_calls.append((machine, env, mirror))
+        return True, "saved"
+
+    src.load_profile_column = load_col
+    src.apply_profile_column = apply_col
+    src._store = store
+    src._applied_calls = applied_calls
+    # The engine resolves the local host from the source LOCAL; align it with a
+    # host column so the self-diagonal lock lands on Lambda-Core Win.
+    src.LOCAL = ("Lambda-Core", "Win")
+    return src
+
+
+def test_profiles_apply_writes_changed_columns():
+    """Toggling a grid cell and Applying runs the per-host progress dialog and
+    persists that host's column on close."""
+    src = _profiles_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 2
+            await pilot.pause()
+            # Find a non-locked cell in the Borealis column (host index 1) and
+            # toggle it on.
+            hi = 1
+            ti = next(t for t in range(len(scr.targets))
+                      if not scr.cell_locked(t, hi))
+            scr.sel = ("PR", ti)
+            scr.pcol = hi
+            scr._toggle_cell()
+            assert scr.grid_dirty()
+            # Apply via the button -> opens the per-host progress dialog.
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            assert scr.active_button() == "PA"
+            scr._activate()
+            await pilot.pause()
+            assert scr.progress is not None
+            assert scr.progress["op"] == "profiles"
+            # Drive the executor to completion, then close (Enter) to commit.
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline and not scr.executor.is_done():
+                time.sleep(0.02)
+            scr._advance_progress()
+            assert scr.progress["done"]
+            scr._key_progress("enter")
+            await pilot.pause()
+        # The Borealis column was written and is no longer dirty.
+        assert any(m == "Borealis" for m, _e, _mir in src._applied_calls)
+        assert not scr.grid_dirty()
+
+    asyncio.run(run())
+
+
 def test_run_tui_picker_redirects_stdout_when_captured(monkeypatch):
     """When stdout is captured (launcher) but stderr is a TTY, Textual must
     render to stderr while the real stdout stays reserved for the plan."""
@@ -359,7 +486,7 @@ def test_live_loader_classify_fallback(monkeypatch):
 
 
 def test_resume_decision_exits_with_worktree():
-    """Enter on a worktree row exits the TUI with a resume decision."""
+    """Enter on a worktree row opens the sub-menu; Open then resumes (#1343)."""
     src = _fixture_source()
 
     async def run():
@@ -368,7 +495,11 @@ def test_resume_decision_exits_with_worktree():
             scr = app.query_one(PickerScreen)
             scr.machine_idx = scr.local_index()
             scr.sel = ("L", 0)
-            scr._activate()
+            scr._activate()                 # opens the sub-menu, no exit
+            await pilot.pause()
+            assert scr.submenu is not None
+            assert scr.submenu["actions"][0] == "Open"
+            scr._key_submenu("enter")       # default-focused Open -> resume
             await pilot.pause()
         assert app.result is not None
         assert app.result["action"] == "resume"
@@ -378,8 +509,29 @@ def test_resume_decision_exits_with_worktree():
     asyncio.run(run())
 
 
+def test_open_submenu_no_mux_toggle():
+    """Space toggles No-mux on Open; the resume decision carries it (#1343)."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.sel = ("L", 0)
+            scr._open_submenu()
+            scr._key_submenu("space")       # toggle No-mux while Open focused
+            assert scr.submenu["no_mux"] is True
+            scr._key_submenu("enter")
+            await pilot.pause()
+        assert app.result["action"] == "resume"
+        assert app.result["options"]["no_mux"] is True
+
+    asyncio.run(run())
+
+
 def test_new_worktree_decision_exits():
-    """The New Worktree button exits the TUI with a create decision."""
+    """New worktree… opens the options dialog; Create exits with a decision."""
     src = _fixture_source()
 
     async def run():
@@ -390,12 +542,20 @@ def test_new_worktree_decision_exits():
             scr.btn_idx = 0
             scr.sel = ("BTN", 0)
             assert scr.active_button() == "N"
-            scr._activate()
+            scr._activate()                 # opens the options dialog (#1346)
+            await pilot.pause()
+            assert scr.optmenu is not None
+            assert scr.optmenu["section"] == 1   # Create default-selected
+            assert all(not o["on"] for o in scr.optmenu["opts"])
+            scr._dlg_confirm(om=True)       # confirm Create, no options
             await pilot.pause()
         assert app.result is not None
         assert app.result["action"] == "new"
         assert app.result["is_local"] is True
-        assert app.result["options"] == {}
+        assert app.result["options"] == {
+            "anchor": False, "bare": False,
+            "no_mux": False, "local_model": False,
+        }
 
     asyncio.run(run())
 

@@ -15,10 +15,12 @@ from pathlib import Path
 
 from .. import config as cfg
 from .. import sessions, tracking
-from . import derive
+from . import derive, roster
 
 bucket = derive.bucket
 for_machine = derive.for_machine
+host_cols = roster.host_cols
+target_envs = roster.target_envs
 
 _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}
 
@@ -37,6 +39,18 @@ def machines():
     """Machine-tab descriptors. Slice 1: the local machine only."""
     m, e = LOCAL
     return [(f"{m} {e}", m, e, True)]
+
+
+def load_profile_column(machine, env):
+    """Read a host's terminal-profile column (local in-process / remote SSH)."""
+    from . import profiles_io
+    return profiles_io.load_column(machine, env)
+
+
+def apply_profile_column(machine, env, sels, *, mirror=True):
+    """Persist a host's terminal-profile column. Returns ``(ok, detail)``."""
+    from . import profiles_io
+    return profiles_io.apply_column(machine, env, sels, mirror=mirror)
 
 
 def load(machine: str | None = None, env: str | None = None):

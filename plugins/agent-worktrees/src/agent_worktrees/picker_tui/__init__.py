@@ -5,26 +5,32 @@ Ported from the aperture-labs ``worktree-picker-tty-overhaul`` prototype. The
 ``machines()`` / ``load()`` / ``bucket`` / ``for_machine`` (and ``make_loader``
 for live multi-machine). ``data_local`` is the real local source.
 
-Rollout is gated by env:
-- ``AGENT_WORKTREES_NEW_PICKER=1`` opts INTO the TUI (during the port).
-- ``AGENT_WORKTREES_LEGACY_PICKER=1`` will force the legacy ANSI picker once the
-  TUI becomes the default (final slice).
+Rollout is gated by config + env:
+- ``new_picker: true`` in ``~/.<project>/config.yaml`` or the global
+  ``~/.agent-worktrees/config.yaml`` opts a machine into the TUI persistently.
+- ``AGENT_WORKTREES_NEW_PICKER=1`` forces the TUI for one invocation.
+- ``AGENT_WORKTREES_LEGACY_PICKER=1`` forces the legacy ANSI picker (rollback;
+  always wins).
 """
 from __future__ import annotations
 
 import os
 
 
-def new_picker_enabled() -> bool:
+def new_picker_enabled(config=None) -> bool:
     """True when the TUI picker should be used instead of the legacy ANSI one.
 
-    During the port the TUI is opt-in (``AGENT_WORKTREES_NEW_PICKER=1``). The
-    legacy override (``AGENT_WORKTREES_LEGACY_PICKER=1``) always wins, so it
-    keeps working as the rollback switch after the default flips.
+    Precedence (first match wins):
+      1. ``AGENT_WORKTREES_LEGACY_PICKER`` env -> legacy (the rollback switch).
+      2. ``AGENT_WORKTREES_NEW_PICKER`` env -> TUI.
+      3. ``config.new_picker`` (persistent, machine-local > global).
+      4. default: legacy.
     """
     if os.environ.get("AGENT_WORKTREES_LEGACY_PICKER"):
         return False
-    return bool(os.environ.get("AGENT_WORKTREES_NEW_PICKER"))
+    if os.environ.get("AGENT_WORKTREES_NEW_PICKER"):
+        return True
+    return bool(getattr(config, "new_picker", False))
 
 
 def run_tui_picker(source=None, live=False):

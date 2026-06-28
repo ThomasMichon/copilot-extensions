@@ -153,6 +153,12 @@ class Config:
     the session and setup script see an up-to-date tree.  Only ever a
     fast-forward (clean + no local commits ahead); dirty/ahead/diverged
     worktrees are left untouched.  Set false to opt out of auto-update."""
+    new_picker: bool = False
+    """When true, the bare binstub launches the overhauled Textual worktree
+    picker instead of the legacy ANSI one.  Machine-wide opt-in during rollout
+    (resolved machine-local > global).  The env vars still override:
+    ``AGENT_WORKTREES_LEGACY_PICKER`` forces the legacy picker (rollback) and
+    ``AGENT_WORKTREES_NEW_PICKER`` forces the new one."""
 
     @property
     def default_repo(self) -> RepoConfig:
@@ -521,6 +527,9 @@ def load_config(path: Path | None = None) -> Config:
             machine_raw.get(
                 "auto_fast_forward", global_raw.get("auto_fast_forward", True)
             )
+        ),
+        new_picker=bool(
+            machine_raw.get("new_picker", global_raw.get("new_picker", False))
         ),
     )
 

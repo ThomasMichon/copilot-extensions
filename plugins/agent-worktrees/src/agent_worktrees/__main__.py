@@ -875,7 +875,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         # multi-machine flow is fleshed out. The legacy ANSI picker below stays
         # the default and the rollback path (AGENT_WORKTREES_LEGACY_PICKER).
         from . import picker_tui
-        if picker_tui.new_picker_enabled():
+        if picker_tui.new_picker_enabled(config):
             return _run_new_picker(config, args)
 
         # Picker loop -- re-enters after system menu actions
@@ -1939,6 +1939,10 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
         if not wt_id:
             output.err("Picker returned a resume decision with no worktree id.")
             return 1
+        # The Open sub-menu's No-mux toggle (picker #1343) launches without the
+        # PSMux/TMux wrapper.
+        if (decision.get("options") or {}).get("no_mux"):
+            args.no_mux = True
         wt_id = _resolve_worktree_id(wt_id)
         yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
         if not yaml_path.exists():
@@ -3782,6 +3786,208 @@ def cmd_sync(args: argparse.Namespace) -> int:
             tag = f"updated ↑{r.get('behind', 0)}" if r.get("updated") \
                 else r.get("reason", "?")
             print(f"{r['worktree_id']}: {tag}")
+    return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# profiles (terminal-profile selection -- the Picker's Profiles grid column)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _profiles_host() -> tuple[str, str]:
+    """This machine's (display_name, env_label) in roster vocabulary."""
+    from .picker_tui import roster
+    return roster.local_host()
+
+
+def cmd_profiles(args: argparse.Namespace) -> int:
+    """Read or write this machine's terminal-profile column for the repo.
+
+    ``get`` emits this host's selected launch targets (its column of the host x
+    target matrix) as JSON. ``apply --set <json>`` persists a new column into
+    ``~/.<project>/config.yaml`` and, unless ``--no-mirror``, regenerates the
+    terminal profiles to match. Both are SSH-able so the Picker can read/write
+    a remote host's column over its facility alias.
+    """
+    from . import profiles as profiles_mod
+
+    action = getattr(args, "profiles_action", "get")
+    as_json = getattr(args, "json", False)
+    cfg_path = cfg.default_config_path()
+    machine, env = _profiles_host()
+
+    if action == "get":
+        managed = profiles_mod.has_selection(cfg_path)
+        sels = profiles_mod.normalize_selection(
+            profiles_mod.load_selection(cfg_path), machine, env)
+        payload = {
+            "machine": machine,
+            "env": env,
+            "managed": managed,
+            "targets": [s.as_dict() for s in sels],
+        }
+        if as_json:
+            _json_output(payload)
+        else:
+            state = "managed" if managed else "legacy (all profiles)"
+            print(f"Terminal profiles for {machine} {env} [{state}]:")
+            for s in sels:
+                lock = " (self, locked)" if (
+                    s.machine == machine and s.env == env and s.kind == "agent"
+                ) else ""
+                print(f"  - {s.machine} {s.env} · {s.kind}{lock}")
+        return 0
+
+    # action == "apply"
+    raw = getattr(args, "set", None)
+    if raw is None:
+        msg = "profiles apply requires --set '<json-array>'"
+        if as_json:
+            _json_error(msg)
+        else:
+            output.err(msg)
+        return 2
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        msg = f"invalid --set JSON: {e}"
+        if as_json:
+            _json_error(msg)
+        else:
+            output.err(msg)
+        return 2
+    if not isinstance(parsed, list):
+        msg = "--set must be a JSON array of {machine, env, kind} objects"
+        if as_json:
+            _json_error(msg)
+        else:
+            output.err(msg)
+        return 2
+    sels = [
+        profiles_mod.TargetSel(
+            str(o.get("machine", "")).strip(),
+            str(o.get("env", "")).strip(),
+            str(o.get("kind", "agent")).strip().lower(),
+        )
+        for o in parsed if isinstance(o, dict)
+    ]
+    written = profiles_mod.save_selection(
+        cfg_path, sels, self_machine=machine, self_env=env)
+
+    mirrored = False
+    if not getattr(args, "no_mirror", False):
+        mirrored = _mirror_terminal_profiles()
+
+    payload = {
+        "machine": machine,
+        "env": env,
+        "targets": [s.as_dict() for s in written],
+        "mirrored": mirrored,
+    }
+    if as_json:
+        _json_output(payload)
+    else:
+        output.ok(f"Saved {len(written)} terminal profile(s) for {machine} {env}"
+                  + (" · mirrored" if mirrored else ""))
+    return 0
+
+
+def _mirror_terminal_profiles() -> bool:
+    """Regenerate the local terminal profiles from the saved selection.
+
+    Mirroring is a Windows-only concern today (Windows Terminal fragment via
+    the installer); on WSL/Linux hosts it is a no-op (Tabby/Linux mirroring is
+    future work). Returns True when a mirror actually ran.
+    """
+    if platform.system() != "Windows":
+        return False
+    try:
+        _refresh_terminal_profiles()
+        return True
+    except Exception:
+        return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# picker -- persistent new-picker opt-in (machine-wide global config)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _set_global_config_key(key: str, value) -> Path:
+    """Read-modify-write one top-level key into the global machine config.
+
+    Preserves every other key. Creates the file (and parent) if absent.
+    Returns the path written.
+    """
+    import yaml as _yaml
+
+    gpath = cfg.global_config_path()
+    data: dict = {}
+    if gpath.exists():
+        try:
+            with open(gpath, encoding="utf-8") as f:
+                loaded = _yaml.safe_load(f)
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, _yaml.YAMLError):
+            data = {}
+    data[key] = value
+    gpath.parent.mkdir(parents=True, exist_ok=True)
+    with open(gpath, "w", encoding="utf-8") as f:
+        _yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+    return gpath
+
+
+def cmd_picker(args: argparse.Namespace) -> int:
+    """Enable/disable/inspect the persistent new-picker opt-in for this machine.
+
+    ``enable``/``disable`` write ``new_picker`` into the machine-wide global
+    config (``~/.agent-worktrees/config.yaml``); ``status`` reports the
+    effective value and where it comes from. SSH-able so a fleet migration can
+    flip it per machine.
+    """
+    from . import picker_tui
+
+    action = getattr(args, "picker_action", "status")
+    as_json = getattr(args, "json", False)
+
+    if action in ("enable", "disable"):
+        val = action == "enable"
+        gpath = _set_global_config_key("new_picker", val)
+        if as_json:
+            _json_output({"new_picker": val, "path": str(gpath)})
+        else:
+            output.ok(f"new_picker = {str(val).lower()} ({gpath})")
+        return 0
+
+    # status
+    persisted = None
+    try:
+        persisted = bool(cfg.load_config().new_picker)
+    except Exception:
+        # No project context -- read the global config directly.
+        import yaml as _yaml
+        gpath = cfg.global_config_path()
+        if gpath.exists():
+            try:
+                with open(gpath, encoding="utf-8") as f:
+                    raw = _yaml.safe_load(f)
+                if isinstance(raw, dict):
+                    persisted = bool(raw.get("new_picker", False))
+            except (OSError, _yaml.YAMLError):
+                persisted = None
+    effective = picker_tui.new_picker_enabled(
+        type("_C", (), {"new_picker": bool(persisted)})())
+    env_override = None
+    if os.environ.get("AGENT_WORKTREES_LEGACY_PICKER"):
+        env_override = "AGENT_WORKTREES_LEGACY_PICKER"
+    elif os.environ.get("AGENT_WORKTREES_NEW_PICKER"):
+        env_override = "AGENT_WORKTREES_NEW_PICKER"
+    if as_json:
+        _json_output({"new_picker": bool(persisted), "effective": effective,
+                      "env_override": env_override})
+    else:
+        print(f"new_picker (persisted): {str(bool(persisted)).lower()}")
+        print(f"effective:              {str(effective).lower()}"
+              + (f"  (env override: {env_override})" if env_override else ""))
     return 0
 
 
@@ -6333,6 +6539,33 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Emit JSON results (a single object with --worktree-id, "
                         "else {\"results\": [...]})")
 
+    # profiles (terminal-profile selection -- the Picker's Profiles grid column)
+    p = sub.add_parser("profiles",
+                       help="Read or write this machine's terminal-profile "
+                            "selection (the Picker's Profiles column)")
+    p.add_argument("profiles_action", choices=["get", "apply"],
+                   help="get: emit this host's selected launch targets; "
+                        "apply: persist a new selection (--set) and mirror it")
+    p.add_argument("--set", default=None,
+                   help="With apply: a JSON array of {machine, env, kind} "
+                        "objects -- the new column for this host (the locked "
+                        "self·agent target is always included)")
+    p.add_argument("--no-mirror", action="store_true",
+                   help="With apply: persist the selection but skip "
+                        "regenerating the terminal profiles")
+    p.add_argument("--json", action="store_true",
+                   help="Emit a JSON result object")
+
+    # picker (persistent new-picker opt-in -- machine-wide)
+    p = sub.add_parser("picker",
+                       help="Enable/disable/inspect the persistent new-picker "
+                            "opt-in for this machine")
+    p.add_argument("picker_action", choices=["enable", "disable", "status"],
+                   nargs="?", default="status",
+                   help="enable/disable writes ~/.agent-worktrees/config.yaml "
+                        "new_picker; status (default) reports the effective value")
+    p.add_argument("--json", action="store_true", help="Emit a JSON result")
+
     # validate
     p = sub.add_parser("validate", help="Validate core infrastructure files")
     p.add_argument("--dry-run", action="store_true")
@@ -6845,6 +7078,8 @@ COMMAND_MAP = {
     "remove-system": cmd_remove_system,
     "cleanup": cmd_cleanup,
     "sync": cmd_sync,
+    "profiles": cmd_profiles,
+    "picker": cmd_picker,
     "validate": cmd_validate,
     "install": cmd_install,
     "register": cmd_register,
@@ -7027,6 +7262,7 @@ def _git_toplevel(path: Path) -> Path | None:
 # Commands that work without a project context (no load_config/project_name).
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "install", "register", "hook",
+    "picker",
 }
 
 
