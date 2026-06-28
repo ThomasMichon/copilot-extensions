@@ -108,6 +108,15 @@ A handoff is **not** auto-loaded. The user resumes by pasting the wrapper prompt
 names the handoff file path and tells you to read it; read that file to orient
 yourself, then continue.
 
+> **A handoff is in-place: same worktree, new session.** The point of a handoff
+> is to continue *this* work with a fresh context window, so the new session
+> runs in the **same worktree** as the one that wrote the handoff. **Never write
+> (or follow) a handoff that says "create / build on a fresh worktree"** -- the
+> operator owns local worktrees and an agent does not spin one up as a
+> continuation of its own work (see the **`worktree`** skill). If a PR merged in
+> the previous session, the next session simply syncs the worktree forward
+> (`agent-worktrees git sync`) and keeps going.
+
 ### If the user says "pick up from last session" with no pasted prompt
 
 The previous session's handoff was not pasted in. Fall back to

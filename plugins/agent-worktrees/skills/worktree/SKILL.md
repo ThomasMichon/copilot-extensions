@@ -394,6 +394,22 @@ when none are live.
   default branch -- it drops the just-merged (squashed) commits and keeps any
   newer local work, so you continue *on top of* the merge rather than starting a
   fresh worktree. See the **`git-collaboration`** skill.
+
+> **The operator owns local worktrees -- an agent never creates one as a
+> *continuation* of its own work.** Reusing the current worktree (sync forward,
+> keep going) is the *only* way to advance serial work, the next stretch of an
+> effort, a follow-up PR, or a finalized worktree. **Do NOT run
+> `agent-worktrees create`** for any of these; from inside an agent session,
+> create a worktree only when the **operator explicitly requests** it.
+> - **Handoffs are in-place.** A context handoff continues in the **same
+>   worktree** via a **new session** -- the handoff prompt must **never** tell
+>   the next session to "create/build on a fresh worktree." (See the
+>   **`context-handoff`** skill.)
+> - **Cross-machine `agent-bridge` delegation is the exception that proves the
+>   rule:** dispatching genuinely *parallel* work to another machine implicitly
+>   provisions a remote worktree *bound to the host worktree* -- that is expected
+>   and fine. The ban is only on new worktrees used as *continuations* of the
+>   current line of work.
 - **Parallel:** keep one PR open and open another from the same worktree with
   `create-pr --new`. Address a specific one with `push-changes` (from its
   feature branch) or `set-pr --pr <n>`.
