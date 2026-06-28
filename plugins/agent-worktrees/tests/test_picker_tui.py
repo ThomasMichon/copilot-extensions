@@ -214,6 +214,11 @@ def test_profiles_apply_writes_changed_columns():
             assert scr.active_button() == "PA"
             scr._activate()
             await pilot.pause()
+            # Apply now opens a confirm dialog showing the add/remove diff.
+            assert scr.prof_confirm is not None
+            assert scr.prof_confirm["changed"]
+            scr._key_prof_confirm("enter")     # confirm -> runs the progress
+            await pilot.pause()
             assert scr.progress is not None
             assert scr.progress["op"] == "profiles"
             # Drive the executor to completion, then close (Enter) to commit.
@@ -227,6 +232,40 @@ def test_profiles_apply_writes_changed_columns():
         # The Borealis column was written and is no longer dirty.
         assert any(m == "Borealis" for m, _e, _mir in src._applied_calls)
         assert not scr.grid_dirty()
+
+    asyncio.run(run())
+
+
+def test_profiles_apply_confirm_cancel_is_noop():
+    """Esc on the Apply confirm dialog cancels without writing or running."""
+    src = _profiles_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 2
+            await pilot.pause()
+            hi = 1
+            ti = next(t for t in range(len(scr.targets))
+                      if not scr.cell_locked(t, hi))
+            scr.sel = ("PR", ti)
+            scr.pcol = hi
+            scr._toggle_cell()
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()
+            await pilot.pause()
+            assert scr.prof_confirm is not None
+            # Confirm shows the concrete add/remove diff for the changed host.
+            added, removed = scr.prof_confirm["diffs"][hi]
+            assert added or removed
+            scr._key_prof_confirm("escape")    # cancel
+            await pilot.pause()
+        assert scr.prof_confirm is None
+        assert scr.progress is None
+        assert src._applied_calls == []        # nothing written
+        assert scr.grid_dirty()                # edit preserved, not applied
 
     asyncio.run(run())
 
