@@ -9,8 +9,18 @@ honoring the no-new-dependency constraint.  A token is required (resolved by
 from __future__ import annotations
 
 import json
+import time
 
 from .base import ProviderError, PRScope, PullResult, run_cli
+
+# HTTP statuses (plus the synthetic 0 = curl-level failure) worth retrying when
+# resolving/attaching labels.  A label apply is a small, idempotent call against
+# the facility Gitea; a single transient hiccup must not silently drop a
+# *required* label (auto-merge / source:<machine>).  4xx (auth / not-found /
+# bad-request) is permanent and not retried.
+_TRANSIENT_LABEL_HTTP = frozenset({0, 408, 429, 500, 502, 503, 504})
+_LABEL_RETRIES = 3
+_LABEL_BACKOFF = 0.5
 
 
 class GiteaProvider:
@@ -90,24 +100,61 @@ class GiteaProvider:
             state=str(data.get("state", "open")) or "open",
         )
         if scope.labels and result.number is not None:
-            self._apply_labels(scope, result.number, token)
+            result.label_error = self._apply_labels(scope, result.number, token)
         return result
+
+    def _curl_with_retry(
+        self,
+        method: str,
+        url: str,
+        token: str,
+        *,
+        payload: dict | None = None,
+    ) -> tuple[int, str]:
+        """``_curl`` with bounded retry on transient failures.
+
+        Returns ``(status, body)``; ``status == 0`` means a curl-level failure
+        persisted across all attempts.  A *transient* status (5xx / 408 / 429 /
+        curl error) is retried with exponential backoff; a permanent status
+        (2xx success or a 4xx) returns immediately.  This is the linchpin of the
+        label-apply reliability fix: the required ``source:<machine>`` labels
+        live on label-list **page 2**, so any single un-retried blip on that
+        page used to silently drop them (see ``_all_labels``).
+        """
+        delay = _LABEL_BACKOFF
+        status, body = 0, ""
+        for attempt in range(1, _LABEL_RETRIES + 1):
+            try:
+                status, body = self._curl(method, url, token, payload=payload)
+            except ProviderError:
+                status, body = 0, ""
+            if status not in _TRANSIENT_LABEL_HTTP or attempt == _LABEL_RETRIES:
+                return status, body
+            time.sleep(delay)
+            delay *= 2
+        return status, body
 
     def _all_labels(self, scope: PRScope, token: str) -> dict[str, int]:
         """Resolve ``label-name (lowercased) -> id`` for the repo, **paginated**.
 
         Gitea's ``GET /repos/{repo}/labels`` returns a single page (default 30),
         so a repo with more labels than fit on page 1 leaves later labels
-        invisible. A previous single-page fetch here silently dropped any
-        configured label past that boundary (e.g. a freshly-created
-        ``source:<machine>``). We page with an explicit ``limit`` until a short
-        page, so every label resolves. Returns ``{}`` on the first non-200.
+        invisible.  We page with an explicit ``limit`` until an **empty** page,
+        so every label resolves regardless of how Gitea clamps the page size
+        (stopping on "page shorter than the requested limit" would drop the
+        newest labels whenever the server clamps ``limit`` below what we ask).
+
+        On a page that still fails after retries this **raises** rather than
+        returning a silent partial map -- a partial map is exactly what caused
+        required ``source:<machine>`` labels (always on page 2) to be dropped
+        whenever a single label-list GET hiccupped.  The caller turns the raise
+        into a surfaced ``label_error`` (non-fatal to the PR, but visible).
         """
         by_name: dict[str, int] = {}
         page = 1
         page_size = 50
         while True:
-            status, body = self._curl(
+            status, body = self._curl_with_retry(
                 "GET",
                 self._api(
                     scope.api_base,
@@ -116,40 +163,63 @@ class GiteaProvider:
                 token,
             )
             if status != 200:
-                return {} if page == 1 else by_name
+                raise ProviderError(
+                    f"Gitea label lookup failed (HTTP {status}) on page {page} "
+                    f"for {scope.repo}"
+                )
             batch = json.loads(body)
-            if not isinstance(batch, list):
+            if not isinstance(batch, list) or not batch:
                 break
             for lbl in batch:
                 if isinstance(lbl, dict) and lbl.get("name") and lbl.get("id") is not None:
                     by_name[str(lbl["name"]).lower()] = lbl["id"]
-            if len(batch) < page_size:
-                break
             page += 1
         return by_name
 
-    def _apply_labels(self, scope: PRScope, number: int, token: str) -> None:
-        """Best-effort: resolve label names to ids and attach them.
+    def _apply_labels(self, scope: PRScope, number: int, token: str) -> str:
+        """Resolve label names to ids and attach them; return an error string.
 
         Gitea's issue-label endpoint takes label **ids**, so names are mapped
-        via the repo label list first.  Failures are swallowed -- a missing
-        label must not fail an otherwise-created PR (it is reported by the
-        caller's verification step).
+        via the (paginated) repo label list first, then attached in a single
+        POST.  Returns ``""`` on full success, or a human-readable description
+        of what could not be applied (lookup failure, attach failure, or labels
+        that don't exist in the repo).  Label trouble is **non-fatal** to the
+        PR -- the caller surfaces the string as ``pr_label_error`` instead of
+        silently swallowing it (the old behavior, which let a transient blip
+        drop a required label with zero trace).
         """
+        wanted = [name for name in scope.labels if name]
+        if not wanted:
+            return ""
         try:
             by_name = self._all_labels(scope, token)
-            ids = [by_name[name.lower()] for name in scope.labels
-                   if name.lower() in by_name and by_name[name.lower()] is not None]
-            if not ids:
-                return
-            self._curl(
+        except (ProviderError, json.JSONDecodeError, ValueError) as exc:
+            return f"label lookup failed: {exc}"
+
+        resolved: dict[str, int] = {}
+        missing: list[str] = []
+        for name in wanted:
+            lid = by_name.get(name.lower())
+            if lid is None:
+                missing.append(name)
+            else:
+                resolved[name] = lid
+
+        problems: list[str] = []
+        if resolved:
+            status, _ = self._curl_with_retry(
                 "POST",
                 self._api(scope.api_base, f"/repos/{scope.repo}/issues/{number}/labels"),
                 token,
-                payload={"labels": ids},
+                payload={"labels": sorted(resolved.values())},
             )
-        except (ProviderError, json.JSONDecodeError, KeyError, ValueError):
-            return
+            if status not in (200, 201):
+                problems.append(
+                    f"attach failed (HTTP {status}) for {sorted(resolved)}"
+                )
+        if missing:
+            problems.append(f"labels not found in {scope.repo}: {missing}")
+        return "; ".join(problems)
 
     def get_pull(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
