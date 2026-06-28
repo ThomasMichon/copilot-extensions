@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import types
 from pathlib import Path
 
 from agent_worktrees import config as cfg
@@ -567,3 +568,65 @@ class TestWorktreeToDictState:
         assert d["ahead"] == 3
         assert d["behind"] == 5
         assert d["dirty"] == 0
+
+
+# ---------------------------------------------------------------------------
+# _classify_records shares the status bar's CONVO refinement (aperture-labs #1290)
+# ---------------------------------------------------------------------------
+
+class TestClassifyRecordsConvo:
+    """list --json --classify must report the same CONVO state the tmux status
+    bar shows: a clean, commit-less worktree whose session held turns."""
+
+    def _wire(self, monkeypatch, *, raw_state):
+        from agent_worktrees import __main__ as m
+        from agent_worktrees import git_ops
+        monkeypatch.setattr(
+            m.cfg, "load_config",
+            lambda: types.SimpleNamespace(
+                default_repo=types.SimpleNamespace(
+                    remote="origin", default_branch="master",
+                ),
+            ),
+        )
+        monkeypatch.setattr(m, "_build_active_paths", lambda *a, **k: set())
+        monkeypatch.setattr(
+            m.git_ops, "classify_worktree",
+            lambda *a, **k: git_ops.WorktreeStateInfo(state=raw_state),
+        )
+        monkeypatch.setattr(m, "_apply_tracking_override", lambda r, i: i)
+        return m
+
+    def _rec(self, path):
+        return tracking.WorktreeRecord(
+            worktree_id="wt-003", branch="worktree/wt-003",
+            worktree_path=str(path), repo="ext", machine="m", platform="wsl",
+            started_at="2026-06-01T10:00:00", last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+            handoff_prompt=None, sessions=None, prs=[],
+        )
+
+    def test_unused_with_turns_classifies_convo(self, monkeypatch, tmp_path):
+        from agent_worktrees import sessions
+        m = self._wire(monkeypatch, raw_state=git_ops.WorktreeState.UNUSED)
+        rec = self._rec(tmp_path)
+        ctx = sessions.SessionContext()
+        ctx.turn_count[m._normalize_path(str(tmp_path))] = 5
+        out = m._classify_records([rec], ctx)
+        assert out["wt-003"].state == git_ops.WorktreeState.CONVO
+
+    def test_unused_without_turns_stays_unused(self, monkeypatch, tmp_path):
+        from agent_worktrees import sessions
+        m = self._wire(monkeypatch, raw_state=git_ops.WorktreeState.UNUSED)
+        rec = self._rec(tmp_path)
+        out = m._classify_records([rec], sessions.SessionContext())
+        assert out["wt-003"].state == git_ops.WorktreeState.UNUSED
+
+    def test_non_unused_unaffected_by_turns(self, monkeypatch, tmp_path):
+        from agent_worktrees import sessions
+        m = self._wire(monkeypatch, raw_state=git_ops.WorktreeState.WIP)
+        rec = self._rec(tmp_path)
+        ctx = sessions.SessionContext()
+        ctx.turn_count[m._normalize_path(str(tmp_path))] = 9
+        out = m._classify_records([rec], ctx)
+        assert out["wt-003"].state == git_ops.WorktreeState.WIP
