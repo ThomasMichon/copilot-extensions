@@ -105,6 +105,14 @@ def _proc(stdout="", returncode=0, stderr=""):
                                        stdout=stdout, stderr=stderr)
 
 
+class _NoSleep:
+    """Stand-in for the ``time`` module so retry backoff doesn't slow tests."""
+
+    @staticmethod
+    def sleep(_seconds):
+        return None
+
+
 class TestGiteaProvider:
     def test_create_pull_parses_url_and_number(self, monkeypatch):
         from agent_worktrees.providers import gitea
@@ -221,6 +229,115 @@ class TestGiteaProvider:
         assert res.number == 42
         # The page-2 label id was resolved and attached.
         assert label_post == {"labels": [228]}
+        assert res.label_error == ""
+
+    def test_apply_labels_retries_transient_page_failure(self, monkeypatch):
+        # Regression (#1161 / observed #1319): a *single* transient failure on
+        # the label-list page that carries source:<machine> (always page 2)
+        # used to make _all_labels return a partial map, silently dropping the
+        # required source label while auto-merge (page 1) still applied. The
+        # GET must now be retried so BOTH labels resolve and attach.
+        from agent_worktrees.providers import gitea
+
+        page1 = [{"name": "auto-merge", "id": 189}] + \
+            [{"name": f"x{i}", "id": i} for i in range(1, 50)]   # full page (50)
+        page2 = [{"name": "source:wheatley", "id": 228}]
+        label_post: dict = {}
+        page2_attempts = {"n": 0}
+
+        def fake_run(args, **kw):
+            url = next((a for a in args if isinstance(a, str)
+                        and a.startswith("http")), "")
+            if "/pulls" in url:
+                return _proc(stdout=json.dumps(
+                    {"html_url": "https://h/gitea/o/r/pulls/42",
+                     "number": 42, "state": "open"}) + "\n201")
+            if "/labels?" in url and "page=1" in url:
+                return _proc(stdout=json.dumps(page1) + "\n200")
+            if "/labels?" in url and "page=2" in url:
+                page2_attempts["n"] += 1
+                if page2_attempts["n"] == 1:
+                    return _proc(stdout="upstream hiccup\n503")  # transient
+                return _proc(stdout=json.dumps(page2) + "\n200")
+            if "/issues/42/labels" in url:
+                idx = args.index("-d")
+                label_post.update(json.loads(args[idx + 1]))
+                return _proc(stdout="[]\n200")
+            return _proc(stdout="[]\n200")  # page 3 empty -> stop
+
+        monkeypatch.setattr(gitea, "time", _NoSleep())
+        monkeypatch.setattr(gitea, "run_cli", fake_run)
+        scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
+                        body="B", api_base="https://h/gitea",
+                        labels=["auto-merge", "source:wheatley"])
+        res = gitea.GiteaProvider().create_pull(scope, token="tok")
+        assert res.number == 42
+        assert page2_attempts["n"] == 2  # retried once
+        assert label_post == {"labels": [189, 228]}  # both, sorted
+        assert res.label_error == ""
+
+    def test_apply_labels_surfaces_error_on_persistent_failure(self, monkeypatch):
+        # When a label-list page fails on every retry, _all_labels must NOT
+        # silently return a partial map; create_pull surfaces label_error so the
+        # dropped label is visible rather than mysterious. The PR still opens.
+        from agent_worktrees.providers import gitea
+
+        def fake_run(args, **kw):
+            url = next((a for a in args if isinstance(a, str)
+                        and a.startswith("http")), "")
+            if "/pulls" in url:
+                return _proc(stdout=json.dumps(
+                    {"html_url": "https://h/gitea/o/r/pulls/42",
+                     "number": 42, "state": "open"}) + "\n201")
+            if "/labels?" in url:
+                return _proc(stdout="down\n503")  # always transient-fails
+            return _proc(stdout="[]\n200")
+
+        monkeypatch.setattr(gitea, "time", _NoSleep())
+        monkeypatch.setattr(gitea, "run_cli", fake_run)
+        scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
+                        body="B", api_base="https://h/gitea",
+                        labels=["auto-merge", "source:wheatley"])
+        res = gitea.GiteaProvider().create_pull(scope, token="tok")
+        assert res.number == 42            # PR still created
+        assert "label lookup failed" in res.label_error
+        assert "503" in res.label_error
+
+    def test_apply_labels_reports_label_absent_from_repo(self, monkeypatch):
+        # A configured label that simply doesn't exist in the repo (e.g. a
+        # source:<machine> not yet created) is reported, and the labels that DO
+        # resolve are still attached.
+        from agent_worktrees.providers import gitea
+
+        page1 = [{"name": "auto-merge", "id": 189}]
+        label_post: dict = {}
+
+        def fake_run(args, **kw):
+            url = next((a for a in args if isinstance(a, str)
+                        and a.startswith("http")), "")
+            if "/pulls" in url:
+                return _proc(stdout=json.dumps(
+                    {"html_url": "https://h/gitea/o/r/pulls/42",
+                     "number": 42, "state": "open"}) + "\n201")
+            if "/labels?" in url and "page=1" in url:
+                return _proc(stdout=json.dumps(page1) + "\n200")
+            if "/labels?" in url:
+                return _proc(stdout="[]\n200")  # page 2 empty -> stop
+            if "/issues/42/labels" in url:
+                idx = args.index("-d")
+                label_post.update(json.loads(args[idx + 1]))
+                return _proc(stdout="[]\n200")
+            return _proc(stdout="[]\n200")
+
+        monkeypatch.setattr(gitea, "time", _NoSleep())
+        monkeypatch.setattr(gitea, "run_cli", fake_run)
+        scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
+                        body="B", api_base="https://h/gitea",
+                        labels=["auto-merge", "source:ghost"])
+        res = gitea.GiteaProvider().create_pull(scope, token="tok")
+        assert label_post == {"labels": [189]}        # resolved one still attached
+        assert "labels not found" in res.label_error
+        assert "source:ghost" in res.label_error
 
 
 # ---------------------------------------------------------------------------

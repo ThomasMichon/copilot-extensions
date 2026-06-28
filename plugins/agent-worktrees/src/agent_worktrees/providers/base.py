@@ -51,6 +51,15 @@ class PullResult:
     some providers, so ``merged`` is the authoritative "did the work land"
     signal for prune-safety reconciliation.
     """
+    label_error: str = ""
+    """Non-empty when the PR opened but one or more configured labels could not
+    be applied (lookup/attach failure, or a label absent from the repo).
+
+    The PR creation itself still succeeded -- label trouble is non-fatal -- but
+    this is surfaced (as ``pr_label_error`` on create_pr's result) instead of
+    being silently swallowed, so a dropped ``auto-merge`` / ``source:<machine>``
+    label is visible rather than mysterious.
+    """
 
 
 @runtime_checkable

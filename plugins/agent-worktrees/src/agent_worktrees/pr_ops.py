@@ -374,6 +374,11 @@ def _open_via_provider(
     result["url"] = pull.url
     result["number"] = pull.number
     result["state"] = pull.state or result.get("state")
+    # The PR opened, but a required label (auto-merge / source:<machine>) may
+    # have failed to apply. Surface it rather than swallowing -- the merge gate
+    # and source attribution depend on these labels.
+    if getattr(pull, "label_error", ""):
+        result["pr_label_error"] = pull.label_error
 
 
 def _finish_auto_open(

@@ -336,6 +336,13 @@ uses the manual flow unchanged.
 > the result carries a `pr_open_error`, or when `pr.auto_open` is off / no
 > provider creds are configured.
 
+> **`pr_label_error` -- PR opened, but a label didn't stick.** When `create-pr`
+> opens the PR but a configured label (e.g. `auto-merge` / `source:<machine>`)
+> could not be applied, the result carries `pr_label_error` (the PR still
+> exists -- do **not** open another). The label apply now retries transient
+> failures, so this is rare; if it appears, re-apply the named label(s) via the
+> provider sub-agent rather than re-creating the PR.
+
 ### Step 2: Delegate PR creation to the provider sub-agent
 
 *(Manual fallback -- used only when `create-pr` did **not** open the PR: i.e.
