@@ -274,11 +274,14 @@ def _classify_records(
     """Classify each worktree's git state, keyed by worktree id.
 
     Mirrors the cleanup/picker classification loop so ``list --json --classify``
-    emits the same ``state`` the status segment and picker use. Classification
-    runs **where git access exists** -- so a remote machine carries its own
-    worktree states in ``list --json`` over SSH (the local picker cannot
-    git-classify a remote worktree). No fetch (``behind`` reflects the last
-    fetch); ~5 git calls per existing worktree, hence opt-in.
+    emits the same ``state`` the status segment and picker use -- including the
+    session-derived ``CONVO`` refinement of ``UNUSED`` (a clean, commit-less
+    worktree whose session held conversation turns), applied here via
+    :func:`git_ops.refine_state_with_session` when a ``session_ctx`` is given.
+    Classification runs **where git access exists** -- so a remote machine
+    carries its own worktree states in ``list --json`` over SSH (the local
+    picker cannot git-classify a remote worktree). No fetch (``behind`` reflects
+    the last fetch); ~5 git calls per existing worktree, hence opt-in.
     """
     config = cfg.load_config()
     repo = config.default_repo
@@ -296,6 +299,17 @@ def _classify_records(
             info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
         else:
             info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
+        # Layer the session-derived CONVO refinement so this data contract
+        # reports the same display state the tmux status bar does.
+        if session_ctx is not None:
+            turns = session_ctx.turn_count.get(
+                _normalize_path(rec.worktree_path), 0,
+            )
+            if turns:
+                info = dataclasses.replace(
+                    info,
+                    state=git_ops.refine_state_with_session(info.state, turns),
+                )
         out[rec.worktree_id] = info
     return out
 
@@ -2662,11 +2676,17 @@ def cmd_status(args: argparse.Namespace) -> int:
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Git state -> (256-color background, short label) for the status-bar block.
+# CONVO is the session-derived refinement of UNUSED (see
+# git_ops.refine_state_with_session): a clean, commit-less worktree whose
+# session held conversation turns reads as a distinct teal block, not grey
+# UNUSED.  Both the status bar and `list --json --classify` resolve to this
+# same WorktreeState set.
 _SEGMENT_STYLE: dict[git_ops.WorktreeState, tuple[str, str]] = {
     git_ops.WorktreeState.DIRTY:     ("colour160", "DIRTY"),   # red
     git_ops.WorktreeState.WIP:       ("colour178", "WIP"),     # amber
     git_ops.WorktreeState.COMPLETED: ("colour034", "FINAL"),   # green
     git_ops.WorktreeState.UNUSED:    ("colour244", "UNUSED"),  # grey
+    git_ops.WorktreeState.CONVO:     ("colour037", "CONVO"),   # teal
     git_ops.WorktreeState.ORPHAN:    ("colour129", "ORPHAN"),  # magenta
     git_ops.WorktreeState.ACTIVE:    ("colour039", "ACTIVE"),  # blue
     git_ops.WorktreeState.GONE:      ("colour238", "GONE"),    # dark grey
@@ -2674,11 +2694,6 @@ _SEGMENT_STYLE: dict[git_ops.WorktreeState, tuple[str, str]] = {
 }
 
 _SEGMENT_TITLE_MAX = 48
-
-# Conversation-only refinement of UNUSED: a worktree with no commits whose
-# session nonetheless held >0 turns is not idle -- render it as a distinct
-# teal "CONVO" block (style, label) so it reads apart from grey UNUSED.
-_SEGMENT_CONVO_STYLE: tuple[str, str] = ("colour037", "CONVO")  # teal
 
 
 def _find_record_for_path(path: str) -> tracking.WorktreeRecord | None:
@@ -2830,14 +2845,14 @@ def cmd_status_segment(args: argparse.Namespace) -> int:
             ctx, turns = None, 0
 
     sync = _sync_status_tag(info)
-    convo = info.state == git_ops.WorktreeState.UNUSED and turns > 0
+    state = git_ops.refine_state_with_session(info.state, turns)
 
-    if convo:
-        bg, label = _SEGMENT_CONVO_STYLE
+    if state == git_ops.WorktreeState.CONVO:
+        bg, label = _SEGMENT_STYLE[state]
         tag = f" {turns}\U0001f4ac"  # turn count + speech-balloon glyph
     else:
         bg, label = _SEGMENT_STYLE.get(
-            info.state, ("colour238", info.state.value.upper())
+            state, ("colour238", state.value.upper())
         )
         tag = sync
 

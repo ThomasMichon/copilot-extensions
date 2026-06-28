@@ -123,6 +123,22 @@ Flags: `--path PATH` (classify another worktree), `--fetch` (refresh
 behind-counts from the remote -- off by default so the poll stays cheap),
 `--plain` (no `#[style]` directives), `--no-title` (state block only).
 
+### Machine-readable state: `list --json --classify`
+
+`list --json --classify` enriches each worktree record with its git-derived
+classification (`state`, `ahead`, `behind`, `dirty`) so a consumer -- notably
+the multi-machine picker -- gets canonical state per machine (a remote's own
+state travels in its `list` output over SSH; the local picker cannot
+git-classify a remote worktree). Classification is **opt-in** because it costs
+~5 git calls per worktree; a bare `list --json` stays fast.
+
+The emitted `state` draws from the **same `WorktreeState` vocabulary the status
+bar uses**, including the session-derived `convo` (a clean, commit-less
+worktree whose session held conversation turns -- the lowercase data-contract
+form of the bar's teal `CONVO` block). Centralized in
+`git_ops.refine_state_with_session` so the bar and the picker can never drift
+apart. Without `--classify`, records carry no `state` key.
+
 ### Left segment: worktree identity
 
 `status-context` prints the **left** side of the bar -- the worktree's

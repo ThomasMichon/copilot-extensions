@@ -12,6 +12,7 @@ from agent_worktrees.git_ops import (
     WorktreeStateInfo,
     git,
     is_cwd_inside,
+    refine_state_with_session,
     resolve_to_anchor,
 )
 
@@ -163,3 +164,35 @@ class TestDataModels:
         assert info.dirty == 0
         assert info.branch_drift is False
         assert info.current_branch is None
+
+
+class TestRefineStateWithSession:
+    """The CONVO refinement shared by the status bar and list --classify."""
+
+    def test_convo_is_canonical_state(self):
+        # CONVO must be a first-class enum value so every surface (status bar,
+        # `list --json --classify`) reports the same vocabulary.
+        assert WorktreeState.CONVO == "convo"
+
+    def test_unused_with_turns_becomes_convo(self):
+        assert (
+            refine_state_with_session(WorktreeState.UNUSED, 7)
+            == WorktreeState.CONVO
+        )
+
+    def test_unused_without_turns_stays_unused(self):
+        assert (
+            refine_state_with_session(WorktreeState.UNUSED, 0)
+            == WorktreeState.UNUSED
+        )
+
+    def test_other_states_unaffected_by_turns(self):
+        for st in (
+            WorktreeState.DIRTY,
+            WorktreeState.WIP,
+            WorktreeState.COMPLETED,
+            WorktreeState.ACTIVE,
+            WorktreeState.ORPHAN,
+            WorktreeState.GONE,
+        ):
+            assert refine_state_with_session(st, 12) == st

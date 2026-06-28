@@ -121,16 +121,46 @@ def git(
 
 
 class WorktreeState(str, Enum):
-    """Git-level worktree state classification."""
+    """Worktree state classification.
+
+    Every value except :attr:`CONVO` is produced by :func:`classify_worktree`
+    from pure git inspection.  ``CONVO`` is a *session-derived* refinement of
+    ``UNUSED`` -- a clean, commit-less worktree whose Copilot session
+    nonetheless held conversation turns -- layered on by
+    :func:`refine_state_with_session`.  It lives in this enum (rather than as a
+    private render flag) so the tmux status bar and the picker data contract
+    (``list --json --classify``) share one display vocabulary.
+    """
 
     ACTIVE = "active"
     WIP = "wip"
     DIRTY = "dirty"
     UNUSED = "unused"
+    CONVO = "convo"
     COMPLETED = "completed"
     GONE = "gone"
     ORPHAN = "orphan"
     UNKNOWN = "unknown"
+
+
+def refine_state_with_session(state: WorktreeState, turns: int) -> WorktreeState:
+    """Layer the session-derived ``CONVO`` refinement onto a git ``state``.
+
+    A clean, commit-less worktree (:attr:`WorktreeState.UNUSED`) whose session
+    held conversation turns is not idle -- it is rendered as a distinct
+    ``CONVO`` block rather than grey ``UNUSED``.  Centralized here so every
+    surface that reports a worktree's *display* state -- the tmux status bar
+    (``status-segment``) and the picker data contract
+    (``list --json --classify``) -- draws from one vocabulary instead of each
+    re-deriving the rule.
+
+    Pure: performs no git or session I/O; ``turns`` is supplied by the caller
+    (e.g. from :class:`sessions.SessionContext`).  Only ``UNUSED`` is refined;
+    any other state is returned unchanged.
+    """
+    if state == WorktreeState.UNUSED and turns > 0:
+        return WorktreeState.CONVO
+    return state
 
 
 @dataclass
