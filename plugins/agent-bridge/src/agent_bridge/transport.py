@@ -271,6 +271,80 @@ async def _resolve_worktree(
     return plan
 
 
+def _extract_json_object(text: str) -> dict | None:
+    """Parse the first top-level JSON object from possibly-noisy text.
+
+    A remote shell may prepend MOTD/banner lines before the binstub's JSON,
+    so fall back to extracting the outermost ``{...}`` span if the whole
+    string is not valid JSON.
+    """
+    text = text.strip()
+    if not text:
+        return None
+    try:
+        obj = json.loads(text)
+        return obj if isinstance(obj, dict) else None
+    except json.JSONDecodeError:
+        pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        obj = json.loads(text[start:end + 1])
+        return obj if isinstance(obj, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+async def _resolve_worktree_remote(
+    manager: Any, target: SpawnTarget, *, timeout: float = 120.0,
+) -> dict:
+    """Resolve the remote worktree plan over SSH to learn its id + work_dir.
+
+    Mirrors :func:`_resolve_worktree` (the local path) for SSH targets: runs
+    the project binstub's ``resolve`` subcommand on the remote host over the
+    shared ControlMaster connection and parses the JSON launch plan. This lets
+    the bridge bind ``worktree_id``/``cwd`` onto the session target for remote
+    sessions -- without it, an SSH session persists a null ``worktree_id`` and
+    never links back to its worktree (managed/live state, duplicate cards).
+
+    The binstub ``resolve`` subcommand emits clean JSON (it bypasses the
+    launch-session scripts), but the JSON object is still extracted defensively
+    in case a remote shell prepends banner noise.
+
+    Returns the parsed plan dict. Raises ``RuntimeError`` on failure; the
+    caller treats failure as non-fatal (falls back to a direct ``--new``
+    launch).
+    """
+    if not target.project:
+        raise RuntimeError("remote resolve requires target.project")
+    resolve_args = [target.project, "resolve", "--json", "--no-resume"]
+    if target.worktree_id:
+        resolve_args.extend(["--worktree-id", target.worktree_id])
+    else:
+        resolve_args.append("--new")
+    resolve_cmd = " ".join(shlex.quote(a) for a in resolve_args)
+
+    log.info("Resolving remote worktree on %s: %s", target.host, resolve_cmd)
+    result = await manager.exec_command(target.host, resolve_cmd, timeout=timeout)
+    if result.timed_out:
+        raise RuntimeError(f"remote worktree resolve timed out after {timeout}s")
+    if result.exit_code != 0:
+        raise RuntimeError(
+            f"remote worktree resolve failed (exit {result.exit_code}): "
+            f"{result.stderr.strip()[:400]}"
+        )
+
+    plan = _extract_json_object(result.stdout)
+    if plan is None:
+        raise RuntimeError(
+            "remote worktree resolve returned no JSON object: "
+            f"{result.stdout.strip()[:400]}"
+        )
+    return plan
+
+
 async def spawn_local(
     target: SpawnTarget,
     *,
@@ -583,6 +657,38 @@ async def spawn_ssh(
             )
             await asyncio.sleep(backoff)
             backoff = min(backoff * 1.5, 15.0)
+
+    # Bind the worktree identity for remote sessions (parity with the local
+    # spawn path). Resolve the remote worktree up-front so worktree_id + cwd
+    # persist onto the session target -- otherwise SSH sessions store a null
+    # worktree_id and never link back to their worktree, which breaks the
+    # bridge's session<->worktree linkage (managed/live state, duplicate NF
+    # cards). ``resolve --new`` creates the worktree; _build_remote_cmd then
+    # takes its resume branch (--worktree-id) so the binstub launches into the
+    # just-created worktree (no second worktree). On any failure this is
+    # non-fatal: we fall through to the legacy direct --new launch, which still
+    # runs -- only the worktree_id binding is lost.
+    if target.project and not target.worktree_id:
+        with tracker.stage(ConnectStage.WORKTREE, f"resolve project={target.project}"):
+            try:
+                plan = await _resolve_worktree_remote(manager, target)
+                launch = plan.get("launch", plan)
+                wt_id = launch.get("worktree_id")
+                work_dir = launch.get("work_dir")
+                if wt_id:
+                    target.worktree_id = wt_id
+                if work_dir and not target.cwd:
+                    target.cwd = work_dir
+                log.info(
+                    "Bound remote worktree for %s: id=%s cwd=%s",
+                    target.host, wt_id, work_dir,
+                )
+            except Exception as exc:  # noqa: BLE001 -- non-fatal, see above
+                log.warning(
+                    "Remote worktree resolve failed for %s (%s); falling back "
+                    "to direct --new launch without worktree_id binding",
+                    target.host, exc,
+                )
 
     # Stages 5-7 happen remotely inside the binstub; the device breadcrumb
     # (in the remote command) is the on-device proof of arrival.

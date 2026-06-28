@@ -13,6 +13,8 @@ from agent_bridge.transport import (
     AgentProcess,
     SpawnTarget,
     _build_remote_cmd,
+    _extract_json_object,
+    _resolve_worktree_remote,
     _wrap_batch_for_windows,
     spawn,
     spawn_local,
@@ -178,6 +180,19 @@ class TestSpawnSsh:
         mock_proc.pid = 99999
         mock_proc.returncode = None
         mgr.open_stdio_channel = AsyncMock(return_value=mock_proc)
+        # Remote worktree resolve returns a launch plan with a worktree id.
+        plan = {
+            "launch": {
+                "worktree_id": "server-a-20260101-000000-abcd",
+                "work_dir": "/home/deploy/src.worktrees/server-a-20260101-000000-abcd",
+            }
+        }
+        result = MagicMock()
+        result.timed_out = False
+        result.exit_code = 0
+        result.stdout = json.dumps(plan)
+        result.stderr = ""
+        mgr.exec_command = AsyncMock(return_value=result)
         return mgr
 
     @pytest.mark.asyncio
@@ -230,7 +245,12 @@ class TestSpawnSsh:
 
     @pytest.mark.asyncio
     async def test_ssh_with_project(self, mock_manager):
-        """SSH with project should use binstub in the remote command."""
+        """SSH with project should resolve the worktree then resume into it.
+
+        The remote resolve binds worktree_id onto the target, so the launch
+        takes _build_remote_cmd's resume branch (--worktree-id) rather than a
+        second --new (which would create a duplicate worktree).
+        """
         target = SpawnTarget(
             type="ssh", host="server-a", user="deploy",
             project="my-project",
@@ -240,13 +260,68 @@ class TestSpawnSsh:
         with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
             await spawn_ssh(target)
 
+        # Resolve was run over the multiplexed connection.
+        mock_manager.exec_command.assert_called_once()
+        resolve_cmd = mock_manager.exec_command.call_args[0][1]
+        assert "my-project" in resolve_cmd
+        assert "resolve" in resolve_cmd
+        assert "--json" in resolve_cmd
+        assert "--new" in resolve_cmd
+
+        # worktree_id + cwd were bound onto the target for DB persistence.
+        assert target.worktree_id == "server-a-20260101-000000-abcd"
+        assert target.cwd == (
+            "/home/deploy/src.worktrees/server-a-20260101-000000-abcd"
+        )
+
+        # The launch resumes the resolved worktree (no second --new create).
         remote_cmd = mock_manager.open_stdio_channel.call_args[0][1]
         assert "my-project" in remote_cmd
-        assert "--new" in remote_cmd
+        assert "--worktree-id" in remote_cmd
+        assert "server-a-20260101-000000-abcd" in remote_cmd
         assert "--no-mux" in remote_cmd
         assert "--acp" in remote_cmd
         assert "--allow-all" in remote_cmd
-        assert "cd " not in remote_cmd
+        # Not the no-project cd-exec fallback (which ends in `&& exec copilot`).
+        assert "&& exec " not in remote_cmd
+
+    @pytest.mark.asyncio
+    async def test_ssh_project_resolve_failure_falls_back_to_new(self, mock_manager):
+        """If remote resolve fails, launch falls back to a direct --new (no crash)."""
+        target = SpawnTarget(
+            type="ssh", host="server-a", user="deploy", project="my-project",
+        )
+        failed = MagicMock()
+        failed.timed_out = False
+        failed.exit_code = 1
+        failed.stdout = ""
+        failed.stderr = "resolve blew up"
+        mock_manager.exec_command = AsyncMock(return_value=failed)
+
+        with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
+            await spawn_ssh(target)
+
+        # No id bound; launch uses the legacy direct --new path.
+        assert target.worktree_id is None
+        remote_cmd = mock_manager.open_stdio_channel.call_args[0][1]
+        assert "--new" in remote_cmd
+        assert "--worktree-id" not in remote_cmd
+
+    @pytest.mark.asyncio
+    async def test_ssh_project_with_existing_worktree_id_skips_resolve(self, mock_manager):
+        """A session roll (worktree_id already set) should not re-resolve --new."""
+        target = SpawnTarget(
+            type="ssh", host="server-a", user="deploy", project="my-project",
+            worktree_id="server-a-existing-1234",
+        )
+
+        with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
+            await spawn_ssh(target)
+
+        mock_manager.exec_command.assert_not_called()
+        remote_cmd = mock_manager.open_stdio_channel.call_args[0][1]
+        assert "--worktree-id" in remote_cmd
+        assert "server-a-existing-1234" in remote_cmd
 
     @pytest.mark.asyncio
     async def test_ssh_requires_host(self):
@@ -279,6 +354,112 @@ class TestSpawnSsh:
         # ensure_connected is idempotent -- called twice but manager handles dedup
         assert mock_manager.ensure_connected.call_count == 2
         assert mock_manager.open_stdio_channel.call_count == 2
+
+
+class TestExtractJsonObject:
+    """Tests for _extract_json_object -- tolerant JSON parsing of remote stdout."""
+
+    def test_clean_json(self):
+        assert _extract_json_object('{"a": 1}') == {"a": 1}
+
+    def test_json_with_banner_noise(self):
+        noisy = "Welcome to Ubuntu\nLast login: today\n{\"worktree_id\": \"x\"}\n"
+        assert _extract_json_object(noisy) == {"worktree_id": "x"}
+
+    def test_empty_returns_none(self):
+        assert _extract_json_object("") is None
+        assert _extract_json_object("   ") is None
+
+    def test_no_object_returns_none(self):
+        assert _extract_json_object("no json here") is None
+
+    def test_non_object_json_returns_none(self):
+        # A bare array is valid JSON but not the object we want.
+        assert _extract_json_object("[1, 2, 3]") is None
+
+
+class TestResolveWorktreeRemote:
+    """Tests for _resolve_worktree_remote -- the SSH worktree resolve round-trip."""
+
+    def _ok_result(self, plan):
+        r = MagicMock()
+        r.timed_out = False
+        r.exit_code = 0
+        r.stdout = json.dumps(plan)
+        r.stderr = ""
+        return r
+
+    @pytest.mark.asyncio
+    async def test_resolve_uses_new_when_no_worktree_id(self):
+        plan = {"launch": {"worktree_id": "wt-1", "work_dir": "/d"}}
+        mgr = MagicMock()
+        mgr.exec_command = AsyncMock(return_value=self._ok_result(plan))
+        target = SpawnTarget(type="ssh", host="h", project="proj")
+
+        out = await _resolve_worktree_remote(mgr, target)
+
+        assert out == plan
+        cmd = mgr.exec_command.call_args[0][1]
+        assert "proj" in cmd and "resolve" in cmd and "--new" in cmd
+        assert "--worktree-id" not in cmd
+
+    @pytest.mark.asyncio
+    async def test_resolve_uses_worktree_id_when_set(self):
+        plan = {"launch": {"worktree_id": "wt-9", "work_dir": "/d"}}
+        mgr = MagicMock()
+        mgr.exec_command = AsyncMock(return_value=self._ok_result(plan))
+        target = SpawnTarget(type="ssh", host="h", project="proj", worktree_id="wt-9")
+
+        await _resolve_worktree_remote(mgr, target)
+
+        cmd = mgr.exec_command.call_args[0][1]
+        assert "--worktree-id" in cmd and "wt-9" in cmd
+        assert "--new" not in cmd
+
+    @pytest.mark.asyncio
+    async def test_resolve_raises_without_project(self):
+        target = SpawnTarget(type="ssh", host="h")
+        with pytest.raises(RuntimeError, match="requires target.project"):
+            await _resolve_worktree_remote(MagicMock(), target)
+
+    @pytest.mark.asyncio
+    async def test_resolve_raises_on_nonzero_exit(self):
+        r = MagicMock()
+        r.timed_out = False
+        r.exit_code = 2
+        r.stdout = ""
+        r.stderr = "boom"
+        mgr = MagicMock()
+        mgr.exec_command = AsyncMock(return_value=r)
+        target = SpawnTarget(type="ssh", host="h", project="proj")
+        with pytest.raises(RuntimeError, match="exit 2"):
+            await _resolve_worktree_remote(mgr, target)
+
+    @pytest.mark.asyncio
+    async def test_resolve_raises_on_timeout(self):
+        r = MagicMock()
+        r.timed_out = True
+        r.exit_code = -1
+        r.stdout = ""
+        r.stderr = ""
+        mgr = MagicMock()
+        mgr.exec_command = AsyncMock(return_value=r)
+        target = SpawnTarget(type="ssh", host="h", project="proj")
+        with pytest.raises(RuntimeError, match="timed out"):
+            await _resolve_worktree_remote(mgr, target)
+
+    @pytest.mark.asyncio
+    async def test_resolve_raises_on_unparseable_stdout(self):
+        r = MagicMock()
+        r.timed_out = False
+        r.exit_code = 0
+        r.stdout = "not json at all"
+        r.stderr = ""
+        mgr = MagicMock()
+        mgr.exec_command = AsyncMock(return_value=r)
+        target = SpawnTarget(type="ssh", host="h", project="proj")
+        with pytest.raises(RuntimeError, match="no JSON object"):
+            await _resolve_worktree_remote(mgr, target)
 
 
 class TestSpawnLocal:
