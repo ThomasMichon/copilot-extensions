@@ -53,7 +53,7 @@ def _git(*args: str, cwd: Path) -> str:
 
 class TestCreatePR:
     def test_disabled_errors(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
+        config, wid, _wt_path, _ = pr_repo
         import dataclasses
         disabled = dataclasses.replace(
             config.repos["ext"], pr=cfg.PRConfig(enabled=False)
@@ -64,7 +64,7 @@ class TestCreatePR:
         assert "not enabled" in res["error"]
 
     def test_creates_and_pushes_feature_branch(self, pr_repo):
-        config, wid, wt_path, remote_dir = pr_repo
+        config, wid, wt_path, _remote_dir = pr_repo
         res = pr_ops.create_pr(wid, config, title="Add feature")
 
         assert res["success"] is True, res
@@ -94,7 +94,7 @@ class TestCreatePR:
         assert len(ahead) == 1
 
     def test_records_pr_state_in_tracking(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
+        config, wid, _wt_path, _ = pr_repo
         pr_ops.create_pr(wid, config, title="Add feature")
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.pr is not None
@@ -103,7 +103,7 @@ class TestCreatePR:
         assert rec.pr.provider == "gitea"
 
     def test_idempotent_rerun(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
+        config, wid, _wt_path, _ = pr_repo
         first = pr_ops.create_pr(wid, config, title="Add feature")
         assert first["success"]
         # Re-run -- now HEAD is on the feature branch; should re-push cleanly.
@@ -135,7 +135,7 @@ class TestCreatePR:
 
 class TestSetPRAndStatus:
     def test_status_no_pr(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
+        _config, wid, _wt_path, _ = pr_repo
         res = pr_ops.pr_status(wid)
         assert res["has_pr"] is False
 
@@ -145,7 +145,7 @@ class TestSetPRAndStatus:
         assert "error" in res
 
     def test_set_pr_creates_block(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
+        _config, wid, _wt_path, _ = pr_repo
         res = pr_ops.set_pr(
             wid, url="https://example/pulls/7", number=7, provider="gitea"
         )
@@ -159,7 +159,7 @@ class TestSetPRAndStatus:
         assert st["number"] == 7
 
     def test_set_pr_merges_with_create_pr(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
+        config, wid, _wt_path, _ = pr_repo
         created = pr_ops.create_pr(wid, config, title="Add feature")
         assert created["success"]
         res = pr_ops.set_pr(wid, url="https://example/pulls/9", number=9)
@@ -170,13 +170,13 @@ class TestSetPRAndStatus:
         assert res["number"] == 9
 
     def test_set_pr_invalid_state(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
+        _config, wid, _wt_path, _ = pr_repo
         res = pr_ops.set_pr(wid, state="bogus")
         assert res["success"] is False
         assert "Invalid PR state" in res["error"]
 
     def test_set_pr_state_transition(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
+        _config, wid, _wt_path, _ = pr_repo
         pr_ops.set_pr(wid, url="u", number=1)
         res = pr_ops.set_pr(wid, state="merged")
         assert res["success"] is True
@@ -232,7 +232,7 @@ class TestPRFinalizeAndPush:
 
     def test_push_changes_updates_feature_branch(self, pr_repo):
         from agent_worktrees import finalize as fin
-        config, wid, wt_path, remote_dir = pr_repo
+        config, wid, wt_path, _remote_dir = pr_repo
         pr_ops.create_pr(wid, config, title="Add feature")
 
         before = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
@@ -381,7 +381,7 @@ class TestPRRequiredEnforcement:
 
     def test_finalize_refuses_unmerged_direct(self, pr_repo):
         from agent_worktrees import finalize as fin
-        config, wid, wt_path, _ = pr_repo
+        config, wid, _wt_path, _ = pr_repo
         req_config = self._required_config(config)
         # Unmerged work, no PR -> finalize must refuse (not prune).
         ok = fin.validate_and_finalize(wid, req_config)
