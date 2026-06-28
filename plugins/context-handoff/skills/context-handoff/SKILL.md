@@ -56,13 +56,16 @@ A handoff produces **two things**:
 
 1. **A handoff file** written to the current session's state folder at
    `~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md`
-   (via the `save_handoff_prompt` tool). This holds the **full** handoff:
-   the direction and **motivation** of the work, key **next action items**,
-   and the **target goals** — plus enough file paths and gotchas to resume.
+   (via the `save_handoff_prompt` tool, passing the markdown as `prompt_text`).
+   This holds the **full** handoff: the direction and **motivation** of the
+   work, key **next action items**, and the **target goals** — plus enough file
+   paths and gotchas to resume.
 
-2. **A short 2–3 sentence prompt** you reply with inline. It summarizes the
-   work in a sentence or two and **explicitly names the full path** to the
-   handoff file, telling the user to paste it into `/new` or `/clear`.
+2. **A short wrapper prompt** you reply with inline. It is **addressed to the
+   next session's agent** and the user copies it **verbatim** into `/clear` (or
+   `/new`). It must (a) name the **full path** to the handoff file and (b)
+   instruct that agent to **read** the file and continue. It does **not** repeat
+   the handoff contents — the file holds those.
 
 ### Steps
 
@@ -74,17 +77,18 @@ A handoff produces **two things**:
    the original request, then direction/motivation, next steps, target goals,
    and gotchas.
 
-3. **Call `save_handoff_prompt`** with that full markdown. It writes the file
-   to the session state folder and **returns the absolute path**.
+3. **Call `save_handoff_prompt`** with that full markdown **as the `prompt_text`
+   argument** (the `prompt` alias is also accepted). It writes the file to the
+   session state folder and **returns the absolute path**.
 
-4. **Reply with the short prompt.** 2–3 sentences, including the returned path
-   (a `~/` form is fine), and tell the user to paste it into `/new` or
-   `/clear` in a new session. For example:
+4. **Reply with the short wrapper prompt.** One or two sentences, **addressed to
+   the next agent**, that name the returned path (a `~/` form is fine) and tell
+   that agent to **read** the handoff file and continue. The user pastes it
+   verbatim into `/clear` (or `/new`). For example:
 
-   > Continued config-reflect + system-worktrees efforts (HA drift tracking →
-   > multi-system framework). Full handoff:
-   > `~/.copilot/session-state/<id>/files/<id>-prompt.md`.
-   > Paste this into `/new` or `/clear` to resume.
+   > Read the handoff at `~/.copilot/session-state/<id>/files/<id>-prompt.md`
+   > and continue: config-reflect + system-worktrees efforts (HA drift tracking
+   > → multi-system framework).
 
 If the `generate_handoff_prompt` tool is unavailable (extension not loaded),
 compose the handoff manually and write the file with the `create` tool to the
@@ -92,16 +96,17 @@ same session-folder path.
 
 **Do not** commit the handoff file, write it anywhere outside the session
 folder, hide the path inside a tool call, or tell the user it will be picked
-up automatically on restart — **it will not**. The user must paste the short
+up automatically on restart — **it will not**. The user must paste the wrapper
 prompt themselves.
 
 ---
 
 ## Resuming From a Handoff
 
-A handoff is **not** auto-loaded. The user resumes by pasting the short prompt
+A handoff is **not** auto-loaded. The user resumes by pasting the wrapper prompt
 (from the previous session) as the first message in a new session. That prompt
-names the handoff file path; read that file to orient yourself, then continue.
+names the handoff file path and tells you to read it; read that file to orient
+yourself, then continue.
 
 ### If the user says "pick up from last session" with no pasted prompt
 
@@ -134,11 +139,13 @@ Its sections:
 ## Rules
 
 - **The handoff FILE can be as long as needed** — it's read on demand when the
-  user pastes the short prompt, not injected into any context automatically.
-  Capture direction/motivation, next actions, and target goals in full.
-- **The inline PROMPT must be short — 2–3 sentences.** It must name the full
-  handoff file path (a `~/` form is fine) and tell the user to paste it into
-  `/new` or `/clear`. The user copy-pastes it; keep it scannable.
+  next agent opens it, not injected into any context automatically. Capture
+  direction/motivation, next actions, and target goals in full.
+- **The inline WRAPPER prompt must be short — one or two sentences.** It is
+  addressed to the **next agent**: it names the full handoff file path (a `~/`
+  form is fine) and tells that agent to **read** the file and continue. It is
+  copy-pasted verbatim into `/clear` (or `/new`); keep it scannable and do
+  **not** repeat the file's contents.
 - **Lead with the original topic.** The "Original Request" must reference the
   session's founding purpose, not just recent activity.
 - **Be specific.** "Fix the auth bug" is useless. "JWT refresh in
@@ -146,7 +153,7 @@ Its sections:
   non-awaited path" is useful. Include file paths, what failed, and the why.
 - **Never claim auto-pickup.** A handoff is never loaded automatically on
   restart. Do not imply Copilot will resume on its own — the user must paste
-  the prompt.
+  the wrapper prompt.
 - **Keep it in the session folder.** Do not commit the handoff file or write it
   anywhere outside `~/.copilot/session-state/<sessionId>/files/`. Do not hide
   the path inside a tool call — show it to the user in your reply.
@@ -158,4 +165,5 @@ Its sections:
 - Handoff files are stored in the session's state folder:
   `~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md`
 - `save_handoff_prompt` writes that file and returns its absolute path; surface
-  that path to the user verbatim in the short prompt.
+  that path to the user verbatim in the wrapper prompt. Pass the markdown as the
+  **`prompt_text`** argument (the `prompt` alias is also accepted).

@@ -281,13 +281,16 @@ const session = await joinSession({
             "1. Compose the FULL handoff markdown — direction + motivation of the",
             "   work, key next action items, and target goals — from this data",
             "   plus your live context. Lead with the original topic/request.",
-            "2. Call save_handoff_prompt with that full markdown; it writes the",
-            "   file to the session state folder and returns its absolute path.",
-            "3. Reply to the user with a SHORT 2-3 sentence handoff prompt that",
-            "   explicitly names the returned file path (a ~/ form is fine) and",
-            "   tells them to paste it into '/new' or '/clear' in a new session.",
-            "Do NOT commit the file, store it outside the session folder, hide",
-            "the path, or claim it will be auto-loaded on restart (it will not).",
+            "2. Call save_handoff_prompt with the full markdown as `prompt_text`;",
+            "   it writes the file to the session state folder and returns its",
+            "   absolute path.",
+            "3. Reply with ONLY a short wrapper prompt the user copies verbatim",
+            "   into '/clear' (or '/new'): addressed to the NEXT session's agent,",
+            "   it names the returned path and tells that agent to READ the",
+            "   handoff file and continue.",
+            "Do NOT paste the file's contents, commit the file, store it outside",
+            "the session folder, hide the path, or claim it auto-loads on restart",
+            "(it will not).",
           ].join("\n"),
           resultType: "success",
         };
@@ -298,9 +301,10 @@ const session = await joinSession({
       description:
         "Persist the full handoff markdown to the CURRENT session's state " +
         "folder and return its absolute path. Call this after composing the " +
-        "handoff from generate_handoff_prompt data. The file is NOT loaded " +
-        "automatically by any future session -- the agent must show the user " +
-        "the returned path plus a short prompt that points at it.",
+        "handoff from generate_handoff_prompt data. Pass the markdown as " +
+        "`prompt_text` (the `prompt` alias is also accepted). The file is NOT " +
+        "loaded automatically by any future session -- the agent must reply " +
+        "with a short wrapper prompt that points the next agent at the path.",
       skipPermission: true,
       parameters: {
         type: "object",
@@ -309,8 +313,14 @@ const session = await joinSession({
             type: "string",
             description: "The full composed handoff markdown text.",
           },
+          prompt: {
+            type: "string",
+            description: "Alias for prompt_text (accepted for convenience).",
+          },
         },
-        required: ["prompt_text"],
+        // Intentionally no `required`: the handler validates so a missing or
+        // misnamed argument returns a clear message instead of a generic
+        // "tool execution failed" (writeFileSync on undefined used to throw).
       },
       handler: async (args, invocation) => {
         ensureState(invocation);
@@ -319,14 +329,26 @@ const session = await joinSession({
           return "Cannot save handoff prompt: sessionId is unavailable.";
         }
 
-        const promptPath = saveHandoffPrompt(args.prompt_text, sid);
+        const text = (args?.prompt_text ?? args?.prompt ?? "").toString().trim();
+        if (!text) {
+          return (
+            "Cannot save handoff: pass the full handoff markdown as `prompt_text` " +
+            "(the `prompt` alias is also accepted). Nothing was written."
+          );
+        }
+
+        const promptPath = saveHandoffPrompt(text, sid);
 
         return (
-          `Handoff saved to ${promptPath}\n` +
-          `Reply to the user with this absolute path (a ~/ form is fine) and a ` +
-          `2-3 sentence prompt that references it, telling them to paste it into ` +
-          `'/new' or '/clear' in a new session. Do NOT claim it will be picked ` +
-          `up automatically on restart -- that does not happen.`
+          `Handoff saved to ${promptPath}\n\n` +
+          `Now reply to the user with ONLY a short wrapper prompt they will copy ` +
+          `verbatim into '/clear' (or '/new'). The wrapper is addressed to the ` +
+          `NEXT session's agent and must (1) name this absolute path (a ~/ form ` +
+          `is fine) and (2) instruct that agent to READ the handoff file and ` +
+          `continue. For example:\n` +
+          `  Read the handoff at ${promptPath} and continue: <one-line topic>.\n` +
+          `Do NOT paste the file's contents, and do NOT claim it loads ` +
+          `automatically on restart -- it does not.`
         );
       },
     },
