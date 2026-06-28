@@ -267,6 +267,39 @@ def _apply_tracking_override(
     return info
 
 
+def _classify_records(
+    records: list[tracking.WorktreeRecord],
+    session_ctx: sessions.SessionContext | None = None,
+) -> dict[str, git_ops.WorktreeStateInfo]:
+    """Classify each worktree's git state, keyed by worktree id.
+
+    Mirrors the cleanup/picker classification loop so ``list --json --classify``
+    emits the same ``state`` the status segment and picker use. Classification
+    runs **where git access exists** -- so a remote machine carries its own
+    worktree states in ``list --json`` over SSH (the local picker cannot
+    git-classify a remote worktree). No fetch (``behind`` reflects the last
+    fetch); ~5 git calls per existing worktree, hence opt-in.
+    """
+    config = cfg.load_config()
+    repo = config.default_repo
+    active_paths = _build_active_paths(records, session_ctx)
+    out: dict[str, git_ops.WorktreeStateInfo] = {}
+    for rec in records:
+        if rec.worktree_path and Path(rec.worktree_path).exists():
+            info = git_ops.classify_worktree(
+                rec.worktree_path, rec.branch,
+                fetch=False, remote=repo.remote,
+                default_branch=repo.default_branch, active_paths=active_paths,
+            )
+            info = _apply_tracking_override(rec, info)
+        elif rec.status == "finalized":
+            info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+        else:
+            info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
+        out[rec.worktree_id] = info
+    return out
+
+
 def _make_pr_lookup(config):
     """Build a ``lookup(repo, number) -> PullResult|None`` over the configured
     provider, for prune PR-state reconciliation. Returns None-yielding on any
@@ -2941,10 +2974,14 @@ def cmd_list(args: argparse.Namespace) -> int:
             wt_ids = [rec.worktree_id for rec in records]
             mux_map = sessions.mux_status_many(wt_ids)
         session_ctx = sessions.scan_sessions_fast(records)
+        state_map: dict[str, git_ops.WorktreeStateInfo] = {}
+        if getattr(args, "classify", False):
+            state_map = _classify_records(records, session_ctx)
         worktrees = [
             _worktree_to_dict(
                 rec, mux_info=mux_map.get(rec.worktree_id),
                 session_ctx=session_ctx,
+                state_info=state_map.get(rec.worktree_id),
             )
             for rec in records
         ]
@@ -5781,6 +5818,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Include worktrees whose directories no longer exist on disk")
     p.add_argument("--include-other-platforms", action="store_true",
                    help="Include worktrees from other platforms (e.g. Windows when on Linux)")
+    p.add_argument("--classify", action="store_true",
+                   help="Include git state classification (state/ahead/behind/"
+                        "dirty; JSON only). Slower: ~5 git calls per worktree.")
 
     # create (non-interactive worktree creation; --system for daemon-owned)
     p = sub.add_parser("create", help="Create a new worktree non-interactively")
