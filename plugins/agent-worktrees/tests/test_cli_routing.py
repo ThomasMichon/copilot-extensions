@@ -113,6 +113,97 @@ def test_project_flag_sets_env_and_bypasses_help(monkeypatch):
     assert os.environ.get("WORKTREE_PROJECT") == "demo"
 
 
+def test_profiles_get_emits_self_diagonal(monkeypatch, capfd, tmp_path):
+    """`profiles get --json` emits this host's column incl. the locked self."""
+    import argparse
+
+    from agent_worktrees import config as cfg
+
+    cfg_path = tmp_path / "config.yaml"
+    monkeypatch.setattr(cfg, "default_config_path", lambda: cfg_path)
+    monkeypatch.setattr(m, "_profiles_host", lambda: ("Lambda-Core", "Win"))
+
+    rc = m.cmd_profiles(argparse.Namespace(profiles_action="get", json=True))
+    assert rc == 0
+    out = capfd.readouterr().out
+    assert '"machine": "Lambda-Core"' in out
+    assert '"kind": "agent"' in out
+
+
+def test_profiles_apply_writes_and_normalizes(monkeypatch, capfd, tmp_path):
+    """`profiles apply --set` persists the column with self forced in."""
+    import argparse
+    import json as _json
+
+    from agent_worktrees import config as cfg
+    from agent_worktrees import profiles as profiles_mod
+
+    cfg_path = tmp_path / "config.yaml"
+    monkeypatch.setattr(cfg, "default_config_path", lambda: cfg_path)
+    monkeypatch.setattr(m, "_profiles_host", lambda: ("Lambda-Core", "Win"))
+
+    rc = m.cmd_profiles(argparse.Namespace(
+        profiles_action="apply", json=True, no_mirror=True,
+        set=_json.dumps([{"machine": "Borealis", "env": "Win", "kind": "shell"}]),
+    ))
+    assert rc == 0
+    capfd.readouterr()
+    loaded = profiles_mod.load_selection(cfg_path)
+    assert profiles_mod.TargetSel("Lambda-Core", "Win", "agent") in loaded
+    assert profiles_mod.TargetSel("Borealis", "Win", "shell") in loaded
+
+
+def test_profiles_apply_rejects_bad_json(monkeypatch, tmp_path):
+    import argparse
+
+    from agent_worktrees import config as cfg
+
+    cfg_path = tmp_path / "config.yaml"
+    monkeypatch.setattr(cfg, "default_config_path", lambda: cfg_path)
+    monkeypatch.setattr(m, "_profiles_host", lambda: ("Lambda-Core", "Win"))
+
+    rc = m.cmd_profiles(argparse.Namespace(
+        profiles_action="apply", json=True, no_mirror=True, set="{not json"))
+    assert rc == 2
+
+
+def test_picker_enable_disable_persists(monkeypatch, tmp_path):
+    """`picker enable/disable` writes new_picker into the global config and
+    preserves other keys."""
+    import argparse
+
+    import yaml
+
+    from agent_worktrees import config as cfg
+
+    gpath = tmp_path / "global.yaml"
+    gpath.write_text("machine: lambda-core\nplatform: windows\n", encoding="utf-8")
+    monkeypatch.setattr(cfg, "global_config_path", lambda: gpath)
+
+    assert m.cmd_picker(argparse.Namespace(picker_action="enable", json=False)) == 0
+    data = yaml.safe_load(gpath.read_text(encoding="utf-8"))
+    assert data["new_picker"] is True
+    assert data["machine"] == "lambda-core"   # other keys preserved
+
+    assert m.cmd_picker(argparse.Namespace(picker_action="disable", json=False)) == 0
+    assert yaml.safe_load(gpath.read_text(encoding="utf-8"))["new_picker"] is False
+
+
+def test_new_picker_enabled_precedence(monkeypatch):
+    import types
+
+    from agent_worktrees import picker_tui
+
+    monkeypatch.delenv("AGENT_WORKTREES_NEW_PICKER", raising=False)
+    monkeypatch.delenv("AGENT_WORKTREES_LEGACY_PICKER", raising=False)
+    assert picker_tui.new_picker_enabled(types.SimpleNamespace(new_picker=True))
+    assert not picker_tui.new_picker_enabled(types.SimpleNamespace(new_picker=False))
+    assert not picker_tui.new_picker_enabled(None)
+    # Legacy env always wins (rollback switch).
+    monkeypatch.setenv("AGENT_WORKTREES_LEGACY_PICKER", "1")
+    assert not picker_tui.new_picker_enabled(types.SimpleNamespace(new_picker=True))
+
+
 def test_project_flag_blanks_inherited_worktree_id(monkeypatch):
     """#25: --project blanks the caller's inherited WORKTREE_ID so worktree
     resolution falls back to CWD instead of the wrong (cross-project) id."""

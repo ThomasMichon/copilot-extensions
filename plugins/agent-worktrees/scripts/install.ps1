@@ -834,6 +834,20 @@ platform: windows
 
     $worktreeRoot = "$RepoDir.worktrees"
 
+    # Resolve this machine's display name (selection vocabulary) so the seeded
+    # self·agent diagonal matches the Picker's roster axes. Falls back to the
+    # machine key when machines.yaml has no entry.
+    $seedDisplay = $Machine
+    $myYaml = if ($RepoDir) { Join-Path $RepoDir 'machines.yaml' } else { $null }
+    if ($myYaml -and (Test-Path $myYaml)) {
+        try {
+            $md = (& $VenvPython -c "import yaml, json, sys; print(json.dumps(yaml.safe_load(open(sys.argv[1], encoding='utf-8'))))" $myYaml 2>$null) | ConvertFrom-Json
+            if ($md.machines -and $md.machines.PSObject.Properties[$Machine] -and $md.machines.$Machine.display_name) {
+                $seedDisplay = $md.machines.$Machine.display_name
+            }
+        } catch { }
+    }
+
     @"
 # ~/.$ProjectName/config.yaml
 # Machine-local config for $ProjectName (overrides + machine paths only).
@@ -850,6 +864,12 @@ repos:
     # Uncomment and set an absolute path to override.
     default_branch: master
     remote: origin
+
+# terminal_profiles -- this machine's terminal-profile column (the Picker's
+# Profiles grid). Seeded with the locked self-agent diagonal only; add other
+# targets via the Picker's Profiles view or `$ProjectName profiles apply`.
+terminal_profiles:
+  - {machine: $seedDisplay, env: Win, kind: agent}
 "@ | Set-Content -Path $configPath
     Write-ServiceChanged "Written config: $configPath"
     return $true
@@ -953,6 +973,48 @@ function Build-TerminalFragment {
     $projectList = @()
     $registry = Read-ProjectsRegistry
 
+    # Helper: load a project's terminal-profile SELECTION (own-column model).
+    # Reads top-level ``terminal_profiles`` from ~/.<project>/config.yaml and
+    # returns a hashtable keyed "machine|env|kind". Returns $null when the file
+    # or key is absent -- the caller treats $null as "legacy, emit everything"
+    # so existing installs (no selection yet) are unaffected.
+    function Get-TerminalSelection {
+        param([string]$ProjName)
+        $cfg = Join-Path $env:USERPROFILE ".$ProjName\config.yaml"
+        if (-not (Test-Path $cfg)) { return $null }
+        try {
+            $raw = & $VenvPython -c "import yaml,json,sys; d=yaml.safe_load(open(sys.argv[1],encoding='utf-8')) or {}; v=d.get('terminal_profiles'); print(json.dumps(v) if v is not None else '')" $cfg 2>$null
+            if (-not $raw) { return $null }
+            $sel = $raw | ConvertFrom-Json
+            if ($null -eq $sel) { return $null }
+            $set = @{}
+            foreach ($t in @($sel)) {
+                $k = if ($t.kind) { $t.kind } else { 'agent' }
+                $set["$($t.machine)|$($t.env)|$k"] = $true
+            }
+            return $set
+        } catch { return $null }
+    }
+
+    # Helper: is a (machine, env, kind) target in this project's selection?
+    # A $null selection means "legacy / unselected" -> emit everything.
+    function Test-ProfileSelected {
+        param($Selection, [string]$Machine, [string]$Env, [string]$Kind)
+        if ($null -eq $Selection) { return $true }
+        return [bool]$Selection.ContainsKey("$Machine|$Env|$Kind")
+    }
+
+    # machines.yaml ssh env name -> the selection's short env label.
+    function Get-SelEnvLabel {
+        param([string]$Name)
+        switch ($Name) {
+            'windows' { 'Win' }
+            'wsl'     { 'WSL' }
+            'linux'   { 'Linux' }
+            default   { $Name }
+        }
+    }
+
     # Helper: extract WSL info from a registry entry
     function Get-WslInfo {
         param([object]$Entry)
@@ -1026,28 +1088,52 @@ function Build-TerminalFragment {
         $pMachinesYaml = $proj.machines_yaml
         $pWslInfo = $proj.wsl_info
 
+        # This project's terminal-profile selection (own-column). $null = legacy
+        # (no selection persisted yet) -> emit every candidate (no regression).
+        $pSel = Get-TerminalSelection $pName
+
+        # Parse this project's machines.yaml once (local display name + SSH loop).
+        $rosterData = $null
+        if ($pMachinesYaml -and (Test-Path $pMachinesYaml)) {
+            try {
+                $rosterData = (& $VenvPython -c "import yaml, json, sys; data = yaml.safe_load(open(sys.argv[1], encoding='utf-8')); print(json.dumps(data))" $pMachinesYaml 2>$null) | ConvertFrom-Json
+            } catch {
+                Write-ServiceWarn "Could not parse machines.yaml for '$pName' terminal profiles: $_"
+            }
+        }
+        # Local machine's display name (selection vocabulary). Falls back to the
+        # machine key when the roster lacks an entry.
+        $localDisplay = $Machine
+        if ($rosterData -and $rosterData.machines -and $rosterData.machines.PSObject.Properties[$Machine]) {
+            $dn = $rosterData.machines.$Machine.display_name
+            if ($dn) { $localDisplay = $dn }
+        }
+
         # Icon: prefer project-specific, fall back to agent-worktrees default
         $iconPath = "%USERPROFILE%\.${pName}\aperture-science.ico"
         if (-not (Test-Path (Join-Path $env:USERPROFILE ".$pName\aperture-science.ico"))) {
             $iconPath = "%USERPROFILE%\.agent-worktrees\aperture-science.ico"
         }
 
-        # Local Windows profile
-        $guid = New-StableGuid "${pName}-local-windows"
-        $profiles += @{
-            guid              = "{$guid}"
-            name              = $pDisplay
-            commandline       = "cmd /c `"%USERPROFILE%\.local\bin\${pName}.cmd`""
-            icon              = $iconPath
-            startingDirectory = "%USERPROFILE%"
-            colorScheme       = 'Aperture Science'
-            hidden            = $false
+        # Local Windows profile (self·agent on a Windows host). Always selected
+        # when present (the diagonal is locked), but still gated for symmetry.
+        if (Test-ProfileSelected $pSel $localDisplay 'Win' 'agent') {
+            $guid = New-StableGuid "${pName}-local-windows"
+            $profiles += @{
+                guid              = "{$guid}"
+                name              = $pDisplay
+                commandline       = "cmd /c `"%USERPROFILE%\.local\bin\${pName}.cmd`""
+                icon              = $iconPath
+                startingDirectory = "%USERPROFILE%"
+                colorScheme       = 'Aperture Science'
+                hidden            = $false
+            }
         }
 
         # Local WSL profile -- only when WSL support is recorded in the registry
         $wslDistro = if ($pWslInfo) { $pWslInfo['distro'] } else { $null }
         $wslState = if ($pWslInfo) { $pWslInfo['state'] } else { $null }
-        if ($wslState -and $wslDistro) {
+        if ($wslState -and $wslDistro -and (Test-ProfileSelected $pSel $localDisplay 'WSL' 'agent')) {
             $wslIconPath = "%USERPROFILE%\.${pName}\aperture-science-wsl.ico"
             if (-not (Test-Path (Join-Path $env:USERPROFILE ".$pName\aperture-science-wsl.ico"))) {
                 $wslIconPath = $iconPath
@@ -1069,10 +1155,9 @@ function Build-TerminalFragment {
         }
 
         # SSH profiles from this project's machines.yaml
-        if ($pMachinesYaml -and (Test-Path $pMachinesYaml)) {
+        if ($rosterData) {
             try {
-                $raw = & $VenvPython -c "import yaml, json, sys; data = yaml.safe_load(open(sys.argv[1], encoding='utf-8')); print(json.dumps(data))" $pMachinesYaml 2>$null
-                $machinesData = $raw | ConvertFrom-Json
+                $machinesData = $rosterData
                 if ($machinesData.machines) {
                     foreach ($mProp in $machinesData.machines.PSObject.Properties) {
                         $key = $mProp.Name
@@ -1088,11 +1173,15 @@ function Build-TerminalFragment {
                                 'linux'   { 'Linux' }
                                 default   { $sshEnv.name }
                             }
+                            # Selection vocabulary: display name + short env.
+                            $remoteDisplay = $mEntry.display_name
+                            $selEnv = Get-SelEnvLabel $sshEnv.name
 
-                            # Plain SSH profile -- deduplicate across projects since
+                            # Plain SSH (shell) profile -- gated by a 'shell'
+                            # selection; deduplicated across projects since
                             # multiple projects may reference the same machines.yaml.
                             $sshGuid = New-StableGuid "ssh-${key}-$($sshEnv.name)"
-                            if (-not $emittedSshGuids.ContainsKey("{$sshGuid}")) {
+                            if ((Test-ProfileSelected $pSel $remoteDisplay $selEnv 'shell') -and (-not $emittedSshGuids.ContainsKey("{$sshGuid}"))) {
                                 $profileName = if ($envLabel -eq 'WSL') { "$($mEntry.display_name) (WSL)" } else { $mEntry.display_name }
                                 $profiles += @{
                                     guid              = "{$sshGuid}"
@@ -1106,21 +1195,24 @@ function Build-TerminalFragment {
                                 $emittedSshGuids["{$sshGuid}"] = $true
                             }
 
-                            # Launch-via-SSH profile
-                            $binstubCmd = if ($sshEnv.shell -eq 'pwsh') { "${pName}.cmd" } else { $pName }
-                            $launchCmdline = "ssh -t $alias $binstubCmd"
-                            $launchLabel = if ($envLabel -eq 'WSL') { "$($mEntry.display_name) WSL" } else { $mEntry.display_name }
-                            $launchProfileName = "$pDisplay ($launchLabel)"
+                            # Launch-via-SSH (agent) profile -- gated by an
+                            # 'agent' selection for this remote target.
+                            if (Test-ProfileSelected $pSel $remoteDisplay $selEnv 'agent') {
+                                $binstubCmd = if ($sshEnv.shell -eq 'pwsh') { "${pName}.cmd" } else { $pName }
+                                $launchCmdline = "ssh -t $alias $binstubCmd"
+                                $launchLabel = if ($envLabel -eq 'WSL') { "$($mEntry.display_name) WSL" } else { $mEntry.display_name }
+                                $launchProfileName = "$pDisplay ($launchLabel)"
 
-                            $launchGuid = New-StableGuid "${pName}-launch-${key}-$($sshEnv.name)"
-                            $profiles += @{
-                                guid              = "{$launchGuid}"
-                                name              = $launchProfileName
-                                commandline       = $launchCmdline
-                                icon              = $iconPath
-                                startingDirectory = "%USERPROFILE%"
-                                colorScheme       = 'Aperture Science'
-                                hidden            = $false
+                                $launchGuid = New-StableGuid "${pName}-launch-${key}-$($sshEnv.name)"
+                                $profiles += @{
+                                    guid              = "{$launchGuid}"
+                                    name              = $launchProfileName
+                                    commandline       = $launchCmdline
+                                    icon              = $iconPath
+                                    startingDirectory = "%USERPROFILE%"
+                                    colorScheme       = 'Aperture Science'
+                                    hidden            = $false
+                                }
                             }
                         }
                     }

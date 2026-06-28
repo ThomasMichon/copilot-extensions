@@ -15,15 +15,17 @@ Keys:
 from __future__ import annotations
 
 import os
+import threading
 import time
 
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.widget import Widget
 
+from .. import profiles as profiles_mod
 from . import derive
 
-VERSION = "1.5.3-dev65"
+VERSION = "1.5.3-dev68"
 
 # ---- palette (highlight-and-invert; subtle borders) -------------------------
 C_DIM = "grey42"          # subtle separators / borders
@@ -179,13 +181,22 @@ LIST_SPECS = [
     ("title", "title", 10, "l", 1),
 ]
 HTABS = ["Worktrees", "Maintenance", "Profiles"]
+# Maintenance groups worktrees by state; this is the display order (#1345).
+# Any state not listed is appended after these, in first-seen order.
+MAINT_GROUP_ORDER = ["DIRTY", "WIP", "ACTIVE", "ORPHAN", "CONVO", "UNUSED",
+                     "GONE", "CLEAN", "FINAL"]
 # Per-tab button sets — Tab/Shift+Tab rotate within these when focused.
-BUTTON_SETS = {0: ["N", "NO"], 1: ["K", "SY"], 2: ["PA", "PReset"]}
+# Worktrees has a single "New worktree…" entry that opens the options dialog
+# directly (aperture-labs #1346); the old separate "More options…" is gone.
+BUTTON_SETS = {0: ["N"], 1: ["K", "SY"], 2: ["PA", "PReset"]}
 
 # ---- Profiles matrix model ----------------------------------------------------
-# Columns = valid HOST machines (a terminal app runs here). Windows or native
+# Axes are config-bound from machines.yaml at runtime (see picker_tui.roster and
+# PickerScreen.setup); these literals are the FALLBACK used only when the roster
+# is unavailable (e.g. a fixture source with no host_cols()/target_envs()).
+# Columns = valid HOST machines (a terminal app runs here): Windows or native
 # Linux per machine -- never WSL.
-HOST_COLS = [
+_DEFAULT_HOST_COLS = [
     ("Lambda·Win", "Lambda-Core", "Win"),
     ("Borealis·Win", "Borealis", "Win"),
     ("Wheatley·Lx", "Wheatley", "Linux"),
@@ -193,16 +204,16 @@ HOST_COLS = [
 ]
 # Rows = TARGETS a profile can launch: every machine + every environment
 # (WSL included), each as an agent (worktree) launch or a plain shell.
-_TARGET_ENVS = [
+_DEFAULT_TARGET_ENVS = [
     ("Lambda-Core", "Win"), ("Lambda-Core", "WSL"),
     ("Borealis", "Win"), ("Borealis", "WSL"),
     ("Wheatley", "Linux"), ("tmichon-book2", "Win"),
 ]
 
 
-def target_rows():
+def target_rows(target_envs):
     rows = []
-    for m, e in _TARGET_ENVS:
+    for m, e in target_envs:
         for agent in (True, False):
             rows.append({
                 "machine": m, "env": e, "agent": agent,
@@ -210,15 +221,24 @@ def target_rows():
             })
     return rows
 
-# Clarify each worktree action in the sub-menu (addresses Open-vs-Resume).
+# Clarify each worktree action in the sub-menu (aperture-labs #1343).
 ACTION_DESC = {
-    "Open": "Attach the worktree's terminal (PSMux/TMux) session and bring it forward.",
-    "Resume": "Re-enter the Copilot agent session in this worktree (continue its turns).",
-    "Sync": "Pull/rebase onto base; surface conflicts.",
-    "Create PR": "Squash commits → feature branch → open or update the PR.",
-    "Kill session": "Terminate the wrapper PSMux/TMux session — use if it's broken/stuck.",
-    "Reset env": "Re-export the worktree's environment variables (rarely needed).",
-    "Cleanup": "Remove this worktree (PR-merged ones are safe to prune).",
+    "Open": "Attach the worktree's terminal (PSMux/TMux); launch one if none. "
+            "Space toggles No-mux (launch without the wrapper, for troubleshooting).",
+    "Resume": "Resume the last Copilot session for this worktree, re-attaching "
+              "to the existing TMux/PSMux.",
+    "Sync": "Fast-forward this worktree onto the default branch (FF-only).",
+    "Cleanup": "Remove this worktree (safe once merged/idle).",
+    "Restart": "Kill the worktree's active processes, start a fresh "
+               "TMux/PSMux, and resume the last session in a NEW Copilot instance.",
+}
+
+# Per-action descriptions for the Maintenance actions menu (#1345).
+MAINT_ACTION_DESC = {
+    "Sync": "Fast-forward the FF-eligible selected worktrees onto the default "
+            "branch.",
+    "Cleanup": "Remove the cleanable selected worktrees (re-checked per worktree).",
+    "Diagnostics": "Inspect the selected worktrees (status / disk / git).",
 }
 
 
@@ -247,6 +267,9 @@ class PickerScreen(Widget):
         self.submenu_idx = 0
         self.cleanup = None           # cleanup-scope modal (Maintenance)
         self.optmenu = None           # "More options…" create modal
+        self.maint_sel = set()        # Maintenance multi-select (id4 set, #1345)
+        self.maint_menu = None        # Maintenance actions menu modal (#1345)
+        self.maint_menu_idx = 0
         self.progress = None          # cleanup/sync progress sub-dialog
         self.executor = None          # real maintenance executor (opt-in)
         # Real cleanup/sync ops are opt-in; the default is the safe in-TUI
@@ -260,6 +283,12 @@ class PickerScreen(Widget):
         self.applied = {}             # last-applied snapshot of the grid
         self.btn_idx = 0              # active button within the current group
         self.targets = []
+        self.host_cols = list(_DEFAULT_HOST_COLS)   # config-bound in setup()
+        self._prof_lock = threading.Lock()
+        self._prof_load = None        # src.load_profile_column (real sources)
+        self._prof_apply = None       # src.apply_profile_column (real sources)
+        self._prof_loading = False    # columns are streaming in
+        self._prof_loaded = False
         self.debug = "ready"
         self.data = []
         self.machines = []
@@ -326,6 +355,7 @@ class PickerScreen(Widget):
         # Machine tabs gain a leading "All" entry that interleaves every machine.
         self.machines = [("All", None, None, True)] + self.src.machines()
         self.machine_idx = self.local_index()
+        self.maint_sel = set()        # drop any stale Maintenance selection
         if self.live:
             # Real background SSH loads: one thread per machine, spinner -> ✓/✗.
             self.data = []
@@ -344,13 +374,29 @@ class PickerScreen(Widget):
                 else:
                     self.load_delay[i] = d
                     d += 1.1
+        # Profiles matrix axes are config-bound from machines.yaml (via the data
+        # source); fall back to the built-in defaults for sources that don't
+        # provide them (e.g. fixture sources in tests).
+        hc = getattr(self.src, "host_cols", None)
+        self.host_cols = (hc() if callable(hc) else None) or list(_DEFAULT_HOST_COLS)
+        te = getattr(self.src, "target_envs", None)
+        target_env_list = (te() if callable(te) else None) or _DEFAULT_TARGET_ENVS
         # Profiles matrix: seed a "self · agent" profile on each host.
-        self.targets = target_rows()
+        self.targets = target_rows(target_env_list)
         self.grid = {}
         for ti, t in enumerate(self.targets):
-            for hi in range(len(HOST_COLS)):
+            for hi in range(len(self.host_cols)):
                 self.grid[(ti, hi)] = self.cell_locked(ti, hi)
         self.applied = dict(self.grid)   # everything starts "applied"
+        # Real per-host columns: when the data source exposes profile IO
+        # (production data_local / data_ssh), stream each host's saved column
+        # in on a background thread so SSH never blocks the UI. Sources without
+        # these hooks (fixtures/tests) keep the seeded self·agent diagonal.
+        self._prof_load = getattr(self.src, "load_profile_column", None)
+        self._prof_apply = getattr(self.src, "apply_profile_column", None)
+        self._prof_loaded = False
+        if callable(self._prof_load):
+            self._start_profile_load()
 
     def button_set(self):
         if self.htab == 2:
@@ -373,7 +419,7 @@ class PickerScreen(Widget):
         """A machine always has a profile for THIS repo with itself as host
         (self · agent) -- force-checked, not editable."""
         t = self.targets[ti]
-        _lbl, hm, he = HOST_COLS[hi]
+        _lbl, hm, he = self.host_cols[hi]
         return t["machine"] == hm and t["env"] == he and t["agent"]
 
     def machine_state(self, i):
@@ -452,8 +498,15 @@ class PickerScreen(Widget):
                 out.append(("L", i))
         elif self.htab == 1:
             out = [("V", 0), ("M", 0), ("BTN", 0)]
-            for i in range(len(self.cleanup_rows())):
-                out.append(("C", i))
+            groups = self.maint_groups()
+            if any(rows for _st, rows in groups):
+                out.append(("SA", 0))   # the "Select all" checkbox
+            li = 0
+            for gi, (_st, rows) in enumerate(groups):
+                out.append(("GH", gi))
+                for _ in rows:
+                    out.append(("C", li))
+                    li += 1
         else:
             out = [("V", 0)]
             for i in range(len(self.targets)):
@@ -470,7 +523,8 @@ class PickerScreen(Widget):
         if zone == "PR":
             return self._pr_head()
         return {"V": ("V", 0), "M": ("M", 0), "BTN": ("BTN", 0),
-                "L": ("L", 0), "C": ("C", 0), "PR": ("PR", 0)}.get(zone, ("V", 0))
+                "L": ("L", 0), "SA": ("SA", 0), "GH": ("GH", 0),
+                "C": ("C", 0), "PR": ("PR", 0)}.get(zone, ("V", 0))
 
     def region_heads(self):
         """Tab/Shift+Tab jump targets — the entry point of each major region."""
@@ -480,8 +534,8 @@ class PickerScreen(Widget):
                 heads.append(("L", 0))
         elif self.htab == 1:
             heads = [("V", 0), ("M", 0), ("BTN", 0)]
-            if self.cleanup_rows():
-                heads.append(("C", 0))
+            if self.maint_records():
+                heads.append(("SA", 0))   # Tab into the selection/list region
         else:
             heads = [("V", 0), self._pr_head(), ("BTN", 0)]
         return heads
@@ -514,9 +568,99 @@ class PickerScreen(Widget):
             w["dispo"] = f" {DISPO_MARK[lvl]} {txt}" if lvl else ""
         return rows
 
+    # ---- Maintenance grouping + multi-select (#1345) ----
+    def maint_groups(self):
+        """Maintenance rows grouped by display state, in MAINT_GROUP_ORDER."""
+        rows = self.cleanup_rows()
+        by = {}
+        for r in rows:
+            by.setdefault(r.get("state", "?"), []).append(r)
+        groups = [(st, by.pop(st)) for st in MAINT_GROUP_ORDER if st in by]
+        groups.extend(by.items())   # any unlisted states, first-seen order
+        return groups
+
+    def maint_records(self):
+        """Flat Maintenance row list in grouped display order (indexes the
+        ("C", i) stops -- must match build_body's ordering)."""
+        out = []
+        for _st, rows in self.maint_groups():
+            out.extend(rows)
+        return out
+
+    def _maint_ids(self):
+        return {r["id4"] for r in self.maint_records()}
+
+    def _toggle_maint(self, i):
+        recs = self.maint_records()
+        if 0 <= i < len(recs):
+            wid = recs[i]["id4"]
+            self.maint_sel.symmetric_difference_update({wid})
+            self.debug = (f"{'selected' if wid in self.maint_sel else 'deselected'}"
+                          f" {wid} · {len(self.maint_sel)} selected")
+
+    def _toggle_maint_all(self):
+        ids = self._maint_ids()
+        if ids and ids <= self.maint_sel:
+            self.maint_sel -= ids
+            self.debug = "cleared selection"
+        else:
+            self.maint_sel |= ids
+            self.debug = f"selected all · {len(ids)}"
+
+    def _toggle_group(self, gi):
+        groups = self.maint_groups()
+        if 0 <= gi < len(groups):
+            st, rows = groups[gi]
+            ids = {r["id4"] for r in rows}
+            if ids and ids <= self.maint_sel:
+                self.maint_sel -= ids
+                self.debug = f"deselected {st} · {len(ids)}"
+            else:
+                self.maint_sel |= ids
+                self.debug = f"selected {st} · {len(ids)}"
+
+    def _open_maint_menu(self):
+        """Open the Maintenance actions menu for the selected set; if nothing
+        is selected, select the focused row and open it for that one (#1345)."""
+        if not self.maint_sel:
+            rec = self._selected_record()
+            if not rec:
+                return
+            self.maint_sel = {rec["id4"]}
+        ids = set(self.maint_sel)
+        chosen = [r for r in self.maint_records() if r["id4"] in ids]
+        acts = []
+        if any(r.get("ff_eligible") for r in chosen):
+            acts.append("Sync")
+        if any(self._cleanable(r) for r in chosen):
+            acts.append("Cleanup")
+        acts.append("Diagnostics")
+        self.maint_menu = {"ids": ids, "actions": acts, "count": len(chosen)}
+        self.maint_menu_idx = 0
+
+    def _key_maint_menu(self, key):
+        m = self.maint_menu
+        acts = m["actions"]
+        if key == "down":
+            self.maint_menu_idx = (self.maint_menu_idx + 1) % len(acts)
+        elif key == "up":
+            self.maint_menu_idx = (self.maint_menu_idx - 1) % len(acts)
+        elif key == "enter":
+            act = acts[self.maint_menu_idx]
+            ids = m["ids"]
+            self.maint_menu = None
+            if act == "Sync":
+                self._open_sync(ids=ids)
+            elif act == "Cleanup":
+                self._open_cleanup(ids=ids)
+            else:
+                self.debug = f"diagnostics -> {len(ids)} worktree(s) (mock)"
+        elif key in ("escape", "q", "tab"):
+            self.maint_menu = None
+
     # ---- Profiles matrix helpers ----
     def profile_col_widths(self):
-        return [max(len(f"{m} {e}"), 3) + 2 for _lbl, m, e in HOST_COLS]
+        return [max(len(f"{m} {e}"), 3) + 2 for _lbl, m, e in self.host_cols]
 
     def _host_header_cell(self, j, colw):
         """One Profiles host-column header: machine (config) name in the header
@@ -524,7 +668,7 @@ class PickerScreen(Widget):
         The active host (the column being edited) gets the SAME subtle shading
         the machine tabs use for an active-but-unfocused tab -- never the
         inversion cursor, since the real cursor lives in the grid cell."""
-        _lbl, m, e = HOST_COLS[j]
+        _lbl, m, e = self.host_cols[j]
         active = j == self.pcol
         name_base = "bold white" if active else C_TABOFF
         env_base = C_ENV.get(e, name_base)
@@ -541,6 +685,124 @@ class PickerScreen(Widget):
 
     def profiles_present(self):
         return sum(1 for v in self.grid.values() if v)
+
+    # ---- Profiles: real per-host column load + Apply (own-column model) ----
+    def _target_sel(self, ti):
+        """The TargetSel a target row represents (kind = agent|shell)."""
+        t = self.targets[ti]
+        return profiles_mod.TargetSel(
+            t["machine"], t["env"], "agent" if t["agent"] else "shell")
+
+    def _start_profile_load(self):
+        """Background-load every host's saved column into the grid.
+
+        Read-only: each host's column is fetched (local in-process, remote over
+        SSH) and projected onto the grid; ``applied`` is snapshotted to match so
+        the freshly-loaded state reads as 'no pending changes'.
+        """
+        self._prof_loading = True
+
+        def work():
+            cols = {}
+            for hi, (_lbl, hm, he) in enumerate(self.host_cols):
+                try:
+                    cols[hi] = self._prof_load(hm, he)
+                except Exception:
+                    cols[hi] = None   # treat a load failure as legacy (all-on)
+            with self._prof_lock:
+                # Don't clobber edits the user already started before the load
+                # resolved -- only project columns onto a pristine grid.
+                if not self.grid_dirty():
+                    for hi, sels in cols.items():
+                        if sels is None:
+                            # Legacy/unmanaged host: every target is "on" (the
+                            # mirror's historical emit-everything behavior), so
+                            # the grid matches reality until the user prunes.
+                            for ti in range(len(self.targets)):
+                                self.grid[(ti, hi)] = True
+                            continue
+                        keys = {s.key for s in sels}
+                        for ti in range(len(self.targets)):
+                            on = self._target_sel(ti).key in keys or \
+                                self.cell_locked(ti, hi)
+                            self.grid[(ti, hi)] = on
+                    self.applied = dict(self.grid)
+                self._prof_loading = False
+                self._prof_loaded = True
+
+        threading.Thread(target=work, name="profiles-load", daemon=True).start()
+
+    def _column_sels(self, hi):
+        """Build the TargetSel list for host column ``hi`` from the grid."""
+        out = []
+        for ti in range(len(self.targets)):
+            if self.grid.get((ti, hi)):
+                out.append(self._target_sel(ti))
+        return out
+
+    def _apply_profiles(self):
+        """Apply every changed host column via the per-host progress dialog.
+
+        Only columns whose cells differ from ``applied`` are written. Each host
+        is one progress item: local writes mirror to the terminal profiles,
+        remote writes go over SSH -- so the run shows a live per-host
+        spinner→✓/✗ while the SSH config updates fan out. Succeeded hosts
+        advance their ``applied`` snapshot when the dialog closes.
+        """
+        if not callable(self._prof_apply):
+            # Mock source (fixtures/tests without the IO hook): instant.
+            self.applied = dict(self.grid)
+            self.debug = f"Applied · {self.profiles_present()} profiles (mock)"
+            return
+        changed = []
+        for hi in range(len(self.host_cols)):
+            if any(self.grid.get((ti, hi)) != self.applied.get((ti, hi))
+                   for ti in range(len(self.targets))):
+                changed.append(hi)
+        if not changed:
+            self.debug = "Apply · nothing changed"
+            return
+
+        from . import maintenance
+        items, tasks = [], []
+        for hi in changed:
+            _lbl, hm, he = self.host_cols[hi]
+            key = f"{hm}/{he}"
+            items.append({"id4": key, "title": f"{hm} {he}",
+                          "machine_env": f"{hm} {he}", "hi": hi,
+                          "state": "pending"})
+            tasks.append((key, self._make_apply_task(hm, he, hi)))
+
+        self.executor = maintenance.MaintenanceExecutor("profiles", tasks)
+        self.progress = {
+            "verb": "Apply profiles", "op": "profiles",
+            "scope": f"{len(changed)} host column(s)",
+            "items": items, "recs": [], "picked": [],
+            "ticks": 0, "steps": 3, "done": False, "armed": True,
+            "include_unused": False, "include_conversations": False,
+        }
+        self.executor.start()
+
+    def _make_apply_task(self, machine, env, hi):
+        """A progress task that writes one host column; ``ok`` drives ✓/✗."""
+        sels = self._column_sels(hi)
+
+        def _run():
+            ok, detail = self._prof_apply(machine, env, sels)
+            return {"ok": bool(ok), "reason": detail, "detail": detail}
+        return _run
+
+    def _commit_applied_profiles(self):
+        """After an Apply run, advance ``applied`` for every host that succeeded
+        (matched by the executor's per-item DONE state)."""
+        p = self.progress
+        if not p or p.get("op") != "profiles":
+            return
+        for it in p["items"]:
+            if it.get("state") == "done":
+                hi = it["hi"]
+                for ti in range(len(self.targets)):
+                    self.applied[(ti, hi)] = self.grid.get((ti, hi), False)
 
     def _btn_style(self, focus, is_active):
         """Focused active button glows; unfocused active button shows a subtle
@@ -562,14 +824,14 @@ class PickerScreen(Widget):
         return t
 
     def new_worktree_row(self, width, focus, active_idx):
+        # Single "New worktree…" entry -- opens the options dialog directly,
+        # which confirms the target machine (aperture-labs #1346).
         tm, te = self.create_target()
         t = Text("  ")
-        t.append(" + New Worktree ", style=self._btn_style(focus, active_idx == 0))
-        t.append("   ")
-        t.append(" More options… ", style=self._btn_style(focus, active_idx == 1))
-        suffix = f"    creates on {tm} {te}"
+        t.append(" + New worktree… ", style=self._btn_style(focus, active_idx == 0))
         host_tag = "  (this host)" if (tm, te) == self.src.LOCAL else ""
-        if t.cell_len + len(suffix) + len(host_tag) <= width:
+        if t.cell_len + len("    creates on ") + len(f"{tm} {te}") \
+                + len(host_tag) <= width:
             t.append("    creates on ", style=C_DIM)
             t.append(f"{tm} ", style="grey70")
             t.append(te, style=C_ENV.get(te, "grey70"))
@@ -586,6 +848,63 @@ class PickerScreen(Widget):
         if suffix and t.cell_len + 3 + len(suffix) <= width:
             t.append("   " + suffix, style=C_DIM)
         t.append(" " * max(0, width - t.cell_len))
+        return t
+
+    # ---- Maintenance row rendering (#1345) ----
+    def _checkbox(self, checked):
+        return ("☑", "green") if checked else ("☐", "grey50")
+
+    def _maint_selectall_row(self, width, focus):
+        ids = self._maint_ids()
+        all_on = bool(ids) and ids <= self.maint_sel
+        glyph, gc = self._checkbox(all_on)
+        nsel = len(self.maint_sel & ids)
+        t = Text("  ")
+        t.append(glyph, style=gc)
+        t.append("  ")
+        t.append("Select all", style="grey78")
+        t.append(f"   ({nsel}/{len(ids)} selected)", style=C_DIM)
+        t.append(" " * max(0, width - t.cell_len))
+        if focus:
+            t.stylize(C_SEL)
+        return t
+
+    def _maint_header(self, ccols, width):
+        # 4-cell checkbox gutter, then the normal column header.
+        t = Text("    ")
+        body = header_text(ccols, max(1, width - 4), indent=0)
+        t.append_text(body)
+        if t.cell_len < width:
+            t.append(" " * (width - t.cell_len))
+        return t
+
+    def _maint_group_row(self, state, rows, width, focus):
+        ids = {r["id4"] for r in rows}
+        all_on = bool(ids) and ids <= self.maint_sel
+        glyph, gc = self._checkbox(all_on)
+        t = Text("  ")
+        t.append(glyph, style=gc)
+        t.append("  ")
+        head = Text(f"── {state} ", style=C_SECTION)
+        head.append(f"({len(rows)}) ", style=C_DIM)
+        t.append_text(head)
+        t.append("─" * max(0, width - t.cell_len - 1), style=C_DIM)
+        t.append(" ")
+        if focus:
+            t.stylize(C_SEL)
+        return t
+
+    def _maint_row(self, d, ccols, width, selected, checked, pulse):
+        glyph, gc = self._checkbox(checked)
+        t = Text(" ")
+        t.append(glyph, style=gc)
+        t.append("  ")
+        body = row_text(d, ccols, max(1, width - 4), selected=False, pulse=pulse)
+        t.append_text(body)
+        if t.cell_len < width:
+            t.append(" " * (width - t.cell_len))
+        if selected:
+            t.stylize(C_SEL)
         return t
 
     # ---- build the scrollable body as VRows ----
@@ -626,20 +945,36 @@ class PickerScreen(Widget):
                     li += 1
         elif self.htab == 1:
             add(self.tab_bar(width, sel == ("M", 0)))
-            rows = self.cleanup_rows()
-            total = sum(_size_mb(w) for w in rows)
+            groups = self.maint_groups()
+            recs = self.maint_records()
+            total = sum(_size_mb(w) for w in recs)
+            nsel = len(self.maint_sel & self._maint_ids())
+            reclaim = sum(_size_mb(w) for w in recs if w["id4"] in self.maint_sel)
+            suffix = f"{len(recs)} candidates · ~{total} MiB"
+            if nsel:
+                suffix += f"  ·  {nsel} selected · ~{reclaim} MiB"
             add(Text(""))
             add(self.two_button_row(
-                "Cleanup…", "Sync…", btn_focus, self.btn_idx,
-                f"{len(rows)} candidates · ~{total} MiB", width),
+                "Cleanup…", "Sync…", btn_focus, self.btn_idx, suffix, width),
                 stop=("BTN", 0))
             add(Text(""))
-            ccols = fit(CLEAN_SPECS, width - 1, "title", 12)
-            add(header_text(ccols, width), kind="colhdr")
-            for i, rec in enumerate(rows):
-                d = dict(rec, mib=f"{_size_mb(rec)}M")
-                add(row_text(d, ccols, width, self.sel == ("C", i), pulse=self.pulse),
-                    stop=("C", i), data=rec)
+            # Checkbox column reserves 4 cells in front of the data columns.
+            ccols = fit(CLEAN_SPECS, width - 1 - 4, "title", 12)
+            add(self._maint_selectall_row(width, sel == ("SA", 0)),
+                stop=("SA", 0))
+            add(self._maint_header(ccols, width), kind="colhdr")
+            li = 0
+            for gi, (state, rows) in enumerate(groups):
+                cur_section = (f"{state} ({len(rows)})", len(vrows))
+                add(self._maint_group_row(state, rows, width, sel == ("GH", gi)),
+                    stop=("GH", gi), kind="section")
+                for rec in rows:
+                    d = dict(rec, mib=f"{_size_mb(rec)}M")
+                    checked = rec["id4"] in self.maint_sel
+                    add(self._maint_row(d, ccols, width, sel == ("C", li),
+                                        checked, self.pulse),
+                        stop=("C", li), data=rec)
+                    li += 1
         else:
             self._build_profiles(add, width, sel)
         return vrows
@@ -766,12 +1101,12 @@ class PickerScreen(Widget):
     def _build_profiles_transposed(self, add, width, sel):
         """Too narrow for a grid: one host is the header, each target a
         space-toggleable checkbox row. ◀▶ switches which host you're editing."""
-        _lbl, hm, he = HOST_COLS[self.pcol]
+        _lbl, hm, he = self.host_cols[self.pcol]
         head = Text(" HOST  ", style=C_HEADER)
         head.append(hm, style=self._hl("bold white", True, False))
         head.append(" ", style=self._hl("", True, False))
         head.append(he, style=self._hl(C_ENV.get(he, "bold white"), True, False))
-        head.append(f"   ‹ {self.pcol + 1}/{len(HOST_COLS)} ›  ◀▶ host",
+        head.append(f"   ‹ {self.pcol + 1}/{len(self.host_cols)} ›  ◀▶ host",
                     style=C_HINT)
         head.append(" " * max(0, width - head.cell_len))
         add(head, kind="colhdr")
@@ -912,15 +1247,15 @@ class PickerScreen(Widget):
         # Live mode: surface how many machines are still loading / failed so the
         # All view's streaming fill-in is legible.
         if self.live and self.loader is not None and self.htab == 0:
-            _ready, loading, failed = self.loader.counts()
+            # Only the loading-spinner count is surfaced. A machine-load (SSH)
+            # failure is NOT a failed worktree -- the per-machine tab already
+            # shows its ✗ -- so totalling them here only confused (aperture-labs
+            # #1347).
+            _ready, loading, _failed = self.loader.counts()
             if loading:
                 t.append(f"  {self.spin()}{loading}", style=C_LOAD)
                 if not compact:
                     t.append(" loading", style=C_LOAD)
-            if failed:
-                t.append(f"  ✗{failed}", style=C_WARN)
-                if not compact:
-                    t.append(" failed", style=C_WARN)
         return t
 
     def _top_pad(self, W, more_above, scrolled):
@@ -964,7 +1299,8 @@ class PickerScreen(Widget):
         stats = self._stats_row(W)
         lines = list(top) + [header_border, stats] + body_lines + [bottom_border, foot]
         # body offset = title+htabs+header_border+stats = len(top)+2
-        modal = self.submenu or self.cleanup or self.optmenu or self.progress
+        modal = (self.submenu or self.maint_menu or self.cleanup
+                 or self.optmenu or self.progress)
         if modal:
             # Gray out ALL background content behind the dialog.
             lines = [Text((ln if isinstance(ln, Text) else Text(str(ln))).plain,
@@ -972,6 +1308,8 @@ class PickerScreen(Widget):
             off, bh = len(top) + 2, body_h
             if self.submenu:
                 self._overlay_submenu(lines, W, off, bh)
+            elif self.maint_menu:
+                self._overlay_maint_menu(lines, W, off, bh)
             elif self.cleanup:
                 self._overlay_scopedlg(self.cleanup, lines, W, off, bh, om=False)
             elif self.optmenu:
@@ -1074,9 +1412,73 @@ class PickerScreen(Widget):
                           style="reverse bold orange1" if v_focus else C_BAND)
             else:
                 l2.append(label, style="white" if v_focus else C_TABOFF)
-        hint = ("Tab/◀▶ switch · ↓ body " if v_focus else "[ ] view ")
+        # Tab never switches the view -- it moves focus between regions. The
+        # view pivot moves with ◀▶ (while focused here) or [ ]/^⇧◀▶ (#1344).
+        hint = ("◀▶ switch view · ↓ body · Tab region "
+                if v_focus else "[ ] switch view ")
         l2.append(hint.rjust(max(1, W - l2.cell_len)), style=C_DIM)
         return [l1, l2]
+
+    def _focus_hint(self):
+        """Focus-specific footer hint: exactly what Enter/Space do for the
+        current focus, naming the concrete target (#1344)."""
+        zone = self.sel[0]
+        if zone == "V":
+            return (f"◀▶ switch view (on {HTABS[self.htab]}) · Enter: focus body"
+                    f" · Tab region · [ ] view")
+        if zone == "M":
+            m, e, _ = self.cur_machine()
+            scope = "All machines" if self.is_all() else f"{m} {e}"
+            return (f"◀▶ switch machine (on {scope}) · Enter: focus actions"
+                    f" · Tab region · ^◀▶ machine")
+        if zone == "BTN":
+            btn = self.active_button()
+            if btn == "N":
+                tm, te = self.create_target()
+                return (f"Enter: new worktree on {tm} {te}"
+                        f" · Tab region · ^◀▶ machine")
+            if btn == "K":
+                return "Enter: open Cleanup dialog · ◀▶ Cleanup/Sync · Tab region"
+            if btn == "SY":
+                return "Enter: open Sync dialog · ◀▶ Cleanup/Sync · Tab region"
+            if btn == "PA":
+                n = self.pending_count()
+                return (f"Enter: apply {n} profile change(s) · ◀▶ Apply/Reset"
+                        f" · ↑ grid · Tab region")
+            if btn == "PReset":
+                return ("Enter: reset grid to applied · ◀▶ Apply/Reset"
+                        " · ↑ grid · Tab region")
+            return ""
+        if zone == "L":
+            rec = self._selected_record()
+            wid = rec.get("id4") if rec else "?"
+            return (f"Enter / Space: sub-menu for worktree {wid}"
+                    f" · Tab region · ^◀▶ machine")
+        if zone == "C":
+            rec = self._selected_record()
+            wid = rec.get("id4") if rec else "?"
+            nsel = len(self.maint_sel & self._maint_ids())
+            tgt = f"{nsel} selected" if nsel else f"row {wid}"
+            return (f"Space: select {wid} · Enter: actions for {tgt}"
+                    f" · Tab region · ^◀▶ machine")
+        if zone == "SA":
+            ids = self._maint_ids()
+            all_on = bool(ids) and ids <= self.maint_sel
+            verb = "clear all" if all_on else "select all"
+            return f"Space / Enter: {verb} ({len(ids)}) · ↓ rows · Tab region"
+        if zone == "GH":
+            groups = self.maint_groups()
+            gi = self.sel[1]
+            st = groups[gi][0] if 0 <= gi < len(groups) else "?"
+            return f"Space / Enter: select all {st} · ↓ rows · Tab region"
+        if zone == "PR":
+            ti = self.sel[1]
+            host = "{1} {2}".format(*self.host_cols[self.pcol])
+            tlabel = (self.targets[ti]["label"]
+                      if 0 <= ti < len(self.targets) else "?")
+            return (f"Space: toggle {host} → {tlabel} · ◀▶ host · ↑↓ target"
+                    f" · Enter: to Apply · Tab region")
+        return ""
 
     def footer(self, W):
         dlg = self.cleanup or self.optmenu
@@ -1084,32 +1486,28 @@ class PickerScreen(Widget):
             hints = ("Esc cancel" if not self.progress["done"]
                      else "Enter/Esc close")
         elif self.submenu:
-            hints = "↑↓ choose · Enter run · Esc back"
+            cur = self.submenu["actions"][self.submenu_idx]
+            wid = self.submenu["rec"].get("id4")
+            if cur == "Open":
+                nm = "No-mux ON" if self.submenu.get("no_mux") else "No-mux"
+                hints = (f"↑↓ choose · Enter: open {wid} · Space: toggle {nm}"
+                         f" · Esc back")
+            else:
+                hints = f"↑↓ choose · Enter: {cur.lower()} {wid} · Esc back"
+        elif self.maint_menu:
+            cur = self.maint_menu["actions"][self.maint_menu_idx]
+            n = self.maint_menu["count"]
+            hints = f"↑↓ choose · Enter: {cur.lower()} {n} worktree(s) · Esc back"
         elif dlg:
             if dlg.get("section", 0) == 0:
-                hints = "↑↓ move · Space toggle · Tab → buttons · Enter next · Esc cancel"
+                hints = ("↑↓ move · Space toggle option · Tab → buttons"
+                         " · Enter next · Esc cancel")
             else:
-                hints = "◀▶ button · Enter select · ↑ back to options · Esc cancel"
-        elif self.sel[0] == "V":
-            hints = "◀▶ or Tab switch view · ↓ into body · ^⇧◀▶ view"
-        elif self.sel[0] == "M":
-            hints = "◀▶ switch machine · Tab region · ↑↓ move · ^◀▶ machine"
-        elif self.sel[0] in ("L", "C"):
-            hints = "Enter open · Space sub-menu · Tab region · ^◀▶ machine"
-        elif self.sel[0] == "BTN":
-            btn = self.active_button()
-            if btn in ("N", "NO"):
-                hints = "◀▶ button · Enter activate · Tab region · ^◀▶ machine"
-            elif btn in ("K", "SY"):
-                hints = "◀▶ button · Enter open dialog · Tab region"
-            elif btn in ("PA", "PReset"):
-                hints = "◀▶ Apply/Reset · Enter activate · ↑ grid · Tab region"
-            else:
-                hints = ""
-        elif self.sel[0] == "PR":
-            hints = "Space toggle · ◀▶ host · ↑↓ target · Tab → buttons · Enter → Apply"
+                clabel = dlg.get("confirm", "Confirm")
+                hints = (f"◀▶ button · Enter: {clabel} · ↑ back to options"
+                         f" · Esc cancel")
         else:
-            hints = ""
+            hints = self._focus_hint()
         f = Text(" " + hints, style="grey70")
         dbg = f"· {self.debug} "
         f.append(dbg.rjust(max(1, W - f.cell_len)), style=C_DIM)
@@ -1201,9 +1599,34 @@ class PickerScreen(Widget):
         panel.append(self._prow("", pw))
         for i, a in enumerate(acts):
             mark = " ▸ " if i == idx else "   "
-            panel.append(self._prow(mark + a, pw, selected=(i == idx)))
+            label = a
+            if a == "Open":
+                label = "Open · no-mux" if self.submenu.get("no_mux") else "Open"
+            panel.append(self._prow(mark + label, pw, selected=(i == idx)))
         panel.append(self._prow("", pw))
         desc = ACTION_DESC.get(acts[idx], "")
+        panel.append(self._prow(" " + desc, pw, style="grey62"))
+        panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
+        self._blit_panel(lines, W, panel, top_off, body_h)
+
+    # Per-action descriptions for the Maintenance actions menu (#1345).
+    def _overlay_maint_menu(self, lines, W, top_off, body_h):
+        m = self.maint_menu
+        acts = m["actions"]
+        idx = self.maint_menu_idx
+        n = m["count"]
+        pw = min(W - 8, 64)
+        header = f"─ Maintenance · {n} selected "
+        panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
+                      style=C_BAND)]
+        panel.append(self._prow(" Action to apply to the selection:", pw,
+                                style="bold white"))
+        panel.append(self._prow("", pw))
+        for i, a in enumerate(acts):
+            mark = " ▸ " if i == idx else "   "
+            panel.append(self._prow(mark + a, pw, selected=(i == idx)))
+        panel.append(self._prow("", pw))
+        desc = MAINT_ACTION_DESC.get(acts[idx], "")
         panel.append(self._prow(" " + desc, pw, style="grey62"))
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)
@@ -1348,6 +1771,8 @@ class PickerScreen(Widget):
             return self._key_progress(key)
         if self.submenu:
             return self._key_submenu(key)
+        if self.maint_menu:
+            return self._key_maint_menu(key)
         if self.cleanup:
             return self._key_scopedlg(key)
         if self.optmenu:
@@ -1389,7 +1814,7 @@ class PickerScreen(Widget):
                 if bset:
                     self.btn_idx = (self.btn_idx + d) % len(bset)
             elif zone == "PR":
-                self.pcol = (self.pcol + d) % len(HOST_COLS)
+                self.pcol = (self.pcol + d) % len(self.host_cols)
             # L / C rows: bare ←/→ is a no-op (machine = Ctrl+←/→)
             return
 
@@ -1408,8 +1833,14 @@ class PickerScreen(Widget):
         elif key == "enter":
             self._activate()
         elif key == "space":
-            if zone in ("L", "C"):
+            if zone == "L":
                 self._open_submenu()
+            elif zone == "C":
+                self._toggle_maint(self.sel[1])
+            elif zone == "SA":
+                self._toggle_maint_all()
+            elif zone == "GH":
+                self._toggle_group(self.sel[1])
             elif zone == "PR":
                 self._toggle_cell()
             elif zone == "BTN":
@@ -1443,7 +1874,7 @@ class PickerScreen(Widget):
         key = (ti, self.pcol)
         self.grid[key] = not self.grid.get(key, False)
         t = self.targets[ti]
-        _lbl, hm, he = HOST_COLS[self.pcol]
+        _lbl, hm, he = self.host_cols[self.pcol]
         host = f"{hm} {he}"
         self.debug = (f"{'+' if self.grid[key] else '-'} {host} → {t['label']}"
                       " (pending Apply)")
@@ -1460,21 +1891,29 @@ class PickerScreen(Widget):
 
     def _key_submenu(self, key):
         acts = self.submenu["actions"]
+        cur = acts[self.submenu_idx]
         if key == "down":
             self.submenu_idx = (self.submenu_idx + 1) % len(acts)
         elif key == "up":
             self.submenu_idx = (self.submenu_idx - 1) % len(acts)
+        elif key == "space":
+            # Space toggles the No-mux option, but only while Open is focused
+            # (#1343). Elsewhere it is a no-op (it no longer closes the menu).
+            if cur == "Open":
+                self.submenu["no_mux"] = not self.submenu["no_mux"]
         elif key == "enter":
-            act = acts[self.submenu_idx]
             rec = self.submenu["rec"]
+            no_mux = self.submenu.get("no_mux", False)
             self.submenu = None
-            if act in ("Open", "Resume"):
+            if cur == "Open":
+                self._decide(self._resume_decision(rec, no_mux=no_mux))
+            elif cur == "Resume":
                 self._decide(self._resume_decision(rec))
             else:
-                # Sync / Create PR / Kill session / Reset env / Cleanup are
-                # deferred ops (full design pending) -- keep the mock note.
-                self.debug = f"{act} -> {rec.get('id4')} (mock)"
-        elif key in ("escape", "q", "space", "tab"):
+                # Sync / Cleanup / Restart are deferred ops (full wiring
+                # pending) -- keep the mock note for now.
+                self.debug = f"{cur} -> {rec.get('id4')} (mock)"
+        elif key in ("escape", "q", "tab"):
             self.submenu = None
 
     def _key_scopedlg(self, key, om=False):
@@ -1534,6 +1973,14 @@ class PickerScreen(Widget):
             failed = sum(1 for it in p["items"] if it["state"] == "failed")
             state = "complete" if p["done"] else "cancelled"
             sim = "" if self.executor is not None else " (sim)"
+            # Profiles Apply: bank the succeeded host columns before clearing.
+            if p.get("op") == "profiles":
+                self._commit_applied_profiles()
+                self.progress = None
+                self.executor = None
+                tail = f" · {failed} failed" if failed else ""
+                self.debug = f"{verb} {state} · {n} host column(s){tail}"
+                return
             self.progress = None
             self.executor = None
             tail = f" · {failed} failed" if failed else ""
@@ -1625,7 +2072,7 @@ class PickerScreen(Widget):
         if zone == "L":
             arr = self.list_records()
         elif zone == "C":
-            arr = self.cleanup_rows()
+            arr = self.maint_records()
         else:
             return None
         return arr[i] if 0 <= i < len(arr) else None
@@ -1639,11 +2086,15 @@ class PickerScreen(Widget):
         self.app.result = decision
         self.app.exit()
 
-    def _resume_decision(self, rec):
-        """Build the resume decision for a worktree row/submenu selection."""
+    def _resume_decision(self, rec, no_mux=False):
+        """Build the resume decision for a worktree row/submenu selection.
+
+        ``no_mux`` (the Open sub-menu toggle, #1343) launches directly without
+        the PSMux/TMux wrapper.
+        """
         raw = rec.get("raw") or {}
         m, e = rec.get("machine"), rec.get("env")
-        return {
+        decision = {
             "action": "resume",
             "worktree_id": raw.get("id"),
             "id4": rec.get("id4"),
@@ -1652,6 +2103,9 @@ class PickerScreen(Widget):
             "title": rec.get("title"),
             "is_local": (m, e) == self.src.LOCAL,
         }
+        if no_mux:
+            decision["options"] = {"no_mux": True}
+        return decision
 
     def _activate(self):
         zone = self.sel[0]
@@ -1665,12 +2119,7 @@ class PickerScreen(Widget):
         elif zone == "BTN":
             btn = self.active_button()
             if btn == "N":
-                tm, te = self.create_target()
-                self._decide({
-                    "action": "new", "machine": tm, "env": te,
-                    "is_local": (tm, te) == self.src.LOCAL, "options": {},
-                })
-            elif btn == "NO":
+                # New worktree… opens the options dialog directly (#1346).
                 self._open_optmenu()
             elif btn == "K":
                 self._open_cleanup()
@@ -1678,14 +2127,21 @@ class PickerScreen(Widget):
                 self._open_sync()
             elif btn == "PReset":
                 self.grid = dict(self.applied)
-                self.debug = "reset · reverted to applied profiles (mock)"
+                self.debug = "reset · reverted to applied profiles"
             elif btn == "PA":
-                self.applied = dict(self.grid)
-                self.debug = f"Applied · {self.profiles_present()} profiles now active (mock)"
-        else:
-            rec = self._selected_record()
-            if rec:
-                self._decide(self._resume_decision(rec))
+                self._apply_profiles()
+        elif zone == "L":
+            # Enter on a worktree row opens its sub-menu (#1343), not a
+            # straight Open.
+            self._open_submenu()
+        elif zone == "C":
+            # Maintenance: Enter opens the maintenance actions menu for the
+            # selected set (#1345) -- it never opens/resumes a worktree.
+            self._open_maint_menu()
+        elif zone == "SA":
+            self._toggle_maint_all()
+        elif zone == "GH":
+            self._toggle_group(self.sel[1])
 
     def _local_model_hosts(self):
         """Machines that can host a local model (the agent runs on their GPU).
@@ -1710,29 +2166,43 @@ class PickerScreen(Widget):
         if tm in self._local_model_hosts():
             opts.append({"label": "Local model", "on": False,
                          "hint": f"run the agent on {tm}'s GPU"})
-        self.optmenu = {"target": (tm, te), "idx": 0, "section": 0, "bidx": 0,
-                        "verb": "New worktree", "confirm": "Create", "opts": opts}
+        # Open straight onto the Create button (section 1) with no options
+        # checked, and confirm the target machine in the prompt (#1346).
+        self.optmenu = {"target": (tm, te), "idx": 0, "section": 1, "bidx": 0,
+                        "verb": "New worktree", "confirm": "Create",
+                        "prompt": f"Creates on {tm} {te} · options (none required):",
+                        "opts": opts}
+
+    @staticmethod
+    def _cleanable(rec):
+        """Whether a worktree's cleanup bucket is one the Cleanup flow offers."""
+        return rec.get("cleanup_bucket") in (
+            "clean", "unused", "conversation", "gone")
 
     def _open_submenu(self):
         rec = self._selected_record()
         if not rec:
             return
-        acts = ["Open", "Resume", "Sync"]
-        if not rec.get("pr", "").endswith("✓"):   # no merged PR yet
-            acts.append("Create PR")
-        if rec.get("sess", "").startswith("●"):
-            acts.append("Kill session")
-        acts += ["Reset env", "Cleanup"]
-        self.submenu = {"rec": rec, "actions": acts}
+        # Open + Resume always; Sync only when FF-eligible; Cleanup only when
+        # the bucket is cleanable; Restart always (#1343).
+        acts = ["Open", "Resume"]
+        if rec.get("ff_eligible"):
+            acts.append("Sync")
+        if self._cleanable(rec):
+            acts.append("Cleanup")
+        acts.append("Restart")
+        self.submenu = {"rec": rec, "actions": acts, "no_mux": False}
         self.submenu_idx = 0
 
     def _scope_label(self):
         return "All machines" if self.is_all() else \
             "{} {}".format(*self.cur_machine()[:2])
 
-    def _open_cleanup(self):
-        scope = self._scope_label()
+    def _open_cleanup(self, ids=None):
+        scope = self._scope_label() if ids is None else f"{len(ids)} selected"
         rows = self.cleanup_rows()
+        if ids is not None:
+            rows = [w for w in rows if w["id4"] in ids]
         clean = {w["id4"] for w in rows if w["cleanup_bucket"] == "clean"}
         unused = {w["id4"] for w in rows if w["cleanup_bucket"] == "unused"}
         convo = {w["id4"] for w in rows if w["cleanup_bucket"] == "conversation"}
@@ -1754,9 +2224,11 @@ class PickerScreen(Widget):
             ],
         }
 
-    def _open_sync(self):
-        scope = self._scope_label()
-        if self.is_all():
+    def _open_sync(self, ids=None):
+        scope = self._scope_label() if ids is None else f"{len(ids)} selected"
+        if ids is not None:
+            rows = [w for w in self.data if w["id4"] in ids]
+        elif self.is_all():
             rows = list(self.data)
         else:
             m, e, _ = self.cur_machine()

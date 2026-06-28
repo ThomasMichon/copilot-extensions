@@ -42,9 +42,12 @@ def _ssh_json(argv, timeout=120):
 
 
 def _result_ok(op, res):
-    """Map a per-worktree result dict onto DONE/FAILED for the progress glyph."""
+    """Map a per-item result dict onto DONE/FAILED for the progress glyph."""
     if op == "cleanup":
         return bool(res.get("removed")) and bool(res.get("ok", True))
+    if op == "profiles":
+        # Profiles Apply: the apply_column result's ``ok`` is authoritative.
+        return bool(res.get("ok"))
     # sync: a no-op that was already current is success; a real skip is not.
     return bool(res.get("updated")) or res.get("reason") == "up-to-date"
 
