@@ -171,6 +171,44 @@ def test_run_tui_picker_no_redirect_in_real_terminal(monkeypatch):
     assert seen["during"] is tty_out   # unchanged -- Textual uses stdout
 
 
+def test_bucket_sections_key_off_state():
+    """Active = in-session (ACTIVE); Completed = FINAL (any age); Recent = rest."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+
+    def rec(raw_state, hours):
+        ts = (derive.NOW - datetime.timedelta(hours=hours)).isoformat()
+        return derive.norm(
+            {"id": f"x-{raw_state}-{hours}", "status": "active",
+             "state": raw_state, "started_at": ts}, "m", "Win")
+
+    wts = [rec("active", 1), rec("completed", 1), rec("completed", 60),
+           rec("wip", 2), rec("unused", 3)]
+    active, recent, completed = derive.bucket(wts)
+    assert [w["state"] for w in active] == ["ACTIVE"]
+    # Both FINALs land in Completed regardless of age (1h and 60h).
+    assert sorted(w["state"] for w in completed) == ["FINAL", "FINAL"]
+    # Recent is whatever is neither in-session nor final.
+    assert sorted(w["state"] for w in recent) == ["UNUSED", "WIP"]
+
+
+def test_bucket_fallback_no_classify_finalized_is_clean_not_wip():
+    """An old remote (no --classify -> no state) must not show FINAL + unmerged."""
+    # status finalized, no git classification -> display FINAL, bucket clean.
+    w = derive.norm(
+        {"id": "borealis-wsl-1234", "status": "finalized",
+         "started_at": "2026-06-25T10:00:00"}, "Borealis", "WSL")
+    assert w["state"] == "FINAL"
+    assert w["cleanup_bucket"] == "clean"          # not 'wip'/'unmerged'
+    assert derive.BUCKET_DISPO[w["cleanup_bucket"]] == "SAFE"
+
+    # status active, no classification, no PR -> unknown (neutral, not unmerged).
+    w2 = derive.norm(
+        {"id": "borealis-wsl-5678", "status": "active",
+         "started_at": "2026-06-25T10:00:00"}, "Borealis", "WSL")
+    assert w2["cleanup_bucket"] == "unknown"
+    assert derive.BUCKET_DISPO[w2["cleanup_bucket"]] == ""   # no chip
+
+
 def test_new_picker_flag_gating(monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_NEW_PICKER", raising=False)
     monkeypatch.delenv("AGENT_WORKTREES_LEGACY_PICKER", raising=False)
