@@ -42,6 +42,68 @@ def _fixture_source():
     return src
 
 
+def _maint_source():
+    """Fixture with one worktree per cleanup bucket + one FF-eligible."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("lambda-core", "Win")
+
+    def raw(code, bucket, ff=False):
+        return {"id": f"lambda-core-win-{code}", "title": code,
+                "status": "active", "started_at": "2026-06-27T17:00:00",
+                "cleanup_bucket": bucket, "ff_eligible": ff}
+
+    raws = [
+        raw("cl00", "clean"),
+        raw("el00", "clean", ff=True),
+        raw("un00", "unused"),
+        raw("cv00", "conversation"),
+        raw("dr00", "dirty"),
+        raw("op00", "open-pr"),
+        raw("ac00", "active"),
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "lambda-core · win"
+    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+    return src
+
+
+def test_cleanup_dialog_buckets_and_sync_eligibility():
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:  # noqa: F841
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+
+            scr._open_cleanup()
+            opts = {o["label"]: o["ids"] for o in scr.cleanup["opts"]}
+            assert len(opts["Merged & finalized"]) == 2   # cl00 + el00
+            assert len(opts["Unused"]) == 1               # un00
+            assert len(opts["Conversation-only"]) == 1    # cv00
+            assert len(opts["All eligible"]) == 4         # clean(2)+unused+convo
+            # Unsafe buckets are never offered.
+            for unsafe in ("dr00", "op00", "ac00"):
+                assert unsafe not in opts["All eligible"]
+
+            scr.cleanup = None
+            scr._open_sync()
+            sopts = {o["label"]: o["ids"] for o in scr.cleanup["opts"]}
+            assert sopts["Eligible"] == {"el00"}          # only the FF-eligible
+
+            # Disposition chips reflect the buckets.
+            rows = {w["id4"]: w for w in scr.cleanup_rows()}
+            assert rows["cl00"]["dispo_level"] == "SAFE"
+            assert rows["ac00"]["dispo_level"] == "UNSAFE"
+            assert rows["op00"]["dispo_level"] == ""      # open PR: healthy
+
+    asyncio.run(run())
+
+
 def test_new_picker_flag_gating(monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_NEW_PICKER", raising=False)
     monkeypatch.delenv("AGENT_WORKTREES_LEGACY_PICKER", raising=False)
@@ -318,7 +380,7 @@ def test_cleanup_extra_confirm_gate_and_real_executor(monkeypatch):
             scr._open_cleanup()
             # Select a beyond-clean scope (Unused) -> extra confirm required.
             for o in scr.cleanup["opts"]:
-                o["on"] = o["label"] in ("Completed", "Unused")
+                o["on"] = o["label"] in ("Merged & finalized", "Unused")
             scr._dlg_confirm(False)
             assert scr.progress is not None
             assert scr.progress["armed"] is False   # gated
