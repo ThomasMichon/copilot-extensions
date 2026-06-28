@@ -220,6 +220,35 @@ class GiteaProvider:
             problems.append(f"labels not found in {scope.repo}: {missing}")
         return "; ".join(problems)
 
+    def remove_label(
+        self, repo: str, number: int, label: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        """Remove ``label`` from PR/issue ``number``; return an error string."""
+        if not token:
+            return "Gitea provider needs a token to remove a label."
+        scope = PRScope(repo=repo, head="", base="", title="", api_base=api_base)
+        try:
+            by_name = self._all_labels(scope, token)
+        except (ProviderError, json.JSONDecodeError, ValueError) as exc:
+            return f"label lookup failed: {exc}"
+        label_id = by_name.get(label.lower())
+        if label_id is None:
+            return f"label not found in {repo}: {label}"
+        try:
+            status, body = self._curl_with_retry(
+                "DELETE",
+                self._api(api_base, f"/repos/{repo}/issues/{number}/labels/{label_id}"),
+                token,
+            )
+        except ProviderError as exc:
+            return str(exc)
+        if status in (200, 204, 404):
+            return ""
+        detail = body.strip()
+        suffix = f": {detail[:200]}" if detail else ""
+        return f"label removal failed (HTTP {status}) for {repo}#{number}{suffix}"
+
     def _issue_label_names(
         self, scope: PRScope, number: int, token: str
     ) -> set[str] | None:

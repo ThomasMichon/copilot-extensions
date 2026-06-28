@@ -98,6 +98,23 @@ rebase conflict stops it with a clear message instead of guessing.
 This is the **review-gate continuation** for efforts: submit the effort PR ->
 it's reviewed + merged -> `git sync` -> build Phase work on top.
 
+## Iterating on an open PR (the merge-only hold)
+
+Use a hold when you want the reviewer to keep commenting on the PR, but you do
+not want the fast auto-merge path to land it while you are still iterating:
+
+```
+agent-worktrees create-pr --hold
+# ...address feedback locally...
+agent-worktrees push-changes
+agent-worktrees pr-ready
+```
+
+`create-pr --hold` opens the PR with `do-not-merge`: the Intelligence Dampener
+still reviews it (unlike a draft/`wip`), but the merge gate refuses to merge it.
+Each `push-changes` update is re-reviewed and remains held. `pr-ready` removes
+the hold label and releases the active PR for merge.
+
 ## Shared feature branch -- many agents, one branch
 
 When several agents collaborate on one effort over a single branch:

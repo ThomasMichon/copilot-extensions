@@ -2476,6 +2476,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             new=getattr(args, "new", False),
             body=body,
             open_pr=(False if getattr(args, "no_open", False) else None),
+            hold=getattr(args, "hold", False),
             attribution=(not getattr(args, "no_attribution", False)),
             dry_run=args.dry_run,
         )
@@ -2496,6 +2497,11 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                     f"Opened PR #{result.get('number')} via '{provider}': "
                     f"{result.get('url')}"
                 )
+                if result.get("held"):
+                    output.warn(
+                        f"PR #{result.get('number')} opened HELD (do-not-merge). "
+                        "Run 'agent-worktrees pr-ready' to release it for merge."
+                    )
                 if result.get("pr_label_error"):
                     output.warn(
                         f"PR opened, but a label did not apply: "
@@ -2566,6 +2572,54 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
     else:
         output.err(result.get("error", "set-pr failed."))
     return 0 if result.get("success") else 1
+
+
+def cmd_pr_ready(args: argparse.Namespace) -> int:
+    """Release a held PR by removing the merge-only hold label."""
+    use_json = getattr(args, "json", False)
+    if use_json:
+        ctx = output.stdout_to_stderr()
+        ctx.__enter__()
+    else:
+        ctx = None  # type: ignore[assignment]
+
+    try:
+        try:
+            config = cfg.load_config(Path(args.config) if args.config else None)
+        except Exception as e:
+            if use_json:
+                return _json_error(str(e))
+            raise
+        worktree_id = _infer_worktree_id(args.worktree_id, config)
+        if not worktree_id:
+            msg = (
+                "Could not determine worktree ID. Pass it explicitly "
+                "or run from inside a worktree."
+            )
+            if use_json:
+                return _json_error(msg)
+            output.err(msg)
+            return 1
+        worktree_id = _resolve_worktree_id(worktree_id)
+
+        result = pr_ops.pr_ready(
+            worktree_id, config,
+            target_repo=getattr(args, "repo", None),
+            pr_number=getattr(args, "pr", None),
+        )
+        if use_json:
+            _json_output(result)
+        elif result.get("success"):
+            output.ok(
+                f"Released PR #{result.get('number')} for merge "
+                f"({result.get('repo')}): {result.get('url')}"
+            )
+        else:
+            output.err(result.get("error", "pr-ready failed."))
+        return 0 if result.get("success") else 1
+    finally:
+        if ctx is not None:
+            ctx.__exit__(None, None, None)
 
 
 def cmd_pr_status(args: argparse.Namespace) -> int:
@@ -4685,6 +4739,7 @@ _WORKTREE_VERBS = {
     "push": "push-changes",
     "push-changes": "push-changes",
     "create-pr": "create-pr",
+    "pr-ready": "pr-ready",
     "finalize": "finalize",
     "cleanup": "cleanup",
 }
@@ -4708,6 +4763,7 @@ def _worktree_usage() -> None:
     print(
         "  create-pr [id] [--title T] [--branch B]  "
         "PR mode: squash + push a feature branch", file=out)
+    print("  pr-ready [id]          Release a held PR for merge", file=out)
     print("  finalize [id]          Validate content on upstream and clean up", file=out)
     print("  cleanup                List and remove orphaned/finalized worktrees", file=out)
 
@@ -6124,6 +6180,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Read the PR body from a file")
     p.add_argument("--no-open", action="store_true", dest="no_open",
                    help="Push the branch only; do not auto-open the PR via the provider")
+    p.add_argument("--hold", action="store_true",
+                   help="Open the PR held (do-not-merge): reviewed but not merged "
+                        "until 'pr-ready'. Lets you iterate on the open PR.")
     p.add_argument("--no-attribution", action="store_true", dest="no_attribution",
                    help="Do not embed the source-worktree attribution marker in the PR body")
     p.add_argument("--dry-run", action="store_true")
@@ -6145,6 +6204,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Select which tracked PR to update by number (default: the active PR)")
     p.add_argument("--select-branch", default=None, dest="select_branch",
                    help="Select which tracked PR to update by feature branch")
+    p.add_argument("--json", action="store_true", help="JSON output mode")
+    p.add_argument("--config", default=None)
+
+    # pr-ready (remove the merge-only hold label)
+    p = sub.add_parser("pr-ready", help="Release a held PR for merge")
+    p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("--repo", default=None,
+                   help="Target repo 'owner/name' for the PR (default: tracked repo)")
+    p.add_argument("--pr", type=int, default=None,
+                   help="Select which tracked PR to release by number")
     p.add_argument("--json", action="store_true", help="JSON output mode")
     p.add_argument("--config", default=None)
 
@@ -6765,6 +6834,7 @@ COMMAND_MAP = {
     "push-changes": cmd_push_changes,
     "create-pr": cmd_create_pr,
     "set-pr": cmd_set_pr,
+    "pr-ready": cmd_pr_ready,
     "pr-status": cmd_pr_status,
     "mark-complete": cmd_mark_complete,
     "status": cmd_status,

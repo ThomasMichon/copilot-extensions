@@ -26,7 +26,17 @@ from . import git_ops, hooks, tracking
 from .config import Config
 from .tracking import PRRecord
 
-__all__ = ["create_pr", "feature_branch_name", "pr_status", "set_pr", "slugify"]
+HOLD_LABEL = "do-not-merge"
+
+__all__ = [
+    "HOLD_LABEL",
+    "create_pr",
+    "feature_branch_name",
+    "pr_ready",
+    "pr_status",
+    "set_pr",
+    "slugify",
+]
 
 
 def slugify(text: str, *, max_len: int = 40) -> str:
@@ -71,6 +81,7 @@ def create_pr(
     new: bool = False,
     body: str | None = None,
     open_pr: bool | None = None,
+    hold: bool = False,
     attribution: bool = True,
     dry_run: bool = False,
 ) -> dict:
@@ -155,6 +166,7 @@ def create_pr(
             **base, "success": True, "dry_run": True,
             "branch": feature_branch, "remote": remote,
             "provider": prcfg.provider, "default_branch": repo.default_branch,
+            "held": bool(hold),
         }
 
     if not git_ops.is_clean(cwd=worktree_path):
@@ -177,7 +189,7 @@ def create_pr(
         return _push_existing_feature(
             worktree_path, feature_branch, remote, repo, prcfg, record, base,
             config=config, worktree_id=worktree_id, title=eff_title, body=body,
-            open_pr=open_pr, attribution=attribution,
+            open_pr=open_pr, hold=hold, attribution=attribution,
         )
 
     if head_branch != wt_branch:
@@ -304,6 +316,7 @@ def create_pr(
         "provider": prcfg.provider, "default_branch": repo.default_branch,
         "repo": (target_pr.repo if target_pr else default_pr_repo),
         "pr_count": len(record.prs) if record else 0,
+        "held": bool(hold),
     }
 
     # 8. Auto-open the PR via the configured provider plugin (Phase 2/3):
@@ -316,7 +329,7 @@ def create_pr(
     _finish_auto_open(
         result, config, record, target_pr, title=eff_title, body=body,
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
-        attribution=attribution,
+        hold=hold, attribution=attribution,
     )
 
     return result
@@ -332,6 +345,7 @@ def _open_via_provider(
     worktree_id: str,
     head_sha: str,
     *,
+    hold: bool = False,
     attribution: bool = True,
 ) -> None:
     """Open the PR through the provider plugin and auto-record it (best-effort)."""
@@ -355,6 +369,8 @@ def _open_via_provider(
     scope = providers.scope_from_create_result(
         result, title=title, body=full_body, prcfg=prcfg, machine=machine,
     )
+    if hold and HOLD_LABEL not in scope.labels:
+        scope.labels = (*scope.labels, HOLD_LABEL)
     try:
         provider = providers.get_provider(prcfg.provider)
         token = providers.resolve_token(prcfg)
@@ -392,6 +408,7 @@ def _finish_auto_open(
     worktree_id: str,
     head_sha: str,
     open_pr: bool | None,
+    hold: bool,
     attribution: bool,
 ) -> None:
     """Open the PR (when pending) or surface an already-open PR's number/url.
@@ -411,7 +428,7 @@ def _finish_auto_open(
     if target_pr.number is None:
         _open_via_provider(
             result, config, record, target_pr, title, body, worktree_id,
-            head_sha, attribution=attribution,
+            head_sha, hold=hold, attribution=attribution,
         )
         return
     # The PR is already open on the provider -- report it so the caller trusts
@@ -556,6 +573,72 @@ def set_pr(
     return {**base, "success": True, **_pr_to_dict(pr)}
 
 
+def pr_ready(
+    worktree_id: str,
+    config: Config,
+    *,
+    target_repo: str | None = None,
+    pr_number: int | None = None,
+) -> dict:
+    """Release a held PR by removing the merge-only hold label."""
+    base: dict = {"success": False, "worktree_id": worktree_id}
+    record = _load_record_or_none(worktree_id)
+    if record is None:
+        return {**base, "error": f"No tracking record found for '{worktree_id}'."}
+
+    _reconcile_active_pr(record, config)
+    if pr_number is not None:
+        pr = next((p for p in record.prs if p.number == pr_number), None)
+        if pr is None:
+            return {**base, "error": (
+                f"No tracked PR #{pr_number} for '{worktree_id}'."
+            )}
+    else:
+        pr = record.active_pr()
+        if pr is None:
+            return {**base, "error": f"No tracked PR for '{worktree_id}'."}
+
+    if pr.number is None:
+        return {**base, "error": (
+            f"Tracked PR for '{worktree_id}' has no PR number recorded."
+        )}
+
+    prcfg = config.default_repo.pr
+    provider_name = pr.provider or prcfg.provider
+    repo = target_repo or pr.repo or record.repo or ""
+    if not repo:
+        return {**base, "error": (
+            f"Tracked PR #{pr.number} for '{worktree_id}' has no target repo."
+        )}
+
+    try:
+        from . import providers
+
+        provider = providers.get_provider(provider_name)
+        token = providers.resolve_token(prcfg)
+        label_error = provider.remove_label(
+            repo, pr.number, HOLD_LABEL,
+            api_base=getattr(prcfg, "api_base", "") or "", token=token,
+        )
+    except Exception as exc:
+        return {**base, **_pr_to_dict(pr), "repo": repo, "removed": False,
+                "error": str(exc)}
+
+    result = {
+        **base,
+        **_pr_to_dict(pr),
+        "success": label_error == "",
+        "repo": repo,
+        "provider": provider_name,
+        "removed": label_error == "",
+        "label": HOLD_LABEL,
+    }
+    if label_error:
+        result["error"] = label_error
+        result["label_error"] = label_error
+    return result
+
+
 def pr_status(worktree_id: str, *, all_prs: bool = False) -> dict:
     """Return the tracked PR metadata for a worktree (for pr-status).
 
@@ -606,6 +689,7 @@ def _push_existing_feature(
     title: str,
     body: str | None,
     open_pr: bool | None,
+    hold: bool,
     attribution: bool,
 ) -> dict:
     """Re-run helper: push an already-created feature branch and record state.
@@ -659,6 +743,6 @@ def _push_existing_feature(
     _finish_auto_open(
         result, config, record, target, title=title, body=body,
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
-        attribution=attribution,
+        hold=hold, attribution=attribution,
     )
     return result

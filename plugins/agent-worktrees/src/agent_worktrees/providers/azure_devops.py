@@ -105,3 +105,14 @@ class AzureDevOpsProvider:
             state=state,
             merged=merged,
         )
+
+    def remove_label(
+        self, repo: str, number: int, label: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        """Remove a label from an Azure DevOps PR.
+
+        The current CLI-backed provider only applies labels at PR creation.
+        """
+        _ = (repo, number, label, api_base, token)
+        return "remove_label is not supported for azure-devops provider"
