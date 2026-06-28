@@ -1728,6 +1728,11 @@ def _load_remote_machines(
     except (FileNotFoundError, ValueError):
         return []
 
+    # Don't offer cross-machine handoffs from inside an SSH session -- it would
+    # be a double hop. Show only this host's worktrees.
+    if _in_ssh_session():
+        return []
+
     local_key = config.machine
     current_platform = cfg.detect_platform()
     result: list[tuple[cfg.MachineEntry, list[cfg.SSHEnvironment]]] = []
@@ -1800,6 +1805,87 @@ def _load_all_machine_keys(config: cfg.Config) -> list[str]:
         return list(machines.keys())
     except (FileNotFoundError, ValueError):
         return []
+
+
+# Picker env labels (engine: "Win" | "WSL" | "Linux") -> machines.yaml ssh
+# environment names.
+_ENV_LABEL_TO_NAME = {"win": "windows", "wsl": "wsl", "linux": "linux"}
+
+
+def _in_ssh_session() -> bool:
+    """True when this process was reached over SSH.
+
+    Used to avoid offering cross-machine handoffs from inside an SSH session
+    (which would create a confusing double hop). ``SSH_CONNECTION`` is set by
+    both OpenSSH on Linux and the Windows OpenSSH server; ``SSH_TTY`` /
+    ``SSH_CLIENT`` are checked as fallbacks.
+    """
+    return bool(
+        os.environ.get("SSH_CONNECTION")
+        or os.environ.get("SSH_TTY")
+        or os.environ.get("SSH_CLIENT")
+    )
+
+
+def _emit_remote_plan_for_env(
+    config: cfg.Config,
+    machine_display: str,
+    env_label: str,
+) -> int | None:
+    """Emit a remote SSH handoff plan for a specific machine **and env**.
+
+    The TUI picker labels a target by ``machines.yaml`` display name *and* env
+    ("Lambda-Core WSL"). The legacy ``_try_machine_handoff`` only knows the
+    machine and resolves the machine's *primary* alias via
+    ``_resolve_ssh_alias`` -- so picking "Lambda-Core WSL" on a Windows host
+    would hand off to the Windows alias (SSHing the host back into itself and
+    hanging). This resolves the **env-specific** alias instead.
+
+    Returns an exit code if the plan was emitted, or ``None`` if the machine /
+    env could not be resolved (caller should error).
+    """
+    repo = config.default_repo
+    try:
+        entries = cfg.load_machines_yaml(repo.anchor)
+    except (FileNotFoundError, ValueError):
+        return None
+
+    key = _machine_key_for_display(config, machine_display)
+    entry = entries.get(key)
+    if entry is None:
+        nl = (machine_display or "").lower()
+        for k, e in entries.items():
+            if (
+                k.lower() == nl
+                or e.display_name.lower() == nl
+                or (e.alias and e.alias.lower() == nl)
+            ):
+                entry, key = e, k
+                break
+    if entry is None or not entry.ssh_environments:
+        return None
+
+    want = _ENV_LABEL_TO_NAME.get((env_label or "").lower())
+    ssh_alias = ""
+    if want:
+        for e in entry.ssh_environments:
+            if e.name == want:
+                ssh_alias = e.alias
+                break
+    if not ssh_alias:
+        # No env match -- fall back to the machine's primary alias.
+        ssh_alias = _resolve_ssh_alias(entry)
+
+    project = cfg.project_name()
+    display = f"{entry.display_name} {env_label}".strip()
+    _emit_plan({
+        "action": "remote",
+        "ssh_alias": ssh_alias,
+        "remote_command": project,
+        "machine": entry.key,
+        "display_name": display,
+    })
+    return 0
 
 
 def _resolve_ssh_alias(entry: cfg.MachineEntry) -> str:
@@ -1915,7 +2001,11 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
     """
     from . import picker_tui
 
-    decision = picker_tui.run_tui_picker(live=True)
+    # Avoid a confusing double hop: when this picker is itself running over SSH,
+    # don't fan out to other machines -- show only the local source (no remote
+    # tabs / handoffs). See issue: "a process should know it's accessed via SSH."
+    live = not _in_ssh_session()
+    decision = picker_tui.run_tui_picker(live=live)
     if not decision:
         print("Cancelled.")
         _emit_plan({"action": "none", "exit_code": 0})
@@ -1925,13 +2015,19 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
     profile = _resolve_profile(config, args)
 
     # A selection on another machine hands off over SSH (the picker re-runs
-    # there); resolving a specific remote worktree directly is deferred.
+    # there); resolving a specific remote worktree directly is deferred. The
+    # picker's target carries both machine *and* env, so resolve the
+    # env-specific SSH alias (not the machine's primary -- see
+    # ``_emit_remote_plan_for_env``).
     if not decision.get("is_local", True):
         machine = decision.get("machine") or ""
-        rc = _try_machine_handoff(config, _machine_key_for_display(config, machine))
+        env_label = decision.get("env") or ""
+        rc = _emit_remote_plan_for_env(config, machine, env_label)
         if rc is not None:
             return rc
-        output.err(f"Unknown or unreachable remote machine: {machine}")
+        output.err(
+            f"Unknown or unreachable remote machine: {machine} {env_label}".strip()
+        )
         return 1
 
     if action == "resume":
