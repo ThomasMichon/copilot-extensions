@@ -59,7 +59,7 @@ class Source:
     """
 
     def __init__(self, machine, env, argv, *, local=False, ready=True,
-                 use_classify=True, timeout=45):
+                 use_classify=True, timeout=45, alias="", shell="bash"):
         self.machine = machine        # display_name from machines.yaml
         self.env = env                # Win | WSL | Linux
         self.argv = argv              # subprocess argv (None for the local src)
@@ -67,6 +67,8 @@ class Source:
         self.ready = ready
         self.use_classify = use_classify
         self.timeout = timeout
+        self.alias = alias            # SSH alias (remote sources only)
+        self.shell = shell            # pwsh | bash (for remote command wrapping)
 
     @property
     def key(self):
@@ -139,10 +141,47 @@ def _build_sources():
                                   ready=True))
             elif m.ssh_ready:
                 argv = _argv_for(shell, ssh_env.alias, project, classify=True)
-                out.append(Source(m.display_name, elabel, argv, ready=True))
+                out.append(Source(m.display_name, elabel, argv, ready=True,
+                                  alias=ssh_env.alias, shell=shell))
             else:
-                out.append(Source(m.display_name, elabel, None, ready=False))
+                out.append(Source(m.display_name, elabel, None, ready=False,
+                                  alias=ssh_env.alias, shell=shell))
     return out
+
+
+def _wrap_remote(shell: str, alias: str, inner: str):
+    """SSH argv that runs *inner* under the right login shell on *alias*."""
+    if shell == "pwsh":
+        return ["ssh", alias, f"pwsh -NoProfile -Command '{inner}'"]
+    return ["ssh", alias, f"bash -lc '{inner}'"]
+
+
+def remote_op_argv(machine, env, op, worktree_id, *, include_unused=False,
+                   include_conversations=False, force=False):
+    """Build the SSH argv to run one maintenance op on a remote machine/env.
+
+    ``op`` is ``"cleanup"`` or ``"sync"``. Returns the ssh argv, or ``None`` for
+    the local host or an unknown / not-ready target (the caller runs local ops
+    in-process). The remote runs the project binstub's JSON per-worktree CLI.
+    """
+    project = _project()
+    for s in _build_sources():
+        if s.machine == machine and s.env == env:
+            if s.local or not s.ready or not s.alias:
+                return None
+            if op == "cleanup":
+                flags = " --clean --json"
+                if force:
+                    flags += " --force"
+                if include_unused:
+                    flags += " --include-unused"
+                if include_conversations:
+                    flags += " --include-conversations"
+                inner = f"{project} cleanup --worktree-id {worktree_id}{flags}"
+            else:  # sync
+                inner = f"{project} sync --worktree-id {worktree_id} --json"
+            return _wrap_remote(s.shell, s.alias, inner)
+    return None
 
 
 def machines():
