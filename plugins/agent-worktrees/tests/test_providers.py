@@ -783,3 +783,38 @@ class TestRerunAutoOpen:
         assert r2["number"] == n1
         assert r2["pr_opened"] is True
         assert fake.create_calls == 1                       # no duplicate PR opened
+
+    def test_rerun_after_external_merge_opens_fresh_pr(self, pr_repo, monkeypatch):
+        # #1336: HEAD is left on the feature branch and that branch's PR was
+        # merged externally (auto-merge). A re-run must NOT surface the merged
+        # PR as if freshly opened -- it must open a FRESH PR for the new commit.
+        config, wid, wt_path, _ = pr_repo
+        config = self._enable_open(config)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _StatefulFakeProvider()
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake
+        )
+
+        r1 = pr_ops.create_pr(wid, config, title="Add feature")  # opens #100
+        n1 = r1["number"]
+        assert n1
+
+        # #100 merges externally; local record is still stale 'open'. HEAD stays
+        # on the feature branch, where a new commit lands.
+        fake.pull_states[n1] = "merged"
+        (wt_path / "more.txt").write_text("more after merge\n")
+        _g("add", "-A", cwd=wt_path)
+        _g("commit", "-m", "more after merge", cwd=wt_path)
+
+        r2 = pr_ops.create_pr(wid, config, title="Add feature")
+        assert r2.get("rerun") is True, r2
+        assert r2["pr_opened"] is True
+        assert r2["number"] != n1                     # a NEW PR, not the merged one
+        assert fake.create_calls == 2                 # a second PR was opened
+
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        # Two PRs on the same branch: the merged one and the fresh one.
+        assert len(rec.prs) == 2
+        assert rec.prs[0].number == n1 and rec.prs[0].state == "merged"
+        assert rec.prs[1].number == r2["number"] and rec.prs[1].state == "open"

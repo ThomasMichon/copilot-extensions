@@ -623,18 +623,26 @@ def _push_existing_feature(
             f"Failed to (re)push '{feature_branch}' to '{remote}'."
         )}
     # Match the PRRecord for this branch (a worktree may track several); update
-    # it in place rather than clobbering an unrelated active PR.
+    # it in place rather than clobbering an unrelated active PR. A *terminal*
+    # PR for this branch (merged/closed externally, e.g. via the auto-merge
+    # label) must NOT be reused -- surfacing it would report the merged PR as if
+    # freshly opened and open no PR for the new commits (#1336). In that case we
+    # append a FRESH record so the auto-open tail opens a new PR for the push.
     target: PRRecord | None = None
     if record is not None:
-        target = next((p for p in record.prs if p.branch == feature_branch), None)
+        target = next(
+            (p for p in record.prs
+             if p.branch == feature_branch and not tracking._pr_is_terminal(p)),
+            None,
+        )
         if target is None:
             target = PRRecord(
                 branch=feature_branch, provider=prcfg.provider,
                 repo=record.repo or "", opened_at=tracking._now_iso(),
             )
             record.prs.append(target)
-        if not tracking._pr_is_terminal(target):
-            target.state = "open"
+        # target is always non-terminal here (a live match or a fresh record).
+        target.state = "open"
         target.head_sha = head_sha
         if not target.provider:
             target.provider = prcfg.provider
