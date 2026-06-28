@@ -2482,6 +2482,12 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                     f"Opened PR #{result.get('number')} via '{provider}': "
                     f"{result.get('url')}"
                 )
+                if result.get("pr_label_error"):
+                    output.warn(
+                        f"PR opened, but a label did not apply: "
+                        f"{result.get('pr_label_error')}. Re-apply the label(s) "
+                        f"via the '{provider}' provider."
+                    )
             elif result.get("pr_open_error"):
                 output.warn(
                     f"Branch pushed, but auto-open failed: "

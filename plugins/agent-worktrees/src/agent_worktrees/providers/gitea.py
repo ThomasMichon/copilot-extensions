@@ -21,6 +21,12 @@ from .base import ProviderError, PRScope, PullResult, run_cli
 _TRANSIENT_LABEL_HTTP = frozenset({0, 408, 429, 500, 502, 503, 504})
 _LABEL_RETRIES = 3
 _LABEL_BACKOFF = 0.5
+# How many times to POST-then-verify the label set.  The bare POST can return
+# 2xx yet a brand-new PR's labels occasionally don't reflect immediately under a
+# burst (the create webhook fans out to the merge gate at the same instant), so
+# we re-read the issue's labels and re-POST until the required ones are actually
+# present -- "applied" means *verified present*, not "the POST returned 200".
+_LABEL_ATTACH_ATTEMPTS = 3
 
 
 class GiteaProvider:
@@ -207,19 +213,73 @@ class GiteaProvider:
 
         problems: list[str] = []
         if resolved:
-            status, _ = self._curl_with_retry(
-                "POST",
-                self._api(scope.api_base, f"/repos/{scope.repo}/issues/{number}/labels"),
-                token,
-                payload={"labels": sorted(resolved.values())},
-            )
-            if status not in (200, 201):
-                problems.append(
-                    f"attach failed (HTTP {status}) for {sorted(resolved)}"
-                )
+            attach_err = self._attach_labels_verified(scope, number, token, resolved)
+            if attach_err:
+                problems.append(attach_err)
         if missing:
             problems.append(f"labels not found in {scope.repo}: {missing}")
         return "; ".join(problems)
+
+    def _issue_label_names(
+        self, scope: PRScope, number: int, token: str
+    ) -> set[str] | None:
+        """Return the lowercased label names currently on the issue/PR.
+
+        ``None`` means the read itself failed (so "are they present?" is
+        unknown -- distinct from "present set is empty").
+        """
+        status, body = self._curl_with_retry(
+            "GET",
+            self._api(scope.api_base, f"/repos/{scope.repo}/issues/{number}/labels"),
+            token,
+        )
+        if status != 200:
+            return None
+        try:
+            arr = json.loads(body)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(arr, list):
+            return None
+        return {
+            str(lbl.get("name", "")).lower()
+            for lbl in arr
+            if isinstance(lbl, dict) and lbl.get("name")
+        }
+
+    def _attach_labels_verified(
+        self, scope: PRScope, number: int, token: str, resolved: dict[str, int]
+    ) -> str:
+        """POST the resolved label ids, then **verify** they stuck; re-POST if not.
+
+        Returns ``""`` once every requested label is confirmed present, or a
+        description of what could not be confirmed after all attempts.  This is
+        what turns "the POST returned 200" into "the labels are actually on the
+        PR" -- the gap that let a required label silently fail to apply at PR
+        creation even though the request appeared to succeed.
+        """
+        url = self._api(scope.api_base, f"/repos/{scope.repo}/issues/{number}/labels")
+        want = {name.lower() for name in resolved}
+        ids = sorted(resolved.values())
+        last = ""
+        present: set[str] | None = None
+        for attempt in range(1, _LABEL_ATTACH_ATTEMPTS + 1):
+            status, _ = self._curl_with_retry("POST", url, token, payload={"labels": ids})
+            if status not in (200, 201):
+                last = f"attach failed (HTTP {status})"
+            present = self._issue_label_names(scope, number, token)
+            if present is not None and want.issubset(present):
+                return ""
+            if present is None:
+                last = last or "could not verify labels were applied"
+            if attempt < _LABEL_ATTACH_ATTEMPTS:
+                time.sleep(_LABEL_BACKOFF * attempt)
+        still_missing = sorted(
+            name for name in resolved if name.lower() not in (present or set())
+        )
+        if still_missing:
+            return f"labels did not stick after retries: {still_missing}"
+        return last
 
     def get_pull(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
