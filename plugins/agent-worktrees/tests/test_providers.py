@@ -113,6 +113,25 @@ class _NoSleep:
         return None
 
 
+def _label_endpoint(args, label_post, applied, id_name):
+    """Fake the ``/issues/{n}/labels`` endpoint for both POST and verify-GET.
+
+    POST captures the attached ids (into ``label_post`` + ``applied``); the
+    verify GET echoes back the currently-applied labels by name so the
+    POST-then-verify loop in ``_attach_labels_verified`` sees them as present.
+    """
+    method = args[args.index("-X") + 1] if "-X" in args else "GET"
+    if method == "POST":
+        idx = args.index("-d")
+        payload = json.loads(args[idx + 1])
+        label_post.clear()
+        label_post.update(payload)
+        applied.update(payload.get("labels", []))
+        return _proc(stdout="[]\n201")
+    names = [{"name": id_name[i]} for i in sorted(applied) if i in id_name]
+    return _proc(stdout=json.dumps(names) + "\n200")
+
+
 class TestGiteaProvider:
     def test_create_pull_parses_url_and_number(self, monkeypatch):
         from agent_worktrees.providers import gitea
@@ -202,6 +221,8 @@ class TestGiteaProvider:
         page1 = [{"name": f"x{i}", "id": i} for i in range(1, 51)]   # full page
         page2 = [{"name": "source:wheatley", "id": 228}]            # short -> stop
         label_post: dict = {}
+        applied: set = set()
+        id_name = {228: "source:wheatley"}
 
         def fake_run(args, **kw):
             url = next((a for a in args if isinstance(a, str)
@@ -215,12 +236,10 @@ class TestGiteaProvider:
             if "/labels?" in url and "page=2" in url:
                 return _proc(stdout=json.dumps(page2) + "\n200")
             if "/issues/42/labels" in url:
-                # Capture the ids POSTed to attach.
-                idx = args.index("-d")
-                label_post.update(json.loads(args[idx + 1]))
-                return _proc(stdout="[]\n200")
+                return _label_endpoint(args, label_post, applied, id_name)
             return _proc(stdout="[]\n200")
 
+        monkeypatch.setattr(gitea, "time", _NoSleep())
         monkeypatch.setattr(gitea, "run_cli", fake_run)
         scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
                         body="B", api_base="https://h/gitea",
@@ -243,6 +262,8 @@ class TestGiteaProvider:
             [{"name": f"x{i}", "id": i} for i in range(1, 50)]   # full page (50)
         page2 = [{"name": "source:wheatley", "id": 228}]
         label_post: dict = {}
+        applied: set = set()
+        id_name = {189: "auto-merge", 228: "source:wheatley"}
         page2_attempts = {"n": 0}
 
         def fake_run(args, **kw):
@@ -260,9 +281,7 @@ class TestGiteaProvider:
                     return _proc(stdout="upstream hiccup\n503")  # transient
                 return _proc(stdout=json.dumps(page2) + "\n200")
             if "/issues/42/labels" in url:
-                idx = args.index("-d")
-                label_post.update(json.loads(args[idx + 1]))
-                return _proc(stdout="[]\n200")
+                return _label_endpoint(args, label_post, applied, id_name)
             return _proc(stdout="[]\n200")  # page 3 empty -> stop
 
         monkeypatch.setattr(gitea, "time", _NoSleep())
@@ -275,6 +294,60 @@ class TestGiteaProvider:
         assert page2_attempts["n"] == 2  # retried once
         assert label_post == {"labels": [189, 228]}  # both, sorted
         assert res.label_error == ""
+
+    def test_apply_labels_reattaches_until_verified(self, monkeypatch):
+        # The #1326 race: the attach POST returns 200, but the brand-new PR's
+        # labels don't reflect on the first read-back. The apply must re-POST
+        # and re-verify until the labels are actually present -- "applied" means
+        # verified-present, not "the POST returned 200".
+        from agent_worktrees.providers import gitea
+
+        page1 = [{"name": "auto-merge", "id": 189},
+                 {"name": "source:lambda-core", "id": 216}]
+        id_name = {189: "auto-merge", 216: "source:lambda-core"}
+        label_post: dict = {}
+        applied: set = set()
+        verify_reads = {"n": 0}
+        posts = {"n": 0}
+
+        def fake_run(args, **kw):
+            url = next((a for a in args if isinstance(a, str)
+                        and a.startswith("http")), "")
+            method = args[args.index("-X") + 1] if "-X" in args else "GET"
+            if "/pulls" in url:
+                return _proc(stdout=json.dumps(
+                    {"html_url": "https://h/gitea/o/r/pulls/42",
+                     "number": 42, "state": "open"}) + "\n201")
+            if "/labels?" in url and "page=1" in url:
+                return _proc(stdout=json.dumps(page1) + "\n200")
+            if "/labels?" in url:
+                return _proc(stdout="[]\n200")  # page 2 empty -> stop
+            if "/issues/42/labels" in url:
+                if method == "POST":
+                    posts["n"] += 1
+                    idx = args.index("-d")
+                    payload = json.loads(args[idx + 1])
+                    label_post.clear()
+                    label_post.update(payload)
+                    # Only the SECOND POST actually makes the labels stick.
+                    if posts["n"] >= 2:
+                        applied.update(payload["labels"])
+                    return _proc(stdout="[]\n201")
+                # verify GET
+                verify_reads["n"] += 1
+                names = [{"name": id_name[i]} for i in sorted(applied)]
+                return _proc(stdout=json.dumps(names) + "\n200")
+            return _proc(stdout="[]\n200")
+
+        monkeypatch.setattr(gitea, "time", _NoSleep())
+        monkeypatch.setattr(gitea, "run_cli", fake_run)
+        scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
+                        body="B", api_base="https://h/gitea",
+                        labels=["auto-merge", "source:lambda-core"])
+        res = gitea.GiteaProvider().create_pull(scope, token="tok")
+        assert res.number == 42
+        assert posts["n"] == 2          # re-POSTed after the first didn't stick
+        assert res.label_error == ""    # eventually verified present
 
     def test_apply_labels_surfaces_error_on_persistent_failure(self, monkeypatch):
         # When a label-list page fails on every retry, _all_labels must NOT
@@ -311,6 +384,8 @@ class TestGiteaProvider:
 
         page1 = [{"name": "auto-merge", "id": 189}]
         label_post: dict = {}
+        applied: set = set()
+        id_name = {189: "auto-merge"}
 
         def fake_run(args, **kw):
             url = next((a for a in args if isinstance(a, str)
@@ -324,9 +399,7 @@ class TestGiteaProvider:
             if "/labels?" in url:
                 return _proc(stdout="[]\n200")  # page 2 empty -> stop
             if "/issues/42/labels" in url:
-                idx = args.index("-d")
-                label_post.update(json.loads(args[idx + 1]))
-                return _proc(stdout="[]\n200")
+                return _label_endpoint(args, label_post, applied, id_name)
             return _proc(stdout="[]\n200")
 
         monkeypatch.setattr(gitea, "time", _NoSleep())
