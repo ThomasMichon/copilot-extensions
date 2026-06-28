@@ -14,13 +14,14 @@ Keys:
 """
 from __future__ import annotations
 
+import os
 import time
 
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.widget import Widget
 
-VERSION = "1.5.3-dev61"
+VERSION = "1.5.3-dev62"
 
 # ---- palette (highlight-and-invert; subtle borders) -------------------------
 C_DIM = "grey42"          # subtle separators / borders
@@ -247,6 +248,12 @@ class PickerScreen(Widget):
         self.cleanup = None           # cleanup-scope modal (Maintenance)
         self.optmenu = None           # "More options…" create modal
         self.progress = None          # cleanup/sync progress sub-dialog
+        self.executor = None          # real maintenance executor (opt-in)
+        # Real cleanup/sync ops are opt-in; the default is the safe in-TUI
+        # simulation (mock walker) so the flow can be exercised without side
+        # effects. AGENT_WORKTREES_PICKER_REAL_OPS=1 runs the real per-worktree
+        # executor (local in-process + remote over SSH).
+        self.real_ops = bool(os.environ.get("AGENT_WORKTREES_PICKER_REAL_OPS"))
         self.pcol = 0                 # Profiles matrix column cursor
         self.last_pr = 0              # remembered Profiles grid row (Tab in/out)
         self.grid = {}                # (target_idx, host_idx) -> bool present
@@ -285,10 +292,18 @@ class PickerScreen(Widget):
         self.refresh()
 
     def _advance_progress(self):
-        """Mock executor: walk the selected worktrees one at a time
-        (pending -> running -> done), paced by the render tick. The real port
-        replaces this with actual cleanup/sync calls + per-item results."""
+        """Drive the progress sub-dialog forward.
+
+        When the run is unarmed (awaiting the extra confirm) nothing advances.
+        With the real executor active, mirror its per-item states; otherwise run
+        the mock walker (the safe simulation): walk the selected worktrees one
+        at a time (pending -> running -> done), paced by the render tick."""
         p = self.progress
+        if not p.get("armed", True):
+            return
+        if self.executor is not None:
+            self._poll_executor()
+            return
         p["ticks"] += 1
         cur = p["ticks"] // p["steps"]   # index currently "running"
         items = p["items"]
@@ -1267,7 +1282,11 @@ class PickerScreen(Widget):
         header = f"─ {verb} · {p['scope']} "
         panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
                       style=C_BAND)]
-        if p["done"]:
+        if not p.get("armed", True):
+            n = len(items)
+            sub = f" ⚠ remove {n} worktree(s) incl. unused? Enter=proceed Esc=cancel"
+            substyle = "bold yellow"
+        elif p["done"]:
             sub = f" done · {done}/{len(items)}" + (f" · {failed} failed" if failed else "")
             substyle = "bold white"
         else:
@@ -1307,7 +1326,10 @@ class PickerScreen(Widget):
         panel.append(self._prow("", pw))
         brow = Text("│", style=C_DIM)
         inner = Text("   ")
-        if p["done"]:
+        if not p.get("armed", True):
+            inner.append(" Confirm ", style=C_BTN_SEL)
+            inner.append("  Cancel ", style=C_BTN)
+        elif p["done"]:
             inner.append(" Close ", style=C_BTN_SEL)
         else:
             inner.append(" Working… ", style=C_BTN)
@@ -1495,14 +1517,27 @@ class PickerScreen(Widget):
 
     def _key_progress(self, key):
         p = self.progress
+        # Unarmed: the extra confirm gate (beyond-clean cleanup). Enter proceeds,
+        # Esc cancels without touching anything.
+        if not p.get("armed", True):
+            if key in ("enter", "space"):
+                p["armed"] = True
+                self._start_progress()
+            elif key in ("escape", "q"):
+                self.progress = None
+                self.executor = None
+                self.debug = f"{p['verb'].lower()} cancelled · 0 worktrees"
+            return
         if key in ("escape", "q") or (p["done"] and key in ("enter", "space")):
             verb = p["verb"].lower()
             n = len(p["items"])
             failed = sum(1 for it in p["items"] if it["state"] == "failed")
             state = "complete" if p["done"] else "cancelled"
+            sim = "" if self.executor is not None else " (sim)"
             self.progress = None
+            self.executor = None
             tail = f" · {failed} failed" if failed else ""
-            self.debug = f"{verb} {state} · {n} worktrees{tail} (mock)"
+            self.debug = f"{verb} {state} · {n} worktrees{tail}{sim}"
 
     def _dlg_confirm(self, om):
         if om:
@@ -1524,20 +1559,52 @@ class PickerScreen(Widget):
             dlg = self.cleanup
             picked = [o["label"] for o in dlg["opts"] if o["on"]]
             verb = dlg.get("verb", "Clean up")
+            op = "sync" if verb.lower().startswith("sync") else "cleanup"
             ids = self._cleanup_union()
+            recs = [w for w in self.data if w["id4"] in ids]
+            self.cleanup = None
+            if not recs:
+                self.debug = (f"{verb.lower()} {dlg['scope']}: "
+                              f"{', '.join(picked) or 'nothing'} → 0 worktrees")
+                return
+            # Extra confirm when a cleanup scope reaches past 'clean' (Unused /
+            # All) -- removing idle/empty trees is a bigger commitment.
+            beyond_clean = op == "cleanup" and any(p != "Completed" for p in picked)
             items = [{"id4": w["id4"], "title": w["title"],
                       "machine_env": w["machine_env"], "state": "pending"}
-                     for w in self.data if w["id4"] in ids]
-            self.cleanup = None
-            if not items:
-                self.debug = (f"{verb.lower()} {dlg['scope']}: "
-                              f"{', '.join(picked) or 'nothing'} → 0 worktrees (mock)")
-                return
-            # Hand off to the progress sub-dialog (mock execution).
+                     for w in recs]
             self.progress = {
-                "verb": verb, "scope": dlg["scope"], "items": items,
+                "verb": verb, "op": op, "scope": dlg["scope"], "items": items,
+                "recs": recs, "picked": picked,
                 "ticks": 0, "steps": 3, "done": False,
+                "armed": not beyond_clean,
+                "include_unused": True, "include_conversations": True,
             }
+            if self.progress["armed"]:
+                self._start_progress()
+
+    def _start_progress(self):
+        """Begin executing the armed progress run (real executor or mock walk)."""
+        p = self.progress
+        if not self.real_ops:
+            return  # mock walker advances via _advance_progress
+        from . import maintenance
+        tasks = maintenance.build_tasks(
+            p["op"], p["recs"], self.src,
+            include_unused=p["include_unused"],
+            include_conversations=p["include_conversations"],
+        )
+        self.executor = maintenance.MaintenanceExecutor(p["op"], tasks)
+        self.executor.start()
+
+    def _poll_executor(self):
+        """Pull real per-item states from the maintenance executor."""
+        p = self.progress
+        ex = self.executor
+        for it in p["items"]:
+            it["state"] = ex.state(it["id4"])
+        if ex.is_done():
+            p["done"] = True
 
     def _cleanup_union(self):
         s = set()

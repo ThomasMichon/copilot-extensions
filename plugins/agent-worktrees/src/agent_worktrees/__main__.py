@@ -3209,7 +3209,185 @@ def cmd_create(args: argparse.Namespace) -> int:
 # cleanup
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _reap_worktree(
+    rec: tracking.WorktreeRecord,
+    info: git_ops.WorktreeStateInfo,
+    repo: cfg.RepoConfig,
+    tracking_path: Path,
+) -> tuple[int, list[str]]:
+    """Remove one worktree: dir + branch + perms + tracking + tmux session.
+
+    Returns ``(failures, warnings)``. The caller must hold the finalization
+    lock. Shared by the batch ``cmd_cleanup`` loop and the per-worktree
+    (``--worktree-id``) path so both reap identically.
+    """
+    warnings: list[str] = []
+    failures = 0
+
+    if rec.worktree_path and Path(rec.worktree_path).exists():
+        if not git_ops.remove_worktree(repo.anchor, rec.worktree_path):
+            warnings.append(
+                "Could not remove worktree via git -- forcing directory removal.")
+        wt_dir = Path(rec.worktree_path)
+        if wt_dir.exists():
+            shutil.rmtree(wt_dir, ignore_errors=True)
+            if wt_dir.exists():
+                warnings.append(f"Directory still present: {wt_dir}")
+                failures += 1
+
+    if rec.branch:
+        if not git_ops.delete_branch(rec.branch, cwd=repo.anchor, force=True):
+            warnings.append(f"Could not delete branch {rec.branch}")
+            failures += 1
+
+    # Clean up Copilot permissions and trusted_folders
+    if rec.worktree_path:
+        permissions.merge_permissions(repo.anchor, rec.worktree_path)
+        permissions.remove_trusted_folder(rec.worktree_path)
+
+    # Remove tracking YAML
+    (tracking_path / f"{rec.worktree_id}.yaml").unlink(missing_ok=True)
+
+    # Kill any associated tmux session
+    sessions.kill_tmux_session(rec.worktree_id)
+
+    activity.log_event(
+        "worktree_reaped",
+        worktree_id=rec.worktree_id,
+        branch=rec.branch,
+        state=info.state.value,
+    )
+    return failures, warnings
+
+
+def reap_one(
+    wt_id: str,
+    *,
+    force: bool = False,
+    include_unused: bool = False,
+    include_conversations: bool = False,
+    reconcile_prs: bool = False,
+) -> dict:
+    """Reap a single worktree by ID and return a JSON-ready result dict.
+
+    Re-checks prune-safety (defense in depth: the picker only sends cleanable
+    ids, but a stray call must never reap unsafe work) unless ``force``; an
+    active session is never reaped even with ``force``. This is the pure
+    result-returning core shared by the ``cleanup --worktree-id`` CLI and the
+    picker's in-process local Cleanup executor.
+    """
+    config = cfg.load_config()
+    repo = config.default_repo
+    tracking_path = cfg.tracking_dir()
+
+    wt_id = _resolve_worktree_id(wt_id)
+    yaml_path = tracking_path / f"{wt_id}.yaml"
+
+    def _result(payload: dict) -> dict:
+        payload.setdefault("worktree_id", wt_id)
+        return payload
+
+    if not yaml_path.exists():
+        return _result({"ok": False, "removed": False, "skipped": False,
+                        "reason": f"worktree not found: {wt_id}"})
+    rec = tracking.load_record(yaml_path)
+    if rec.kind == "system":
+        return _result({"ok": False, "removed": False, "skipped": True,
+                        "reason": "daemon-owned system worktree "
+                        "(use the System menu)"})
+
+    if git_ops.has_remote(repo.remote, cwd=repo.anchor):
+        git_ops.fetch(repo.remote, cwd=repo.anchor)
+    upstream = f"{repo.remote}/{repo.default_branch}"
+
+    session_ctx = sessions.scan_sessions_fast([rec])
+    active_paths = _build_active_paths([rec], session_ctx)
+    turns = session_ctx.turn_count.get(_normalize_path(rec.worktree_path), 0)
+
+    if reconcile_prs and rec.prs:
+        lookup = _make_pr_lookup(config)
+        if prune.reconcile_pr_states(rec, lookup):
+            try:
+                tracking.save_record(rec)
+            except OSError:
+                pass
+
+    if rec.worktree_path and Path(rec.worktree_path).exists():
+        info = git_ops.classify_worktree(
+            rec.worktree_path, rec.branch, fetch=False,
+            remote=repo.remote, default_branch=repo.default_branch,
+            active_paths=active_paths,
+        )
+        info = _apply_tracking_override(rec, info)
+    elif rec.status == "finalized":
+        info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    else:
+        info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
+
+    # An active session is never reaped, even with force.
+    if info.state == git_ops.WorktreeState.ACTIVE:
+        return _result({"ok": False, "removed": False, "skipped": True,
+                        "reason": "active Copilot session in use",
+                        "bucket": "active"})
+    if not force:
+        if info.state == git_ops.WorktreeState.GONE:
+            if rec.branch and not git_ops.is_branch_merged(
+                rec.branch, upstream, cwd=repo.anchor,
+            ):
+                return _result({"ok": False, "removed": False, "skipped": True,
+                                "reason": "branch has unmerged commits "
+                                "(worktree dir missing)"})
+        else:
+            disp = prune.cleanup_disposition(
+                rec, info, turn_count=turns,
+                include_unused=include_unused,
+                include_conversations=include_conversations,
+            )
+            if not disp.cleanable:
+                return _result({"ok": False, "removed": False, "skipped": True,
+                                "reason": disp.reason, "bucket": disp.bucket})
+
+    lock = fin.FinalizeLock(Path(repo.worktree_root) / ".finalize.lock")
+    try:
+        lock.acquire()
+    except TimeoutError:
+        return _result({"ok": False, "removed": False, "skipped": False,
+                        "reason": "timed out waiting for finalization lock"})
+    try:
+        failures, warnings = _reap_worktree(rec, info, repo, tracking_path)
+        git_ops.prune_worktrees(cwd=repo.anchor)
+    finally:
+        lock.release()
+
+    return _result({"ok": failures == 0, "removed": True, "skipped": False,
+                    "state": info.state.value, "warnings": warnings})
+
+
+def _cleanup_one(args: argparse.Namespace) -> int:
+    """``cleanup --worktree-id <id>`` -- thin CLI wrapper over :func:`reap_one`."""
+    payload = reap_one(
+        args.worktree_id,
+        force=getattr(args, "force", False),
+        include_unused=getattr(args, "include_unused", False),
+        include_conversations=getattr(args, "include_conversations", False),
+        reconcile_prs=getattr(args, "reconcile_prs", False),
+    )
+    if getattr(args, "json", False):
+        _json_output(payload)
+    else:
+        tag = "removed" if payload.get("removed") else (
+            "skipped" if payload.get("skipped") else "error")
+        line = f"{payload['worktree_id']}: {tag}"
+        if payload.get("reason"):
+            line += f" -- {payload['reason']}"
+        print(line)
+    return 0 if payload.get("ok") else 1
+
+
 def cmd_cleanup(args: argparse.Namespace) -> int:
+    if getattr(args, "worktree_id", None):
+        return _cleanup_one(args)
+
     config = cfg.load_config()
     repo = config.default_repo
     tracking_path = cfg.tracking_dir()
@@ -3391,40 +3569,10 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     try:
         for rec, info in to_clean:
             print(f"Cleaning {rec.worktree_id} ({info.state.value})...")
-
-            if rec.worktree_path and Path(rec.worktree_path).exists():
-                if not git_ops.remove_worktree(repo.anchor, rec.worktree_path):
-                    output.warn("Could not remove worktree via git -- forcing directory removal.")
-                wt_dir = Path(rec.worktree_path)
-                if wt_dir.exists():
-                    shutil.rmtree(wt_dir, ignore_errors=True)
-                    if wt_dir.exists():
-                        output.warn(f"Directory still present: {wt_dir}")
-                        failures += 1
-
-            if rec.branch:
-                if not git_ops.delete_branch(rec.branch, cwd=repo.anchor, force=True):
-                    output.warn(f"Could not delete branch {rec.branch}")
-                    failures += 1
-
-            # Clean up Copilot permissions and trusted_folders
-            if rec.worktree_path:
-                permissions.merge_permissions(repo.anchor, rec.worktree_path)
-                permissions.remove_trusted_folder(rec.worktree_path)
-
-            # Remove tracking YAML
-            yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
-            yaml_path.unlink(missing_ok=True)
-
-            # Kill any associated tmux session
-            sessions.kill_tmux_session(rec.worktree_id)
-
-            activity.log_event(
-                "worktree_reaped",
-                worktree_id=rec.worktree_id,
-                branch=rec.branch,
-                state=info.state.value,
-            )
+            f, warns = _reap_worktree(rec, info, repo, tracking_path)
+            for w in warns:
+                output.warn(w)
+            failures += f
 
         # Prune stale worktree entries
         git_ops.prune_worktrees(cwd=repo.anchor)
@@ -3436,6 +3584,130 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         output.warn(f"Cleaned {len(to_clean)} session(s) with {failures} warning(s).")
     else:
         output.ok(f"Cleaned {len(to_clean)} session(s).")
+    return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# sync (fast-forward worktrees to the default branch)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _sync_one_record(
+    rec: tracking.WorktreeRecord,
+    repo: cfg.RepoConfig,
+    active_paths: set[str],
+) -> dict:
+    """Fast-forward one worktree (FF-only, never an active session).
+
+    Returns a JSON-ready result dict ``{worktree_id, updated, reason, behind}``.
+    ``reason`` is the git_ops FF reason (updated / up-to-date / ahead / diverged
+    / dirty / detached / orphan / gone / no-upstream / ff-failed), or ``active``
+    when a live session owns the worktree.
+    """
+    if not (rec.worktree_path and Path(rec.worktree_path).exists()):
+        return {"worktree_id": rec.worktree_id, "updated": False,
+                "reason": "gone", "behind": 0}
+    info = git_ops.classify_worktree(
+        rec.worktree_path, rec.branch, fetch=False,
+        remote=repo.remote, default_branch=repo.default_branch,
+        active_paths=active_paths,
+    )
+    info = _apply_tracking_override(rec, info)
+    if info.state == git_ops.WorktreeState.ACTIVE:
+        return {"worktree_id": rec.worktree_id, "updated": False,
+                "reason": "active", "behind": info.behind}
+    ff = git_ops.fast_forward_worktree(
+        rec.worktree_path, remote=repo.remote,
+        default_branch=repo.default_branch, do_fetch=False,
+    )
+    return {"worktree_id": rec.worktree_id, "updated": ff.updated,
+            "reason": ff.reason, "behind": ff.behind}
+
+
+def sync_one(wt_id: str) -> dict:
+    """Fast-forward a single worktree by ID; return a JSON-ready result dict.
+
+    The pure result-returning core shared by the ``sync --worktree-id`` CLI and
+    the picker's in-process local Sync executor.
+    """
+    config = cfg.load_config()
+    repo = config.default_repo
+    tracking_path = cfg.tracking_dir()
+    wt_id = _resolve_worktree_id(wt_id)
+    yaml_path = tracking_path / f"{wt_id}.yaml"
+    if not yaml_path.exists():
+        return {"worktree_id": wt_id, "updated": False,
+                "reason": "not-found", "behind": 0}
+    rec = tracking.load_record(yaml_path)
+    if git_ops.has_remote(repo.remote, cwd=repo.anchor):
+        try:
+            git_ops.fetch(repo.remote, cwd=repo.anchor)
+        except Exception:
+            pass
+    session_ctx = sessions.scan_sessions_fast([rec])
+    active_paths = _build_active_paths([rec], session_ctx)
+    return _sync_one_record(rec, repo, active_paths)
+
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    """Fast-forward worktrees to their upstream default branch (FF-only).
+
+    ``--worktree-id <id>`` syncs one (and emits a single JSON object with
+    ``--json``); otherwise every active worktree on this machine is synced.
+    SSH-able: the picker's per-item Sync progress calls ``--worktree-id --json``
+    per remote row. Never rebases, never touches an ahead/dirty/diverged or
+    active worktree -- those come back with a skip ``reason``.
+    """
+    config = cfg.load_config()
+    repo = config.default_repo
+    tracking_path = cfg.tracking_dir()
+    as_json = getattr(args, "json", False)
+    single = getattr(args, "worktree_id", None)
+
+    if single:
+        wt_id = _resolve_worktree_id(single)
+        yaml_path = tracking_path / f"{wt_id}.yaml"
+        if not yaml_path.exists():
+            res = {"worktree_id": wt_id, "updated": False,
+                   "reason": "not-found", "behind": 0}
+            if as_json:
+                _json_output(res)
+            else:
+                print(f"{wt_id}: not-found")
+            return 1
+        records = [tracking.load_record(yaml_path)]
+    else:
+        records = tracking.list_records(
+            tracking_path, status_filter="active",
+            platform_filter=cfg.detect_platform(),
+        )
+        records = [
+            r for r in records
+            if r.kind != "system"
+            and r.worktree_path and Path(r.worktree_path).exists()
+        ]
+
+    # One fetch refreshes the shared upstream ref for every worktree of this
+    # repo; per-worktree classification then runs with fetch=False.
+    if git_ops.has_remote(repo.remote, cwd=repo.anchor):
+        try:
+            git_ops.fetch(repo.remote, cwd=repo.anchor)
+        except Exception:
+            pass
+
+    session_ctx = sessions.scan_sessions_fast(records)
+    active_paths = _build_active_paths(records, session_ctx)
+
+    results = [_sync_one_record(rec, repo, active_paths) for rec in records]
+
+    if as_json:
+        _json_output(results[0] if single else {"results": results})
+    elif not results:
+        print("No worktrees to sync.")
+    else:
+        for r in results:
+            tag = f"updated ↑{r.get('behind', 0)}" if r.get("updated") \
+                else r.get("reason", "?")
+            print(f"{r['worktree_id']}: {tag}")
     return 0
 
 
@@ -5939,6 +6211,15 @@ def build_parser() -> argparse.ArgumentParser:
     # cleanup
     p = sub.add_parser("cleanup", help="List and clean orphaned worktrees")
     p.add_argument("--clean", action="store_true")
+    p.add_argument("--worktree-id", default=None,
+                   help="Clean a single worktree by ID (non-interactive, "
+                        "re-checks prune-safety; pair with --json for the "
+                        "picker's per-item progress)")
+    p.add_argument("--force", action="store_true",
+                   help="With --worktree-id: reap even if prune-safety would "
+                        "skip it (still refuses an active session)")
+    p.add_argument("--json", action="store_true",
+                   help="With --worktree-id: emit a single JSON result object")
     p.add_argument("--include-unused", action="store_true",
                    help="Also clean truly-empty worktrees (no commits, "
                         "zero conversation turns)")
@@ -5950,6 +6231,18 @@ def build_parser() -> argparse.ArgumentParser:
                         "deciding (heals stale 'open' PRs merged externally); "
                         "requires network + provider credentials")
     p.add_argument("--max-age-days", type=int, default=7)
+
+    # sync (fast-forward worktrees to the default branch, FF-only)
+    p = sub.add_parser("sync", help="Fast-forward worktrees to the default branch")
+    p.add_argument("--worktree-id", default=None,
+                   help="Sync a single worktree by ID (default: all active "
+                        "worktrees on this machine)")
+    p.add_argument("--all", action="store_true",
+                   help="Sync every active worktree (the default when no "
+                        "--worktree-id is given)")
+    p.add_argument("--json", action="store_true",
+                   help="Emit JSON results (a single object with --worktree-id, "
+                        "else {\"results\": [...]})")
 
     # validate
     p = sub.add_parser("validate", help="Validate core infrastructure files")
@@ -6461,6 +6754,7 @@ COMMAND_MAP = {
     "create": cmd_create,
     "remove-system": cmd_remove_system,
     "cleanup": cmd_cleanup,
+    "sync": cmd_sync,
     "validate": cmd_validate,
     "install": cmd_install,
     "register": cmd_register,

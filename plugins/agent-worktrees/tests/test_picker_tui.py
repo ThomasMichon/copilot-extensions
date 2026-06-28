@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import time
 import types
 
 from agent_worktrees.picker_tui import derive, new_picker_enabled
@@ -228,5 +229,106 @@ def test_new_worktree_decision_exits():
         assert app.result["action"] == "new"
         assert app.result["is_local"] is True
         assert app.result["options"] == {}
+
+    asyncio.run(run())
+
+
+def _drain(ex, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if ex.is_done():
+            return
+        time.sleep(0.02)
+    raise AssertionError("executor did not finish")
+
+
+def test_maintenance_executor_cleanup_states():
+    from agent_worktrees.picker_tui import maintenance as mnt
+
+    def boom():
+        raise RuntimeError("kaboom")
+
+    tasks = [
+        ("a", lambda: {"removed": True, "ok": True}),
+        ("b", lambda: {"removed": False, "ok": False, "reason": "unsafe"}),
+        ("c", boom),
+    ]
+    ex = mnt.MaintenanceExecutor("cleanup", tasks)
+    ex.start()
+    _drain(ex)
+    assert ex.state("a") == "done"
+    assert ex.state("b") == "failed"
+    assert ex.state("c") == "failed"
+    assert ex.counts() == (1, 2, 0)
+    assert ex.result("c")["reason"] == "kaboom"
+
+
+def test_maintenance_executor_sync_uptodate_is_success():
+    from agent_worktrees.picker_tui import maintenance as mnt
+
+    tasks = [
+        ("a", lambda: {"updated": True, "reason": "updated", "behind": 2}),
+        ("b", lambda: {"updated": False, "reason": "up-to-date"}),
+        ("c", lambda: {"updated": False, "reason": "ahead"}),
+    ]
+    ex = mnt.MaintenanceExecutor("sync", tasks)
+    ex.start()
+    _drain(ex)
+    assert ex.state("a") == "done"   # fast-forwarded
+    assert ex.state("b") == "done"   # already current
+    assert ex.state("c") == "failed"  # skipped (ahead)
+
+
+def test_cleanup_extra_confirm_gate_and_real_executor(monkeypatch):
+    """Beyond-clean cleanup requires an extra confirm, then runs the executor."""
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_REAL_OPS", "1")
+    from agent_worktrees.picker_tui import maintenance as mnt
+
+    started = {}
+
+    class _FakeExec:
+        def __init__(self, op, tasks):
+            started["n"] = len(tasks)
+
+        def start(self):
+            started["started"] = True
+
+        def state(self, key):
+            return "done"
+
+        def is_done(self):
+            return True
+
+        def counts(self):
+            return (started.get("n", 0), 0, 0)
+
+    monkeypatch.setattr(mnt, "MaintenanceExecutor", _FakeExec)
+    monkeypatch.setattr(
+        mnt, "build_tasks",
+        lambda op, recs, src, **kw: [(w["id4"], None) for w in recs])
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            assert scr.real_ops is True
+            scr.machine_idx = scr.local_index()
+            scr._open_cleanup()
+            # Select a beyond-clean scope (Unused) -> extra confirm required.
+            for o in scr.cleanup["opts"]:
+                o["on"] = o["label"] in ("Completed", "Unused")
+            scr._dlg_confirm(False)
+            assert scr.progress is not None
+            assert scr.progress["armed"] is False   # gated
+            assert scr.executor is None              # not started yet
+            # Confirm -> arm -> executor starts.
+            scr._key_progress("enter")
+            assert scr.progress["armed"] is True
+            assert started.get("started") is True
+            scr._poll_executor()
+            assert scr.progress["done"] is True
+            await pilot.pause()
 
     asyncio.run(run())
