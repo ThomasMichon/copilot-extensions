@@ -534,3 +534,36 @@ class TestWorktreeToDictPRs:
         assert d["pr_count"] == 2
         assert d["pr"]["number"] == 2  # active = the open one
         assert [p["number"] for p in d["prs"]] == [1, 2]
+
+
+# ---------------------------------------------------------------------------
+# _worktree_to_dict state exposure (list --json --classify, aperture-labs #1290)
+# ---------------------------------------------------------------------------
+
+class TestWorktreeToDictState:
+    def _rec(self):
+        return tracking.WorktreeRecord(
+            worktree_id="wt-002", branch="worktree/wt-002",
+            worktree_path="/tmp/wt2", repo="ext", machine="m", platform="wsl",
+            started_at="2026-06-01T10:00:00", last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+            handoff_prompt=None, sessions=None, prs=[],
+        )
+
+    def test_no_state_info_omits_state_keys(self):
+        from agent_worktrees.__main__ import _worktree_to_dict
+        d = _worktree_to_dict(self._rec())
+        for k in ("state", "ahead", "behind", "dirty"):
+            assert k not in d
+
+    def test_state_info_exposes_canonical_state(self):
+        from agent_worktrees.__main__ import _worktree_to_dict
+        from agent_worktrees.git_ops import WorktreeState, WorktreeStateInfo
+        info = WorktreeStateInfo(
+            state=WorktreeState.WIP, ahead=3, behind=5, dirty=0,
+        )
+        d = _worktree_to_dict(self._rec(), state_info=info)
+        assert d["state"] == "wip"   # the canonical enum value the picker maps
+        assert d["ahead"] == 3
+        assert d["behind"] == 5
+        assert d["dirty"] == 0
