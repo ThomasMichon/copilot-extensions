@@ -875,7 +875,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         # multi-machine flow is fleshed out. The legacy ANSI picker below stays
         # the default and the rollback path (AGENT_WORKTREES_LEGACY_PICKER).
         from . import picker_tui
-        if picker_tui.new_picker_enabled(config):
+        if picker_tui.new_picker_enabled(config) and not _new_picker_blocked_by_ssh():
             return _run_new_picker(config, args)
 
         # Picker loop -- re-enters after system menu actions
@@ -1805,6 +1805,21 @@ def _load_all_machine_keys(config: cfg.Config) -> list[str]:
         return list(machines.keys())
     except (FileNotFoundError, ValueError):
         return []
+
+
+def _new_picker_blocked_by_ssh() -> bool:
+    """The Textual picker can't read the keyboard over Windows OpenSSH.
+
+    Textual's Windows input driver reads key events via
+    ``ReadConsoleInputW(GetStdHandle(STD_INPUT_HANDLE))`` (see
+    ``textual/drivers/win32.py``); those records are not delivered through the
+    Windows OpenSSH ConPTY input path, so the TUI renders but is completely
+    unresponsive to the keyboard. Linux/WSL over SSH is unaffected (the Unix
+    driver reads the pty directly via ``os.read``). So over SSH **on Windows**
+    we fall back to the legacy ANSI picker, whose ``msvcrt`` input works over
+    the ConPTY (it's what the fleet has used over SSH all along).
+    """
+    return _in_ssh_session() and cfg.detect_platform() == "windows"
 
 
 # Picker env labels (engine: "Win" | "WSL" | "Linux") -> machines.yaml ssh
