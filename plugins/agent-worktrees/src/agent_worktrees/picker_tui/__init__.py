@@ -33,8 +33,18 @@ def run_tui_picker(source=None, live=False):
     With no source: ``live=True`` selects the multi-machine SSH source
     (``data_ssh``, async per-machine loader); otherwise the local-only source
     (``data_local``). Returns ``app.result``, which the caller maps onto a
-    resume/create action (wired in a later slice).
+    resume/create action.
+
+    Launch-channel handling: this runs inside ``resolve``, whose **stdout
+    (fd 1) is captured by the launcher for the JSON plan**. Textual's driver
+    renders to ``sys.__stdout__`` -- so when stdout is captured (not a TTY) but
+    stderr is the terminal, point ``sys.__stdout__`` at stderr for the duration
+    of the TUI. The plan is emitted to the real fd 1 after the app exits (and
+    ``sys.__stdout__`` is restored). Mirrors the legacy picker's
+    ``stdout_to_stderr`` redirect.
     """
+    import sys
+
     from .engine import PickerApp
 
     if source is None:
@@ -44,6 +54,20 @@ def run_tui_picker(source=None, live=False):
         else:
             from . import data_local
             source = data_local
-    app = PickerApp(source, live=live)
-    app.run()
+
+    saved_stdout = sys.__stdout__
+    redirect = (
+        saved_stdout is not None
+        and hasattr(saved_stdout, "isatty") and not saved_stdout.isatty()
+        and sys.stderr is not None
+        and hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+    )
+    try:
+        if redirect:
+            sys.__stdout__ = sys.stderr
+        app = PickerApp(source, live=live)
+        app.run()
+    finally:
+        if redirect:
+            sys.__stdout__ = saved_stdout
     return app.result
