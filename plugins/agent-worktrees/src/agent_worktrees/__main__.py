@@ -447,6 +447,20 @@ def _worktree_to_dict(
         if state_info.branch_drift and state_info.current_branch:
             d["current_branch"] = state_info.current_branch
             d["branch_drift"] = True
+        # Authoritative maintenance hints (single source of truth: prune.py +
+        # git_ops.can_fast_forward), so the picker's Cleanup/Sync scope dialogs
+        # never re-derive eligibility from display heuristics. The bucket is
+        # flag-independent; the executor still re-checks safety per worktree.
+        _turns = (
+            session_ctx.turn_count.get(_normalize_path(rec.worktree_path), 0)
+            if session_ctx is not None else 0
+        )
+        d["cleanup_bucket"] = prune.cleanup_disposition(
+            rec, state_info, turn_count=_turns).bucket
+        d["ff_eligible"] = (
+            git_ops.can_fast_forward(state_info)
+            and state_info.state != git_ops.WorktreeState.ACTIVE
+        )
     if mux_info is not None:
         d["mux_session"] = mux_info.exists
         d["mux_clients"] = mux_info.clients

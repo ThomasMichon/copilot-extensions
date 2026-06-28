@@ -102,6 +102,92 @@ def _age_secs(w):
         return 1 << 40
 
 
+def _bucket_from_raw(w):
+    """Cleanup bucket for a raw worktree dict.
+
+    Prefers the authoritative ``cleanup_bucket`` emitted by
+    ``list --json --classify`` (computed by ``prune.cleanup_disposition``).
+    Falls back to an approximation from the canonical ``state`` + PR for remotes
+    too old to emit it. Buckets: clean / unused / conversation / open-pr /
+    closed-unmerged / dirty / wip / orphan / active / gone.
+    """
+    b = w.get("cleanup_bucket")
+    if b:
+        return b
+    st = (w.get("state") or "").lower()
+    pr = (w.get("pr") or {})
+    prst = pr.get("state")
+    if st == "active":
+        return "active"
+    if st == "gone":
+        return "gone"
+    if st == "dirty":
+        return "dirty"
+    if st == "orphan":
+        return "orphan"
+    if prst == "open":
+        return "open-pr"
+    if prst == "merged" or st == "completed":
+        return "clean"
+    if prst == "closed":
+        return "closed-unmerged"
+    if st == "wip":
+        return "wip"
+    if st == "unused":
+        return "conversation" if w.get("turn_count", 0) > 0 else "unused"
+    return "wip"
+
+
+def _ff_from_raw(w):
+    """Whether a raw worktree dict is fast-forward eligible.
+
+    Prefers the authoritative ``ff_eligible`` field; else mirrors
+    ``git_ops.can_fast_forward`` (clean, no local commits ahead, strictly
+    behind) plus "no live session".
+    """
+    if "ff_eligible" in w:
+        return bool(w["ff_eligible"])
+    return (
+        w.get("dirty", 0) == 0
+        and w.get("ahead", 0) == 0
+        and w.get("behind", 0) > 0
+        and (w.get("state") or "").lower() != "active"
+    )
+
+
+# Cleanup bucket -> Maintenance disposition chip. open-pr is a healthy end
+# state (in review): no flag. Cleanable buckets are SAFE/REVIEW; work-bearing or
+# in-use buckets are UNSAFE (never auto-pruned).
+BUCKET_DISPO = {
+    "clean": "SAFE",
+    "unused": "REVIEW",
+    "conversation": "REVIEW",
+    "closed-unmerged": "REVIEW",
+    "gone": "REVIEW",
+    "dirty": "UNSAFE",
+    "wip": "UNSAFE",
+    "unmerged": "UNSAFE",
+    "orphan": "UNSAFE",
+    "active": "UNSAFE",
+    "open-pr": "",
+}
+
+# Cleanup bucket -> short reason shown in the disposition chip.
+BUCKET_REASON = {
+    "clean": "on default branch",
+    "unused": "idle · no commits/turns",
+    "conversation": "chat history, no commits",
+    "closed-unmerged": "PR closed unmerged",
+    "gone": "dir missing",
+    "dirty": "uncommitted work",
+    "wip": "unmerged commits",
+    "unmerged": "commits not on default branch",
+    "orphan": "no merge base",
+    "active": "live session",
+    "open-pr": "open PR",
+}
+
+
 def norm(w, machine, env):
     """Normalize one raw worktree dict into the engine's record shape."""
     return {
@@ -120,6 +206,8 @@ def norm(w, machine, env):
         "sess": _sess(w),
         "turns": w.get("turn_count", 0),
         "pr": _pr(w),
+        "cleanup_bucket": _bucket_from_raw(w),
+        "ff_eligible": _ff_from_raw(w),
         "attached": bool(w.get("mux_attached")),
         "active": w.get("status") == "active",
         "raw": w,

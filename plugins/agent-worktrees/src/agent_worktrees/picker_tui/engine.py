@@ -21,7 +21,9 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.widget import Widget
 
-VERSION = "1.5.3-dev62"
+from . import derive
+
+VERSION = "1.5.3-dev63"
 
 # ---- palette (highlight-and-invert; subtle borders) -------------------------
 C_DIM = "grey42"          # subtle separators / borders
@@ -493,28 +495,22 @@ class PickerScreen(Widget):
         return self.region_heads()
 
     def cleanup_rows(self):
-        """Prune candidates, scoped to the active machine sub-pivot (All =
-        every machine)."""
+        """Maintenance worktree list, scoped to the active machine sub-pivot
+        (All = every machine), each tagged with its prune disposition.
+
+        Shows every in-scope worktree -- including in-use/work-bearing ones --
+        so the disposition column is honest; the Cleanup dialog only *offers*
+        the cleanable buckets, and the executor re-checks safety per worktree.
+        """
         if self.is_all():
-            rows = [w for w in self.data if not w["active"]]
+            rows = list(self.data)
         else:
             m, e, _ = self.cur_machine()
-            rows = [w for w in self.data
-                    if not w["active"] and w["machine"] == m and w["env"] == e]
+            rows = [w for w in self.data if w["machine"] == m and w["env"] == e]
         for w in rows:
-            pr = w["raw"].get("pr") or {}
-            st = pr.get("state")
-            num = pr.get("number")
-            if w["state"] == "WIP":
-                lvl, txt = "UNSAFE", "uncommitted work"
-            elif st == "merged":
-                lvl, txt = "SAFE", f"merged #{num}"
-            elif st == "open":
-                lvl, txt = "", ""           # open PR is a good end state, no flag
-            elif w["age"].endswith(("m", "h")):
-                lvl, txt = "REVIEW", "recent activity"
-            else:
-                lvl, txt = "SAFE", "idle / finalized"
+            bucket = w.get("cleanup_bucket", "wip")
+            lvl = derive.BUCKET_DISPO.get(bucket, "")
+            txt = derive.BUCKET_REASON.get(bucket, "")
             # Blended disposition (verdict + reason in one colored chip).
             w["dispo_level"] = lvl
             w["dispo"] = f" {DISPO_MARK[lvl]} {txt}" if lvl else ""
@@ -1284,7 +1280,13 @@ class PickerScreen(Widget):
                       style=C_BAND)]
         if not p.get("armed", True):
             n = len(items)
-            sub = f" ⚠ remove {n} worktree(s) incl. unused? Enter=proceed Esc=cancel"
+            extra = []
+            if p.get("include_unused"):
+                extra.append("unused")
+            if p.get("include_conversations"):
+                extra.append("conversation")
+            tail = f" incl. {'/'.join(extra)}" if extra else ""
+            sub = f" ⚠ remove {n} worktree(s){tail}? Enter=proceed Esc=cancel"
             substyle = "bold yellow"
         elif p["done"]:
             sub = f" done · {done}/{len(items)}" + (f" · {failed} failed" if failed else "")
@@ -1567,9 +1569,15 @@ class PickerScreen(Widget):
                 self.debug = (f"{verb.lower()} {dlg['scope']}: "
                               f"{', '.join(picked) or 'nothing'} → 0 worktrees")
                 return
-            # Extra confirm when a cleanup scope reaches past 'clean' (Unused /
-            # All) -- removing idle/empty trees is a bigger commitment.
-            beyond_clean = op == "cleanup" and any(p != "Completed" for p in picked)
+            # Extra confirm when a cleanup scope reaches past 'clean'
+            # (Unused / Conversation-only / All) -- removing idle/empty trees
+            # or trees that held conversation is a bigger commitment.
+            include_unused = any(
+                p in ("Unused", "All eligible") for p in picked)
+            include_conversations = any(
+                p in ("Conversation-only", "All eligible") for p in picked)
+            beyond_clean = op == "cleanup" and (
+                include_unused or include_conversations)
             items = [{"id4": w["id4"], "title": w["title"],
                       "machine_env": w["machine_env"], "state": "pending"}
                      for w in recs]
@@ -1578,7 +1586,8 @@ class PickerScreen(Widget):
                 "recs": recs, "picked": picked,
                 "ticks": 0, "steps": 3, "done": False,
                 "armed": not beyond_clean,
-                "include_unused": True, "include_conversations": True,
+                "include_unused": include_unused,
+                "include_conversations": include_conversations,
             }
             if self.progress["armed"]:
                 self._start_progress()
@@ -1715,46 +1724,45 @@ class PickerScreen(Widget):
     def _open_cleanup(self):
         scope = self._scope_label()
         rows = self.cleanup_rows()
-        allids = {w["id4"] for w in rows}
-        completed = {w["id4"] for w in rows
-                     if (w["raw"].get("pr") or {}).get("state") == "merged"
-                     or (w["tracking"] == "finalized" and w["age"].endswith("d")
-                         and (w["raw"].get("pr") or {}).get("state") != "open")}
-        unused = {w["id4"] for w in rows if w["state"] == "UNUSED"}
+        clean = {w["id4"] for w in rows if w["cleanup_bucket"] == "clean"}
+        unused = {w["id4"] for w in rows if w["cleanup_bucket"] == "unused"}
+        convo = {w["id4"] for w in rows if w["cleanup_bucket"] == "conversation"}
+        gone = {w["id4"] for w in rows if w["cleanup_bucket"] == "gone"}
+        all_eligible = clean | unused | convo | gone
         self.cleanup = {
             "verb": "Clean up", "prompt": "Select what to prune:",
             "confirm": "Confirm", "scope": scope, "idx": 0, "section": 0, "bidx": 0,
             "opts": [
-                {"label": "Completed", "on": True, "ids": completed,
-                 "hint": f"merged / old finalized · {len(completed)}"},
+                {"label": "Merged & finalized", "on": True, "ids": clean,
+                 "hint": f"work is on the default branch · {len(clean)}"},
                 {"label": "Unused", "on": False, "ids": unused,
-                 "hint": f"idle, no session · {len(unused)}"},
-                {"label": "All", "on": False, "ids": allids,
-                 "hint": f"everything prunable · {len(allids)}"},
+                 "hint": f"no commits, no conversation · {len(unused)}"},
+                {"label": "Conversation-only", "on": False, "ids": convo,
+                 "hint": f"no commits, but the session has chat history "
+                         f"· {len(convo)}"},
+                {"label": "All eligible", "on": False, "ids": all_eligible,
+                 "hint": f"every prunable worktree · {len(all_eligible)}"},
             ],
         }
 
     def _open_sync(self):
         scope = self._scope_label()
         if self.is_all():
-            rows = [w for w in self.data]
+            rows = list(self.data)
         else:
             m, e, _ = self.cur_machine()
             rows = [w for w in self.data if w["machine"] == m and w["env"] == e]
-        active = {w["id4"] for w in rows if w["active"]}
-        behind = {w["id4"] for w in rows
-                  if (w["raw"].get("pr") or {}).get("state") == "open"}
-        allids = {w["id4"] for w in rows}
+        eligible = {w["id4"] for w in rows if w.get("ff_eligible")}
+        skipped = len(rows) - len(eligible)
         self.cleanup = {
-            "verb": "Sync", "prompt": "Pull/rebase onto base — pick scope:",
+            "verb": "Sync", "prompt": "Fast-forward worktrees onto the default "
+            "branch (FF-only):",
             "confirm": "Confirm", "scope": scope, "idx": 0, "section": 0, "bidx": 0,
             "opts": [
-                {"label": "Active", "on": True, "ids": active,
-                 "hint": f"in-progress worktrees · {len(active)}"},
-                {"label": "Has PR", "on": False, "ids": behind,
-                 "hint": f"open-PR branches · {len(behind)}"},
-                {"label": "All", "on": False, "ids": allids,
-                 "hint": f"every worktree · {len(allids)}"},
+                {"label": "Eligible", "on": True, "ids": eligible,
+                 "hint": f"clean · behind · no local commits · {len(eligible)}"
+                         + (f"  ({skipped} skipped: ahead/dirty/active)"
+                            if skipped else "")},
             ],
         }
 
