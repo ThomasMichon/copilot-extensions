@@ -842,8 +842,14 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             output.err("Run 'agent-worktrees list' to see available worktrees.")
             return 1
 
-        # Non-interactive resume by worktree ID (used by agent-bridge SSH
-        # for session roll -- resume existing worktree without creating new).
+        # Resume a specific worktree by ID without the picker. Two callers:
+        #   * agent-bridge SSH session-roll -- passes ``--no-mux`` (clean stdio
+        #     for ACP) explicitly, so it does not rely on a forced default.
+        #   * the TUI picker's cross-machine "Open" handoff -- runs
+        #     ``<project> --worktree-id <id>`` over ``ssh -t`` to launch the
+        #     remote worktree's session *interactively, with the normal mux*.
+        # So respect the actual ``--no-mux`` flag here rather than forcing it;
+        # an interactive open gets a muxed session like a local launch.
         wt_id_noninteractive = getattr(args, "worktree_id", None)
         if wt_id_noninteractive:
             wt_id_noninteractive = _resolve_worktree_id(wt_id_noninteractive)
@@ -852,7 +858,6 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 output.err(f"Worktree not found: {wt_id_noninteractive}")
                 return 1
             record = tracking.load_record(yaml_path)
-            args.no_mux = True
             profile = _resolve_profile(config, args)
             return _resolve_resume(record, config, args, profile=profile)
 
@@ -1846,6 +1851,7 @@ def _emit_remote_plan_for_env(
     config: cfg.Config,
     machine_display: str,
     env_label: str,
+    remote_args: list[str] | None = None,
 ) -> int | None:
     """Emit a remote SSH handoff plan for a specific machine **and env**.
 
@@ -1855,6 +1861,13 @@ def _emit_remote_plan_for_env(
     ``_resolve_ssh_alias`` -- so picking "Lambda-Core WSL" on a Windows host
     would hand off to the Windows alias (SSHing the host back into itself and
     hanging). This resolves the **env-specific** alias instead.
+
+    ``remote_args`` are appended to the project binstub in the remote command,
+    so the remote launches **straight through** into the chosen action instead
+    of re-opening its own picker. For example ``["--worktree-id", "<id>"]``
+    resumes that worktree interactively on the far side; ``["--new"]`` creates
+    one there. Without them the remote just opens its picker (the old
+    behavior).
 
     Returns an exit code if the plan was emitted, or ``None`` if the machine /
     env could not be resolved (caller should error).
@@ -1892,11 +1905,14 @@ def _emit_remote_plan_for_env(
         ssh_alias = _resolve_ssh_alias(entry)
 
     project = cfg.project_name()
+    # The remote runs this string under its login shell (ssh -t alias "<cmd>");
+    # worktree ids and flags are shell-safe tokens, so a simple join is fine.
+    remote_command = " ".join([project, *remote_args]) if remote_args else project
     display = f"{entry.display_name} {env_label}".strip()
     _emit_plan({
         "action": "remote",
         "ssh_alias": ssh_alias,
-        "remote_command": project,
+        "remote_command": remote_command,
         "machine": entry.key,
         "display_name": display,
     })
@@ -2029,15 +2045,30 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
     action = decision.get("action")
     profile = _resolve_profile(config, args)
 
-    # A selection on another machine hands off over SSH (the picker re-runs
-    # there); resolving a specific remote worktree directly is deferred. The
-    # picker's target carries both machine *and* env, so resolve the
-    # env-specific SSH alias (not the machine's primary -- see
-    # ``_emit_remote_plan_for_env``).
+    # A selection on another machine hands off over SSH. The picker's target
+    # carries machine *and* env, so resolve the env-specific SSH alias (not the
+    # machine's primary -- see ``_emit_remote_plan_for_env``). The selected
+    # action is forwarded as binstub args so the remote launches **straight
+    # through** into that worktree's interactive session instead of re-opening
+    # its own picker (resume -> ``--worktree-id <id>``; new -> ``--new``).
     if not decision.get("is_local", True):
         machine = decision.get("machine") or ""
         env_label = decision.get("env") or ""
-        rc = _emit_remote_plan_for_env(config, machine, env_label)
+        opts = decision.get("options") or {}
+        remote_args: list[str] = []
+        if action == "resume":
+            wt_id = decision.get("worktree_id")
+            if wt_id:
+                remote_args = ["--worktree-id", str(wt_id)]
+                if opts.get("no_mux"):
+                    remote_args.append("--no-mux")
+        elif action == "new":
+            remote_args = ["--new"]
+            if opts.get("no_mux"):
+                remote_args.append("--no-mux")
+        # Other actions (or a resume with no id) fall back to opening the
+        # remote picker (empty remote_args).
+        rc = _emit_remote_plan_for_env(config, machine, env_label, remote_args)
         if rc is not None:
             return rc
         output.err(
