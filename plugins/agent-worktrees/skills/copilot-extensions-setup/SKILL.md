@@ -7,29 +7,17 @@ description: >
   skill for all setup flows. Trigger phrases include:
   - 'install agent-worktrees'
   - 'install agent-bridge'
-  - 'install agent-codespaces'
-  - 'install agent-containers'
-  - 'install agent-mcp'
-  - 'set up agent-worktrees'
-  - 'set up agent-bridge'
   - 'set up copilot extensions'
-  - 'bootstrap agent-worktrees'
+  - 'set up agent-worktrees'
   - 'bootstrap agent-bridge'
   - 'agent-worktrees not found'
-  - 'agent-bridge not found'
   - 'agent-bridge not installed'
-  - 'agent-containers not found'
   - 'agent-mcp not found'
   - 'runtime not installed'
   - 'adopt this repo'
-  - 'adopt repo'
   - 'register project'
-  - 'agent-worktrees adopt'
-  - 'wire agent-bridge topology'
-  - 'configure agent-bridge for this repo'
   - 'agent-bridge config adopt'
-  - 'agent-bridge topology missing'
-  - 'set up worktree sessions for this repo'
+  - 'wire agent-bridge topology'
   - 'bootstrap this machine'
 ---
 
@@ -61,9 +49,59 @@ local install path (`~/.agent-worktrees`, `~/.agent-codespaces`,
 
 ## 0. Install the plugins (marketplace)
 
-Run once per machine. **Install the four mesh plugins** — installing
-agent-worktrees alone is not enough for codespace/container support.
-agent-mcp is optional; add it if you need to wrap an authenticated MCP.
+Two ways to register the plugins. **Repo-scoped registration is preferred** --
+it pins the plugin set to the control repo, keeps machines consistent, and lets
+the launcher keep everything fresh automatically.
+
+### Recommended: register at repo scope
+
+1. Enable experimental mode once per machine -- the CLI gates **all** extension
+   loading on it (`~/.copilot/settings.json`):
+
+   ```json
+   { "experimental": true }
+   ```
+
+2. Declare the marketplace + enable the plugins in the **control repo's**
+   `.github/copilot/settings.json` (committed, shared across every machine):
+
+   ```json
+   {
+     "extraKnownMarketplaces": {
+       "copilot-extensions": {
+         "source": { "source": "github", "repo": "ThomasMichon/copilot-extensions" }
+       }
+     },
+     "enabledPlugins": {
+       "agent-worktrees@copilot-extensions": true,
+       "agent-bridge@copilot-extensions": true,
+       "agent-codespaces@copilot-extensions": true,
+       "agent-containers@copilot-extensions": true,
+       "agent-mcp@copilot-extensions": true
+     }
+   }
+   ```
+
+   Copilot vendors the enabled plugin **payloads** when a session runs in that
+   repo. **agent-worktrees may only take effect after restarting the active
+   session** -- plugins are scanned at startup.
+
+3. Deploy the **runtimes** (the `uv` venvs + binstubs) by running this setup
+   skill once the payloads are vendored -- *"set up copilot extensions"*
+   (sections 1-8 below install the uv/pip payloads).
+
+4. From then on, **boot via the binstub or terminal profile**. Each interactive
+   launch runs `agent-worktrees reconcile-plugins`, which keeps the repo's
+   enabled payloads installed and their runtimes matched to the payload version
+   -- so the plugin set stays fresh automatically (see
+   [`docs/install-contract.md`](../../../../docs/install-contract.md)).
+
+### Alternative: global install
+
+Install into the user profile instead (handy for a machine with no single
+control repo). **Install the four mesh plugins** -- agent-worktrees alone is not
+enough for codespace/container support. agent-mcp is optional; add it if you
+need to wrap an authenticated MCP.
 
 ```bash
 copilot plugin marketplace add ThomasMichon/copilot-extensions
@@ -399,161 +437,21 @@ agent-bridge config remove my-profile
 
 ---
 
-## 5. Agent-Codespaces Init
+## 5-8. Optional plugins -- Codespaces, Containers, MCP
 
-Install the agent-codespaces runtime (CLI binstub + `~/.agent-codespaces`
-home). The credential relay itself runs inside the agent-bridge service, but
-this step gives you the standalone `agent-codespaces` CLI and is the canonical
-owner of the `~/.local/bin/agent-codespaces` binstub.
+Setup for the optional / standalone plugins lives in
+[references/optional-plugins-setup.md](references/optional-plugins-setup.md):
 
-```powershell
-# Windows
-pwsh -NoProfile -ExecutionPolicy Bypass -File "$acDir\scripts\init.ps1"
-```
-
-```bash
-# Linux/WSL
-bash "$ac_dir/scripts/init.sh"
-```
-
-### Verify
-
-```bash
-agent-codespaces version
-agent-codespaces status      # shows runtime, gh CLI, ssh
-```
-
-`gh` must be authenticated (`gh auth login`) for CodeSpace operations.
-
----
-
-## 6. Agent-Codespaces Adopt
-
-Register the repo so agent-codespaces reads `codespaces.yaml` live (CodeSpace
-defaults + credential-relay policy). Run **from inside the repo**.
-
-```bash
-cd /path/to/repo
-agent-codespaces config adopt
-agent-codespaces config validate
-agent-codespaces config show
-```
-
-If the repo has no `codespaces.yaml`, create one first — see the
-`codespaces-setup` skill for the format (defaults, credential sources, per-repo
-overrides).
-
-### Verify relay + bridge integration
-
-No registration step is needed: when agent-codespaces is installed, the
-agent-bridge service imports it as a sibling and **auto-registers the live
-`codespace:` namespace resolver** at startup, so CodeSpaces are addressable as
-`codespace:<name>` (raw or friendly) on demand.
-
-```bash
-# CodeSpaces should already appear here -- no `bridge register` required.
-agent-bridge agents          # look for codespace:<name> entries
-```
-
-If `agent-bridge agents` shows no codespace entries and the bridge install
-WARNED about a missing sibling, re-run the agent-bridge installer **after** the
-agent-codespaces plugin is installed (section 0) so the service venv picks up
-the `agent_codespaces` package. (`agent-codespaces bridge register` exists but
-only POSTs a static `cs-*` snapshot with a TTL — it is optional and superseded
-by the resolver; see the `codespaces-lifecycle` skill.)
-
----
-
-## 7. Agent-Containers Init
-
-Install the agent-containers runtime (CLI binstub + `~/.agent-containers`
-home). The `container:` namespace resolver runs inside the agent-bridge
-service (installed as a sibling import); this step gives you the standalone
-`agent-containers` CLI for fleet/lease management and owns the
-`~/.local/bin/agent-containers` binstub.
-
-```powershell
-# Windows
-pwsh -NoProfile -ExecutionPolicy Bypass -File "$anDir\scripts\init.ps1"
-```
-
-```bash
-# Linux/WSL
-bash "$an_dir/scripts/init.sh"
-```
-
-### What It Creates
-
-```
-~/.agent-containers/
-  .venv/                   Python venv with the agent_containers package
-  deploy-manifest.json
-
-~/.local/bin/
-  agent-containers[.cmd]   Binstub
-```
-
-### Verify
-
-```bash
-agent-containers version
-agent-containers fleet       # lists local dev containers + lease status
-```
-
-Docker (Docker Desktop WSL2 backend) must be running for fleet operations.
-The `container:` resolver in agent-bridge forwards the host `gh auth token`
-into containers, so `gh` must be authenticated for dispatched agents to work.
-
----
-
-## 8. Agent-MCP Init (optional, standalone)
-
-Install the agent-mcp runtime (CLI binstub + `~/.agent-mcp` home). agent-mcp is
-**not** part of the bridge mesh — it has no `codespace:` / `container:`-style
-resolver and the bridge does not import it. An agent wraps an upstream MCP by
-pointing an `mcp-servers` entry at the `agent-mcp` binstub. Install it only if
-you need to bridge an authenticated MCP server.
-
-```powershell
-# Windows
-pwsh -NoProfile -ExecutionPolicy Bypass -File "$amDir\scripts\init.ps1"
-```
-
-```bash
-# Linux/WSL
-bash "$am_dir/scripts/init.sh"
-```
-
-### What It Creates
-
-```
-~/.agent-mcp/
-  .venv/                   Python venv with the agent_mcp package
-  deploy-manifest.json
-
-~/.local/bin/
-  agent-mcp[.cmd]          Binstub
-```
-
-You create `~/.agent-mcp/bridges/<name>.yaml` config files yourself (or pass
-`--config <path>`); init does not create the `bridges/` directory.
-
-### Verify
-
-```bash
-agent-mcp status            # prerequisites + available bridges
-```
-
-Define a bridge under `~/.agent-mcp/bridges/<name>.yaml` (or pass `--config`),
-then validate it with `agent-mcp validate <name>`. See the `agent-mcp` skill for
-the config format and how to wire it into an agent's `mcp-servers`.
+- **agent-codespaces** -- init (`~/.agent-codespaces` + binstub), adopt, credential relay + bridge integration
+- **agent-containers** -- init (`~/.agent-containers` + binstub), fleet / lease config, `container:` resolver
+- **agent-mcp** -- standalone init (optional; not part of the mesh)
 
 ---
 
 ## Full Machine Bootstrap
 
 To set up a fresh machine with the four **mesh** plugins (add agent-mcp
-separately if needed — see section 8):
+separately if needed — see [references/optional-plugins-setup.md](references/optional-plugins-setup.md)):
 
 ```bash
 # 0. Install the mesh plugins from the marketplace (see section 0)
@@ -572,12 +470,12 @@ copilot plugin install agent-bridge@copilot-extensions
 # 4. Wire topology
 agent-bridge config adopt --repo /path/to/repo --profile my-control-harness
 
-# 5. Install agent-codespaces runtime      (section 5)
-# 6. Adopt the repo for codespaces         (section 6)
+# 5. Install agent-codespaces runtime      (optional-plugins-setup.md §5)
+# 6. Adopt the repo for codespaces         (optional-plugins-setup.md §6)
 cd /path/to/repo && agent-codespaces config adopt
 
-# 7. Install agent-containers runtime      (section 7)
-# 8. (optional) Install agent-mcp runtime  (section 8)
+# 7. Install agent-containers runtime      (optional-plugins-setup.md §7)
+# 8. (optional) Install agent-mcp runtime  (optional-plugins-setup.md §8)
 
 # 9. Start the service
 agent-bridge start  # or: install.ps1 start
