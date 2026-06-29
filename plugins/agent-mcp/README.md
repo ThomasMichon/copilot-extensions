@@ -37,6 +37,13 @@ written to its stdin as git-credential `key=value` text and its stdout supplies
 the secret. Use it to source credentials from a vault CLI, a custom helper, or a
 password manager without baking that tool into this plugin.
 
+**`command` vs `git-credential`.** `git-credential` is the special case that
+reads the host's **Git Credential Manager** (`git credential fill`); `command`
+runs **any other** secret printer — a vault CLI, 1Password's `op`, a custom
+binstub. There is **no built-in `vault` (or other vendor) auth kind by design**:
+vault access is simply a `command` that runs your own `vault` CLI, so no
+facility- or vendor-specific secret tool is hard-coded into agent-mcp.
+
 Set `source_env` on a `command` auth to make it **env-first**: if that host
 variable is already set (e.g. a no-vault/push machine's static `.env`), it is
 used and the command is **not** run; otherwise the command runs. One bridge
