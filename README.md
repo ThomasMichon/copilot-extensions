@@ -19,7 +19,7 @@ Plugins, one marketplace. Install what you need; they compose.
 | [efforts](plugins/efforts/) | Planning skills | Plan a stretch of work as an **effort** — a folder with a README-as-shared-contract (premise + plan + journal) that humans and agents coordinate through. The executor plugins above bind its participant seam. |
 | [agent-logger](plugins/agent-logger/) | Session logging | Turn raw Copilot sessions into structured Markdown logs — a segmenter, a voice-neutral log-writer agent, and a `session-sync` step that pushes session data to a configurable target (local / OneDrive / SSH / ingest). Personality is injected by the host, never built in. |
 | [context-handoff](plugins/context-handoff/) | Extension + skill | Watch the context window via a session extension and, before it fills, compose a continuation prompt so a fresh session can resume the work. Payload-only — no runtime to install. |
-| [skill-authoring](plugins/skill-authoring/) | Authoring skills | Teach an agent how to author Copilot CLI extensions — skills, sub-agents, MCP servers, hooks, custom instructions — and the per-skill folder conventions. Payload-only — no runtime to install. |
+| [customizing-copilot](plugins/customizing-copilot/) | Customizing the CLI | Teach an agent how to customize and extend the Copilot CLI — authoring skills, defining sub-agents, registering MCP servers, and installing plugins (repo `settings.json`). Four focused skills. Payload-only — no runtime to install. |
 
 All support **Windows** and **Linux/WSL** (macOS planned).
 
@@ -30,7 +30,7 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 Nine plugins, one marketplace. **Six ship a runtime** (a `uv`-built venv under
 `~/.agent-*` + a `~/.local/bin` binstub, deployed by the plugin's own
 installer); **three are payload-only** — `efforts` (skills), `context-handoff`
-(a session extension), and `skill-authoring` (skills) need no install beyond
+(a session extension), and `customizing-copilot` (skills) need no install beyond
 enabling the plugin. Everything installs **from the marketplace** and runs
 **from local install paths** — no git checkout required at runtime.
 
@@ -44,7 +44,7 @@ flowchart TB
       AN["agent-containers<br/>CLI + container: resolver"]
       AM["agent-mcp<br/>MCP bridge CLI"]
       AL["agent-logger<br/>session-sync + log writer"]
-      PO["efforts · context-handoff · skill-authoring<br/>(payload-only: skills / extension)"]
+      PO["efforts · context-handoff · customizing-copilot<br/>(payload-only: skills / extension)"]
     end
     subgraph RT["Local runtimes — ~/.* + ~/.local/bin"]
       RW["~/.agent-worktrees<br/>agent-worktrees"]
@@ -134,12 +134,12 @@ copilot plugin install agent-mcp@copilot-extensions      # optional, standalone
 copilot plugin install agent-logger@copilot-extensions   # optional — session logging
 copilot plugin install efforts@copilot-extensions        # optional — planning skills (no runtime)
 copilot plugin install context-handoff@copilot-extensions # optional — context-window handoff (no runtime)
-copilot plugin install skill-authoring@copilot-extensions # optional — how to author skills/agents/MCP (no runtime)
+copilot plugin install customizing-copilot@copilot-extensions # optional — how to customize the CLI (no runtime)
 ```
 
 Each `copilot plugin install` only vendors the plugin's **payload** (source,
 skills, hooks, extensions). The six runtime plugins (everything except `efforts`,
-`context-handoff`, and `skill-authoring`) then need their runtime deployed once — that's Step 2,
+`context-handoff`, and `customizing-copilot`) then need their runtime deployed once — that's Step 2,
 which runs each installer to build a `uv` venv under `~/.agent-*` and drop a
 binstub in `~/.local/bin`.
 
@@ -370,13 +370,15 @@ Your source repos and their `.worktrees` content are never touched.
 | [context-handoff](plugins/context-handoff/skills/context-handoff/SKILL.md) | The `/handoff` continuation-prompt workflow |
 | [context-handoff-setup](plugins/context-handoff/skills/context-handoff-setup/SKILL.md) | Enable the plugin extension in a repo |
 
-### Skill Authoring
+### Customizing Copilot
 
 | Document | Description |
 |----------|-------------|
-| [README](plugins/skill-authoring/README.md) | Plugin overview, what it covers, no-install delivery |
-| [authoring-extensions](plugins/skill-authoring/skills/authoring-extensions/SKILL.md) | Skills, folder conventions, validation checklist |
-| [reference](plugins/skill-authoring/skills/authoring-extensions/references/reference.md) | Custom agents, MCP servers, custom instructions, hooks |
+| [README](plugins/customizing-copilot/README.md) | Plugin overview, the four skills, no-install delivery |
+| [authoring-skills](plugins/customizing-copilot/skills/authoring-skills/SKILL.md) | SKILL.md format, folder convention, validation, hooks, custom instructions |
+| [defining-subagents](plugins/customizing-copilot/skills/defining-subagents/SKILL.md) | Custom agents: `.agent.md`, tool aliases, MCP ownership, anti-recursion |
+| [registering-mcp-servers](plugins/customizing-copilot/skills/registering-mcp-servers/SKILL.md) | MCP registration hierarchy, config formats, writing a server |
+| [installing-plugins](plugins/customizing-copilot/skills/installing-plugins/SKILL.md) | Repo `settings.json` registration, experimental mode, payload-vs-runtime |
 
 ### Contributing
 
