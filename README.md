@@ -17,6 +17,8 @@ Plugins, one marketplace. Install what you need; they compose.
 | [agent-containers](plugins/agent-containers/) | CLI + resolver | Manage a fleet of local Docker dev containers, borrow/release them per effort, and address them as bridge agents (`container:<name>`). |
 | [agent-mcp](plugins/agent-mcp/) | MCP bridge | Wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP and inject host credentials (Entra/`az`, `gh`, git-credential, env). Standalone — used directly from an agent's `mcp-servers` config. |
 | [efforts](plugins/efforts/) | Planning skills | Plan a stretch of work as an **effort** — a folder with a README-as-shared-contract (premise + plan + journal) that humans and agents coordinate through. The executor plugins above bind its participant seam. |
+| [agent-logger](plugins/agent-logger/) | Session logging | Turn raw Copilot sessions into structured Markdown logs — a segmenter, a voice-neutral log-writer agent, and a `session-sync` step that pushes session data to a configurable target (local / OneDrive / SSH / ingest). Personality is injected by the host, never built in. |
+| [context-handoff](plugins/context-handoff/) | Extension + skill | Watch the context window via a session extension and, before it fills, compose a continuation prompt so a fresh session can resume the work. Payload-only — no runtime to install. |
 
 All support **Windows** and **Linux/WSL** (macOS planned).
 
@@ -24,8 +26,12 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 
 ## Architecture at a glance
 
-Everything installs **from the marketplace** and runs **from local install
-paths** (`~/.agent-*` + `~/.local/bin`) — no git checkout required at runtime.
+Eight plugins, one marketplace. **Six ship a runtime** (a `uv`-built venv under
+`~/.agent-*` + a `~/.local/bin` binstub, deployed by the plugin's own
+installer); **two are payload-only** — `efforts` (skills) and `context-handoff`
+(a session extension) need no install beyond enabling the plugin. Everything
+installs **from the marketplace** and runs **from local install paths** — no git
+checkout required at runtime.
 
 ```mermaid
 flowchart TB
@@ -36,6 +42,8 @@ flowchart TB
       AC["agent-codespaces<br/>CLI + credential relay"]
       AN["agent-containers<br/>CLI + container: resolver"]
       AM["agent-mcp<br/>MCP bridge CLI"]
+      AL["agent-logger<br/>session-sync + log writer"]
+      PO["efforts · context-handoff<br/>(payload-only: skills / extension)"]
     end
     subgraph RT["Local runtimes — ~/.* + ~/.local/bin"]
       RW["~/.agent-worktrees<br/>agent-worktrees"]
@@ -43,20 +51,31 @@ flowchart TB
       RC["~/.agent-codespaces<br/>agent-codespaces"]
       RN["~/.agent-containers<br/>agent-containers"]
       RM["~/.agent-mcp<br/>agent-mcp"]
+      RL["~/.agent-logger<br/>session-sync task + digests"]
     end
     MP -->|copilot plugin install| AW
     MP -->|copilot plugin install| AB
     MP -->|copilot plugin install| AC
     MP -->|copilot plugin install| AN
     MP -->|copilot plugin install| AM
+    MP -->|copilot plugin install| AL
+    MP -->|copilot plugin install| PO
     AW -->|init.ps1 / init.sh| RW
     AB -->|install.ps1 / install.sh| RB
     AC -->|init.ps1 / init.sh| RC
     AN -->|init.ps1 / init.sh| RN
     AM -->|init.ps1 / init.sh| RM
+    AL -->|install.ps1 / install.sh| RL
     AC -.->|codespace resolver + relay| RB
     AN -.->|container resolver| RB
 ```
+
+Each runtime plugin is itself a **Python package** (its `src/` plus vendored
+`libs/`); the installer creates the venv with `uv venv` and installs the package
+with `uv pip install <plugin_dir>`. See
+[Quick Start](#quick-start) and [Architecture overview](docs/architecture.md)
+for the payload-vs-runtime split.
+
 
 How the pieces relate at run time:
 
@@ -111,7 +130,16 @@ copilot plugin install agent-codespaces@copilot-extensions
 copilot plugin install agent-containers@copilot-extensions
 copilot plugin install agent-bridge@copilot-extensions
 copilot plugin install agent-mcp@copilot-extensions      # optional, standalone
+copilot plugin install agent-logger@copilot-extensions   # optional — session logging
+copilot plugin install efforts@copilot-extensions        # optional — planning skills (no runtime)
+copilot plugin install context-handoff@copilot-extensions # optional — context-window handoff (no runtime)
 ```
+
+Each `copilot plugin install` only vendors the plugin's **payload** (source,
+skills, hooks, extensions). The six runtime plugins (everything except `efforts`
+and `context-handoff`) then need their runtime deployed once — that's Step 2,
+which runs each installer to build a `uv` venv under `~/.agent-*` and drop a
+binstub in `~/.local/bin`.
 
 ### 2. Bootstrap the runtimes
 
@@ -311,6 +339,23 @@ Your source repos and their `.worktrees` content are never touched.
 | [planning-efforts](plugins/efforts/skills/planning-efforts/SKILL.md) | Start, plan, resume, archive efforts |
 | [reference guide](plugins/efforts/skills/planning-efforts/references/efforts.md) | Full effort schema, lifecycle, participants seam |
 | [efforts-setup](plugins/efforts/skills/efforts-setup/SKILL.md) | Adopt efforts in a repo: scaffold + write the addendum |
+
+### Agent Logger
+
+| Document | Description |
+|----------|-------------|
+| [README](plugins/agent-logger/README.md) | Plugin overview, pipeline pieces, design principles |
+| [log-session](plugins/agent-logger/skills/log-session/SKILL.md) | Write a log for one session on demand |
+| [process-backlog](plugins/agent-logger/skills/process-backlog/SKILL.md) | Batch-log a backlog of unlogged sessions locally |
+| [session-sync-setup](plugins/agent-logger/skills/session-sync-setup/SKILL.md) | Configure + deploy session-sync (target, schedule) |
+
+### Context Handoff
+
+| Document | Description |
+|----------|-------------|
+| [README](plugins/context-handoff/README.md) | Plugin overview, why an extension, no-install delivery |
+| [context-handoff](plugins/context-handoff/skills/context-handoff/SKILL.md) | The `/handoff` continuation-prompt workflow |
+| [context-handoff-setup](plugins/context-handoff/skills/context-handoff-setup/SKILL.md) | Enable the plugin extension in a repo |
 
 ### Contributing
 

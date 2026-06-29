@@ -1,10 +1,16 @@
 # Architecture Overview
 
-How the five copilot-extensions plugins fit together — install topology,
-runtimes, ports, and the credential relay. For per-plugin internals, follow the
-links in each section.
+How the eight copilot-extensions plugins fit together — install topology,
+runtimes, ports, and the credential relay. **Six ship a runtime** (a `uv`-built
+venv under `~/.agent-*` plus a `~/.local/bin` binstub, deployed by the plugin's
+own installer); **two are payload-only** — `efforts` (skills) and
+`context-handoff` (a session extension) deploy entirely from the marketplace
+payload with no installer. For per-plugin internals, follow the links in each
+section.
 
 ## The plugins
+
+### Runtime plugins (installer-deployed venv + binstub)
 
 | Plugin | Kind | Runtime home | Binstub | Lifecycle |
 |--------|------|--------------|---------|-----------|
@@ -13,6 +19,23 @@ links in each section.
 | [agent-codespaces](../plugins/agent-codespaces/) | CLI + credential relay | `~/.agent-codespaces/` | `~/.local/bin/agent-codespaces` | On-demand CLI; relay + `codespace:` resolver run inside the agent-bridge service process |
 | [agent-containers](../plugins/agent-containers/) | CLI + `container:` resolver | `~/.agent-containers/` | `~/.local/bin/agent-containers` | On-demand CLI; `container:` resolver runs inside the agent-bridge service process |
 | [agent-mcp](../plugins/agent-mcp/) | Standalone MCP bridge (stdio) | `~/.agent-mcp/` | `~/.local/bin/agent-mcp` | Spawned per-call by an agent's `mcp-servers` entry; no bridge integration |
+| [agent-logger](../plugins/agent-logger/) | Session-logging CLI + writer agent + sync task | `~/.agent-logger/` | `~/.local/bin/agent-logger` | On-demand CLI + a scheduled `session-sync` (Windows task / Linux systemd timer) |
+
+### Payload-only plugins (no installer, no runtime)
+
+| Plugin | Kind | Deployed as | Lifecycle |
+|--------|------|-------------|-----------|
+| [efforts](../plugins/efforts/) | Planning skills (`planning-efforts`, `efforts-setup`) | Marketplace payload (skills + assets) | Loaded on demand when a skill matches; no runtime to install |
+| [context-handoff](../plugins/context-handoff/) | Session **extension** + `/handoff` skill | Marketplace payload (`extensions/context-handoff/extension.mjs`) | Auto-discovered from the enabled plugin's `extensions/` dir; no copy to `~/.copilot/extensions/`, no deploy manifest |
+
+Every runtime plugin is itself a **Python package** — its `src/` package plus
+any vendored `libs/` — installed by its own `scripts/install.*` / `scripts/init.*`
+with `uv venv` + `uv pip install <plugin_dir>`. `copilot plugin install/update`
+only moves the marketplace payload; the runtime venv/binstub/service is deployed
+(and updated) by that installer step. The repo uses **`uv`/`uv pip`** throughout
+— not `uvx`, `uv tool install`, or `pipx`. The full payload-vs-runtime contract
+lives in [install-contract.md](install-contract.md).
+
 
 ## Install topology — marketplace to local paths
 
@@ -30,6 +53,8 @@ flowchart TB
       AC["agent-codespaces/<br/>scripts • src"]
       AN["agent-containers/<br/>scripts • src"]
       AM["agent-mcp/<br/>scripts • src"]
+      AL["agent-logger/<br/>scripts • src"]
+      PO["efforts/ • context-handoff/<br/>(payload-only: skills / extension)"]
     end
     subgraph RT["Local runtimes"]
       RW["~/.agent-worktrees/<br/>.venv • lib • bin"]
@@ -37,21 +62,28 @@ flowchart TB
       RC["~/.agent-codespaces/<br/>.venv • lib"]
       RN["~/.agent-containers/<br/>.venv • leases.json"]
       RM["~/.agent-mcp/<br/>.venv • deploy-manifest.json"]
+      RL["~/.agent-logger/<br/>.venv • digests • sync task"]
     end
-    BIN["~/.local/bin/<br/>agent-worktrees • agent-bridge • agent-codespaces • agent-containers • agent-mcp"]
+    BIN["~/.local/bin/<br/>agent-worktrees • agent-bridge • agent-codespaces • agent-containers • agent-mcp • agent-logger"]
     MP --> AW --> RW
     MP --> AB --> RB
     MP --> AC --> RC
     MP --> AN --> RN
     MP --> AM --> RM
+    MP --> AL --> RL
+    MP --> PO
     RW --> BIN
     RB --> BIN
     RC --> BIN
     RN --> BIN
     RM --> BIN
+    RL --> BIN
     AC -.->|package imported into bridge venv| RB
     AN -.->|package imported into bridge venv| RB
 ```
+
+> `efforts` and `context-handoff` (the `PO` node) deploy entirely from the
+> marketplace payload — no installer, no `~/.agent-*` runtime, no binstub.
 
 Key rule: the **agent-codespaces and agent-containers binstubs are owned by
 their own runtimes** (`~/.agent-codespaces`, `~/.agent-containers`). The
@@ -171,3 +203,6 @@ flowchart TB
 - agent-codespaces [README](../plugins/agent-codespaces/README.md) · [lifecycle skill](../plugins/agent-codespaces/skills/codespaces-lifecycle/SKILL.md)
 - agent-containers [README](../plugins/agent-containers/README.md) · [containers-fleet skill](../plugins/agent-containers/skills/containers-fleet/SKILL.md)
 - agent-mcp [README](../plugins/agent-mcp/README.md) · [agent-mcp skill](../plugins/agent-mcp/skills/agent-mcp/SKILL.md)
+- agent-logger [README](../plugins/agent-logger/README.md) · [session-sync-setup skill](../plugins/agent-logger/skills/session-sync-setup/SKILL.md)
+- efforts [README](../plugins/efforts/README.md) · [planning-efforts skill](../plugins/efforts/skills/planning-efforts/SKILL.md)
+- context-handoff [README](../plugins/context-handoff/README.md) · [context-handoff skill](../plugins/context-handoff/skills/context-handoff/SKILL.md)

@@ -30,6 +30,16 @@ All three ship from the same repo.
 > When installed as a sibling plugin through the marketplace, no
 > separate relay setup is required.
 
+`copilot plugin install` only vendors the plugin **payload** into
+`~/.copilot/installed-plugins/`. agent-bridge is a **Python package**
+(`plugins/agent-bridge/src/agent_bridge` plus vendored `libs/`); the installer
+below deploys its **runtime** — it builds a venv with `uv venv` and installs the
+package (and the `agent_codespaces`/`agent_containers` resolver packages) with
+`uv pip install` under `~/.agent-bridge/venv`, then registers the always-on
+service. (`uv` is bootstrapped automatically if missing; nothing here uses
+`uvx`/`pipx`.) A full update is two steps: `copilot plugin update` (payload)
+**then** `scripts/install.* update` (runtime).
+
 Start a Copilot CLI session and say:
 
 > *"set up agent-bridge"*
