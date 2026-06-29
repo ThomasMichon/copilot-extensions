@@ -15,8 +15,11 @@ nature via a ``runtimeScope`` field in its ``plugin.json``:
                        any runtime is managed out-of-band).
 * ``universal``     -- the runtime is reconciled on every machine.
 * ``machine-gated`` -- the runtime is reconciled only on machines in the
-                       plugin's allowed set, sourced from a facility
-                       ``external-repos.yaml`` (``deploy_machines``).
+                       plugin's allowed set, sourced from a control-harness
+                       gate manifest (by default ``external-repos.yaml`` with
+                       ``deploy_machines``; both the filename and an optional
+                       anchor repo are overridable via env -- see
+                       ``load_runtime_gate``).
 
 Runtime reconciliation is **local and version-keyed**: it compares the
 installed payload version (``plugin.json``) against the deployed runtime
@@ -33,6 +36,7 @@ re-invoke for a second pass (payload, then runtime).
 from __future__ import annotations
 
 import json
+import os
 import platform
 import time
 from pathlib import Path
@@ -46,6 +50,14 @@ MARKETPLACE = "copilot-extensions"
 SELF_PLUGIN = "agent-worktrees"
 CACHE_NAME = "plugin-reconcile-cache.json"
 VALID_SCOPES = ("universal", "machine-gated", "none")
+
+# Machine-gate source (pluggable). The reconciler reads the per-plugin allowed
+# machine set from a control-harness manifest. Both the manifest filename and an
+# optional anchor repo (searched via the repos registry when the current repo
+# lacks the manifest) are overridable so any control harness can supply its own
+# gate; the defaults match this repo's reference (facility) convention.
+GATE_MANIFEST = os.environ.get("WORKTREE_GATE_MANIFEST", "external-repos.yaml")
+GATE_ANCHOR = os.environ.get("WORKTREE_GATE_ANCHOR", "aperture-labs")
 
 # Throttle (hours) for the network payload refresh (`copilot plugin update`).
 # Runtime reconciliation is version-keyed and not throttled.
@@ -186,26 +198,31 @@ def runtime_installer_argv(plugin_dir: Path) -> tuple[str, list[str]] | None:
 
 
 # --------------------------------------------------------------------------
-# Facility machine gate (external-repos.yaml deploy_machines)
+# Machine gate (control-harness manifest -> per-plugin deploy_machines)
 # --------------------------------------------------------------------------
 
 def load_runtime_gate(repo_dir: Path) -> dict[str, set[str]]:
-    """Map plugin name -> allowed machine set from a facility manifest.
+    """Map plugin name -> allowed machine set from a control-harness manifest.
 
-    Looks for ``external-repos.yaml`` in the current repo first, then in the
-    ``aperture-labs`` repo (resolved via the repos registry). Parses
+    Looks for the gate manifest (``GATE_MANIFEST``, default
+    ``external-repos.yaml``; override with ``WORKTREE_GATE_MANIFEST``) in the
+    current repo first, then -- if an anchor repo is configured
+    (``GATE_ANCHOR``; override with ``WORKTREE_GATE_ANCHOR``) -- in that repo as
+    resolved via the repos registry. Parses
     ``repos.<repo>.services[].{name, deploy_machines}``. Returns ``{}`` when no
-    manifest is found.
+    manifest is found, which makes every ``machine-gated`` runtime skip (the
+    safe default).
     """
-    candidates = [repo_dir / "external-repos.yaml"]
-    try:
-        from . import repos as _repos
+    candidates = [repo_dir / GATE_MANIFEST]
+    if GATE_ANCHOR:
+        try:
+            from . import repos as _repos
 
-        anchor = _repos.resolve_path("aperture-labs")
-        if anchor:
-            candidates.append(Path(anchor) / "external-repos.yaml")
-    except Exception:
-        pass
+            anchor = _repos.resolve_path(GATE_ANCHOR)
+            if anchor:
+                candidates.append(Path(anchor) / GATE_MANIFEST)
+        except Exception:
+            pass
 
     gate: dict[str, set[str]] = {}
     for path in candidates:

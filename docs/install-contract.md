@@ -65,17 +65,22 @@ A plugin declares whether — and where — its runtime should be reconciled via
 | `machine-gated` | Reconcile the runtime only on machines in the plugin's allowed set (e.g. `agent-bridge`, `agent-codespaces`, `agent-containers`). |
 
 The machine set for `machine-gated` plugins is **not** hard-coded in the plugin:
-it is read from a facility `external-repos.yaml` (`repos.*.services[].{name,
-deploy_machines}`) resolved from the current repo or the `aperture-labs` anchor.
-With no gate info available, a `machine-gated` runtime is **skipped** (safe
-default — never auto-install a machine-specific runtime where the policy is
-unknown). Reconciliation is local and version-keyed, so a re-launch with no
-version change does ~no work; the network payload refresh is throttled via a
-small cache under `~/.agent-worktrees/`. Opt out per session with
-`WORKTREE_NO_RECONCILE=1`.
+the reconciler reads it from a **control-harness gate manifest** — by default a
+file named `external-repos.yaml` (`repos.*.services[].{name, deploy_machines}`),
+resolved from the current repo first and then, if a gate anchor repo is
+configured, from that repo via the repos registry. Both knobs are **pluggable**
+via environment variables — `WORKTREE_GATE_MANIFEST` (the filename) and
+`WORKTREE_GATE_ANCHOR` (the anchor repo name) — so any control harness can point
+the gate at its own manifest; the defaults (`external-repos.yaml`, anchor
+`aperture-labs`) match this repo's reference facility. With no gate info
+available, a `machine-gated` runtime is **skipped** (safe default — never
+auto-install a machine-specific runtime where the policy is unknown).
+Reconciliation is local and version-keyed, so a re-launch with no version change
+does ~no work; the network payload refresh is throttled via a small cache under
+`~/.agent-worktrees/`. Opt out per session with `WORKTREE_NO_RECONCILE=1`.
 
 > **Headless caveat.** This runs only on **interactive** launches.
-> `copilot -p --autopilot` (the facility harnesses) does not merge repo
+> `copilot -p --autopilot` (an autopilot/headless harness) does not merge repo
 > `enabledPlugins`, so harness machines still need required runtimes installed
 > globally, out-of-band.
 
