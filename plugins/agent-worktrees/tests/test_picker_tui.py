@@ -698,3 +698,95 @@ def test_cleanup_extra_confirm_gate_and_real_executor(monkeypatch):
             await pilot.pause()
 
     asyncio.run(run())
+
+
+# ---- prefetch cancellation (picker-perf bug: orphaned SSH list workers) ----
+
+def _sleeper_argv(seconds: int):
+    import sys
+    return [sys.executable, "-c", f"import time; time.sleep({seconds})"]
+
+
+def test_live_loader_spawn_tracks_and_unregisters():
+    """``_spawn`` runs a child, returns a CompletedProcess, and leaves no
+    tracked process behind once it completes."""
+    import sys
+
+    from agent_worktrees.picker_tui import data_ssh
+
+    loader = data_ssh.LiveLoader(sources=[])
+    proc = loader._spawn([sys.executable, "-c", "print('hi')"], timeout=15)
+    assert proc.returncode == 0
+    assert "hi" in proc.stdout
+    with loader._procs_lock:
+        assert loader._procs == []   # unregistered after completion
+
+
+def test_live_loader_spawn_after_cancel_raises():
+    """Once cancelled, the loader refuses to spawn new prefetch children."""
+    import sys
+
+    import pytest
+
+    from agent_worktrees.picker_tui import data_ssh
+
+    loader = data_ssh.LiveLoader(sources=[])
+    loader.cancel()
+    with pytest.raises(RuntimeError):
+        loader._spawn([sys.executable, "-c", "pass"], timeout=5)
+
+
+def test_live_loader_cancel_kills_inflight_prefetch():
+    """The core fix: cancelling the loader kills an in-flight prefetch child so
+    it can't orphan into a heavy git-classify after the picker exits."""
+    import threading
+    import time
+
+    from agent_worktrees.picker_tui import data_ssh
+
+    loader = data_ssh.LiveLoader(sources=[])
+    result = {}
+
+    def run():
+        try:
+            result["proc"] = loader._spawn(_sleeper_argv(30), timeout=30)
+        except Exception as exc:  # pragma: no cover - failure path
+            result["err"] = exc
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+
+    # Wait until the child is registered as in-flight.
+    for _ in range(100):
+        with loader._procs_lock:
+            if loader._procs:
+                break
+        time.sleep(0.05)
+    with loader._procs_lock:
+        assert loader._procs, "prefetch child should be tracked while running"
+        child = loader._procs[0]
+
+    loader.cancel()
+    t.join(timeout=15)
+
+    assert not t.is_alive(), "spawn thread must unblock after cancel kills child"
+    assert child.poll() is not None, "the prefetch child must be dead"
+    with loader._procs_lock:
+        assert loader._procs == [], "tracked child must be removed after cancel"
+
+
+def test_screen_on_unmount_cancels_loader():
+    """The picker's teardown hook cancels the loader (no orphaned prefetch)."""
+    from agent_worktrees.picker_tui import data_local
+    from agent_worktrees.picker_tui.engine import PickerScreen
+
+    screen = PickerScreen(data_local, live=True)
+    cancelled = {"v": False}
+
+    class _FakeLoader:
+        def cancel(self):
+            cancelled["v"] = True
+
+    screen.loader = _FakeLoader()
+    screen.on_unmount()
+    assert cancelled["v"] is True

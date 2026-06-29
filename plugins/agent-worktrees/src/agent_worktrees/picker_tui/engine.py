@@ -310,16 +310,39 @@ class PickerScreen(Widget):
         # ~10 fps drives the SSH spinner and the slower live-glyph pulse.
         self.set_interval(0.1, self._tick)
 
+    def on_unmount(self):
+        # Picker is tearing down (a launch decision, cancel, or quit). Kill any
+        # in-flight SSH prefetch so it never orphans into a heavy git-classify
+        # churning on the machine we're about to hand off into -- the picker
+        # perf bug where Copilot "slows to a crawl" after launch.
+        loader = getattr(self, "loader", None)
+        if loader is not None:
+            try:
+                loader.cancel()
+            except Exception:
+                pass
+
     def _tick(self):
         self.frame += 1
         self.pulse = (self.frame // 5) % 2
+        busy = False
         # In live mode, stream in worktrees as each machine's load resolves.
         if self.live and self.loader is not None:
             self.data = self.loader.records()
+            _ready, loading, _failed = self.loader.counts()
+            busy = busy or loading > 0
         # Drive the mock cleanup/sync progress dialog forward.
         if self.progress and not self.progress["done"]:
             self._advance_progress()
-        self.refresh()
+            busy = True
+        # Full 10 fps only while something is actually animating (the SSH
+        # connect spinner or a running progress dialog). When idle, throttle to
+        # ~2 fps: keystrokes already repaint synchronously (on_key -> refresh),
+        # so this only paces the cosmetic live-glyph pulse -- and it stops the
+        # picker from flooding an SSH/tmux link with continuous full-screen
+        # repaints (the over-SSH sluggishness the legacy picker never had).
+        if busy or self.frame % 5 == 0:
+            self.refresh()
 
     def _advance_progress(self):
         """Drive the progress sub-dialog forward.
