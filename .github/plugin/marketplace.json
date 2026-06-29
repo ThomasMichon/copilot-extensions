@@ -5,8 +5,8 @@
     "email": "thomas@thomasmichon.com"
   },
   "metadata": {
-    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, and extension authoring",
-    "version": "1.7.4-dev127"
+    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, and CLI customization",
+    "version": "1.7.4-dev128"
   },
   "plugins": [
     {
@@ -58,10 +58,10 @@
       "source": "plugins/efforts"
     },
     {
-      "name": "skill-authoring",
-      "description": "Author Copilot CLI extensions - skills, sub-agents, MCP servers, hooks, and custom instructions - with the per-skill folder conventions (SKILL.md + references/, scripts/, assets/) and Agent Skills best practices; ships the authoring-extensions skill",
-      "version": "0.1.0-dev1",
-      "source": "plugins/skill-authoring"
+      "name": "customizing-copilot",
+      "description": "Customize and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, and installing plugins - with the per-skill folder conventions and Agent Skills best practices; ships the authoring-skills, defining-subagents, registering-mcp-servers, and installing-plugins skills",
+      "version": "0.1.0-dev2",
+      "source": "plugins/customizing-copilot"
     }
   ]
 }

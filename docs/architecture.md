@@ -4,7 +4,7 @@ How the nine copilot-extensions plugins fit together — install topology,
 runtimes, ports, and the credential relay. **Six ship a runtime** (a `uv`-built
 venv under `~/.agent-*` plus a `~/.local/bin` binstub, deployed by the plugin's
 own installer); **three are payload-only** — `efforts` (skills),
-`context-handoff` (a session extension), and `skill-authoring` (skills) deploy
+`context-handoff` (a session extension), and `customizing-copilot` (skills) deploy
 entirely from the marketplace payload with no installer. For per-plugin
 internals, follow the links in each section.
 
@@ -27,7 +27,7 @@ internals, follow the links in each section.
 |--------|------|-------------|-----------|
 | [efforts](../plugins/efforts/) | Planning skills (`planning-efforts`, `efforts-setup`) | Marketplace payload (skills + assets) | Loaded on demand when a skill matches; no runtime to install |
 | [context-handoff](../plugins/context-handoff/) | Session **extension** + `/handoff` skill | Marketplace payload (`extensions/context-handoff/extension.mjs`) | Auto-discovered from the enabled plugin's `extensions/` dir; no copy to `~/.copilot/extensions/`, no deploy manifest |
-| [skill-authoring](../plugins/skill-authoring/) | Authoring skill (`authoring-extensions`) | Marketplace payload (skills + references) | Loaded on demand when a skill-authoring prompt matches; no runtime to install |
+| [customizing-copilot](../plugins/customizing-copilot/) | Customization skills (`authoring-skills`, `defining-subagents`, `registering-mcp-servers`, `installing-plugins`) | Marketplace payload (skills) | Loaded on demand when a CLI-customization prompt matches; no runtime to install |
 
 Every runtime plugin is itself a **Python package** — its `src/` package plus
 any vendored `libs/` — installed by its own `scripts/install.*` / `scripts/init.*`
@@ -55,7 +55,7 @@ flowchart TB
       AN["agent-containers/<br/>scripts • src"]
       AM["agent-mcp/<br/>scripts • src"]
       AL["agent-logger/<br/>scripts • src"]
-      PO["efforts/ • context-handoff/ • skill-authoring/<br/>(payload-only: skills / extension)"]
+      PO["efforts/ • context-handoff/ • customizing-copilot/<br/>(payload-only: skills / extension)"]
     end
     subgraph RT["Local runtimes"]
       RW["~/.agent-worktrees/<br/>.venv • lib • bin"]
@@ -83,7 +83,7 @@ flowchart TB
     AN -.->|package imported into bridge venv| RB
 ```
 
-> `efforts`, `context-handoff`, and `skill-authoring` (the `PO` node) deploy
+> `efforts`, `context-handoff`, and `customizing-copilot` (the `PO` node) deploy
 > entirely from the
 > marketplace payload — no installer, no `~/.agent-*` runtime, no binstub.
 
@@ -208,4 +208,4 @@ flowchart TB
 - agent-logger [README](../plugins/agent-logger/README.md) · [session-sync-setup skill](../plugins/agent-logger/skills/session-sync-setup/SKILL.md)
 - efforts [README](../plugins/efforts/README.md) · [planning-efforts skill](../plugins/efforts/skills/planning-efforts/SKILL.md)
 - context-handoff [README](../plugins/context-handoff/README.md) · [context-handoff skill](../plugins/context-handoff/skills/context-handoff/SKILL.md)
-- skill-authoring [README](../plugins/skill-authoring/README.md) · [authoring-extensions skill](../plugins/skill-authoring/skills/authoring-extensions/SKILL.md)
+- customizing-copilot [README](../plugins/customizing-copilot/README.md) · [authoring-skills](../plugins/customizing-copilot/skills/authoring-skills/SKILL.md) · [defining-subagents](../plugins/customizing-copilot/skills/defining-subagents/SKILL.md) · [registering-mcp-servers](../plugins/customizing-copilot/skills/registering-mcp-servers/SKILL.md) · [installing-plugins](../plugins/customizing-copilot/skills/installing-plugins/SKILL.md)
