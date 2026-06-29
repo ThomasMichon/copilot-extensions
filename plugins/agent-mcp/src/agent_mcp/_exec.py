@@ -8,7 +8,7 @@ and runs fine from a shell. This bites two common bridge inputs on Windows:
 
 * upstream stdio servers launched via ``npx`` (ships as ``npx.cmd``), and
 * ``command``-kind auth that shells out to a ``.cmd`` binstub such as a
-  facility ``vault`` -> ``vault.cmd`` credential printer.
+  a ``vault``-style ``vault.cmd`` credential printer.
 
 ``shutil.which`` *is* ``PATHEXT``-aware, so resolving ``argv[0]`` to its full
 path before spawning fixes ``.cmd``/``.bat`` shims uniformly. On POSIX this is a

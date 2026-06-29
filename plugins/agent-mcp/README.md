@@ -107,7 +107,7 @@ server:
   command: ["npx", "-y", "@scope/some-mcp"]
 auth:
   kind: command
-  command: ["vault", "get", "Aperture Science/Some API", "password"]
+  command: ["vault", "get", "My Vault/Some API", "password"]
   parse: raw               # stdout IS the secret (no adapter needed)
   inject: env
   target_env: API_KEY      # set on the child
@@ -134,11 +134,11 @@ server:
     SERVICE_HOST: host.example.com      # non-secret config stays here
 auth:
   - kind: command
-    command: ["vault", "get", "Aperture Science/Service Controller", "password"]
+    command: ["vault", "get", "My Vault/Service Controller", "password"]
     parse: raw
     target_env: SERVICE_PASSWORD
   - kind: command
-    command: ["vault", "get", "Aperture Science/Service API Key", "password"]
+    command: ["vault", "get", "My Vault/Service API Key", "password"]
     parse: raw
     target_env: SERVICE_API_KEY
 ```
