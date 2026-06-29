@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import os
+import signal
 import socket
 import subprocess
 import threading
@@ -62,7 +64,7 @@ class Source:
     """
 
     def __init__(self, machine, env, argv, *, local=False, ready=True,
-                 use_classify=True, timeout=45, alias="", shell="bash"):
+                 use_classify=True, timeout=20, alias="", shell="bash"):
         self.machine = machine        # display_name from machines.yaml
         self.env = env                # Win | WSL | Linux
         self.argv = argv              # subprocess argv (None for the local src)
@@ -289,23 +291,60 @@ def _run(argv, timeout):
     )
 
 
-def _fetch(source: Source):
+def _kill_proc_tree(proc):
+    """Best-effort terminate a prefetch child *and* its process group.
+
+    Killing the local ``ssh`` also drops the channel, so the remote
+    ``agent-worktrees list`` it was driving dies with it -- which is the whole
+    point: don't leave a heavy git-classification churning on the machine the
+    operator is about to hand off into.
+    """
+    if proc.poll() is not None:
+        return
+    try:
+        if os.name == "posix":
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                proc.terminate()
+        else:
+            proc.kill()
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=2)
+    except Exception:
+        try:
+            if os.name == "posix":
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            else:
+                proc.kill()
+        except Exception:
+            pass
+
+
+def _fetch(source: Source, runner=None):
     """Run one source's list command and return normalized worktree records.
 
     Local sources load in-process. Remotes run over SSH, retrying without
     ``--classify`` when the remote agent-worktrees is too old to recognize it.
+
+    ``runner`` runs the subprocess (default :func:`_run`); :class:`LiveLoader`
+    passes its own tracked-and-killable runner so a picker exit can cancel any
+    in-flight prefetch.
     """
+    runner = runner or _run
     if source.local:
         return data_local.load(source.machine, source.env)
 
-    proc = _run(source.argv, source.timeout)
+    proc = runner(source.argv, source.timeout)
     if proc.returncode != 0 and _is_classify_unsupported(proc.stderr):
         # Older remote: drop --classify and retry (rows will lack canonical
         # state but still load).
         retry = [a.replace(" --classify", "") for a in source.argv]
         source.argv = retry
         source.use_classify = False
-        proc = _run(retry, source.timeout)
+        proc = runner(retry, source.timeout)
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip().splitlines()
         raise RuntimeError(err[-1] if err else f"exit {proc.returncode}")
@@ -331,6 +370,13 @@ class LiveLoader:
         self._state = {}     # (machine, env) -> loading|ready|failed
         self._records = {}   # (machine, env) -> [normalized record, ...]
         self._error = {}     # (machine, env) -> str (last error)
+        # In-flight prefetch ssh children, tracked so a picker exit can kill
+        # them (otherwise a quick selection orphans them -- they reparent to
+        # init and keep churning git-classification on the target machine,
+        # starving the Copilot session we just launched there).
+        self._procs = []
+        self._procs_lock = threading.Lock()
+        self._cancelled = threading.Event()
         for s in all_sources:
             self._state[s.key] = "loading" if s.ready else "failed"
             self._records[s.key] = []
@@ -343,9 +389,55 @@ class LiveLoader:
                 name=f"load-{s.machine}-{s.env}", daemon=True,
             ).start()
 
+    def cancel(self):
+        """Stop loading and kill any in-flight prefetch ssh children.
+
+        Idempotent; called from the picker's teardown (Textual ``on_unmount``)
+        so a launch decision never leaves orphaned ``ssh ... list`` processes
+        behind. Safe to call when nothing is in flight.
+        """
+        self._cancelled.set()
+        with self._procs_lock:
+            procs = list(self._procs)
+        for p in procs:
+            _kill_proc_tree(p)
+
+    def _spawn(self, argv, timeout):
+        """Tracked, killable runner for prefetch subprocesses.
+
+        Mirrors :func:`_run` but registers the live :class:`subprocess.Popen`
+        so :meth:`cancel` can terminate it (and, on POSIX, its whole process
+        group). Returns a :class:`subprocess.CompletedProcess` so ``_fetch`` is
+        agnostic to which runner produced it.
+        """
+        if self._cancelled.is_set():
+            raise RuntimeError("cancelled")
+        kwargs = dict(
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace",
+        )
+        if os.name == "posix":
+            kwargs["start_new_session"] = True   # own group -> killpg on cancel
+        else:
+            kwargs["creationflags"] = getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        proc = subprocess.Popen(argv, **kwargs)
+        with self._procs_lock:
+            self._procs.append(proc)
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_proc_tree(proc)
+            out, err = proc.communicate()
+        finally:
+            with self._procs_lock:
+                if proc in self._procs:
+                    self._procs.remove(proc)
+        return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+
     def _load_one(self, source: Source):
         try:
-            recs = _fetch(source)
+            recs = _fetch(source, runner=self._spawn)
         except Exception as exc:  # any failure -> failed state
             with self._lock:
                 self._state[source.key] = "failed"
