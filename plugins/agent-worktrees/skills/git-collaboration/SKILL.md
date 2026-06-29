@@ -4,13 +4,12 @@ description: >
   Multi-agent git collaboration on a worktree: pull a worktree forward onto an
   updated default branch and build on top of a just-merged PR, share a durable
   feature branch across several agents, and ff-merge a delegate's slice into that
-  feature branch -- with a clear boundary between git operations that must go
-  through the agent-worktrees wrappers (because they protect a shared invariant)
-  and the everyday git you should just run directly. This is the "branches"
-  executor binding for the efforts planning system: an effort that coordinates
-  multiple agents over one feature branch is driven from here. Use whenever you
-  need to continue work after a PR merges, coordinate more than one agent on a
-  single branch, or decide whether a git command is safe to run raw. Trigger
+  feature branch -- with a clear boundary between git that must go through the
+  agent-worktrees wrappers and the everyday git you run directly. This is the
+  "branches" executor binding for the efforts planning system: an effort
+  coordinating multiple agents over one feature branch is driven from here. Use
+  whenever you continue work after a PR merges, coordinate more than one agent
+  on a branch, or decide whether a git command is safe to run raw. Trigger
   phrases include:
   - 'pull forward'
   - 'build on top of the merged PR'
