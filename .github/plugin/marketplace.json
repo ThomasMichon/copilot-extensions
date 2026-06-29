@@ -5,8 +5,8 @@
     "email": "thomas@thomasmichon.com"
   },
   "metadata": {
-    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, and effort planning",
-    "version": "1.7.4-dev124"
+    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, and extension authoring",
+    "version": "1.7.4-dev125"
   },
   "plugins": [
     {
@@ -56,6 +56,12 @@
       "description": "Efforts planning system - comprehensive planning folders that represent a stretch of work (premise + plan + validation plan + journal + participant coordination), with a README-as-shared-contract; ships the planning-efforts and efforts-setup skills",
       "version": "0.1.0-dev2",
       "source": "plugins/efforts"
+    },
+    {
+      "name": "skill-authoring",
+      "description": "Author Copilot CLI extensions - skills, sub-agents, MCP servers, hooks, and custom instructions - with the per-skill folder conventions (SKILL.md + references/, scripts/, assets/) and Agent Skills best practices; ships the authoring-extensions skill",
+      "version": "0.1.0-dev1",
+      "source": "plugins/skill-authoring"
     }
   ]
 }
