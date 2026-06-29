@@ -141,6 +141,17 @@ and `context-handoff`) then need their runtime deployed once — that's Step 2,
 which runs each installer to build a `uv` venv under `~/.agent-*` and drop a
 binstub in `~/.local/bin`.
 
+> **Recommended: register at repo scope instead of globally.** Set
+> `"experimental": true` in `~/.copilot/settings.json`, then declare the
+> marketplace + `enabledPlugins` in your control repo's committed
+> `.github/copilot/settings.json`. Copilot vendors the payloads when a session
+> runs in that repo (agent-worktrees may need a session restart to take effect),
+> Step 2 deploys the runtimes, and every subsequent launch via the
+> binstub/terminal profile runs `agent-worktrees reconcile-plugins` to keep the
+> payloads and runtimes fresh automatically. See
+> [`copilot-extensions-setup`](plugins/agent-worktrees/skills/copilot-extensions-setup/SKILL.md)
+> § 0 and [install-contract.md](docs/install-contract.md).
+
 ### 2. Bootstrap the runtimes
 
 Start a Copilot CLI session and say **"set up copilot extensions"** — the
