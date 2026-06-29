@@ -161,7 +161,7 @@ class CommandInjector(TokenInjector):
 
     * ``keyvalue`` (default) -- parse ``key=value`` output and extract
       ``auth.field`` (default: ``token`` then ``password``). Wraps
-      ``git credential fill``, the facility ``git-credential-vault`` helper,
+      ``git credential fill``, a ``git-credential-vault``-style helper,
       ``op``/1Password CLI, etc.
     * ``raw`` -- the whole trimmed stdout is the secret verbatim. Wraps a plain
       secret-printer such as ``vault get "<entry>" password`` with no adapter.

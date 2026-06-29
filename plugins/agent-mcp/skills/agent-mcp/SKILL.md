@@ -132,11 +132,11 @@ them into the child environment.
 ```yaml
 auth:
   - kind: command
-    command: ["vault", "get", "Aperture Science/UniFi Controller", "password"]
+    command: ["vault", "get", "My Vault/UniFi Controller", "password"]
     parse: raw
     target_env: UNIFI_NETWORK_PASSWORD
   - kind: command
-    command: ["vault", "get", "Aperture Science/UniFi API Key (Local)", "password"]
+    command: ["vault", "get", "My Vault/UniFi API Key (Local)", "password"]
     parse: raw
     target_env: UNIFI_API_KEY
 ```
