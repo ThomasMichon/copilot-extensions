@@ -1054,3 +1054,71 @@ def test_banner_version_falls_back_when_build_info_blank(monkeypatch):
     monkeypatch.setattr(_build_info, "BUILD_INFO", {}, raising=False)
     v = engine._resolve_version()
     assert v and v != "1.5.3-dev69"
+
+
+def test_run_detaches_console_stdin(monkeypatch):
+    """``data_ssh._run`` must give its child an empty stdin, never the console.
+
+    Regression for the picker freezing keyboard input until the SSH load
+    fan-out exits: an ``ssh`` child that inherits the terminal stdin reads the
+    operator's keystrokes out from under Textual's input reader (which reads
+    the same console handle), so keys never reach the app until ssh dies.
+    """
+    import subprocess
+
+    from agent_worktrees.picker_tui import data_ssh
+
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    data_ssh._run(["ssh", "host", "agent-worktrees list"], timeout=5)
+    assert seen.get("stdin") is subprocess.DEVNULL
+
+
+def test_live_loader_spawn_detaches_console_stdin(monkeypatch):
+    """The killable prefetch runner (``LiveLoader._spawn``) must also detach
+    stdin so a backgrounded ssh load can't swallow keyboard input."""
+    import subprocess
+
+    from agent_worktrees.picker_tui import data_ssh
+
+    seen = {}
+
+    class _FakeProc:
+        returncode = 0
+
+        def __init__(self, argv, **kwargs):
+            seen.update(kwargs)
+
+        def communicate(self, timeout=None):
+            return ("{}", "")
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", _FakeProc)
+    loader = data_ssh.LiveLoader(sources=[])
+    loader._spawn(["ssh", "host", "agent-worktrees list"], timeout=5)
+    assert seen.get("stdin") is subprocess.DEVNULL
+
+
+def test_maintenance_ssh_detaches_console_stdin(monkeypatch):
+    """Remote Maintenance ops run while the TUI is up, so their ssh child must
+    detach stdin too (same input-theft class as the load fan-out)."""
+    import subprocess
+
+    from agent_worktrees.picker_tui import maintenance
+
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    maintenance._ssh_json(["ssh", "host", "agent-worktrees sync"], timeout=5)
+    assert seen.get("stdin") is subprocess.DEVNULL

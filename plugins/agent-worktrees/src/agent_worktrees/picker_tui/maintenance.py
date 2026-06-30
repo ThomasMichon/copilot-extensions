@@ -29,6 +29,9 @@ def _ssh_json(argv, timeout=120):
     proc = subprocess.run(
         argv, capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=timeout,
+        # Detach from the console stdin so the remote ``ssh`` op can't read the
+        # operator's keystrokes out from under the TUI (see data_ssh._run).
+        stdin=subprocess.DEVNULL,
     )
     out = proc.stdout or ""
     i = out.find("{")

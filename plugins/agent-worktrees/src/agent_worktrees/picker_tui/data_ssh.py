@@ -288,6 +288,15 @@ def _run(argv, timeout):
     return subprocess.run(
         argv, capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=timeout,
+        # Detach the child from the console's stdin. Without this, an ``ssh``
+        # child inherits the terminal's keyboard input and *reads* it (ssh
+        # forwards stdin to the remote) -- so while the picker's background
+        # load fan-out is alive, the operator's keystrokes are swallowed by
+        # the ssh processes instead of reaching Textual's input reader
+        # (which reads the same console handle). Input only "unblocks" once
+        # the SSH calls finish. DEVNULL gives ssh an empty stdin (instant
+        # EOF) and leaves the console input with the TUI.
+        stdin=subprocess.DEVNULL,
     )
 
 
@@ -443,6 +452,10 @@ class LiveLoader:
             raise RuntimeError("cancelled")
         kwargs = dict(
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            # Never inherit the console stdin: an ``ssh`` child would otherwise
+            # read the terminal's keyboard input out from under Textual's input
+            # reader, freezing the picker's keys until the load fan-out exits.
+            stdin=subprocess.DEVNULL,
             text=True, encoding="utf-8", errors="replace",
         )
         if os.name == "posix":
