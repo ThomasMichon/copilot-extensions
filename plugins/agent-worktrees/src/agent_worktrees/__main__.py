@@ -2032,6 +2032,15 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
     """
     from . import picker_tui
 
+    # Reap orphaned mux sessions (finalized / gone / untracked) before the
+    # picker renders, so a dead worktree is never presented as a live,
+    # resumable session (issue #713). Best-effort: never let a reap hiccup
+    # block the picker.
+    try:
+        reap_orphan_mux_sessions()
+    except Exception:
+        pass
+
     # Avoid a confusing double hop: when this picker is itself running over SSH,
     # don't fan out to other machines -- show only the local source (no remote
     # tabs / handoffs). See issue: "a process should know it's accessed via SSH."
@@ -3581,6 +3590,98 @@ def reap_one(
 
     return _result({"ok": failures == 0, "removed": True, "skipped": False,
                     "state": info.state.value, "warnings": warnings})
+
+
+def reap_orphan_mux_sessions(*, dry_run: bool = False) -> dict:
+    """Reap leaked tmux/psmux sessions whose worktree is gone or done.
+
+    Enumerates live ``wt-<id>`` multiplexer sessions and kills those that no
+    longer have an owning, resumable worktree -- the *finalized-still-present*
+    orphans plus untracked / path-missing leaks (issue #713). Without this, a
+    finalized worktree's tmux session + idle Copilot process linger forever and
+    the picker presents the dead session as resumable.
+
+    **Conservative by design** -- a session is never reaped when:
+
+    - a terminal client is **attached** (a human is using it),
+    - its worktree record is ``kind: system`` (daemon-owned; torn down by its
+      owning service), or
+    - its worktree is still **active** (tracked, dir present, just unattended) --
+      it may be doing background work, so the sweep leaves it alone.
+
+    Returns a JSON-ready dict::
+
+        {"available": bool,                  # False when no mux is installed
+         "reaped": ["<id>", ...],
+         "skipped": [{"id": "<id>", "reason": "attached|system|active"}, ...],
+         "errors":  [{"id": "<id>", "reason": "..."}, ...]}
+    """
+    all_sessions = sessions._list_mux_sessions()
+    if all_sessions is None:
+        return {"available": False, "reaped": [], "skipped": [], "errors": []}
+
+    tracking_path = cfg.tracking_dir()
+    by_id: dict[str, tracking.WorktreeRecord] = {
+        rec.worktree_id: rec for rec in tracking.list_records(tracking_path)
+    }
+
+    reaped: list[str] = []
+    skipped: list[dict] = []
+    errors: list[dict] = []
+    for name, attached in all_sessions.items():
+        if not name.startswith("wt-"):
+            continue
+        wt_id = name[len("wt-"):]
+        if attached and attached > 0:
+            skipped.append({"id": wt_id, "reason": "attached"})
+            continue
+        rec = by_id.get(wt_id)
+        if rec is None:
+            reason = "untracked"
+        elif rec.kind == "system":
+            skipped.append({"id": wt_id, "reason": "system"})
+            continue
+        elif rec.status in ("finalized", "complete", "completed"):
+            reason = rec.status
+        elif not (rec.worktree_path and Path(rec.worktree_path).exists()):
+            reason = "gone"
+        else:
+            skipped.append({"id": wt_id, "reason": "active"})
+            continue
+        if dry_run:
+            reaped.append(wt_id)
+            continue
+        if sessions.kill_tmux_session(wt_id):
+            reaped.append(wt_id)
+            try:
+                activity.log_event(
+                    "mux_session_reaped", worktree_id=wt_id, reason=reason)
+            except Exception:
+                pass
+        else:
+            errors.append({"id": wt_id, "reason": f"kill failed ({reason})"})
+
+    return {"available": True, "reaped": reaped,
+            "skipped": skipped, "errors": errors}
+
+
+def cmd_reap_sessions(args: argparse.Namespace) -> int:
+    """``reap-sessions`` -- sweep orphaned mux sessions (issue #713)."""
+    dry = getattr(args, "dry_run", False)
+    payload = reap_orphan_mux_sessions(dry_run=dry)
+    if getattr(args, "json", False):
+        _json_output(payload)
+        return 0
+    if not payload["available"]:
+        print("No multiplexer available -- nothing to reap.")
+        return 0
+    verb = "Would reap" if dry else "Reaped"
+    ids = payload["reaped"]
+    print(f"{verb} {len(ids)} orphaned mux session(s): "
+          + (", ".join(ids) if ids else "(none)"))
+    for e in payload["errors"]:
+        print(f"  ! {e['id']}: {e['reason']}")
+    return 0
 
 
 def _cleanup_one(args: argparse.Namespace) -> int:
@@ -6669,6 +6770,16 @@ def build_parser() -> argparse.ArgumentParser:
                         "requires network + provider credentials")
     p.add_argument("--max-age-days", type=int, default=7)
 
+    # reap-sessions (GC orphaned tmux/psmux sessions -- issue #713)
+    p = sub.add_parser(
+        "reap-sessions",
+        help="Reap leaked tmux/psmux sessions whose worktree is finalized, "
+             "gone, or untracked (never touches attached or active sessions)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Report what would be reaped without killing anything")
+    p.add_argument("--json", action="store_true",
+                   help="Emit a single JSON result object")
+
     # sync (fast-forward worktrees to the default branch, FF-only)
     p = sub.add_parser("sync", help="Fast-forward worktrees to the default branch")
     p.add_argument("--worktree-id", default=None,
@@ -7219,6 +7330,7 @@ COMMAND_MAP = {
     "create": cmd_create,
     "remove-system": cmd_remove_system,
     "cleanup": cmd_cleanup,
+    "reap-sessions": cmd_reap_sessions,
     "sync": cmd_sync,
     "profiles": cmd_profiles,
     "picker": cmd_picker,
@@ -7404,7 +7516,7 @@ def _git_toplevel(path: Path) -> Path | None:
 # Commands that work without a project context (no load_config/project_name).
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "install", "register", "hook",
-    "picker",
+    "picker", "reap-sessions",
 }
 
 
