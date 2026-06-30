@@ -383,38 +383,38 @@ class LiveLoader:
 
     def start(self):
         derive.NOW = _dt.datetime.now()
+        # Every source -- local included -- loads on its own daemon thread so
+        # the picker paints and accepts keys the instant it mounts; rows stream
+        # in (local + remote alike) via the engine's render tick as each source
+        # resolves. Local was once run synchronously here on the assumption it's
+        # "fast" (#1432), but a real machine's git-classification of many
+        # worktrees can take multiple seconds -- long enough to freeze the whole
+        # TUI (no paint, no arrow keys) until it finished. Threading it keeps
+        # interaction immediate and the local tab simply shows the connect
+        # spinner until its records arrive, exactly like the remotes.
         for s in self._sources:
-            if s.local:
-                # Local loads in-process and fast: run it synchronously so the
-                # current machine's worktrees are on screen the instant the
-                # picker paints -- interaction never waits on the background SSH
-                # fan-out (#1432). Remote sources still stream in on threads.
-                self._load_one(s)
-            else:
-                threading.Thread(
-                    target=self._load_one, args=(s,),
-                    name=f"load-{s.machine}-{s.env}", daemon=True,
-                ).start()
+            threading.Thread(
+                target=self._load_one, args=(s,),
+                name=f"load-{s.machine}-{s.env}", daemon=True,
+            ).start()
 
     def reload(self, machine, env):
         """Re-fetch one source now (e.g. after a Maintenance op changed it).
 
-        The local source re-runs in-process synchronously (fast), so a
-        post-maintenance refresh reflects immediately; a remote re-threads so
-        the UI never blocks. Unknown / not-ready sources are a no-op. Returns
-        True when a matching source was found (#1421, live re-render).
+        Every source -- local included -- re-threads so a post-maintenance
+        refresh never blocks the UI (the local git-classification can take
+        seconds); the tab shows the connect spinner until its fresh records
+        arrive. Unknown / not-ready sources are a no-op. Returns True when a
+        matching source was found (#1421, live re-render).
         """
         for s in self._sources:
             if s.key == (machine, env):
-                if s.local:
-                    self._load_one(s)
-                else:
-                    with self._lock:
-                        self._state[s.key] = "loading"
-                    threading.Thread(
-                        target=self._load_one, args=(s,),
-                        name=f"reload-{s.machine}-{s.env}", daemon=True,
-                    ).start()
+                with self._lock:
+                    self._state[s.key] = "loading"
+                threading.Thread(
+                    target=self._load_one, args=(s,),
+                    name=f"reload-{s.machine}-{s.env}", daemon=True,
+                ).start()
                 return True
         return False
 

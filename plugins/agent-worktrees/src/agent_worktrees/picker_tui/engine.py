@@ -385,11 +385,11 @@ class PickerScreen(Widget):
         self.machine_idx = self.local_index()
         self.maint_sel = set()        # drop any stale Maintenance selection
         if self.live:
-            # Real background SSH loads: one thread per machine, spinner -> ✓/✗.
-            # The local source resolves synchronously inside the loader's start()
-            # (#1432), so seed self.data from it immediately -- the current
-            # machine's rows are interactable on the very first paint while the
-            # remote machines stream in.
+            # Real background SSH loads: one daemon thread per machine,
+            # spinner -> ✓/✗. Every source -- local included -- streams in on a
+            # thread (#1432), so the picker paints and accepts keys immediately;
+            # seed self.data empty and let the render tick fill it as each
+            # machine resolves.
             self.data = []
             self.loader = self.src.make_loader()
             self.loader.start()
@@ -2196,9 +2196,10 @@ class PickerScreen(Widget):
     def _refresh_after_maint(self, p):
         """Reload the machines a real Cleanup/Sync just touched.
 
-        Local re-reads in-process (instant); remote re-fetches stream back in on
-        a thread. Keeps the worktree list honest after maintenance without a
-        full Picker relaunch (#1421).
+        Every touched source re-fetches on a thread (local included) and streams
+        back in via the render tick -- the list stays honest after maintenance
+        without a full Picker relaunch, and the refresh never blocks the UI
+        (#1421).
         """
         targets = {(r.get("machine"), r.get("env"))
                    for r in p.get("recs", []) if r.get("machine")}

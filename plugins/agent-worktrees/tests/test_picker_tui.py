@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import threading
 import time
 import types
 
@@ -815,33 +816,59 @@ def test_real_ops_default_on_and_opt_out(monkeypatch):
     assert _real_ops_for_env("1") is True
 
 
-def test_live_loader_local_is_synchronous_remote_streams(monkeypatch):
-    """start() resolves the local source in-process before returning, so the
-    current machine is interactable immediately while remotes stream in (#1432)."""
+def _wait_state(loader, machine, env, want, timeout=5.0):
+    deadline = time.perf_counter() + timeout
+    while loader.state(machine, env) != want:
+        if time.perf_counter() > deadline:
+            break
+        time.sleep(0.01)
+    return loader.state(machine, env)
+
+
+def test_live_loader_local_streams_without_blocking_start(monkeypatch):
+    """start() never blocks on the local source: it threads local too, so the
+    picker paints and accepts input immediately while the (sometimes
+    multi-second) local git-classification streams in just like the remotes.
+
+    Regression guard for the freeze where a slow local load held the event-loop
+    thread inside on_mount -> no paint, no arrow keys -- until every source
+    (including the SSH fan-out) had resolved."""
     from agent_worktrees.picker_tui import data_ssh
 
     sentinel = [{"id4": "abcd", "machine": "lambda-core", "env": "Win"}]
-    monkeypatch.setattr(data_ssh.data_local, "load",
-                        lambda m=None, e=None: sentinel)
+    gate = threading.Event()
+
+    def _slow_local(m=None, e=None):
+        gate.wait(5)
+        return sentinel
+
+    monkeypatch.setattr(data_ssh.data_local, "load", _slow_local)
 
     local = data_ssh.Source("lambda-core", "Win", None, local=True)
     remote = data_ssh.Source("borealis", "Win", _sleeper_argv(30),
                              local=False, alias="borealis", shell="pwsh")
     loader = data_ssh.LiveLoader(sources=[local, remote])
+    t0 = time.perf_counter()
     loader.start()
+    elapsed = time.perf_counter() - t0
     try:
-        # Local resolved synchronously the moment start() returned.
-        assert loader.state("lambda-core", "Win") == "ready"
+        # start() returned immediately -- it did NOT wait on the slow local load.
+        assert elapsed < 1.0
+        assert loader.state("lambda-core", "Win") == "loading"
+        # Release the local load; it resolves on its thread and streams in.
+        gate.set()
+        assert _wait_state(loader, "lambda-core", "Win", "ready") == "ready"
         assert loader.records() == sentinel
-        # The remote is still loading (thread mid-sleep) -- never depended on.
+        # The remote is still loading throughout -- never blocked on.
         assert loader.state("borealis", "Win") == "loading"
     finally:
+        gate.set()
         loader.cancel()
 
 
 def test_live_loader_reload_local_refetches(monkeypatch):
-    """reload() re-fetches the local source in-process so a post-maintenance
-    refresh reflects immediately (#1421 live re-render)."""
+    """reload() re-fetches the local source on a thread so a post-maintenance
+    refresh streams back in without blocking the UI (#1421 live re-render)."""
     from agent_worktrees.picker_tui import data_ssh
 
     seq = [[{"id4": "a"}], [{"id4": "b"}]]   # initial load, then reload
@@ -856,8 +883,10 @@ def test_live_loader_reload_local_refetches(monkeypatch):
     local = data_ssh.Source("lambda-core", "Win", None, local=True)
     loader = data_ssh.LiveLoader(sources=[local])
     loader.start()
+    assert _wait_state(loader, "lambda-core", "Win", "ready") == "ready"
     assert loader.records() == [{"id4": "a"}]
     assert loader.reload("lambda-core", "Win") is True
+    assert _wait_state(loader, "lambda-core", "Win", "ready") == "ready"
     assert loader.records() == [{"id4": "b"}]
     assert loader.reload("nope", "X") is False
 
