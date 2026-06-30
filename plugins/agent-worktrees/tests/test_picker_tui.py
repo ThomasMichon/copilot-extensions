@@ -813,3 +813,27 @@ def test_real_ops_default_on_and_opt_out(monkeypatch):
     assert _real_ops_for_env(None) is True
     assert _real_ops_for_env("0") is False
     assert _real_ops_for_env("1") is True
+
+
+def test_live_loader_local_is_synchronous_remote_streams(monkeypatch):
+    """start() resolves the local source in-process before returning, so the
+    current machine is interactable immediately while remotes stream in (#1432)."""
+    from agent_worktrees.picker_tui import data_ssh
+
+    sentinel = [{"id4": "abcd", "machine": "lambda-core", "env": "Win"}]
+    monkeypatch.setattr(data_ssh.data_local, "load",
+                        lambda m=None, e=None: sentinel)
+
+    local = data_ssh.Source("lambda-core", "Win", None, local=True)
+    remote = data_ssh.Source("borealis", "Win", _sleeper_argv(30),
+                             local=False, alias="borealis", shell="pwsh")
+    loader = data_ssh.LiveLoader(sources=[local, remote])
+    loader.start()
+    try:
+        # Local resolved synchronously the moment start() returned.
+        assert loader.state("lambda-core", "Win") == "ready"
+        assert loader.records() == sentinel
+        # The remote is still loading (thread mid-sleep) -- never depended on.
+        assert loader.state("borealis", "Win") == "loading"
+    finally:
+        loader.cancel()

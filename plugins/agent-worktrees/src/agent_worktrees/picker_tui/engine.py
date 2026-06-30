@@ -384,9 +384,14 @@ class PickerScreen(Widget):
         self.maint_sel = set()        # drop any stale Maintenance selection
         if self.live:
             # Real background SSH loads: one thread per machine, spinner -> ✓/✗.
+            # The local source resolves synchronously inside the loader's start()
+            # (#1432), so seed self.data from it immediately -- the current
+            # machine's rows are interactable on the very first paint while the
+            # remote machines stream in.
             self.data = []
             self.loader = self.src.make_loader()
             self.loader.start()
+            self.data = self.loader.records()
         else:
             self.data = self.src.load()
             # Simulate background SSH status loads: local is instant, remotes
