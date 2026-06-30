@@ -126,6 +126,7 @@ LEGACY_SCRIPTS=(
     finalize-session.sh
     worktree-status.ps1
     worktree-cleanup.ps1
+    status-writer.sh
 )
 
 # Legacy alias binstubs that earlier versions deployed into BIN_DIR and/or
@@ -975,7 +976,7 @@ deploy_terminal_scripts() {
     # opt-in server-global tuning script the user (or a restore flow) may run.
     local src_dir="$PLUGIN_DIR/terminal"
     local script src tmp
-    for script in session-options.sh apply-mux-keybinds.sh status-writer.sh; do
+    for script in session-options.sh apply-mux-keybinds.sh; do
         src="$src_dir/$script"
         if [[ ! -f "$src" ]]; then
             echo "  ⚠ terminal script not found at $src" >&2
@@ -1216,7 +1217,7 @@ case "$ACTION" in
 
         # Remove wrappers + terminal-integration scripts
         for wrapper in launch-session.cmd launch-session.sh \
-                       session-options.sh apply-mux-keybinds.sh status-writer.sh; do
+                       session-options.sh apply-mux-keybinds.sh; do
             rm -f "$BIN_DIR/$wrapper"
         done
         remove_legacy_scripts

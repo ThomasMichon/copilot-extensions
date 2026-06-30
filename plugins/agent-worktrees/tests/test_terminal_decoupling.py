@@ -84,45 +84,36 @@ def test_installer_does_not_own_global_tmux_conf():
     assert "apply-mux-keybinds.sh" in text
 
 
-# --- Status bar must read a cache file, not spawn the CLI on the render path ---
-
-_STATUS_WRITER = _TERMINAL / "status-writer.sh"
+# --- Status bar reads precomputed @vars, not the CLI on the render path ---
 
 
-def test_status_writer_ships():
-    assert _STATUS_WRITER.is_file(), "background status writer must ship"
-
-
-def test_status_bar_reads_cache_file_not_cli():
-    """The worktree-id path must read a cache file with a bare `cat`, never
-    invoke the heavy Python CLI on the mux render path (the perf regression)."""
+def test_status_bar_reads_at_vars_not_cli():
+    """The bar must reference precomputed #{@aw_ctx}/#{@aw_seg} session options,
+    never invoke the heavy Python CLI (or a cache-file cat) on the render path."""
     text = _SESSION_OPTS.read_text()
-    # Reader is a bare cat of the per-worktree cache file.
-    assert "#(cat " in text, "status bar must read the cache file via cat"
-    assert "run/status" in text, "cache lives under the run/status dir"
-    # The id-bearing branch must NOT shell out to agent-worktrees. Only the
-    # id-less base-session fallback may, so scope the check to the wid branch.
-    wid_branch = text.split('if [ -n "$wid" ]; then', 1)[1].split("else", 1)[0]
-    assert "#(agent-worktrees" not in wid_branch, (
+    assert "#{@aw_ctx}" in text, "left segment must read the @aw_ctx var"
+    assert "#{@aw_seg}" in text, "right segment must read the @aw_seg var"
+    assert "#(agent-worktrees" not in text, (
         "worktree sessions must not invoke the CLI on the render path"
     )
+    assert "#(cat " not in text, "the cache-file reader is retired"
 
 
-def test_writer_is_single_instance_and_self_terminating():
-    text = _STATUS_WRITER.read_text()
-    assert "flock -n" in text, "writer must guard against duplicate instances"
-    assert "tmux has-session" in text, "writer must self-terminate with the session"
-    assert "--path" in text, "writer must target the worktree by path"
-
-
-def test_launcher_spawns_status_writer_with_worktree_id():
+def test_launcher_spawns_common_status_updater():
     text = _LAUNCHER.read_text()
-    assert "_aw_spawn_status_writer" in text, "launcher must spawn the writer"
-    assert "status-writer.sh" in text
-    # The worktree id must be threaded into the per-session apply.
+    assert "_aw_spawn_status_updater" in text, "launcher must spawn the updater"
+    assert "status-updater --session" in text
+    assert "--mux tmux" in text, "the tmux launcher must target the tmux watcher"
+    # The per-session apply is still threaded with the worktree id (call-site
+    # compatibility) even though the watcher classifies by path.
     assert 'aw_apply_tmux_session_options "$1" "${WORKTREE_ID:-}"' in text
 
 
-def test_installer_deploys_status_writer():
-    text = _INSTALL.read_text()
-    assert "status-writer.sh" in text, "installer must deploy the writer"
+def test_status_writer_retired():
+    assert not (_TERMINAL / "status-writer.sh").exists(), (
+        "the bash status-writer is superseded by the common status-updater"
+    )
+    install = _INSTALL.read_text()
+    # Dropped from the deploy + uninstall loops (only legacy cleanup may name it).
+    assert "for script in session-options.sh apply-mux-keybinds.sh; do" in install
+    assert "session-options.sh apply-mux-keybinds.sh status-writer.sh" not in install

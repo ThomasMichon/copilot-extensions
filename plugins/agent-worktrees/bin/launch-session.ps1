@@ -496,8 +496,8 @@ function Set-PsmuxLastSession {
 # identity (@aw_ctx) once and refreshes the git-disposition (@aw_seg) off
 # psmux's paint path, so the status bar never spawns a process per render.
 # Best-effort: a failure here just leaves a static/blank bar, never blocks
-# the launch.  Spawned only at session *creation* (one per session); joins
-# reuse the still-running updater.
+# the launch.  Safe to call on every create/join: the updater's @aw_updater
+# token elects a single live instance, so older ones self-retire.
 function Start-StatusUpdater {
     param([string]$Session, [string]$WorkDir)
     if (-not $Session) { return }
@@ -528,6 +528,9 @@ if (-not $noMux -and $psmuxCmd) {
         Write-Host "Joining existing session: $sessName"
         Reset-SshConptyViewport
         Set-PsmuxLastSession $sessName
+        # (Re)assert the updater on join: if the prior one died, this revives
+        # the bar; if it's alive, the token guard makes the new one retire.
+        Start-StatusUpdater $sessName $plan.work_dir
         & psmux attach-session -t $sessName
         if ($LASTEXITCODE -eq 0) {
             exit 0

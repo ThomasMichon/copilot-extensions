@@ -3302,8 +3302,10 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     native ``set-option`` / ``has-session`` mux verbs.
 
     Identity is rendered once into ``@aw_ctx``; disposition is refreshed into
-    ``@aw_seg`` every ``--interval`` seconds until the session ends.  Intended
-    to be launched detached, once, by the session launcher at create time.
+    ``@aw_seg`` every ``--interval`` seconds until the session ends.  Launched
+    detached by the session launcher; safe to (re)spawn on every attach/join --
+    an ``@aw_updater`` token elects a single live updater per session and older
+    ones retire on their next tick.
     """
     import shutil
     import subprocess
@@ -3340,6 +3342,21 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     if not _has_session():
         return 0
 
+    # Single-instance guard.  The launcher may (re)spawn an updater on every
+    # attach/join, so each updater claims @aw_updater with its own token; a
+    # newer updater overwrites it and the older one retires on its next tick.
+    # Cheaper and more portable than pid-liveness checks, and it doubles as the
+    # tmux/psmux equivalent of the old flock guard.
+    token = str(os.getpid())
+
+    def _owns() -> bool:
+        r = _mux("display-message", "-t", sess, "-p", "#{@aw_updater}")
+        if r is None or r.returncode != 0:
+            return True  # can't read the token -> assume ownership, keep serving
+        return r.stdout.strip() == token
+
+    _set("@aw_updater", token)
+
     # Identity (machine | env | repo:id4) is static for the session's life:
     # render once, push to @aw_ctx, never poll it again.
     try:
@@ -3348,9 +3365,10 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
         pass
 
     # Disposition (DIRTY/FINAL/WIP/CONVO/...) changes as work happens: refresh
-    # @aw_seg on the interval.  The bar itself does zero process work between
-    # updates -- psmux only re-runs the strftime %H:%M clock.
-    while _has_session():
+    # @aw_seg on the interval until the session ends or a newer updater takes
+    # over.  The bar itself does zero process work between updates -- the mux
+    # only re-runs the strftime %H:%M clock.
+    while _has_session() and _owns():
         try:
             seg = _render_status_segment(
                 path, fetch=False, plain=False, no_title=False,
@@ -7657,7 +7675,7 @@ def _git_toplevel(path: Path) -> Path | None:
 # Commands that work without a project context (no load_config/project_name).
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "install", "register", "hook",
-    "picker", "reap-sessions",
+    "picker", "reap-sessions", "status-updater",
 }
 
 

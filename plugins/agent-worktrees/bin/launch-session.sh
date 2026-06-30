@@ -420,17 +420,19 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
                 aw_apply_tmux_session_options "$1" "${WORKTREE_ID:-}" || true
             fi
         }
-        # Spawn (at most one) detached background writer that keeps the status
-        # cache files fresh OFF the render path, so the status bar can read them
-        # with a cheap `#(cat ...)` instead of spawning the Python CLI per frame.
-        _aw_spawn_status_writer() {
+        # Spawn the common, in-process Python status-updater (detached). It
+        # keeps this session's @aw_ctx/@aw_seg vars fresh OFF the render path,
+        # so the bar reads #{@aw_ctx}/#{@aw_seg} with zero spawn per repaint.
+        # Safe to call on every create/join/handoff: an @aw_updater token
+        # elects a single live updater and older ones self-retire. The updater
+        # self-terminates within one interval of the session ending.
+        _aw_spawn_status_updater() {
             local sess="$1"
-            [[ -n "${WORKTREE_ID:-}" ]] || return 0
-            local writer="$HOME/.agent-worktrees/bin/status-writer.sh"
-            [[ -r "$writer" ]] || return 0
-            AW_BIN="$(command -v agent-worktrees 2>/dev/null || true)" \
-                setsid bash "$writer" "$sess" "$WORKTREE_ID" "${WORK_DIR:-$PWD}" \
-                >/dev/null 2>&1 < /dev/null &
+            local aw; aw="$(command -v agent-worktrees 2>/dev/null || true)"
+            [[ -x "$aw" ]] || aw="$HOME/.local/bin/agent-worktrees"
+            [[ -x "$aw" ]] || return 0
+            setsid "$aw" status-updater --session "$sess" --mux tmux \
+                --path "${WORK_DIR:-$PWD}" >/dev/null 2>&1 < /dev/null &
             disown 2>/dev/null || true
         }
 
@@ -442,7 +444,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             # Refresh per-session options on (re)connect so a long-lived
             # session picks up the current bar without us owning the global.
             _aw_apply_session_opts "$TMUX_SESS"
-            _aw_spawn_status_writer "$TMUX_SESS"
+            _aw_spawn_status_updater "$TMUX_SESS"
             if [[ -n "${TMUX:-}" ]]; then
                 exec tmux switch-client -t "=$TMUX_SESS"
             else
@@ -505,7 +507,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
 
             activity_log mux_attached "$WORKTREE_ID" mux=create
             _aw_apply_session_opts "$TMUX_SESS"
-            _aw_spawn_status_writer "$TMUX_SESS"
+            _aw_spawn_status_updater "$TMUX_SESS"
             if [[ -n "${TMUX:-}" ]]; then
                 tmux switch-client -t "=$TMUX_SESS"
             else
@@ -540,7 +542,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
                             tmux new-session -d -s "$TMUX_SESS" -c "$WORK_DIR" "${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}" "${HANDOFF_PANE_CMD[@]}"
                             if [[ $? -eq 0 ]]; then
                                 _aw_apply_session_opts "$TMUX_SESS"
-                                _aw_spawn_status_writer "$TMUX_SESS"
+                                _aw_spawn_status_updater "$TMUX_SESS"
                                 if [[ -n "${TMUX:-}" ]]; then
                                     tmux switch-client -t "=$TMUX_SESS"
                                 else
