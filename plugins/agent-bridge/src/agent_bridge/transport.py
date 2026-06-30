@@ -233,34 +233,46 @@ async def _resolve_worktree(
     if target.project:
         env["WORKTREE_PROJECT"] = target.project
 
-    resolve_args = [python, "-m", "agent_worktrees", "resolve", "--json", "--no-resume"]
+    base_args = [python, "-m", "agent_worktrees", "resolve", "--json", "--no-resume"]
+    creating_new = not target.worktree_id
     if target.worktree_id:
-        resolve_args.extend(["--worktree-id", target.worktree_id])
+        base_args.extend(["--worktree-id", target.worktree_id])
     else:
-        # A bridge-spawned new worktree is agent-owned: mark it kind=bridge so
-        # the Picker hides it by default and routine cleanup leaves it alone.
-        resolve_args.extend(["--new", "--bridge"])
+        base_args.append("--new")
 
-    log.info("Resolving worktree: %s", " ".join(resolve_args))
+    async def _run(extra: list[str]):
+        argv = base_args + extra
+        log.info("Resolving worktree: %s", " ".join(argv))
+        p = await asyncio.create_subprocess_exec(
+            *argv,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+            creationflags=_creation_flags(),
+        )
+        out, err = await p.communicate()
+        return p.returncode, out, err
 
-    proc = await asyncio.create_subprocess_exec(
-        *resolve_args,
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-        creationflags=_creation_flags(),
-    )
-    stdout, stderr = await proc.communicate()
+    # A bridge-spawned new worktree is agent-owned -> mark it kind=bridge so the
+    # Picker hides it by default and routine cleanup leaves it alone. A stale
+    # local agent-worktrees runtime won't recognize --bridge (argparse exits
+    # non-zero); detect that and retry without it so the spawn still resolves
+    # (the worktree just isn't bridge-marked). Mirrors the remote-resolve guard.
+    returncode, stdout, stderr = await _run(["--bridge"] if creating_new else [])
+    if (creating_new and returncode != 0
+            and "--bridge" in stderr.decode(errors="replace")):
+        log.info("local agent-worktrees lacks --bridge; retrying unmarked")
+        returncode, stdout, stderr = await _run([])
 
     if stderr:
         for line in stderr.decode(errors="replace").strip().splitlines():
             log.debug("resolve stderr: %s", line)
 
-    if proc.returncode != 0:
+    if returncode != 0:
         err_text = stderr.decode(errors="replace").strip()
         raise RuntimeError(
-            f"Worktree resolve failed (exit {proc.returncode}): {err_text}"
+            f"Worktree resolve failed (exit {returncode}): {err_text}"
         )
 
     try:
