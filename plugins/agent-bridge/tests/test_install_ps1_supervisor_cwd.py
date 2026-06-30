@@ -53,3 +53,22 @@ def test_scheduled_task_action_sets_working_directory():
     assert "-WorkingDirectory $InstallDir" in text, (
         "New-ScheduledTaskAction must set -WorkingDirectory $InstallDir (#1376)"
     )
+
+
+def test_invoke_start_pins_working_directory():
+    """Invoke-Start's non-headless path (the at-logon mode) must launch BOTH the
+    inner python AND its hosting conhost with a working directory off the plugin
+    dir. -NoNewWindow keeps that conhost alive hosting the long-lived daemon, so
+    without an explicit working dir it holds the installed-plugins payload
+    folder open and a later ``copilot plugin update`` empties it (#1376).
+    """
+    text = _text()
+    # The inner python Start-Process carries an explicit -WorkingDirectory.
+    assert "-ArgumentList '-m','agent_bridge','start' -WorkingDirectory '" in text, (
+        "Invoke-Start inner python Start-Process must pin -WorkingDirectory (#1376)"
+    )
+    # Both the scheduled-task action AND the Invoke-Start conhost pin
+    # -WorkingDirectory $InstallDir (so this token appears at least twice).
+    assert text.count("-WorkingDirectory $InstallDir") >= 2, (
+        "Invoke-Start conhost must also pin -WorkingDirectory $InstallDir (#1376)"
+    )
