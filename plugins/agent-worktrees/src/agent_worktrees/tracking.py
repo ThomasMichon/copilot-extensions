@@ -21,10 +21,17 @@ WorktreeStatus = Literal["active", "complete", "pushed", "finalized", "orphaned"
 
 # A worktree's owner class. "session" = an interactive agent session (the
 # default, shown in the launch Picker). "system" = a daemon-owned worktree
-# created per work-session by a background service; hidden from the Picker and
-# exempt from routine cleanup. See the agent-worktrees docs and the
-# aperture-labs system-worktrees effort.
-WorktreeKind = Literal["session", "system"]
+# created per work-session by a background service. "bridge" = an
+# agent-bridge-owned worktree backing an ACP/remote agent session. "system" and
+# "bridge" are both **managed** kinds: hidden from the launch Picker by default
+# and exempt from routine cleanup (each is torn down by its owner). They are
+# tracked as distinct kinds so the Picker can mark and manage them separately.
+# See the agent-worktrees docs and the aperture-labs system-worktrees effort.
+WorktreeKind = Literal["session", "system", "bridge"]
+
+# Agent/daemon-owned kinds: hidden from the Picker + exempt from routine
+# cleanup/reap (their owning service or bridge manages their lifecycle).
+MANAGED_KINDS: tuple[WorktreeKind, ...] = ("system", "bridge")
 
 
 @dataclass
@@ -281,9 +288,10 @@ def load_record(path: Path) -> WorktreeRecord:
     elif isinstance(data.get("pr"), dict):
         prs_list.append(_parse_pr_mapping(data["pr"], default_repo))
 
-    # Owner class -- absent (legacy records) defaults to "session".
+    # Owner class -- absent (legacy records) defaults to "session". Unknown
+    # values degrade to "session" so a stray kind can never hide a real worktree.
     kind_raw = data.get("kind")
-    kind_val: WorktreeKind = "system" if kind_raw == "system" else "session"
+    kind_val: WorktreeKind = kind_raw if kind_raw in ("system", "bridge") else "session"
     owner_raw = data.get("owner")
     if owner_raw in (None, "", "null"):
         owner_raw = None
@@ -336,10 +344,10 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         f"handoff_prompt: {record.handoff_prompt or 'null'}\n"
     )
 
-    # Owner class -- only emit for system worktrees so existing session-record
-    # YAMLs stay byte-identical (no churn for the common case).
-    if record.kind == "system":
-        content += "kind: system\n"
+    # Owner class -- only emit for managed (system/bridge) worktrees so existing
+    # session-record YAMLs stay byte-identical (no churn for the common case).
+    if record.kind in MANAGED_KINDS:
+        content += f"kind: {record.kind}\n"
         if record.owner:
             content += f"owner: {record.owner}\n"
 

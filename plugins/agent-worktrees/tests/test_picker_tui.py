@@ -955,3 +955,48 @@ def test_toggle_hidden_button_absent_when_nothing_hidden():
             assert "TH" not in scr.button_set()
 
     asyncio.run(run())
+
+
+def test_bridge_and_system_hidden_and_marked_distinctly():
+    """Bridge and system worktrees are both hidden by default and marked
+    distinctly in the title ([bridge] vs [system]) (#1424 tracking)."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("lambda-core", "Win")
+    raws = [
+        {"id": "lambda-core-win-aaaa", "title": "Real", "status": "active",
+         "started_at": "2026-06-27T17:00:00", "turn_count": 3, "state": "wip"},
+        {"id": "lambda-core-win-ssss", "title": "daemon", "status": "active",
+         "started_at": "2026-06-27T17:00:00", "turn_count": 0, "state": "wip",
+         "kind": "system", "owner": "permanent-record"},
+        {"id": "lambda-core-win-bbbb", "title": "acp", "status": "active",
+         "started_at": "2026-06-27T17:00:00", "turn_count": 0, "state": "wip",
+         "kind": "bridge"},
+    ]
+    recs = {w["id"][-4:]: derive.norm(w, *local) for w in raws}
+    assert recs["aaaa"]["hidden"] is False
+    assert recs["ssss"]["hidden"] is True and recs["ssss"]["kind"] == "system"
+    assert recs["bbbb"]["hidden"] is True and recs["bbbb"]["kind"] == "bridge"
+    assert recs["ssss"]["title"].startswith("[system] ")
+    assert recs["bbbb"]["title"].startswith("[bridge] ")
+
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "lambda-core · win"
+    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)):
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            ids = {r["id4"] for r in scr.list_records()}
+            assert "aaaa" in ids and "ssss" not in ids and "bbbb" not in ids
+            assert scr._hidden_count() == 2          # bridge + system
+            scr.show_hidden = True
+            ids = {r["id4"] for r in scr.list_records()}
+            assert "ssss" in ids and "bbbb" in ids
+
+    asyncio.run(run())
