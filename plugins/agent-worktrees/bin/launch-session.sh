@@ -326,6 +326,16 @@ if [[ $RC -ne 0 ]]; then
     exit $RC
 fi
 
+# Non-interactive resolves (`resolve --json --worktree-id` / `--json --new`,
+# used by agent-bridge ACP launches) emit the bridge's nested plan shape:
+#   {"worktree": {...}, "launch": {"action": "exec", ...}}
+# The launcher below consumes the *flat* plan ({"action": "exec", ...}); the
+# nested `launch` object carries the identical keys, so unwrap it when present.
+# A flat plan (no top-level `launch`) passes through unchanged.
+JSON=$(printf '%s' "$JSON" | "$PYTHON" -c "import sys, json
+d = json.load(sys.stdin)
+print(json.dumps(d['launch'] if isinstance(d, dict) and 'launch' in d else d))")
+
 ACTION=$(echo "$JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','none'))")
 setup_log INFO "Plan resolved: action=$ACTION"
 

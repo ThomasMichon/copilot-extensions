@@ -498,17 +498,23 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
     breadcrumb = _breadcrumb_prelude(session_id)
 
     if target.project:
+        # ``--json`` marks the launch as non-interactive: it forces the
+        # binstub's ``resolve`` step to skip the TTY picker and resolve the
+        # worktree deterministically (by ``--worktree-id`` or ``--new``).
+        # Without it, ``resolve`` treats a no-TTY SSH spawn as "no worktree
+        # specified" and aborts before Copilot launches -- the ACP client then
+        # sees the closed stdio as a ``LAUNCH_ACP`` "Connection closed" failure.
         if target.worktree_id:
             # Session roll: resume existing worktree, skip Copilot session
             # resume (bridge manages ACP sessions independently)
             binstub_args = [
-                target.project, "--worktree-id", target.worktree_id,
+                target.project, "--json", "--worktree-id", target.worktree_id,
                 "--no-mux", "--no-update", "--no-resume",
                 "--", "--acp", "--stdio",
             ]
         else:
             binstub_args = [
-                target.project, "--new", "--no-mux", "--no-update",
+                target.project, "--json", "--new", "--no-mux", "--no-update",
                 "--", "--acp", "--stdio",
             ]
         if target.copilot_args:

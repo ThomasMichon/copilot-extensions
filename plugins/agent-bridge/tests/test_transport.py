@@ -76,6 +76,9 @@ class TestBuildRemoteCmd:
         assert "--no-mux" in cmd
         assert "--acp" in cmd
         assert "--stdio" in cmd
+        # --json forces the binstub's resolve into non-interactive mode so a
+        # no-TTY SSH spawn doesn't abort with "no worktree specified".
+        assert "--json" in cmd
         assert "--allow-all" in cmd
         # The ACP passthrough separator must be *quoted* so PowerShell (the
         # default OpenSSH shell on native Windows targets) does not strip the
@@ -145,6 +148,9 @@ class TestBuildRemoteCmd:
         assert "--new" not in cmd
         assert "--acp" in cmd
         assert "--stdio" in cmd
+        # --json forces non-interactive resolve for the resume/session-roll
+        # path too (otherwise the no-TTY SSH spawn aborts before Copilot).
+        assert "--json" in cmd
 
     def test_project_pwsh_skips_bash_breadcrumb(self):
         """PowerShell targets must not get the bash breadcrumb -- it
