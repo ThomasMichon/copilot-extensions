@@ -495,8 +495,15 @@ async def _provision_dotfiles(manager, name: str, config) -> None:
         command = build_dotfiles_command(
             config.dotfiles_repo, config.credentials.relay_port,
         )
+        # Run under a LOGIN shell: the dotfiles clone authenticates to GitHub via
+        # the CodeSpace's own credential helper (gitcredential_github.sh), which
+        # needs the platform env (GITHUB_TOKEN, profile.d) that only a login
+        # shell loads. A non-login `exec_command` would clone unauthenticated and
+        # fail silently. Mirrors how `_verify_remote_auth` and the remote_cmd
+        # path wrap their commands.
+        login_command = f"bash -l -c {shlex.quote(command)}"
         # Clone + install.sh can run long on a first connect; be generous.
-        result = await manager.exec_command(name, command, timeout=900.0)
+        result = await manager.exec_command(name, login_command, timeout=900.0)
         if result.exit_code == 0:
             log.debug("Dotfiles provisioned on %s", name)
         else:
