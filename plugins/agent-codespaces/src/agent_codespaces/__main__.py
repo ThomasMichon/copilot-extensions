@@ -388,6 +388,13 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             await _provision_relay_helpers(manager, args.name)
             tracker.reached(ConnectStage.TARGET_AUTH_ENV)
 
+        # Ensure the account dotfiles repo is cloned + current (universal
+        # bootstrap, gated on `dotfiles_repo`). Heals a CodeSpace whose
+        # post-start dotfiles clone hasn't run (e.g. first agent-bridge connect)
+        # and syncs it forward on reconnect. Needs the relay up for git auth.
+        if not args.no_relay:
+            await _provision_dotfiles(manager, args.name, config)
+
         # Run repo-declared provision hooks (by-convention extras from the
         # adopted repo's codespaces.yaml). Best-effort, idempotent.
         await _provision_repo_hooks(
@@ -464,6 +471,40 @@ async def _provision_relay_helpers(manager, name: str) -> None:
             )
     except Exception as exc:
         log.warning("Relay helper provisioning on %s failed: %s", name, exc)
+
+
+async def _provision_dotfiles(manager, name: str, config) -> None:
+    """Ensure the configured dotfiles repo is present + current on a CodeSpace.
+
+    Universal bootstrap for every CodeSpace when ``defaults.dotfiles_repo`` is
+    set: clone-if-absent (+ run ``install.sh``) and sync-forward on the default
+    branch (re-installing only when ``HEAD`` moved); a checkout parked on a
+    feature branch / left dirty is never touched. This used to live in a per-repo
+    ``on_create`` hook; making it built-in means a CodeSpace created outside
+    agent-codespaces (e.g. via the GitHub UI / VS Code, where the post-start
+    dotfiles clone may not have completed) is healed on the first connect.
+    Best-effort and idempotent: logs a warning on failure but never raises.
+    """
+    if not config.dotfiles_repo:
+        return
+
+    from .provision import build_dotfiles_command
+
+    try:
+        command = build_dotfiles_command(
+            config.dotfiles_repo, config.credentials.relay_port,
+        )
+        # Clone + install.sh can run long on a first connect; be generous.
+        result = await manager.exec_command(name, command, timeout=900.0)
+        if result.exit_code == 0:
+            log.debug("Dotfiles provisioned on %s", name)
+        else:
+            log.warning(
+                "Dotfiles provisioning on %s exited %s: %s",
+                name, result.exit_code, result.stderr.strip(),
+            )
+    except Exception as exc:
+        log.warning("Dotfiles provisioning on %s failed: %s", name, exc)
 
 
 async def _verify_remote_auth(manager, name: str) -> None:
@@ -1205,7 +1246,8 @@ def _cmd_create(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # Provision over SSH: relay helpers + repo hooks including on_create.
+    # Provision over SSH: relay helpers + dotfiles bootstrap + repo hooks
+    # (including on_create extras).
     relay_port = config.credentials.relay_port
     port_forwards = [f"-R {relay_port}:127.0.0.1:{relay_port}"]
     source = CodespaceSource(info.name)
@@ -1214,6 +1256,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
     async def _run() -> int:
         await manager.ensure_connected(info.name, source, port_forwards)
         await _provision_relay_helpers(manager, info.name)
+        await _provision_dotfiles(manager, info.name, config)
         await _provision_repo_hooks(
             manager, info.name, config, args.repo, include_on_create=True,
         )

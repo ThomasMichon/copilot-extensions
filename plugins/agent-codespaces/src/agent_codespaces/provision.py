@@ -21,6 +21,62 @@ from .config import ProvisionConfig, ProvisionFile
 
 log = logging.getLogger("agent-codespaces")
 
+# Standard location GitHub Codespaces clones the account dotfiles repo into.
+DOTFILES_DIR = "/workspaces/.codespaces/.persistedshare/dotfiles"
+
+
+def build_dotfiles_command(dotfiles_repo: str, relay_port: int) -> str:
+    """Build an idempotent bash command that ensures the dotfiles repo is
+    present and current on a CodeSpace.
+
+    This is the **universal** dotfiles bootstrap, run for every CodeSpace when
+    ``defaults.dotfiles_repo`` is set -- it is built-in plugin behavior, not a
+    per-repo ``on_create`` hook (those are reserved for genuine extras, e.g.
+    cloning an *additional* repo). Behavior:
+
+    - **Absent** (``$df/.git`` missing): clone the repo and run its ``install.sh``.
+    - **Present, on the default branch, clean**: ``fetch`` + ``--ff-only`` and
+      re-run ``install.sh`` *only* when the fast-forward moved ``HEAD`` (fast
+      no-op otherwise).
+    - **On a feature branch or dirty**: **never touched** -- the command prints a
+      directive instead, so a human/agent can sync the parked work deliberately.
+
+    Auth for the clone/fetch rides the credential relay, matching the env the
+    create-time hook used (``LC_GIT_CREDENTIAL_RELAY`` + non-interactive git).
+    ``install.sh`` is the dotfiles repo's own idempotent installer.
+    """
+    url = shlex.quote(f"https://github.com/{dotfiles_repo}")
+    df = shlex.quote(DOTFILES_DIR)
+    port = int(relay_port)
+    return f"""\
+export LC_GIT_CREDENTIAL_RELAY={port} GIT_TERMINAL_PROMPT=0
+df={df}
+if [ ! -d "$df/.git" ]; then
+  echo "[dotfiles] cloning {dotfiles_repo}"
+  if git clone --depth 1 {url} "$df"; then
+    bash "$df/install.sh" || echo "[dotfiles] install FAILED"
+  else
+    echo "[dotfiles] clone FAILED"
+  fi
+else
+  br=$(git -C "$df" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')
+  def=$(git -C "$df" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
+  [ -n "$def" ] || def=main
+  if [ "$br" != "$def" ] || [ -n "$(git -C "$df" status --porcelain 2>/dev/null)" ]; then
+    echo "[dotfiles] $df is on '$br' (default '$def') or has local changes -- NOT syncing. Sync it yourself if you parked work here."
+  else
+    before=$(git -C "$df" rev-parse HEAD 2>/dev/null)
+    git -C "$df" fetch --quiet origin "$def" 2>/dev/null && git -C "$df" merge --ff-only --quiet "origin/$def" 2>/dev/null
+    after=$(git -C "$df" rev-parse HEAD 2>/dev/null)
+    if [ "$before" != "$after" ]; then
+      echo "[dotfiles] synced to $after -- reinstalling"
+      bash "$df/install.sh" || echo "[dotfiles] install FAILED"
+    else
+      echo "[dotfiles] up to date"
+    fi
+  fi
+fi"""
+
 
 def _resolve_src(pf: ProvisionFile) -> Path | None:
     """Resolve a provision file's ``src`` relative to its repo dir."""

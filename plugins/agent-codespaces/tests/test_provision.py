@@ -12,7 +12,10 @@ from agent_codespaces.config import (
     _parse_provision,
     _parse_repo_config,
 )
-from agent_codespaces.provision import build_provision_command
+from agent_codespaces.provision import (
+    build_dotfiles_command,
+    build_provision_command,
+)
 
 
 class TestParseProvision:
@@ -116,3 +119,33 @@ class TestBuildProvisionCommand:
         assert "bash install.sh" in cmd
         # on_create runs after on_connect
         assert cmd.index("echo connect") < cmd.index("bash install.sh")
+
+
+class TestBuildDotfilesCommand:
+    def test_clones_when_absent_and_runs_install(self) -> None:
+        cmd = build_dotfiles_command("acme/dotfiles", 9857)
+        assert "https://github.com/acme/dotfiles" in cmd
+        assert "/workspaces/.codespaces/.persistedshare/dotfiles" in cmd
+        assert "git clone --depth 1" in cmd
+        assert 'bash "$df/install.sh"' in cmd
+
+    def test_sets_relay_env_and_noninteractive_git(self) -> None:
+        cmd = build_dotfiles_command("acme/dotfiles", 1234)
+        assert "LC_GIT_CREDENTIAL_RELAY=1234" in cmd
+        assert "GIT_TERMINAL_PROMPT=0" in cmd
+
+    def test_syncs_forward_only_on_clean_default_branch(self) -> None:
+        cmd = build_dotfiles_command("acme/dotfiles", 9857)
+        # fast-forward only, never a non-ff merge or reset
+        assert "merge --ff-only" in cmd
+        # feature-branch / dirty guard prints a directive instead of touching it
+        assert "NOT syncing" in cmd
+        assert "status --porcelain" in cmd
+        # re-install only when HEAD moved
+        assert 'before=' in cmd and 'after=' in cmd
+
+    def test_repo_is_shell_quoted(self) -> None:
+        # a repo value with shell metachars is single-quoted into the URL so it
+        # can't break out of the git clone argument
+        cmd = build_dotfiles_command("acme/dot;rm -rf", 9857)
+        assert "'https://github.com/acme/dot;rm -rf'" in cmd
