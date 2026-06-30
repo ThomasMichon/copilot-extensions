@@ -271,6 +271,7 @@ class PickerScreen(Widget):
         self.maint_menu = None        # Maintenance actions menu modal (#1345)
         self.maint_menu_idx = 0
         self.prof_confirm = None      # Profiles Apply confirm dialog (add/remove diff)
+        self.quit_confirm = None      # Esc/q on a main view asks before quitting (#1429)
         self.progress = None          # cleanup/sync progress sub-dialog
         self.executor = None          # real maintenance executor
         # Real cleanup/sync ops are the DEFAULT: the Maintenance actions
@@ -1350,13 +1351,16 @@ class PickerScreen(Widget):
         lines = list(top) + [header_border, stats] + body_lines + [bottom_border, foot]
         # body offset = title+htabs+header_border+stats = len(top)+2
         modal = (self.submenu or self.maint_menu or self.cleanup
-                 or self.optmenu or self.prof_confirm or self.progress)
+                 or self.optmenu or self.prof_confirm or self.progress
+                 or self.quit_confirm)
         if modal:
             # Gray out ALL background content behind the dialog.
             lines = [Text((ln if isinstance(ln, Text) else Text(str(ln))).plain,
                           style="grey35") for ln in lines]
             off, bh = len(top) + 2, body_h
-            if self.submenu:
+            if self.quit_confirm:
+                self._overlay_quit_confirm(lines, W, off, bh)
+            elif self.submenu:
                 self._overlay_submenu(lines, W, off, bh)
             elif self.maint_menu:
                 self._overlay_maint_menu(lines, W, off, bh)
@@ -1685,6 +1689,31 @@ class PickerScreen(Widget):
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)
 
+    def _overlay_quit_confirm(self, lines, W, top_off, body_h):
+        """Confirm dialog for Esc/q on a main view -- ask before quitting (#1429)."""
+        qc = self.quit_confirm
+        pw = min(W - 8, 48)
+        header = "─ Quit the Picker? "
+        panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
+                      style=C_BAND)]
+        panel.append(self._prow("", pw))
+        panel.append(self._prow(" Leave the worktree picker?", pw,
+                                style="bold white"))
+        panel.append(self._prow("", pw))
+        brow = Text("│", style=C_DIM)
+        inner = Text("   ")
+        inner.append(" Quit ", style=C_BTN_SEL if qc["idx"] == 0 else C_BTN)
+        inner.append("   ")
+        inner.append(" Stay ", style=C_BTN_SEL if qc["idx"] == 1 else C_BTN)
+        inner.append(" " * max(0, pw - 2 - inner.cell_len))
+        brow.append_text(inner)
+        brow.append("│", style=C_DIM)
+        panel.append(brow)
+        panel.append(self._prow(" y quit · n/Esc stay · ←/→ choose", pw,
+                                style="grey54"))
+        panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
+        self._blit_panel(lines, W, panel, top_off, body_h)
+
     def _overlay_prof_confirm(self, lines, W, top_off, body_h):
         """Confirm dialog for Profiles Apply: the exact terminal profiles each
         changed host column will gain (+) or lose (-) before anything runs."""
@@ -1875,6 +1904,8 @@ class PickerScreen(Widget):
         # Remember the grid row before any navigation, so Tab out/in restores it.
         if self.sel and self.sel[0] == "PR":
             self.last_pr = self.sel[1]
+        if self.quit_confirm:
+            return self._key_quit_confirm(key)
         if self.progress:
             return self._key_progress(key)
         if self.prof_confirm:
@@ -1960,7 +1991,31 @@ class PickerScreen(Widget):
             self.setup()
             self.sel = self.default_sel()
         elif key in ("q", "escape"):
+            self._open_quit_confirm()
+
+    def _open_quit_confirm(self):
+        """Esc/q on a main pivot view asks before quitting (#1429).
+
+        Only reached when no nested dialog is open (those consume Esc as
+        back/cancel first), so this guards exactly the top-level views against
+        an accidental Escape. Defaults focus to *Stay* so a reflexive Enter
+        never quits.
+        """
+        self.quit_confirm = {"idx": 1}   # 0 = Quit, 1 = Stay (safe default)
+
+    def _key_quit_confirm(self, key):
+        qc = self.quit_confirm
+        if key in ("left", "right", "tab"):
+            qc["idx"] ^= 1
+        elif key == "y":
             self.app.exit()
+        elif key in ("n", "escape", "q"):
+            self.quit_confirm = None
+        elif key in ("enter", "space"):
+            if qc["idx"] == 0:
+                self.app.exit()
+            else:
+                self.quit_confirm = None
 
     def _rotate_machine(self, d):
         self.machine_idx = (self.machine_idx + d) % len(self.machines)
