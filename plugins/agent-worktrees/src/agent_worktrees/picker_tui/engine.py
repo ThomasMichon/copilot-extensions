@@ -272,12 +272,14 @@ class PickerScreen(Widget):
         self.maint_menu_idx = 0
         self.prof_confirm = None      # Profiles Apply confirm dialog (add/remove diff)
         self.progress = None          # cleanup/sync progress sub-dialog
-        self.executor = None          # real maintenance executor (opt-in)
-        # Real cleanup/sync ops are opt-in; the default is the safe in-TUI
-        # simulation (mock walker) so the flow can be exercised without side
-        # effects. AGENT_WORKTREES_PICKER_REAL_OPS=1 runs the real per-worktree
-        # executor (local in-process + remote over SSH).
-        self.real_ops = bool(os.environ.get("AGENT_WORKTREES_PICKER_REAL_OPS"))
+        self.executor = None          # real maintenance executor
+        # Real cleanup/sync ops are the DEFAULT: the Maintenance actions
+        # actually mutate worktrees (local in-process + remote over SSH), so a
+        # Sync/Cleanup the operator runs takes effect (issue #1420). The mock
+        # walker (safe in-TUI simulation, no side effects) is now opt-in via
+        # AGENT_WORKTREES_PICKER_REAL_OPS=0 -- an escape hatch for demos and
+        # headless smoketests.
+        self.real_ops = os.environ.get("AGENT_WORKTREES_PICKER_REAL_OPS", "1") != "0"
         self.pcol = 0                 # Profiles matrix column cursor
         self.last_pr = 0              # remembered Profiles grid row (Tab in/out)
         self.grid = {}                # (target_idx, host_idx) -> bool present
