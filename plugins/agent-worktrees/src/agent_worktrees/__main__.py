@@ -436,7 +436,7 @@ def _worktree_to_dict(
     }
     if rec.completed_at:
         d["completed_at"] = rec.completed_at
-    if rec.kind == "system":
+    if rec.kind in tracking.MANAGED_KINDS:
         d["kind"] = rec.kind
         if rec.owner:
             d["owner"] = rec.owner
@@ -782,6 +782,8 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 try:
                     result = _create_worktree_core(
                         config, profile=profile, no_mux=True,
+                        kind="bridge" if getattr(args, "bridge", False)
+                        else "session",
                     )
                 except RuntimeError as e:
                     return _json_error(str(e))
@@ -933,7 +935,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 r for r in records
                 if Path(r.worktree_path).exists()
                 and (Path(r.worktree_path) / ".git").exists()
-                and r.kind != "system"  # daemon-owned; hidden from the Picker
+                and r.kind not in tracking.MANAGED_KINDS  # agent-owned; hidden
             ]
 
             # Scan for live Copilot sessions and mux sessions
@@ -1351,7 +1353,7 @@ def _system_cleanup(config: cfg.Config) -> int | None:
 
     # Exclude daemon-owned system worktrees; they have their own browse/
     # force-remove flow and must never be swept by routine cleanup.
-    records = [r for r in records if r.kind != "system"]
+    records = [r for r in records if r.kind not in tracking.MANAGED_KINDS]
     if not records:
         _system_pause("No tracked worktrees.")
         return None
@@ -1457,8 +1459,8 @@ def _system_update(config: cfg.Config) -> int | None:
         platform_filter=cfg.detect_platform(),
     )
     records = [r for r in records if r.worktree_path and Path(r.worktree_path).exists()]
-    # System worktrees are recreated fresh per daemon run; never FF them here.
-    records = [r for r in records if r.kind != "system"]
+    # System/bridge worktrees are recreated fresh per run; never FF them here.
+    records = [r for r in records if r.kind not in tracking.MANAGED_KINDS]
 
     if not records:
         _system_pause("No tracked worktrees.")
@@ -1634,7 +1636,8 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
     is flagged as likely leaked.
     """
     tracking_path = cfg.tracking_dir()
-    records = tracking.list_records(tracking_path, kind_filter="system")
+    records = [r for r in tracking.list_records(tracking_path)
+               if r.kind in tracking.MANAGED_KINDS]
     records = [r for r in records if r.repo == config.repo_name]
 
     if not records:
@@ -1645,8 +1648,8 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
 
     while True:
         records = [
-            r for r in tracking.list_records(tracking_path, kind_filter="system")
-            if r.repo == config.repo_name
+            r for r in tracking.list_records(tracking_path)
+            if r.kind in tracking.MANAGED_KINDS and r.repo == config.repo_name
         ]
         if not records:
             _system_pause("No system worktrees remain.")
@@ -3498,8 +3501,9 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
         output.err(f"no such worktree: {wt_id}")
         return 1
     rec = tracking.load_record(yaml_path)
-    if rec.kind != "system":
-        output.err(f"{wt_id} is not a system worktree (kind={rec.kind}); refusing")
+    if rec.kind not in tracking.MANAGED_KINDS:
+        output.err(f"{wt_id} is not a managed (system/bridge) worktree "
+                   f"(kind={rec.kind}); refusing")
         return 1
 
     if rec.worktree_path and Path(rec.worktree_path).exists():
@@ -3644,9 +3648,9 @@ def reap_one(
         return _result({"ok": False, "removed": False, "skipped": False,
                         "reason": f"worktree not found: {wt_id}"})
     rec = tracking.load_record(yaml_path)
-    if rec.kind == "system":
+    if rec.kind in tracking.MANAGED_KINDS:
         return _result({"ok": False, "removed": False, "skipped": True,
-                        "reason": "daemon-owned system worktree "
+                        "reason": f"agent-owned {rec.kind} worktree "
                         "(use the System menu)"})
 
     if git_ops.has_remote(repo.remote, cwd=repo.anchor):
@@ -3762,8 +3766,8 @@ def reap_orphan_mux_sessions(*, dry_run: bool = False) -> dict:
         rec = by_id.get(wt_id)
         if rec is None:
             reason = "untracked"
-        elif rec.kind == "system":
-            skipped.append({"id": wt_id, "reason": "system"})
+        elif rec.kind in tracking.MANAGED_KINDS:
+            skipped.append({"id": wt_id, "reason": rec.kind})
             continue
         elif rec.status in ("finalized", "complete", "completed"):
             reason = rec.status
@@ -3845,7 +3849,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     # System worktrees are daemon-owned and torn down by their owning service;
     # never auto-removed here (a routine cleanup must not yank one out from
     # under a running daemon). Force-removal lives in the ":" System menu.
-    records = [r for r in records if r.kind != "system"]
+    records = [r for r in records if r.kind not in tracking.MANAGED_KINDS]
     if not records:
         print("No tracked sessions.")
         return 0
@@ -4127,7 +4131,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         )
         records = [
             r for r in records
-            if r.kind != "system"
+            if r.kind not in tracking.MANAGED_KINDS
             and r.worktree_path and Path(r.worktree_path).exists()
         ]
 
@@ -6722,6 +6726,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help=argparse.SUPPRESS)  # deprecated alias for --new
     p.add_argument("--new", action="store_true", dest="new_worktree",
                    help="Create a new worktree (non-interactive, implies --no-mux)")
+    p.add_argument("--bridge", action="store_true",
+                   help="With --new: mark the worktree as agent-bridge-owned "
+                        "(kind=bridge: hidden from the Picker by default, exempt "
+                        "from routine cleanup)")
     p.add_argument("--profile", help="Copilot backend profile name (skips Tab toggle)")
     p.add_argument("--machine", default=None,
                    help="Target machine name (bypasses machine picker)")

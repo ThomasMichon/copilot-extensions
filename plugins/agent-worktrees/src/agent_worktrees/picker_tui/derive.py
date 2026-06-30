@@ -204,12 +204,18 @@ BUCKET_REASON = {
 
 def norm(w, machine, env):
     """Normalize one raw worktree dict into the engine's record shape."""
+    kind = w.get("kind") or "session"
+    title = (w.get("title") or "").strip() or "(untitled)"
+    if kind in ("system", "bridge"):
+        # Mark managed worktrees distinctly so bridge != system at a glance.
+        title = f"[{kind}] {title}"
     return {
         "id4": w["id"][-4:],
         "machine": machine,
         "env": env,
         "machine_env": f"{machine} {env}",
-        "title": (w.get("title") or "").strip() or "(untitled)",
+        "title": title,
+        "kind": kind,
         "tracking": w.get("status", ""),
         "state": _state(w),
         "age": _age(
@@ -224,7 +230,7 @@ def norm(w, machine, env):
         "ff_eligible": _ff_from_raw(w),
         "attached": bool(w.get("mux_attached")),
         "active": w.get("status") == "active",
-        "hidden": bool(w.get("kind") == "system"),
+        "hidden": bool(kind in ("system", "bridge")),
         "raw": w,
     }
 

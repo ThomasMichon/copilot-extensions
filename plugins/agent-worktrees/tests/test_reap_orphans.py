@@ -94,6 +94,12 @@ class TestReapOrphans:
         assert killed == []
         assert {"id": "svc", "reason": "system"} in result["skipped"]
 
+    def test_bridge_worktree_is_spared(self, tmp_path):
+        rec = _rec("brg", status="finalized", path=str(tmp_path), kind="bridge")
+        result, killed = _run({"wt-brg": 0}, [rec])
+        assert killed == []
+        assert {"id": "brg", "reason": "bridge"} in result["skipped"]
+
     def test_non_wt_sessions_ignored(self):
         result, killed = _run({"misc": 0, "scratch": 0}, [])
         assert killed == []

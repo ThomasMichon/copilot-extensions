@@ -237,7 +237,9 @@ async def _resolve_worktree(
     if target.worktree_id:
         resolve_args.extend(["--worktree-id", target.worktree_id])
     else:
-        resolve_args.append("--new")
+        # A bridge-spawned new worktree is agent-owned: mark it kind=bridge so
+        # the Picker hides it by default and routine cleanup leaves it alone.
+        resolve_args.extend(["--new", "--bridge"])
 
     log.info("Resolving worktree: %s", " ".join(resolve_args))
 
@@ -319,15 +321,30 @@ async def _resolve_worktree_remote(
     """
     if not target.project:
         raise RuntimeError("remote resolve requires target.project")
-    resolve_args = [target.project, "resolve", "--json", "--no-resume"]
+    base_args = [target.project, "resolve", "--json", "--no-resume"]
+    creating_new = not target.worktree_id
     if target.worktree_id:
-        resolve_args.extend(["--worktree-id", target.worktree_id])
+        base_args.extend(["--worktree-id", target.worktree_id])
     else:
-        resolve_args.append("--new")
-    resolve_cmd = " ".join(shlex.quote(a) for a in resolve_args)
+        base_args.append("--new")
 
-    log.info("Resolving remote worktree on %s: %s", target.host, resolve_cmd)
-    result = await manager.exec_command(target.host, resolve_cmd, timeout=timeout)
+    async def _run(extra: list[str]):
+        cmd = " ".join(shlex.quote(a) for a in base_args + extra)
+        log.info("Resolving remote worktree on %s: %s", target.host, cmd)
+        return await manager.exec_command(target.host, cmd, timeout=timeout)
+
+    # A bridge-spawned new worktree is agent-owned -> mark it kind=bridge so the
+    # remote Picker hides it by default and routine cleanup leaves it alone.
+    # An older remote agent-worktrees won't recognize --bridge (argparse exits
+    # non-zero); detect that and retry without it so a version-skewed remote
+    # still spawns (the worktree just isn't bridge-marked there). Mirrors the
+    # data_ssh --classify fallback.
+    result = await _run(["--bridge"] if creating_new else [])
+    if (creating_new and not result.timed_out and result.exit_code != 0
+            and "--bridge" in (result.stderr or "")):
+        log.info("remote %s lacks --bridge; retrying unmarked", target.host)
+        result = await _run([])
+
     if result.timed_out:
         raise RuntimeError(f"remote worktree resolve timed out after {timeout}s")
     if result.exit_code != 0:

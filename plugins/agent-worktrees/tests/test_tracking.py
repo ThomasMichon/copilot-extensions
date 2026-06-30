@@ -779,6 +779,26 @@ class TestSystemWorktreeKind:
         assert loaded.kind == "system"
         assert loaded.owner == "config-reflect"
 
+    def test_bridge_kind_round_trip(self, tmp_path: Path):
+        rec = self._base(kind="bridge")
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        assert "kind: bridge\n" in path.read_text(encoding="utf-8")
+        loaded = load_record(path)
+        assert loaded.kind == "bridge"
+
+    def test_unknown_kind_degrades_to_session(self, tmp_path: Path):
+        path = tmp_path / "weird.yaml"
+        path.write_text(
+            "worktree_id: w\nbranch: worktree/w\nworktree_path: /tmp/w\n"
+            "repo: test-repo\nmachine: test\nplatform: wsl\n"
+            "started_at: 2026-06-01T10:00:00\nlast_resumed_at: 2026-06-01T10:00:00\n"
+            "resume_count: 0\ntitle: null\nstatus: active\ncompleted_at: null\n"
+            "handoff_prompt: null\nkind: gremlin\n",
+            encoding="utf-8",
+        )
+        assert load_record(path).kind == "session"
+
     def test_legacy_record_without_kind_loads_as_session(self, tmp_path: Path):
         # A pre-feature YAML has no `kind:` line.
         path = tmp_path / "legacy.yaml"

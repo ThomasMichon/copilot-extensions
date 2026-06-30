@@ -401,7 +401,29 @@ class TestResolveWorktreeRemote:
         assert out == plan
         cmd = mgr.exec_command.call_args[0][1]
         assert "proj" in cmd and "resolve" in cmd and "--new" in cmd
+        assert "--bridge" in cmd          # bridge-spawned new wt -> kind=bridge
         assert "--worktree-id" not in cmd
+
+    @pytest.mark.asyncio
+    async def test_remote_resolve_retries_without_bridge_on_old_remote(self):
+        plan = {"launch": {"worktree_id": "wt-1", "work_dir": "/d"}}
+        old = MagicMock()
+        old.timed_out = False
+        old.exit_code = 2
+        old.stdout = ""
+        old.stderr = "unrecognized arguments: --bridge"
+        mgr = MagicMock()
+        mgr.exec_command = AsyncMock(side_effect=[old, self._ok_result(plan)])
+        target = SpawnTarget(type="ssh", host="h", project="proj")
+
+        out = await _resolve_worktree_remote(mgr, target)
+
+        assert out == plan
+        assert mgr.exec_command.await_count == 2
+        first = mgr.exec_command.call_args_list[0][0][1]
+        second = mgr.exec_command.call_args_list[1][0][1]
+        assert "--bridge" in first
+        assert "--bridge" not in second   # retried without the unknown flag
 
     @pytest.mark.asyncio
     async def test_resolve_uses_worktree_id_when_set(self):
