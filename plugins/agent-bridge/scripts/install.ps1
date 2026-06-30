@@ -552,14 +552,16 @@ function Register-ScheduledTask_ {
 `$logFile = Join-Path (Split-Path `$pidFile) 'agent-bridge.log'
 `$errFile = Join-Path (Split-Path `$pidFile) 'agent-bridge-err.log'
 
-# #1376: pin this supervisor (pwsh) to the runtime home, never the
+# #1376: keep this supervisor (pwsh) AND the worker python it spawns OUT of the
 # installed-plugins payload dir. A process holding a directory as its CWD locks
-# it on Windows, so a supervisor sitting in the plugin folder blocks
+# it on Windows, so anything sitting in the plugin folder blocks
 # ``copilot plugin update agent-bridge`` (the replace fails and the payload dir
-# is left emptied -- "installer not found" on the next update). The worker
-# (python -m agent_bridge) already chdir's, but this pwsh parent is the process
-# that actually held the handle.
-Set-Location -LiteralPath (Split-Path `$pidFile)
+# is left emptied -- "installer not found" on the next update). The OPERATIVE
+# guard is -WorkingDirectory on Start-Process below: Set-Location only moves
+# PowerShell's `$PWD provider path, NOT the OS working directory a spawned child
+# inherits. We set both, and the scheduled task pins -WorkingDirectory too.
+`$runtimeHome = Split-Path `$pidFile
+Set-Location -LiteralPath `$runtimeHome
 
 if (Test-Path `$pidFile) {
     `$existingPid = Get-Content `$pidFile -ErrorAction SilentlyContinue
@@ -570,6 +572,7 @@ if (Test-Path `$pidFile) {
 }
 
 `$proc = Start-Process -FilePath `$launchPy -ArgumentList '-m','agent_bridge','start' ``
+    -WorkingDirectory `$runtimeHome ``
     -NoNewWindow -PassThru ``
     -RedirectStandardOutput `$logFile ``
     -RedirectStandardError `$errFile
