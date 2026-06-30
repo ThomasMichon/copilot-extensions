@@ -45,6 +45,10 @@ for_machine = derive.for_machine
 # Profiles-matrix axes are config-bound from machines.yaml (same roster).
 host_cols = roster.host_cols
 target_envs = roster.target_envs
+# Repo name + default branch for the top bar -- project config, not hardcoded
+# (shared with data_local; both resolve the same active-project config).
+REPO = data_local.REPO
+BRANCH = data_local.BRANCH
 
 # machines.yaml environment name -> the picker's short env label (and C_ENV key).
 _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}

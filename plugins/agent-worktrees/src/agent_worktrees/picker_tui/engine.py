@@ -223,23 +223,15 @@ BUTTON_SETS = {0: ["N"], 1: ["K", "SY"], 2: ["PA", "PReset"]}
 
 # ---- Profiles matrix model ----------------------------------------------------
 # Axes are config-bound from machines.yaml at runtime (see picker_tui.roster and
-# PickerScreen.setup); these literals are the FALLBACK used only when the roster
-# is unavailable (e.g. a fixture source with no host_cols()/target_envs()).
-# Columns = valid HOST machines (a terminal app runs here): Windows or native
-# Linux per machine -- never WSL.
-_DEFAULT_HOST_COLS = [
-    ("Lambda·Win", "Lambda-Core", "Win"),
-    ("Borealis·Win", "Borealis", "Win"),
-    ("Wheatley·Lx", "Wheatley", "Linux"),
-    ("book2·Win", "tmichon-book2", "Win"),
-]
-# Rows = TARGETS a profile can launch: every machine + every environment
-# (WSL included), each as an agent (worktree) launch or a plain shell.
-_DEFAULT_TARGET_ENVS = [
-    ("Lambda-Core", "Win"), ("Lambda-Core", "WSL"),
-    ("Borealis", "Win"), ("Borealis", "WSL"),
-    ("Wheatley", "Linux"), ("tmichon-book2", "Win"),
-]
+# PickerScreen.setup): the real data sources (data_local/data_ssh) expose
+# host_cols()/target_envs() derived from the roster. These fallbacks apply only
+# when a source omits those hooks (e.g. a fixture source with no
+# host_cols()/target_envs()). They are intentionally EMPTY so a missing roster
+# degrades to an empty matrix instead of fabricating a machine list -- the
+# picker ships in a shared marketplace plugin and must never hardcode one
+# facility's roster.
+_DEFAULT_HOST_COLS: list[tuple[str, str, str]] = []
+_DEFAULT_TARGET_ENVS: list[tuple[str, str]] = []
 
 
 def target_rows(target_envs):
@@ -1497,7 +1489,15 @@ class PickerScreen(Widget):
         ver = f" · v{VERSION}"
         m, e = self.src.LOCAL
         host = f"{m.lower()}"
-        present = {"version": True, "repo": True, "env": True, "branch": True}
+        # Repo name + default branch are project config, surfaced by the data
+        # source (data_local/data_ssh expose REPO/BRANCH from the resolved
+        # config); never hardcoded. Empty when a source omits them (e.g. a
+        # fixture source) so the segment is dropped rather than showing a
+        # fabricated name.
+        repo = getattr(self.src, "REPO", "") or ""
+        branch = getattr(self.src, "BRANCH", "") or ""
+        present = {"version": True, "repo": bool(repo), "env": True,
+                   "branch": bool(branch)}
 
         def build():
             left = Text(" Agent Worktrees", style="bold")
@@ -1509,9 +1509,9 @@ class PickerScreen(Widget):
                 right.append(" · ", style=C_DIM)
                 right.append(e, style=C_ENV.get(e, "grey70"))
             if present["repo"]:
-                right.append("  ·  aperture-labs", style=C_DIM)
+                right.append(f"  ·  {repo}", style=C_DIM)
             if present["branch"]:
-                right.append(" · master", style=C_DIM)
+                right.append(f" · {branch}", style=C_DIM)
             return left, right
 
         for drop in ("version", "branch", "env", "repo"):
