@@ -1029,3 +1029,28 @@ def test_bridge_and_system_hidden_and_marked_distinctly():
             assert "ssss" in ids and "bbbb" in ids
 
     asyncio.run(run())
+
+
+def test_banner_version_tracks_build_info(monkeypatch):
+    """The picker banner version is derived from the real package version
+    (``_build_info`` -> package metadata), never a hand-maintained literal.
+
+    Regression for the banner that silently froze at ``1.5.3-dev69`` while the
+    package shipped dev97: a stale constant must not be able to reappear.
+    """
+    from agent_worktrees import _build_info
+    from agent_worktrees.picker_tui import engine
+
+    monkeypatch.setitem(_build_info.BUILD_INFO, "version", "9.9.9-devTEST")
+    assert engine._resolve_version() == "9.9.9-devTEST"
+
+
+def test_banner_version_falls_back_when_build_info_blank(monkeypatch):
+    """With no build-info version, fall back to installed metadata / ``dev`` --
+    never the old frozen ``1.5.3-dev69`` literal."""
+    from agent_worktrees import _build_info
+    from agent_worktrees.picker_tui import engine
+
+    monkeypatch.setattr(_build_info, "BUILD_INFO", {}, raising=False)
+    v = engine._resolve_version()
+    assert v and v != "1.5.3-dev69"
