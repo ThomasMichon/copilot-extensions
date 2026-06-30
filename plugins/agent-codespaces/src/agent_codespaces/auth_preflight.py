@@ -21,14 +21,21 @@ from urllib.parse import urlsplit
 
 from credential_relay.sources.git_credential import GitCredentialSource
 
+from .provision import DOTFILES_DIR
+
 log = logging.getLogger("agent-codespaces.auth-preflight")
 
-# Remote command that prints the workspace's git remotes. Prefers the reliable
-# $VM_REPO_PATH checkout (set by many codespaces devcontainers) and falls back to
-# the current directory. Bounded; never prompts.
+# Remote command that prints the git remotes of both repos a session touches:
+# the workspace/product checkout (preferring the reliable $VM_REPO_PATH set by
+# many codespaces devcontainers, falling back to $PWD) AND the account dotfiles
+# checkout (so its host -- usually github.com -- is auth-verified too). Bounded;
+# never prompts; missing checkouts contribute nothing.
 REMOTE_LIST_COMMAND = (
-    'git -C "${VM_REPO_PATH:-$PWD}" remote -v 2>/dev/null '
-    '|| git remote -v 2>/dev/null || true'
+    "{ "
+    'git -C "${VM_REPO_PATH:-$PWD}" remote -v 2>/dev/null; '
+    f'git -C "{DOTFILES_DIR}" remote -v 2>/dev/null; '
+    "git remote -v 2>/dev/null; "
+    "} || true"
 )
 
 
@@ -101,22 +108,31 @@ async def verify_remote_auth(
     *,
     source: GitCredentialSource | None = None,
     timeout: float = 15.0,
+    extra_hosts: list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
-    """Verify host auth for every domain used by the workspace's git remotes.
+    """Verify host auth for every domain the session's git remotes use.
+
+    Probes the union of: the **workspace/product** checkout's remotes, the
+    **dotfiles** checkout's remotes (both via ``REMOTE_LIST_COMMAND``), and any
+    ``extra_hosts`` the caller guarantees (e.g. the configured dotfiles repo's
+    host, so github.com is verified even before the dotfiles clone exists).
 
     ``run_remote`` runs a shell command on the CodeSpace and returns its stdout
     (used to fetch ``git remote -v``). Returns ``(hosts, missing)`` where
-    ``hosts`` is every distinct remote domain found and ``missing`` is the
-    subset with no resolvable local auth. An empty ``hosts`` list means no
-    remotes were discovered (verification is a no-op).
+    ``hosts`` is every distinct domain checked and ``missing`` is the subset
+    with no resolvable local auth. An empty ``hosts`` list means nothing to
+    verify (a no-op). A failure listing remotes does not suppress ``extra_hosts``.
     """
     try:
         remote_output = await run_remote(REMOTE_LIST_COMMAND)
     except Exception:
-        log.debug("Could not list remote workspace git remotes", exc_info=True)
-        return [], []
+        log.debug("Could not list remote git remotes", exc_info=True)
+        remote_output = ""
 
     hosts = parse_remote_hosts(remote_output or "")
+    for host in extra_hosts or []:
+        if host and host not in hosts:
+            hosts.append(host)
     if not hosts:
         return [], []
 

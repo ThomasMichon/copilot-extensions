@@ -401,11 +401,12 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             manager, args.name, config, getattr(args, "repo", None),
         )
 
-        # Verify the host has local auth for every domain the workspace's git
-        # remotes use (ADO + GitHub). Surfaces missing auth up front rather
-        # than letting it fail mid-fetch. Best-effort, warning-only.
+        # Verify the host has local auth for every domain the session's git
+        # remotes use -- the workspace (ADO) AND the dotfiles repo (GitHub).
+        # Surfaces missing auth up front rather than letting it fail mid-fetch.
+        # Best-effort, warning-only.
         if not args.no_relay:
-            await _verify_remote_auth(manager, args.name)
+            await _verify_remote_auth(manager, args.name, config)
 
         if args.stdio and remote_cmd:
             # Structured stdio mode for agent-bridge
@@ -507,23 +508,36 @@ async def _provision_dotfiles(manager, name: str, config) -> None:
         log.warning("Dotfiles provisioning on %s failed: %s", name, exc)
 
 
-async def _verify_remote_auth(manager, name: str) -> None:
+async def _verify_remote_auth(manager, name: str, config) -> None:
     """Verify host-side auth for the CodeSpace's git remote domains.
 
-    Lists the remote workspace's git remotes, extracts their domains, and
-    probes the local credential store (the same source the relay uses) for
-    each. Missing domains are reported as a warning so the user can fix auth
-    (``az login`` / GCM sign-in) before work begins. Best-effort: never raises.
+    Lists the git remotes of both the workspace/product checkout and the
+    dotfiles checkout, extracts their domains, and probes the local credential
+    store (the same source the relay uses) for each. When ``dotfiles_repo`` is
+    configured, its host (e.g. github.com) is verified explicitly too -- even
+    on a first connect before the dotfiles clone exists. Missing domains are
+    reported as a warning so the user can fix auth (``az login`` / GCM sign-in)
+    before work begins. Best-effort: never raises.
     """
-    from .auth_preflight import verify_remote_auth
+    from .auth_preflight import host_from_url, verify_remote_auth
 
     async def _run_remote(cmd: str) -> str:
         wrapped = f"bash -l -c {shlex.quote(cmd)}"
         result = await manager.exec_command(name, wrapped, timeout=30.0)
         return result.stdout or ""
 
+    # Guarantee the dotfiles repo's host is checked even if its checkout isn't
+    # present yet (account dotfiles are always GitHub-hosted).
+    extra_hosts: list[str] = []
+    if config.dotfiles_repo:
+        host = host_from_url(f"https://github.com/{config.dotfiles_repo}")
+        if host:
+            extra_hosts.append(host)
+
     try:
-        hosts, missing = await verify_remote_auth(_run_remote)
+        hosts, missing = await verify_remote_auth(
+            _run_remote, extra_hosts=extra_hosts,
+        )
     except Exception as exc:
         log.debug("Remote auth verification on %s failed: %s", name, exc)
         return
