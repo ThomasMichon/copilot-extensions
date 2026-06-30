@@ -72,7 +72,6 @@ def load(machine: str | None = None, env: str | None = None):
         if r.worktree_path
         and Path(r.worktree_path).exists()
         and (Path(r.worktree_path) / ".git").exists()
-        and r.kind != "system"
     ]
     if not records:
         return []

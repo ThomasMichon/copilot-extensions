@@ -224,6 +224,7 @@ def norm(w, machine, env):
         "ff_eligible": _ff_from_raw(w),
         "attached": bool(w.get("mux_attached")),
         "active": w.get("status") == "active",
+        "hidden": bool(w.get("kind") == "system"),
         "raw": w,
     }
 

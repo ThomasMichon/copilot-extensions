@@ -286,6 +286,7 @@ class PickerScreen(Widget):
         self.grid = {}                # (target_idx, host_idx) -> bool present
         self.applied = {}             # last-applied snapshot of the grid
         self.btn_idx = 0              # active button within the current group
+        self.show_hidden = False      # reveal bridge/system worktrees (#1422)
         self.targets = []
         self.host_cols = list(_DEFAULT_HOST_COLS)   # config-bound in setup()
         self._prof_lock = threading.Lock()
@@ -433,6 +434,12 @@ class PickerScreen(Widget):
     def button_set(self):
         if self.htab == 2:
             return ["PA", "PReset"] if self.grid_dirty() else ["PA"]
+        if self.htab == 0:
+            # Toggle-hidden joins the button row only when there's something to
+            # reveal (or it's already revealing), so it never clutters (#1422).
+            if self.show_hidden or self._hidden_count() > 0:
+                return ["N", "TH"]
+            return ["N"]
         return BUTTON_SETS.get(self.htab, [])
 
     def active_button(self):
@@ -491,19 +498,31 @@ class PickerScreen(Widget):
         label, m, e, ok = self.machines[self.machine_idx]
         return m, e, ok
 
+    def _scope_data(self):
+        """Worktrees in the active machine-tab scope (All = every ready env)."""
+        if self.is_all():
+            ready = self.ready_envs()
+            return [w for w in self.data if (w["machine"], w["env"]) in ready]
+        m, e, _ = self.cur_machine()
+        return [w for w in self.data if w["machine"] == m and w["env"] == e]
+
+    def _hidden_count(self):
+        """How many bridge/system worktrees are hidden in the current scope."""
+        return sum(1 for w in self._scope_data() if w.get("hidden"))
+
+    def _visible_scope_data(self):
+        data = self._scope_data()
+        if not self.show_hidden:
+            data = [w for w in data if not w.get("hidden")]
+        return data
+
     def current_list(self):
         """(cols, [(section_label, [records])]) for the selected machine tab.
         'All' interleaves every READY machine and shows the machine/env columns;
-        a specific machine hides them (implied by the tab)."""
-        if self.is_all():
-            cols = ACTIVE_SPECS
-            ready = self.ready_envs()
-            data = [w for w in self.data if (w["machine"], w["env"]) in ready]
-            a, r, c = self.src.bucket(data)
-        else:
-            cols = LIST_SPECS
-            m, e, _ = self.cur_machine()
-            a, r, c = self.src.for_machine(self.data, m, e)
+        a specific machine hides them (implied by the tab). Bridge/system
+        worktrees are hidden unless Toggle-hidden is on (#1422)."""
+        cols = ACTIVE_SPECS if self.is_all() else LIST_SPECS
+        a, r, c = self.src.bucket(self._visible_scope_data())
         return cols, [("Active", a), ("Recent", r), ("Completed", c)]
 
     def list_records(self):
@@ -586,11 +605,7 @@ class PickerScreen(Widget):
         so the disposition column is honest; the Cleanup dialog only *offers*
         the cleanable buckets, and the executor re-checks safety per worktree.
         """
-        if self.is_all():
-            rows = list(self.data)
-        else:
-            m, e, _ = self.cur_machine()
-            rows = [w for w in self.data if w["machine"] == m and w["env"] == e]
+        rows = self._visible_scope_data()
         for w in rows:
             bucket = w.get("cleanup_bucket", "wip")
             lvl = derive.BUCKET_DISPO.get(bucket, "")
@@ -876,19 +891,36 @@ class PickerScreen(Widget):
 
     def new_worktree_row(self, width, focus, active_idx):
         # Single "New worktree…" entry -- opens the options dialog directly,
-        # which confirms the target machine (aperture-labs #1346).
+        # which confirms the target machine (aperture-labs #1346). When there are
+        # bridge/system worktrees in scope, a right-aligned Toggle-hidden chip
+        # joins the row (#1422).
         tm, te = self.create_target()
         t = Text("  ")
         t.append(" + New worktree… ", style=self._btn_style(focus, active_idx == 0))
         host_tag = "  (this host)" if (tm, te) == self.src.LOCAL else ""
-        if t.cell_len + len("    creates on ") + len(f"{tm} {te}") \
-                + len(host_tag) <= width:
-            t.append("    creates on ", style=C_DIM)
-            t.append(f"{tm} ", style="grey70")
-            t.append(te, style=C_ENV.get(te, "grey70"))
-            if host_tag:
-                t.append(host_tag, style=C_DIM)
-        t.append(" " * max(0, width - t.cell_len))
+
+        toggle = None
+        if "TH" in self.button_set():
+            nh = self._hidden_count()
+            tlabel = " Hide hidden " if self.show_hidden else f" Show hidden ({nh}) "
+            toggle = Text(tlabel, style=self._btn_style(focus, active_idx == 1))
+
+        ctx = Text()
+        ctx.append("    creates on ", style=C_DIM)
+        ctx.append(f"{tm} ", style="grey70")
+        ctx.append(te, style=C_ENV.get(te, "grey70"))
+        if host_tag:
+            ctx.append(host_tag, style=C_DIM)
+
+        right_w = (toggle.cell_len + 2) if toggle is not None else 0
+        if t.cell_len + ctx.cell_len + 3 + right_w <= width:
+            t.append_text(ctx)
+        if toggle is not None:
+            t.append(" " * max(1, width - t.cell_len - right_w))
+            t.append_text(toggle)
+            t.append("  ")
+        else:
+            t.append(" " * max(0, width - t.cell_len))
         return t
 
     def button_row(self, label, suffix, selected, width):
@@ -991,8 +1023,12 @@ class PickerScreen(Widget):
                 if not rows:
                     add(Text("    (none)", style=C_DIM))
                 for rec in rows:
-                    add(row_text(rec, lcols, width, sel == ("L", li), pulse=self.pulse),
-                        stop=("L", li), data=rec)
+                    vr = add(row_text(rec, lcols, width, sel == ("L", li),
+                                      pulse=self.pulse),
+                             stop=("L", li), data=rec)
+                    if rec.get("hidden") and sel != ("L", li):
+                        # Revealed bridge/system worktree -> dim it (#1422).
+                        vr.text.stylize("grey42")
                     li += 1
         elif self.htab == 1:
             add(self.tab_bar(width, sel == ("M", 0)))
@@ -2308,6 +2344,13 @@ class PickerScreen(Widget):
             if btn == "N":
                 # New worktree… opens the options dialog directly (#1346).
                 self._open_optmenu()
+            elif btn == "TH":
+                self.show_hidden = not self.show_hidden
+                n = self._hidden_count()
+                self.debug = (f"{'showing' if self.show_hidden else 'hiding'} "
+                              f"{n} bridge/system worktree(s)")
+                if self.sel not in self.stops():
+                    self.sel = self.default_sel()
             elif btn == "K":
                 self._open_cleanup()
             elif btn == "SY":

@@ -895,3 +895,63 @@ def test_escape_on_main_view_confirms_before_quit(monkeypatch):
             assert quit_called["v"] is True
 
     asyncio.run(run())
+
+
+def test_hidden_worktrees_filtered_and_toggle():
+    """Bridge/system (kind=system) worktrees are hidden by default; Toggle-hidden
+    reveals them, and the button appears only when there's something to reveal (#1422)."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("lambda-core", "Win")
+    raws = [
+        {"id": "lambda-core-win-aaaa", "title": "Real work", "status": "active",
+         "started_at": "2026-06-27T17:00:00", "turn_count": 3, "state": "wip"},
+        {"id": "lambda-core-win-ssss", "title": "daemon wt", "status": "active",
+         "started_at": "2026-06-27T17:00:00", "turn_count": 0, "state": "wip",
+         "kind": "system", "owner": "permanent-record"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "lambda-core · win"
+    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    recs = src.load()
+    assert recs[0]["hidden"] is False
+    assert recs[1]["hidden"] is True
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)):
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            # Default: the system worktree is hidden; the toggle button appears.
+            ids = {r["id4"] for r in scr.list_records()}
+            assert "aaaa" in ids and "ssss" not in ids
+            assert scr._hidden_count() == 1
+            assert "TH" in scr.button_set()
+            # Activate the Toggle-hidden button (index 1) -> reveal.
+            scr.sel = ("BTN", 0)
+            scr.btn_idx = 1
+            scr._activate()
+            assert scr.show_hidden is True
+            ids = {r["id4"] for r in scr.list_records()}
+            assert "ssss" in ids
+
+    asyncio.run(run())
+
+
+def test_toggle_hidden_button_absent_when_nothing_hidden():
+    """With no bridge/system worktrees, the Toggle-hidden button stays off (#1422)."""
+    src = _fixture_source()   # no kind=system rows
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)):
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            assert scr._hidden_count() == 0
+            assert "TH" not in scr.button_set()
+
+    asyncio.run(run())
