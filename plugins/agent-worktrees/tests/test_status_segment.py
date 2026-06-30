@@ -77,3 +77,90 @@ def test_turns_do_not_override_dirty(monkeypatch, capsys):
     out = capsys.readouterr().out.strip()
     assert "DIRTY" in out
     assert "CONVO" not in out
+
+
+# ---------------------------------------------------------------------------
+# Picker title slot: rec.title is the single read slot, with a live
+# latest_summary fallback so an un-persisted worktree still reads meaningfully.
+# ---------------------------------------------------------------------------
+
+def test_worktree_to_dict_title_falls_back_to_summary():
+    rec = _record(worktree_path="/w/wt", title=None)
+    ctx = sessions.SessionContext()
+    ctx.latest_summary[m._normalize_path("/w/wt")] = "Resume PushChannel E2E"
+    d = m._worktree_to_dict(rec, session_ctx=ctx)
+    assert d["title"] == "Resume PushChannel E2E"
+
+
+def test_worktree_to_dict_title_prefers_persisted():
+    rec = _record(worktree_path="/w/wt", title="Curated Title")
+    ctx = sessions.SessionContext()
+    ctx.latest_summary[m._normalize_path("/w/wt")] = "Live Summary"
+    d = m._worktree_to_dict(rec, session_ctx=ctx)
+    assert d["title"] == "Curated Title"
+
+
+def test_worktree_to_dict_title_none_without_summary():
+    rec = _record(worktree_path="/w/wt", title=None)
+    d = m._worktree_to_dict(rec, session_ctx=sessions.SessionContext())
+    assert not (d["title"] and d["title"] != "null")
+
+
+# ---------------------------------------------------------------------------
+# status-updater title persistence: the daemon that already resolves the
+# title each tick lands it in rec.title (the Picker's slot).
+# ---------------------------------------------------------------------------
+
+def _wire_persist(monkeypatch, target, *, rec, summary):
+    info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.UNUSED)
+    monkeypatch.setattr(m, "_detect_upstream_branch", lambda *a, **k: "master")
+    monkeypatch.setattr(m, "_find_record_for_path", lambda _p: rec)
+    monkeypatch.setattr(m.git_ops, "classify_worktree", lambda *a, **k: info)
+    monkeypatch.setattr(m, "_apply_tracking_override", lambda r, i: i)
+    ctx = sessions.SessionContext()
+    if summary is not None:
+        ctx.latest_summary[m._normalize_path(target)] = summary
+    monkeypatch.setattr(m.sessions, "scan_sessions_fast", lambda recs: ctx)
+    saved: list[str | None] = []
+    monkeypatch.setattr(
+        m.tracking, "save_record", lambda r, *a, **k: saved.append(r.title)
+    )
+    return saved
+
+
+def test_updater_persists_summary_into_title(monkeypatch):
+    target = str(Path("wt-persist").resolve())
+    rec = _record(worktree_path=target, title=None, status="active")
+    saved = _wire_persist(monkeypatch, target, rec=rec,
+                          summary="Investigate Agent-Bridge")
+    m._render_status_segment(target, persist_title=True)
+    assert rec.title == "Investigate Agent-Bridge"
+    assert saved == ["Investigate Agent-Bridge"]
+
+
+def test_updater_does_not_clobber_finalized_title(monkeypatch):
+    target = str(Path("wt-final").resolve())
+    rec = _record(worktree_path=target, title="Curated PR Title",
+                  status="finalized")
+    saved = _wire_persist(monkeypatch, target, rec=rec, summary="Live Summary")
+    m._render_status_segment(target, persist_title=True)
+    assert rec.title == "Curated PR Title"
+    assert saved == []
+
+
+def test_updater_title_persist_is_noop_when_unchanged(monkeypatch):
+    target = str(Path("wt-same").resolve())
+    rec = _record(worktree_path=target, title="Investigate X", status="active")
+    saved = _wire_persist(monkeypatch, target, rec=rec, summary="Investigate X")
+    m._render_status_segment(target, persist_title=True)
+    assert saved == []
+
+
+def test_render_without_persist_flag_never_writes(monkeypatch):
+    target = str(Path("wt-readonly").resolve())
+    rec = _record(worktree_path=target, title=None, status="active")
+    saved = _wire_persist(monkeypatch, target, rec=rec, summary="Live Summary")
+    m._render_status_segment(target)  # persist_title defaults False
+    assert saved == []
+    assert rec.title is None
+
