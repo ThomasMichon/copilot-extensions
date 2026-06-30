@@ -903,6 +903,51 @@ function Deploy-PsmuxConfig {
     }
 }
 
+function Ensure-Psmux {
+    <# Install psmux 3.3.5 (pinned) when absent; if 3.3.6 is present -- the
+       version with the `attach-session -t` regression (psmux#408, which makes
+       worktree launches land in the wrong session) -- auto-downgrade+pin back
+       to 3.3.5. The downgrade is skipped when live sessions exist, because a
+       winget uninstall/reinstall tears down the running psmux server and every
+       attached session; in that case we warn and defer to the next clean run.
+       Called from both 'install' and 'update' so existing 3.3.6 boxes
+       self-heal. launch-session.ps1 carries a last_session workaround as
+       defense-in-depth while still on 3.3.6. #>
+    if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) {
+        Write-Host "  Installing psmux 3.3.5 (terminal multiplexer)..."
+        & winget install --id marlocarlo.psmux --version 3.3.5 --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            # Block winget from auto-upgrading back into the 3.3.6 regression.
+            & winget pin add --id marlocarlo.psmux --version 3.3.5 2>&1 | Out-Null
+            Write-ServiceOk "psmux 3.3.5 installed (pinned)"
+        } else {
+            Write-ServiceWarn "psmux install failed - sessions will launch without multiplexing"
+        }
+        return
+    }
+    $psmuxVer = (& psmux --help 2>&1 | Select-Object -First 1) -replace '.*psmux v([0-9.]+).*', '$1'
+    if ($psmuxVer -eq '3.3.6') {
+        $liveSessions = @()
+        try { $liveSessions = @(& psmux ls 2>$null | Where-Object { $_ -match '\S' }) } catch {}
+        if ($liveSessions.Count -gt 0) {
+            Write-ServiceWarn "psmux 3.3.6 has the attach -t regression (psmux#408); the launcher works around it. $($liveSessions.Count) live session(s) present -- not downgrading now (it would kill them). Close all worktree sessions and re-run 'update' to auto-pin 3.3.5."
+        } else {
+            Write-ServiceChanged "psmux 3.3.6 has the attach -t regression (psmux#408) -- downgrading to pinned 3.3.5"
+            & winget install --id marlocarlo.psmux --version 3.3.5 --uninstall-previous --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+            # Block winget from auto-upgrading back into the 3.3.6 regression.
+            & winget pin add --id marlocarlo.psmux --version 3.3.5 2>&1 | Out-Null
+            $newVer = (& psmux --help 2>&1 | Select-Object -First 1) -replace '.*psmux v([0-9.]+).*', '$1'
+            if ($newVer -eq '3.3.5') {
+                Write-ServiceOk "psmux pinned to 3.3.5 (regression-free)"
+            } else {
+                Write-ServiceWarn "psmux downgrade attempted but version reads '$newVer' -- verify manually (winget install --id marlocarlo.psmux --version 3.3.5 --uninstall-previous; winget pin add --id marlocarlo.psmux --version 3.3.5)"
+            }
+        }
+    } else {
+        Write-ServiceOk "psmux available ($psmuxVer)"
+    }
+}
+
 function Deploy-Icon {
     if (-not $RepoDir) { return }
     foreach ($icon in @('aperture-science.ico', 'aperture-science-wsl.ico')) {
@@ -1787,50 +1832,10 @@ switch ($Action) {
             exit 1
         }
 
-        # Optional: psmux terminal multiplexer for session persistence.
-        # Pinned to 3.3.5: 3.3.6 regressed `attach-session -t` (ignores the
-        # target and attaches to ~/.psmux/last_session), which makes every
-        # worktree launch land in the wrong session. launch-session.ps1 also
-        # carries a last_session workaround as defense-in-depth.
-        if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) {
-            Write-Host "  Installing psmux 3.3.5 (terminal multiplexer)..."
-            & winget install --id marlocarlo.psmux --version 3.3.5 --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) {
-                # Block winget from auto-upgrading back into the 3.3.6 regression.
-                & winget pin add --id marlocarlo.psmux --version 3.3.5 2>&1 | Out-Null
-                Write-ServiceOk "psmux 3.3.5 installed (pinned)"
-            } else {
-                Write-ServiceWarn "psmux install failed - sessions will launch without multiplexing"
-            }
-        } else {
-            # Already installed. 3.3.6 carries the `attach-session -t` regression
-            # (psmux#408): downgrade+pin back to 3.3.5 automatically. A winget
-            # uninstall/reinstall tears down the running psmux server and every
-            # attached session, so we only do it when NO live sessions exist;
-            # otherwise we warn and defer to the next clean run. The launcher's
-            # last_session workaround keeps 3.3.6 usable in the meantime.
-            $psmuxVer = (& psmux --help 2>&1 | Select-Object -First 1) -replace '.*psmux v([0-9.]+).*', '$1'
-            if ($psmuxVer -eq '3.3.6') {
-                $liveSessions = @()
-                try { $liveSessions = @(& psmux ls 2>$null | Where-Object { $_ -match '\S' }) } catch {}
-                if ($liveSessions.Count -gt 0) {
-                    Write-ServiceWarn "psmux 3.3.6 has the attach -t regression (psmux#408); the launcher works around it. $($liveSessions.Count) live session(s) present -- not downgrading now (it would kill them). Close all worktree sessions and re-run 'update' to auto-pin 3.3.5."
-                } else {
-                    Write-ServiceChanged "psmux 3.3.6 has the attach -t regression (psmux#408) -- downgrading to pinned 3.3.5"
-                    & winget install --id marlocarlo.psmux --version 3.3.5 --uninstall-previous --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
-                    # Block winget from auto-upgrading back into the 3.3.6 regression.
-                    & winget pin add --id marlocarlo.psmux --version 3.3.5 2>&1 | Out-Null
-                    $newVer = (& psmux --help 2>&1 | Select-Object -First 1) -replace '.*psmux v([0-9.]+).*', '$1'
-                    if ($newVer -eq '3.3.5') {
-                        Write-ServiceOk "psmux pinned to 3.3.5 (regression-free)"
-                    } else {
-                        Write-ServiceWarn "psmux downgrade attempted but version reads '$newVer' -- verify manually (winget install --id marlocarlo.psmux --version 3.3.5 --uninstall-previous; winget pin add --id marlocarlo.psmux --version 3.3.5)"
-                    }
-                }
-            } else {
-                Write-ServiceOk "psmux available ($psmuxVer)"
-            }
-        }
+        # Optional: psmux terminal multiplexer for session persistence. Pinned
+        # to 3.3.5; 3.3.6 has the `attach-session -t` regression (psmux#408).
+        # See Ensure-Psmux (shared with 'update' so existing boxes self-heal).
+        Ensure-Psmux
 
         # Create directory structure (runtime dirs always; project dirs only if adopting)
         $runtimeDirs = @($InstallDir, $BinDir, $LocalBin)
@@ -2121,6 +2126,7 @@ switch ($Action) {
         Remove-LegacyBinstubs
         # Machine-wide terminal integration (see install path): deploy the
         # multiplexer config regardless of project context.
+        Ensure-Psmux
         Deploy-PsmuxConfig
 
         # -- Project-specific (only when a project is known) --
