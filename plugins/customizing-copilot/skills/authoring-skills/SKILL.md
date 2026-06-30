@@ -210,6 +210,18 @@ only) auto-submit text or a slash command.
 > a nudge when some condition holds -- no `extension.mjs` required. Multiple
 > hooks' `additionalContext` are joined (double newline) and capped at 10 KB.
 
+> **Hooks are reactive -- they can't originate or schedule a turn.** Every hook
+> fires in response to activity the session is already producing. The only hook
+> that injects a *follow-up prompt* is `agentStop` with
+> `{"decision":"block","reason":"..."}` (the `reason` becomes a new user turn,
+> verified) -- but it fires only at a turn boundary, so it's a continuation
+> loop, **not a scheduler**, and never fires once the agent is idle. No hook
+> fires on a clock or from an external/async event; `notification` is
+> fire-and-forget, has no turn-forcing output, and does not fire in
+> non-interactive mode. Waking an idle session asynchronously (callbacks, peer
+> messaging, scheduled prompts) still needs `session.send()` (an extension) or
+> the runtime's own scheduled prompts -- not a hook.
+
 ### Script I/O
 
 - **Input:** read all of stdin as JSON (`jq` in bash, `ConvertFrom-Json` in
