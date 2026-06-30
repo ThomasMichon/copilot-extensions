@@ -26,6 +26,14 @@ on demand -- plus the two always-/lifecycle-adjacent surfaces that pair with
 them: **hooks** and **custom instructions**. This supplements knowledge the
 Copilot CLI does not ship natively.
 
+> **Declarative first.** Skills, custom instructions, hooks, sub-agents, and MCP
+> servers are *declarative* surfaces -- prefer them. The CLI also has an
+> *imperative* **Extensions API** (a JS `extension.mjs` calling `joinSession`),
+> but it is heavier and **may be on its way out**: the native runtime (1.0.66+)
+> already **removed extension SDK callback hooks**, and the declarative hook
+> system below now covers what they did -- including injecting `additionalContext`
+> into the model. Reach for an extension only when no declarative surface fits.
+
 Reference documentation:
 
 | Feature | URL |
@@ -172,24 +180,48 @@ for cloud agent, on the default branch).
 
 ### Events
 
-| Event | Fires when | Can block? |
-|-------|-----------|------------|
-| `sessionStart` | Session begins or resumes | No |
-| `sessionEnd` | Session completes or terminates | No |
-| `userPromptSubmitted` | User submits a prompt | No |
-| `preToolUse` | Before any tool invocation | **Yes** -- return `{"permissionDecision":"deny","permissionDecisionReason":"..."}` |
-| `postToolUse` | After a tool completes | No |
-| `agentStop` | Main agent finishes responding | No |
-| `subagentStop` | Sub-agent completes | No |
-| `errorOccurred` | Error during agent execution | No |
+Configure events in **camelCase** (native, fields camelCase) or **PascalCase**
+(VS Code / Claude-compatible, fields snake_case). Command hooks are the default;
+**`http`** hooks POST the payload to a URL, and **`prompt`** hooks (sessionStart
+only) auto-submit text or a slash command.
+
+| Event | Fires when | Output |
+|-------|-----------|--------|
+| `sessionStart` | New or resumed session begins | Can inject **`additionalContext`** |
+| `sessionEnd` | Session completes or terminates | Ignored |
+| `userPromptSubmitted` | User submits a prompt | Ignored |
+| `preToolUse` | Before any tool invocation | **Allow/deny/modify** -- `{"permissionDecision":"deny","permissionDecisionReason":"..."}` or `modifiedArgs` |
+| `postToolUse` | After a tool completes successfully | **Inject `additionalContext`** (appended to the result, same turn) or `modifiedResult` |
+| `postToolUseFailure` | After a tool fails | Recovery guidance via **`additionalContext`** |
+| `notification` | Async CLI notification (`shell_completed`, `agent_completed`, `agent_idle`, `permission_prompt`, ...) | Can inject **`additionalContext`**; fire-and-forget, never blocks |
+| `permissionRequest` | Before the permission service runs | `{"behavior":"allow"|"deny"}` (CLI only; great for `-p`/CI) |
+| `preCompact` | Before context compaction (manual/auto) | Ignored |
+| `agentStop` | Main agent finishes a turn | **Block** -- `{"decision":"block","reason":"..."}` forces another turn |
+| `subagentStart` | A sub-agent is spawned | `additionalContext` prepended to its prompt |
+| `subagentStop` | Sub-agent completes | **Block** (force another turn) |
+| `errorOccurred` | Error during agent execution | Ignored |
+
+> **`additionalContext` is the declarative way to talk to the model.** Several
+> events (`postToolUse`, `notification`, `sessionStart`, `postToolUseFailure`)
+> let a hook write `{"additionalContext": "..."}` to stdout and the string is
+> surfaced to the model. This is the supported replacement for the **removed**
+> extension SDK `onPostToolUse` callback: a command hook can read a small
+> **state file** (e.g. a sidecar maintained by a background process) and inject
+> a nudge when some condition holds -- no `extension.mjs` required. Multiple
+> hooks' `additionalContext` are joined (double newline) and capped at 10 KB.
 
 ### Script I/O
 
 - **Input:** read all of stdin as JSON (`jq` in bash, `ConvertFrom-Json` in
   PowerShell). Tool hooks also receive `toolName` / `toolArgs`; post-tool hooks
   include `toolResult`.
-- **Output (preToolUse only):** single-line JSON on stdout (`jq -c` /
-  `ConvertTo-Json -Compress`).
+- **Output:** a single JSON object on stdout. Decision/injection events read it
+  -- `preToolUse` (`permissionDecision`/`modifiedArgs`), `postToolUse` /
+  `postToolUseFailure` / `notification` / `sessionStart` (`additionalContext`),
+  `permissionRequest` (`behavior`), `agentStop` (`decision`). Emit **exactly
+  one** final JSON object (progress lines `{"type":"progress",...}` are stripped
+  first; two decision objects concatenate into invalid JSON and are ignored).
+  Other events ignore stdout.
 - **Stderr:** debug logging, ignored. **Exit code:** 0 = success.
 - **Performance:** hooks run synchronously and block the agent -- keep them under
   5 seconds; background expensive work.

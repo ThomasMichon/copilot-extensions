@@ -15,6 +15,32 @@ best practices baked in.
 Each skill supplements knowledge the CLI does not ship natively and points at the
 authoritative GitHub Copilot CLI and Anthropic Agent Skills documentation.
 
+## Choosing a surface: declarative first
+
+Copilot CLI exposes two kinds of customization:
+
+- **Declarative surfaces** (what these skills cover) -- skills, custom
+  instructions, **hooks** (`.github/hooks/*.json`), sub-agents, MCP servers, and
+  plugins. All are config/Markdown loaded by the runtime; nothing to compile, no
+  process to babysit.
+- **The imperative Extensions API** -- a JavaScript `extension.mjs` that calls
+  `joinSession(...)` to register tools/commands, subscribe to `session.on(...)`
+  events, and drive the session via `session.send(...)`.
+
+**Prefer the declarative surfaces.** They are simpler, safer, and first-class in
+the runtime. The Extensions API is heavier and **may be on its way out**: the
+native runtime (1.0.66+) already **removed extension SDK callback hooks**
+(`joinSession({ hooks: {...} })` now fails the extension at load), and the
+**declarative hook system has grown to cover what those callbacks did** --
+including injecting `additionalContext` into the model from `postToolUse` /
+`notification` / `sessionStart` (see the `authoring-skills` hooks section). A
+hook can read a small **state file** (maintained by a lightweight background
+process if needed) and emit `{"additionalContext": "..."}`, which is the
+declarative replacement for the old extension `onPostToolUse` injection. Reach
+for an extension only when no declarative surface can express the goal (e.g. a
+genuinely interactive slash command with live UI), and keep the imperative part
+minimal.
+
 ## Install
 
 No runtime — the skills load from the marketplace payload when enabled.
