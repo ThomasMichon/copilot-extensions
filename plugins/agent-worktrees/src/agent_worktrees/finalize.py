@@ -41,7 +41,7 @@ import shutil
 import time
 from pathlib import Path
 
-from . import activity, git_ops, hooks, output, permissions, sessions, tracking
+from . import activity, git_ops, hooks, output, permissions, procs, sessions, tracking
 from .config import Config
 
 
@@ -873,6 +873,20 @@ def validate_and_finalize(
             )
         else:
             print("Removing worktree...")
+            # Tear down the mux session and terminate any process still rooted
+            # in the worktree before removing it, so directory locks don't leave
+            # an empty shell behind (issue dotfiles#139).
+            sessions.kill_tmux_session(worktree_id)
+            try:
+                killed = procs.terminate_processes_under(worktree_path)
+            except Exception:
+                killed = []
+            if killed:
+                names = ", ".join(
+                    f"{k['name'] or '?'}({k['pid']})" for k in killed if k["killed"])
+                if names:
+                    output.info(f"Terminated lingering process(es): {names}")
+
             if not git_ops.remove_worktree(anchor, worktree_path):
                 output.warn("Could not remove worktree via git -- forcing directory removal.")
 
@@ -897,12 +911,15 @@ def validate_and_finalize(
 
             wt_dir = Path(worktree_path)
             if wt_dir.exists():
-                shutil.rmtree(wt_dir, ignore_errors=True)
+                for attempt in range(4):
+                    shutil.rmtree(wt_dir, ignore_errors=True)
+                    if not wt_dir.exists():
+                        break
+                    time.sleep(0.25 * (attempt + 1))
                 if wt_dir.exists():
                     output.warn(f"Directory still present after cleanup: {wt_dir}")
 
             git_ops.prune_worktrees(cwd=anchor)
-            sessions.kill_tmux_session(worktree_id)
 
         # Merge permissions
         merged = permissions.merge_permissions(anchor, worktree_path)
