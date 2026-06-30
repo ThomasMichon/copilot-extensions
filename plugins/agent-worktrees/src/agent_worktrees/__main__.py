@@ -3086,12 +3086,26 @@ def _resolve_segment_title(
     return title
 
 
-def cmd_status_segment(args: argparse.Namespace) -> int:
-    """Print one styled status-bar segment for the worktree at the path/cwd.
+def _render_status_segment(
+    path: str | None = None,
+    fetch: bool = False,
+    plain: bool = False,
+    no_title: bool = False,
+) -> str:
+    """Render one styled status-bar segment for the worktree at the path/cwd.
 
-    Intended to be polled from a multiplexer status line::
+    Returns the segment string (empty outside a git worktree).  The
+    ``status-updater`` loop calls this in-process to refresh a session's
+    ``@aw_seg`` option; ``cmd_status_segment`` is the thin print wrapper.
+
+    Historically polled directly from a multiplexer status line::
 
         set -g status-right '#(agent-worktrees status-segment)'
+
+    -- but that spawns a process per render, which psmux runs synchronously
+    in the paint path (no #() caching like tmux), tanking responsiveness.
+    The status bar now reads a precomputed ``#{@aw_seg}`` instead, refreshed
+    off the paint path by ``status-updater``.
 
     Classifies the worktree's git disposition relative to its upstream
     default branch -- independent of any live session -- and prints::
@@ -3111,7 +3125,7 @@ def cmd_status_segment(args: argparse.Namespace) -> int:
     remote.  Prints nothing (exit 0) outside a git worktree so a
     misconfigured status line never spams errors into the bar.
     """
-    target = str(Path(args.path).resolve()) if args.path else os.getcwd()
+    target = str(Path(path).resolve()) if path else os.getcwd()
 
     # Remote / default-branch.  The config gives a hint, but the segment may
     # run in any repo, so the real upstream branch is detected from git
@@ -3132,15 +3146,15 @@ def cmd_status_segment(args: argparse.Namespace) -> int:
 
     try:
         info = git_ops.classify_worktree(
-            target, branch, fetch=bool(args.fetch),
+            target, branch, fetch=bool(fetch),
             remote=remote, default_branch=default_branch,
             active_paths=None,  # raw git disposition -- never ACTIVE
         )
     except Exception:
-        return 0  # not a worktree / git failure -> empty bar, no noise
+        return ""  # not a worktree / git failure -> empty bar, no noise
 
     if info.state == git_ops.WorktreeState.GONE:
-        return 0
+        return ""
 
     if rec is not None:
         info = _apply_tracking_override(rec, info)
@@ -3170,18 +3184,28 @@ def cmd_status_segment(args: argparse.Namespace) -> int:
         )
         tag = sync
 
-    if args.plain:
+    if plain:
         block = f"[{label}{tag}]"
     else:
         block = f"#[bg={bg},fg=colour015,bold] {label}{tag} #[default]"
 
     parts: list[str] = []
-    if not args.no_title:
+    if not no_title:
         title = _resolve_segment_title(rec, target, info, ctx)
         if title:
             parts.append(title)
     parts.append(block)
-    print(" ".join(parts))
+    return " ".join(parts)
+
+
+def cmd_status_segment(args: argparse.Namespace) -> int:
+    """Print the worktree status-bar segment (thin wrapper over the renderer)."""
+    line = _render_status_segment(
+        args.path, fetch=bool(args.fetch),
+        plain=bool(args.plain), no_title=bool(args.no_title),
+    )
+    if line:
+        print(line)
     return 0
 
 
@@ -3205,14 +3229,14 @@ _ENV_BG: dict[str, str] = {
 }
 
 
-def cmd_status_context(args: argparse.Namespace) -> int:
-    """Print the left status-bar segment: machine, environment, repo:id.
+def _render_status_context(path: str | None = None, plain: bool = False) -> str:
+    """Render the left status-bar segment: machine, environment, repo:id.
 
-    Intended to be polled from a multiplexer status line::
+    Returns the identity string (empty when no fields resolve).  Static for
+    a session's lifetime, so ``status-updater`` renders it once into
+    ``@aw_ctx``; ``cmd_status_context`` is the thin print wrapper.
 
-        set -g status-left '#(agent-worktrees status-context) '
-
-    Renders three identity fields for the worktree the pane is in::
+    Renders three identity fields for the worktree the path is in::
 
         <machine>  <env-badge>  <repo>:<id4>
 
@@ -3220,12 +3244,10 @@ def cmd_status_context(args: argparse.Namespace) -> int:
     the platform short code (``win``/``wsl``/``linux``, matching the
     worktree id) rendered as a colored badge keyed on OS type, and
     ``<id4>`` is the worktree id's 4-char suffix (its "last 4 digits").
-    Values come from the worktree's tracking record when the pane is
-    inside a tracked worktree, falling back to live host detection
-    otherwise.  Prints nothing problematic outside a worktree so a
-    misconfigured status line never spams the bar.
+    Values come from the worktree's tracking record when the path is
+    inside a tracked worktree, falling back to live host detection.
     """
-    target = str(Path(args.path).resolve()) if args.path else os.getcwd()
+    target = str(Path(path).resolve()) if path else os.getcwd()
     rec = _find_record_for_path(target)
 
     machine = (rec.machine if rec and rec.machine else "") \
@@ -3241,11 +3263,10 @@ def cmd_status_context(args: argparse.Namespace) -> int:
 
     fields = [f for f in (machine, env, locus) if f]
     if not fields:
-        return 0
+        return ""
 
-    if args.plain:
-        print("  ".join(fields))
-        return 0
+    if plain:
+        return "  ".join(fields)
 
     bg = _ENV_BG.get(env, "colour238")
     styled: list[str] = []
@@ -3256,7 +3277,88 @@ def cmd_status_context(args: argparse.Namespace) -> int:
     if locus:
         styled.append(f"#[fg=colour016,bold]{locus}#[default]")
     # Lead with a style directive so the 1-char left padding is not trimmed.
-    print("#[default] " + " ".join(styled))
+    return "#[default] " + " ".join(styled)
+
+
+def cmd_status_context(args: argparse.Namespace) -> int:
+    """Print the left identity segment (thin wrapper over the renderer)."""
+    line = _render_status_context(args.path, plain=bool(args.plain))
+    if line:
+        print(line)
+    return 0
+
+
+def cmd_status_updater(args: argparse.Namespace) -> int:
+    """Keep a session's status-bar vars fresh without per-render spawns.
+
+    The status bar references precomputed user options -- ``#{@aw_ctx}``
+    (identity, static) and ``#{@aw_seg}`` (git disposition, dynamic) --
+    instead of polling ``#(agent-worktrees ...)``.  psmux runs ``#()`` jobs
+    synchronously in the paint path (no tmux-style caching), so a
+    600 ms-class binstub spawn per repaint under Copilot's high-framerate
+    TUI made muxed sessions unusable.  This long-lived loop moves that cost
+    off the paint path: it renders **in-process** (paying Python import once,
+    never re-spawning the binstub) and only ever shells out to the cheap,
+    native ``set-option`` / ``has-session`` mux verbs.
+
+    Identity is rendered once into ``@aw_ctx``; disposition is refreshed into
+    ``@aw_seg`` every ``--interval`` seconds until the session ends.  Intended
+    to be launched detached, once, by the session launcher at create time.
+    """
+    import shutil
+    import subprocess
+    import time
+
+    sess = args.session
+    if not sess:
+        return 2
+
+    mux = args.mux or ("psmux" if shutil.which("psmux") else "tmux")
+    mux_bin = shutil.which(mux) or mux
+    path = args.path or os.getcwd()
+    interval = args.interval if args.interval and args.interval >= 2 else 15
+
+    def _mux(*a: str) -> "subprocess.CompletedProcess[str] | None":
+        try:
+            return subprocess.run(
+                [mux_bin, *a],
+                capture_output=True, text=True, timeout=15,
+            )
+        except Exception:
+            return None
+
+    def _has_session() -> bool:
+        r = _mux("has-session", "-t", sess)
+        return r is not None and r.returncode == 0
+
+    def _set(opt: str, val: str) -> None:
+        # Session-scoped (no -g): empirically isolated per session on psmux
+        # 3.3.6 and tmux 3.4, so concurrent worktree sessions don't clobber
+        # each other's bar.
+        _mux("set-option", "-t", sess, opt, val)
+
+    if not _has_session():
+        return 0
+
+    # Identity (machine | env | repo:id4) is static for the session's life:
+    # render once, push to @aw_ctx, never poll it again.
+    try:
+        _set("@aw_ctx", _render_status_context(path, plain=False))
+    except Exception:
+        pass
+
+    # Disposition (DIRTY/FINAL/WIP/CONVO/...) changes as work happens: refresh
+    # @aw_seg on the interval.  The bar itself does zero process work between
+    # updates -- psmux only re-runs the strftime %H:%M clock.
+    while _has_session():
+        try:
+            seg = _render_status_segment(
+                path, fetch=False, plain=False, no_title=False,
+            )
+        except Exception:
+            seg = ""
+        _set("@aw_seg", seg)
+        time.sleep(interval)
     return 0
 
 
@@ -5189,6 +5291,7 @@ _WORKTREE_VERBS = {
     "status": "status",
     "status-segment": "status-segment",
     "status-context": "status-context",
+    "status-updater": "status-updater",
     "push": "push-changes",
     "push-changes": "push-changes",
     "create-pr": "create-pr",
@@ -6734,6 +6837,21 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Worktree path to describe (default: current directory)")
     p.add_argument("--plain", action="store_true",
                    help="Plain text without tmux #[style] directives")
+
+    # status-updater (background loop: refresh @aw_ctx/@aw_seg off the paint path)
+    p = sub.add_parser(
+        "status-updater",
+        help="Background loop: keep a session's @aw_ctx/@aw_seg status vars "
+             "fresh (no per-render binstub spawns)",
+    )
+    p.add_argument("--session", required=True,
+                   help="Mux session name to update (e.g. wt-<id>)")
+    p.add_argument("--mux", default=None, choices=["psmux", "tmux"],
+                   help="Multiplexer binary (default: auto-detect)")
+    p.add_argument("--path", default=None,
+                   help="Worktree path to classify (default: current directory)")
+    p.add_argument("--interval", type=int, default=15,
+                   help="Disposition refresh cadence in seconds (min 2)")
     p = sub.add_parser("list", help="List worktrees from tracking records")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
@@ -7348,6 +7466,7 @@ COMMAND_MAP = {
     "status": cmd_status,
     "status-segment": cmd_status_segment,
     "status-context": cmd_status_context,
+    "status-updater": cmd_status_updater,
     "list": cmd_list,
     "create": cmd_create,
     "remove-system": cmd_remove_system,

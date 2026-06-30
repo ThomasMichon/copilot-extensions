@@ -492,6 +492,26 @@ function Set-PsmuxLastSession {
         }
     } catch {}
 }
+# Start the detached status-bar updater for a session. It renders the
+# identity (@aw_ctx) once and refreshes the git-disposition (@aw_seg) off
+# psmux's paint path, so the status bar never spawns a process per render.
+# Best-effort: a failure here just leaves a static/blank bar, never blocks
+# the launch.  Spawned only at session *creation* (one per session); joins
+# reuse the still-running updater.
+function Start-StatusUpdater {
+    param([string]$Session, [string]$WorkDir)
+    if (-not $Session) { return }
+    try {
+        $updArgs = @('-m', 'agent_worktrees', 'status-updater',
+                     '--session', $Session, '--mux', 'psmux')
+        if ($WorkDir) { $updArgs += @('--path', $WorkDir) }
+        Start-Process -FilePath $VenvPython -ArgumentList $updArgs `
+            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+        Write-SetupLog "psmux: started status-updater for $Session"
+    } catch {
+        Write-SetupLog "psmux: status-updater spawn failed: $($_.Exception.Message)" 'WARN'
+    }
+}
 if (-not $noMux -and $psmuxCmd) {
     $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
     $sessName = "wt-$wtId"
@@ -562,6 +582,9 @@ if (-not $noMux -and $psmuxCmd) {
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Failed to create psmux session. Falling back to direct launch."
     } else {
+        # Session created: start its status-bar updater (one per session,
+        # before any nested-create early-exit so the bar populates either way).
+        Start-StatusUpdater $sessName $plan.work_dir
         if ($nested) {
             Write-Host "Session created: $sessName (open a new terminal to join)"
             exit 0

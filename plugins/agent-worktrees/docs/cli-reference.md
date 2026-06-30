@@ -79,6 +79,7 @@ continue to work unchanged.
 | `status` | Show worktree git status |
 | `status-segment` | Print a styled status-bar segment for the worktree at the cwd (for a tmux/psmux status line) |
 | `status-context` | Print a styled left status-bar segment: machine, environment, and repo:id4 for the worktree at the cwd |
+| `status-updater` | Background loop that keeps a session's `@aw_ctx`/`@aw_seg` status vars fresh **off the paint path** (no per-render binstub spawn) |
 | `list` | List worktrees from tracking records |
 | `handoff` | Manage handoff prompt state on a worktree |
 
@@ -164,7 +165,42 @@ tracked worktree it falls back to live machine/platform detection and omits
 the `repo:id4` field. Flags: `--path PATH`, `--plain` (no `#[style]`
 directives).
 
-### Per-session, not global (Linux/WSL)
+### Off the paint path: `status-updater` (psmux / Windows)
+
+Polling `#(agent-worktrees status-segment)` directly from the bar is fine on
+**tmux**, which runs `#()` jobs asynchronously and caches the result between
+`status-interval` ticks. **psmux** (Windows) does not: it runs `#()`
+synchronously **in the render path**, so a ~600 ms binstub spawn (two fresh
+PowerShell processes for the two segments) fired on every repaint. Under
+Copilot's high-framerate TUI that made muxed sessions sluggish on lambda-core
+and unusable on slower hosts.
+
+`status-updater` fixes this by moving the work off the paint path. The psmux
+bar reads **precomputed session options** instead of spawning:
+
+```psmux
+set -g status-left  '#{@aw_ctx} '          # identity  (machine | env | repo:id4)
+set -g status-right '#{@aw_seg} %H:%M '     # disposition block + live clock
+```
+
+At session creation the launcher spawns one detached updater:
+
+```text
+agent-worktrees status-updater --session wt-<id> --mux psmux --path <worktree>
+```
+
+It renders **in-process** (paying Python import once, never re-spawning the
+binstub), pushes the static identity into `@aw_ctx` once, and refreshes the
+dynamic disposition into `@aw_seg` every `--interval` seconds (default 15) via
+the cheap native `set-option` verb -- exiting on its own when `has-session`
+shows the session is gone. Between updates the bar does **zero** process work;
+psmux only re-runs the strftime `%H:%M` clock. Non-worktree psmux sessions
+leave the vars unset and render a blank bar.
+
+Flags: `--session` (required), `--mux {psmux,tmux}` (default: auto-detect),
+`--path PATH` (worktree to classify), `--interval N` (seconds, min 2).
+
+
 
 agent-worktrees does **not** deploy, overwrite, or delete your global
 `~/.tmux.conf`. The launcher applies the bar and session behaviors with
