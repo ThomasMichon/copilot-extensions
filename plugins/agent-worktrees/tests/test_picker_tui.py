@@ -790,3 +790,26 @@ def test_screen_on_unmount_cancels_loader():
     screen.loader = _FakeLoader()
     screen.on_unmount()
     assert cancelled["v"] is True
+
+
+def test_real_ops_default_on_and_opt_out(monkeypatch):
+    """Real Maintenance ops are the default; =0 forces the mock walker (#1420)."""
+    src = _fixture_source()
+
+    def _real_ops_for_env(value):
+        if value is None:
+            monkeypatch.delenv("AGENT_WORKTREES_PICKER_REAL_OPS", raising=False)
+        else:
+            monkeypatch.setenv("AGENT_WORKTREES_PICKER_REAL_OPS", value)
+
+        async def _run():
+            app = PickerApp(src, live=False)
+            async with app.run_test(size=(118, 36)):
+                return app.query_one(PickerScreen).real_ops
+
+        return asyncio.run(_run())
+
+    # Default (unset) -> real ops on; explicit "0" -> mock walker; "1" -> on.
+    assert _real_ops_for_env(None) is True
+    assert _real_ops_for_env("0") is False
+    assert _real_ops_for_env("1") is True
