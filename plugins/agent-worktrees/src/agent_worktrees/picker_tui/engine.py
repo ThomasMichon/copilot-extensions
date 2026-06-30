@@ -2091,10 +2091,32 @@ class PickerScreen(Widget):
                 tail = f" · {failed} failed" if failed else ""
                 self.debug = f"{verb} {state} · {n} host column(s){tail}"
                 return
+            was_real = self.executor is not None and p["done"]
             self.progress = None
             self.executor = None
+            if was_real:
+                # A real Cleanup/Sync changed worktree state -- reload the
+                # machines it touched so the list re-renders without a Picker
+                # restart (#1421, live re-render half).
+                self._refresh_after_maint(p)
             tail = f" · {failed} failed" if failed else ""
             self.debug = f"{verb} {state} · {n} worktrees{tail}{sim}"
+
+    def _refresh_after_maint(self, p):
+        """Reload the machines a real Cleanup/Sync just touched.
+
+        Local re-reads in-process (instant); remote re-fetches stream back in on
+        a thread. Keeps the worktree list honest after maintenance without a
+        full Picker relaunch (#1421).
+        """
+        targets = {(r.get("machine"), r.get("env"))
+                   for r in p.get("recs", []) if r.get("machine")}
+        if self.live and self.loader is not None:
+            for m, e in targets:
+                self.loader.reload(m, e)
+            self.data = self.loader.records()
+        elif not self.live:
+            self.data = self.src.load()
 
     def _dlg_confirm(self, om):
         if om:
