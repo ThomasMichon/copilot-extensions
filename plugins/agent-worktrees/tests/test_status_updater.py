@@ -134,6 +134,26 @@ def test_status_updater_requires_session():
     assert m.cmd_status_updater(_ns(session="")) == 2
 
 
+def test_status_updater_loop_requests_title_persistence(monkeypatch):
+    """The loop must render the segment with persist_title=True so the
+    daemon lands the resolved title in rec.title (the Picker's slot)."""
+    flags: list[object] = []
+    monkeypatch.setattr(subprocess, "run", _fake_mux([0, 0, 1], []))
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+
+    def _seg(_path, **kw):
+        flags.append(kw.get("persist_title"))
+        return "SEG"
+
+    monkeypatch.setattr(m, "_render_status_segment", _seg)
+    monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)
+
+    rc = m.cmd_status_updater(_ns())
+
+    assert rc == 0
+    assert flags and all(f is True for f in flags)
+
+
 def test_status_updater_survives_render_errors(monkeypatch):
     """A transient render exception must not kill the loop or leak out."""
     calls: list[tuple[str, str]] = []

@@ -471,6 +471,15 @@ def _worktree_to_dict(
         norm = _normalize_path(rec.worktree_path)
         d["turn_count"] = session_ctx.turn_count.get(norm, 0)
         d["session_count"] = session_ctx.session_count.get(norm, 0)
+        # Overall-summary slot: prefer the persisted title (curated by
+        # finalize/PR or captured by the status-updater/deregister hook), but
+        # fall back to the live session summary so a worktree whose title has
+        # not been persisted yet still reads meaningfully instead of
+        # "(untitled)".  Mirrors the fallback used by the status/list paths.
+        if not (d.get("title") and d["title"] != "null"):
+            summary = session_ctx.latest_summary.get(norm)
+            if summary:
+                d["title"] = summary
     # PR metadata: the active PR (back-compat ``pr``) plus the full list and a
     # count so consumers can see serial/parallel PRs at a glance.
     if rec.prs:
@@ -3102,11 +3111,50 @@ def _resolve_segment_title(
     return title
 
 
+def _persist_segment_title(
+    rec: tracking.WorktreeRecord,
+    path: str,
+    ctx: sessions.SessionContext | None,
+) -> None:
+    """Persist the live session overall-summary into the worktree's ``title``.
+
+    The ``title`` field is the single slot the Picker reads, so the
+    status-updater -- which already resolves the title every tick -- lands it
+    there instead of only painting the mux status bar.  This keeps the overall
+    summary alive after the Copilot session-state directory is cleaned up
+    (when the live ``latest_summary`` is no longer derivable).
+
+    Distinct from the live "latest action" disposition (DIRTY/WIP/CONVO),
+    which stays ephemeral in ``@aw_seg`` -- this only persists the slow,
+    overall summary.
+
+    Only the session summary is persisted (never the commit-subject fallback,
+    which would lock in a poor title), and a finalized/completed worktree's
+    curated PR/squash title is left untouched.  A no-op when nothing changed,
+    so per-tick writes don't churn the YAML.
+    """
+    if ctx is None:
+        return
+    if (rec.status or "").lower() in ("finalized", "complete", "completed"):
+        return  # curated title -- don't clobber
+    summary = ctx.latest_summary.get(_normalize_path(path), "")
+    if not summary or summary == "null":
+        return
+    if (rec.title or "") == summary:
+        return
+    try:
+        rec.title = summary
+        tracking.save_record(rec)
+    except Exception:
+        pass
+
+
 def _render_status_segment(
     path: str | None = None,
     fetch: bool = False,
     plain: bool = False,
     no_title: bool = False,
+    persist_title: bool = False,
 ) -> str:
     """Render one styled status-bar segment for the worktree at the path/cwd.
 
@@ -3208,6 +3256,8 @@ def _render_status_segment(
     parts: list[str] = []
     if not no_title:
         title = _resolve_segment_title(rec, target, info, ctx)
+        if persist_title and rec is not None:
+            _persist_segment_title(rec, target, ctx)
         if title:
             parts.append(title)
     parts.append(block)
@@ -3388,6 +3438,7 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
         try:
             seg = _render_status_segment(
                 path, fetch=False, plain=False, no_title=False,
+                persist_title=True,
             )
         except Exception:
             seg = ""
@@ -7386,35 +7437,42 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
     return 0
 
 
-def _capture_session_title(worktree_id: str, session_id: str) -> None:
+def _capture_session_title(worktree_id: str, session_id: str) -> bool:
     """Read summary/name from the session's workspace.yaml and persist it
     to the tracking YAML ``title`` field if not already set.
 
     This ensures the worktree retains a descriptive title even after the
-    Copilot session-state directory is cleaned up.
+    Copilot session-state directory is cleaned up.  Returns ``True`` when a
+    title was written, ``False`` otherwise (already titled, session-state
+    gone, or no usable summary) -- so callers can try sessions newest-first.
     """
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
-        return
+        return False
 
     rec = tracking.load_record(yaml_path)
     if rec.title and rec.title != "null":
-        return  # already has a title
+        return False  # already has a title
 
     # Read summary/name from the session's workspace.yaml
     session_dir = sessions._session_state_dir() / session_id
     ws_file = session_dir / "workspace.yaml"
     if not ws_file.exists():
-        return
+        return False
+    # Detached parent-continuation sessions (subconscious / rem-agent runs)
+    # reuse the parent's cwd and carry the generic "Apply context_board ..."
+    # prompt as their name/summary -- never a meaningful worktree title.
+    if sessions._is_detached_session(session_dir):
+        return False
 
     try:
         with open(ws_file, encoding="utf-8") as f:
             ws_data = yaml.safe_load(f)
     except Exception:
-        return
+        return False
 
     if not ws_data or not isinstance(ws_data, dict):
-        return
+        return False
 
     _placeholder = ("", "|-", "|", ">-", ">", "null", "Untitled")
     display_text = ""
@@ -7429,45 +7487,75 @@ def _capture_session_title(worktree_id: str, session_id: str) -> None:
     if display_text:
         rec.title = display_text
         tracking.save_record(rec)
+        return True
+    return False
 
 
 def cmd_backfill_sessions(args: argparse.Namespace) -> int:
-    """Populate empty session registries from existing session-state data."""
+    """Populate empty session registries -- and the Picker's title slot --
+    from existing session-state data.
+
+    Two independent passes:
+
+      1. **Session registry** -- records with an empty ``sessions`` list get
+         their discovered session ids written back.
+
+      2. **Title (overall summary)** -- records lacking a ``title`` get one
+         captured from their newest session's ``workspace.yaml`` (newest
+         first, falling back to older sessions whose state still exists), so
+         the Picker shows the summary instead of "(untitled)".  Runs even
+         when every record already has session data -- e.g. after an earlier
+         sessions-only backfill that left titles null.
+    """
     tracking_path = cfg.tracking_dir()
     records = tracking.list_records(tracking_path)
 
-    # Only backfill records with empty sessions lists
+    # --- Pass 1: session registry (only records with empty sessions) ---
     need_backfill = [r for r in records if not r.sessions]
-    if not need_backfill:
-        output.ok("All worktree records already have session data")
-        return 0
+    discovered: dict[str, list[str]] = {}
+    sess_updated = 0
+    if need_backfill:
+        print(f"Scanning session-state for {len(need_backfill)} worktree(s)...")
+        discovered = sessions.backfill_sessions(need_backfill)
+        for rec in need_backfill:
+            sids = discovered.get(rec.worktree_id, [])
+            if not sids:
+                # Mark as indexed (empty list) so we don't rescan
+                if rec.sessions is None:
+                    rec.sessions = []
+                    tracking.save_record(rec)
+                    sess_updated += 1
+                continue
 
-    print(f"Scanning session-state for {len(need_backfill)} worktree(s)...")
-    discovered = sessions.backfill_sessions(need_backfill)
+            rec.sessions = [
+                tracking.SessionEntry(session_id=sid, started_at="")
+                for sid in sids
+            ]
+            tracking.save_record(rec)
+            sess_updated += 1
 
-    updated = 0
-    for rec in need_backfill:
-        sids = discovered.get(rec.worktree_id, [])
-        if not sids:
-            # Mark as indexed (empty list) so we don't rescan
-            if rec.sessions is None:
-                rec.sessions = []
+    # --- Pass 2: title slot (any record still lacking a title) ---
+    # Use the same scan the Picker reads from (skips detached subconscious
+    # sessions and picks the newest summary by updated_at), so a backfilled
+    # title matches exactly what the Picker/status-bar would otherwise derive
+    # live -- and survives later session-state cleanup.
+    titled = 0
+    title_targets = [r for r in records if not (r.title and r.title != "null")]
+    if title_targets:
+        tctx = sessions.scan_sessions_fast(title_targets)
+        for rec in title_targets:
+            summary = tctx.latest_summary.get(
+                _normalize_path(rec.worktree_path), "")
+            if summary and summary != "null":
+                rec.title = summary
                 tracking.save_record(rec)
-                updated += 1
-            continue
-
-        rec.sessions = [
-            tracking.SessionEntry(session_id=sid, started_at="")
-            for sid in sids
-        ]
-        tracking.save_record(rec)
-        updated += 1
+                titled += 1
 
     total_sessions = sum(len(v) for v in discovered.values())
     print(
-        f"Backfilled {total_sessions} session(s) "
-        f"across {len(discovered)} worktree(s) "
-        f"({updated} record(s) updated)"
+        f"Backfilled {total_sessions} session(s) across "
+        f"{len(discovered)} worktree(s); "
+        f"{sess_updated} registry + {titled} title record(s) updated"
     )
     return 0
 
