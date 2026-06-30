@@ -578,6 +578,7 @@ def _create_worktree_core(
     return {
         "worktree": _worktree_to_dict(record),
         "launch": {
+            "action": "exec",
             "work_dir": worktree_path,
             "cmd": launch_cmd,
             "env": env,
