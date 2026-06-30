@@ -5748,7 +5748,13 @@ def _cmd_services_batch(action: str, flags: list[str]) -> int:
 
 def _repos_usage() -> None:
     """Print repos subcommand usage."""
-    project = cfg.project_name()
+    # `repos` is a no-project command, so usage must render even without
+    # project context. Fall back to the generic binstub name rather than
+    # raising when WORKTREE_PROJECT is unset.
+    try:
+        project = cfg.project_name()
+    except Exception:
+        project = "agent-worktrees"
     print(f"Usage: {project} repos <command>")
     print()
     print("Commands:")
