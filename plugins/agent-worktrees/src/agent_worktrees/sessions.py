@@ -982,3 +982,111 @@ def kill_tmux_session(worktree_id: str) -> bool:
         # spawn failures such as WinError 4551 (Application Control policy
         # blocked the executable). Degrade gracefully instead of crashing.
         return False
+
+
+def _mux_send_keys(worktree_id: str, keys: str) -> bool:
+    """Send a key sequence to a worktree's mux pane (tmux/psmux ``send-keys``).
+
+    ``keys`` uses tmux key syntax (e.g. ``"C-c"`` for Ctrl-C). Returns True if
+    the command succeeded, False if the session/mux is gone or unavailable.
+    """
+    import subprocess
+
+    sess_name = f"wt-{worktree_id}"
+    if platform.system() == "Windows":
+        cmd = ["psmux", "send-keys", "-t", sess_name, keys]
+    else:
+        # ``send-keys`` needs a *pane* target: the bare ``=wt-<id>`` exact-match
+        # form (valid for has-session/kill-session) is rejected as "can't find
+        # pane", so append ``:`` to address the session's active pane while
+        # keeping the ``=`` exact-session match (avoids hitting a ``wt-<id>-x``
+        # sibling).
+        cmd = ["tmux", "send-keys", "-t", f"={sess_name}:", keys]
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=5)
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def graceful_quit_mux_session(
+    worktree_id: str,
+    *,
+    settle_timeout: float = 6.0,
+    poll_interval: float = 0.3,
+    ctrl_c_gap: float = 0.5,
+) -> bool:
+    """Ask the interactive Copilot in a worktree's mux session to quit cleanly.
+
+    Copilot CLI exits on a **double Ctrl-C** -- two interrupts ~300-800 ms
+    apart. We deliver them via the multiplexer's ``send-keys`` (tmux on
+    Linux/WSL, psmux on Windows), which is Copilot's *native* clean-quit path:
+    it lets Copilot tear down its own session rather than being signalled out
+    from under (a plain ``SIGTERM`` to the pane only ``SIGHUP``s Copilot when
+    its shell dies, which is no cleaner than the hard kill below). When Copilot
+    exits, the pane's only command ends, dropping the single-window
+    ``wt-<id>`` session.
+
+    Returns True if the session ended within ``settle_timeout`` (graceful quit
+    succeeded), False otherwise (the caller should fall back to a hard
+    ``kill_tmux_session``). A worktree with no live mux session counts as
+    already quit (True).
+    """
+    import time
+
+    if not has_mux_session(worktree_id):
+        return True
+    # Double Ctrl-C, ``ctrl_c_gap`` apart (default 0.5 s, within Copilot's
+    # 300-800 ms window). If the first send fails the mux is already gone.
+    if not _mux_send_keys(worktree_id, "C-c"):
+        return not has_mux_session(worktree_id)
+    time.sleep(ctrl_c_gap)
+    _mux_send_keys(worktree_id, "C-c")
+    # Wait for Copilot to exit and the session to drop.
+    deadline = time.monotonic() + settle_timeout
+    while time.monotonic() < deadline:
+        if not has_mux_session(worktree_id):
+            return True
+        time.sleep(poll_interval)
+    return not has_mux_session(worktree_id)
+
+
+def restart_worktree_copilot(
+    worktree_id: str,
+    *,
+    graceful: bool = True,
+    settle_timeout: float = 6.0,
+) -> dict:
+    """Terminate the interactive Copilot holding a worktree, keeping the worktree.
+
+    The shared primitive behind the Picker **"Restart"** maintenance action and
+    Neuron-Forge **"Take over"**: it stops the running interactive Copilot (its
+    ``wt-<id>`` tmux/psmux session) **without** removing the git worktree, so the
+    caller can relaunch interactively (Picker) or ACP-resume (NF) afterwards.
+
+    Ladder: with ``graceful`` (default), first ask Copilot to quit cleanly via a
+    double Ctrl-C (:func:`graceful_quit_mux_session`); if it does not exit within
+    ``settle_timeout``, hard-kill the mux session. With ``graceful=False`` it
+    hard-kills immediately.
+
+    Returns a JSON-able dict ``{worktree_id, had_session, method, ok}`` where
+    ``method`` is ``none`` (nothing was running), ``graceful``, ``hard``, or
+    ``failed``.
+    """
+    if not has_mux_session(worktree_id):
+        return {
+            "worktree_id": worktree_id, "had_session": False,
+            "method": "none", "ok": True,
+        }
+    if graceful and graceful_quit_mux_session(
+        worktree_id, settle_timeout=settle_timeout,
+    ):
+        return {
+            "worktree_id": worktree_id, "had_session": True,
+            "method": "graceful", "ok": True,
+        }
+    killed = kill_tmux_session(worktree_id)
+    return {
+        "worktree_id": worktree_id, "had_session": True,
+        "method": "hard" if killed else "failed", "ok": killed,
+    }

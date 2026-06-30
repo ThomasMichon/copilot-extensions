@@ -3824,6 +3824,34 @@ def cmd_reap_sessions(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_restart(args: argparse.Namespace) -> int:
+    """``restart <id>`` -- stop a worktree's interactive Copilot, keep the worktree.
+
+    The shared primitive behind the Picker "Restart" action and NF "Take over":
+    graceful double-Ctrl-C quit (Copilot's native clean exit), falling back to a
+    hard mux kill-session. Relaunch / ACP-resume is the caller's job.
+    """
+    payload = sessions.restart_worktree_copilot(
+        args.worktree_id,
+        graceful=not getattr(args, "no_graceful", False),
+        settle_timeout=getattr(args, "settle_timeout", 6.0),
+    )
+    if getattr(args, "json", False):
+        _json_output(payload)
+        return 0 if payload["ok"] else 1
+    wt = payload["worktree_id"]
+    if not payload["had_session"]:
+        print(f"{wt}: no interactive Copilot running (nothing to stop).")
+        return 0
+    if payload["method"] == "graceful":
+        print(f"{wt}: Copilot quit gracefully (double Ctrl-C).")
+    elif payload["method"] == "hard":
+        print(f"{wt}: Copilot hard-stopped (mux kill-session).")
+    else:
+        print(f"{wt}: failed to stop the interactive Copilot.")
+    return 0 if payload["ok"] else 1
+
+
 def _cleanup_one(args: argparse.Namespace) -> int:
     """``cleanup --worktree-id <id>`` -- thin CLI wrapper over :func:`reap_one`."""
     payload = reap_one(
@@ -6969,6 +6997,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true",
                    help="Emit a single JSON result object")
 
+    # restart (terminate a worktree's interactive Copilot, keep the worktree)
+    p = sub.add_parser(
+        "restart",
+        help="Stop a worktree's interactive Copilot (graceful double Ctrl-C, "
+             "then mux kill-session) -- keeps the worktree on disk. The shared "
+             "primitive behind the Picker 'Restart' action and NF 'Take over'; "
+             "relaunch/ACP-resume is performed by the caller.")
+    p.add_argument("worktree_id", help="Worktree id whose Copilot to stop")
+    p.add_argument("--no-graceful", action="store_true",
+                   help="Skip the graceful double-Ctrl-C quit; hard-kill the "
+                        "mux session immediately")
+    p.add_argument("--settle-timeout", type=float, default=6.0,
+                   help="Seconds to wait for a graceful quit before hard-killing "
+                        "(default: 6.0)")
+    p.add_argument("--json", action="store_true",
+                   help="Emit a single JSON result object")
+
     # sync (fast-forward worktrees to the default branch, FF-only)
     p = sub.add_parser("sync", help="Fast-forward worktrees to the default branch")
     p.add_argument("--worktree-id", default=None,
@@ -7521,6 +7566,7 @@ COMMAND_MAP = {
     "remove-system": cmd_remove_system,
     "cleanup": cmd_cleanup,
     "reap-sessions": cmd_reap_sessions,
+    "restart": cmd_restart,
     "sync": cmd_sync,
     "profiles": cmd_profiles,
     "picker": cmd_picker,
@@ -7706,7 +7752,7 @@ def _git_toplevel(path: Path) -> Path | None:
 # Commands that work without a project context (no load_config/project_name).
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "install", "register", "hook",
-    "picker", "reap-sessions", "status-updater",
+    "picker", "reap-sessions", "status-updater", "restart",
 }
 
 
