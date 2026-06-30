@@ -55,12 +55,13 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 
-from . import activity, git_ops, output, permissions, pr_ops, prune, sessions, tracking
+from . import activity, git_ops, output, permissions, pr_ops, procs, prune, sessions, tracking
 from . import config as cfg
 from . import finalize as fin
 from . import installer as inst
@@ -3594,12 +3595,39 @@ def _reap_worktree(
     failures = 0
 
     if rec.worktree_path and Path(rec.worktree_path).exists():
+        # Tear down the owning mux session first, then terminate any lingering
+        # process whose cwd is still rooted in the worktree (a stray gh, a
+        # status-updater, a leftover shell). On Windows an open cwd handle keeps
+        # the directory locked, so this must happen *before* rmtree or the dir
+        # is left behind as an empty shell (issue dotfiles#139).
+        sessions.kill_tmux_session(rec.worktree_id)
+        try:
+            killed = procs.terminate_processes_under(rec.worktree_path)
+        except Exception:
+            killed = []
+        if killed:
+            names = ", ".join(
+                f"{k['name'] or '?'}({k['pid']})" for k in killed if k["killed"])
+            if names:
+                warnings.append(f"Terminated lingering process(es): {names}")
+            activity.log_event(
+                "worktree_procs_terminated",
+                worktree_id=rec.worktree_id,
+                count=sum(1 for k in killed if k["killed"]),
+            )
+
         if not git_ops.remove_worktree(repo.anchor, rec.worktree_path):
             warnings.append(
                 "Could not remove worktree via git -- forcing directory removal.")
         wt_dir = Path(rec.worktree_path)
         if wt_dir.exists():
-            shutil.rmtree(wt_dir, ignore_errors=True)
+            # Locks may release a beat after the holding process dies; retry the
+            # tree removal briefly before giving up.
+            for attempt in range(4):
+                shutil.rmtree(wt_dir, ignore_errors=True)
+                if not wt_dir.exists():
+                    break
+                time.sleep(0.25 * (attempt + 1))
             if wt_dir.exists():
                 warnings.append(f"Directory still present: {wt_dir}")
                 failures += 1
@@ -3616,9 +3644,6 @@ def _reap_worktree(
 
     # Remove tracking YAML
     (tracking_path / f"{rec.worktree_id}.yaml").unlink(missing_ok=True)
-
-    # Kill any associated tmux session
-    sessions.kill_tmux_session(rec.worktree_id)
 
     activity.log_event(
         "worktree_reaped",
