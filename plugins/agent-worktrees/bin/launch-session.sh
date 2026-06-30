@@ -417,8 +417,21 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
         fi
         _aw_apply_session_opts() {
             if declare -F aw_apply_tmux_session_options >/dev/null 2>&1; then
-                aw_apply_tmux_session_options "$1" || true
+                aw_apply_tmux_session_options "$1" "${WORKTREE_ID:-}" || true
             fi
+        }
+        # Spawn (at most one) detached background writer that keeps the status
+        # cache files fresh OFF the render path, so the status bar can read them
+        # with a cheap `#(cat ...)` instead of spawning the Python CLI per frame.
+        _aw_spawn_status_writer() {
+            local sess="$1"
+            [[ -n "${WORKTREE_ID:-}" ]] || return 0
+            local writer="$HOME/.agent-worktrees/bin/status-writer.sh"
+            [[ -r "$writer" ]] || return 0
+            AW_BIN="$(command -v agent-worktrees 2>/dev/null || true)" \
+                setsid bash "$writer" "$sess" "$WORKTREE_ID" "${WORK_DIR:-$PWD}" \
+                >/dev/null 2>&1 < /dev/null &
+            disown 2>/dev/null || true
         }
 
         # If a tmux session already exists for this worktree, join it.
@@ -429,6 +442,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             # Refresh per-session options on (re)connect so a long-lived
             # session picks up the current bar without us owning the global.
             _aw_apply_session_opts "$TMUX_SESS"
+            _aw_spawn_status_writer "$TMUX_SESS"
             if [[ -n "${TMUX:-}" ]]; then
                 exec tmux switch-client -t "=$TMUX_SESS"
             else
@@ -491,6 +505,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
 
             activity_log mux_attached "$WORKTREE_ID" mux=create
             _aw_apply_session_opts "$TMUX_SESS"
+            _aw_spawn_status_writer "$TMUX_SESS"
             if [[ -n "${TMUX:-}" ]]; then
                 tmux switch-client -t "=$TMUX_SESS"
             else
@@ -525,6 +540,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
                             tmux new-session -d -s "$TMUX_SESS" -c "$WORK_DIR" "${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}" "${HANDOFF_PANE_CMD[@]}"
                             if [[ $? -eq 0 ]]; then
                                 _aw_apply_session_opts "$TMUX_SESS"
+                                _aw_spawn_status_writer "$TMUX_SESS"
                                 if [[ -n "${TMUX:-}" ]]; then
                                     tmux switch-client -t "=$TMUX_SESS"
                                 else
