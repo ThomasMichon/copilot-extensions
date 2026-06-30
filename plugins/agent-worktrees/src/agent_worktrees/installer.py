@@ -621,11 +621,33 @@ def show_install_status() -> None:
     else:
         output.err(f"Venv Python missing: {python}")
 
-    # Package
-    if lib.exists():
+    # Package: verify the venv can import the agent_worktrees package. This is
+    # mode-agnostic -- it works whether the package is pip-installed into the
+    # venv (current runtime mode) or file-copied into lib/ (legacy) -- and it
+    # reflects whether future invocations will actually resolve the package,
+    # rather than assuming one physical layout.
+    pkg_loc = ""
+    if python.exists():
+        try:
+            r = subprocess.run(
+                [str(python), "-c",
+                 "import agent_worktrees, os; "
+                 "print(os.path.dirname(agent_worktrees.__file__))"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if r.returncode == 0:
+                pkg_loc = r.stdout.strip()
+        except Exception:
+            pkg_loc = ""
+    if pkg_loc:
+        output.ok(f"Package importable: {pkg_loc}")
+    elif lib.exists():
         output.ok(f"Package deployed: {lib}")
     else:
-        output.err(f"Package missing: {lib}")
+        output.err(
+            "Package missing: venv cannot import agent_worktrees "
+            f"(checked venv site-packages and {lib})"
+        )
 
     # Wrappers
     bd = bin_dir()
