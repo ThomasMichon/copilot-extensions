@@ -14,6 +14,7 @@ from agent_bridge.transport import (
     SpawnTarget,
     _build_remote_cmd,
     _extract_json_object,
+    _resolve_worktree,
     _resolve_worktree_remote,
     _wrap_batch_for_windows,
     spawn,
@@ -910,3 +911,54 @@ class TestSpawnDispatchCommand:
             mock_raw.assert_called_once()
             assert mock_raw.call_args[0][0] == target
 
+
+
+class TestLocalResolveBridgeFallback:
+    """The local resolve marks new worktrees kind=bridge, retrying without
+    --bridge when the local agent-worktrees runtime is too old for it."""
+
+    def _proc(self, returncode, stdout=b"", stderr=b""):
+        p = MagicMock()
+        p.returncode = returncode
+        p.communicate = AsyncMock(return_value=(stdout, stderr))
+        return p
+
+    @pytest.mark.asyncio
+    async def test_local_new_sends_bridge(self):
+        plan = {"launch": {"worktree_id": "wt-1", "work_dir": "/d"}}
+        target = SpawnTarget(type="local", cwd="/c", project="proj")
+        calls = []
+
+        async def fake_exec(*argv, **kw):
+            calls.append(argv)
+            return self._proc(0, json.dumps(plan).encode())
+
+        with patch("os.path.exists", return_value=True), \
+             patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+            out = await _resolve_worktree(target, {})
+
+        assert out == plan
+        assert "--bridge" in calls[0] and "--new" in calls[0]
+
+    @pytest.mark.asyncio
+    async def test_local_retries_without_bridge_on_old_runtime(self):
+        plan = {"launch": {"worktree_id": "wt-1", "work_dir": "/d"}}
+        target = SpawnTarget(type="local", cwd="/c", project="proj")
+        results = [
+            self._proc(2, b"", b"unrecognized arguments: --bridge"),
+            self._proc(0, json.dumps(plan).encode()),
+        ]
+        calls = []
+
+        async def fake_exec(*argv, **kw):
+            calls.append(argv)
+            return results[len(calls) - 1]
+
+        with patch("os.path.exists", return_value=True), \
+             patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+            out = await _resolve_worktree(target, {})
+
+        assert out == plan
+        assert len(calls) == 2
+        assert "--bridge" in calls[0]
+        assert "--bridge" not in calls[1]
