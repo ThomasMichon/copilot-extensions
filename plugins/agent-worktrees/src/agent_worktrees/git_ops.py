@@ -554,12 +554,27 @@ def push(
     by the rebase chain, without clobbering unrelated remote updates.
     """
     extra = ["--force-with-lease"] if force_with_lease else []
+    auth_args = _auth_config_args(remote, cwd=cwd)
     result = git(
-        *_auth_config_args(remote, cwd=cwd),
+        *auth_args,
         "push", remote, branch, *extra, "--quiet",
         cwd=cwd, check=False,
     )
-    return result.returncode == 0
+    if result.returncode == 0:
+        return True
+    # Defense-in-depth: if we injected a cross-account token and the push
+    # still failed, the injected gh OAuth token may lack push scope (#900).
+    # Retry once *without* the override so the default credential helper
+    # (git-credential-vault / GCM) can authenticate -- which often succeeds
+    # where the OAuth token 403s.
+    if auth_args:
+        retry = git(
+            "push", remote, branch, *extra, "--quiet",
+            cwd=cwd, check=False,
+        )
+        if retry.returncode == 0:
+            return True
+    return False
 
 
 # --- Cross-account authentication (#29) -------------------------------------
@@ -641,17 +656,66 @@ def _gh_token_for_owner(owner: str) -> str | None:
     return result.stdout.strip() or None
 
 
+@functools.cache
+def _active_gh_account() -> str | None:
+    """Return the login of the **active** ``gh`` account, or None.
+
+    Parsed from ``gh auth status`` (no network call). Used to decide whether
+    the cross-account token override is needed: when the repo owner *is* the
+    active account, the default credential helper already authenticates as
+    that user, and overriding it with the account's ``gh`` OAuth token can
+    instead cause a 403 (the device/web OAuth token may lack push scope).
+    """
+    if shutil.which("gh") is None:
+        return None
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "status"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:
+        return None
+    # `gh auth status` prints per-account blocks; the active one carries a
+    # following "Active account: true" line. Track the most recent
+    # "account <login>" and return it when the active marker appears. Fall
+    # back to the sole logged-in account when no active marker is present
+    # (older single-account `gh`).
+    text = result.stdout + result.stderr
+    accounts: list[str] = []
+    current: str | None = None
+    for line in text.splitlines():
+        m = re.search(r"account\s+([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)", line)
+        if m:
+            current = m.group(1)
+            accounts.append(current)
+        if "Active account: true" in line and current:
+            return current
+    return accounts[0] if len(accounts) == 1 else None
+
+
 def _auth_config_args(remote: str, *, cwd: str | Path) -> list[str]:
     """Build ``-c http.extraheader=...`` args to auth as the remote's owner.
 
     Returns ``[]`` when no override is needed or possible (non-GitHub remote,
-    ``gh`` unavailable, or owner is not an authenticated ``gh`` account).
+    ``gh`` unavailable, owner is not an authenticated ``gh`` account, or the
+    owner **is** the active ``gh`` account).
+
+    The override exists for the cross-account case: the repo is owned by a
+    different account than the active ``gh`` account, so a plain push would
+    403. But when the owner *is* the active account, the default credential
+    helper already authenticates correctly; injecting the active account's
+    ``gh`` OAuth token would *override* that helper with a token that may lack
+    push scope, turning a working push into a 403 (#900). So skip injection in
+    that case and let the credential helper do its job.
     """
     url = _remote_url(remote, cwd=cwd)
     if not url:
         return []
     owner = _parse_github_owner(url)
     if not owner:
+        return []
+    active = _active_gh_account()
+    if active and active.casefold() == owner.casefold():
         return []
     token = _gh_token_for_owner(owner)
     if not token:
