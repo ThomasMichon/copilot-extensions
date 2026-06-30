@@ -837,3 +837,26 @@ def test_live_loader_local_is_synchronous_remote_streams(monkeypatch):
         assert loader.state("borealis", "Win") == "loading"
     finally:
         loader.cancel()
+
+
+def test_live_loader_reload_local_refetches(monkeypatch):
+    """reload() re-fetches the local source in-process so a post-maintenance
+    refresh reflects immediately (#1421 live re-render)."""
+    from agent_worktrees.picker_tui import data_ssh
+
+    seq = [[{"id4": "a"}], [{"id4": "b"}]]   # initial load, then reload
+    calls = {"n": 0}
+
+    def _load(m=None, e=None):
+        i = min(calls["n"], len(seq) - 1)
+        calls["n"] += 1
+        return seq[i]
+
+    monkeypatch.setattr(data_ssh.data_local, "load", _load)
+    local = data_ssh.Source("lambda-core", "Win", None, local=True)
+    loader = data_ssh.LiveLoader(sources=[local])
+    loader.start()
+    assert loader.records() == [{"id4": "a"}]
+    assert loader.reload("lambda-core", "Win") is True
+    assert loader.records() == [{"id4": "b"}]
+    assert loader.reload("nope", "X") is False

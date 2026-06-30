@@ -396,6 +396,28 @@ class LiveLoader:
                     name=f"load-{s.machine}-{s.env}", daemon=True,
                 ).start()
 
+    def reload(self, machine, env):
+        """Re-fetch one source now (e.g. after a Maintenance op changed it).
+
+        The local source re-runs in-process synchronously (fast), so a
+        post-maintenance refresh reflects immediately; a remote re-threads so
+        the UI never blocks. Unknown / not-ready sources are a no-op. Returns
+        True when a matching source was found (#1421, live re-render).
+        """
+        for s in self._sources:
+            if s.key == (machine, env):
+                if s.local:
+                    self._load_one(s)
+                else:
+                    with self._lock:
+                        self._state[s.key] = "loading"
+                    threading.Thread(
+                        target=self._load_one, args=(s,),
+                        name=f"reload-{s.machine}-{s.env}", daemon=True,
+                    ).start()
+                return True
+        return False
+
     def cancel(self):
         """Stop loading and kill any in-flight prefetch ssh children.
 
