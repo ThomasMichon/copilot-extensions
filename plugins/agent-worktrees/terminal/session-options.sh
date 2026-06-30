@@ -18,39 +18,34 @@
 # Apply the worktree status bar + session behaviors to a single tmux session.
 # Idempotent and side-effect-free on global state -- only ever touches the named
 # session (and its active window). Safe to call after every new-session.
+# (A second positional arg is accepted for call-site compatibility but unused:
+# the status-updater watcher classifies the worktree by path.)
 #
 # Note (tmux 3.4): the `=name` exact-match target form does NOT resolve for
 # `set`/`show` (it works for has-session/switch-client). Session ids here are
 # unique timestamped slugs, so the plain prefix-matching name is unambiguous.
 aw_apply_tmux_session_options() {
     local sess="$1"
-    local wid="${2:-}"
     [ -n "$sess" ] || return 0
     command -v tmux >/dev/null 2>&1 || return 0
 
     # -- Status bar -------------------------------------------------------
-    # Left: worktree identity (machine | env | repo:id4).
+    # Left: worktree identity (machine | env | repo:id4), static per session.
     # Right: worktree git disposition block + clock.
     #
     # CRITICAL: the status bar must NOT invoke the (heavy, Python) agent-worktrees
     # CLI on its render path. tmux runs `#()` jobs async + cached, but psmux
     # repaints synchronously -- a Python cold-start per frame makes the terminal
-    # crawl. Instead a detached status-writer.sh keeps a tiny cache file fresh
-    # off the render path, and the bar reads it with a bare `#(cat ...)` (~1ms,
-    # safe even on a synchronous repaint). The writer is spawned by the launcher.
+    # crawl. Instead the bar reads precomputed session options that the common
+    # `status-updater` watcher refreshes OFF the render path (#{@aw_ctx} once,
+    # #{@aw_seg} each tick, via `set-option`). Between updates the bar does zero
+    # process work -- only the %H:%M clock. Unset (non-worktree) sessions render
+    # a blank bar. The writer is spawned by the launcher.
     tmux set -t "$sess" status-interval 15
     tmux set -t "$sess" status-left-length 100
+    tmux set -t "$sess" status-left '#{@aw_ctx} '
     tmux set -t "$sess" status-right-length 150
-    if [ -n "$wid" ]; then
-        local sdir="${AW_STATUS_DIR:-$HOME/.agent-worktrees/run/status}/$wid"
-        tmux set -t "$sess" status-left "#(cat $sdir/context 2>/dev/null) "
-        tmux set -t "$sess" status-right "#(cat $sdir/segment 2>/dev/null) %H:%M "
-    else
-        # No worktree id (e.g. a base session): fall back to the direct CLI call.
-        # Rare and short-lived, so the render-path cost is acceptable here.
-        tmux set -t "$sess" status-left '#(agent-worktrees status-context) '
-        tmux set -t "$sess" status-right '#(agent-worktrees status-segment) %H:%M '
-    fi
+    tmux set -t "$sess" status-right '#{@aw_seg} %H:%M '
 
     # Drop the center window list (e.g. "0:bash*"): single-window worktree
     # sessions don't benefit from it and it crowds the identity/status segments.

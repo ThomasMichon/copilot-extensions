@@ -87,19 +87,20 @@ continue to work unchanged.
 ## Status bar segment (tmux / psmux)
 
 `status-segment` prints a **single styled line** classifying the worktree at
-the current directory (or `--path`) relative to its upstream default branch,
-for polling from a multiplexer status line. On Linux/WSL the launcher wires it
-up **per session** when it creates (or rejoins) a worktree session --
-agent-worktrees does **not** own your global `~/.tmux.conf`. The applied option
-is the session-scoped equivalent of:
+the current directory (or `--path`) relative to its upstream default branch.
+The launcher wires it into each session's bar **per session** (it does **not**
+own your global `~/.tmux.conf` / `~/.psmux.conf`) -- but the bar does **not**
+poll this command on its render path. Instead the `status-updater` watcher
+calls it *off* the render path and pushes the result into the `@aw_seg` session
+option, which the bar reads with zero per-render spawn (see *Off the paint
+path* below):
 
 ```tmux
 set status-interval 15
-set status-right '#(agent-worktrees status-segment) %H:%M '
+set status-right '#{@aw_seg} %H:%M '
 ```
 
-The `#()` job runs in the pane's current directory, so the segment classifies
-the worktree the pane is actually in. Output is the resolved session title
+Output (what the watcher stores in `@aw_seg`) is the resolved session title
 followed by a colored state block:
 
 | State | Color | Meaning |
@@ -148,7 +149,7 @@ alongside the right segment:
 
 ```tmux
 set status-left-length 100
-set status-left '#(agent-worktrees status-context) '
+set status-left '#{@aw_ctx} '
 ```
 
 It renders three fields:
@@ -159,34 +160,35 @@ It renders three fields:
 | Environment | Badge: white on an OS-keyed background (win=blue, wsl=purple, linux=orange) | Platform short code, matching the worktree id | `win` |
 | Repo : id4 | Black | Record `repo` + the worktree id's 4-char suffix | `copilot-extensions:8e45` |
 
-Like the right segment, the `#()` job runs in the pane's current directory,
-so the fields describe the worktree the pane is actually in. Outside a
-tracked worktree it falls back to live machine/platform detection and omits
-the `repo:id4` field. Flags: `--path PATH`, `--plain` (no `#[style]`
+Like the right segment, the watcher classifies the worktree by `--path` and
+stores the result in `@aw_ctx` (once -- identity is static for a session).
+Outside a tracked worktree it falls back to live machine/platform detection and
+omits the `repo:id4` field. Flags: `--path PATH`, `--plain` (no `#[style]`
 directives).
 
-### Off the paint path: `status-updater` (psmux / Windows)
+### Off the paint path: `status-updater` (psmux + tmux)
 
-Polling `#(agent-worktrees status-segment)` directly from the bar is fine on
-**tmux**, which runs `#()` jobs asynchronously and caches the result between
+Polling `#(agent-worktrees status-segment)` directly from the bar is tolerable
+on **tmux**, which runs `#()` jobs asynchronously and caches the result between
 `status-interval` ticks. **psmux** (Windows) does not: it runs `#()`
 synchronously **in the render path**, so a ~600 ms binstub spawn (two fresh
 PowerShell processes for the two segments) fired on every repaint. Under
 Copilot's high-framerate TUI that made muxed sessions sluggish on lambda-core
 and unusable on slower hosts.
 
-`status-updater` fixes this by moving the work off the paint path. The psmux
-bar reads **precomputed session options** instead of spawning:
+`status-updater` is the **single, cross-platform watcher** that fixes this on
+both muxes. The bar reads **precomputed session options** instead of spawning:
 
-```psmux
-set -g status-left  '#{@aw_ctx} '          # identity  (machine | env | repo:id4)
-set -g status-right '#{@aw_seg} %H:%M '     # disposition block + live clock
+```tmux
+set status-left  '#{@aw_ctx} '          # identity  (machine | env | repo:id4)
+set status-right '#{@aw_seg} %H:%M '     # disposition block + live clock
 ```
 
-At session creation the launcher spawns one detached updater:
+The launcher spawns one detached updater per session (psmux via
+`launch-session.ps1`, tmux via `launch-session.sh`):
 
 ```text
-agent-worktrees status-updater --session wt-<id> --mux psmux --path <worktree>
+agent-worktrees status-updater --session wt-<id> --mux <psmux|tmux> --path <worktree>
 ```
 
 It renders **in-process** (paying Python import once, never re-spawning the
@@ -194,8 +196,10 @@ binstub), pushes the static identity into `@aw_ctx` once, and refreshes the
 dynamic disposition into `@aw_seg` every `--interval` seconds (default 15) via
 the cheap native `set-option` verb -- exiting on its own when `has-session`
 shows the session is gone. Between updates the bar does **zero** process work;
-psmux only re-runs the strftime `%H:%M` clock. Non-worktree psmux sessions
-leave the vars unset and render a blank bar.
+the mux only re-runs the strftime `%H:%M` clock. Non-worktree sessions leave
+the vars unset and render a blank bar. The launcher may (re)spawn the updater
+on every attach/join: an `@aw_updater` token elects a single live instance, so
+older ones self-retire (the cross-platform equivalent of the old `flock`).
 
 Flags: `--session` (required), `--mux {psmux,tmux}` (default: auto-detect),
 `--path PATH` (worktree to classify), `--interval N` (seconds, min 2).

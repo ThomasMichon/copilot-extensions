@@ -51,14 +51,16 @@ def test_render_wrapper_prints_nothing_when_empty(monkeypatch, capsys):
     assert capsys.readouterr().out == ""
 
 
-def _fake_mux(has_session_codes, calls):
+def _fake_mux(has_session_codes, calls, store=None):
     """Build a fake subprocess.run for the mux binary.
 
     ``has_session_codes`` is consumed one return-code per ``has-session``
     call; ``set-option`` invocations are recorded into ``calls`` as
-    ``(option, value)`` tuples.
+    ``(option, value)`` tuples and mirrored into ``store``; ``display-message``
+    reads ``store`` so the ``@aw_updater`` token round-trips.
     """
     codes = iter(has_session_codes)
+    store = store if store is not None else {}
 
     def fake_run(argv, **_kw):
         verb = argv[1]
@@ -66,8 +68,13 @@ def _fake_mux(has_session_codes, calls):
             return subprocess.CompletedProcess(argv, next(codes, 1), "", "")
         if verb == "set-option":
             # argv == [bin, set-option, -t, <sess>, <opt>, <val>]
+            store[argv[4]] = argv[5]
             calls.append((argv[4], argv[5]))
             return subprocess.CompletedProcess(argv, 0, "", "")
+        if verb == "display-message":
+            # argv == [bin, display-message, -t, <sess>, -p, "#{@opt}"]
+            key = argv[5].strip("#{}")
+            return subprocess.CompletedProcess(argv, 0, store.get(key, ""), "")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     return fake_run
@@ -84,11 +91,30 @@ def test_status_updater_sets_ctx_once_then_seg_until_gone(monkeypatch):
     rc = m.cmd_status_updater(_ns())
 
     assert rc == 0
-    # Identity pushed exactly once, first.
-    assert calls[0] == ("@aw_ctx", "CTX")
+    # Ownership claimed first, then identity once, then disposition.
+    assert calls[0][0] == "@aw_updater"
     assert [c for c in calls if c[0] == "@aw_ctx"] == [("@aw_ctx", "CTX")]
-    # Disposition pushed at least once.
     assert ("@aw_seg", "SEG") in calls
+
+
+def test_status_updater_retires_when_token_taken_over(monkeypatch):
+    """A newer updater claiming @aw_updater makes the older one retire."""
+    calls: list[tuple[str, str]] = []
+    store: dict[str, str] = {}
+    monkeypatch.setattr(subprocess, "run", _fake_mux([0, 0, 0, 0], calls, store))
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    # Simulate a newer updater stealing the token after the first tick.
+    monkeypatch.setattr(
+        time, "sleep",
+        lambda *_a, **_k: store.__setitem__("@aw_updater", "another-pid"),
+    )
+
+    rc = m.cmd_status_updater(_ns())
+
+    assert rc == 0
+    # Exactly one disposition write before retiring on the stolen token.
+    assert [c for c in calls if c[0] == "@aw_seg"] == [("@aw_seg", "SEG")]
 
 
 def test_status_updater_noop_when_session_absent(monkeypatch):
@@ -101,7 +127,7 @@ def test_status_updater_noop_when_session_absent(monkeypatch):
     rc = m.cmd_status_updater(_ns())
 
     assert rc == 0
-    assert calls == []  # never set any option for a dead session
+    assert calls == []  # never set any option (or claim a token) for a dead session
 
 
 def test_status_updater_requires_session():
