@@ -388,6 +388,17 @@ if (-not $jsonOutput) {
 # ── Parse the JSON plan ──────────────────────────────────────────────────
 
 $plan = ($jsonOutput -join "`n") | ConvertFrom-Json -ErrorAction Stop
+
+# Non-interactive resolves (`resolve --json --worktree-id` / `--json --new`,
+# used by agent-bridge ACP launches) emit the bridge's nested plan shape:
+#   { worktree = {...}; launch = { action = 'exec'; ... } }
+# The handling below consumes the *flat* plan ($plan.action / .work_dir / .cmd);
+# the nested `launch` object carries the identical keys, so unwrap it when
+# present. A flat plan (no `launch` property) is used unchanged.
+if ($plan.PSObject.Properties.Name -contains 'launch') {
+    $plan = $plan.launch
+}
+
 Write-SetupLog "Plan resolved: action=$($plan.action) work_dir=$($plan.work_dir) worktree_id=$($plan.worktree_id)"
 
 if ($plan.action -eq 'none') {

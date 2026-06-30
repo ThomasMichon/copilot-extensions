@@ -30,6 +30,10 @@ _LAUNCH_SCRIPT = (
     Path(__file__).resolve().parents[1] / "bin" / "launch-session.sh"
 )
 
+_LAUNCH_PS1 = (
+    Path(__file__).resolve().parents[1] / "bin" / "launch-session.ps1"
+)
+
 
 def _unwrap(plan: dict) -> dict:
     out = subprocess.run(
@@ -74,3 +78,11 @@ def test_launch_script_contains_unwrap_snippet():
     """Drift guard: the script must still apply the unwrap we test here."""
     text = _LAUNCH_SCRIPT.read_text()
     assert "d['launch'] if isinstance(d, dict) and 'launch' in d else d" in text
+
+
+def test_powershell_launcher_contains_unwrap():
+    """The Windows launcher must unwrap the nested plan too, else `--json`
+    ACP launches to Windows targets fail ($plan.action is null)."""
+    text = _LAUNCH_PS1.read_text()
+    assert "$plan.PSObject.Properties.Name -contains 'launch'" in text
+    assert "$plan = $plan.launch" in text
