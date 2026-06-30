@@ -206,11 +206,37 @@ when none are live.
   the merged branch. Works even when the prior PR was merged externally:
   `create-pr` reconciles the tracked PR's state against the provider first.
 
-  **After a PR merges, pull the worktree forward and build on top of it.** Run
-  `agent-worktrees git sync` to rebase the worktree branch onto the updated
-  default branch -- it drops the just-merged (squashed) commits and keeps any
+  **After a PR merges, immediately pull the worktree forward -- this is the
+  standard, expected post-merge move, not an optional cleanup.** The moment you
+  confirm your PR landed, rebase the worktree branch onto the updated default
+  branch with:
+
+  ```
+  agent-worktrees git sync
+  ```
+
+  It drops the just-merged (squashed) commits as already-applied and keeps any
   newer local work, so you continue *on top of* the merge rather than starting a
   fresh worktree. See the **`git-collaboration`** skill.
+
+  **Confirming the merge is built into `pr-status`.** `agent-worktrees pr-status`
+  reconciles the active PR against the provider before reporting, so a PR merged
+  externally (e.g. via the `auto-merge` label, bypassing `finalize`/`pr-watch`)
+  shows `state: merged` instead of a stale `open` -- this is your authoritative
+  "did my PR land?" check. When it has landed **and** the worktree is not yet on
+  top of the updated default branch, `pr-status` flags it for you:
+
+  ```
+  "pull_forward_recommended": true,
+  "pull_forward_command": "agent-worktrees git sync",
+  "next_action": "Active PR #N is merged. Pull this worktree forward: ..."
+  ```
+
+  Treat `pull_forward_recommended` as a directive: run `git sync` straight away.
+  Because the PR squashes your work into a single commit, the rebase usually
+  reconciles cleanly; if it does hit a conflict the rebase auto-aborts and tells
+  you to resolve it by hand -- do so, then re-run. (If the worktree is dirty,
+  commit or stash first, as the `next_action` note will say.)
 
 > **The operator owns local worktrees -- an agent never creates one as a
 > *continuation* of its own work.** Reusing the current worktree (sync forward,

@@ -75,6 +75,16 @@ After a PR merges (especially a **squash** merge), the worktree branch still
 carries the now-upstreamed commits. To keep working, advance onto the new
 default and stack new work on top -- **do not** start a fresh worktree.
 
+**This is the standard, automatic-by-convention move the moment a PR lands** --
+not an optional cleanup. As soon as you confirm the merge, pull forward.
+
+**`pr-status` confirms the merge and tells you to do it.** `agent-worktrees
+pr-status` reconciles the active PR against the provider, so a PR merged
+externally (e.g. via the `auto-merge` label) reports `state: merged` rather than
+a stale `open`. When it has landed and the worktree is not yet on top of the
+updated default branch, it flags `pull_forward_recommended: true` with a
+`next_action`. Treat that flag as a directive.
+
 The flow is plain git you could run by hand:
 
 ```
@@ -92,10 +102,14 @@ agent-worktrees git sync                            # the helper
 (they reappear as a single commit on the default branch; git skips them as
 already-applied) while preserving any genuinely-new local commits. It runs
 **mid-flight** -- it does *not* finalize, prune, or push. A dirty tree or a true
-rebase conflict stops it with a clear message instead of guessing.
+rebase conflict stops it with a clear message instead of guessing; on a conflict
+the rebase auto-aborts so the branch is left untouched -- resolve by hand, then
+re-run. Because the PR squashed your work into one commit, conflicts are
+uncommon.
 
 This is the **review-gate continuation** for efforts: submit the effort PR ->
-it's reviewed + merged -> `git sync` -> build Phase work on top.
+it's reviewed + merged -> confirm via `pr-status` -> `git sync` -> build Phase
+work on top.
 
 ## Iterating on an open PR (the merge-only hold)
 

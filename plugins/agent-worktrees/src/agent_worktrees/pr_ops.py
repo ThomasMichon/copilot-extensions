@@ -482,8 +482,18 @@ def _reconcile_active_pr(
         # guessing.  (Conservative: an unverifiable open PR is still iterated.)
         return
     state = (pull.state or "").strip().lower()
-    if state and state not in tracking._PR_NON_TERMINAL:
-        active.state = state
+    # ``merged`` is authoritative: a squash-merged PR reports state="closed" on
+    # some providers, so prefer it -- the record should say the work actually
+    # *landed* (not merely "closed"), which is what drives the post-merge
+    # pull-forward recommendation in :func:`pr_status`.
+    if pull.merged:
+        resolved = "merged"
+    elif state and state not in tracking._PR_NON_TERMINAL:
+        resolved = state
+    else:
+        resolved = ""
+    if resolved:
+        active.state = resolved
         if not active.closed_at:
             active.closed_at = tracking._now_iso()
         tracking.save_record(record)
@@ -639,25 +649,105 @@ def pr_ready(
     return result
 
 
-def pr_status(worktree_id: str, *, all_prs: bool = False) -> dict:
+def pr_status(worktree_id: str, *, all_prs: bool = False,
+              config: Config | None = None) -> dict:
     """Return the tracked PR metadata for a worktree (for pr-status).
 
     Returns the **active** PR by default.  With ``all_prs`` the full ``prs``
     history is included alongside the active one.  ``pr_count`` is always
     present so the orphan-detection probe can key on existence.
+
+    Before reporting, the active PR is reconciled against the provider so a PR
+    merged or closed *externally* (e.g. via the ``auto-merge`` label, bypassing
+    ``finalize``/``pr-watch``) is reported with its true terminal state rather
+    than a stale ``open``.  This is the agent's authoritative "did my PR land?"
+    check; when it lands, the result also carries a **pull-forward
+    recommendation** (``pull_forward_recommended`` + ``next_action``) directing
+    the standard post-merge move -- ``agent-worktrees git sync`` to rebase the
+    worktree onto the updated default branch.
     """
     base: dict = {"worktree_id": worktree_id}
     record = _load_record_or_none(worktree_id)
     if record is None:
         return {**base, "has_pr": False, "pr_count": 0,
                 "error": f"No tracking record found for '{worktree_id}'."}
+    if config is None:
+        config = cfg.load_config()
+    _reconcile_active_pr(record, config)
     active = record.active_pr()
     result = {**base, "has_pr": active is not None, "pr_count": len(record.prs)}
     if active is not None:
         result.update(_pr_to_dict(active))
+        rec = _pull_forward_recommendation(record, active, config)
+        if rec:
+            result.update(rec)
     if all_prs:
         result["prs"] = [_pr_to_dict(p) for p in record.prs]
     return result
+
+
+def _pull_forward_recommendation(
+    record: tracking.WorktreeRecord,
+    active: PRRecord,
+    config: Config,
+) -> dict | None:
+    """Recommend the post-merge pull-forward when the active PR has merged.
+
+    Returns recommendation fields, or ``None`` when no nudge is warranted.
+    Fires only when the active PR is **merged** and the worktree branch is not
+    already rebased on top of the updated default branch -- i.e. there is real
+    pull-forward work to do.  Best-effort and side-effect-free (a single
+    upstream fetch aside): any git hiccup falls back to recommending, since the
+    agent's ``git sync`` is a safe no-op when already current.
+    """
+    if active.state != "merged":
+        return None
+    path = record.worktree_path
+    if not (path and Path(path).exists()):
+        return None
+    repo = config.default_repo
+    remote = repo.remote
+    upstream = f"{remote}/{repo.default_branch}"
+    # Refresh the upstream ref so "behind" reflects the just-landed merge.
+    if git_ops.has_remote(remote, cwd=path):
+        try:
+            git_ops.fetch(remote, cwd=path)
+        except Exception:
+            pass
+    behind: int | None = None
+    branch = git_ops._get_current_branch_safe(path)
+    if branch and git_ops.ref_exists(upstream, cwd=path):
+        out = git_ops.git(
+            "rev-list", "--count", f"{branch}..{upstream}",
+            cwd=path, check=False,
+        ).stdout.strip()
+        try:
+            behind = int(out)
+        except ValueError:
+            behind = None
+    # Already on top of the updated default branch -- nothing to pull forward.
+    if behind == 0:
+        return None
+    rec: dict = {
+        "pull_forward_recommended": True,
+        "pull_forward_command": "agent-worktrees git sync",
+    }
+    if behind:
+        rec["behind"] = behind
+    if not git_ops.is_clean(cwd=path):
+        rec["pull_forward_blocked"] = "dirty"
+        rec["next_action"] = (
+            f"Active PR #{active.number} is merged, but this worktree has "
+            "uncommitted changes. Commit or stash them, then run "
+            f"`agent-worktrees git sync` to pull forward (rebase onto {upstream})."
+        )
+    else:
+        rec["next_action"] = (
+            f"Active PR #{active.number} is merged. Pull this worktree forward: "
+            f"`agent-worktrees git sync` (rebase onto {upstream}; the merged "
+            "commits drop as already-applied)."
+        )
+    return rec
 
 
 def _pr_to_dict(pr: PRRecord) -> dict:
