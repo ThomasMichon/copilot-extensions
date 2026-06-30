@@ -527,10 +527,18 @@ if (-not $noMux -and $psmuxCmd) {
         }
         Write-Host "Joining existing session: $sessName"
         Reset-SshConptyViewport
-        Set-PsmuxLastSession $sessName
         # (Re)assert the updater on join: if the prior one died, this revives
         # the bar; if it's alive, the token guard makes the new one retire.
         Start-StatusUpdater $sessName $plan.work_dir
+        # Write last_session AFTER spawning the updater, immediately before
+        # attach -- mirroring the create branch below. The updater connects to
+        # psmux as a background client, which can rewrite ~/.psmux/last_session;
+        # since the 3.3.6 attach regression reads that file instead of honoring
+        # -t, setting it any earlier lets the updater clobber our target and the
+        # join lands in whatever session was last current (collapsing two
+        # worktrees onto one session). Set-PsmuxLastSession must be the final
+        # psmux-affecting action before attach.
+        Set-PsmuxLastSession $sessName
         & psmux attach-session -t $sessName
         if ($LASTEXITCODE -eq 0) {
             exit 0
