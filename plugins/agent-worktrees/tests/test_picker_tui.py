@@ -860,3 +860,38 @@ def test_live_loader_reload_local_refetches(monkeypatch):
     assert loader.reload("lambda-core", "Win") is True
     assert loader.records() == [{"id4": "b"}]
     assert loader.reload("nope", "X") is False
+
+
+def test_escape_on_main_view_confirms_before_quit(monkeypatch):
+    """Esc/q on a main pivot view opens a quit-confirm instead of instant-quit;
+    Esc/n stays, y quits, Enter acts on the focused button (default Stay) (#1429)."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)):
+            scr = app.query_one(PickerScreen)
+            quit_called = {"v": False}
+            monkeypatch.setattr(app, "exit",
+                                lambda *a, **k: quit_called.__setitem__("v", True))
+
+            assert scr.quit_confirm is None
+            scr.handle_key("escape")            # main view -> confirm, no exit
+            assert scr.quit_confirm is not None
+            assert quit_called["v"] is False
+
+            scr.handle_key("escape")            # Esc in the confirm -> stay
+            assert scr.quit_confirm is None
+            assert quit_called["v"] is False
+
+            scr.handle_key("q")                 # q also opens the confirm
+            assert scr.quit_confirm is not None
+            scr.handle_key("enter")             # default focus = Stay -> cancel
+            assert scr.quit_confirm is None
+            assert quit_called["v"] is False
+
+            scr.handle_key("escape")            # open again
+            scr.handle_key("y")                 # y -> quit
+            assert quit_called["v"] is True
+
+    asyncio.run(run())
