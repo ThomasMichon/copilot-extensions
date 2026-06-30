@@ -410,3 +410,115 @@ def test_cli_add_codespace_flags(tmp_path: Path):
     assert e.locus.preferred == "codespace"
     assert e.locus.codespace == {"repo": "org/odsp-web-codespaces",
                                  "machine": "big", "location": "EastUs"}
+
+
+# ---------------------------------------------------------------------------
+# container venue (local Docker fleet, machine-restricted)
+# ---------------------------------------------------------------------------
+
+def test_container_venue_roundtrip(tmp_path: Path):
+    cfg = RelatedConfig(
+        primary="odsp-web",
+        related={
+            "odsp-web": RelatedEntry(
+                name="odsp-web", role="product", delegate="agent-codespaces",
+                locus=Locus(
+                    preferred="codespace",
+                    codespace={"repo": "org/odsp-web-codespaces",
+                               "workspace_folder": "/workspaces/odsp-web"},
+                    container={"repo": "org/odsp-web-codespaces",
+                               "workspace_folder": "/workspaces/odsp-web",
+                               "machines": ["dev6"]},
+                ),
+            ),
+        },
+    )
+    related.write_related(tmp_path, cfg)
+    got = related.read_related(tmp_path).related["odsp-web"]
+    assert got.locus.codespace["workspace_folder"] == "/workspaces/odsp-web"
+    assert got.locus.container["repo"] == "org/odsp-web-codespaces"
+    assert got.locus.container["machines"] == ["dev6"]   # list preserved
+
+
+def test_container_emitted_yaml_is_valid(tmp_path: Path):
+    cfg = RelatedConfig(related={
+        "x": RelatedEntry(name="x", locus=Locus(
+            preferred="container",
+            container={"repo": "org/x-codespaces", "machines": ["dev6", "cloud1"]},
+        )),
+    })
+    related.write_related(tmp_path, cfg)
+    data = yaml.safe_load(related.related_path(tmp_path).read_text(encoding="utf-8"))
+    ct = data["related"]["x"]["locus"]["container"]
+    assert ct["repo"] == "org/x-codespaces"
+    assert ct["machines"] == ["dev6", "cloud1"]
+
+
+def test_cli_add_container_flags(tmp_path: Path):
+    from agent_worktrees.__main__ import cmd_related_dispatch as run
+
+    rc = run(["add", "odsp-web", "--repo", str(tmp_path), "--locus", "codespace",
+              "--cs-repo", "org/odsp-web-codespaces",
+              "--cs-workspace", "/workspaces/odsp-web",
+              "--container-repo", "org/odsp-web-codespaces",
+              "--container-workspace", "/workspaces/odsp-web",
+              "--container-machines", "dev6", "--no-scaffold"])
+    assert rc == 0
+    e = related.get_related(tmp_path, "odsp-web")
+    assert e.locus.codespace["workspace_folder"] == "/workspaces/odsp-web"
+    assert e.locus.container == {"repo": "org/odsp-web-codespaces",
+                                 "workspace_folder": "/workspaces/odsp-web",
+                                 "machines": ["dev6"]}
+
+
+def test_resolve_container_available_here(tmp_path: Path):
+    e = RelatedEntry(
+        name="odsp-web", delegate="agent-containers",
+        locus=Locus(preferred="container",
+                    container={"repo": "org/odsp-web-codespaces",
+                               "machines": ["dev6"]}),
+    )
+    r = related.build_resolution(
+        e, current_machine="tmichon-dev6", repo_class="reference",
+        repo_path=None, adopted=False,
+    )
+    assert r.locus_kind == "container"
+    assert r.available_here is True
+    assert any("agent-containers up odsp-web" in s for s in r.steps)
+    assert any("agent-bridge send container:" in s for s in r.steps)
+
+
+def test_resolve_container_unavailable_elsewhere_falls_back(tmp_path: Path):
+    e = RelatedEntry(
+        name="odsp-web",
+        locus=Locus(preferred="container",
+                    codespace={"repo": "org/odsp-web-codespaces"},
+                    container={"repo": "org/odsp-web-codespaces",
+                               "machines": ["dev6"]}),
+    )
+    r = related.build_resolution(
+        e, current_machine="tmichon-cloud1", repo_class="reference",
+        repo_path=None, adopted=False,
+    )
+    assert r.available_here is False
+    assert any("only available on: dev6" in n for n in r.notes)
+    # CodeSpace is offered as the machine-agnostic fallback
+    assert any("gh cs create -R org/odsp-web-codespaces" in n for n in r.notes)
+
+
+def test_resolve_codespace_notes_container_alternative_here(tmp_path: Path):
+    e = RelatedEntry(
+        name="odsp-web", delegate="agent-codespaces",
+        locus=Locus(preferred="codespace",
+                    codespace={"repo": "org/odsp-web-codespaces",
+                               "workspace_folder": "/workspaces/odsp-web"},
+                    container={"repo": "org/odsp-web-codespaces",
+                               "machines": ["dev6"]}),
+    )
+    r = related.build_resolution(
+        e, current_machine="tmichon-dev6", repo_class="reference",
+        repo_path=None, adopted=False,
+    )
+    assert r.locus_kind == "codespace"
+    assert any("/workspaces/odsp-web" in n for n in r.notes)
+    assert any("container fleet is also available here" in n for n in r.notes)

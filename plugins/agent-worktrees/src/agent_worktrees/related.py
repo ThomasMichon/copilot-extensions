@@ -74,7 +74,7 @@ VALID_ROLES = ("product", "dependency", "consumer", "tooling", "docs", "sibling"
 VALID_DELEGATES = ("agent-bridge", "agent-codespaces", "none")
 
 # Locus "kinds" -- where work on a related repo actually happens.
-VALID_LOCUS_KINDS = ("local", "machine", "codespace")
+VALID_LOCUS_KINDS = ("local", "machine", "codespace", "container")
 
 
 # ---------------------------------------------------------------------------
@@ -85,20 +85,35 @@ VALID_LOCUS_KINDS = ("local", "machine", "codespace")
 class Locus:
     """Where work on a related repo happens, *from the current machine*.
 
-    ``preferred`` is one of ``local``, ``machine:<key>``, or ``codespace``.
-    ``machines`` lists the machine keys on which the repo is available (e.g.
-    ``[dev6, cloud1]``) -- this is the per-machine availability the global,
-    per-*platform* registry cannot express.  ``codespace`` carries the
-    provisioning hints (``repo`` / ``machine`` / ``location``) used when the
-    preferred locus is a CodeSpace.
+    ``preferred`` is one of ``local``, ``machine:<key>``, ``codespace``, or
+    ``container``.  ``machines`` lists the machine keys on which the repo is
+    available *locally* (e.g. ``[dev6, cloud1]``) -- the per-machine
+    availability the global, per-*platform* registry cannot express.
+
+    Two **cloud/sandbox venues** carry their own provisioning hints, each a
+    free-form mapping:
+
+    * ``codespace`` -- a GitHub CodeSpace (``repo`` / ``machine`` / ``location``
+      / ``workspace_folder``).  CodeSpaces run in the cloud, so they are
+      available from *any* machine.
+    * ``container`` -- a local Docker dev-container fleet (``repo`` /
+      ``workspace_folder`` plus a ``machines`` list scoping it to the boxes
+      that host the fleet).  Unlike a CodeSpace, a container fleet is local, so
+      ``machines`` restricts where it can be used (e.g. ``[dev6]``).
+
+    ``workspace_folder`` records the checkout path the venue lands in (e.g.
+    ``/workspaces/odsp-web``), which often differs from the venue ``repo`` name.
     """
 
     preferred: str = ""
     machines: list[str] = field(default_factory=list)
-    codespace: dict[str, str] = field(default_factory=dict)
+    codespace: dict[str, Any] = field(default_factory=dict)
+    container: dict[str, Any] = field(default_factory=dict)
 
     def is_empty(self) -> bool:
-        return not (self.preferred or self.machines or self.codespace)
+        return not (
+            self.preferred or self.machines or self.codespace or self.container
+        )
 
 
 @dataclass
@@ -192,6 +207,23 @@ def parse_preferred(value: str | None) -> tuple[str, str]:
 # Read / write
 # ---------------------------------------------------------------------------
 
+def _parse_venue(raw: Any) -> dict[str, Any]:
+    """Parse a venue block (``codespace`` / ``container``) into a flat mapping.
+
+    Scalars become strings; a list value (e.g. ``machines: [dev6]``) is kept as
+    a list of strings.  Non-dict input degrades to an empty mapping.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for k, v in raw.items():
+        if isinstance(v, list):
+            out[str(k)] = [str(x).strip() for x in v if str(x).strip()]
+        else:
+            out[str(k)] = str(v)
+    return out
+
+
 def _parse_locus(raw: Any) -> Locus:
     if not isinstance(raw, dict):
         return Locus()
@@ -202,13 +234,12 @@ def _parse_locus(raw: Any) -> Locus:
         if isinstance(raw_machines, list)
         else []
     )
-    raw_cs = raw.get("codespace", {})
-    codespace = (
-        {str(k): str(v) for k, v in raw_cs.items()}
-        if isinstance(raw_cs, dict)
-        else {}
+    return Locus(
+        preferred=preferred,
+        machines=machines,
+        codespace=_parse_venue(raw.get("codespace", {})),
+        container=_parse_venue(raw.get("container", {})),
     )
-    return Locus(preferred=preferred, machines=machines, codespace=codespace)
 
 
 def _parse_delegate(raw: Any) -> str:
@@ -268,6 +299,22 @@ def _quote(v: str) -> str:
     return v
 
 
+def _emit_venue(name: str, venue: dict[str, Any]) -> str:
+    """Render a venue mapping (``codespace`` / ``container``) as inline YAML.
+
+    Scalar values are quoted as needed; a list value renders as a flow
+    sequence (``machines: [dev6, cloud1]``).
+    """
+    parts: list[str] = []
+    for k, v in venue.items():
+        if isinstance(v, list):
+            rendered = ", ".join(_quote(str(x)) for x in v)
+            parts.append(f"{k}: [{rendered}]")
+        else:
+            parts.append(f"{k}: {_quote(str(v))}")
+    return f"{name}: {{ {', '.join(parts)} }}"
+
+
 def _emit_locus(lines: list[str], locus: Locus, indent: str) -> None:
     if locus.is_empty():
         return
@@ -279,10 +326,9 @@ def _emit_locus(lines: list[str], locus: Locus, indent: str) -> None:
         rendered = ", ".join(_quote(m) for m in locus.machines)
         lines.append(f"{inner}machines: [{rendered}]")
     if locus.codespace:
-        rendered = ", ".join(
-            f"{k}: {_quote(str(v))}" for k, v in locus.codespace.items()
-        )
-        lines.append(f"{inner}codespace: {{ {rendered} }}")
+        lines.append(f"{inner}{_emit_venue('codespace', locus.codespace)}")
+    if locus.container:
+        lines.append(f"{inner}{_emit_venue('container', locus.container)}")
 
 
 def write_related(anchor: str | Path, cfg: RelatedConfig) -> None:
@@ -475,13 +521,30 @@ class Resolution:
     """A plan for how to work on a related repo from the current machine."""
 
     name: str
-    locus_kind: str = "local"        # local | machine | codespace
+    locus_kind: str = "local"        # local | machine | codespace | container
     target_machine: str = ""         # for the ``machine`` kind
     available_here: bool = True
     editing_model: str = ""          # read-only | anchor | worktree | worktree-unadopted
-    delegate_via: str = ""           # agent-bridge | agent-codespaces | none
+    delegate_via: str = ""           # agent-bridge | agent-codespaces | agent-containers | none
     steps: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+
+
+def _venue_machines(venue: dict[str, Any]) -> list[str]:
+    """Machine keys a venue is restricted to (empty list = unrestricted)."""
+    raw = venue.get("machines") if isinstance(venue, dict) else None
+    if isinstance(raw, list):
+        return [str(m).strip() for m in raw if str(m).strip()]
+    if raw:
+        return [str(raw).strip()]
+    return []
+
+
+def _venue_available_here(venue: dict[str, Any], current_machine: str) -> bool:
+    """A venue with no ``machines`` is unrestricted; otherwise the current
+    machine must match one of them."""
+    ms = _venue_machines(venue)
+    return (not ms) or any(machine_matches(m, current_machine) for m in ms)
 
 
 def build_resolution(
@@ -541,6 +604,7 @@ def build_resolution(
         repo = cs.get("repo", "<codespace-repo>")
         mach = cs.get("machine", "")
         loc = cs.get("location", "")
+        ws = cs.get("workspace_folder", "")
         create = f"gh cs create -R {repo}"
         if mach:
             create += f" -m {mach}"
@@ -553,6 +617,55 @@ def build_resolution(
             "Dispatch work: `agent-bridge send codespace:<name> \"<task>\"` "
             "(or `agent-codespaces ssh <name>`).",
         ]
+        if ws:
+            res.notes.append(f"Workspace checkout on the CodeSpace: {ws}.")
+        # Surface the container alternative when this machine hosts the fleet.
+        if entry.locus.container and _venue_available_here(
+            entry.locus.container, current_machine
+        ):
+            res.notes.append(
+                f"A local container fleet is also available here: "
+                f"`agent-containers up {name}` then "
+                f"`agent-bridge send container:<name> \"<task>\"`."
+            )
+        return res
+
+    if kind == "container":
+        ct = entry.locus.container or {}
+        res.available_here = _venue_available_here(ct, current_machine)
+        repo = ct.get("repo", "<container-repo>")
+        ws = ct.get("workspace_folder", "")
+        ct_machines = _venue_machines(ct)
+        if res.available_here:
+            res.steps = [
+                f"Preferred locus is a local container fleet (delegate via "
+                f"{entry.delegate or 'agent-containers'}).",
+                f"Bring up/reuse the fleet (built from {repo}): "
+                f"`agent-containers up {name}`.",
+                "Dispatch work: `agent-bridge send container:<name> \"<task>\"`.",
+            ]
+            if ws:
+                res.notes.append(f"Workspace checkout in the container: {ws}.")
+        else:
+            avail = ", ".join(ct_machines) if ct_machines else "(none configured)"
+            via = entry.delegate or "agent-bridge"
+            res.available_here = False
+            res.notes.append(
+                f"Container fleet only available on: {avail} "
+                f"(you are on '{current_machine}')."
+            )
+            res.steps = [
+                f"Delegate via {via} to a fleet host: "
+                f"`agent-bridge send <machine> \"<task>\"`.",
+            ]
+            # CodeSpaces, if configured, are the machine-agnostic fallback.
+            if entry.locus.codespace:
+                cs_repo = entry.locus.codespace.get("repo", "<codespace-repo>")
+                res.notes.append(
+                    f"Or use the CodeSpace from any machine: "
+                    f"`gh cs create -R {cs_repo}` then "
+                    f"`agent-bridge send codespace:<name> \"<task>\"`."
+                )
         return res
 
     if kind == "machine":

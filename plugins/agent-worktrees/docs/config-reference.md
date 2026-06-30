@@ -250,11 +250,14 @@ related:
     summary: "Primary product monorepo we ship changes to."
     doc: related/odsp-web.md       # narrative, relative to .agent-worktrees/
     locus:
-      preferred: codespace         # local | machine:<key> | codespace
-      machines: [dev6]             # boxes the repo is available on (optional)
+      preferred: codespace         # local | machine:<key> | codespace | container
+      machines: [dev6]             # boxes a *local* checkout is available on (optional)
       codespace: { repo: org/odsp-web-codespaces,
-                   machine: largePremiumLinux256gb, location: EastUs }
-    delegate: { via: agent-codespaces }   # agent-bridge | agent-codespaces | none
+                   workspace_folder: /workspaces/odsp-web }   # cloud: any machine
+      container: { repo: org/odsp-web-codespaces,
+                   workspace_folder: /workspaces/odsp-web,
+                   machines: [dev6] }                         # local fleet: dev6 only
+    delegate: { via: agent-codespaces }   # agent-bridge | agent-codespaces | agent-containers | none
 ```
 
 | Key | Type | Meaning |
@@ -264,10 +267,11 @@ related:
 | `related.<name>.role` | string | `product` \| `dependency` \| `consumer` \| `tooling` \| `docs` \| `sibling` (free-form; stored verbatim). |
 | `related.<name>.summary` | string | One line: why the repo matters to this one. |
 | `related.<name>.doc` | string | Narrative-doc path, relative to `.agent-worktrees/` (default `related/<name>.md`). |
-| `related.<name>.locus.preferred` | string | Where work happens: `local` \| `machine:<key>` \| `codespace`. |
-| `related.<name>.locus.machines` | list | Machine keys the repo is available on (per-machine availability the per-platform registry can't express). |
-| `related.<name>.locus.codespace` | map | `repo` / `machine` / `location` provisioning hints for a CodeSpace locus. |
-| `related.<name>.delegate.via` | string | How to hand off work: `agent-bridge` \| `agent-codespaces` \| `none`. |
+| `related.<name>.locus.preferred` | string | Where work happens: `local` \| `machine:<key>` \| `codespace` \| `container`. |
+| `related.<name>.locus.machines` | list | Machine keys a *local* checkout is available on (per-machine availability the per-platform registry can't express). |
+| `related.<name>.locus.codespace` | map | GitHub CodeSpace hints: `repo` / `machine` / `location` / `workspace_folder`. Cloud venue -- usable from any machine. |
+| `related.<name>.locus.container` | map | Local Docker dev-container fleet: `repo` / `workspace_folder` + a `machines` list scoping it to the fleet hosts. Local venue -- `machines` restricts where it runs. |
+| `related.<name>.delegate.via` | string | How to hand off work: `agent-bridge` \| `agent-codespaces` \| `agent-containers` \| `none`. |
 
 Reads degrade safely (a missing/malformed file yields an empty index); a bare
 `name:` is a valid minimal link. Writes emit only non-empty fields, keeping the
