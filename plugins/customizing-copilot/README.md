@@ -41,6 +41,21 @@ for an extension only when no declarative surface can express the goal (e.g. a
 genuinely interactive slash command with live UI), and keep the imperative part
 minimal.
 
+**The one gap declarative surfaces can't close: originating a turn.** Hooks are
+**reactive** -- they ride activity the session is already producing, and can
+*decorate*, *gate*, or *continue* it, but they cannot *start* a turn. The
+closest is `agentStop` with `decision: "block"`, which forces a follow-up turn
+using `reason` as the prompt (verified) -- but only at the moment the agent
+finishes a turn, so it's a continuation loop, **not a scheduler**: once the
+agent goes idle it never fires again. There is **no hook that fires on a clock
+or from an external/async event to wake an idle session** (the `notification`
+hook is fire-and-forget, carries no turn-forcing output, and does not even fire
+in non-interactive mode). Asynchronous "push a new turn into a live/idle
+session" -- callbacks, peer-to-peer messaging, scheduled wake-ups -- still
+requires **`session.send()`** (an extension) or the runtime's own
+agent-initiated scheduled prompts. That gap is the strongest reason the
+Extensions API is not yet fully replaceable.
+
 ## Install
 
 No runtime — the skills load from the marketplace payload when enabled.
