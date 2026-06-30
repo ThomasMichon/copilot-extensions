@@ -35,6 +35,24 @@ LOCAL = _local_identity()
 LOCAL_LABEL = f"{LOCAL[0]} · {LOCAL[1].lower()}"
 
 
+def _project_repo() -> tuple[str, str]:
+    """``(repo name, default branch)`` for the active project's default repo.
+
+    Data-backs the picker top bar's repo/branch segments (formerly hardcoded to
+    ``aperture-labs`` / ``master``). Returns empty strings when config can't be
+    resolved, so the engine simply drops the segment rather than showing a
+    fabricated value.
+    """
+    try:
+        config = cfg.load_config()
+        return config.repo_name, config.default_repo.default_branch
+    except Exception:
+        return "", ""
+
+
+REPO, BRANCH = _project_repo()
+
+
 def machines():
     """Machine-tab descriptors. Slice 1: the local machine only."""
     m, e = LOCAL

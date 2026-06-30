@@ -406,6 +406,43 @@ def test_tui_renders_local_worktrees():
     asyncio.run(run())
 
 
+def test_topbar_repo_branch_are_data_backed():
+    """The top bar's repo + default-branch segments come from the data source
+    (config), not a hardcoded ``aperture-labs`` / ``master``."""
+    src = _fixture_source()
+    src.REPO = "copilot-extensions"
+    src.BRANCH = "main"
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:  # noqa: F841
+            scr = app.query_one(PickerScreen)
+            out = str(scr.render())
+            assert "copilot-extensions" in out
+            assert "main" in out
+            # The old hardcoded values must not leak in.
+            assert "aperture-labs" not in out
+            assert "master" not in out
+
+    asyncio.run(run())
+
+
+def test_topbar_drops_repo_branch_when_source_omits_them():
+    """A source without REPO/BRANCH (e.g. a bare fixture) renders no repo or
+    branch segment rather than a fabricated one."""
+    src = _fixture_source()  # SimpleNamespace -> no REPO/BRANCH attrs
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:  # noqa: F841
+            scr = app.query_one(PickerScreen)
+            out = str(scr.render())
+            assert "Agent Worktrees" in out
+            assert "aperture-labs" not in out
+
+    asyncio.run(run())
+
+
 class _FakeLoader:
     """In-memory loader matching the engine's live contract (no SSH)."""
 
