@@ -6,12 +6,15 @@
 // Uses the session.usage_info event for accurate context window monitoring
 // (currentTokens / tokenLimit) instead of heuristic turn counting.
 //
-// Integration points:
+// Integration points (all via observable session events -- the native runtime
+// removed SDK callback hooks, so no `hooks` object is passed to joinSession):
 // 1. generate_handoff_prompt tool -- on-demand structured handoff data
 // 2. save_handoff_prompt tool -- persist composed handoff to session folder
 // 3. session.usage_info event -- real-time context utilization monitoring
-// 4. onPostToolUse hook -- tracks modified files, context utilization reminders
-// 5. onUserPromptSubmitted hook -- tracks turn count (supplementary metric)
+// 4. tool.execution_start / _complete events -- track modified files + tools
+// 5. user.message event -- tracks turn count + first prompt (topic bias)
+// 6. session.idle event -- delivers the queued context-pressure nudge to the
+//    agent via session.send() (replaces onPostToolUse additionalContext)
 //
 // The /handoff gesture is handled as a skill invocation (context-handoff
 // skill), not a slash command. The skill triggers the agent to call
@@ -353,97 +356,123 @@ const session = await joinSession({
       },
     },
   ],
-
-  hooks: {
-    onSessionStart: async (input, invocation) => {
-      state.sessionId = invocation?.sessionId ?? null;
-      state.cwd = input?.cwd || process.cwd();
-      state.turnCount = 0;
-
-      await session.log(
-        `[Context Handoff] Session started (id=${state.sessionId}, cwd=${state.cwd}, source=${input?.source ?? "?"})`
-      );
-    },
-
-    onUserPromptSubmitted: async (input, invocation) => {
-      ensureState(invocation);
-      state.turnCount++;
-
-      // Capture the first user message for topic bias in handoffs
-      if (!state.firstUserPrompt && input?.prompt) {
-        state.firstUserPrompt = input.prompt;
-      }
-    },
-
-    onPostToolUse: async (input, invocation) => {
-      ensureState(invocation);
-
-      // Track file modifications
-      if ((input.toolName === "edit" || input.toolName === "create") && input.toolArgs?.path) {
-        state.filesModified.set(input.toolArgs.path, {
-          tool: input.toolName,
-          turnIndex: state.turnCount,
-        });
-      }
-
-      // Track notable tool invocations (skip high-frequency read-only tools)
-      const skipTools = new Set(["view", "glob", "grep", "report_intent", "sql", "session_store_sql"]);
-      if (!skipTools.has(input.toolName)) {
-        const summary = input.toolName === "edit" || input.toolName === "create"
-          ? input.toolArgs?.path || ""
-          : input.toolName === "powershell" || input.toolName === "bash"
-            ? (String(input.toolArgs?.description || input.toolArgs?.command || "")).slice(0, 80)
-            : input.toolName === "task"
-              ? `${input.toolArgs?.agent_type || ""}: ${(input.toolArgs?.description || "").slice(0, 60)}`
-              : JSON.stringify(input.toolArgs || {}).slice(0, 80);
-
-        state.toolInvocations.push({
-          tool: input.toolName,
-          turn: state.turnCount,
-          summary,
-        });
-
-        // Cap at 50 entries to avoid unbounded growth
-        if (state.toolInvocations.length > 50) {
-          state.toolInvocations = state.toolInvocations.slice(-30);
-        }
-      }
-
-      // --- Context utilization reminders (injected as additionalContext) ---
-      // The session.usage_info event updates state.lastUtilization with exact
-      // token counts. We check those values here because onPostToolUse can
-      // return additionalContext that the LLM actually sees.
-      const pct = Math.round(state.lastUtilization * 100);
-
-      if (state.lastUtilization >= HARD_UTILIZATION_THRESHOLD &&
-          !state.hardReminderSent && !state.handoffGenerated) {
-        state.hardReminderSent = true;
-        state.softReminderSent = true;  // hard implies soft
-        return {
-          additionalContext:
-            `[Context Handoff] ⚠️ Context window is ${pct}% full ` +
-            `(${state.currentTokens.toLocaleString()} / ${state.tokenLimit.toLocaleString()} tokens). ` +
-            `Auto-compaction triggers at ~80%. Invoke the context-handoff skill NOW ` +
-            `(call generate_handoff_prompt) to write a handoff file before context is lost.`,
-        };
-      }
-
-      if (state.lastUtilization >= SOFT_UTILIZATION_THRESHOLD &&
-          !state.softReminderSent && !state.handoffGenerated) {
-        state.softReminderSent = true;
-        return {
-          additionalContext:
-            `[Context Handoff] Context window is ${pct}% full ` +
-            `(${state.currentTokens.toLocaleString()} / ${state.tokenLimit.toLocaleString()} tokens). ` +
-            `Consider invoking the context-handoff skill soon (call generate_handoff_prompt) ` +
-            `to write a handoff file. No rush — finish your current task first.`,
-        };
-      }
-    },
-  },
 });
 
 await session.log("Context handoff extension loaded");
+
+// --- Session lifecycle reconstructed from events (SDK callback hooks removed) ---
+// The native runtime dropped SDK callback hooks ("SDK hook callbacks are no
+// longer supported by the native runtime"), which hard-failed joinSession when
+// a `hooks` object was passed. The former onSessionStart / onUserPromptSubmitted
+// / onPostToolUse behaviours are reconstructed below from observable session
+// events. The extension module loads once per session, so session-start work
+// runs inline here (session.sessionId is available directly on the session).
+state.sessionId = session.sessionId ?? state.sessionId ?? null;
+state.cwd = state.cwd || process.cwd();
+state.turnCount = 0;
+await session.log(
+  `[Context Handoff] Session started (id=${state.sessionId}, cwd=${state.cwd})`
+);
+
+// Turn counting + first-prompt capture (replaces onUserPromptSubmitted).
+session.on("user.message", (event) => {
+  state.turnCount++;
+  if (!state.firstUserPrompt && event.data?.content) {
+    state.firstUserPrompt = event.data.content;
+  }
+});
+
+// File / tool-invocation tracking (replaces onPostToolUse's bookkeeping).
+// tool.execution_complete carries the success flag but NOT the call
+// arguments, so the args are stashed from tool.execution_start (keyed by
+// toolCallId) and committed on a successful completion -- matching the old
+// hook, which ran for successful tool calls only.
+const pendingToolArgs = new Map();  // toolCallId -> { toolName, arguments }
+
+session.on("tool.execution_start", (event) => {
+  const d = event.data;
+  if (!d?.toolCallId) return;
+  pendingToolArgs.set(d.toolCallId, {
+    toolName: d.toolName,
+    arguments: d.arguments || {},
+  });
+  // Bound the map in case a completion event is ever missed.
+  if (pendingToolArgs.size > 200) {
+    pendingToolArgs.delete(pendingToolArgs.keys().next().value);
+  }
+});
+
+session.on("tool.execution_complete", (event) => {
+  const d = event.data;
+  const pend = d?.toolCallId ? pendingToolArgs.get(d.toolCallId) : null;
+  if (d?.toolCallId) pendingToolArgs.delete(d.toolCallId);
+  if (!d?.success) return;  // old onPostToolUse fired for successes only
+
+  const toolName = pend?.toolName || d.toolDescription?.name;
+  const toolArgs = pend?.arguments || {};
+  if (!toolName) return;
+
+  // Track file modifications
+  if ((toolName === "edit" || toolName === "create") && toolArgs?.path) {
+    state.filesModified.set(toolArgs.path, {
+      tool: toolName,
+      turnIndex: state.turnCount,
+    });
+  }
+
+  // Track notable tool invocations (skip high-frequency read-only tools)
+  const skipTools = new Set(["view", "glob", "grep", "report_intent", "sql", "session_store_sql"]);
+  if (!skipTools.has(toolName)) {
+    const summary = toolName === "edit" || toolName === "create"
+      ? toolArgs?.path || ""
+      : toolName === "powershell" || toolName === "bash"
+        ? (String(toolArgs?.description || toolArgs?.command || "")).slice(0, 80)
+        : toolName === "task"
+          ? `${toolArgs?.agent_type || ""}: ${(toolArgs?.description || "").slice(0, 60)}`
+          : JSON.stringify(toolArgs || {}).slice(0, 80);
+
+    state.toolInvocations.push({
+      tool: toolName,
+      turn: state.turnCount,
+      summary,
+    });
+
+    // Cap at 50 entries to avoid unbounded growth
+    if (state.toolInvocations.length > 50) {
+      state.toolInvocations = state.toolInvocations.slice(-30);
+    }
+  }
+});
+
+// Agent-facing context-pressure nudge (replaces the onPostToolUse
+// additionalContext return value, which the native runtime no longer
+// supports). session.on handlers are observe-only, so the reminder is queued
+// in the session.usage_info handler and delivered here as a real user-turn
+// message via session.send() on the next idle boundary -- the agent sees and
+// can act on it, exactly as the injected additionalContext used to allow.
+// Guarded by the once-only softReminderSent / hardReminderSent flags (reset
+// on compaction). session.send() inside an idle handler does not loop: the
+// queue is cleared before sending and the guard flags prevent re-queueing.
+let pendingNudge = null;  // null | "soft" | "hard"
+
+session.on("session.idle", () => {
+  if (!pendingNudge) return;
+  const level = pendingNudge;
+  pendingNudge = null;
+  const pct = Math.round(state.lastUtilization * 100);
+  const tokens =
+    `${state.currentTokens.toLocaleString()} / ${state.tokenLimit.toLocaleString()} tokens`;
+  const msg = level === "hard"
+    ? `[Context Handoff -- automated] Context window is ${pct}% full (${tokens}). ` +
+      `Auto-compaction triggers at ~80%. Invoke the context-handoff skill now ` +
+      `(call generate_handoff_prompt) to write a handoff file before context is lost.`
+    : `[Context Handoff -- automated] Context window is ${pct}% full (${tokens}). ` +
+      `Consider invoking the context-handoff skill soon (call generate_handoff_prompt) ` +
+      `to write a handoff file. No rush -- finish your current task first.`;
+  session.send(msg).catch((e) =>
+    session.log(`[Context Handoff] nudge send failed: ${e.message}`, { level: "warning" })
+  );
+});
 
 // --- Real-time context utilization monitoring ---
 // The session.usage_info event fires with exact token counts after each
@@ -461,7 +490,21 @@ session.on("session.usage_info", (event) => {
 
   const pct = Math.round(state.lastUtilization * 100);
 
-  // Soft reminder at threshold (user-visible log only — agent sees it via onPostToolUse)
+  // Queue an agent-facing nudge once per threshold, delivered on the next
+  // idle via session.send() (see the session.idle handler above). This is the
+  // agent-visible counterpart to the user-visible logs below.
+  if (state.lastUtilization >= HARD_UTILIZATION_THRESHOLD &&
+      !state.hardReminderSent && !state.handoffGenerated) {
+    state.hardReminderSent = true;
+    state.softReminderSent = true;  // hard implies soft
+    pendingNudge = "hard";
+  } else if (state.lastUtilization >= SOFT_UTILIZATION_THRESHOLD &&
+      !state.softReminderSent && !state.handoffGenerated) {
+    state.softReminderSent = true;
+    pendingNudge = "soft";
+  }
+
+  // Soft reminder at threshold (user-visible log only -- agent nudged via session.send on idle)
   if (state.lastUtilization >= SOFT_UTILIZATION_THRESHOLD &&
       !state.softLogShown && !state.handoffGenerated) {
     state.softLogShown = true;
@@ -473,7 +516,7 @@ session.on("session.usage_info", (event) => {
     );
   }
 
-  // Hard reminder at threshold (user-visible log only — agent sees it via onPostToolUse)
+  // Hard reminder at threshold (user-visible log only -- agent nudged via session.send on idle)
   if (state.lastUtilization >= HARD_UTILIZATION_THRESHOLD &&
       !state.hardLogShown && !state.handoffGenerated) {
     state.hardLogShown = true;
