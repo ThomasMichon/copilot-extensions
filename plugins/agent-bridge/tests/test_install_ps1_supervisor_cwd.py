@@ -26,23 +26,29 @@ def test_install_ps1_exists():
     assert _INSTALL_PS1.is_file(), "Windows installer must ship"
 
 
-def test_launcher_chdirs_supervisor_to_runtime_home():
-    """The generated launcher script must Set-Location off the plugin dir
-    before spawning the worker, so the supervisor pwsh never pins the payload
-    folder."""
+def test_launcher_spawns_worker_in_runtime_home():
+    """The generated launcher must spawn the worker python with its OS working
+    directory set to the runtime home -- via ``-WorkingDirectory`` on
+    Start-Process, the only thing that actually moves a spawned child's cwd.
+
+    ``Set-Location`` alone is NOT sufficient: it moves PowerShell's ``$PWD``
+    provider path, not the OS working directory a child inherits, so the
+    supervisor python would still pin the plugin dir (#1376).
+    """
     text = _text()
-    assert "Set-Location -LiteralPath (Split-Path `$pidFile)" in text, (
-        "launcher must chdir the supervisor to the runtime home (#1376)"
+    # The operative guard: Start-Process must pin -WorkingDirectory.
+    assert "-WorkingDirectory `$runtimeHome" in text, (
+        "launcher Start-Process must set -WorkingDirectory `$runtimeHome (#1376)"
     )
-    # And it must do so before launching the worker (Start-Process).
-    chdir_at = text.index("Set-Location -LiteralPath (Split-Path `$pidFile)")
+    # ...and it must precede the actual spawn arguments of that call.
+    workdir_at = text.index("-WorkingDirectory `$runtimeHome")
     spawn_at = text.index("Start-Process -FilePath `$launchPy")
-    assert chdir_at < spawn_at, "supervisor must chdir before spawning the worker"
+    assert spawn_at < workdir_at, "WorkingDirectory must belong to the Start-Process call"
 
 
 def test_scheduled_task_action_sets_working_directory():
     """The task action must pin the runtime home as its working directory, so a
-    task-launched supervisor also starts off the plugin dir."""
+    task-launched supervisor (conhost) also starts off the plugin dir."""
     text = _text()
     assert "-WorkingDirectory $InstallDir" in text, (
         "New-ScheduledTaskAction must set -WorkingDirectory $InstallDir (#1376)"
