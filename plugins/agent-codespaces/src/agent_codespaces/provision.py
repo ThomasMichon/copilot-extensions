@@ -52,11 +52,19 @@ def build_dotfiles_command(dotfiles_repo: str, relay_port: int) -> str:
 export LC_GIT_CREDENTIAL_RELAY={port} GIT_TERMINAL_PROMPT=0
 df={df}
 if [ ! -d "$df/.git" ]; then
+  # A non-git directory here is a broken/partial native dotfiles clone (e.g. the
+  # post-create clone was interrupted). git refuses to clone into a non-empty
+  # dir, so clear it first.
+  if [ -e "$df" ]; then
+    echo "[dotfiles] removing partial non-git dir at $df"
+    rm -rf "$df"
+  fi
   echo "[dotfiles] cloning {dotfiles_repo}"
   if git clone --depth 1 {url} "$df"; then
-    bash "$df/install.sh" || echo "[dotfiles] install FAILED"
+    bash "$df/install.sh" || {{ echo "[dotfiles] install FAILED" >&2; exit 1; }}
   else
-    echo "[dotfiles] clone FAILED"
+    echo "[dotfiles] clone FAILED" >&2
+    exit 1
   fi
 else
   br=$(git -C "$df" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')
@@ -70,7 +78,7 @@ else
     after=$(git -C "$df" rev-parse HEAD 2>/dev/null)
     if [ "$before" != "$after" ]; then
       echo "[dotfiles] synced to $after -- reinstalling"
-      bash "$df/install.sh" || echo "[dotfiles] install FAILED"
+      bash "$df/install.sh" || {{ echo "[dotfiles] install FAILED" >&2; exit 1; }}
     else
       echo "[dotfiles] up to date"
     fi

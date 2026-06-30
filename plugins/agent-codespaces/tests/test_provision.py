@@ -149,3 +149,17 @@ class TestBuildDotfilesCommand:
         # can't break out of the git clone argument
         cmd = build_dotfiles_command("acme/dot;rm -rf", 9857)
         assert "'https://github.com/acme/dot;rm -rf'" in cmd
+
+    def test_clone_and_install_failures_exit_nonzero(self) -> None:
+        # a failed clone/install must surface (exit 1), not be swallowed, so the
+        # caller can log a warning instead of silently leaving dotfiles missing
+        cmd = build_dotfiles_command("acme/dotfiles", 9857)
+        assert 'echo "[dotfiles] clone FAILED" >&2' in cmd
+        assert "exit 1" in cmd
+
+    def test_clears_partial_non_git_dir_before_clone(self) -> None:
+        # a non-git dir at the dotfiles path is a broken partial native clone;
+        # git won't clone into a non-empty dir, so it must be removed first
+        cmd = build_dotfiles_command("acme/dotfiles", 9857)
+        assert 'rm -rf "$df"' in cmd
+        assert "partial non-git dir" in cmd
