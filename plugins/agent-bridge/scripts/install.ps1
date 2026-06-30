@@ -971,8 +971,13 @@ function Invoke-Start {
     # uvicorn server inherits the installer's std handles; when install.ps1 is
     # run with its output redirected or piped, the server holds that handle open
     # and the installer appears to hang after "Update complete".
+    # #1376: pin both the inner python AND its conhost host to the runtime home,
+    # never the installer's cwd (the installed-plugins payload dir). -NoNewWindow
+    # keeps this conhost alive hosting the long-lived daemon, so without an
+    # explicit working dir it would hold the payload folder open and a later
+    # ``copilot plugin update agent-bridge`` would fail (os error 32) and empty it.
     $inner = @"
-`$p = Start-Process -FilePath '$($VenvPython -replace "'", "''")' -ArgumentList '-m','agent_bridge','start' -NoNewWindow -PassThru -RedirectStandardOutput '$($logFile -replace "'", "''")' -RedirectStandardError '$($errFile -replace "'", "''")'
+`$p = Start-Process -FilePath '$($VenvPython -replace "'", "''")' -ArgumentList '-m','agent_bridge','start' -WorkingDirectory '$($InstallDir -replace "'", "''")' -NoNewWindow -PassThru -RedirectStandardOutput '$($logFile -replace "'", "''")' -RedirectStandardError '$($errFile -replace "'", "''")'
 Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
 "@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
@@ -995,6 +1000,7 @@ Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
         # not inherit the installer's std handles.
         Start-Process -FilePath 'conhost.exe' `
             -ArgumentList @('--headless', "`"$pwshForHeadless`"", '-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded) `
+            -WorkingDirectory $InstallDir `
             -WindowStyle Hidden | Out-Null
 
         # Success == the port actually answers /health (not merely "a process
