@@ -54,6 +54,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -2032,14 +2033,17 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
     """
     from . import picker_tui
 
-    # Reap orphaned mux sessions (finalized / gone / untracked) before the
-    # picker renders, so a dead worktree is never presented as a live,
-    # resumable session (issue #713). Best-effort: never let a reap hiccup
-    # block the picker.
-    try:
-        reap_orphan_mux_sessions()
-    except Exception:
-        pass
+    # Reap orphaned mux sessions (finalized / gone / untracked) so a dead
+    # worktree is never presented as a live, resumable session (issue #713).
+    # Run it on a background thread so the mux enumeration never delays the
+    # picker appearing -- interaction must not wait on startup housekeeping
+    # (#1432). Best-effort: a reap hiccup never touches the picker.
+    def _reap_bg():
+        try:
+            reap_orphan_mux_sessions()
+        except Exception:
+            pass
+    threading.Thread(target=_reap_bg, name="reap-orphans", daemon=True).start()
 
     # Avoid a confusing double hop: when this picker is itself running over SSH,
     # don't fan out to other machines -- show only the local source (no remote

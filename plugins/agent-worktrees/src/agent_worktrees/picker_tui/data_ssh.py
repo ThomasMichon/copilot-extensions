@@ -384,10 +384,17 @@ class LiveLoader:
     def start(self):
         derive.NOW = _dt.datetime.now()
         for s in self._sources:
-            threading.Thread(
-                target=self._load_one, args=(s,),
-                name=f"load-{s.machine}-{s.env}", daemon=True,
-            ).start()
+            if s.local:
+                # Local loads in-process and fast: run it synchronously so the
+                # current machine's worktrees are on screen the instant the
+                # picker paints -- interaction never waits on the background SSH
+                # fan-out (#1432). Remote sources still stream in on threads.
+                self._load_one(s)
+            else:
+                threading.Thread(
+                    target=self._load_one, args=(s,),
+                    name=f"load-{s.machine}-{s.env}", daemon=True,
+                ).start()
 
     def cancel(self):
         """Stop loading and kill any in-flight prefetch ssh children.
