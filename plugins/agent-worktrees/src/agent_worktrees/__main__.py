@@ -5978,7 +5978,10 @@ def _related_usage() -> None:
     print("  add <name>                          Link a related repo + scaffold its doc")
     print("     [--role R] [--summary S] [--doc PATH] [--delegate D]")
     print("     [--locus L] [--machines a,b] [--primary] [--no-scaffold]")
-    print("     [--cs-repo R] [--cs-machine M] [--cs-location L]   (codespace locus)")
+    print("     [--cs-repo R] [--cs-machine M] [--cs-location L]")
+    print("     [--cs-workspace DIR]                                (codespace locus)")
+    print("     [--container-repo R] [--container-workspace DIR]")
+    print("     [--container-machines a,b]                          (container locus)")
     print("  remove <name>                       Unlink (leaves the narrative doc)")
     print("  doc <name>                          Print (scaffold if missing) the narrative")
     print("  primary [<name>]                    Show or set the primary related repo")
@@ -5987,8 +5990,8 @@ def _related_usage() -> None:
     print("Any command takes [--repo PATH] to target a specific checkout")
     print("(default: the git repo containing the current directory).")
     print()
-    print("Locus (where work happens): local | machine:<key> | codespace")
-    print("Delegate (how to hand off): agent-bridge | agent-codespaces | none")
+    print("Locus (where work happens): local | machine:<key> | codespace | container")
+    print("Delegate (how to hand off): agent-bridge | agent-codespaces | agent-containers | none")
 
 
 def _related_opt(rest: list[str], flag: str, default: str | None = None) -> str | None:
@@ -6059,6 +6062,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                             "preferred": e.locus.preferred,
                             "machines": e.locus.machines,
                             "codespace": e.locus.codespace,
+                            "container": e.locus.container,
                         },
                     }
                     for e in entries
@@ -6093,6 +6097,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                     "preferred": e.locus.preferred,
                     "machines": e.locus.machines,
                     "codespace": e.locus.codespace,
+                    "container": e.locus.container,
                 },
                 "registry": None if reg is None else {
                     "class": reg.repo_class, "remote": reg.remote,
@@ -6105,7 +6110,8 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         print(f"  summary:  {e.summary or '-'}")
         print(f"  locus:    {e.locus.preferred or '-'}"
               + (f"  machines={e.locus.machines}" if e.locus.machines else "")
-              + (f"  codespace={e.locus.codespace}" if e.locus.codespace else ""))
+              + (f"  codespace={e.locus.codespace}" if e.locus.codespace else "")
+              + (f"  container={e.locus.container}" if e.locus.container else ""))
         print(f"  delegate: {e.delegate or '-'}")
         print(f"  doc:      {related.doc_abs_path(anchor, e)}")
         if reg is None:
@@ -6124,12 +6130,23 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         name = rest[0]
         machines_csv = _related_opt(rest, "--machines", "") or ""
         machines = [m.strip() for m in machines_csv.split(",") if m.strip()]
-        codespace: dict[str, str] = {}
+        codespace: dict = {}
         for flag, key in (("--cs-repo", "repo"), ("--cs-machine", "machine"),
-                          ("--cs-location", "location")):
+                          ("--cs-location", "location"),
+                          ("--cs-workspace", "workspace_folder")):
             v = _related_opt(rest, flag)
             if v:
                 codespace[key] = v
+        container: dict = {}
+        for flag, key in (("--container-repo", "repo"),
+                          ("--container-workspace", "workspace_folder")):
+            v = _related_opt(rest, flag)
+            if v:
+                container[key] = v
+        ct_machines_csv = _related_opt(rest, "--container-machines", "") or ""
+        ct_machines = [m.strip() for m in ct_machines_csv.split(",") if m.strip()]
+        if ct_machines:
+            container["machines"] = ct_machines
         entry = related.RelatedEntry(
             name=name,
             role=related.normalize_role(_related_opt(rest, "--role", "")),
@@ -6139,6 +6156,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 preferred=(_related_opt(rest, "--locus", "") or "").strip(),
                 machines=machines,
                 codespace=codespace,
+                container=container,
             ),
             delegate=related.normalize_delegate(_related_opt(rest, "--delegate", "")),
         )

@@ -12,11 +12,18 @@ related:
     summary: "Primary product monorepo we ship changes to."
     doc: related/odsp-web.md      # narrative, relative to .agent-worktrees/
     locus:
-      preferred: codespace        # local | machine:<key> | codespace
+      preferred: codespace        # local | machine:<key> | codespace | container
       machines: [dev6]            # boxes the repo is available on (optional)
+      # CodeSpace venue -- cloud, usable from ANY machine.
       codespace: { repo: org/odsp-web-codespaces,
-                   machine: largePremiumLinux256gb, location: EastUs }
-    delegate: { via: agent-codespaces }   # agent-bridge | agent-codespaces | none
+                   machine: largePremiumLinux256gb, location: EastUs,
+                   workspace_folder: /workspaces/odsp-web }
+      # Container venue -- a local Docker dev-container fleet, scoped to the
+      # boxes that host it (`machines` restricts where it can run).
+      container: { repo: org/odsp-web-codespaces,
+                   workspace_folder: /workspaces/odsp-web,
+                   machines: [dev6] }
+    delegate: { via: agent-codespaces }   # agent-bridge | agent-codespaces | agent-containers | none
   copilot-extensions:
     role: tooling
     summary: "Source of the plugins this control plane drives."

@@ -54,19 +54,30 @@ related:
     role: product                 # product|dependency|consumer|tooling|docs|sibling
     summary: "Primary product monorepo we ship changes to."
     locus:
-      preferred: codespace        # local | machine:<key> | codespace
+      preferred: codespace        # local | machine:<key> | codespace | container
       codespace: { repo: org/odsp-web-codespaces,
-                   machine: largePremiumLinux256gb, location: EastUs }
+                   workspace_folder: /workspaces/odsp-web }   # cloud: any machine
+      container: { repo: org/odsp-web-codespaces,
+                   workspace_folder: /workspaces/odsp-web,
+                   machines: [dev6] }                         # local fleet: dev6 only
     delegate: { via: agent-codespaces }
 ```
 
 - **`role`** -- what the repo is to this one (free-form; common values above).
-- **`locus`** -- *where work actually happens*: `local`, `machine:<key>`, or
-  `codespace`; `machines:` lists the boxes it is available on (the per-machine
-  availability the per-*platform* global registry can't express); `codespace:`
-  carries provisioning hints.
+- **`locus`** -- *where work actually happens*: `local`, `machine:<key>`,
+  `codespace`, or `container`; `machines:` lists the boxes a *local* checkout is
+  available on (the per-machine availability the per-*platform* global registry
+  can't express).
+  - **`codespace:`** -- GitHub CodeSpace hints (`repo` / `machine` / `location`
+    / `workspace_folder`). CodeSpaces run in the cloud, so they work from **any**
+    machine.
+  - **`container:`** -- a local Docker dev-container fleet (`repo` /
+    `workspace_folder` + a `machines:` list scoping it to the fleet hosts). A
+    container fleet is **local**, so `machines:` restricts where it can run
+    (e.g. `[dev6]`). `workspace_folder` is the checkout path the venue lands in
+    (often *not* the venue `repo` name).
 - **`delegate.via`** -- how to hand work to the agent that owns the repo:
-  `agent-bridge`, `agent-codespaces`, or `none`.
+  `agent-bridge`, `agent-codespaces`, `agent-containers`, or `none`.
 - **`primary`** -- the default repo (used by `related resolve` with no name).
 
 ## CLI
@@ -85,8 +96,10 @@ related resolve [<name>]                 How to work on it from here (see workin
 ```
 
 `add` options: `--role R`, `--summary S`, `--doc PATH`, `--delegate D`,
-`--locus L`, `--machines a,b`, `--primary`, `--no-scaffold`, and for a
-codespace locus `--cs-repo R --cs-machine M --cs-location L`.
+`--locus L`, `--machines a,b`, `--primary`, `--no-scaffold`; for a codespace
+locus `--cs-repo R --cs-machine M --cs-location L --cs-workspace DIR`; and for a
+container locus `--container-repo R --container-workspace DIR
+--container-machines a,b`.
 
 ## When to link a repo
 
