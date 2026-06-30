@@ -62,8 +62,9 @@ agent-worktrees does not deploy, overwrite, or delete your global
 `~/.tmux.conf`. Server-global tuning that can't be session-scoped (keystroke
 passthrough, `escape-time`) is an **opt-in** `apply-mux-keybinds.sh` you run
 yourself; it persists a clearly-marked managed block in `~/.tmux.conf` (so it
-survives restarts) and applies to any running server. (The Windows/psmux side
-still uses a deployed `~/.psmux.conf` for now.) See the CLI Reference's
+survives restarts) and applies to any running server. (Windows/psmux works the
+same way: per-session `session-options.ps1` + opt-in `apply-mux-keybinds.ps1`;
+agent-worktrees no longer owns `~/.psmux.conf`.) See the CLI Reference's
 *Per-session, not global* note for details.
 
 ## Getting Started

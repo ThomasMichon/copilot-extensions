@@ -875,31 +875,37 @@ terminal_profiles:
     return $true
 }
 
-function Deploy-PsmuxConfig {
-    <# Deploy psmux.conf to ~/.psmux.conf with drift detection. #>
-    $src = Join-Path $PluginDir 'terminal\psmux.conf'
-    $dst = Join-Path $env:USERPROFILE '.psmux.conf'
-
-    if (-not (Test-Path $src)) {
-        Write-ServiceWarn "psmux.conf template not found at $src"
-        return
-    }
-
-    if ((Test-Path $dst) -and -not $Force) {
-        $srcHash = (Get-FileHash $src -Algorithm SHA256).Hash
-        $dstHash = (Get-FileHash $dst -Algorithm SHA256).Hash
-        if ($srcHash -eq $dstHash) {
-            Write-ServiceSkipped "psmux config up to date"
-            return
+function Deploy-TerminalScripts {
+    <# Deploy the per-session psmux options + opt-in keybind scripts to BIN_DIR.
+       agent-worktrees no longer owns ~/.psmux.conf: the launcher stamps the
+       status bar + behaviors per-session from session-options.ps1, and
+       apply-mux-keybinds.ps1 is an opt-in server-global tuning script the user
+       (or a restore flow) may run. Mirrors install.sh deploy_terminal_scripts. #>
+    Ensure-InstallDir $BinDir
+    $srcDir = Join-Path $PluginDir 'terminal'
+    foreach ($script in @('session-options.ps1', 'apply-mux-keybinds.ps1')) {
+        $src = Join-Path $srcDir $script
+        if (-not (Test-Path $src)) {
+            Write-ServiceWarn "terminal script not found at $src"
+            continue
         }
-        Write-ServiceChanged "psmux config drift detected - updating"
+        Copy-Item $src (Join-Path $BinDir $script) -Force
+        Write-ServiceOk "Terminal script: $script"
     }
 
-    Copy-Item $src $dst -Force
-    if (Test-Path $dst) {
-        Write-ServiceChanged "psmux config deployed to $dst"
-    } else {
-        Write-ServiceWarn "Failed to deploy psmux config"
+    # Relinquish the legacy installer-owned ~/.psmux.conf. Earlier versions
+    # deployed a fully-managed global config (status bar + keybinds) and
+    # drift-overwrote it; the per-session model makes that file obsolete and its
+    # global status bar would double up with the per-session one. Only remove it
+    # when it is unmistakably OUR old managed file (header match) -- never a
+    # user's personal config, nor an opt-in apply-mux-keybinds.ps1 block.
+    $psmuxConf = Join-Path $env:USERPROFILE '.psmux.conf'
+    if (Test-Path $psmuxConf) {
+        $head = (Get-Content -LiteralPath $psmuxConf -TotalCount 5 -ErrorAction SilentlyContinue) -join "`n"
+        if ($head -match 'Deployed by agent-worktrees installer') {
+            Remove-Item $psmuxConf -Force -ErrorAction SilentlyContinue
+            Write-ServiceChanged "Relinquished legacy psmux config ($psmuxConf) - now configured per-session"
+        }
     }
 }
 
@@ -1853,11 +1859,12 @@ switch ($Action) {
         Ensure-CopilotExperimental
         Assert-PathIncludes $LocalBin
         Remove-LegacyBinstubs
-        # Machine-wide terminal integration: ~/.psmux.conf is global (the
-        # status segments auto-detect the repo at runtime), so deploy it
-        # regardless of project context -- a project-less update must still
-        # refresh the multiplexer config.
-        Deploy-PsmuxConfig
+        # Machine-wide terminal integration: deploy the per-session psmux
+        # options + opt-in keybind scripts. We do NOT own ~/.psmux.conf -- the
+        # launcher stamps the status bar + behaviors per-session at runtime.
+        # Deploy regardless of project context (a project-less update must still
+        # refresh the terminal scripts).
+        Deploy-TerminalScripts
 
         # -- Project-specific (only when adopting) --
         if ($HasProject) {
@@ -1905,11 +1912,17 @@ switch ($Action) {
             Write-ServiceChanged "Removed Windows Terminal fragment: $fragDir"
         }
 
-        # Remove psmux config
+        # Remove the deployed terminal scripts. ~/.psmux.conf is intentionally
+        # left alone: agent-worktrees no longer owns it (sessions are configured
+        # per-session at launch), so uninstall must not delete a file that may
+        # now be the user's own (or an opt-in apply-mux-keybinds.ps1 block).
+        foreach ($script in @('session-options.ps1', 'apply-mux-keybinds.ps1')) {
+            $sp = Join-Path $BinDir $script
+            if (Test-Path $sp) { Remove-Item $sp -Force; Write-ServiceChanged "Removed terminal script: $script" }
+        }
         $psmuxConf = Join-Path $env:USERPROFILE '.psmux.conf'
         if (Test-Path $psmuxConf) {
-            Remove-Item $psmuxConf -Force
-            Write-ServiceChanged "Removed psmux config ($psmuxConf)"
+            Write-ServiceSkipped "Left ~/.psmux.conf in place (no longer managed by agent-worktrees)"
         }
 
         # Remove shortcuts
@@ -2068,12 +2081,12 @@ switch ($Action) {
             } catch { }
         }
 
-        # psmux config
-        $psmuxConf = Join-Path $env:USERPROFILE '.psmux.conf'
-        if (Test-Path $psmuxConf) {
-            Write-ServiceOk "psmux config at $psmuxConf"
+        # Terminal scripts (per-session psmux options + opt-in keybinds)
+        $sessOpts = Join-Path $BinDir 'session-options.ps1'
+        if (Test-Path $sessOpts) {
+            Write-ServiceOk "terminal scripts at $BinDir (session-options.ps1)"
         } else {
-            Write-ServiceWarn "psmux config missing - run 'update' to deploy"
+            Write-ServiceWarn "terminal scripts missing - run 'update' to deploy"
         }
 
         # Active worktree sessions
@@ -2125,9 +2138,10 @@ switch ($Action) {
         Ensure-CopilotExperimental
         Remove-LegacyBinstubs
         # Machine-wide terminal integration (see install path): deploy the
-        # multiplexer config regardless of project context.
+        # per-session options + opt-in keybind scripts regardless of project
+        # context.
         Ensure-Psmux
-        Deploy-PsmuxConfig
+        Deploy-TerminalScripts
 
         # -- Project-specific (only when a project is known) --
         if ($HasProject) {

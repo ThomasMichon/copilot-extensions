@@ -224,8 +224,11 @@ clearly-marked managed block in `~/.tmux.conf` (so it survives server restarts)
 (`--no-persist` tunes the running server without writing the file; deleting the
 marked block removes the settings).
 
-> psmux / Windows still uses a deployed `~/.psmux.conf` for now; the per-session
-> model is being mirrored there in a follow-up.
+> Both tmux (Linux/WSL) and psmux (Windows) are configured **per session** by
+> the launcher: `session-options.{sh,ps1}` stamps the bar + behaviors with
+> `set -t` (no `-g`), and the server-global keystroke passthrough lives in the
+> opt-in `apply-mux-keybinds.{sh,ps1}`. agent-worktrees no longer owns
+> `~/.tmux.conf` or `~/.psmux.conf`.
 
 
 ## Keeping worktrees current
