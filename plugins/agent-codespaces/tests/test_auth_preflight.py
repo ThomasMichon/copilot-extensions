@@ -145,3 +145,64 @@ class TestVerifyRemoteAuth:
         hosts, missing = await verify_remote_auth(run_remote, source=source)
         assert hosts == []
         assert missing == []
+
+
+class TestVerifyRemoteAuthExtraHosts:
+
+    @pytest.mark.asyncio
+    async def test_extra_hosts_are_unioned_and_probed(self):
+        async def run_remote(_cmd):
+            return "origin\thttps://your-org.visualstudio.com/x/_git/y (fetch)\n"
+
+        source = AsyncMock()
+
+        async def resolve(_action, fields, **_kw):
+            if fields["host"] == "github.com":
+                return "protocol=https\nhost=github.com\npassword=tok\n\n"
+            return None
+
+        source.resolve = AsyncMock(side_effect=resolve)
+
+        hosts, missing = await verify_remote_auth(
+            run_remote, source=source, extra_hosts=["github.com"],
+        )
+        # the dotfiles host is appended after the workspace host, deduped
+        assert hosts == ["your-org.visualstudio.com", "github.com"]
+        assert missing == ["your-org.visualstudio.com"]
+
+    @pytest.mark.asyncio
+    async def test_extra_hosts_deduped_against_remotes(self):
+        async def run_remote(_cmd):
+            return "origin\thttps://github.com/org/repo.git (fetch)\n"
+
+        source = AsyncMock()
+        source.resolve = AsyncMock(
+            return_value="protocol=https\nhost=h\npassword=tok\n\n",
+        )
+
+        hosts, missing = await verify_remote_auth(
+            run_remote, source=source, extra_hosts=["github.com"],
+        )
+        assert hosts == ["github.com"]
+        assert missing == []
+
+    @pytest.mark.asyncio
+    async def test_extra_hosts_probed_even_when_remote_listing_fails(self):
+        async def run_remote(_cmd):
+            raise RuntimeError("ssh failed")
+
+        source = AsyncMock()
+        source.resolve = AsyncMock(return_value=None)  # no auth
+
+        hosts, missing = await verify_remote_auth(
+            run_remote, source=source, extra_hosts=["github.com"],
+        )
+        assert hosts == ["github.com"]
+        assert missing == ["github.com"]
+
+    def test_remote_list_command_scans_dotfiles_checkout(self):
+        from agent_codespaces.auth_preflight import REMOTE_LIST_COMMAND
+        from agent_codespaces.provision import DOTFILES_DIR
+
+        assert DOTFILES_DIR in REMOTE_LIST_COMMAND
+        assert "${VM_REPO_PATH:-$PWD}" in REMOTE_LIST_COMMAND
