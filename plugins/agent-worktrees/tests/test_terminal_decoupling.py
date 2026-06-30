@@ -18,12 +18,19 @@ _KEYBINDS = _TERMINAL / "apply-mux-keybinds.sh"
 _LAUNCHER = _PLUGIN_ROOT / "bin" / "launch-session.sh"
 _INSTALL = _PLUGIN_ROOT / "scripts" / "install.sh"
 
+# psmux (Windows) counterparts -- the same decoupling, ported to PowerShell.
+_SESSION_OPTS_PS = _TERMINAL / "session-options.ps1"
+_KEYBINDS_PS = _TERMINAL / "apply-mux-keybinds.ps1"
+_LAUNCHER_PS = _PLUGIN_ROOT / "bin" / "launch-session.ps1"
+_INSTALL_PS = _PLUGIN_ROOT / "scripts" / "install.ps1"
+
 
 def test_terminal_scripts_exist():
     assert _SESSION_OPTS.is_file(), "per-session options script must ship"
     assert _KEYBINDS.is_file(), "opt-in keybind script must ship"
     # The legacy global config must be gone.
     assert not (_TERMINAL / "tmux.conf").exists(), "global tmux.conf must not ship"
+    assert not (_TERMINAL / "psmux.conf").exists(), "global psmux.conf must not ship"
 
 
 def test_session_options_are_session_scoped():
@@ -117,3 +124,55 @@ def test_status_writer_retired():
     # Dropped from the deploy + uninstall loops (only legacy cleanup may name it).
     assert "for script in session-options.sh apply-mux-keybinds.sh; do" in install
     assert "session-options.sh apply-mux-keybinds.sh status-writer.sh" not in install
+
+
+# --- psmux (Windows) decoupling: the same invariants, ported to PowerShell ---
+
+
+def test_psmux_session_options_are_session_scoped():
+    text = _SESSION_OPTS_PS.read_text()
+    assert "Set-AwPsmuxSessionOptions" in text
+    # Per-session: psmux options are stamped with `set-option -t <session>`.
+    assert "set-option -t $Session" in text, "options must be session-scoped (-t)"
+    # No global stamping anywhere in an executable line.
+    code = [
+        ln for ln in text.splitlines()
+        if ln.strip() and not ln.lstrip().startswith("#")
+    ]
+    assert not any(" -g " in ln for ln in code), "psmux options must not be global (-g)"
+    # The status bar reads precomputed @vars, never the heavy CLI on render.
+    assert "#{@aw_ctx}" in text and "#{@aw_seg}" in text
+    assert "agent-worktrees status" not in text
+    # The server-global keystroke bits must NOT live in the per-session script.
+    assert not any("unbind-key" in ln for ln in code)
+    assert not any("prefix" in ln for ln in code)
+
+
+def test_psmux_keybind_script_holds_only_server_global_bits():
+    text = _KEYBINDS_PS.read_text()
+    # The things that cannot be session-scoped live here, and only here.
+    assert "unbind-key -a -T root" in text
+    assert "prefix C-b" in text
+    # Opt-in, persisted as a marked block in ~/.psmux.conf, with an escape hatch.
+    assert ".psmux.conf" in text
+    assert ">>> agent-worktrees mux keybinds" in text
+    assert "NoPersist" in text
+
+
+def test_psmux_launcher_applies_session_options():
+    text = _LAUNCHER_PS.read_text()
+    assert "session-options.ps1" in text, "launcher must dot-source the options script"
+    assert "Set-AwPsmuxSessionOptions" in text or "Set-AwSessionOptionsSafe" in text
+
+
+def test_psmux_installer_does_not_own_global_conf():
+    text = _INSTALL_PS.read_text()
+    # No deployment of, or drift-overwrite into, ~/.psmux.conf.
+    assert "Deploy-PsmuxConfig" not in text
+    assert "psmux config drift detected" not in text
+    # The new terminal scripts must be deployed instead, and the legacy global
+    # config relinquished (header-matched), never blindly redeployed.
+    assert "Deploy-TerminalScripts" in text
+    assert "session-options.ps1" in text
+    assert "apply-mux-keybinds.ps1" in text
+    assert "Relinquished legacy psmux config" in text

@@ -523,6 +523,23 @@ function Start-StatusUpdater {
         Write-SetupLog "psmux: status-updater spawn failed: $($_.Exception.Message)" 'WARN'
     }
 }
+# Per-session psmux options (status bar + behaviors). agent-worktrees does NOT
+# own ~/.psmux.conf; the launcher stamps these onto each session it creates or
+# joins (psmux set-option -t <session>, no -g), mirroring the Linux/WSL
+# session-options.sh. Dot-source the helper deployed alongside this launcher
+# (~/.agent-worktrees/bin/session-options.ps1).
+$script:AwSessionOptions = Join-Path $PSScriptRoot 'session-options.ps1'
+if (Test-Path $script:AwSessionOptions) {
+    try { . $script:AwSessionOptions }
+    catch { Write-SetupLog "psmux: failed to load session-options.ps1: $($_.Exception.Message)" 'WARN' }
+}
+function Set-AwSessionOptionsSafe {
+    param([string]$Session)
+    if (Get-Command Set-AwPsmuxSessionOptions -ErrorAction SilentlyContinue) {
+        try { Set-AwPsmuxSessionOptions -Session $Session }
+        catch { Write-SetupLog "psmux: session-options apply failed: $($_.Exception.Message)" 'WARN' }
+    }
+}
 if (-not $noMux -and $psmuxCmd) {
     $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
     $sessName = "wt-$wtId"
@@ -538,6 +555,9 @@ if (-not $noMux -and $psmuxCmd) {
         }
         Write-Host "Joining existing session: $sessName"
         Reset-SshConptyViewport
+        # Re-stamp per-session options on (re)connect so a long-lived session
+        # picks up the current bar without us owning the global config.
+        Set-AwSessionOptionsSafe $sessName
         # (Re)assert the updater on join: if the prior one died, this revives
         # the bar; if it's alive, the token guard makes the new one retire.
         Start-StatusUpdater $sessName $plan.work_dir
@@ -604,8 +624,10 @@ if (-not $noMux -and $psmuxCmd) {
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Failed to create psmux session. Falling back to direct launch."
     } else {
-        # Session created: start its status-bar updater (one per session,
-        # before any nested-create early-exit so the bar populates either way).
+        # Session created: stamp per-session options + start its status-bar
+        # updater (one per session, before any nested-create early-exit so the
+        # bar populates either way).
+        Set-AwSessionOptionsSafe $sessName
         Start-StatusUpdater $sessName $plan.work_dir
         if ($nested) {
             Write-Host "Session created: $sessName (open a new terminal to join)"
