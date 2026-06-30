@@ -90,6 +90,55 @@ See [`references/codespaces.yaml`](references/codespaces.yaml) for every field
 (credential sources, per-repo provisioning, `workspace_folder` overrides) with
 inline comments. The per-field reference is in **Config Reference** below.
 
+### 1b. Declare your dotfiles repo (account-wide, one-time)
+
+GitHub Codespaces clones **one** dotfiles repo — chosen once for your **whole
+account** at <https://github.com/settings/codespaces> — into *every* CodeSpace
+(via the post-start script, at `/workspaces/.codespaces/.persistedshare/dotfiles`).
+It is **not** per-repo configurable, and **GitHub exposes no API to read which
+repo you picked**, so agent-codespaces can't auto-discover it. Declare it **once**
+so connect-time housekeeping (dotfiles sync-forward, auth re-shim) knows where
+your dotfiles live:
+
+```yaml
+defaults:
+  dotfiles_repo: <your-user>/dotfiles    # the repo set at github.com/settings/codespaces
+```
+
+- The value must match your **account** dotfiles setting (commonly
+  `<your-user>/dotfiles`, but any single repo you configured). This field only
+  **records** that choice — setting it here does **not** change your GitHub
+  account setting (do that in the web UI).
+- The repo should contain an **`install.sh`** at its root that performs your
+  CodeSpace setup (symlink skills, install relay shims, etc.). Connect-time
+  housekeeping runs `bash install.sh` after syncing the repo forward. Verify it
+  exists:
+  ```bash
+  gh api repos/<your-user>/dotfiles/contents/install.sh --jq .name   # expect: install.sh
+  ```
+
+#### Control-plane repo == or != dotfiles repo
+
+If the repo you adopt for CodeSpaces config (your **control plane**) **is** your
+account dotfiles repo (a common setup), you're done — `dotfiles_repo` just names
+it.
+
+If they **differ** (control plane is e.g. `org/my-harness`, account dotfiles is
+`<your-user>/dotfiles`), make the relationship explicit so cross-repo flows can
+find and update the dotfiles repo as a good citizen:
+
+1. **Link it as a related repo** from your control plane (see the
+   `agent-worktrees-related` skill):
+   ```bash
+   agent-worktrees related add <your-user>/dotfiles --role tooling \
+     --summary "Account dotfiles repo cloned into every CodeSpace; hosts install.sh." \
+     --delegate none
+   ```
+2. **Scaffold a `repo-<dotfiles>` skill** in your control plane describing how to
+   update that dotfiles repo (its branch/PR conventions, what `install.sh` does,
+   how to test a change on a CodeSpace), so future sessions edit it knowingly
+   rather than guessing.
+
 ### 2. Adopt the repo
 
 ```bash
@@ -116,7 +165,7 @@ agent-codespaces config show
 |-----|------|---------|-------------|
 | `machine_type` | string | `largePremiumLinux` | Default VM size for `gh codespace create` |
 | `location` | string | `EastUs` | Default Azure region |
-| `dotfiles_repo` | string | -- | Dotfiles repo for CodeSpace provisioning |
+| `dotfiles_repo` | string | -- | Your **account-wide** dotfiles repo (the single repo GitHub clones into every CodeSpace; set at `github.com/settings/codespaces`). Records the choice so connect-time housekeeping finds it — GitHub has no API to read it. See "Declare your dotfiles repo" above. Not per-repo. |
 | `ssh_user` | string | `vscode` | SSH user on CodeSpaces |
 | `workspace_folder` | string | -- | **Global** workspace root applied to every CodeSpace (e.g., `/workspaces/<your-repo>`). Used to `cd` before launching Copilot, preventing CWD race conditions during cold starts. When you adopt more than one CodeSpaces repo, prefer per-repo `repos.<repo>.workspace_repo`/`workspace_folder` instead (see `repos`). |
 | `acp_command` | string | -- | Explicit override for the remote agent command. If omitted, built automatically from the resolved workspace folder. |

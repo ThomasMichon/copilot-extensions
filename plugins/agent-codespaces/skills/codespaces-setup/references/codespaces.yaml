@@ -9,7 +9,11 @@ defaults:
   machine_type: largePremiumLinux        # default `gh codespace create` VM size
   location: EastUs                        # default Azure region
   ssh_user: vscode                        # SSH user (match your CodeSpace user)
-  # dotfiles_repo: <your-user>/<your-dotfiles>   # optional dotfiles repo
+  # Your ACCOUNT-WIDE dotfiles repo -- the single repo GitHub clones into every
+  # CodeSpace (set at github.com/settings/codespaces; no API to read it, so
+  # declare it once here). Should host an install.sh; run by connect-time
+  # housekeeping after sync. Not per-repo.
+  # dotfiles_repo: <your-user>/dotfiles
   #
   # Global workspace root applied to EVERY CodeSpace. Prefer the per-repo
   # `repos.<repo>.workspace_repo` / `workspace_folder` below when you adopt
