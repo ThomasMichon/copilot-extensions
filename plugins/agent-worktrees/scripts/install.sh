@@ -87,7 +87,9 @@ REPO_DIR=""
 if $HAS_PROJECT; then
     _config_file="$HOME/.$PROJECT_NAME/config.yaml"
     if [[ -f "$_config_file" ]]; then
-        _anchor=$(grep 'anchor:' "$_config_file" 2>/dev/null | head -1 | sed 's/.*anchor:\s*//')
+        # `|| true`: under `set -euo pipefail` a no-match grep exits 1 and
+        # aborts the whole installer; a missing key must just yield empty.
+        _anchor=$(grep 'anchor:' "$_config_file" 2>/dev/null | head -1 | sed 's/.*anchor:\s*//' || true)
         if [[ -n "$_anchor" ]] && git -C "$_anchor" rev-parse --show-toplevel >/dev/null 2>&1; then
             REPO_DIR="$_anchor"
         fi
@@ -203,7 +205,11 @@ register_project() {
     local cfg_path="$PROJECT_DIR/config.yaml"
     if [[ -f "$cfg_path" ]]; then
         local _db
-        _db=$(grep 'default_branch:' "$cfg_path" 2>/dev/null | head -1 | sed 's/.*default_branch:\s*//')
+        # `|| true`: under `set -euo pipefail` a no-match grep exits 1, which
+        # would abort `install.sh update` mid-flight -- before "Update
+        # complete" and before sibling-module updates (agent-bridge). A config
+        # missing `default_branch:` must just fall back to the default below.
+        _db=$(grep 'default_branch:' "$cfg_path" 2>/dev/null | head -1 | sed 's/.*default_branch:\s*//' || true)
         if [[ -n "$_db" ]]; then
             default_branch="$_db"
         fi
@@ -1312,7 +1318,9 @@ case "$ACTION" in
             # Active sessions
             if [[ -d "$WORKTREES_DIR" ]]; then
                 total=$(find "$WORKTREES_DIR" -name '*.yaml' 2>/dev/null | wc -l)
-                active=$(grep -l 'status: active' "$WORKTREES_DIR"/*.yaml 2>/dev/null | wc -l)
+                # `|| true`: a no-match `grep -l` exits 1 and, under pipefail,
+                # would abort the script; treat "no active worktrees" as 0.
+                active=$(grep -l 'status: active' "$WORKTREES_DIR"/*.yaml 2>/dev/null | wc -l || true)
                 ok "$active active session(s), $total total"
             fi
         else
