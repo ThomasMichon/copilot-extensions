@@ -704,8 +704,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     ``--base`` implies ``--no-mux`` and ``--no-resume``.
 
     With ``--new``, skips the interactive picker and creates a new
-    worktree.  Used by agent-bridge for non-interactive SSH sessions.
-    ``--new`` implies ``--no-mux``.
+    worktree.  Used by agent-bridge for non-interactive SSH sessions and by
+    the picker's cross-env "New worktree" handoff. ``--new`` gets a muxed
+    session unless ``--no-mux`` is passed (agent-bridge passes it; it also
+    uses ``--json``, which forces ``--no-mux``).
 
     When stdin is not a TTY and no non-interactive flag is set
     (``--json``, ``--base``, ``--new``), resolve errors out instead of
@@ -729,8 +731,11 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         args.no_mux = True
         args.no_resume = True
 
-    if use_new:
-        args.no_mux = True
+    # NOTE: ``--new`` does NOT force ``--no-mux``. A new worktree gets a muxed
+    # session like a resume (the cross-env/cross-machine "New worktree" picker
+    # handoff runs ``<project> --new`` over ``ssh -t`` and wants tmux/psmux just
+    # like a local launch). Callers that need clean stdio pass ``--no-mux``
+    # explicitly (agent-bridge does, and also uses ``--json`` which forces it).
 
     with output.stdout_to_stderr():
         # Base-repo (no-worktree) projects resolve against the anchor directly,
@@ -6731,7 +6736,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--auto", action="store_true",
                    help=argparse.SUPPRESS)  # deprecated alias for --new
     p.add_argument("--new", action="store_true", dest="new_worktree",
-                   help="Create a new worktree (non-interactive, implies --no-mux)")
+                   help="Create a new worktree non-interactively (muxed unless "
+                        "--no-mux is also passed)")
     p.add_argument("--bridge", action="store_true",
                    help="With --new: mark the worktree as agent-bridge-owned "
                         "(kind=bridge: hidden from the Picker by default, exempt "
