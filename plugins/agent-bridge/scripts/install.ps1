@@ -552,6 +552,15 @@ function Register-ScheduledTask_ {
 `$logFile = Join-Path (Split-Path `$pidFile) 'agent-bridge.log'
 `$errFile = Join-Path (Split-Path `$pidFile) 'agent-bridge-err.log'
 
+# #1376: pin this supervisor (pwsh) to the runtime home, never the
+# installed-plugins payload dir. A process holding a directory as its CWD locks
+# it on Windows, so a supervisor sitting in the plugin folder blocks
+# ``copilot plugin update agent-bridge`` (the replace fails and the payload dir
+# is left emptied -- "installer not found" on the next update). The worker
+# (python -m agent_bridge) already chdir's, but this pwsh parent is the process
+# that actually held the handle.
+Set-Location -LiteralPath (Split-Path `$pidFile)
+
 if (Test-Path `$pidFile) {
     `$existingPid = Get-Content `$pidFile -ErrorAction SilentlyContinue
     if (`$existingPid) {
@@ -581,7 +590,8 @@ Set-Content -Path `$pidFile -Value `$proc.Id
     # with -NoNewWindow, that window persists for the life of the service.
     $action = New-ScheduledTaskAction `
         -Execute 'conhost.exe' `
-        -Argument "--headless `"$pwshPath`" -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$launcherPath`""
+        -Argument "--headless `"$pwshPath`" -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$launcherPath`"" `
+        -WorkingDirectory $InstallDir
 
     # Non-interactive mode runs the daemon headless: a boot trigger (fires
     # without any logon) plus an S4U principal ("run whether the user is logged

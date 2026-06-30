@@ -4,12 +4,13 @@ requires-python = ">=3.10"
 
 [[package]]
 name = "agent-bridge"
-version = "0.4.0.dev61"
+version = "0.4.0.dev68"
 source = { editable = "." }
 dependencies = [
     { name = "agent-client-protocol" },
     { name = "agent-credential-relay" },
     { name = "agent-ssh-manager" },
+    { name = "agent-zdd" },
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -29,6 +30,7 @@ requires-dist = [
     { name = "agent-client-protocol", specifier = ">=0.10.1,<1" },
     { name = "agent-credential-relay", directory = "libs/credential-relay" },
     { name = "agent-ssh-manager", directory = "libs/ssh-manager" },
+    { name = "agent-zdd", directory = "libs/zdd" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2.0" },
@@ -74,6 +76,15 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
 ]
+provides-extras = ["dev"]
+
+[[package]]
+name = "agent-zdd"
+version = "0.1.0.dev1"
+source = { directory = "libs/zdd" }
+
+[package.metadata]
+requires-dist = [{ name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" }]
 provides-extras = ["dev"]
 
 [[package]]
