@@ -368,6 +368,38 @@ Bypass in a pinch with `git commit/push --no-verify` (discouraged). The
 install-contract check fails until every runtime plugin's installer conforms —
 see the contract doc for the rules.
 
+## Gotchas
+
+### The mux status bar must never compute on the render path
+
+**Rule: nothing in a tmux/psmux `status-left` / `status-right` may spawn a
+process per render.** No `#(agent-worktrees …)`, no `#(cat …)`, no `#()` that
+shells out. The bar may read only precomputed values — the `#{@aw_ctx}` /
+`#{@aw_seg}` user options plus `%H:%M`-style strftime. A detached
+`status-updater` watcher computes the segments **off** the render path and
+pushes them in via `set-option`.
+
+**Why (the regression this exists to prevent).** tmux runs `#()` jobs
+asynchronously and caches them between `status-interval` ticks, so it *mostly*
+hides the cost. **psmux repaints synchronously** — it re-runs every `#()` in the
+status line on each repaint, in the render/keystroke path. A bar that shelled
+out to the (Python, cold-starting) `agent-worktrees` CLI cost ~600 ms per
+repaint there; under Copilot's high-framerate TUI that turned keystroke echo and
+re-render to molasses on Windows (worse under the double-ConPTY stack), while a
+no-mux session stayed snappy. The fix moved the compute into one common
+`status-updater` watcher feeding `#{@aw_*}` vars. See the *Off the paint path*
+section of
+[`plugins/agent-worktrees/docs/cli-reference.md`](plugins/agent-worktrees/docs/cli-reference.md).
+
+**If you touch `terminal/psmux.conf`, `terminal/session-options.sh`, or a
+launcher status path:** keep the bar on `#{@aw_*}` vars; keep the compute in the
+shared cross-platform `status-updater` watcher (do **not** re-introduce a
+per-mux shell writer or a render-path `#()`); the guard tests in
+`plugins/agent-worktrees/tests/test_terminal_decoupling.py` (assert no
+`#(agent-worktrees` / `#(cat` in the bar) will fail if you regress. Verified
+mechanisms: psmux 3.3.6 and tmux 3.4 both support session-scoped `set-option -t`
+(isolated per session) and `#{@user-option}` expansion.
+
 ## Commit Messages
 
 - Descriptive, imperative mood: "Fix Unicode crash on cp1252 consoles"
