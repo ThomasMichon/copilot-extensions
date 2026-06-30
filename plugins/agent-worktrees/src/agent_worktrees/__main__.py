@@ -2800,7 +2800,9 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         return _json_error(msg) if use_json else (output.err(msg) or 1)
     worktree_id = _resolve_worktree_id(worktree_id)
 
-    result = pr_ops.pr_status(worktree_id, all_prs=getattr(args, "all", False))
+    result = pr_ops.pr_status(
+        worktree_id, all_prs=getattr(args, "all", False), config=config,
+    )
     if use_json:
         _json_output(result)
         return 0 if result.get("has_pr") or "error" not in result else 1
@@ -2824,6 +2826,10 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         for p in result["prs"]:
             num = f"#{p['number']}" if p.get("number") else "(unnumbered)"
             print(f"    - {num} [{p.get('state')}] {p.get('branch')}")
+    if result.get("pull_forward_recommended"):
+        print()
+        output.warn("Pull-forward recommended (active PR merged):")
+        print(f"  {result.get('next_action')}")
     return 0
 
 
@@ -6824,7 +6830,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", default=None)
 
     # pr-status (read tracked PR metadata)
-    p = sub.add_parser("pr-status", help="Show tracked PR metadata for a worktree")
+    p = sub.add_parser(
+        "pr-status",
+        help="Show tracked PR metadata (reconciles against the provider; "
+             "recommends pull-forward when the active PR has merged)",
+    )
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--all", action="store_true",
                    help="List every tracked PR, not just the active one")

@@ -298,7 +298,7 @@ modules directly. The binstub resolves the project from the
 | **Finalize** (validate + clean up, step 2) | `agent-worktrees finalize` |
 | **PR mode: create + push a feature branch** | `agent-worktrees create-pr --title "desc"` |
 | **PR mode: record PR metadata** (after sub-agent opens it) | `agent-worktrees set-pr --url URL --number N` |
-| **PR mode: show tracked PR state** | `agent-worktrees pr-status` |
+| **PR mode: show tracked PR state** (reconciles vs. provider; flags pull-forward when merged) | `agent-worktrees pr-status` |
 | **Check if PRs are required** (direct-to-master blocked) | `agent-worktrees get pr-required` |
 | Set/update title only | `agent-worktrees push-changes --title "desc" --title-only` |
 | Show worktree git status | `agent-worktrees status` |
