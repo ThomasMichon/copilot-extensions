@@ -14,6 +14,16 @@
  * auth keeps working even after an SSH session disconnects -- instead of
  * relying on a static backup copy that goes stale when the extension updates.
  *
+ * If NEITHER is ready yet -- the relay tunnel is down AND the VS Code helper
+ * hasn't initialized (the "reverse order" case: agent-codespaces provisions us
+ * first, then VS Code opens and its auth system comes up moments later) -- we do
+ * NOT hard-fail. A hard failure makes single-shot callers (setup-agency /
+ * external-git) fall through to a plain-git `Username:` prompt that HANGS,
+ * stalling postStart. Instead we BLOCK (bounded poll) until the relay or the VS
+ * Code helper becomes serviceable, so the caller's one call waits through the
+ * window and then succeeds. On timeout we fail QUIETLY (git `get` -> `quit=1`)
+ * so even the worst case can't trip an interactive prompt.
+ *
  * Installed (by agent-codespaces, with the extension's node shebang) at both
  * ~/ado-auth-helper and ~/azure-auth-helper. The real auth-helper.js branches
  * on the invoked basename, which is preserved because this wrapper IS that
@@ -34,8 +44,27 @@ const DEFAULT_RELAY_PORT = 9857;
 const RELAY_CLIENT = path.join(HOME, ".local", "bin", "ado-auth-helper-relay");
 const EXT_PREFIX = "ms-codespaces-tools.ado-codespaces-auth";
 
+// When neither the relay nor the VS Code helper is available yet, callers like
+// `setup-agency` / `external-git` call us ONCE and, on failure, fall through to
+// a plain-git `Username:` prompt that HANGS. So instead of hard-failing we BLOCK
+// (bounded poll) until one becomes serviceable -- absorbing the wait so the
+// caller's single call succeeds. The deadline matches external-git's own 120s
+// tolerance for the helper to appear; the poll interval keeps it responsive.
+// Overridable via env for tuning/tests.
+const WAIT_DEADLINE_MS = Number(process.env.ADO_AUTH_HELPER_WAIT_MS || 120000);
+const POLL_INTERVAL_MS = Number(process.env.ADO_AUTH_HELPER_POLL_MS || 2000);
+
 function isExecutable(p) {
   try { fs.accessSync(p, fs.constants.X_OK); return true; } catch (e) { return false; }
+}
+
+// Synchronous sleep (no event loop available in this one-shot helper).
+function sleepMs(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch (e) {
+    cp.spawnSync("sleep", [String(Math.max(0, ms) / 1000)]);
+  }
 }
 
 // Resolve the active relay port: explicit env var, else probe the default
@@ -96,20 +125,54 @@ function findRealHelper() {
   return best ? best.js : null;
 }
 
-const port = relayPort();
-if (port && isExecutable(RELAY_CLIENT)) {
-  useRelay(port);
+// Hand off to the real VS Code helper as the main module. Returns false if it
+// isn't available/loadable yet (extension still initializing), true if it ran
+// (it typically exits the process itself).
+function tryRealHelper() {
+  const real = findRealHelper();
+  if (!real) return false;
+  // process.argv[1] is this wrapper's path (~/ado-auth-helper or
+  // ~/azure-auth-helper), so the real helper sees the correct invoked name.
+  require(real);
+  return true;
 }
 
-const real = findRealHelper();
-if (real) {
-  // Hand off to the real helper as the main module. process.argv[1] is this
-  // wrapper's path (~/ado-auth-helper or ~/azure-auth-helper), so the real
-  // helper sees the correct invoked name.
-  require(real);
-} else {
-  process.stderr.write(
-    "ado-auth-helper: relay unavailable and no VS Code auth-helper found\n"
-  );
+// Fail WITHOUT tripping an interactive git prompt. For the git-credential `get`
+// action, emit `quit=1` so git stops the helper chain instead of falling back
+// to a `Username:`/`Password:` terminal prompt (which hangs headless). Other
+// actions (e.g. `get-access-token`) just exit non-zero.
+function failQuietly(msg) {
+  const action = process.argv[2] || "";
+  if (action === "get") process.stdout.write("quit=1\n");
+  process.stderr.write("ado-auth-helper: " + msg + "\n");
   process.exit(1);
 }
+
+// Relay-first, then the VS Code helper; if NEITHER is ready yet, block and
+// re-check until one becomes serviceable or the deadline passes -- so a caller
+// that only calls us once (setup-agency / external-git) waits through the
+// relay-down / VS-Code-still-initializing window instead of hard-failing into a
+// git prompt hang.
+const deadline = Date.now() + WAIT_DEADLINE_MS;
+let waited = false;
+for (;;) {
+  const port = relayPort();
+  if (port && isExecutable(RELAY_CLIENT)) {
+    useRelay(port); // exits
+  }
+  try {
+    if (tryRealHelper()) return; // ran the real helper (usually exits)
+  } catch (e) {
+    // Extension present but not serving yet (host still coming up) -- keep
+    // polling; a later attempt succeeds once it's ready.
+  }
+  if (Date.now() >= deadline) break;
+  waited = true;
+  sleepMs(POLL_INTERVAL_MS);
+}
+
+failQuietly(
+  waited
+    ? "timed out waiting for the credential relay or VS Code auth-helper"
+    : "relay unavailable and no VS Code auth-helper found"
+);
