@@ -15,7 +15,7 @@ from agent_bridge.agent_registry import (
     parse_agent_registry,
 )
 from agent_bridge.topology import MachineConfig, SshEnvironment, parse_machines_yaml
-from agent_bridge.transport import SpawnTarget
+from agent_bridge.transport import PluginRef, SpawnTarget
 
 
 # -- Sample data ---------------------------------------------------------------
@@ -1041,3 +1041,69 @@ class TestElevatedDiscovery:
         discovered = discover_local_agents()
         assert discovered["SPO.Core"].requires_admin is True
         assert discovered["Plain"].requires_admin is False
+
+
+# -- Plugin injection contract (related-repo plugins) -------------------------
+
+
+class _PluginAwareResolver:
+    """Namespace resolver that records the extra_plugins it was resolved with."""
+
+    def __init__(self, prefix_val: str = "pl"):
+        self._prefix = prefix_val
+        self.seen_extra: object = "UNSET"
+
+    @property
+    def prefix(self) -> str:
+        return self._prefix
+
+    async def resolve(
+        self, name: str, *, extra_plugins: "list[PluginRef]" = ()
+    ) -> SpawnTarget:
+        self.seen_extra = list(extra_plugins)
+        return SpawnTarget(type="command", spawn_command=["echo", name])
+
+    async def list(self):
+        return []
+
+    async def ensure_ready(self, name: str) -> None:
+        return None
+
+
+class TestPluginInjectionContract:
+    """agent-bridge decides related-repo plugins; resolvers fold them."""
+
+    def test_pluginref_defaults(self):
+        ref = PluginRef("odsp-web-codespace@dev-tmichon")
+        assert ref.source == "odsp-web-codespace@dev-tmichon"
+        assert ref.enable is True
+        assert PluginRef("x", enable=False).enable is False
+
+    @pytest.mark.asyncio
+    async def test_no_extra_plugins_by_default(self):
+        # Default sourcing returns [] -> resolver is called WITHOUT extra_plugins
+        # (so resolvers that never adopted the kwarg keep working).
+        r = AgentResolver({}, {})
+        pr = _PluginAwareResolver()
+        r.register_namespace_resolver(pr)
+        await r.resolve_async("pl:agent")
+        assert pr.seen_extra == []
+
+    @pytest.mark.asyncio
+    async def test_extra_plugins_forwarded_when_present(self, monkeypatch):
+        r = AgentResolver({}, {})
+        pr = _PluginAwareResolver()
+        r.register_namespace_resolver(pr)
+        refs = [PluginRef("a@m"), PluginRef("b@m", enable=False)]
+        monkeypatch.setattr(r, "_related_plugins_for", lambda name: refs)
+        await r.resolve_async("pl:agent")
+        assert pr.seen_extra == refs
+
+    @pytest.mark.asyncio
+    async def test_legacy_resolver_without_kwarg_still_works(self):
+        # _MockResolver.resolve has no extra_plugins kwarg; with empty sourcing
+        # (the default) it must resolve fine.
+        r = AgentResolver({}, {})
+        r.register_namespace_resolver(_MockResolver("legacy"))
+        target = await r.resolve_async("legacy:my-agent")
+        assert target.spawn_command == ["echo", "my-agent"]

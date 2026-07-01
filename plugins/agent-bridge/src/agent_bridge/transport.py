@@ -65,6 +65,24 @@ def _creation_flags() -> int:
 
 
 @dataclass
+class PluginRef:
+    """A CLI plugin to inject into a dispatched agent's launch.
+
+    Neutral, transport-agnostic reference shared between agent-bridge (which
+    *decides* a related-repo plugin set) and namespace resolvers (which *stage*
+    the payload onto their target and fold ``--plugin-dir`` into the launch
+    command). ``source`` is any ``copilot plugin install`` source
+    (``plugin@marketplace`` | ``owner/repo`` | ``owner/repo:path`` | git URL).
+    ``enable`` mirrors the CodeSpace-plugin manifest semantics (install-and-
+    enable vs install-only); resolvers that only do ``--plugin-dir`` may ignore
+    it.
+    """
+
+    source: str
+    enable: bool = True
+
+
+@dataclass
 class SpawnTarget:
     """Where and how to spawn an agent process."""
 
