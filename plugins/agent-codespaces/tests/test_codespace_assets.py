@@ -32,6 +32,24 @@ class TestAssets:
         assert "auth-helper.js" in text
         assert "ms-codespaces-tools.ado-codespaces-auth" in text
 
+    def test_wrapper_waits_instead_of_hard_failing(self) -> None:
+        """When neither relay nor VS Code helper is ready, the wrapper must
+        BLOCK (bounded poll) instead of exiting immediately -- otherwise
+        single-shot callers (setup-agency / external-git) fall through to an
+        interactive git prompt that hangs postStart."""
+        text = asset_text("ado-auth-helper-wrapper")
+        assert "WAIT_DEADLINE_MS" in text
+        assert "sleepMs" in text
+        # Polls in a loop until the deadline rather than one-shot fail.
+        assert "Date.now() >= deadline" in text
+
+    def test_wrapper_fails_quietly_to_avoid_git_prompt(self) -> None:
+        """On timeout, a git-credential `get` must emit quit=1 so git stops
+        instead of prompting for a username/password (which hangs headless)."""
+        text = asset_text("ado-auth-helper-wrapper")
+        assert "quit=1" in text
+        assert 'action === "get"' in text
+
 
 class TestProvisionCommand:
     def test_command_installs_both_helpers(self) -> None:
