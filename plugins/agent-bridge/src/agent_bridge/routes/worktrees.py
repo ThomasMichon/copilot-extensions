@@ -647,3 +647,64 @@ async def get_worktree_session_transcript(
         "events": data.get("events", []) if isinstance(data, dict) else [],
         "meta": data.get("meta") if isinstance(data, dict) else None,
     }
+
+
+@router.post("/api/v1/worktrees/{worktree_id}/restart")
+async def restart_worktree_copilot(
+    worktree_id: str, request: Request, force: bool = False,
+) -> dict[str, Any]:
+    """Restart a worktree's interactive (mux-launched) Copilot in place.
+
+    Shells out to ``<project> restart <id> --json`` on the machine that owns
+    the worktree (local or via SSH).  The agent-worktrees ``restart`` primitive
+    terminates the worktree's interactive Copilot -- graceful double Ctrl-C into
+    the ``wt-<id>`` mux pane, then a hard mux ``kill-session`` fallback -- while
+    **keeping the worktree on disk**, so a caller can relaunch (picker) or
+    ACP-resume (Neuron Forge "Take over", #1388).
+
+    This targets the **interactive mux Copilot**, not a bridge ACP session --
+    distinct from ``DELETE /sessions/{id}`` / the worktree ``terminate`` path,
+    which stop bridge-owned sessions.  Pass ``force=true`` to skip the graceful
+    quit and hard-kill the mux session immediately (``--no-graceful``).
+
+    Returns the primitive's JSON verdict:
+    ``{worktree_id, had_session, method, ok}`` where ``method`` is one of
+    ``none`` | ``graceful`` | ``hard`` | ``failed``.
+    """
+    cache = get_cache()
+    await cache.crawl_if_empty()
+
+    owner = _owning_agent(worktree_id, request)
+    if owner is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Worktree {worktree_id} not found on any agent",
+        )
+    agent_name, config = owner
+    resolver = request.app.state.resolver
+
+    args = ["restart", worktree_id, "--json"]
+    if force:
+        args.append("--no-graceful")
+
+    raw = await _run_for_agent(agent_name, config, resolver, args)
+    if raw is None:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to restart Copilot for worktree {worktree_id}",
+        )
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Invalid restart JSON for worktree {worktree_id}",
+        ) from exc
+
+    return {
+        "worktree_id": data.get("worktree_id", worktree_id),
+        "agent_name": agent_name,
+        "had_session": bool(data.get("had_session", False)),
+        "method": data.get("method", "unknown"),
+        "ok": bool(data.get("ok", False)),
+    }
