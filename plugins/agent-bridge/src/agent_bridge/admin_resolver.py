@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .agent_registry import AgentResolver, NamespaceAgentInfo
-    from .transport import SpawnTarget
+    from .transport import PluginRef, SpawnTarget
 
 log = logging.getLogger("agent-bridge")
 
@@ -116,13 +116,17 @@ class AdminResolver:
             project=target.project,
         )
 
-    async def resolve(self, name: str) -> "SpawnTarget":
+    async def resolve(self, name: str, *, extra_plugins: "list[PluginRef]" = ()) -> "SpawnTarget":
         """Resolve an agent name and route it for elevated execution.
 
         The inner name is resolved via the parent resolver (static path only
         -- nested namespace resolution is not supported). On Windows the
         session is relayed through the elevated sub-daemon (the ``admin:``
         prefix is just the cue to elevate); on Linux/WSL it is ``sudo``-wrapped.
+
+        ``extra_plugins`` is accepted for interface conformance but not applied:
+        ``admin:`` elevates **static** agents, which are not a related-repo
+        dispatch target, so related-repo plugin injection does not apply here.
         """
         from . import elevated
         from .transport import SpawnTarget as ST

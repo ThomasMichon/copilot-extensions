@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from .topology import MachineConfig, SshEnvironment
-from .transport import SpawnTarget
+from .transport import PluginRef, SpawnTarget
 
 log = logging.getLogger("agent-bridge")
 
@@ -126,12 +126,24 @@ class NamespaceResolver(ABC):
         ...
 
     @abstractmethod
-    async def resolve(self, name: str) -> SpawnTarget:
+    async def resolve(self, name: str, *, extra_plugins: "list[PluginRef]" = ()) -> SpawnTarget:
         """Resolve a bare name (without prefix) to a SpawnTarget.
 
         Called at dispatch time when a session targets ``prefix:name``.
         The resolver should verify the target is reachable and return
         a SpawnTarget ready for ``transport.spawn()``.
+
+        ``extra_plugins`` (optional) is a set of **related-repo** plugins that
+        agent-bridge has decided to inject for this dispatch (sourced from the
+        related-repos registry). A resolver that supports plugin injection
+        should **stage** these payloads onto its target (over its own transport)
+        and fold the resulting ``--plugin-dir`` args into the launch command,
+        alongside any provider-intrinsic plugins it resolves itself. The
+        SpawnTarget is fully built at resolve time (``session_manager`` spawns it
+        with no further resolver access), so this is the injection point for
+        ``type="command"`` providers whose launch command is otherwise opaque to
+        the bridge. Resolvers that do not support plugins may ignore it; the
+        bridge only passes a non-empty set to resolvers that opt in.
 
         Raises:
             KeyError: Agent not found.
@@ -806,7 +818,7 @@ class AgentResolver:
                 prefix, name, prefix,
             )
             await resolver.ensure_ready(name)
-            return await resolver.resolve(name)
+            return await self._resolve_with_plugins(resolver, name)
 
         # Bare name (no prefix): search static/provider agents AND every
         # namespace (codespaces, containers, ...) for a match by name or alias.
@@ -822,11 +834,36 @@ class AgentResolver:
             if resolver is None:
                 return await self._resolve_bare(agent_name)
             await resolver.ensure_ready(resolve_name)
-            return await resolver.resolve(resolve_name)
+            return await self._resolve_with_plugins(resolver, resolve_name)
 
         # No match anywhere -- defer to static resolution for its precise
         # "not found in registry" error.
         return self._resolve_static(agent_name)
+
+    async def _resolve_with_plugins(
+        self, resolver: "NamespaceResolver", name: str
+    ) -> SpawnTarget:
+        """Resolve via a namespace resolver, injecting related-repo plugins.
+
+        agent-bridge *owns* the related-repo plugin set (sourced from the
+        related-repos registry, ``related.yaml``); the resolver *folds + stages*
+        it. We only pass ``extra_plugins`` when non-empty so resolvers that have
+        not yet adopted the kwarg keep working unchanged.
+        """
+        extra = self._related_plugins_for(name)
+        if extra:
+            return await resolver.resolve(name, extra_plugins=extra)
+        return await resolver.resolve(name)
+
+    def _related_plugins_for(self, name: str) -> list[PluginRef]:
+        """Related-repo plugins to inject for a dispatch target, or ``[]``.
+
+        Sourced from the related-repos registry (``related.yaml``). Wiring the
+        repo mapping + registry read is a follow-up slice; today this returns
+        ``[]`` (a no-op seam) so the contract and forwarding land first without
+        changing behavior. Always fail safe: never raise into the dispatch path.
+        """
+        return []
 
     async def _resolve_bare(self, agent_name: str) -> SpawnTarget:
         """Resolve a bare static/provider agent, routing elevated ones.
