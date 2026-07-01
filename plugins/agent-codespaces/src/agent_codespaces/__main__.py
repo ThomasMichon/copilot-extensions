@@ -9,6 +9,10 @@ Subcommands:
   config validate       Validate config
   delete <name>         Delete a CodeSpace (recovers sessions first)
   finalize <name>       Recover Copilot sessions, then optionally --delete
+  borrow <effort> <cs>  Advisory-lease a CodeSpace to an effort (check out)
+  release <target>      Release a lease (by CodeSpace or effort name)
+  leases                Show active CodeSpace leases
+  wait <name>           Patiently wait for Available (fail-fast on dead state)
   status                Show service status
 """
 
@@ -100,6 +104,13 @@ def main(argv: list[str] | None = None) -> int:
         "--repo", dest="repo", default=None,
         help="CodeSpace repository (owner/name) -- selects per-repo "
              "provision hooks without an extra lookup",
+    )
+    ssh_parser.add_argument(
+        "--effort", dest="effort", default=None,
+        help="Effort/worktree borrowing this CodeSpace. When set, records an "
+             "advisory lease (check-out) and refreshes its heartbeat on connect. "
+             "A conflicting live lease warns but does not block (use `borrow "
+             "--force` to take over explicitly).",
     )
     ssh_parser.add_argument(
         "--force", action="store_true",
@@ -246,6 +257,41 @@ def main(argv: list[str] | None = None) -> int:
         help="Show what would be removed without removing",
     )
 
+    # --- borrow / release / leases (advisory borrow broker) ---
+    borrow_p = sub.add_parser(
+        "borrow",
+        help="Advisory-lease a CodeSpace to an effort (check it out)",
+    )
+    borrow_p.add_argument("effort", help="Effort/worktree name (lease holder)")
+    borrow_p.add_argument("codespace", help="CodeSpace name to borrow")
+    borrow_p.add_argument(
+        "--force", action="store_true",
+        help="Take over even if leased by another effort (stale/buggy holder)",
+    )
+
+    release_p = sub.add_parser(
+        "release", help="Release a CodeSpace lease (check it in)",
+    )
+    release_p.add_argument("target", help="CodeSpace name or effort name")
+
+    sub.add_parser("leases", help="Show active CodeSpace leases")
+
+    # --- wait (patient, fail-fast, backgroundable) ---
+    wait_p = sub.add_parser(
+        "wait",
+        help="Wait for a CodeSpace to become Available (patient; fails fast on "
+             "a genuinely-dead state; safe to run as a background task)",
+    )
+    wait_p.add_argument("name", help="CodeSpace name")
+    wait_p.add_argument(
+        "--timeout", type=float, default=1200.0,
+        help="Max seconds to wait (default: 1200 = 20 min)",
+    )
+    wait_p.add_argument(
+        "--interval", type=float, default=10.0,
+        help="Poll interval in seconds (default: 10)",
+    )
+
     # --- status ---
     sub.add_parser("status", help="Show service status")
 
@@ -282,6 +328,14 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_bridge(args)
         if args.command == "cleanup":
             return _cmd_cleanup(args)
+        if args.command == "borrow":
+            return _cmd_borrow(args)
+        if args.command == "release":
+            return _cmd_release(args)
+        if args.command == "leases":
+            return _cmd_leases()
+        if args.command == "wait":
+            return _cmd_wait(args)
         if args.command == "status":
             return _cmd_status()
         if args.command == "version":
@@ -302,6 +356,21 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     source = CodespaceSource(args.name)
     config = load_merged_config()
     relay_port = config.credentials.relay_port
+
+    # Advisory check-out: record/refresh the borrow so a parallel same-machine
+    # agent doesn't dispatch to this CodeSpace concurrently. Non-blocking -- a
+    # conflicting live lease warns but still connects (use `borrow --force` to
+    # take over explicitly). ``ssh --force`` (SSH-lock takeover) also forces the
+    # lease takeover for consistency.
+    effort = getattr(args, "effort", None)
+    if effort:
+        from .lease import borrow
+
+        try:
+            borrow(effort, args.name, force=getattr(args, "force", False))
+        except RuntimeError as exc:
+            print(f"[WARN] CodeSpace lease conflict (continuing): {exc}",
+                  file=sys.stderr)
 
     # Build port forwards for credential relay
     port_forwards: list[str] = []
@@ -1211,6 +1280,7 @@ def _cmd_delete(args: argparse.Namespace) -> int:
                   f"{res.get('detail')}", file=sys.stderr)
     delete_codespace(args.name, force=args.force)
     print(f"Deleted: {args.name}")
+    _release_lease_quietly(args.name)
     return 0
 
 
@@ -1238,8 +1308,20 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
     if args.delete:
         delete_codespace(args.name, force=args.force)
         print(f"Deleted: {args.name}")
+        _release_lease_quietly(args.name)
 
     return 0 if res.get("ok") else 1
+
+
+def _release_lease_quietly(codespace: str) -> None:
+    """Check a CodeSpace back in on teardown. Best-effort, never raises."""
+    try:
+        from .lease import release
+
+        if release(codespace):
+            print(f"[OK] Released lease on {codespace}")
+    except Exception as exc:  # pragma: no cover - defensive
+        log.debug("lease release for %s failed: %s", codespace, exc)
 
 
 def _cmd_create(args: argparse.Namespace) -> int:
@@ -1349,6 +1431,80 @@ def _cmd_bridge(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     return 1
+
+
+def _cmd_borrow(args: argparse.Namespace) -> int:
+    """Advisory-lease a CodeSpace to an effort (check it out)."""
+    from .lease import borrow
+
+    lease = borrow(args.effort, args.codespace, force=args.force)
+    print(lease.codespace)
+    return 0
+
+
+def _cmd_release(args: argparse.Namespace) -> int:
+    """Release a CodeSpace lease by CodeSpace name or effort name."""
+    from .lease import release
+
+    if release(args.target):
+        print(f"Released: {args.target}")
+        return 0
+    print(f"No lease found for '{args.target}'", file=sys.stderr)
+    return 1
+
+
+def _cmd_leases() -> int:
+    """Show active CodeSpace leases."""
+    from .lease import list_leases
+
+    leases = list_leases()
+    if not leases:
+        print("No active leases.")
+        return 0
+    print(f"{'CODESPACE':<40} {'EFFORT':<24} {'HOST':<16} {'PID'}")
+    for lease in leases:
+        print(
+            f"{lease.codespace:<40} {lease.effort:<24} "
+            f"{lease.host:<16} {lease.pid}"
+        )
+    return 0
+
+
+def _cmd_wait(args: argparse.Namespace) -> int:
+    """Patiently wait for a CodeSpace to become Available.
+
+    Exit codes: 0 Available, 2 genuinely-failed state, 124 timeout -- so a
+    background caller can distinguish "still slow" from "dead" and never create
+    a redundant CodeSpace just because a boot was slow.
+    """
+    from .lifecycle import WaitOutcome, wait_for_codespace
+
+    print(f"Waiting for CodeSpace '{args.name}' (up to {args.timeout:.0f}s)...")
+
+    def _progress(state: str, remaining: float) -> None:
+        print(f"  ... state={state or '?'} ({remaining:.0f}s left)")
+
+    outcome, last_state = wait_for_codespace(
+        args.name, timeout=args.timeout, interval=args.interval,
+        on_progress=_progress,
+    )
+    if outcome == WaitOutcome.AVAILABLE:
+        print(f"[OK] {args.name} is Available")
+        return 0
+    if outcome == WaitOutcome.FAILED:
+        print(
+            f"[FAIL] {args.name} reached a terminal state '{last_state}' -- it "
+            f"will not become Available on its own. Diagnose before recreating.",
+            file=sys.stderr,
+        )
+        return 2
+    print(
+        f"[TIMEOUT] {args.name} still not Available (last state "
+        f"'{last_state or '?'}') after {args.timeout:.0f}s. It may still be "
+        f"provisioning -- wait longer rather than declaring it dead.",
+        file=sys.stderr,
+    )
+    return 124
 
 
 def _cmd_cleanup(args: argparse.Namespace) -> int:

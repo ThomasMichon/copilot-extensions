@@ -25,6 +25,11 @@ SOCKET_DIR = RUNTIME_DIR / "sockets"
 LOG_FILE = RUNTIME_DIR / "agent-codespaces.log"
 CONFIG_FILENAME = "codespaces.yaml"
 
+
+def ensure_runtime_dir() -> None:
+    """Create the runtime directory (~/.agent-codespaces) if it is absent."""
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+
 # Remote-resolved `cd` for a CodeSpace session when no explicit
 # ``workspace_folder`` is configured (#33). Expanded by the remote
 # ``bash -l -c`` at launch, so the agent lands in the repo checkout rather than
