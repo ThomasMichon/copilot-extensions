@@ -628,6 +628,78 @@ class TestWorktreeRoutes:
         )
         assert resp.status_code == 404
 
+    def test_restart_worktree_copilot_proxies(self, client, app) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "lambda-core-wsl-20250101-193000-restart"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        payload = (
+            '{"worktree_id": "%s", "had_session": true, '
+            '"method": "graceful", "ok": true}' % wt_id
+        )
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ) as mock_run:
+            resp = client.post(f"/api/v1/worktrees/{wt_id}/restart")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["worktree_id"] == wt_id
+        assert data["agent_name"] == "test-agent"
+        assert data["had_session"] is True
+        assert data["method"] == "graceful"
+        assert data["ok"] is True
+        # Graceful default -> no --no-graceful flag.
+        args = mock_run.call_args.args[-1]
+        assert args == ["restart", wt_id, "--json"]
+
+    def test_restart_worktree_copilot_force_passes_no_graceful(
+        self, client, app,
+    ) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "lambda-core-wsl-20250101-193100-force"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        payload = (
+            '{"worktree_id": "%s", "had_session": true, '
+            '"method": "hard", "ok": true}' % wt_id
+        )
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ) as mock_run:
+            resp = client.post(f"/api/v1/worktrees/{wt_id}/restart?force=true")
+
+        assert resp.status_code == 200
+        assert resp.json()["method"] == "hard"
+        args = mock_run.call_args.args[-1]
+        assert args == ["restart", wt_id, "--json", "--no-graceful"]
+
+    def test_restart_worktree_unknown_worktree_404s(self, client) -> None:
+        resp = client.post("/api/v1/worktrees/does-not-exist/restart")
+        assert resp.status_code == 404
+
+    def test_restart_worktree_502_on_command_failure(
+        self, client, app,
+    ) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "lambda-core-wsl-20250101-193200-fail"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=None),
+        ):
+            resp = client.post(f"/api/v1/worktrees/{wt_id}/restart")
+        assert resp.status_code == 502
+
 
 class TestAcpAliasResolution:
     """Session routes accept the ACP session id as an alias key."""
