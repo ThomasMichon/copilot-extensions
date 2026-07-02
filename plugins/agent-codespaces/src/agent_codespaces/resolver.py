@@ -89,18 +89,25 @@ def _friendly_aliases(cs) -> list[str]:
     return aliases
 
 
-def _build_spawn_command(codespace_name: str, acp_command: str) -> list[str]:
+def _build_spawn_command(
+    codespace_name: str, acp_command: str, stage_plugins: list[str] | None = None,
+) -> list[str]:
     """Build the spawn command for a codespace agent.
 
     The ``acp_command`` is read from ``codespaces.yaml`` defaults and
     passed as ``--remote-cmd`` to ``agent-codespaces ssh --stdio``.
+
+    ``stage_plugins`` are related-repo plugin sources (from agent-bridge) that
+    the ``ssh`` transport stages onto the CodeSpace and folds into the launch as
+    ``--plugin-dir`` -- passed as repeatable ``--stage-plugin`` args so the
+    staging (which needs the SSH connection) happens transport-side, not here.
 
     Invokes the module directly (``python -m agent_codespaces``) rather
     than the ``.cmd`` binstub so agent-bridge does not route the spawn
     through cmd.exe, which would expand ``%VAR%`` tokens in the
     ``--remote-cmd`` payload and mangle it (see ``._invoke``).
     """
-    return [
+    cmd = [
         *module_argv(),
         "ssh", codespace_name, "--stdio",
         # The bridge dispatch is the authoritative transport for this CodeSpace
@@ -109,8 +116,11 @@ def _build_spawn_command(codespace_name: str, acp_command: str) -> list[str]:
         # --force lets it reclaim the target; ad-hoc CLI calls omit it and are
         # rejected against a busy target instead.
         "--force",
-        "--remote-cmd", acp_command,
     ]
+    for source in stage_plugins or []:
+        cmd += ["--stage-plugin", source]
+    cmd += ["--remote-cmd", acp_command]
+    return cmd
 
 
 class CodespaceResolver:
@@ -125,13 +135,21 @@ class CodespaceResolver:
     def prefix(self) -> str:
         return "codespace"
 
-    async def resolve(self, name: str) -> "SpawnTarget":
+    async def resolve(
+        self, name: str, *, extra_plugins: "list | None" = None
+    ) -> "SpawnTarget":
         """Resolve a codespace name to a SpawnTarget.
 
         Accepts either the raw codespace name or its friendly (display) name.
         Accepts CodeSpaces in Available or Shutdown state.  Shutdown
         CodeSpaces will be started automatically by ``gh`` during the
         SSH connection (``gh codespace ssh --config`` triggers startup).
+
+        ``extra_plugins`` are **related-repo** plugins agent-bridge decided for
+        this dispatch (a list of objects with ``.source``). They are passed to
+        the ``ssh`` transport as ``--stage-plugin`` args, which stages each
+        payload on the CodeSpace (egress-free) and folds ``--plugin-dir`` into
+        the launch -- dispatch-scoped, no global enablement.
         """
         from agent_bridge.transport import SpawnTarget
 
@@ -167,9 +185,20 @@ class CodespaceResolver:
         # per CodeSpace *repository* so the agent lands in the right checkout
         # (e.g. odsp-web-codespaces -> /workspaces/odsp-web), not the global
         # default workspace folder.
+        stage = [
+            p.source for p in (extra_plugins or [])
+            if getattr(p, "source", None)
+        ]
         spawn_cmd = _build_spawn_command(
-            cs.name, config.effective_acp_command_for(cs.repository)
+            cs.name,
+            config.effective_acp_command_for(cs.repository),
+            stage_plugins=stage,
         )
+        if stage:
+            log.info(
+                "codespace:%s -- staging %d related-repo plugin(s): %s",
+                cs.name, len(stage), stage,
+            )
         log.info("Resolved codespace:%s -> %s", cs.name, " ".join(spawn_cmd))
 
         return SpawnTarget(
@@ -177,6 +206,16 @@ class CodespaceResolver:
             spawn_command=spawn_cmd,
             user=config.ssh_user,
         )
+
+    async def target_repo(self, name: str) -> str | None:
+        """The CodeSpace's workspace repository (for related-repo plugin
+        sourcing by agent-bridge), or ``None`` if it can't be determined."""
+        try:
+            codespaces = await asyncio.to_thread(list_codespaces)
+            cs = _find_codespace(codespaces, name)
+            return cs.repository or None
+        except Exception:
+            return None
 
     async def list(self) -> list["NamespaceAgentInfo"]:
         """List all codespaces as namespace agent info."""

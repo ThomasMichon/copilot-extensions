@@ -113,6 +113,14 @@ def main(argv: list[str] | None = None) -> int:
              "--force` to take over explicitly).",
     )
     ssh_parser.add_argument(
+        "--stage-plugin", dest="stage_plugins", action="append", default=[],
+        metavar="SOURCE",
+        help="A related-repo plugin source (e.g. name@marketplace) to stage onto "
+             "the CodeSpace (egress-free, from the host's installed payload) and "
+             "fold into the launch as --plugin-dir. Repeatable. Set by the "
+             "agent-bridge dispatch path; dispatch-scoped, not globally enabled.",
+    )
+    ssh_parser.add_argument(
         "--force", action="store_true",
         help="Take over the target if another SSH operation is already in "
              "progress against it: terminates the in-flight connection and "
@@ -398,23 +406,27 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
 
     manager = ConnectionManager()
 
-    # Wrap remote commands in a login shell so the CodeSpace platform
-    # environment is loaded (GITHUB_TOKEN, gh auth state, profile.d
-    # scripts).  Non-interactive SSH commands skip /etc/profile and
-    # ~/.profile by default, which leaves tools like `copilot` and `gh`
-    # unauthenticated.
-    #
-    # Inject LC_GIT_CREDENTIAL_RELAY before the login shell so the
-    # credential relay activation script and ado-auth-helper can find
-    # the tunnel port.
-    remote_cmd = args.remote_cmd
-    if remote_cmd:
-        # Prepend a device-arrival breadcrumb so a hung/failed launch can be
-        # diagnosed as "reached the CodeSpace" via ~/.agent-bridge-connect.log.
-        inner = relay_env + breadcrumb_prelude(args.name) + "; " + remote_cmd
-        remote_cmd = f"bash -l -c {shlex.quote(inner)}"
-
+    # The remote command is assembled inside _run() -- AFTER the relay is up and
+    # any --stage-plugin payloads are staged -- so their on-CodeSpace
+    # --plugin-dir paths can be folded into the copilot invocation. See
+    # _finalize_remote_cmd below.
     tracker = ConnectTracker(session_id=args.name)
+
+    def _finalize_remote_cmd(plugin_dirs: list[str]) -> str | None:
+        """Wrap args.remote_cmd in a login shell, folding in --plugin-dir args.
+
+        Appends ``--plugin-dir=<dir>`` for each staged plugin to the acp payload
+        (the copilot invocation is the tail of the command, so appending is
+        correct), then prepends the relay env + arrival breadcrumb and wraps in
+        ``bash -l -c`` so the CodeSpace platform env loads.
+        """
+        if not args.remote_cmd:
+            return None
+        acp = args.remote_cmd
+        for d in plugin_dirs:
+            acp += f' --plugin-dir="{d}"'
+        inner = relay_env + breadcrumb_prelude(args.name) + "; " + acp
+        return f"bash -l -c {shlex.quote(inner)}"
 
     async def _run() -> int:
         # Stage 3 (ssh-to-target): a Shutdown CodeSpace boots on connect, so be
@@ -477,6 +489,16 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         if not args.no_relay:
             await _verify_remote_auth(manager, args.name, config)
 
+        # Stage related-repo plugins (repo-targeted lane) onto the CodeSpace and
+        # fold their --plugin-dir paths into the launch. Best-effort: a staging
+        # failure drops that plugin but never blocks the dispatch.
+        plugin_dirs: list[str] = []
+        if not args.no_relay:
+            plugin_dirs = await _stage_plugins(
+                manager, args.name, getattr(args, "stage_plugins", []),
+            )
+        remote_cmd = _finalize_remote_cmd(plugin_dirs)
+
         if args.stdio and remote_cmd:
             # Structured stdio mode for agent-bridge
             proc = await manager.open_stdio_channel(args.name, remote_cmd)
@@ -517,6 +539,46 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         return asyncio.run(_run())
     finally:
         target_lock.release()
+
+
+async def _stage_plugins(manager, name: str, sources: list[str]) -> list[str]:
+    """Stage related-repo plugin payloads onto the CodeSpace over SSH.
+
+    For each ``name@marketplace`` source, tar+base64 the host's installed
+    payload and extract it into a per-plugin dir on the CodeSpace, returning the
+    remote ``--plugin-dir`` paths. Egress-free (no marketplace fetch on the
+    CodeSpace). Best-effort per source: a missing host payload or a failed
+    transfer is logged and skipped, never raised.
+    """
+    if not sources:
+        return []
+    from .plugin_staging import build_stage_command, dest_dir, host_payload_dir
+
+    dirs: list[str] = []
+    for source in sources:
+        payload = host_payload_dir(source)
+        if payload is None:
+            log.warning(
+                "Skipping plugin stage for %s: no host payload under "
+                "~/.copilot/installed-plugins (is it installed on the host?)",
+                source,
+            )
+            continue
+        dest = dest_dir(source)
+        try:
+            command = build_stage_command(payload, dest)
+            result = await manager.exec_command(name, command, timeout=60.0)
+            if result.exit_code == 0:
+                dirs.append(dest)
+                log.info("Staged plugin %s -> %s on %s", source, dest, name)
+            else:
+                log.warning(
+                    "Staging %s on %s exited %s: %s",
+                    source, name, result.exit_code, result.stderr.strip(),
+                )
+        except Exception as exc:
+            log.warning("Staging %s on %s failed: %s", source, name, exc)
+    return dirs
 
 
 async def _provision_relay_helpers(manager, name: str) -> None:
