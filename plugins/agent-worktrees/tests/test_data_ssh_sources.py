@@ -1,0 +1,174 @@
+"""Unit tests for ``data_ssh._build_sources`` machine/env resolution.
+
+Focus: the local machine never needs an SSH profile of its own (the picker runs
+there), and a listed env with no SSH profile is never connected to -- it renders
+as a disabled tab instead.
+"""
+from __future__ import annotations
+
+import types
+
+from agent_worktrees import config as cfg
+from agent_worktrees.picker_tui import data_ssh
+
+
+def _install_roster(monkeypatch, entries, *, machine, local_id):
+    """Point ``_build_sources`` at a fabricated roster + local identity."""
+    fake_config = types.SimpleNamespace(
+        default_repo=types.SimpleNamespace(anchor="/repo"),
+        machine=machine,
+    )
+    monkeypatch.setattr(data_ssh.cfg, "load_config", lambda: fake_config)
+    monkeypatch.setattr(
+        data_ssh.cfg, "load_machines_yaml", lambda _anchor: entries)
+    monkeypatch.setattr(data_ssh, "_local_identity", lambda: local_id)
+    monkeypatch.setattr(data_ssh, "_project", lambda: "proj")
+
+
+def _entry(key, display, envs, *, ssh_ready=True, copilot=True, alias=""):
+    return cfg.MachineEntry(
+        key=key,
+        display_name=display,
+        environment="",
+        alias=alias,
+        ssh_environments=envs,
+        ssh_ready=ssh_ready,
+        copilot=copilot,
+    )
+
+
+def _by_key(sources):
+    return {(s.machine, s.env): s for s in sources}
+
+
+def test_local_machine_needs_no_ssh_profile(monkeypatch):
+    """A current machine with NO ssh environments still gets a local tab."""
+    entries = {
+        "lambda-core": _entry("lambda-core", "Lambda-Core", [], ssh_ready=False),
+    }
+    _install_roster(
+        monkeypatch, entries, machine="lambda-core",
+        local_id=("lambda-core", "windows"))
+
+    sources = data_ssh._build_sources()
+    assert len(sources) == 1
+    local = sources[0]
+    assert local.local is True
+    assert local.ready is True
+    assert local.machine == "Lambda-Core"
+    assert local.env == "Win"  # derived from the running platform
+    assert local.argv is None
+    assert local.alias == ""
+
+
+def test_local_env_is_local_even_when_machine_not_ssh_ready(monkeypatch):
+    """The current machine's native env is local; its other env is a disabled
+    tab because the machine is not ssh_ready."""
+    envs = [
+        cfg.SSHEnvironment(name="windows", alias="lambda-core", shell="pwsh"),
+        cfg.SSHEnvironment(name="wsl", alias="lambda-core-wsl", shell="bash"),
+    ]
+    entries = {"lambda-core": _entry("lambda-core", "Lambda-Core", envs,
+                                     ssh_ready=False)}
+    _install_roster(
+        monkeypatch, entries, machine="lambda-core",
+        local_id=("lambda-core", "windows"))
+
+    by = _by_key(data_ssh._build_sources())
+    assert by[("Lambda-Core", "Win")].local is True
+    assert by[("Lambda-Core", "Win")].ready is True
+    # WSL of the current machine is not local and the machine is not ready:
+    # disabled tab, never contacted.
+    wsl = by[("Lambda-Core", "WSL")]
+    assert wsl.local is False
+    assert wsl.ready is False
+    assert wsl.argv is None
+
+
+def test_env_without_alias_is_disabled_not_connected(monkeypatch):
+    """A remote env with no SSH profile (empty alias) becomes a disabled tab
+    even when the machine is ssh_ready -- it is never connected to."""
+    envs = [cfg.SSHEnvironment(name="linux", alias="", shell="bash")]
+    entries = {
+        "lambda-core": _entry(
+            "lambda-core", "Lambda-Core",
+            [cfg.SSHEnvironment(name="windows", alias="lambda-core",
+                                shell="pwsh")]),
+        "ghost": _entry("ghost", "Ghost", envs, ssh_ready=True),
+    }
+    _install_roster(
+        monkeypatch, entries, machine="lambda-core",
+        local_id=("lambda-core", "windows"))
+
+    by = _by_key(data_ssh._build_sources())
+    ghost = by[("Ghost", "Linux")]
+    assert ghost.ready is False
+    assert ghost.argv is None
+    assert ghost.local is False
+
+
+def test_ready_remote_env_with_alias_is_connected(monkeypatch):
+    """A remote ssh_ready env with a real alias gets an SSH argv (reachable)."""
+    entries = {
+        "lambda-core": _entry(
+            "lambda-core", "Lambda-Core",
+            [cfg.SSHEnvironment(name="windows", alias="lambda-core",
+                                shell="pwsh")]),
+        "wheatley": _entry(
+            "wheatley", "Wheatley",
+            [cfg.SSHEnvironment(name="linux", alias="wheatley", shell="bash")],
+            ssh_ready=True),
+    }
+    _install_roster(
+        monkeypatch, entries, machine="lambda-core",
+        local_id=("lambda-core", "windows"))
+
+    by = _by_key(data_ssh._build_sources())
+    wheatley = by[("Wheatley", "Linux")]
+    assert wheatley.ready is True
+    assert wheatley.local is False
+    assert wheatley.alias == "wheatley"
+    assert wheatley.argv and wheatley.argv[0] == "ssh"
+    assert "wheatley" in wheatley.argv
+
+
+def test_ssh_not_ready_remote_env_is_disabled(monkeypatch):
+    """A ssh.ready:false machine's remote env stays a disabled tab."""
+    entries = {
+        "lambda-core": _entry(
+            "lambda-core", "Lambda-Core",
+            [cfg.SSHEnvironment(name="windows", alias="lambda-core",
+                                shell="pwsh")]),
+        "book2": _entry(
+            "book2", "tmichon-book2",
+            [cfg.SSHEnvironment(name="windows", alias="book2", shell="pwsh")],
+            ssh_ready=False),
+    }
+    _install_roster(
+        monkeypatch, entries, machine="lambda-core",
+        local_id=("lambda-core", "windows"))
+
+    by = _by_key(data_ssh._build_sources())
+    book2 = by[("tmichon-book2", "Win")]
+    assert book2.ready is False
+    assert book2.argv is None
+    assert book2.alias == "book2"
+
+
+def test_copilot_false_machine_is_skipped(monkeypatch):
+    entries = {
+        "lambda-core": _entry(
+            "lambda-core", "Lambda-Core",
+            [cfg.SSHEnvironment(name="windows", alias="lambda-core",
+                                shell="pwsh")]),
+        "nas": _entry(
+            "nas", "NAS",
+            [cfg.SSHEnvironment(name="linux", alias="nas", shell="bash")],
+            copilot=False),
+    }
+    _install_roster(
+        monkeypatch, entries, machine="lambda-core",
+        local_id=("lambda-core", "windows"))
+
+    by = _by_key(data_ssh._build_sources())
+    assert ("NAS", "Linux") not in by
