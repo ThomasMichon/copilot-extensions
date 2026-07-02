@@ -522,3 +522,61 @@ def test_resolve_codespace_notes_container_alternative_here(tmp_path: Path):
     assert r.locus_kind == "codespace"
     assert any("/workspaces/odsp-web" in n for n in r.notes)
     assert any("container fleet is also available here" in n for n in r.notes)
+
+
+# ---------------------------------------------------------------------------
+# Related-repo plugins (side-loaded by agent-bridge)
+# ---------------------------------------------------------------------------
+
+def test_plugins_roundtrip(tmp_path: Path):
+    cfg = RelatedConfig(related={
+        "odsp-web": RelatedEntry(
+            name="odsp-web",
+            plugins=[
+                {"source": "odsp-web-codespace@dev-tmichon", "enable": True},
+                {"source": "extra@dev-tmichon", "enable": False},
+            ],
+        ),
+    })
+    related.write_related(tmp_path, cfg)
+    got = related.read_related(tmp_path).related["odsp-web"]
+    assert got.plugins == [
+        {"source": "odsp-web-codespace@dev-tmichon", "enable": True},
+        {"source": "extra@dev-tmichon", "enable": False},
+    ]
+
+
+def test_plugins_parse_shorthand_dedup_and_invalid(tmp_path: Path):
+    (tmp_path / ".agent-worktrees").mkdir()
+    related.related_path(tmp_path).write_text(
+        "related:\n"
+        "  x:\n"
+        "    plugins:\n"
+        "      - bare@mkt\n"                       # bare string -> enable true
+        "      - { source: withflag@mkt, enable: false }\n"
+        "      - { source: bare@mkt }\n"           # duplicate of first (last wins)
+        "      - { enable: true }\n"               # no source -> skipped
+        "      - 42\n",                            # non-str/dict -> skipped
+        encoding="utf-8",
+    )
+    got = related.read_related(tmp_path).related["x"].plugins
+    assert got == [
+        {"source": "bare@mkt", "enable": True},
+        {"source": "withflag@mkt", "enable": False},
+    ]
+
+
+def test_plugins_emitted_yaml_is_valid(tmp_path: Path):
+    cfg = RelatedConfig(related={
+        "x": RelatedEntry(name="x", plugins=[{"source": "p@m", "enable": True}]),
+    })
+    related.write_related(tmp_path, cfg)
+    data = yaml.safe_load(related.related_path(tmp_path).read_text(encoding="utf-8"))
+    assert data["related"]["x"]["plugins"] == [{"source": "p@m"}]
+
+
+def test_no_plugins_emits_nothing(tmp_path: Path):
+    cfg = RelatedConfig(related={"x": RelatedEntry(name="x", role="product")})
+    related.write_related(tmp_path, cfg)
+    text = related.related_path(tmp_path).read_text(encoding="utf-8")
+    assert "plugins" not in text

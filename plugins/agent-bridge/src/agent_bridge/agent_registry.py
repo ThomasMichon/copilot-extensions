@@ -16,6 +16,7 @@ always fresh (no TTL, no registration).
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -187,6 +188,17 @@ class NamespaceResolver(ABC):
         Raises:
             RuntimeError: Target cannot be made ready.
         """
+
+    async def target_repo(self, name: str) -> str | None:
+        """The workspace repo (``owner/name``) this target hosts, or ``None``.
+
+        Optional hook used by agent-bridge to source **related-repo** plugins:
+        the bridge maps this repo to the control-plane ``related.yaml`` entry and
+        passes that entry's plugins to :meth:`resolve` as ``extra_plugins``. A
+        resolver that hosts a known repo (e.g. a CodeSpace's repository) should
+        return it; the default returns ``None`` (no related-repo injection).
+        """
+        return None
 
 
 def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
@@ -850,20 +862,51 @@ class AgentResolver:
         it. We only pass ``extra_plugins`` when non-empty so resolvers that have
         not yet adopted the kwarg keep working unchanged.
         """
-        extra = self._related_plugins_for(name)
+        extra = await self._related_plugins_for(resolver, name)
         if extra:
             return await resolver.resolve(name, extra_plugins=extra)
         return await resolver.resolve(name)
 
-    def _related_plugins_for(self, name: str) -> list[PluginRef]:
+    async def _related_plugins_for(
+        self, resolver: "NamespaceResolver", name: str
+    ) -> list[PluginRef]:
         """Related-repo plugins to inject for a dispatch target, or ``[]``.
 
-        Sourced from the related-repos registry (``related.yaml``). Wiring the
-        repo mapping + registry read is a follow-up slice; today this returns
-        ``[]`` (a no-op seam) so the contract and forwarding land first without
-        changing behavior. Always fail safe: never raise into the dispatch path.
+        Asks the resolver for the target's workspace repo (optional
+        ``target_repo`` hook) and looks up that repo's related-repo ``plugins``
+        in the control-plane ``related.yaml``. Always fail-safe: any error (no
+        hook, unknown repo, unreadable config) yields ``[]`` -- never raises
+        into the dispatch path.
         """
-        return []
+        try:
+            repo = await self._resolver_target_repo(resolver, name)
+            if not repo:
+                return []
+            from .related_plugins import related_plugins_for_repo
+
+            refs = related_plugins_for_repo(repo)
+            if refs:
+                log.info(
+                    "Injecting %d related-repo plugin(s) for %s (repo=%s): %s",
+                    len(refs), name, repo, [r.source for r in refs],
+                )
+            return refs
+        except Exception as exc:  # pragma: no cover - defensive
+            log.debug("related-repo plugin sourcing failed for %s: %s", name, exc)
+            return []
+
+    async def _resolver_target_repo(
+        self, resolver: "NamespaceResolver", name: str
+    ) -> str | None:
+        """Best-effort workspace repo for a resolved target via the optional
+        ``target_repo`` hook (sync or async). ``None`` if unimplemented."""
+        fn = getattr(resolver, "target_repo", None)
+        if fn is None:
+            return None
+        result = fn(name)
+        if inspect.isawaitable(result):
+            result = await result
+        return result if isinstance(result, str) and result.strip() else None
 
     async def _resolve_bare(self, agent_name: str) -> SpawnTarget:
         """Resolve a bare static/provider agent, routing elevated ones.
