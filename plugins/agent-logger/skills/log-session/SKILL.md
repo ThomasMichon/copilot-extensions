@@ -31,6 +31,18 @@ path, and create the log directory:
 prepare-session-log --title "<Title>" --session "<Session ID>"
 ```
 
+`prepare-session-log` is deployed as a binstub in `~/.local/bin` by the
+agent-logger installer. If it is not on PATH (payload installed but the
+runtime installer hasn't run, or `~/.local/bin` isn't on PATH), invoke it via
+the deployed venv interpreter instead:
+
+```
+# POSIX
+~/.agent-logger/.venv/bin/python -m agent_logger.segmenter.prepare_log --title "<Title>" --session "<Session ID>"
+# Windows
+~/.agent-logger/.venv/Scripts/python.exe -m agent_logger.segmenter.prepare_log --title "<Title>" --session "<Session ID>"
+```
+
 Pass the session ID from the session context (omit `--session` to
 auto-detect the most recently active session for the current project). The
 tool prints `machine`, `session_id`, `session_dir`, `cutoff`, `log_path`,

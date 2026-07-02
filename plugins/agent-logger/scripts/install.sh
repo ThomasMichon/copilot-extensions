@@ -117,9 +117,13 @@ install_package() {
   uv pip install --python "${VENV}/bin/python" "${PLUGIN_DIR}" --quiet
   ok "installed agent-logger package"
 
-  # Binstub on PATH -> venv console script (the sanctioned POSIX launch path).
-  ln -sf "${VENV}/bin/session-sync" "${LOCAL_BIN}/session-sync"
-  ln -sf "${VENV}/bin/agent-logger" "${LOCAL_BIN}/agent-logger"
+  # Binstubs on PATH -> venv console scripts (the sanctioned POSIX launch path).
+  # Both the service CLIs and the segmenter tools the log-session skill and
+  # session-log-writer agent invoke, so they resolve on PATH rather than assuming
+  # a bare command that was never deployed.
+  for name in session-sync agent-logger collate-session read-session-digest prepare-session-log; do
+    ln -sf "${VENV}/bin/${name}" "${LOCAL_BIN}/${name}"
+  done
   ok "linked binstubs into ${LOCAL_BIN}"
 }
 
@@ -180,6 +184,10 @@ case "${ACTION}" in
     rm -f "${UNIT_DIR}/${TIMER_NAME}.service" "${UNIT_DIR}/${TIMER_NAME}.timer"
     systemctl --user daemon-reload || true
     chg "timer removed (config at ${INSTALL_DIR} kept)"
+    for name in session-sync agent-logger collate-session read-session-digest prepare-session-log; do
+      rm -f "${LOCAL_BIN}/${name}"
+    done
+    chg "binstubs removed from ${LOCAL_BIN}"
     ;;
   status)
     if [ -x "${VENV}/bin/session-sync" ]; then

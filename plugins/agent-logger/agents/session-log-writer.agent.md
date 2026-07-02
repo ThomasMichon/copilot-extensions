@@ -68,8 +68,20 @@ The caller passes a **manifest file path** in its prompt. Read it with the
 ## Tool policy
 
 - **Invoke segmenter tools by binstub name** -- `collate-session`,
-  `read-session-digest`. They are on PATH. Never call the underlying `.py`
-  files with `python` / `uv run`.
+  `read-session-digest`. The agent-logger installer deploys these as binstubs
+  in `~/.local/bin`, so they are on PATH once the runtime is installed.
+- **If a binstub is not on PATH** (payload installed but the runtime installer
+  hasn't run, or `~/.local/bin` isn't on PATH), fall back to the deployed venv
+  interpreter with `-m`:
+  ```
+  # POSIX
+  ~/.agent-logger/.venv/bin/python -m agent_logger.segmenter.collate <session_path> --nas --segment-size 80000
+  # Windows
+  ~/.agent-logger/.venv/Scripts/python.exe -m agent_logger.segmenter.collate <session_path> --nas --segment-size 80000
+  ```
+  The module names are `agent_logger.segmenter.collate` and
+  `agent_logger.segmenter.read_digest`. Never call the underlying `.py` files
+  with a system `python` / `uv run` -- they need the venv's dependencies.
 - **Collate from the manifest's `session_path`.** Example:
   ```
   collate-session <session_path> --nas --segment-size 80000
