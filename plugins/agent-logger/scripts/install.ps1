@@ -49,8 +49,14 @@ $PluginDir  = (Resolve-Path (Join-Path $ScriptDir '..')).Path
 $TaskName   = 'Agent Logger Session Sync'
 $BinstubPs1 = Join-Path $LocalBin 'session-sync.ps1'
 $BinstubCmd = Join-Path $LocalBin 'session-sync.cmd'
-$AltBinstubPs1 = Join-Path $LocalBin 'agent-logger.ps1'
-$AltBinstubCmd = Join-Path $LocalBin 'agent-logger.cmd'
+# Every CLI name deployed as a binstub (.ps1 primary + .cmd fallback), each
+# launching the venv's signed python via `-m <module>`. Kept in one list so
+# Write-Binstubs (install) and the uninstall sweep stay in sync. The segmenter
+# tools (collate-session, read-session-digest, prepare-session-log) are included
+# so the log-session skill and the session-log-writer agent resolve them on PATH
+# -- rather than assuming a console-script trampoline that this installer strips
+# (SAC/CodeIntegrity-3077) and never replaces.
+$BinstubNames = @('session-sync', 'agent-logger', 'collate-session', 'read-session-digest', 'prepare-session-log')
 
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
 function Remove-ConsoleTrampolines {
@@ -250,12 +256,18 @@ function Write-Binstubs {
        plus a .cmd fallback. PowerShell resolves a .ps1 (ExternalScript) ahead of
        a .cmd (Application) in the same dir; both launch the venv's signed python
        via `-m`, never the unsigned console-script trampoline .exe that Smart App
-       Control blocks (3077). #>
+       Control blocks (3077). Covers both the service CLIs (session-sync,
+       agent-logger) and the segmenter tools the log-session skill and
+       session-log-writer agent call (collate-session, read-session-digest,
+       prepare-session-log). #>
     param([Parameter(Mandatory)][string]$PythonExe)
 
-    $stubs = @{
-        'session-sync' = 'agent_logger.sync.engine'
-        'agent-logger' = 'agent_logger'
+    $stubs = [ordered]@{
+        'session-sync'        = 'agent_logger.sync.engine'
+        'agent-logger'        = 'agent_logger'
+        'collate-session'     = 'agent_logger.segmenter.collate'
+        'read-session-digest' = 'agent_logger.segmenter.read_digest'
+        'prepare-session-log' = 'agent_logger.segmenter.prepare_log'
     }
     foreach ($name in $stubs.Keys) {
         $mod = $stubs[$name]
@@ -364,8 +376,11 @@ switch ($Action) {
         } else {
             Write-Warn2 "no scheduled task found"
         }
-        foreach ($f in @($BinstubPs1, $BinstubCmd, $AltBinstubPs1, $AltBinstubCmd)) {
-            if (Test-Path $f) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+        foreach ($name in $BinstubNames) {
+            foreach ($ext in 'ps1', 'cmd') {
+                $f = Join-Path $LocalBin "$name.$ext"
+                if (Test-Path $f) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+            }
         }
         Write-Changed "binstubs removed from $LocalBin"
     }
