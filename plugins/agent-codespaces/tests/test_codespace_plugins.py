@@ -9,6 +9,7 @@ from pathlib import Path
 from agent_codespaces.codespace_plugins import (
     CodespacePluginSpec,
     enabled_plugin_names,
+    is_harness_plugin,
     iter_installed_manifests,
     repo_matches,
     resolve_codespace_plugins,
@@ -236,3 +237,29 @@ def test_spec_to_dict_roundtrip():
         "forWorkspaceRepo": ["owner/repo"],
         "declaredBy": ["repo-x"],
     }
+
+
+# --------------------------------------------------------------------------
+# Harness-plugin guard (never inject a *-harness* plugin into a CodeSpace)
+# --------------------------------------------------------------------------
+
+def test_is_harness_plugin():
+    assert is_harness_plugin("odsp-web-harness@dev-tmichon") is True
+    assert is_harness_plugin("odsp-web-harness-status@m") is True
+    assert is_harness_plugin("odsp-web-agent@m") is False
+    assert is_harness_plugin("odsp-web-agent-development@m") is False
+    assert is_harness_plugin("agent-codespaces@copilot-extensions") is False
+
+
+def test_resolve_drops_harness_declarations(tmp_path):
+    # A harness plugin mis-declared in codespacePlugins must be filtered out.
+    _install_plugin(
+        tmp_path, "dev-tmichon", "odsp-web-harness",
+        codespace_plugins=[
+            {"source": "odsp-web-harness@dev-tmichon"},   # dropped
+            {"source": "odsp-web-agent@dev-tmichon"},     # kept
+        ],
+    )
+    _set_enabled(tmp_path, "odsp-web-harness@dev-tmichon")
+    specs = resolve_codespace_plugins("odsp-microsoft/odsp-web", copilot_home=tmp_path)
+    assert [s.source for s in specs] == ["odsp-web-agent@dev-tmichon"]

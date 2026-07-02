@@ -122,8 +122,30 @@ def _entry_repos(entry: dict) -> list[str]:
     return repos
 
 
+def plugin_name(source: str) -> str:
+    """The plugin name from a source (``name@marketplace`` -> ``name``)."""
+    return (source or "").strip().partition("@")[0].strip()
+
+
+def is_harness_plugin(source: str) -> bool:
+    """True for a ``<reponame>-harness[-*]`` plugin.
+
+    Harness plugins are central-harness-only (they let an orchestrator cross-talk
+    with a repo remotely) and must NEVER be propagated to a repo's venue. See the
+    control-plane AGENTS.md "Plugin Naming & Propagation Convention". This is the
+    hard guard that keeps a mis-declaration from leaking a harness plugin onto a
+    CodeSpace.
+    """
+    name = plugin_name(source)
+    return name.endswith("-harness") or "-harness-" in name
+
+
 def _parse_plugin_items(raw: object) -> list[PluginRef]:
-    """Parse a related entry's ``plugins`` list into PluginRefs (tolerant)."""
+    """Parse a related entry's ``plugins`` list into PluginRefs (tolerant).
+
+    Drops any ``*-harness*`` plugin: those are central-harness-only and must not
+    be side-loaded into a venue, even if mis-declared here.
+    """
     if not isinstance(raw, list):
         return []
     seen: dict[str, PluginRef] = {}
@@ -135,8 +157,15 @@ def _parse_plugin_items(raw: object) -> list[PluginRef]:
             enable = bool(item.get("enable", True))
         else:
             continue
-        if source:
-            seen[source] = PluginRef(source=source, enable=enable)
+        if not source:
+            continue
+        if is_harness_plugin(source):
+            log.warning(
+                "Refusing to propagate harness plugin '%s' to a venue "
+                "(*-harness* plugins are central-harness-only)", source,
+            )
+            continue
+        seen[source] = PluginRef(source=source, enable=enable)
     return list(seen.values())
 
 

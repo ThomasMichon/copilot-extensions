@@ -180,10 +180,31 @@ def repo_matches(filters: tuple[str, ...], workspace_repo: str | None) -> bool:
     return False
 
 
+def plugin_name(source: str) -> str:
+    """The plugin name from a source (``name@marketplace`` -> ``name``)."""
+    return (source or "").strip().partition("@")[0].strip()
+
+
+def is_harness_plugin(source: str) -> bool:
+    """True for a ``<reponame>-harness[-*]`` plugin.
+
+    Harness plugins are central-harness-only and must NEVER be injected into a
+    CodeSpace. See the control-plane AGENTS.md "Plugin Naming & Propagation
+    Convention". Enforced here so a mis-declared ``codespacePlugins`` entry can't
+    leak a harness plugin onto a CodeSpace.
+    """
+    name = plugin_name(source)
+    return name.endswith("-harness") or "-harness-" in name
+
+
 def parse_codespace_plugins(
     manifest: dict[str, Any], declared_by: str
 ) -> list[CodespacePluginSpec]:
-    """Parse a manifest's ``codespacePlugins`` array into specs (tolerant)."""
+    """Parse a manifest's ``codespacePlugins`` array into specs (tolerant).
+
+    Drops any ``*-harness*`` source: harness plugins are central-harness-only and
+    must not be injected into a CodeSpace even if mis-declared.
+    """
     raw = manifest.get(MANIFEST_FIELD)
     if not isinstance(raw, list):
         return []
@@ -193,6 +214,8 @@ def parse_codespace_plugins(
             continue
         source = entry.get("source")
         if not isinstance(source, str) or not source.strip():
+            continue
+        if is_harness_plugin(source):
             continue
         enable = bool(entry.get("enable", True))
         filters = _as_repo_filters(entry.get("forWorkspaceRepo"))
