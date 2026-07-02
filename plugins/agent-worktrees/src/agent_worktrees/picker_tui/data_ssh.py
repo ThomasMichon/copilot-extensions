@@ -115,10 +115,14 @@ def _argv_for(shell: str, alias: str, project: str, *, classify: bool):
 def _build_sources():
     """Derive machine/env sources from ``machines.yaml`` (the canonical roster).
 
-    Skips ``copilot: false`` machines entirely. A machine with
-    ``ssh.ready: false`` is kept as a disabled tab (never contacted). The local
-    machine's matching env becomes the in-process local source; its other
-    environments and every remote env go over SSH.
+    Skips ``copilot: false`` machines entirely. The local machine's matching env
+    always becomes the in-process local source -- **it never needs an SSH
+    profile of its own** (the picker runs there): even a machine with no SSH
+    environment, or one whose ``ssh.ready`` is false, still gets a working local
+    tab. Every *other* env is contacted over SSH only when it actually has an
+    SSH profile (a non-empty alias) and the machine is ``ssh.ready``; an env
+    with no alias is rendered as a disabled tab and never connected to, and a
+    ``ssh.ready: false`` machine's remote envs stay disabled tabs.
     """
     config = cfg.load_config()
     repo = config.default_repo
@@ -129,6 +133,7 @@ def _build_sources():
 
     project = _project()
     local_key, local_plat = _local_identity()
+    local_elabel = _ENV_LABEL.get(local_plat, local_plat.title() or "?")
     config_machine = (config.machine or "").lower()
 
     out: list[Source] = []
@@ -140,21 +145,37 @@ def _build_sources():
             or key.lower() == config_machine
             or (m.alias and m.alias.lower() == config_machine)
         )
+        local_env_added = False
         for ssh_env in m.ssh_environments:
             ename = (ssh_env.name or "").lower()
             elabel = _ENV_LABEL.get(ename, ename.title() or "?")
             shell = ssh_env.shell or ("pwsh" if ename == "windows" else "bash")
+            alias = ssh_env.alias or ""
             is_local = is_local_machine and ename == local_plat
             if is_local:
+                # Local env: in-process, no SSH profile required.
                 out.append(Source(m.display_name, elabel, None, local=True,
                                   ready=True))
+                local_env_added = True
+            elif not alias:
+                # No SSH profile for this env -- never try to connect to it;
+                # surface it as a disabled tab.
+                out.append(Source(m.display_name, elabel, None, ready=False,
+                                  alias="", shell=shell))
             elif m.ssh_ready:
-                argv = _argv_for(shell, ssh_env.alias, project, classify=True)
+                argv = _argv_for(shell, alias, project, classify=True)
                 out.append(Source(m.display_name, elabel, argv, ready=True,
-                                  alias=ssh_env.alias, shell=shell))
+                                  alias=alias, shell=shell))
             else:
                 out.append(Source(m.display_name, elabel, None, ready=False,
-                                  alias=ssh_env.alias, shell=shell))
+                                  alias=alias, shell=shell))
+        # Bypass: the current machine always gets a local source, even when it
+        # has no SSH environment of its own in machines.yaml (or none matched
+        # the running platform). The picker runs *here*, so it never needs to
+        # SSH to itself.
+        if is_local_machine and not local_env_added:
+            out.append(Source(m.display_name, local_elabel, None, local=True,
+                              ready=True))
     return out
 
 
@@ -219,9 +240,11 @@ def profiles_argv(machine, env, *, action, set_json=None, no_mirror=False):
 def machines():
     """Ordered machine-tab descriptors: (label, machine, env, reachable).
 
-    ``reachable`` is the ``machines.yaml`` ``ssh.ready`` flag (the local source
-    is always reachable): ready machines are attempted (spinner -> ✓/✗);
-    not-ready machines render as a disabled tab and are never contacted.
+    ``reachable`` is true only for the local source (always) and for a remote
+    env that both has an SSH profile (a non-empty alias) and belongs to an
+    ``ssh.ready`` machine: those are attempted (spinner -> ✓/✗). An env with no
+    SSH profile, or one on a ``ssh.ready: false`` machine, renders as a disabled
+    tab and is never contacted.
     """
     return [
         (f"{s.machine} {s.env}", s.machine, s.env, s.ready)
