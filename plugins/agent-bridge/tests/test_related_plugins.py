@@ -102,6 +102,31 @@ def test_control_plane_anchors_from_topology(tmp_path, monkeypatch):
     assert tmp_path in anchors
 
 
+def test_harness_plugins_are_never_propagated(tmp_path: Path):
+    # A mis-declared harness plugin in related.plugins must be filtered out.
+    _write_related(
+        tmp_path,
+        "related:\n"
+        "  odsp-web:\n"
+        "    locus:\n"
+        "      codespace: { repo: org/odsp-web-codespaces }\n"
+        "    plugins:\n"
+        "      - odsp-web-harness@dev-tmichon\n"        # harness -> dropped
+        "      - { source: odsp-web-harness-extra@m }\n"  # harness-* -> dropped
+        "      - odsp-web-agent@dev-tmichon\n",          # in-context -> kept
+    )
+    refs = rp.related_plugins_for_repo("org/odsp-web-codespaces", anchors=[tmp_path])
+    assert [r.source for r in refs] == ["odsp-web-agent@dev-tmichon"]
+
+
+def test_is_harness_plugin():
+    assert rp.is_harness_plugin("odsp-web-harness@dev-tmichon") is True
+    assert rp.is_harness_plugin("odsp-web-harness-status@m") is True
+    assert rp.is_harness_plugin("odsp-web-agent@m") is False
+    assert rp.is_harness_plugin("odsp-web-agent-development@m") is False
+    assert rp.is_harness_plugin("agent-bridge@copilot-extensions") is False
+
+
 def test_control_plane_anchors_registry_fallback(tmp_path, monkeypatch):
     # machines_yaml points at a stale/missing worktree; the repos-registry
     # canonical anchor (by topology name) is used instead.
