@@ -1095,7 +1095,11 @@ class TestPluginInjectionContract:
         pr = _PluginAwareResolver()
         r.register_namespace_resolver(pr)
         refs = [PluginRef("a@m"), PluginRef("b@m", enable=False)]
-        monkeypatch.setattr(r, "_related_plugins_for", lambda name: refs)
+
+        async def _fake(resolver, name):
+            return refs
+
+        monkeypatch.setattr(r, "_related_plugins_for", _fake)
         await r.resolve_async("pl:agent")
         assert pr.seen_extra == refs
 
@@ -1107,3 +1111,46 @@ class TestPluginInjectionContract:
         r.register_namespace_resolver(_MockResolver("legacy"))
         target = await r.resolve_async("legacy:my-agent")
         assert target.spawn_command == ["echo", "my-agent"]
+
+    @pytest.mark.asyncio
+    async def test_target_repo_drives_related_sourcing(self, monkeypatch):
+        # A resolver that reports a target_repo -> bridge sources related-repo
+        # plugins for that repo and forwards them as extra_plugins.
+        import agent_bridge.related_plugins as rp
+
+        captured = {}
+
+        class _RepoResolver(_PluginAwareResolver):
+            async def target_repo(self, name: str):
+                return "org/some-codespaces"
+
+        refs = [PluginRef("p@m")]
+
+        def _fake_source(repo, anchors=None):
+            captured["repo"] = repo
+            return refs
+
+        monkeypatch.setattr(rp, "related_plugins_for_repo", _fake_source)
+        r = AgentResolver({}, {})
+        pr = _RepoResolver("repo")
+        r.register_namespace_resolver(pr)
+        await r.resolve_async("repo:agent")
+        assert captured["repo"] == "org/some-codespaces"
+        assert pr.seen_extra == refs
+
+    @pytest.mark.asyncio
+    async def test_target_repo_none_means_no_injection(self, monkeypatch):
+        # target_repo returning None -> no sourcing, resolver called plainly.
+        import agent_bridge.related_plugins as rp
+
+        called = {"n": 0}
+        monkeypatch.setattr(
+            rp, "related_plugins_for_repo",
+            lambda *a, **k: (called.__setitem__("n", called["n"] + 1) or []),
+        )
+        r = AgentResolver({}, {})
+        pr = _PluginAwareResolver("norepo")  # no target_repo hook -> None
+        r.register_namespace_resolver(pr)
+        await r.resolve_async("norepo:agent")
+        assert pr.seen_extra == []
+        assert called["n"] == 0  # sourcing not even attempted without a repo

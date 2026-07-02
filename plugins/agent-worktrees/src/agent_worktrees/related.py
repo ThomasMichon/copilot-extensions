@@ -37,6 +37,9 @@ Schema (``<anchor>/.agent-worktrees/related.yaml``)::
           codespace: { repo: org/odsp-web-codespaces,
                        machine: largePremiumLinux256gb, location: EastUs }
         delegate: { via: agent-codespaces }
+        plugins:                        # related-repo plugins agent-bridge side-loads
+          - { source: odsp-web-codespace@dev-tmichon }
+          - { source: some-plugin@dev-tmichon, enable: false }
       copilot-extensions:
         role: tooling
         summary: "Source of the plugins this control plane drives."
@@ -126,6 +129,13 @@ class RelatedEntry:
     doc: str = ""                       # relative to ``.agent-worktrees/``
     locus: Locus = field(default_factory=Locus)
     delegate: str = ""                  # the ``via`` value; see VALID_DELEGATES
+    # Plugins this control plane side-loads when delegating work to the related
+    # repo (the *related-repo* plugin lane -- distinct from a CodeSpace's own
+    # ``codespacePlugins``). Each item is a normalized ``{"source": str,
+    # "enable": bool}`` mapping; ``source`` is any ``copilot plugin install``
+    # source. Consumed by agent-bridge, which injects them into the dispatched
+    # agent's launch (``--plugin-dir`` / user-settings), never by agent-worktrees.
+    plugins: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -251,6 +261,31 @@ def _parse_delegate(raw: Any) -> str:
     return ""
 
 
+def _parse_plugins(raw: Any) -> list[dict[str, Any]]:
+    """Normalise a ``plugins`` block to ``[{"source": str, "enable": bool}]``.
+
+    Accepts a list whose items are either a bare source string (shorthand for
+    ``{source, enable: true}``) or a mapping with ``source`` (+ optional
+    ``enable``). Items without a usable ``source`` are skipped; duplicate
+    sources are collapsed (last ``enable`` wins). Never raises.
+    """
+    if not isinstance(raw, list):
+        return []
+    out: dict[str, dict[str, Any]] = {}
+    for item in raw:
+        if isinstance(item, str):
+            source, enable = item.strip(), True
+        elif isinstance(item, dict):
+            source = str(item.get("source", "")).strip()
+            enable = bool(item.get("enable", True))
+        else:
+            continue
+        if not source:
+            continue
+        out[source] = {"source": source, "enable": enable}
+    return list(out.values())
+
+
 def read_related(anchor: str | Path) -> RelatedConfig:
     """Load ``<anchor>/.agent-worktrees/related.yaml``.
 
@@ -286,6 +321,7 @@ def read_related(anchor: str | Path) -> RelatedConfig:
                 doc=str(entry.get("doc", "")).strip(),
                 locus=_parse_locus(entry.get("locus")),
                 delegate=_parse_delegate(entry.get("delegate")),
+                plugins=_parse_plugins(entry.get("plugins")),
             )
 
     return RelatedConfig(primary=primary, related=related)
@@ -366,6 +402,14 @@ def write_related(anchor: str | Path, cfg: RelatedConfig) -> None:
             _emit_locus(lines, entry.locus, "    ")
             if entry.delegate:
                 lines.append(f"    delegate: {{ via: {_quote(entry.delegate)} }}")
+            if entry.plugins:
+                lines.append("    plugins:")
+                for p in entry.plugins:
+                    src = _quote(str(p.get("source", "")))
+                    if p.get("enable", True):
+                        lines.append(f"      - {{ source: {src} }}")
+                    else:
+                        lines.append(f"      - {{ source: {src}, enable: false }}")
             lines.append("")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
