@@ -1,7 +1,7 @@
 {
   "name": "agent-bridge",
   "description": "Persistent inter-agent communication service -- one instance per machine, serving all Copilot CLI sessions with session management, event streaming, and agent spawning",
-  "version": "0.4.0-dev76",
+  "version": "0.4.0-dev77",
   "runtimeScope": "machine-gated",
   "author": {
     "name": "Thomas Michon"
