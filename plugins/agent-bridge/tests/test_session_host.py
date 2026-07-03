@@ -296,6 +296,78 @@ def test_create_breakaway_flag_value():
 
 
 # --------------------------------------------------------------------------
+# host index (durable session -> host endpoint map)
+# --------------------------------------------------------------------------
+def test_host_index_register_get_remove(tmp_path):
+    from agent_bridge.session_host.host_index import HostIndex, HostRecord
+
+    idx = HostIndex(tmp_path / "hosts.json")
+    rec = HostRecord(session_id="s1", port=9000, host_pid=111, child_pid=222)
+    idx.register(rec)
+    assert "s1" in idx
+    assert idx.get("s1").child_pid == 222
+    assert len(idx) == 1
+    assert idx.remove("s1") is True
+    assert idx.remove("s1") is False
+    assert len(idx) == 0
+
+
+def test_host_index_persists_across_reload(tmp_path):
+    from agent_bridge.session_host.host_index import HostIndex, HostRecord
+
+    path = tmp_path / "hosts.json"
+    idx = HostIndex(path)
+    idx.register(HostRecord(session_id="s1", port=9000, host_pid=111, child_pid=222,
+                            host_version="0.4.0-dev78"))
+    idx.register(HostRecord(session_id="s2", port=9001, host_pid=333, child_pid=444))
+    # fresh instance reads the same file
+    idx2 = HostIndex(path)
+    assert len(idx2) == 2
+    assert idx2.get("s1").host_version == "0.4.0-dev78"
+    assert idx2.get("s2").port == 9001
+
+
+def test_host_index_prune_and_live(tmp_path):
+    from agent_bridge.session_host.host_index import HostIndex, HostRecord
+
+    idx = HostIndex(tmp_path / "hosts.json")
+    idx.register(HostRecord(session_id="alive", port=1, host_pid=10, child_pid=20))
+    idx.register(HostRecord(session_id="dead", port=2, host_pid=99, child_pid=30))
+
+    def is_alive(pid: int) -> bool:
+        return pid == 10
+
+    live = idx.live_records(is_alive)
+    assert [r.session_id for r in live] == ["alive"]
+    pruned = idx.prune_dead(is_alive)
+    assert [r.session_id for r in pruned] == ["dead"]
+    assert "dead" not in idx and "alive" in idx
+
+
+def test_host_index_from_state_file(tmp_path):
+    from agent_bridge.session_host.host_index import HostRecord
+
+    state = tmp_path / "host.json"
+    state.write_text('{"pid": 111, "child_pid": 222, "port": 9000}')
+    rec = HostRecord.from_state_file("s1", state, host_version="v1")
+    assert rec.session_id == "s1"
+    assert rec.host_pid == 111
+    assert rec.child_pid == 222
+    assert rec.port == 9000
+    assert rec.host_version == "v1"
+    assert rec.state_file == str(state)
+
+
+def test_host_index_corrupt_file_is_ignored(tmp_path):
+    from agent_bridge.session_host.host_index import HostIndex
+
+    path = tmp_path / "hosts.json"
+    path.write_text("{ not json")
+    idx = HostIndex(path)  # must not raise
+    assert len(idx) == 0
+
+
+# --------------------------------------------------------------------------
 # ACP stream adapter (Phase 2 bridge): host <-> asyncio streams, byte-exact
 # --------------------------------------------------------------------------
 @pytest.mark.asyncio
