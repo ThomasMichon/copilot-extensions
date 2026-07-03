@@ -14,6 +14,7 @@ import asyncio
 import pytest
 
 from agent_bridge import winjob
+from agent_bridge.session_host import launcher
 from agent_bridge.session_host import protocol as proto
 from agent_bridge.session_host.client import SessionHostClient
 from agent_bridge.session_host.host import SessionHost
@@ -291,3 +292,83 @@ def test_breakaway_flag_composition():
 def test_create_breakaway_flag_value():
     # documented Win32 constant
     assert winjob.CREATE_BREAKAWAY_FROM_JOB == 0x01000000
+
+
+# --------------------------------------------------------------------------
+# launcher: survival adapter selection + real end-to-end via run_host
+# --------------------------------------------------------------------------
+def test_host_spawn_kwargs_per_os():
+    kw = launcher.host_spawn_kwargs()
+    import sys
+    if sys.platform == "win32":
+        assert kw["creationflags"] & winjob.CREATE_BREAKAWAY_FROM_JOB
+        assert "start_new_session" not in kw
+    else:
+        assert kw["start_new_session"] is True
+        assert "creationflags" not in kw
+
+
+_STREAMER = (
+    "import sys,time,json\n"
+    "sys.stdout.write(json.dumps({'type':'ready'})+'\\n'); sys.stdout.flush()\n"
+    "line=sys.stdin.readline()\n"
+    "for i in range(1,6):\n"
+    "    sys.stdout.write(json.dumps({'type':'update','chunk':i})+'\\n'); sys.stdout.flush(); time.sleep(0.05)\n"
+    "sys.stdout.write(json.dumps({'type':'turn_complete'})+'\\n'); sys.stdout.flush()\n"
+    "time.sleep(1.0)\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_run_host_end_to_end_reattach(tmp_path):
+    """run_host spawns a real child process; a front reattaches mid-stream."""
+    import sys
+
+    state = tmp_path / "host.json"
+    ready = asyncio.Event()
+    task = asyncio.create_task(
+        launcher.run_host(
+            [sys.executable, "-c", _STREAMER],
+            port=0, state_file=str(state), ready=ready,
+        )
+    )
+    try:
+        await asyncio.wait_for(ready.wait(), timeout=10)
+        import json as _json
+        meta = _json.loads(state.read_text())
+        port = meta["port"]
+
+        # front 1: attach fresh, drive the stream, read 2 frames, ack, detach.
+        c1 = await SessionHostClient.connect(port=port)
+        hello = await c1.attach(0)
+        assert hello.child_pid == meta["child_pid"]
+        await c1.write(b'{"prompt":"go"}\n')
+        gen1 = c1.frames()
+        first_seqs = []
+        for _ in range(2):
+            seq, _d = await asyncio.wait_for(gen1.__anext__(), timeout=10)
+            first_seqs.append(seq)
+            await c1.ack(seq)
+        await c1.close()
+
+        # front 2: reattach from the last-acked seq; drain to completion.
+        c2 = await SessionHostClient.connect(port=port)
+        await c2.attach(first_seqs[-1])
+        saw_complete = False
+        seqs2 = []
+        async for seq, data in c2.frames():
+            seqs2.append(seq)
+            await c2.ack(seq)
+            if b"turn_complete" in data:
+                saw_complete = True
+                break
+        assert saw_complete
+        assert seqs2[0] == first_seqs[-1] + 1        # no gap
+        assert min(seqs2) > first_seqs[-1]           # no re-stream
+        await c2.close()
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
