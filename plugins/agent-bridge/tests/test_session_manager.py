@@ -584,3 +584,52 @@ class TestRehydrate:
         assert session is not None
         assert session.status == SessionStatus.STOPPED
         assert session.acp_session_id == "acp-456"
+
+
+class TestTeardownDuringDrain:
+    """Teardown (stop/end) must stay permitted while draining (#1755).
+
+    The drain gate blocks only *new* work (create session / submit turn);
+    stop/end are exactly what let the busy sessions the drain waits on settle,
+    so gating them self-deadlocks a redeploy.
+    """
+
+    @pytest.mark.asyncio
+    async def test_stop_allowed_while_draining(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        session_manager.set_draining(True, source="test")
+        await session_manager.stop_session(session.session_id)
+        assert session.status == SessionStatus.STOPPED
+        # The gate is untouched by teardown -- it stays open for the redeploy.
+        assert session_manager.is_draining is True
+
+    @pytest.mark.asyncio
+    async def test_end_allowed_while_draining(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        sid = session.session_id
+        session_manager.set_draining(True, source="test")
+        await session_manager.end_session(sid)
+        assert session_manager.get_session(sid) is None
+        assert session_manager.is_draining is True
+
+    @pytest.mark.asyncio
+    async def test_create_and_turn_blocked_while_draining(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        from agent_bridge.session_manager import DaemonDrainingError
+
+        session = await session_manager.start_session(spawn_target)
+        session_manager.set_draining(True, source="test")
+        # New work is refused...
+        with pytest.raises(DaemonDrainingError):
+            await session_manager.start_session(spawn_target)
+        with pytest.raises(DaemonDrainingError):
+            await session_manager.submit_prompt(session.session_id, "hi")
+        # ...but teardown of the existing session still succeeds.
+        await session_manager.end_session(session.session_id)
+        assert session_manager.get_session(session.session_id) is None
+

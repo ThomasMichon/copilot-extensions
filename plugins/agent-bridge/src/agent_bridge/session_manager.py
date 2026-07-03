@@ -17,6 +17,7 @@ import re
 import sys
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from .acp_client import AcpClient
@@ -306,6 +307,15 @@ class SessionManager:
 
     MAX_SESSIONS = 100
 
+    # A drain that outlives this many seconds with no handoff completing is
+    # treated as stuck/aborted and auto-released so the daemon self-heals
+    # instead of returning 503 forever (#1757). Generous enough to cover a slow
+    # real cutover (health probe + full drain_timeout), short enough that an
+    # aborted cutover does not strand the daemon for hours.
+    DRAIN_AUTO_RELEASE_S = 900.0
+    # How often the watchdog logs a "still draining" WARN while the gate is open.
+    DRAIN_WARN_INTERVAL_S = 60.0
+
     def __init__(
         self,
         db: Database,
@@ -313,6 +323,8 @@ class SessionManager:
         context_thresholds: ContextThresholds | None = None,
         timeouts: PhasedTimeouts | None = None,
         retention: RetentionConfig | None = None,
+        drain_auto_release_s: float | None = None,
+        drain_warn_interval_s: float | None = None,
     ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
@@ -321,8 +333,27 @@ class SessionManager:
         self._retention = retention or RetentionConfig()
         # Drain gate: when True the daemon refuses *new* sessions and *new*
         # turns so in-flight work can settle before a zero-downtime handoff.
-        # Set via drain(); never persisted (a fresh daemon starts un-drained).
+        # Set via drain()/set_draining(); never persisted (a fresh daemon
+        # starts un-drained). Teardown (stop/end) is *never* gated -- it is the
+        # operation the drain is waiting for (#1755).
         self._draining = False
+        # Drain observability + bounded lifetime (#1757). When the gate opens we
+        # record when/why/by-whom and arm a watchdog that WARNs on an interval
+        # and finally auto-releases the gate if no cutover ever retires this
+        # daemon -- so a stuck/aborted drain self-heals rather than 503'ing new
+        # work (including the operator's own diagnosis session) forever.
+        self._draining_since: float | None = None
+        self._drain_reason: str | None = None
+        self._drain_source: str | None = None
+        self._drain_watchdog: asyncio.Task[None] | None = None
+        self._drain_auto_release_s = (
+            self.DRAIN_AUTO_RELEASE_S if drain_auto_release_s is None
+            else float(drain_auto_release_s)
+        )
+        self._drain_warn_interval_s = (
+            self.DRAIN_WARN_INTERVAL_S if drain_warn_interval_s is None
+            else float(drain_warn_interval_s)
+        )
         self._rehydrate()
 
     @property
@@ -330,9 +361,138 @@ class SessionManager:
         """True once drain() has begun -- new sessions/turns are refused."""
         return self._draining
 
-    def set_draining(self, value: bool) -> None:
-        """Open (True) or release (False) the drain gate."""
-        self._draining = bool(value)
+    def set_draining(
+        self,
+        value: bool,
+        *,
+        reason: str | None = None,
+        source: str | None = None,
+    ) -> None:
+        """Open (True) or release (False) the drain gate.
+
+        Logs the transition (with ``source``/``reason``) so a drained daemon is
+        never invisible, and -- on open -- arms a watchdog that bounds how long
+        the daemon may sit drained before auto-releasing (#1757). Idempotent: a
+        call that does not change the gate state is a quiet no-op (the existing
+        watchdog and its ``since`` timestamp are preserved).
+        """
+        value = bool(value)
+        if value == self._draining:
+            return
+        self._draining = value
+        if value:
+            self._draining_since = time.time()
+            self._drain_reason = reason
+            self._drain_source = source
+            log.info(
+                "Drain gate OPENED (source=%s reason=%s) -- refusing new "
+                "sessions/turns; reads and teardown still served",
+                source or "?", reason or "?",
+            )
+            self._arm_drain_watchdog()
+        else:
+            held = (
+                time.time() - self._draining_since
+                if self._draining_since is not None else 0.0
+            )
+            log.info(
+                "Drain gate RELEASED (source=%s) after %.0fs -- accepting new "
+                "work", source or "?", held,
+            )
+            self._draining_since = None
+            self._drain_reason = None
+            self._drain_source = None
+            self._cancel_drain_watchdog()
+
+    def drain_status(self) -> dict[str, Any]:
+        """Snapshot of the drain gate for /health and monitoring (#1757).
+
+        Exposes *how long* the daemon has been drained and when the watchdog
+        will auto-release, so a stuck drain is visible without grepping logs.
+        """
+        now = time.time()
+        since = self._draining_since
+        held = (now - since) if since is not None else None
+        auto_at = (
+            since + self._drain_auto_release_s
+            if since is not None and self._drain_auto_release_s > 0 else None
+        )
+        return {
+            "draining": self._draining,
+            "since": (
+                datetime.fromtimestamp(since, tz=timezone.utc).isoformat()
+                if since is not None else None
+            ),
+            "held_s": round(held, 1) if held is not None else None,
+            "reason": self._drain_reason,
+            "source": self._drain_source,
+            "auto_release_at": (
+                datetime.fromtimestamp(auto_at, tz=timezone.utc).isoformat()
+                if auto_at is not None else None
+            ),
+        }
+
+    def _arm_drain_watchdog(self) -> None:
+        """Start the bounded-drain watchdog if an event loop is running."""
+        self._cancel_drain_watchdog()
+        if self._drain_auto_release_s <= 0:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No event loop (e.g. a synchronous unit test toggling the gate).
+            # The bounded-lifetime backstop is a no-op here; the gate can still
+            # be released manually or by the next drain() call under a loop.
+            return
+        self._drain_watchdog = loop.create_task(self._drain_watchdog_loop())
+
+    def _cancel_drain_watchdog(self) -> None:
+        wd = self._drain_watchdog
+        self._drain_watchdog = None
+        if wd is not None and not wd.done():
+            wd.cancel()
+
+    async def _drain_watchdog_loop(self) -> None:
+        """Bound how long the daemon may sit drained (#1757).
+
+        WARNs on an interval while the gate is open, then auto-releases it once
+        the drain outlives ``_drain_auto_release_s`` with no cutover retiring
+        the daemon. A completed handoff shuts the process down before this
+        fires; a manual undrain cancels it. This is the self-heal for an
+        aborted cutover (or a diagnosis session that can't get in because it is
+        itself 503'd) that would otherwise leave the daemon drained forever.
+        """
+        interval = max(1.0, self._drain_warn_interval_s)
+        deadline = (
+            (self._draining_since or time.time()) + self._drain_auto_release_s
+        )
+        try:
+            while self._draining:
+                await asyncio.sleep(interval)
+                if not self._draining:
+                    return
+                held = (
+                    time.time() - self._draining_since
+                    if self._draining_since is not None else 0.0
+                )
+                if time.time() >= deadline:
+                    log.warning(
+                        "Drain gate open %.0fs (source=%s reason=%s) with no "
+                        "handoff completing -- auto-releasing to self-heal (a "
+                        "cutover likely aborted)",
+                        held, self._drain_source or "?",
+                        self._drain_reason or "?",
+                    )
+                    self.set_draining(False, source="watchdog-auto-release")
+                    return
+                log.warning(
+                    "Still draining after %.0fs (source=%s reason=%s); "
+                    "auto-release at %.0fs",
+                    held, self._drain_source or "?", self._drain_reason or "?",
+                    self._drain_auto_release_s,
+                )
+        except asyncio.CancelledError:
+            return
 
     def busy_sessions(self) -> list[str]:
         """Session IDs that must not be torn down: actively streaming a turn
@@ -351,6 +511,8 @@ class SessionManager:
         timeout: float = 300.0,
         poll: float = 1.0,
         force: bool = False,
+        reason: str | None = None,
+        source: str = "drain-endpoint",
     ) -> dict[str, Any]:
         """Open the drain gate and wait for in-flight work to settle.
 
@@ -360,10 +522,16 @@ class SessionManager:
         orchestrator call this *before* the process exits so an active turn is
         never hard-killed. Returns a summary; ``drained`` is False on timeout
         unless ``force`` is set (the caller accepts interrupting the laggards).
+
+        ``source``/``reason`` are recorded for observability (#1757). Note the
+        gate stays open after this returns (the successor retires this daemon);
+        the watchdog armed here auto-releases it if that handoff never lands.
+        Teardown (stop/end) stays permitted throughout -- it is what lets the
+        busy sessions this loop waits on settle (#1755).
         """
         import asyncio as _asyncio
 
-        self.set_draining(True)
+        self.set_draining(True, reason=reason, source=source)
         deadline = time.monotonic() + max(0.0, timeout)
         busy = self.busy_sessions()
         log.info(
@@ -1144,6 +1312,10 @@ class SessionManager:
         Refuses with SessionBusyError when the session is hosting active
         background sub-agents unless ``force`` is set, so a routine stop does
         not kill in-flight background work (e.g. the PR daemon).
+
+        Teardown is **never gated by the drain flag** (#1755): stopping a
+        session is exactly what lets the busy sessions ``drain()`` waits on
+        settle, so gating it here would self-deadlock a redeploy.
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
@@ -1179,6 +1351,11 @@ class SessionManager:
         Refuses with SessionBusyError when the session is hosting active
         background sub-agents unless ``force`` is set -- ending kills the
         process and every in-process sub-agent with it.
+
+        Teardown is **never gated by the drain flag** (#1755): ending a session
+        is exactly what lets the busy sessions ``drain()`` waits on settle, so
+        gating it would self-deadlock a redeploy (the operator could not clear
+        the very sessions blocking the drain).
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)

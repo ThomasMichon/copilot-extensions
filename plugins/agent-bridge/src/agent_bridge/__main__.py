@@ -722,6 +722,7 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
     from . import __version__
     from .client import BridgeClient
     from .config import config_dir, load_config, load_or_create_auth_token
+    from zdd import breadcrumb
     from zdd.cutover import CutoverOrchestrator
 
     cfg = load_config()
@@ -762,6 +763,23 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
     def make_client(base_url: str) -> BridgeClient:
         return BridgeClient(base_url, token,
                             timeout=int(args.drain_timeout) + 60)
+
+    # Heal a prior aborted cutover before starting a new one (#1756): if a
+    # stale breadcrumb marks a survivor left drained, undrain it so it is not
+    # stranded closed to new work. `--recover` runs *only* this heal and exits.
+    recovery = breadcrumb.recover_stale_cutover(
+        config_dir(), make_client, health_check=health_check,
+    )
+    if getattr(args, "recover", False):
+        if args.json:
+            _json_out(recovery)
+        elif recovery.get("recovered"):
+            print(f"[OK] {recovery.get('reason')}")
+        else:
+            print(f"[>] {recovery.get('reason')}")
+        sys.exit(0)
+    if recovery.get("recovered"):
+        print(f"[>] Recovered a prior aborted cutover: {recovery.get('reason')}")
 
     orch = CutoverOrchestrator(
         config_dir(), bind=cfg.bind, version=__version__,
@@ -2177,6 +2195,12 @@ def main(argv: list[str] | None = None) -> None:
     deploy_p.add_argument(
         "--force", action="store_true",
         help="Proceed with cutover even if the old daemon does not fully drain.",
+    )
+    deploy_p.add_argument(
+        "--recover", action="store_true",
+        help="Only heal a prior aborted cutover: undrain a survivor left "
+             "drained by a cutover that never completed, then exit. Does not "
+             "start a new cutover.",
     )
     deploy_p.add_argument("--json", action="store_true", help="Emit JSON.")
     deploy_p.set_defaults(func=_cmd_deploy)

@@ -119,7 +119,7 @@ re-read already-consumed content and never moves the cursor. See
 ### Health
 
 ```
-GET    /health                           # Service health (no auth); reports {status, service, draining}
+GET    /health                           # Service health (no auth); reports {status, service, draining}, plus a drain{} detail block while draining
 ```
 
 ### Admin / Deployment
@@ -260,12 +260,28 @@ bounded by `--timeout`. Busy is the dev57 **busy oracle**: a session that is
 actively streaming a turn (RUNNING) **or** hosting active background sub-agents
 (`has_active_background_tasks`). `--force` proceeds past the timeout, accepting
 that the laggards are interrupted. `agent-bridge undrain` (`POST /api/v1/undrain`)
-releases the gate (used by cutover rollback); `/health` reports `draining`.
+releases the gate (used by cutover rollback).
+
+**Teardown is never gated by the drain flag.** `stop`/`end` on a session stay
+permitted while draining -- teardown is exactly the operation the drain waits
+for, so gating it would self-deadlock a redeploy (the operator could not clear
+the very sessions blocking the drain). The gate blocks only *new* work
+(create/turn). (aperture-labs #1755.)
+
+**Drain observability + bounded lifetime.** Opening and releasing the gate are
+logged with a `source`/`reason`, and `/health` exposes a `drain` block (`since`,
+`held_s`, `reason`, `source`, `auto_release_at`) whenever `draining` is true, so
+a stuck drain is visible to monitoring without grepping logs. A drain has a
+**bounded lifetime**: a watchdog WARNs on an interval while the gate is open and
+**auto-releases** it after `SessionManager.DRAIN_AUTO_RELEASE_S` (default 900s)
+if no cutover ever retires the daemon -- so an aborted cutover (or a diagnosis
+session that is itself 503'd by the gate it is investigating) self-heals instead
+of returning 503 forever. (aperture-labs #1757.)
 
 ### 3. Active/passive cutover (`agent-bridge deploy`)
 
 `agent-bridge deploy [--drain-timeout SECONDS] [--force]` runs a reversible
-cutover (`deploy.py`, `CutoverOrchestrator`):
+cutover (`zdd.cutover.CutoverOrchestrator`):
 
 1. pick a free port and spawn the new daemon `--passive` (no self-route, no
    relay);
@@ -283,6 +299,19 @@ the route was already flipped and the old daemon is gone, the orchestrator
 [single-instance guard](#single-instance-guard) is **port-keyed** so an active
 and a passive daemon can coexist on one config dir during the overlap (two starts
 on the *same* port still collide).
+
+**Durable breadcrumb + stale-cutover recovery.** The orchestrator runs in the
+short-lived `agent-bridge deploy` process, separate from the daemons it drives.
+It writes a durable **breadcrumb** (`<config_dir>/cutover.json`) *before* it
+touches the old daemon's drain gate and advances its state at each phase
+(`started` -> `flipped` -> `draining` -> `committed`/`rolled_back`), clearing it
+on a clean cutover. If the deploy process dies mid-cutover, the breadcrumb is
+left in a non-terminal state -- an attributable trace tying a drained survivor
+to the cutover that drained it. `agent-bridge deploy` heals such a stale
+breadcrumb on its next run (undraining the stranded survivor); `agent-bridge
+deploy --recover` runs *only* that heal and exits. Combined with the drain
+watchdog (#1757), a stranded survivor self-heals even if no deploy is re-run.
+(aperture-labs #1756.)
 
 ### Installer wiring (both platforms)
 
