@@ -16,6 +16,7 @@ import pytest
 from agent_bridge import winjob
 from agent_bridge.session_host import launcher
 from agent_bridge.session_host import protocol as proto
+from agent_bridge.session_host.acp_adapter import open_acp_streams
 from agent_bridge.session_host.client import SessionHostClient
 from agent_bridge.session_host.host import SessionHost
 
@@ -292,6 +293,58 @@ def test_breakaway_flag_composition():
 def test_create_breakaway_flag_value():
     # documented Win32 constant
     assert winjob.CREATE_BREAKAWAY_FROM_JOB == 0x01000000
+
+
+# --------------------------------------------------------------------------
+# ACP stream adapter (Phase 2 bridge): host <-> asyncio streams, byte-exact
+# --------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_acp_adapter_relays_both_directions_byte_exact():
+    child = _FakeChild()
+    host, port = await _serve(child)
+    c1 = await SessionHostClient.connect(port=port)
+    await c1.attach(0)
+    streams = await open_acp_streams(c1, start_from=0)
+    try:
+        # agent -> client: a child ACP line must arrive byte-for-byte on reader.
+        frame = b'{"jsonrpc":"2.0","method":"session/update","params":{"x":1}}\n'
+        child.feed_frame(frame.rstrip(b"\n"))
+        got = await asyncio.wait_for(streams.reader.readline(), timeout=5)
+        assert got == frame
+
+        # client -> agent: bytes written to writer must reach the child stdin.
+        outbound = b'{"jsonrpc":"2.0","id":1,"method":"session/prompt"}\n'
+        streams.writer.write(outbound)
+        await streams.writer.drain()
+        await asyncio.sleep(0.05)
+        assert bytes(child.stdin.buffer) == outbound
+    finally:
+        await streams.aclose()
+        await c1.close()
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_acp_adapter_auto_acks_frames():
+    child = _FakeChild()
+    host, port = await _serve(child)
+    c1 = await SessionHostClient.connect(port=port)
+    await c1.attach(0)
+    streams = await open_acp_streams(c1, start_from=0, auto_ack=True)
+    try:
+        for i in range(1, 4):
+            child.feed_frame(f'{{"n":{i}}}'.encode())
+        # drain three lines through the adapter
+        for _ in range(3):
+            await asyncio.wait_for(streams.reader.readline(), timeout=5)
+        await asyncio.sleep(0.05)
+        # auto-ack advanced the host's durable cursor and trimmed the buffer.
+        assert host.ack_cursor == 3
+        assert host.buffered_seqs == []
+    finally:
+        await streams.aclose()
+        await c1.close()
+        await host.close()
 
 
 # --------------------------------------------------------------------------
