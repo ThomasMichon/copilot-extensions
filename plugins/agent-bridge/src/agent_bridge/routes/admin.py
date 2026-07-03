@@ -48,7 +48,14 @@ async def drain(request: Request):
     except (TypeError, ValueError):
         timeout, poll = 300.0, 1.0
     force = bool(body.get("force", False))
-    return await mgr.drain(timeout=timeout, poll=max(0.05, poll), force=force)
+    # Optional caller-supplied provenance so a cutover-driven drain is
+    # distinguishable from a manual one in logs/health (#1757).
+    source = body.get("source") or "drain-endpoint"
+    reason = body.get("reason")
+    return await mgr.drain(
+        timeout=timeout, poll=max(0.05, poll), force=force,
+        source=str(source), reason=(str(reason) if reason is not None else None),
+    )
 
 
 @router.post("/undrain")
@@ -58,7 +65,7 @@ async def undrain(request: Request):
     Used to roll back a cutover that was aborted before the old daemon exited,
     so a drained-but-surviving daemon does not stay closed to new sessions."""
     mgr: SessionManager = request.app.state.session_manager
-    mgr.set_draining(False)
+    mgr.set_draining(False, source="undrain-endpoint")
     return {"draining": False}
 
 

@@ -17,7 +17,13 @@ The library carries no service-specific logic; see ``cutover``'s
 ``CutoverOrchestrator`` for the consumer contract.
 """
 
-from . import cutover, routing
+from . import breadcrumb, cutover, routing
+from .breadcrumb import (
+    clear_breadcrumb,
+    read_breadcrumb,
+    recover_stale_cutover,
+    write_breadcrumb,
+)
 from .cutover import CutoverError, CutoverOrchestrator, CutoverResult
 from .routing import (
     Endpoint,
@@ -33,11 +39,16 @@ __all__ = [
     "CutoverOrchestrator",
     "CutoverResult",
     "Endpoint",
+    "breadcrumb",
+    "clear_breadcrumb",
     "clear_if_owner",
     "cutover",
     "publish_active",
     "read_active_endpoint",
+    "read_breadcrumb",
     "read_table",
+    "recover_stale_cutover",
     "routing",
     "routing_table_path",
+    "write_breadcrumb",
 ]

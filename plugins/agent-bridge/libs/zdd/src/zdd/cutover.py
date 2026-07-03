@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from zdd import routing
+from zdd import breadcrumb, routing
 from zdd.routing import Endpoint
 
 log = logging.getLogger("zdd")
@@ -172,6 +172,18 @@ class CutoverOrchestrator:
         new_port = self.pick_free_port()
         result.new_port = new_port
 
+        # Durable breadcrumb (#1756): written *before* the drain gate is ever
+        # touched, so if this orchestrator dies mid-cutover the aborted attempt
+        # leaves an attributable trace on disk (and recover_stale_cutover can
+        # undrain the stranded old daemon). started_at is threaded through every
+        # later update so the record keeps its original timestamp.
+        old_dict = (
+            {"bind": old.bind, "port": old.port} if old is not None else None
+        )
+        started_at = breadcrumb.write_breadcrumb(
+            self.config_dir, state="started", old=old_dict, new_port=new_port,
+        )["started_at"]
+
         handle = self.spawn_passive(new_port)
         result.steps.append(f"spawned passive pid={getattr(handle, 'pid', '?')} "
                             f"port={new_port}")
@@ -195,9 +207,19 @@ class CutoverOrchestrator:
             )
             flipped = True
             result.steps.append("routing table flipped -> new active")
+            breadcrumb.write_breadcrumb(
+                self.config_dir, state="flipped", old=old_dict,
+                new_port=new_port, started_at=started_at,
+            )
 
             if old is not None and old.port != new_port:
                 old_client = self.make_client(old.base_url)
+                # About to open the old daemon's drain gate -- record it first
+                # so an abort during the (possibly long) drain is traceable.
+                breadcrumb.write_breadcrumb(
+                    self.config_dir, state="draining", old=old_dict,
+                    new_port=new_port, started_at=started_at,
+                )
                 drain_res = old_client.drain(
                     timeout=drain_timeout, poll=1.0, force=force
                 )
@@ -216,10 +238,18 @@ class CutoverOrchestrator:
                 # COMMIT POINT: retire the old daemon. Past here the new daemon
                 # is the only one, so we never roll back.
                 result.committed = True
+                breadcrumb.write_breadcrumb(
+                    self.config_dir, state="committed", old=old_dict,
+                    new_port=new_port, started_at=started_at,
+                )
                 old_client.shutdown()
                 result.steps.append("old daemon shutdown requested")
             else:
                 result.committed = True
+                breadcrumb.write_breadcrumb(
+                    self.config_dir, state="committed", old=old_dict,
+                    new_port=new_port, started_at=started_at,
+                )
                 result.steps.append("no prior active daemon -- nothing to retire")
 
             # Best-effort: hand the credential relay (9857) to the new daemon
@@ -227,6 +257,8 @@ class CutoverOrchestrator:
             self._adopt_relay(new_port, result)
 
             result.ok = True
+            # Clean cutover: retire the breadcrumb so no stale trace lingers.
+            breadcrumb.clear_breadcrumb(self.config_dir)
             return result
 
         except Exception as exc:  # noqa: BLE001 -- convert to a rollback
@@ -236,9 +268,21 @@ class CutoverOrchestrator:
                 result.error = f"post-commit error (new daemon is live): {exc}"
                 result.ok = True
                 log.error("Cutover post-commit error: %s", exc)
+                breadcrumb.clear_breadcrumb(self.config_dir)
                 return result
             result.error = str(exc)
             self._rollback(old, handle, new_port, result, flipped=flipped)
+            # Record the terminal outcome durably. On a clean rollback (or
+            # commit-forward) no daemon is left stranded; the breadcrumb marks
+            # the attempt as resolved rather than lingering as "aborted".
+            if result.ok:
+                breadcrumb.clear_breadcrumb(self.config_dir)
+            else:
+                breadcrumb.write_breadcrumb(
+                    self.config_dir, state="rolled_back", old=old_dict,
+                    new_port=new_port, error=result.error,
+                    started_at=started_at,
+                )
             return result
 
     def _adopt_relay(self, new_port: int, result: CutoverResult) -> None:
@@ -250,6 +294,20 @@ class CutoverOrchestrator:
         except Exception as exc:  # noqa: BLE001 -- relay is non-fatal
             result.steps.append(f"relay adopt failed (non-fatal): {exc}")
             log.warning("Relay adoption failed after cutover: %s", exc)
+
+    def _undrain(self, old: Endpoint, result: CutoverResult) -> None:
+        """Best-effort release of the old daemon's drain gate (#1756).
+
+        A cutover that aborts after opening the drain gate must not leave the
+        survivor drained. Records the outcome as a step either way so a rollback
+        is traceable rather than silent.
+        """
+        try:
+            self.make_client(old.base_url).undrain()
+            result.steps.append("rollback: old daemon undrained")
+        except Exception as exc:  # noqa: BLE001 -- undrain is best-effort
+            result.steps.append(f"rollback: old undrain failed (non-fatal): {exc}")
+            log.warning("Rollback could not undrain old daemon: %s", exc)
 
     def _rollback(
         self,
@@ -272,12 +330,10 @@ class CutoverOrchestrator:
                     )
                     old_restored = True
                     result.steps.append("rollback: restored old as active")
-                    # If we already opened the old daemon's drain gate, release it.
-                    try:
-                        self.make_client(old.base_url).undrain()
-                        result.steps.append("rollback: old daemon undrained")
-                    except Exception:
-                        pass
+                    # We may have opened the old daemon's drain gate before the
+                    # failure -- release it so the survivor does not stay closed
+                    # to new work (#1756). Recorded either way for traceability.
+                    self._undrain(old, result)
             except Exception as exc:  # noqa: BLE001
                 log.error("Rollback could not restore old endpoint: %s", exc)
 

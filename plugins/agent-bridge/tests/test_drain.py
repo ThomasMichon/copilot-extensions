@@ -135,3 +135,94 @@ def test_undrain_endpoint(client, app):
     res = client.post("/api/v1/undrain")
     assert res.status_code == 200
     assert app.state.session_manager.is_draining is False
+
+
+# -- Drain observability + bounded lifetime (#1757) --------------------------
+
+
+def test_set_draining_records_provenance(session_manager: SessionManager):
+    session_manager.set_draining(True, reason="redeploy", source="test")
+    status = session_manager.drain_status()
+    assert status["draining"] is True
+    assert status["reason"] == "redeploy"
+    assert status["source"] == "test"
+    assert status["since"] is not None
+    assert status["held_s"] is not None
+
+    session_manager.set_draining(False, source="test-clear")
+    status = session_manager.drain_status()
+    assert status["draining"] is False
+    assert status["since"] is None
+    assert status["reason"] is None
+
+
+def test_set_draining_is_idempotent(session_manager: SessionManager):
+    session_manager.set_draining(True, reason="first", source="a")
+    since1 = session_manager.drain_status()["since"]
+    # A redundant open must not reset the since timestamp or provenance.
+    session_manager.set_draining(True, reason="second", source="b")
+    status = session_manager.drain_status()
+    assert status["since"] == since1
+    assert status["reason"] == "first"
+    assert status["source"] == "a"
+
+
+@pytest.mark.asyncio
+async def test_drain_watchdog_auto_releases(tmp_db, caplog):
+    # A drain that outlives its budget with no handoff must self-heal by
+    # auto-releasing the gate (#1757) -- otherwise the daemon 503s forever.
+    import asyncio
+    import logging
+
+    mgr = SessionManager(
+        tmp_db, drain_auto_release_s=0.2, drain_warn_interval_s=0.05
+    )
+    with caplog.at_level(logging.WARNING, logger="agent-bridge"):
+        mgr.set_draining(True, reason="stuck-cutover", source="test")
+        assert mgr.is_draining is True
+
+        # Wait past the auto-release budget; the watchdog clears the gate.
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            if not mgr.is_draining:
+                break
+    # Auto-released (not manually) -- the gate is open no longer.
+    assert mgr.is_draining is False
+    assert mgr.drain_status()["draining"] is False
+    assert any("auto-releasing" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_manual_undrain_cancels_watchdog(tmp_db):
+    import asyncio
+
+    mgr = SessionManager(
+        tmp_db, drain_auto_release_s=10.0, drain_warn_interval_s=0.05
+    )
+    mgr.set_draining(True, source="test")
+    assert mgr._drain_watchdog is not None
+    mgr.set_draining(False, source="manual")
+    await asyncio.sleep(0)  # let the cancellation propagate
+    assert mgr.is_draining is False
+    assert mgr._drain_watchdog is None
+
+
+def test_health_exposes_drain_detail(client, app):
+    # Idle: no drain block.
+    assert "drain" not in client.get("/health").json()
+    app.state.session_manager.set_draining(True, reason="redeploy", source="cutover")
+    body = client.get("/health").json()
+    assert body["draining"] is True
+    assert body["drain"]["reason"] == "redeploy"
+    assert body["drain"]["source"] == "cutover"
+    assert body["drain"]["since"] is not None
+
+
+def test_drain_endpoint_records_source(client, app):
+    client.post(
+        "/api/v1/drain",
+        json={"timeout": 1, "poll": 0.05, "source": "cutover", "reason": "redeploy"},
+    )
+    status = app.state.session_manager.drain_status()
+    assert status["source"] == "cutover"
+    assert status["reason"] == "redeploy"

@@ -191,12 +191,18 @@ it, and the old daemon retire -- with no client ever dialing a dead port.
 # Stop accepting new sessions/turns and wait for in-flight work to settle
 # (the busy oracle: streaming turns + active background sub-agents). Bounded by
 # --timeout; --force proceeds anyway at timeout. Exit 0 = clean, 2 = still busy.
+# Teardown (stop/end) stays permitted while draining (#1755). Set/clear is
+# logged; /health exposes a drain{} block; a watchdog auto-releases a stuck
+# drain after ~15min so an aborted cutover self-heals (#1757).
 agent-bridge drain --timeout 300
 agent-bridge undrain                 # release the gate (rollback)
 
 # Active/passive cutover: spawn the new daemon on a free port, flip the routing
 # table, drain + retire the old one. Rolls back on any pre-commit failure.
+# Writes a durable breadcrumb (cutover.json) so an aborted cutover is traceable
+# and its stranded survivor can be undrained (#1756).
 agent-bridge deploy --drain-timeout 300 [--force]
+agent-bridge deploy --recover        # only heal a prior aborted cutover, then exit
 ```
 
 The installer `update` path drains before stopping by default (no hard-killed
