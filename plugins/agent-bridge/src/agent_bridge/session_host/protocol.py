@@ -1,0 +1,114 @@
+"""The Session-Host <-> frontend wire protocol (control + data, multiplexed).
+
+One local connection (AF_UNIX or loopback TCP) carries both logical channels the
+design calls for. Message framing is length-prefixed and byte-exact so the ACP
+**data** payloads are relayed 1:1:
+
+    <4-byte big-endian total length><1-byte type><payload>
+
+The envelope is versioned independently of ACP (``PROTOCOL_VERSION``) and is
+deliberately tiny -- it changes only on a breaking transport change, which is the
+rare event the version-mux strategy (Phase 4) exists for.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import enum
+import struct
+
+# Bump only on a breaking envelope change (not on an ACP change -- ACP rides the
+# data channel opaquely).
+PROTOCOL_VERSION = 1
+
+_U32 = struct.Struct(">I")
+_U64 = struct.Struct(">Q")
+
+# Largest single wire message. ACP frames can be large (e.g. a diff), so allow
+# generous headroom; a frame exceeding this is a protocol violation.
+MAX_MESSAGE_BYTES = 64 * 1024 * 1024
+
+
+class ProtocolError(Exception):
+    """Raised on a malformed or oversized wire message."""
+
+
+class MsgType(bytes, enum.Enum):
+    # Frontend -> Host
+    ATTACH = b"A"      # payload: u64 last_acked_seq (0 == fresh attach)
+    ACK = b"K"         # payload: u64 seq
+    WRITE = b"W"       # payload: raw ACP bytes to relay into child stdin
+    TERMINATE = b"T"   # payload: empty -- explicit, sanctioned reap
+
+    # Host -> Frontend
+    HELLO = b"H"       # payload: u64 max_seq + u64 child_pid
+    FRAME = b"F"       # payload: u64 seq + raw ACP frame bytes (verbatim)
+    LIVENESS = b"L"    # payload: u8 alive(1/0) + u32 exit_code
+
+
+def pack_u64(n: int) -> bytes:
+    return _U64.pack(n)
+
+
+def unpack_u64(b: bytes) -> int:
+    return _U64.unpack(b[:8])[0]
+
+
+def pack_frame(seq: int, data: bytes) -> bytes:
+    return _U64.pack(seq) + data
+
+
+def unpack_frame(payload: bytes) -> tuple[int, bytes]:
+    return _U64.unpack(payload[:8])[0], payload[8:]
+
+
+def pack_liveness(alive: bool, exit_code: int = 0) -> bytes:
+    return (b"\x01" if alive else b"\x00") + _U32.pack(exit_code & 0xFFFFFFFF)
+
+
+def unpack_liveness(payload: bytes) -> tuple[bool, int]:
+    alive = payload[:1] == b"\x01"
+    code = _U32.unpack(payload[1:5])[0] if len(payload) >= 5 else 0
+    return alive, code
+
+
+def encode(mtype: MsgType, payload: bytes = b"") -> bytes:
+    body = bytes(mtype.value) + payload
+    return _U32.pack(len(body)) + body
+
+
+async def write_message(
+    writer: asyncio.StreamWriter, mtype: MsgType, payload: bytes = b"",
+) -> None:
+    writer.write(encode(mtype, payload))
+    await writer.drain()
+
+
+async def read_message(
+    reader: asyncio.StreamReader,
+) -> tuple[MsgType, bytes] | None:
+    """Read one framed message. Returns ``None`` on clean EOF.
+
+    Raises :class:`ProtocolError` on an oversized or malformed frame. A peer
+    that crashes hard (RST) surfaces as EOF/``IncompleteReadError`` and is
+    reported as ``None`` -- a clean disconnect, never an exception the host
+    must crash on.
+    """
+    try:
+        header = await reader.readexactly(4)
+    except asyncio.IncompleteReadError:
+        return None
+    (length,) = _U32.unpack(header)
+    if length == 0:
+        return None
+    if length > MAX_MESSAGE_BYTES:
+        raise ProtocolError(f"message length {length} exceeds cap {MAX_MESSAGE_BYTES}")
+    try:
+        body = await reader.readexactly(length)
+    except asyncio.IncompleteReadError:
+        return None
+    try:
+        mtype = MsgType(body[:1])
+    except ValueError as exc:
+        raise ProtocolError(f"unknown message type {body[:1]!r}") from exc
+    return mtype, body[1:]
