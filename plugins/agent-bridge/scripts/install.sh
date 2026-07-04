@@ -338,6 +338,15 @@ After=network.target
 
 [Service]
 Type=simple
+# KillMode=process: on stop/restart, signal ONLY the main daemon process, not
+# the whole cgroup. This lets a survivable Session Host (session_host_enabled)
+# and its Copilot --acp child outlive an agent-bridge restart so the new daemon
+# can reattach (effort agent-bridge-version-mux, #1759; fixes #1780 -- the
+# default KillMode=control-group cgroup-kills the host). The daemon's own
+# lifespan shutdown gracefully stops SSH masters, the credential relay, and
+# non-host sessions, so nothing else leaks. This is the systemd analog of the
+# Windows Job Object breakaway.
+KillMode=process
 ExecStart=$venv_bridge start
 ExecStopPost=/bin/sleep 2
 Restart=on-failure
