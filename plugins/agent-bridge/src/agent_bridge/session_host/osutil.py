@@ -37,3 +37,31 @@ def pid_alive(pid: int | None) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def kill_pid(pid: int | None) -> None:
+    """Best-effort tree-kill of a process by pid (cross-platform, idempotent).
+
+    Used by the frontend to reap a Session Host process (and, via the host's
+    kill-on-close job / process group, its child) once the host's session has
+    reached its own stop or is being force-reaped under the sprawl bound.
+    Swallows "already gone" and permission errors -- reaping is best-effort.
+    """
+    if not pid:
+        return
+    if sys.platform == "win32":
+        import subprocess
+
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return
+    import signal
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass

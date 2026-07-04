@@ -37,6 +37,7 @@ from typing import Any
 
 from .. import winjob
 from .host import SessionHost
+from . import protocol as proto
 
 _ACP_STDIO_LIMIT_BYTES = 64 * 1024 * 1024
 
@@ -63,6 +64,7 @@ class HostHandle:
     port: int
     state_file: str
     proc: subprocess.Popen
+    protocol_version: int = proto.PROTOCOL_VERSION
 
 
 def launch_session_host(
@@ -123,6 +125,8 @@ def launch_session_host(
                     port=int(data["port"]),
                     state_file=str(state_file),
                     proc=proc,
+                    protocol_version=int(data.get("protocol_version",
+                                                  proto.PROTOCOL_VERSION)),
                 )
         time.sleep(0.05)
 
@@ -183,6 +187,7 @@ async def run_host(
             "pid": os.getpid(),
             "child_pid": child.pid,
             "port": bound_port,
+            "protocol_version": proto.PROTOCOL_VERSION,
         }))
     if ready is not None:
         ready.set()
