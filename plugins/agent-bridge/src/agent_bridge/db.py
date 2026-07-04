@@ -647,6 +647,22 @@ class Database:
             conn.commit()
             return new_val
 
+    def reset_delivery_cursors(self, session_id: str) -> None:
+        """Drop all delivery cursors for a session (get_cursor -> 0 afterwards).
+
+        Called when a session's event log is **rebuilt** (resync replaces the
+        log with the agent's authoritative replay, renumbering event ids). The
+        cursors are monotonic and would otherwise point past the rebuilt log --
+        orphaning consumers (NF's "odd states"). Resetting them makes consumers
+        re-read the rebuilt log from the start instead of silently stalling.
+        """
+        with self._write_lock:
+            conn = self._get_conn()
+            conn.execute(
+                "DELETE FROM delivery_cursors WHERE session_id=?", (session_id,)
+            )
+            conn.commit()
+
     # -- Garbage collection / maintenance ------------------------------------
 
     def gc_eligible_session_ids(

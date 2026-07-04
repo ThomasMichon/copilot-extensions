@@ -369,6 +369,76 @@ def test_host_index_corrupt_file_is_ignored(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# Phase 3: cursor-stable event identity across a front cycle / resync
+# --------------------------------------------------------------------------
+def _mk_session(db, sid="s1"):
+    import time as _t
+    db.create_session(session_id=sid, name="n", agent_name=None, caller_id=None,
+                      target_dir=".", target_type="local", status="idle",
+                      now=_t.time(), target_json="{}")
+
+
+def test_reattach_preserves_event_ids_and_cursor(tmp_path):
+    """A frontend restart (rehydrate) must NOT renumber events or orphan the
+    delivery cursor -- the identity is append-only and stable."""
+    import time as _t
+
+    from agent_bridge.db import Database
+    from agent_bridge.events import EventLog
+
+    db = Database(tmp_path / "e.db")
+    try:
+        _mk_session(db)
+        log1 = EventLog(db=db, session_id="s1")
+        for i in range(5):
+            log1.append("agent_message", {"text": f"m{i}"})
+        db.flush()
+        ids_before = [e.id for e in log1.get_events(0)]
+        assert ids_before == [1, 2, 3, 4, 5]
+        db.set_cursor("nf", "s1", 3, _t.time())  # consumer acked up to id 3
+
+        # simulate a frontend restart: EventLog is rebuilt from the DB
+        log2 = EventLog.from_db(db, "s1")
+        assert [e.id for e in log2.get_events(0)] == ids_before   # no renumbering
+        cur = db.get_cursor("nf", "s1")
+        assert cur == 3                                           # cursor intact
+        assert [e.id for e in log2.get_events(after=cur)] == [4, 5]  # no gap/dup
+        assert log2.append("x", {}).id == 6                       # append-only continues
+    finally:
+        db.close()
+
+
+def test_rebuild_resets_delivery_cursors(tmp_path):
+    """resync's rebuild renumbers from 1; the monotonic cursor must be reset so
+    a consumer re-reads the rebuilt log instead of stalling past its end."""
+    import time as _t
+
+    from agent_bridge.db import Database
+    from agent_bridge.events import EventLog
+
+    db = Database(tmp_path / "e.db")
+    try:
+        _mk_session(db)
+        log = EventLog(db=db, session_id="s1")
+        for i in range(5):
+            log.append("agent_message", {"text": f"m{i}"})
+        db.flush()
+        db.set_cursor("nf", "s1", 5, _t.time())   # consumer fully caught up
+        assert db.get_cursor("nf", "s1") == 5
+
+        # resync rebuilds to a shorter authoritative log (ids renumber 1..N)
+        n = log.rebuild([("agent_message", {"text": "only-one"})])
+        db.flush()
+        assert n == 1
+        # cursor reset -> consumer re-reads the rebuilt log rather than seeing
+        # nothing (its old ack id 5 is now past the 1-event log).
+        assert db.get_cursor("nf", "s1") == 0
+        assert [e.id for e in log.get_events(after=0)] == [1]
+    finally:
+        db.close()
+
+
+# --------------------------------------------------------------------------
 # flag-gated start_session -> Session-Host mode, end to end (real subprocesses)
 # --------------------------------------------------------------------------
 _FAKE_AGENT_SRC = (
