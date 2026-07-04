@@ -1133,3 +1133,110 @@ async def test_sweep_strands_then_force_reaps_over_bound(tmp_path, monkeypatch):
                         import os as _os
                         import signal
                         _os.kill(pid, signal.SIGKILL)
+
+
+# --------------------------------------------------------------------------
+# Graceful cancel + resume-on-reattach (redeploy protocol)
+# --------------------------------------------------------------------------
+def test_host_record_resume_flag_persists(tmp_path):
+    from agent_bridge.session_host.host_index import HostIndex, HostRecord
+
+    path = tmp_path / "hosts.json"
+    idx = HostIndex(path)
+    idx.register(HostRecord(session_id="s1", port=1, host_pid=1, child_pid=1))
+    assert idx.get("s1").resume_on_reattach is False
+    assert idx.set_resume_flag("s1", True) is True
+    assert idx.set_resume_flag("s1", True) is False        # idempotent no-op
+    assert idx.set_resume_flag("missing", True) is False
+    # persists across reload
+    assert HostIndex(path).get("s1").resume_on_reattach is True
+    assert idx.set_resume_flag("s1", False) is True
+    assert HostIndex(path).get("s1").resume_on_reattach is False
+
+
+@pytest.mark.asyncio
+async def test_graceful_cancel_for_redeploy(tmp_path):
+    """Cancels only in-flight (RUNNING) turns, spares the excluded caller,
+    flags host-backed mid-turn sessions for resume, and waits for settle."""
+    from agent_bridge.db import Database
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session, SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    db = Database(tmp_path / "s.db")
+    try:
+        mgr = SessionManager(db, session_host_enabled=True,
+                             session_host_state_dir=str(tmp_path / "hosts"),
+                             graceful_cancel_settle_seconds=5)
+        cancels: list[str] = []
+
+        class _FakeClient:
+            def __init__(self, sess):
+                self._sess = sess
+
+            async def cancel_prompt(self):
+                cancels.append(self._sess.session_id)
+                self._sess.status = SessionStatus.IDLE  # turn settles at once
+
+        target = SpawnTarget(type="local", cwd=str(tmp_path))
+        for sid, status in [("run-a", SessionStatus.RUNNING),
+                            ("run-self", SessionStatus.RUNNING),
+                            ("idle-c", SessionStatus.IDLE)]:
+            s = Session(sid, sid, target)
+            s.status = status
+            s.client = _FakeClient(s)
+            mgr._sessions[sid] = s
+            mgr._host_index.register(
+                HostRecord(session_id=sid, port=1, host_pid=1, child_pid=1))
+
+        res = await mgr.graceful_cancel_for_redeploy(exclude_session_id="run-self")
+
+        assert res["enabled"] is True
+        assert res["settled"] is True
+        assert set(res["cancelled"]) == {"run-a"}     # only RUNNING, not excluded/idle
+        assert cancels == ["run-a"]
+        assert mgr._host_index.get("run-a").resume_on_reattach is True   # flagged
+        assert mgr._host_index.get("run-self").resume_on_reattach is False  # spared
+        assert mgr._host_index.get("idle-c").resume_on_reattach is False   # not mid-turn
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_graceful_cancel_noop_when_flag_off(tmp_path):
+    from agent_bridge.db import Database
+    from agent_bridge.session_manager import SessionManager
+
+    db = Database(tmp_path / "s.db")
+    try:
+        mgr = SessionManager(db, session_host_enabled=False)
+        res = await mgr.graceful_cancel_for_redeploy()
+        assert res == {"cancelled": [], "settled": True, "enabled": False}
+    finally:
+        db.close()
+
+
+def test_cli_drain_excludes_self_from_env(monkeypatch):
+    """The CLI drain passes AGENT_BRIDGE_SESSION_ID as exclude_session_id so an
+    agent updating its own bridge doesn't cancel the turn driving the update."""
+    from agent_bridge.client import BridgeClient
+
+    captured = {}
+
+    class _C(BridgeClient):
+        def __init__(self):
+            pass
+
+        def _request(self, method, path, *, body=None, request_timeout=None):
+            captured["body"] = body
+            return {}
+
+    monkeypatch.setenv("AGENT_BRIDGE_SESSION_ID", "my-own-sess")
+    _C().drain(timeout=10)
+    assert captured["body"]["exclude_session_id"] == "my-own-sess"
+
+    captured.clear()
+    monkeypatch.delenv("AGENT_BRIDGE_SESSION_ID", raising=False)
+    _C().drain(timeout=10)
+    assert "exclude_session_id" not in captured["body"]

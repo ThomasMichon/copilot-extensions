@@ -39,6 +39,7 @@ class HostRecord:
     protocol_version: int = 1
     state_file: str = ""
     created_at: float = 0.0
+    resume_on_reattach: bool = False
     extra: dict = field(default_factory=dict)
 
     @classmethod
@@ -103,6 +104,20 @@ class HostIndex:
         if existed:
             self._flush()
         return existed
+
+    def set_resume_flag(self, session_id: str, value: bool) -> bool:
+        """Mark (or clear) a session to receive a 'Resume' nudge on reattach.
+
+        Set during a redeploy's graceful-cancel for a session whose in-flight
+        turn we cancelled, so the restarted frontend knows to resume it. Returns
+        True if the record existed and was updated.
+        """
+        rec = self._records.get(session_id)
+        if rec is None or rec.resume_on_reattach == value:
+            return False
+        rec.resume_on_reattach = value
+        self._flush()
+        return True
 
     def prune_dead(self, is_alive: Callable[[int], bool]) -> list[HostRecord]:
         """Drop records whose host process is gone. Returns the pruned records."""
