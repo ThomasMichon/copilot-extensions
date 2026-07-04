@@ -368,6 +368,67 @@ def test_host_index_corrupt_file_is_ignored(tmp_path):
     assert len(idx) == 0
 
 
+@pytest.mark.asyncio
+async def test_launch_session_host_process_owns_child(tmp_path):
+    import signal
+    import sys
+
+    from agent_bridge.session_host.launcher import launch_session_host
+
+    handle = await asyncio.to_thread(
+        launch_session_host, [sys.executable, "-c", _STREAMER],
+        state_dir=str(tmp_path),
+    )
+    try:
+        assert handle.child_pid > 0 and handle.port > 0
+        assert osutil_pid_alive(handle.host_pid)
+
+        c = await SessionHostClient.connect(port=handle.port)
+        hello = await c.attach(0)
+        assert hello.child_pid == handle.child_pid
+        await c.write(b'{"prompt":"go"}\n')
+        seqs = []
+        async for seq, data in c.frames():
+            seqs.append(seq)
+            await c.ack(seq)
+            if b"turn_complete" in data:
+                break
+        assert len(seqs) >= 5
+        await c.close()
+    finally:
+        with contextlib.suppress(Exception):
+            handle.proc.terminate()
+        with contextlib.suppress(Exception):
+            handle.proc.wait(timeout=5)
+        if sys.platform != "win32":
+            import os as _os
+            with contextlib.suppress(Exception):
+                _os.kill(handle.child_pid, signal.SIGKILL)
+
+
+def osutil_pid_alive(pid: int) -> bool:
+    import sys
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.OpenProcess.restype = wintypes.HANDLE
+        k.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        h = k.OpenProcess(0x1000, False, pid)
+        if not h:
+            return False
+        code = wintypes.DWORD()
+        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return bool(ok) and code.value == 259
+    import os as _os
+    try:
+        _os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
 # --------------------------------------------------------------------------
 # full-stack: a real AcpClient completes an ACP handshake THROUGH the host
 # --------------------------------------------------------------------------

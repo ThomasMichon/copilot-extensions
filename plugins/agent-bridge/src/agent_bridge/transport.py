@@ -392,31 +392,19 @@ async def _resolve_worktree_remote(
     return plan
 
 
-async def spawn_local(
+async def resolve_local_launch(
     target: SpawnTarget,
     *,
     tracker: ConnectTracker | None = None,
     session_id: str = "",
-) -> AgentProcess:
-    """Spawn a Copilot ACP agent as a local subprocess.
+) -> tuple[list[str], str | None, dict[str, str]]:
+    """Resolve a local spawn into a concrete launch plan ``(args, cwd, env)``.
 
-    When a ``project`` is configured, uses a two-step flow:
-
-    1. **Resolve** -- calls ``<project> resolve --json --new`` (or
-       ``--worktree-id <id>``) to create/resume a worktree and get a
-       JSON launch plan containing the copilot command, work directory,
-       and environment variables.
-    2. **Exec** -- launches copilot directly using the plan, with
-       ``--acp --stdio`` appended.  This gives agent-bridge clean
-       ownership of copilot's stdin/stdout for ACP framing, without
-       any launcher or binstub output in the stdio stream.
-
-    The binstub's ``resolve`` subcommand routes directly to the
-    agent-worktrees resolve handler -- it does NOT go through
-    launch-session scripts, so there is no update noise, picker
-    output, or Write-Host pollution.
-
-    Without ``project``, runs copilot directly (legacy behavior).
+    Extracted from :func:`spawn_local` so the same worktree-resolve + arg-building
+    logic can feed either a directly-owned child (``spawn_local``) or a
+    **Session-Host-owned** child (the session_host launcher). Returns the argv
+    (already batch-wrapped on Windows), the working directory, and the full child
+    environment.
     """
     tracker = tracker or ConnectTracker(session_id=session_id)
     env = os.environ.copy()
@@ -451,7 +439,7 @@ async def spawn_local(
         # Append ACP protocol args + any extra copilot args
         args = cmd + ["--acp", "--stdio"] + target.copilot_args
         log.info(
-            "Spawning copilot from worktree plan: %s (cwd=%s, worktree=%s)",
+            "Resolved copilot launch from worktree plan: %s (cwd=%s, worktree=%s)",
             " ".join(args), work_dir, worktree_id,
         )
     else:
@@ -460,9 +448,27 @@ async def spawn_local(
         copilot = target.copilot_path or _find_copilot()
         args = [copilot, "--acp", "--stdio"] + target.copilot_args
         work_dir = target.cwd
-        log.info("Spawning local agent: %s (cwd=%s)", " ".join(args), work_dir)
+        log.info("Resolved local agent launch: %s (cwd=%s)", " ".join(args), work_dir)
 
     args = _wrap_batch_for_windows(args, env)
+    return args, work_dir, env
+
+
+async def spawn_local(
+    target: SpawnTarget,
+    *,
+    tracker: ConnectTracker | None = None,
+    session_id: str = "",
+) -> AgentProcess:
+    """Spawn a Copilot ACP agent as a local subprocess.
+
+    When a ``project`` is configured, uses a two-step flow (resolve worktree ->
+    exec copilot with ``--acp --stdio``); without it, runs copilot directly.
+    The launch-plan resolution lives in :func:`resolve_local_launch`.
+    """
+    args, work_dir, env = await resolve_local_launch(
+        target, tracker=tracker, session_id=session_id,
+    )
 
     proc = await asyncio.create_subprocess_exec(
         *args,
