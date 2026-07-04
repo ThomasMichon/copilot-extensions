@@ -87,6 +87,13 @@ files in this repo.**
 - **Be validation-driven:** every effort carries an implementation plan *and* a
   validation/test plan. An effort may *start* as a pure reproduction — a
   failing validation captured first, fix to follow.
+- **Additive or subtractive.** Most efforts *build* something (an additive delta:
+  a required capability is missing). An effort can equally be **subtractive** —
+  its goal is to **remove** a capability. A subtractive effort must trace to an
+  **explicit removal intent** (a stated "no X" / decommission decision), never to
+  the *mere absence* of a mention in some source — silence is not a removal order.
+  Its Validation Plan proves the capability is **gone** *and* that nothing
+  depending on it broke (callers, docs, configs, downstream services).
 - File **sub-issues** for discrete tracked work; link them in the header.
 
 ## Submit for review, then execute (the review gate)

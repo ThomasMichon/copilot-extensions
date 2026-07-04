@@ -55,8 +55,10 @@ The cycle:
 1. A **vision** states the expected features and behaviors of its subject.
 2. Diffing the vision's **should-be body** (Purpose, Concepts, Features,
    Behaviors, Non-Goals — *not* any Provenance/Journal) against the subject's
-   **reality docs** (and code) surfaces **misalignments** — expected-but-absent
-   or divergent items.
+   **reality docs** (and code) surfaces **misalignments** — a stated item that is
+   *absent/divergent* (an **additive** delta) or a stated **negative** that
+   reality *violates* (a **subtractive** delta). A merely-unmentioned capability
+   is not a delta (see *Positive and negative intent* below).
 3. Each misalignment becomes an **issue** that *cites the vision item*.
 4. Related issues are grouped into an **effort** that plans, implements, and
    validates the work (see the `planning-efforts` skill).
@@ -66,6 +68,31 @@ The cycle:
 The vision is **never edited to record this cycle**. It changes only when the
 *intent itself* changes. Efforts, issues, and docs move; the vision holds still
 until the north star itself moves.
+
+### Positive and negative intent (add / stop-requiring / remove)
+
+A vision is **open-world**: authoritative about what it *states*, silent-with-
+latitude about everything below its altitude. **Absence is not prohibition** —
+an unstated detail is *unspecified*, filled by convention and the repo's
+framework standards, not forbidden. This makes *how a vision edit maps to a
+delta* asymmetric, and that asymmetry is a safety property:
+
+| To… | Edit the vision by… | Delta vs. reality | Effort |
+|------|---------------------|-------------------|--------|
+| **Add / require** a capability | **stating** it (positive Feature/Behavior) | vs. its absence | **additive** — build it |
+| **Stop requiring** a capability | **deleting** its entry | *none* (absence ≠ prohibition) | none forced — reality may keep or drop it at latitude |
+| **Force removal** of a capability | **stating a negative** (Non-Goal / "no X") | vs. its presence | **subtractive** — remove it |
+
+- **Deleting an entry withdraws a requirement; it does not command destruction.**
+  To make reality *lose* a capability, state the boundary (a Non-Goal / "does
+  not / must not") — that is what produces a subtractive delta.
+- **A merely-unmentioned capability is not a delta.** Only a stated negative
+  justifies removing something; silence is latitude.
+- **Why deliberate:** trimming a sentence must never cause an agent — or an
+  autonomous fleet acting on a committed vision diff — to tear out a working
+  capability. Destruction is a stated act, never a side effect of omission. (If
+  the conventional realization of a stated feature would add something you *don't*
+  want, say its absence explicitly.)
 
 ## Vision vs. specification (a deliberate boundary)
 

@@ -93,6 +93,27 @@ endgame is test-driven work across whatever participants the effort
 coordinates: validate against the real target, feed failures back to whoever
 (or whatever) is implementing, and loop until the validation passes.
 
+### Additive and subtractive efforts
+
+An effort is carved from a **delta** — a gap between what should be and what is.
+Most deltas are **additive** (a required capability is missing → build it), but a
+delta can equally be **subtractive** (a capability should *no longer* exist →
+remove it). The two are not symmetric, and the distinction is a safety property:
+
+- A **subtractive / removal effort** must trace to an **explicit removal intent**
+  — a stated decision to decommission the capability (e.g. a "no X" boundary in a
+  north-star source, a deprecation call, an operator directive). It must **never**
+  be justified by the *mere absence* of a mention in some source document:
+  silence is latitude, not a removal order.
+- Its **Validation Plan** proves two things: the capability is genuinely **gone**,
+  *and* nothing that depended on it broke — callers, docs, configs, and
+  downstream consumers are reconciled. Removal is destructive; the validation is
+  what makes it safe.
+
+(Where the delta is sourced from a **vision**, the mapping of positive vs.
+negative vision statements to additive vs. subtractive deltas is governed by the
+visions system — the effort just consumes the delta it is handed.)
+
 ## The participants seam
 
 The `## Participants` section is the **pluggable seam** that makes efforts

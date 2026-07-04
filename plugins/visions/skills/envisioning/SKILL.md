@@ -106,6 +106,36 @@ Visions change **in place** — this is the core difference from efforts:
   set Status `Superseded` (and point at the replacement). Superseding is not
   archiving — the file stays; Git carries the prior life.
 
+## Adding, changing, and removing (positive vs. negative intent)
+
+A vision is **open-world**: authoritative about what it *states*, and
+silent-with-latitude about everything below its altitude. **Absence is not
+prohibition.** An unstated detail is *unspecified* — an agent realizing the
+vision fills it with sensible defaults (convention + the repo's framework
+standards), not with nothing. ("A clip library the user can replay" conventionally
+implies a play control; you don't have to enumerate the button.)
+
+This gives three distinct edits, each mapping to a different delta:
+
+| To… | Edit the vision by… | Delta vs. reality | Effect |
+|------|---------------------|-------------------|--------|
+| **Add / require** a capability | **stating** it (a positive Feature/Behavior) | vs. its absence | an **additive** effort builds it |
+| **Stop requiring** a capability | **deleting** its entry | *none* — absence ≠ prohibition | reality may keep or drop it, at latitude; nothing is forced |
+| **Force removal** of a capability | **stating a negative** (a Non-Goal / "no X") | vs. its presence | a **subtractive** (removal) effort tears it out |
+
+The load-bearing rule: **deleting a vision entry withdraws a *requirement*; it
+does not command destruction.** To make reality *lose* a capability you must
+**state the boundary** — a Non-Goal, or an explicit "does not / must not."
+
+- **Overriding an obvious default → say it.** If the conventional realization of
+  a stated feature would add something you *don't* want, state its absence as a
+  Behavior or Non-Goal. Omitting the mention yields the default; only a stated
+  negative removes it.
+- **Why the asymmetry is deliberate (a safety property):** trimming a sentence
+  must never cause an agent — or an autonomous fleet acting on a committed vision
+  diff — to rip out a working capability. Destructive change stays a deliberate,
+  *stated* act, never a side effect of omission.
+
 ## Derive the delta → issues → efforts
 
 This is how a vision *does work*: it is diffed against reality.
@@ -116,11 +146,18 @@ This is how a vision *does work*: it is diffed against reality.
    body** — Purpose & Intent, Concepts & Components, Features, Behaviors,
    Non-Goals. An optional **Provenance/Journal** section (see below) is **never**
    part of the diff.
-2. **Name misalignments.** Each expected-but-absent (or divergent) feature/behavior
-   is a **delta**: file it as an issue that *cites the vision item*.
+2. **Name misalignments — additive or subtractive.** Each mismatch is a **delta**,
+   filed as an issue that *cites the vision item*:
+   - a stated feature/behavior that is **absent or divergent** → an **additive**
+     delta (build / fix it);
+   - a stated **negative** (Non-Goal / "no X") that reality **violates** (X
+     exists) → a **subtractive** delta (remove it).
+   A capability that is *merely unmentioned* is **not** a delta — absence is
+   latitude, not a removal order.
 3. **Carve efforts.** Group related deltas into an **effort** (see the
-   `planning-efforts` skill). The effort plans and validates the work; the issues
-   track it; the vision stays untouched (it already says what should be).
+   `planning-efforts` skill) — additive and subtractive deltas carve additive and
+   removal efforts respectively. The effort plans and validates the work; the
+   issues track it; the vision stays untouched (it already says what should be).
 4. **Close the loop.** When the work lands and the reality docs are updated to
    match, the delta for those items is gone — reality has caught up to the vision.
 
@@ -172,5 +209,9 @@ backlog, it has drifted out of its lane.
 - ❌ Treating the optional **Provenance/Journal** as authoritative — never carve
   a delta, issue, or effort from it, and never let it hold the subject's
   implementation status (it records the *vision's* history only).
+- ❌ Deleting a vision entry expecting the feature to be **torn out of reality** —
+  deletion only withdraws a *requirement*; state a **Non-Goal** to force removal.
+- ❌ Carving a removal delta from a *merely unmentioned* capability — absence is
+  latitude; only a stated **negative** justifies removing something.
 - ❌ Letting a vision drift to match a half-built reality (a vision is the target,
   not a mirror of current code).

@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, and CLI customization",
-    "version": "1.7.4-dev168"
+    "version": "1.7.4-dev169"
   },
   "plugins": [
     {
@@ -54,13 +54,13 @@
     {
       "name": "efforts",
       "description": "Efforts planning system - comprehensive planning folders that represent a stretch of work (premise + plan + validation plan + journal + participant coordination), with a README-as-shared-contract; ships the planning-efforts and efforts-setup skills",
-      "version": "0.1.0-dev2",
+      "version": "0.1.0-dev3",
       "source": "plugins/efforts"
     },
     {
       "name": "visions",
       "description": "Visions system - persistent, in-place-revised north-star documents stating what a system/service/tool/product is ultimately meant to be (purpose + concepts + expected features + expected behaviors); intent-level, not a specification; efforts are carved from the vision-vs-reality delta. Ships the envisioning and visions-setup skills",
-      "version": "0.1.0-dev2",
+      "version": "0.1.0-dev3",
       "source": "plugins/visions"
     },
     {
