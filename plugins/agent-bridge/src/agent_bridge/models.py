@@ -311,3 +311,11 @@ class ServiceConfig(BaseModel):
         "never evicts) the primary's relay -- local elevated agents reuse the "
         "primary's relay on the same host.",
     )
+    session_host_enabled: bool = Field(
+        default=False,
+        description="EXPERIMENTAL (default off). When True, a LOCAL copilot child "
+        "is spawned inside a survivable Session Host process that outlives an "
+        "agent-bridge restart, so a frontend update does not kill or corrupt an "
+        "active session; the frontend reattaches over a loopback endpoint. See "
+        "the session_host package / effort agent-bridge-version-mux (#1759).",
+    )

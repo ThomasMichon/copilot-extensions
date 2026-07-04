@@ -325,9 +325,23 @@ class SessionManager:
         retention: RetentionConfig | None = None,
         drain_auto_release_s: float | None = None,
         drain_warn_interval_s: float | None = None,
+        session_host_enabled: bool = False,
+        session_host_state_dir: str | None = None,
     ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
+        # Session-Host mode (experimental, default off): local children live in
+        # a survivable Session Host that outlives a frontend restart. The host
+        # index is the durable session_id -> host-endpoint map used to reattach.
+        self._session_host_enabled = session_host_enabled
+        self._host_index: Any = None
+        if session_host_enabled:
+            from pathlib import Path as _Path
+
+            from .session_host.host_index import HostIndex
+            sd = _Path(session_host_state_dir or "~/.agent-bridge/hosts").expanduser()
+            sd.mkdir(parents=True, exist_ok=True)
+            self._host_index = HostIndex(sd / "index.json")
         self._thresholds = context_thresholds or ContextThresholds()
         self._timeouts = timeouts or PhasedTimeouts()
         self._retention = retention or RetentionConfig()
@@ -757,6 +771,88 @@ class SessionManager:
                 return s
         return None
 
+    async def _connect_via_session_host(
+        self,
+        target: SpawnTarget,
+        *,
+        tracker: Any,
+        session_id: str,
+        on_acp_event: Any,
+        permission_callback: Any | None,
+    ) -> tuple[AcpClient, str]:
+        """Spawn a local child inside a survivable Session Host and drive ACP
+        over the reattachable loopback endpoint (Session-Host mode).
+
+        Registers the durable host index so a restarted frontend can reattach.
+        Teardown DETACHES (host-mode ``AcpClient.shutdown``), never reaping the
+        child inadvertently -- goal 1.
+        """
+        from . import __version__
+        from .session_host.acp_adapter import open_acp_streams
+        from .session_host.client import SessionHostClient
+        from .session_host.host_index import HostRecord
+        from .session_host.launcher import launch_session_host
+        from .transport import resolve_local_launch
+
+        args, work_dir, env = await resolve_local_launch(
+            target, tracker=tracker, session_id=session_id,
+        )
+        if work_dir and not target.cwd:
+            target.cwd = work_dir
+
+        with tracker.stage(ConnectStage.LAUNCH_ACP):
+            # launch_session_host blocks briefly on host readiness; keep it off
+            # the event loop.
+            handle = await asyncio.to_thread(
+                launch_session_host, args, cwd=work_dir, env=env,
+            )
+            sock = await SessionHostClient.connect(port=handle.port)
+            await sock.attach(0)
+            streams = await open_acp_streams(sock)
+
+            async def _closer() -> None:
+                await streams.aclose()
+                await sock.close()
+
+            client = AcpClient(
+                on_event=on_acp_event,
+                on_permission=permission_callback,
+            )
+            if permission_callback:
+                client.auto_approve = False
+            try:
+                await asyncio.wait_for(
+                    client.start_streams(
+                        streams.reader, streams.writer,
+                        child_pid=handle.child_pid, closer=_closer,
+                    ),
+                    timeout=self._timeouts.session_start,
+                )
+                session_cwd = target.cwd or _default_cwd(target)
+                acp_sid = await asyncio.wait_for(
+                    client.new_session(cwd=session_cwd),
+                    timeout=self._timeouts.session_start,
+                )
+            except (TimeoutError, asyncio.TimeoutError) as exc:
+                raise ConnectError(
+                    ConnectStage.LAUNCH_ACP,
+                    f"Copilot ACP launch (session host) timed out after "
+                    f"{self._timeouts.session_start}s",
+                    retryable=False,
+                    cause=exc,
+                ) from exc
+
+        if self._host_index is not None:
+            self._host_index.register(HostRecord(
+                session_id=session_id,
+                port=handle.port,
+                host_pid=handle.host_pid,
+                child_pid=handle.child_pid,
+                host_version=__version__,
+                state_file=handle.state_file,
+            ))
+        return client, acp_sid
+
     async def start_session(
         self,
         target: SpawnTarget,
@@ -837,45 +933,57 @@ class SessionManager:
         )
 
         try:
-            # Spawn the subprocess (local/SSH/command). Emits per-stage
-            # checkpoints (auth-env, ssh-connect, worktree) into the event log.
-            agent_proc = await spawn(
-                target,
-                tracker=tracker,
-                connect_timeout=connect_timeout,
-                session_id=session_id,
-            )
-
-            # Stage 7: launch + initialize Copilot in ACP mode. Should be fast;
-            # bound it so a hung launch fails fast instead of hanging forever.
-            with tracker.stage(ConnectStage.LAUNCH_ACP):
-                client = AcpClient(
-                    on_event=on_acp_event,
-                    on_permission=permission_callback,
+            if self._session_host_enabled and target.type == "local":
+                # Session-Host mode: the child lives in a survivable host that
+                # outlives this frontend (goal 1/3). resolve->launch host->
+                # reattach over loopback->drive ACP.
+                client, acp_sid = await self._connect_via_session_host(
+                    target,
+                    tracker=tracker,
+                    session_id=session_id,
+                    on_acp_event=on_acp_event,
+                    permission_callback=permission_callback,
                 )
-                if permission_callback:
-                    client.auto_approve = False
-                try:
-                    await asyncio.wait_for(
-                        client.start(agent_proc.proc),
-                        timeout=self._timeouts.session_start,
+            else:
+                # Spawn the subprocess (local/SSH/command). Emits per-stage
+                # checkpoints (auth-env, ssh-connect, worktree) into the event log.
+                agent_proc = await spawn(
+                    target,
+                    tracker=tracker,
+                    connect_timeout=connect_timeout,
+                    session_id=session_id,
+                )
+
+                # Stage 7: launch + initialize Copilot in ACP mode. Should be
+                # fast; bound it so a hung launch fails fast.
+                with tracker.stage(ConnectStage.LAUNCH_ACP):
+                    client = AcpClient(
+                        on_event=on_acp_event,
+                        on_permission=permission_callback,
                     )
-                    # Create ACP session -- binstub agents resolve CWD remotely,
-                    # so target.cwd may be None.  The ACP spec requires an
-                    # absolute path.  Derive a plausible home-dir default.
-                    session_cwd = target.cwd or _default_cwd(target)
-                    acp_sid = await asyncio.wait_for(
-                        client.new_session(cwd=session_cwd),
-                        timeout=self._timeouts.session_start,
-                    )
-                except (TimeoutError, asyncio.TimeoutError) as exc:
-                    raise ConnectError(
-                        ConnectStage.LAUNCH_ACP,
-                        f"Copilot ACP launch timed out after "
-                        f"{self._timeouts.session_start}s",
-                        retryable=False,
-                        cause=exc,
-                    ) from exc
+                    if permission_callback:
+                        client.auto_approve = False
+                    try:
+                        await asyncio.wait_for(
+                            client.start(agent_proc.proc),
+                            timeout=self._timeouts.session_start,
+                        )
+                        # Create ACP session -- binstub agents resolve CWD
+                        # remotely, so target.cwd may be None.  The ACP spec
+                        # requires an absolute path.  Derive a home-dir default.
+                        session_cwd = target.cwd or _default_cwd(target)
+                        acp_sid = await asyncio.wait_for(
+                            client.new_session(cwd=session_cwd),
+                            timeout=self._timeouts.session_start,
+                        )
+                    except (TimeoutError, asyncio.TimeoutError) as exc:
+                        raise ConnectError(
+                            ConnectStage.LAUNCH_ACP,
+                            f"Copilot ACP launch timed out after "
+                            f"{self._timeouts.session_start}s",
+                            retryable=False,
+                            cause=exc,
+                        ) from exc
 
             session.client = client
             session.acp_session_id = acp_sid
