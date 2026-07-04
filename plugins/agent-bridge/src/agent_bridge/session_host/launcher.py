@@ -27,7 +27,11 @@ import argparse
 import asyncio
 import json
 import os
+import subprocess
 import sys
+import tempfile
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +52,81 @@ def host_spawn_kwargs() -> dict[str, Any]:
         # CREATE_NO_WINDOW keeps it headless; breakaway escapes the front's job.
         return {"creationflags": 0x08000000 | winjob.CREATE_BREAKAWAY_FROM_JOB}
     return {"start_new_session": True}
+
+
+@dataclass
+class HostHandle:
+    """A launched Session Host process + how to reach it."""
+
+    host_pid: int
+    child_pid: int
+    port: int
+    state_file: str
+    proc: subprocess.Popen
+
+
+def launch_session_host(
+    child_argv: list[str],
+    *,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    state_dir: str | os.PathLike[str] | None = None,
+    ready_timeout: float = 30.0,
+) -> HostHandle:
+    """Spawn a **survivable** Session Host process that owns ``child_argv``.
+
+    The host is launched with :func:`host_spawn_kwargs` so it outlives this
+    frontend (Windows job-breakaway / POSIX new-session). It serves a loopback
+    reattach endpoint and writes a ``pid``/``child_pid``/``port`` state file,
+    which this call waits for. The child inherits ``env`` (so worktree/plan env
+    vars reach copilot). Raises ``TimeoutError`` if the host never reports ready.
+    """
+    sd = Path(state_dir) if state_dir else Path(tempfile.mkdtemp(prefix="agbridge-host-"))
+    sd.mkdir(parents=True, exist_ok=True)
+    state_file = sd / f"host-{os.getpid()}-{int(time.time()*1000)}.json"
+
+    host_argv = [sys.executable, "-m", "agent_bridge.session_host",
+                 "--port", "0", "--state-file", str(state_file)]
+    if cwd:
+        host_argv += ["--cwd", cwd]
+    host_argv += ["--", *child_argv]
+
+    child_env = os.environ.copy()
+    if env:
+        child_env.update(env)
+
+    proc = subprocess.Popen(
+        host_argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=child_env,
+        cwd=cwd or None,
+        **host_spawn_kwargs(),
+    )
+
+    deadline = time.time() + ready_timeout
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(
+                f"session host exited early (code={proc.returncode}) before ready"
+            )
+        if state_file.exists():
+            try:
+                data = json.loads(state_file.read_text())
+            except (json.JSONDecodeError, OSError):
+                data = {}
+            if data.get("port") and data.get("child_pid"):
+                return HostHandle(
+                    host_pid=int(data["pid"]),
+                    child_pid=int(data["child_pid"]),
+                    port=int(data["port"]),
+                    state_file=str(state_file),
+                    proc=proc,
+                )
+        time.sleep(0.05)
+
+    raise TimeoutError(f"session host did not become ready within {ready_timeout}s")
 
 
 def apply_host_survival() -> None:
