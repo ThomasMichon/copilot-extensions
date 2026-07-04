@@ -10,6 +10,7 @@ platform.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import pytest
 
@@ -365,6 +366,120 @@ def test_host_index_corrupt_file_is_ignored(tmp_path):
     path.write_text("{ not json")
     idx = HostIndex(path)  # must not raise
     assert len(idx) == 0
+
+
+# --------------------------------------------------------------------------
+# full-stack: a real AcpClient completes an ACP handshake THROUGH the host
+# --------------------------------------------------------------------------
+class _FakeAcpAgent:
+    """Minimal ACP agent: answers initialize + new_session; no-ops the rest."""
+
+    def __init__(self) -> None:
+        self.initialized = False
+        self.new_session_calls = 0
+
+    async def initialize(self, protocol_version, **kwargs):
+        from acp.schema import AgentCapabilities, InitializeResponse
+        self.initialized = True
+        return InitializeResponse(
+            protocol_version=protocol_version,
+            agent_capabilities=AgentCapabilities(),
+        )
+
+    async def new_session(self, cwd, **kwargs):
+        from acp.schema import NewSessionResponse
+        self.new_session_calls += 1
+        return NewSessionResponse(session_id="fake-sess-1")
+
+    def __getattr__(self, name):
+        # route_request binds getattr(agent, <method>) for every ACP method at
+        # build time; provide async no-ops for the ones this test never calls.
+        # Raise for dunders / on_connect so the library's optional-hook probe
+        # (getattr(agent, "on_connect", None)) resolves to None.
+        if name.startswith("_") or name == "on_connect":
+            raise AttributeError(name)
+
+        async def _noop(*a, **k):
+            return None
+
+        return _noop
+
+
+class _SockChild:
+    """A child whose stdio is one end of a socketpair (the agent is the other)."""
+
+    def __init__(self, reader, writer, pid) -> None:
+        self.stdout = reader
+        self.stdin = writer
+        self._pid = pid
+
+    @property
+    def pid(self):
+        return self._pid
+
+    @property
+    def returncode(self):
+        return None  # stays alive for the test
+
+    async def wait(self):
+        await asyncio.sleep(3600)
+        return 0
+
+
+@pytest.mark.asyncio
+async def test_full_stack_acp_handshake_through_host():
+    import socket as _socket
+
+    from acp.agent.connection import AgentSideConnection
+
+    from agent_bridge.acp_client import AcpClient
+    from agent_bridge.session_host.acp_adapter import open_acp_streams
+
+    # socketpair: one end is the child's stdio (host side), the other the agent.
+    host_sock, agent_sock = _socket.socketpair()
+    host_reader, host_writer = await asyncio.open_connection(sock=host_sock)
+    agent_reader, agent_writer = await asyncio.open_connection(sock=agent_sock)
+
+    fake_agent = _FakeAcpAgent()
+    # AgentSideConnection(input_stream=writer, output_stream=reader)
+    _agent_conn = AgentSideConnection(fake_agent, agent_writer, agent_reader)
+
+    child = _SockChild(host_reader, host_writer, pid=54321)
+    host = SessionHost(child)
+    port = await host.serve(port=0)
+
+    client = await SessionHostClient.connect(port=port)
+    await client.attach(0)
+    streams = await open_acp_streams(client, start_from=0)
+
+    acp = AcpClient()
+    try:
+        # initialize + new_session flow all the way through:
+        # AcpClient -> adapter -> host -> child.stdin -> agent, and back.
+        await asyncio.wait_for(
+            acp.start_streams(streams.reader, streams.writer,
+                              child_pid=child.pid, closer=streams.aclose),
+            timeout=10,
+        )
+        assert acp.is_running is True
+        assert acp.pid == 54321                       # informational child pid
+        assert fake_agent.initialized is True
+
+        sid = await asyncio.wait_for(acp.new_session(cwd="/tmp"), timeout=10)
+        assert sid == "fake-sess-1"
+        assert fake_agent.new_session_calls == 1
+
+        # host-mode shutdown DETACHES (no child kill) -- intentional-only reaping.
+        await acp.shutdown()
+        assert child.returncode is None               # child untouched
+    finally:
+        with contextlib.suppress(Exception):
+            await streams.aclose()
+        await client.close()
+        await host.close()
+        for w in (agent_writer, host_writer):
+            with contextlib.suppress(Exception):
+                w.close()
 
 
 # --------------------------------------------------------------------------

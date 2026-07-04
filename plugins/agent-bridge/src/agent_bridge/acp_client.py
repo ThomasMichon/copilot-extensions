@@ -319,8 +319,18 @@ class AcpClient:
         self._stderr_buffer: list[str] = []
         self._stderr_task: asyncio.Task[None] | None = None
 
+        # Session-Host mode: the child lives in a Session Host that outlives
+        # this frontend; ACP is relayed over a stream pair, there is no local
+        # process to own, and teardown DETACHES (never reaps the child) --
+        # goal 1's intentional-only reaping. See session_host/.
+        self._host_mode = False
+        self._host_child_pid: int | None = None
+        self._host_closer: Any = None  # async () -> None, called on shutdown
+
     @property
     def pid(self) -> int | None:
+        if self._host_mode:
+            return self._host_child_pid
         return self._process.pid if self._process else None
 
     @property
@@ -329,6 +339,8 @@ class AcpClient:
 
     @property
     def is_running(self) -> bool:
+        if self._host_mode:
+            return self._connection is not None
         return self._process is not None and self._process.returncode is None
 
     @property
@@ -364,15 +376,44 @@ class AcpClient:
         if process.stderr:
             self._stderr_task = asyncio.create_task(self._read_stderr())
 
-        # Create ACP client-side connection
+        await self._init_connection(process.stdin, process.stdout)
+
+    async def start_streams(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        *,
+        child_pid: int | None = None,
+        closer: Any = None,
+    ) -> None:
+        """Initialize ACP over a Session Host's relayed stream pair (host mode).
+
+        The child lives in a Session Host that outlives this frontend, so there
+        is no local process to own here: ``pid`` is informational, and
+        :meth:`shutdown` DETACHES (closes the streams via ``closer``) rather than
+        killing the child. Reaping the child is a separate, explicit act
+        (goal 1's intentional-only reaping). ``reader`` carries agent->client
+        ACP; ``writer`` carries client->agent ACP.
+        """
+        self._host_mode = True
+        self._host_child_pid = child_pid
+        self._host_closer = closer
+        await self._init_connection(writer, reader)
+
+    async def _init_connection(
+        self, input_stream: asyncio.StreamWriter, output_stream: asyncio.StreamReader,
+    ) -> None:
+        """Create + initialize the ACP ClientSideConnection over a stream pair.
+
+        ``input_stream`` is where the ACP connection *writes* (client->agent);
+        ``output_stream`` is where it *reads* (agent->client).
+        """
         client_impl = _BridgeClientImpl(self)
         self._connection = ClientSideConnection(
             client_impl,
-            process.stdin,
-            process.stdout,
+            input_stream,
+            output_stream,
         )
-
-        # Initialize the ACP connection
         await self._connection.initialize(
             protocol_version=PROTOCOL_VERSION,
             client_capabilities=ClientCapabilities(),
@@ -457,7 +498,12 @@ class AcpClient:
             await self._connection.cancel(session_id=self._acp_session_id)
 
     async def shutdown(self) -> None:
-        """Shut down the ACP connection and process."""
+        """Shut down the ACP connection.
+
+        In **host mode** this DETACHES only -- the Session Host keeps the child
+        alive across a frontend restart (goal 1: no inadvertent reaping). In
+        the classic process-owning mode it tree-kills the child as before.
+        """
         # Cancel any pending permission
         if self._pending_permission_future and not self._pending_permission_future.done():
             self._pending_permission_future.set_result(
@@ -470,10 +516,18 @@ class AcpClient:
                 await self._connection.close()
             self._connection = None
 
-        proc = self._process
-        if proc and proc.returncode is None:
-            await _terminate_process_tree(proc)
-        self._process = None
+        if self._host_mode:
+            # Detach from the Session Host; the child survives. Reaping is a
+            # separate, explicit act (the host's TERMINATE), not a shutdown.
+            if self._host_closer is not None:
+                with contextlib.suppress(Exception):
+                    await self._host_closer()
+                self._host_closer = None
+        else:
+            proc = self._process
+            if proc and proc.returncode is None:
+                await _terminate_process_tree(proc)
+            self._process = None
 
         # The process (and the in-process sub-agents it hosted) is gone; drop
         # any background-task tracking so a discarded client never reports
