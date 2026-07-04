@@ -58,16 +58,35 @@ class TestDetectPlatform:
 # ---------------------------------------------------------------------------
 
 class TestProjectName:
-    def test_reads_from_env(self, monkeypatch):
+    def test_reads_active_project(self, monkeypatch):
+        # The in-process active project (set by main() from CWD/--project) is
+        # authoritative -- read ahead of any ambient env.
+        monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+        cfg.set_active_project("test-project")
+        assert cfg.project_name() == "test-project"
+
+    def test_active_project_wins_over_env(self, monkeypatch):
+        # CWD/flag resolution beats the transitional env fallback -- this is the
+        # anti-contamination guarantee.
+        monkeypatch.setenv("WORKTREE_PROJECT", "stale-env-project")
+        cfg.set_active_project("resolved-project")
+        assert cfg.project_name() == "resolved-project"
+
+    def test_env_is_transitional_fallback(self, monkeypatch):
+        # With no active project resolved, the ambient env is honored only as a
+        # transitional bridge (for internal/import-time callers).
+        cfg.set_active_project(None)
         monkeypatch.setenv("WORKTREE_PROJECT", "test-project")
         assert cfg.project_name() == "test-project"
 
     def test_raises_when_unset(self, monkeypatch):
+        cfg.set_active_project(None)
         monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
-        with pytest.raises(RuntimeError, match="WORKTREE_PROJECT"):
+        with pytest.raises(RuntimeError, match="No active project"):
             cfg.project_name()
 
     def test_raises_on_invalid_name(self, monkeypatch):
+        cfg.set_active_project(None)
         monkeypatch.setenv("WORKTREE_PROJECT", "invalid name with spaces!")
         with pytest.raises(ValueError, match="Invalid"):
             cfg.project_name()

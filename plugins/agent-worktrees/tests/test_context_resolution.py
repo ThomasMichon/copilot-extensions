@@ -1,0 +1,164 @@
+"""Tests for git-like CWD-based context resolution.
+
+Covers the resolver that discovers the active project + worktree from the
+current directory (or an explicit ``--project``), and the core anti-contamination
+guarantee: ambient ``WORKTREE_PROJECT`` / ``WORKTREE_ID`` / ``WORKTREE_REPO`` are
+never trusted for identity when the directory is authoritative.
+"""
+
+from __future__ import annotations
+
+import types
+from pathlib import Path
+
+import pytest
+
+from agent_worktrees import __main__ as m
+from agent_worktrees import config as cfg
+from agent_worktrees import git_ops
+from agent_worktrees import installer as inst
+
+
+def _git(*args: str, cwd) -> str:
+    return git_ops.git(*args, cwd=str(cwd)).stdout.strip()
+
+
+@pytest.fixture
+def adopted_repo(tmp_path: Path, monkeypatch):
+    """A real anchor repo + one worktree, adopted as project ``myproj``.
+
+    Returns ``(anchor, wt_root, wt_path, wt_id, config)``. Stubs the projects
+    registry, repos registry, tracking dir, and ``load_config`` so resolution is
+    hermetic.
+    """
+    anchor = tmp_path / "myrepo"
+    wt_root = tmp_path / "myrepo.worktrees"
+
+    git_ops.git("init", "-b", "master", str(anchor))
+    _git("config", "user.email", "t@example.com", cwd=anchor)
+    _git("config", "user.name", "Test", cwd=anchor)
+    (anchor / "f.txt").write_text("x\n")
+    _git("add", "-A", cwd=anchor)
+    _git("commit", "-m", "init", cwd=anchor)
+
+    wt_root.mkdir()
+    wt_id = "myrepo-wt-001"
+    wt_path = wt_root / wt_id
+    git_ops.git(
+        "worktree", "add", str(wt_path), "-b", f"worktree/{wt_id}", "master",
+        cwd=str(anchor),
+    )
+
+    monkeypatch.setattr(
+        inst, "read_projects_registry",
+        lambda: {"projects": {"myproj": {"anchor": str(anchor)}}},
+    )
+    monkeypatch.setattr(
+        "agent_worktrees.repos.read_registry",
+        lambda: types.SimpleNamespace(repos={}),
+    )
+
+    tdir = tmp_path / "tracking"
+    tdir.mkdir()
+    (tdir / f"{wt_id}.yaml").write_text("id: x\n")
+    monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: tdir)
+
+    conf = cfg.Config(
+        srcroot=str(tmp_path), machine="t", platform="linux", repo_name="myproj",
+        repos={"myproj": cfg.RepoConfig(
+            anchor=str(anchor), worktree_root=str(wt_root),
+            default_branch="master", remote="origin",
+        )},
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: conf)
+
+    return anchor, wt_root, wt_path, wt_id, conf
+
+
+# ---------------------------------------------------------------------------
+# Reverse lookup + project resolution
+# ---------------------------------------------------------------------------
+
+def test_reverse_lookup_from_anchor(adopted_repo):
+    anchor, *_ = adopted_repo
+    assert m._reverse_lookup_project(anchor) == "myproj"
+
+
+def test_resolve_from_anchor_cwd(adopted_repo, monkeypatch):
+    anchor, _wt_root, _wt_path, _wt_id, _conf = adopted_repo
+    monkeypatch.chdir(anchor)
+    project, assumed = m._resolve_active_project(None)
+    assert project == "myproj"
+    assert assumed is None  # assumed CWD stays the real CWD
+
+
+def test_resolve_from_worktree_cwd(adopted_repo, monkeypatch):
+    _anchor, _wt_root, wt_path, _wt_id, _conf = adopted_repo
+    monkeypatch.chdir(wt_path)
+    project, assumed = m._resolve_active_project(None)
+    assert project == "myproj"
+    assert assumed is None
+
+
+def test_project_override_assumes_anchor(adopted_repo):
+    anchor, *_ = adopted_repo
+    project, assumed = m._resolve_active_project("myproj")
+    assert project == "myproj"
+    # --project X => assume CWD is X's anchor repo.
+    assert Path(assumed).resolve() == anchor.resolve()
+
+
+def test_not_in_repo_resolves_nothing(adopted_repo, monkeypatch, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    assert m._resolve_active_project(None) == (None, None)
+
+
+# ---------------------------------------------------------------------------
+# Worktree-id resolution is CWD-only
+# ---------------------------------------------------------------------------
+
+def test_worktree_id_from_worktree_cwd(adopted_repo, monkeypatch):
+    _anchor, _wt_root, wt_path, wt_id, conf = adopted_repo
+    monkeypatch.chdir(wt_path)
+    assert m._infer_worktree_id(None, conf) == wt_id
+
+
+def test_worktree_id_none_at_anchor(adopted_repo, monkeypatch):
+    anchor, _wt_root, _wt_path, _wt_id, conf = adopted_repo
+    monkeypatch.chdir(anchor)
+    # The anchor is not under worktree_root -> no worktree id.
+    assert m._infer_worktree_id(None, conf) is None
+
+
+def test_project_override_yields_no_worktree_id(adopted_repo):
+    anchor, _wt_root, _wt_path, _wt_id, conf = adopted_repo
+    # --project set the assumed CWD to the anchor (not under worktree_root).
+    cfg.set_assumed_cwd(anchor)
+    assert m._infer_worktree_id(None, conf) is None
+
+
+# ---------------------------------------------------------------------------
+# Anti-contamination: ambient env is ignored when CWD is authoritative
+# ---------------------------------------------------------------------------
+
+def test_worktree_id_ignores_wrong_env(adopted_repo, monkeypatch):
+    """WORKTREE_ID / WORKTREE_REPO set to WRONG values must not override the
+    worktree id resolved from the current directory."""
+    _anchor, _wt_root, wt_path, wt_id, conf = adopted_repo
+    monkeypatch.setenv("WORKTREE_ID", "some-other-worktree")
+    monkeypatch.setenv("APERTURE_WORKTREE_ID", "some-other-worktree")
+    monkeypatch.setenv("WORKTREE_REPO", "/nonexistent/other/repo")
+    monkeypatch.chdir(wt_path)
+    assert m._infer_worktree_id(None, conf) == wt_id
+
+
+def test_project_resolution_ignores_wrong_env(adopted_repo, monkeypatch):
+    """A stale WORKTREE_PROJECT in the env must not steer resolution when the
+    directory identifies a different (correct) project."""
+    _anchor, _wt_root, wt_path, _wt_id, _conf = adopted_repo
+    monkeypatch.setenv("WORKTREE_PROJECT", "some-other-project")
+    monkeypatch.chdir(wt_path)
+    project, _assumed = m._resolve_active_project(None)
+    assert project == "myproj"

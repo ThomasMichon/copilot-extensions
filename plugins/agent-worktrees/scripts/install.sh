@@ -447,16 +447,15 @@ deploy_binstub() {
 #!/usr/bin/env bash
 BINSTUB_HEAD
     cat >> "$tmp" <<BINSTUB_BODY
-export WORKTREE_PROJECT="$PROJECT_NAME"
 export PYTHONUTF8=1
-# #25: a project binstub is a cross-project entry point --
-# drop any inherited WORKTREE_ID so worktree resolution uses CWD.
-unset WORKTREE_ID APERTURE_WORKTREE_ID
+# Context resolves from CWD / --project (git-like); the binstub names its
+# project via --project, not an ambient env var.
 _AW="\$HOME/.agent-worktrees/.venv/bin/agent-worktrees"
 if [[ -x "\$_AW" ]]; then
-    exec "\$_AW" "\$@"
+    exec "\$_AW" --project "$PROJECT_NAME" "\$@"
 fi
-# Fallback: launch session directly (venv missing / recovery)
+# Recovery (venv missing): launch-session reads WORKTREE_PROJECT
+export WORKTREE_PROJECT="$PROJECT_NAME"
 exec "\$HOME/.agent-worktrees/bin/launch-session.sh" "\$@"
 BINSTUB_BODY
     chmod +x "$tmp"

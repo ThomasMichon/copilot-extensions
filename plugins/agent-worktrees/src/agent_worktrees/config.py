@@ -4,7 +4,9 @@ Reads per-project config from ~/.{project}/config.yaml and provides
 typed access.  Runtime lives at ~/.agent-worktrees/ (shared across
 projects); per-project state at ~/.{project}/.
 
-The active project is determined by $WORKTREE_PROJECT (required).
+The active project is resolved from the current working directory (git-like),
+or an explicit ``--project``; it is threaded in-process, not read from
+``$WORKTREE_PROJECT``.
 """
 
 from __future__ import annotations
@@ -355,20 +357,69 @@ def _home() -> Path:
     return Path.home()
 
 
-def project_name() -> str:
-    """Active project name from ``$WORKTREE_PROJECT``.
+# ── Active project / assumed CWD (in-process, git-like context) ──────────
+# The active project and the "assumed CWD" are resolved once per invocation
+# from the current working directory (or an explicit ``--project``) and threaded
+# in-process here -- they are NOT read from ambient environment variables.
+# ``main()`` sets these after CWD/flag resolution; every consumer reads them
+# through ``project_name()`` / ``assumed_cwd()``. This is what makes
+# agent-worktrees resolve context the way git does: from where you are, not from
+# inherited session env.
+_ACTIVE_PROJECT: str | None = None
+_ASSUMED_CWD: Path | None = None
 
-    Raises ``RuntimeError`` if ``$WORKTREE_PROJECT`` is not set.
+
+def set_active_project(name: str | None) -> None:
+    """Set the in-process active project (resolved from CWD or ``--project``)."""
+    global _ACTIVE_PROJECT
+    _ACTIVE_PROJECT = name.strip() if name else None
+
+
+def active_project() -> str | None:
+    """Return the in-process active project name, or ``None`` if unresolved."""
+    return _ACTIVE_PROJECT
+
+
+def set_assumed_cwd(path: Path | None) -> None:
+    """Set the assumed working directory (the anchor when ``--project`` is used).
+
+    When a project is named explicitly, context resolves *as if* CWD were that
+    project's anchor repo; ``None`` restores the real ``Path.cwd()``.
     """
-    name = os.environ.get("WORKTREE_PROJECT", "").strip()
+    global _ASSUMED_CWD
+    _ASSUMED_CWD = path
+
+
+def assumed_cwd() -> Path:
+    """Return the assumed CWD -- the anchor when ``--project`` set one, else CWD."""
+    return _ASSUMED_CWD if _ASSUMED_CWD is not None else Path.cwd()
+
+
+def project_name() -> str:
+    """Return the in-process active project name (resolved from CWD or ``--project``).
+
+    Resolution is git-like: the active project is derived from the current
+    directory (or an explicit ``--project``) by ``main()`` and threaded in
+    process -- it is **not** read from ``$WORKTREE_PROJECT``. Raises
+    ``RuntimeError`` when no project could be resolved.
+    """
+    name = (_ACTIVE_PROJECT or "").strip()
+    if not name:
+        # Transitional fallback for internal / import-time callers that run
+        # before main() resolves context (shell installers, module-import
+        # side effects). Command dispatch always sets the active project from
+        # CWD/--project first, so this never overrides CWD-first resolution.
+        # Removed once the shell layer is migrated off $WORKTREE_PROJECT.
+        name = os.environ.get("WORKTREE_PROJECT", "").strip()
     if not name:
         raise RuntimeError(
-            "WORKTREE_PROJECT environment variable is required but not set. "
-            "Set it to your project name (e.g. 'my-project', 'dotfiles')."
+            "No active project could be resolved. agent-worktrees discovers its "
+            "context from the current directory (like git); run from inside a "
+            "managed repo or worktree, or pass --project <name>."
         )
     if not _PROJECT_NAME_RE.match(name):
         raise ValueError(
-            f"Invalid WORKTREE_PROJECT value: {name!r}. "
+            f"Invalid project name: {name!r}. "
             "Must be 1-64 alphanumeric/dash/dot/underscore characters."
         )
     return name
@@ -568,7 +619,7 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 
 def _project_name_safe() -> str:
-    """Return the active project name, or ``""`` if ``$WORKTREE_PROJECT`` unset.
+    """Return the active project name, or ``""`` if none is resolved.
 
     Unlike :func:`project_name`, never raises -- used where an absent project is
     a tolerable condition (e.g. tests that pass an explicit config).

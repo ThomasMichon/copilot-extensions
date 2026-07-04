@@ -10,6 +10,23 @@ import pytest
 from agent_worktrees import tracking
 
 # ---------------------------------------------------------------------------
+# Isolate the in-process active-project / assumed-CWD state between tests.
+# These module globals are set by main() during CWD/--project resolution;
+# without a reset a test that runs main() (or set_active_project) would leak
+# its project into unrelated tests.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _reset_active_project():
+    from agent_worktrees import config as _cfg
+
+    _cfg.set_active_project(None)
+    _cfg.set_assumed_cwd(None)
+    yield
+    _cfg.set_active_project(None)
+    _cfg.set_assumed_cwd(None)
+
+# ---------------------------------------------------------------------------
 # Path fixtures — redirect config helpers to tmp dirs
 # ---------------------------------------------------------------------------
 

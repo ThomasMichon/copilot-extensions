@@ -2280,56 +2280,40 @@ def _infer_worktree_id(
     explicit: str | None,
     config: cfg.Config | None = None,
 ) -> str | None:
-    """Return the worktree ID from an explicit arg, CWD, or env var.
+    """Return the worktree ID from an explicit arg or the (assumed) CWD.
 
     Resolution order:
       1. Explicit value passed on the CLI
-      2. CWD under the configured ``worktree_root`` directory
-      3. ``WORKTREE_ID`` environment variable (falls back to
-         ``APERTURE_WORKTREE_ID`` for backward compat; last resort -- may
-         be stale in long-lived tmux servers or sub-agent contexts)
+      2. The assumed CWD under the configured ``worktree_root`` directory
 
-    Git branch is intentionally *not* used for identification -- worktrees
-    are permitted to switch to feature branches, so the branch name is
-    not a reliable indicator of which worktree directory we're in.
+    Identity is resolved **purely from the directory**, the way git resolves
+    its repo. Ambient ``$WORKTREE_ID`` / ``$APERTURE_WORKTREE_ID`` are **not**
+    consulted -- they were the source of cross-session/cross-repo contamination.
+    Git branch is likewise never used: worktrees may switch to feature branches,
+    so the branch name is not a reliable indicator of which worktree we are in.
 
-    When CWD yields a worktree ID that disagrees with the env var, a
-    warning is emitted.
+    When ``--project`` set an assumed CWD (the project's anchor), that anchor --
+    not the real CWD -- is what is checked; the anchor is not under
+    ``worktree_root``, so cross-project calls yield ``None`` (name the worktree
+    explicitly).
 
-    Returns None if no source yields a worktree ID.
+    Returns None if neither source yields a worktree ID.
     """
     if explicit:
         return explicit
 
-    from_cwd = _infer_worktree_id_from_cwd(config)
-    from_env = _env_get("WORKTREE_ID")
-
-    # Pick the best source
-    resolved = from_cwd or from_env
-
-    # Cross-check: warn when CWD disagrees with the env var
-    if from_env and resolved and resolved != from_env:
-        output.warn(
-            f"Ignoring WORKTREE_ID={from_env}; "
-            f"working directory resolves to {resolved}."
-        )
-    elif resolved and resolved == from_env and not from_cwd:
-        output.warn(
-            f"Using WORKTREE_ID={from_env}; "
-            f"could not verify from working directory."
-        )
-
-    return resolved
+    return _infer_worktree_id_from_cwd(config)
 
 
 def _infer_worktree_id_from_cwd(
     config: cfg.Config | None = None,
 ) -> str | None:
-    """Derive worktree ID from the current working directory.
+    """Derive worktree ID from the assumed working directory.
 
-    If CWD (or a parent) sits directly inside ``worktree_root``, the
-    first path component under that root is the worktree ID.  Validated
-    against the tracking directory to avoid false positives.
+    If the assumed CWD (real CWD, or the anchor when ``--project`` set one) sits
+    directly inside ``worktree_root``, the first path component under that root
+    is the worktree ID.  Validated against the tracking directory to avoid false
+    positives.
     """
     try:
         if config is None:
@@ -2338,7 +2322,7 @@ def _infer_worktree_id_from_cwd(
     except Exception:
         return None
 
-    cwd = Path.cwd().resolve()
+    cwd = cfg.assumed_cwd().resolve()
     try:
         rel = cwd.relative_to(wt_root)
     except ValueError:
@@ -6680,13 +6664,14 @@ def _find_repo_dir() -> Path | None:
 
     Priority order (most specific → least specific):
       1. Running script location (navigate up to git root)
-      2. WORKTREE_REPO env var (falls back to APERTURE_REPO for compat)
-      3. cwd git root (via git rev-parse)
-      4. Config anchor (last resort -- may be stale)
+      2. The (assumed) CWD git root (via git rev-parse)
+      3. Config anchor (last resort -- may be stale)
 
-    All paths are resolved through :func:`git_ops.resolve_to_anchor` so
-    that running from inside a git worktree returns the main checkout,
-    not the ephemeral worktree path.
+    Resolution is from the directory, not ambient env: the former
+    ``WORKTREE_REPO`` / ``APERTURE_REPO`` env fallback has been removed (it was
+    a cross-session contamination source). All paths are resolved through
+    :func:`git_ops.resolve_to_anchor` so that running from inside a git worktree
+    returns the main checkout, not the ephemeral worktree path.
     """
 
     # 1. Running script location -- walk up from __file__ to find .git
@@ -6709,17 +6694,10 @@ def _find_repo_dir() -> Path | None:
             break
         candidate = parent
 
-    # 2. WORKTREE_REPO env (set by setup.sh during active sessions)
-    env_repo = _env_get("WORKTREE_REPO")
-    if env_repo:
-        env_path = Path(env_repo)
-        if env_path.is_dir():
-            return git_ops.resolve_to_anchor(env_path)
-
-    # 3. git rev-parse to find repo root of cwd
+    # 2. git rev-parse to find repo root of the assumed CWD
     try:
         r = subprocess.run(
-            ["git", "-C", str(Path.cwd()), "rev-parse", "--show-toplevel"],
+            ["git", "-C", str(cfg.assumed_cwd()), "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, timeout=5,
         )
         if r.returncode == 0:
@@ -6727,7 +6705,7 @@ def _find_repo_dir() -> Path | None:
     except Exception:
         pass
 
-    # 4. Config anchor (last resort -- may deploy stale code if anchor
+    # 3. Config anchor (last resort -- may deploy stale code if anchor
     #    hasn't been updated, but better than failing entirely)
     try:
         config = cfg.load_config()
@@ -7869,6 +7847,83 @@ _NO_PROJECT_COMMANDS = {
 }
 
 
+def _anchor_for_project(name: str) -> Path | None:
+    """Return the anchor checkout path for project *name*, or ``None``.
+
+    Prefers the projects registry, falling back to the repos registry. Used to
+    realize ``--project X`` as "assume CWD is X's anchor repo".
+    """
+    try:
+        projects = inst.read_projects_registry().get("projects", {})
+        entry = projects.get(name)
+        if isinstance(entry, dict) and entry.get("anchor"):
+            p = Path(entry["anchor"])
+            if p.is_dir():
+                return p.resolve()
+    except Exception:
+        pass
+    try:
+        anchor = cfg._resolve_anchor_from_registry(name, cfg.detect_platform())
+        if anchor and Path(anchor).is_dir():
+            return Path(anchor).resolve()
+    except Exception:
+        pass
+    return None
+
+
+def _reverse_lookup_project(anchor: Path) -> str | None:
+    """Map an anchor checkout path back to its adopted project name, or ``None``.
+
+    This is the git-like "which project am I in?" query: given the anchor of the
+    repo discovered from CWD, find the adopted project whose anchor it is.
+    Case-insensitive on Windows (via ``git_ops._normalize_wt_path``).
+    """
+    target = git_ops._normalize_wt_path(str(anchor))
+    try:
+        projects = inst.read_projects_registry().get("projects", {})
+    except Exception:
+        projects = {}
+    for name, entry in projects.items():
+        a = entry.get("anchor") if isinstance(entry, dict) else None
+        if a and git_ops._normalize_wt_path(str(Path(a))) == target:
+            return name
+    try:
+        from . import repos as _repos
+
+        registry = _repos.read_registry()
+        plat = cfg.detect_platform()
+        for name in registry.repos:
+            a = registry.repos[name].local_path(plat)
+            if a and git_ops._normalize_wt_path(str(Path(a))) == target:
+                return name
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_active_project(
+    project_override: str | None,
+) -> tuple[str | None, Path | None]:
+    """Resolve ``(project, assumed_cwd)`` the way git resolves its repo.
+
+    - ``--project X`` -> ``(X, anchor(X))``: operate as if CWD were X's anchor
+      repo, so a caller inside repo A can cleanly target repo B.
+    - otherwise -> reverse-lookup the project from the real CWD's git anchor;
+      ``assumed_cwd`` stays the real CWD (``None``).
+
+    Returns ``(None, None)`` when nothing resolves (caller balks helpfully).
+    Branch names and ambient env vars are never consulted.
+    """
+    if project_override:
+        return project_override, _anchor_for_project(project_override)
+    cwd_anchor = _git_toplevel(Path.cwd())
+    if cwd_anchor is not None:
+        name = _reverse_lookup_project(cwd_anchor)
+        if name:
+            return name, None
+    return None, None
+
+
 def cmd_help_unrouted(requested: str | None = None) -> int:
     """Help shown when ``agent-worktrees`` runs without project context.
 
@@ -7881,15 +7936,18 @@ def cmd_help_unrouted(requested: str | None = None) -> int:
     print(file=out)
     if requested:
         print(
-            f"No project context for '{requested}'. You ran the generic "
-            f"'agent-worktrees' binstub rather than a project binstub, and "
-            f"no --project was given.",
+            f"Could not resolve a project for '{requested}'. Context is "
+            f"discovered from the current directory (like git), but this "
+            f"directory is not inside an adopted repo or worktree, and no "
+            f"--project was given.",
             file=out,
         )
     else:
         print(
-            "No project context. You ran the generic 'agent-worktrees' "
-            "binstub rather than a project binstub (e.g. 'my-control-harness').",
+            "Could not resolve a project. Context is discovered from the "
+            "current directory (like git), but this directory is not inside "
+            "an adopted repo or worktree. Run from inside one, use a project "
+            "binstub, or pass --project <name>.",
             file=out,
         )
     print(file=out)
@@ -8194,23 +8252,42 @@ def main(argv: list[str] | None = None) -> int:
     if args_list and args_list[0] == "agent-worktrees":
         args_list = args_list[1:]
 
-    # Global --project/-p flag: set WORKTREE_PROJECT in-process so any
-    # subcommand works without the per-project binstub.
+    # ── Resolve the active project + assumed CWD (git-like) ──────────────
+    # Context is discovered from the current directory, or an explicit
+    # --project (which means "assume CWD is that project's anchor repo").
+    # Ambient $WORKTREE_PROJECT / $WORKTREE_ID are NOT trusted for identity --
+    # resolution is a pure function of where you are, not inherited session env.
     args_list, _proj = _extract_project_flag(args_list)
-    if _proj:
-        os.environ["WORKTREE_PROJECT"] = _proj
-        # #25: an explicit --project selects a project that is, in general,
-        # *different* from the worktree the caller's session is running in.
-        # The inherited WORKTREE_ID / APERTURE_WORKTREE_ID belong to that
-        # caller's session, not to this project, so blank them and let
-        # worktree-id resolution fall back to the current working directory.
-        # (Bare `agent-worktrees <cmd>` with no --project still inherits the
-        # session's WORKTREE_ID -- that is the intended "operate on my current
-        # worktree" path.)
-        os.environ.pop("WORKTREE_ID", None)
-        os.environ.pop("APERTURE_WORKTREE_ID", None)
 
-    has_project = bool(os.environ.get("WORKTREE_PROJECT", "").strip())
+    # Only auto-derive from CWD for project-requiring commands (skip the git
+    # subprocess for global no-project commands and bare flags).
+    _needs_project = not (
+        args_list
+        and (args_list[0] in _NO_PROJECT_COMMANDS or args_list[0].startswith("-"))
+    )
+
+    if _proj:
+        _project, _assumed = _resolve_active_project(_proj)
+    elif _needs_project:
+        _project, _assumed = _resolve_active_project(None)
+    else:
+        _project, _assumed = None, None
+
+    # Transitional bridge (removed in the shell-layer migration phase): internal
+    # subprocess callers (install / launch shell) still pass the project via
+    # $WORKTREE_PROJECT, which project_name() honors as a last resort. main()
+    # resolves CWD/flag first, so ambient env never overrides a repo
+    # discoverable from CWD, and thus never reintroduces cross-repo contamination.
+    if _project:
+        cfg.set_active_project(_project)
+        cfg.set_assumed_cwd(_assumed)
+        # Export outward for legacy shell consumers (launch-session / setup);
+        # the Python resolver reads cfg.active_project(), never this env var.
+        os.environ["WORKTREE_PROJECT"] = _project
+
+    has_project = bool(cfg.active_project()) or bool(
+        os.environ.get("WORKTREE_PROJECT", "").strip()
+    )
 
     # No args → launch (with project) or helpful balk (without).
     if not args_list:

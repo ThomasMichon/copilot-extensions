@@ -13,21 +13,29 @@ def _project_binstub(lb: Path, project: str) -> str:
     return (lb / name).read_text()
 
 
-def test_project_binstub_clears_inherited_worktree_id(monkeypatch, tmp_path: Path):
-    """A project binstub is a cross-project entry point, so it must drop any
-    inherited WORKTREE_ID / APERTURE_WORKTREE_ID before routing to the CLI."""
+def test_project_binstub_uses_project_flag(monkeypatch, tmp_path: Path):
+    """A project binstub names its project via ``--project`` (context otherwise
+    resolves from CWD, git-like). It must NOT set an ambient WORKTREE_PROJECT on
+    the primary path, nor scrub WORKTREE_ID (identity now comes purely from CWD)."""
     lb = tmp_path / "bin"
     monkeypatch.setattr(inst, "local_bin", lambda: lb)
 
     assert inst.deploy_binstubs(repo_dir=tmp_path, project="demoproj") is True
 
     content = _project_binstub(lb, "demoproj")
-    assert "WORKTREE_PROJECT" in content
+    # Primary path routes through the CLI with an explicit --project.
+    assert "--project demoproj" in content
+    # No longer scrubs the inherited worktree id -- it is simply ignored.
+    assert "WORKTREE_ID" not in content
+    assert "APERTURE_WORKTREE_ID" not in content
+    # WORKTREE_PROJECT survives ONLY in the recovery (venv-missing) branch,
+    # never on the primary CLI path.
     if platform.system() == "Windows":
-        assert 'set "WORKTREE_ID="' in content
-        assert 'set "APERTURE_WORKTREE_ID="' in content
+        assert '"%_PY%" -m agent_worktrees --project demoproj' in content
+        assert 'set "WORKTREE_PROJECT=demoproj"' in content  # recovery only
     else:
-        assert "unset WORKTREE_ID APERTURE_WORKTREE_ID" in content
+        assert 'exec "$_AW" --project demoproj' in content
+        assert 'export WORKTREE_PROJECT="demoproj"' in content  # recovery only
 
 
 def test_global_stub_does_not_clear_worktree_id(monkeypatch, tmp_path: Path):
