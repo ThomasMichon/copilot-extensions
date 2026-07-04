@@ -39,12 +39,14 @@ def pid_alive(pid: int | None) -> bool:
     return True
 
 
-def kill_pid(pid: int | None) -> None:
+def kill_pid(pid: int | None, *, force: bool = False) -> None:
     """Best-effort tree-kill of a process by pid (cross-platform, idempotent).
 
     Used by the frontend to reap a Session Host process (and, via the host's
     kill-on-close job / process group, its child) once the host's session has
-    reached its own stop or is being force-reaped under the sprawl bound.
+    reached its own stop or is being force-reaped. ``force`` sends SIGKILL
+    (POSIX) for a prompt, definite death -- appropriate for a reap where the
+    child has already been handled and we must not leave the host lingering.
     Swallows "already gone" and permission errors -- reaping is best-effort.
     """
     if not pid:
@@ -52,6 +54,7 @@ def kill_pid(pid: int | None) -> None:
     if sys.platform == "win32":
         import subprocess
 
+        # taskkill /F already forces; /T collects the tree either way.
         subprocess.run(
             ["taskkill", "/PID", str(pid), "/T", "/F"],
             stdout=subprocess.DEVNULL,
@@ -62,6 +65,6 @@ def kill_pid(pid: int | None) -> None:
     import signal
 
     try:
-        os.kill(pid, signal.SIGTERM)
+        os.kill(pid, signal.SIGKILL if force else signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
         pass
