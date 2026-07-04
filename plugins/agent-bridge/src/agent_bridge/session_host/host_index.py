@@ -11,8 +11,10 @@ SQLite schema, so it is additive and carries no migration. The cutover
 alive, reconnect via ``SessionHostClient``; prune the rest.
 
 Records are transport addressing only -- no ACP semantics, no conversation
-state (that stays in the frontend event log). ``host_version`` is carried now so
-the Phase-4 version-mux can route a session to the host generation that owns it.
+state (that stays in the frontend event log). ``host_version`` (the agent-bridge
+build) and ``protocol_version`` (the wire-envelope generation) are carried so the
+Phase-4 version-mux can route a session to the host generation that owns it and
+tell whether this frontend can still speak its wire (see ``version_mux``).
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ class HostRecord:
     host_pid: int
     child_pid: int
     host_version: str = ""
+    protocol_version: int = 1
     state_file: str = ""
     created_at: float = 0.0
     extra: dict = field(default_factory=dict)
@@ -49,6 +52,7 @@ class HostRecord:
             host_pid=int(data["pid"]),
             child_pid=int(data["child_pid"]),
             host_version=host_version,
+            protocol_version=int(data.get("protocol_version", 1)),
             state_file=str(state_file),
         )
 

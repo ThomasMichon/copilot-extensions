@@ -887,3 +887,169 @@ async def test_run_host_end_to_end_reattach(tmp_path):
             await task
         except asyncio.CancelledError:
             pass
+
+
+# --------------------------------------------------------------------------
+# Phase 4 -- host version-mux (protocol-version routing + stranded hosts)
+# --------------------------------------------------------------------------
+def test_version_mux_is_compatible():
+    from agent_bridge.session_host import version_mux as vm
+
+    assert vm.is_compatible(proto.PROTOCOL_VERSION) is True
+    assert vm.is_compatible(proto.PROTOCOL_VERSION + 1) is False
+    assert proto.PROTOCOL_VERSION in vm.SUPPORTED_PROTOCOL_VERSIONS
+
+
+def test_plan_host_dispositions():
+    from agent_bridge.session_host.version_mux import (
+        HostDisposition as D,
+        plan_host,
+    )
+
+    cur = proto.PROTOCOL_VERSION
+    future = cur + 1
+
+    # Compatible -> always reattach (drives a live child, drains a dead one).
+    assert plan_host(protocol_version=cur, child_alive=True).disposition is D.REATTACH
+    assert plan_host(protocol_version=cur, child_alive=False).disposition is D.REATTACH
+
+    # Incompatible + child still running, no bound -> strand (goal 1).
+    assert plan_host(protocol_version=future, child_alive=True).disposition is D.STRAND
+
+    # Incompatible + child already stopped -> reap (frees the pinned install).
+    assert (plan_host(protocol_version=future, child_alive=False).disposition
+            is D.REAP_STOPPED)
+
+    # Incompatible + child alive + past the sprawl bound -> force-reap.
+    assert (plan_host(protocol_version=future, child_alive=True,
+                      age_seconds=120.0, stale_reap_seconds=60.0).disposition
+            is D.FORCE_REAP)
+    # ...but under the bound it still strands.
+    assert (plan_host(protocol_version=future, child_alive=True,
+                      age_seconds=30.0, stale_reap_seconds=60.0).disposition
+            is D.STRAND)
+    # A zero/None bound never force-reaps.
+    assert (plan_host(protocol_version=future, child_alive=True,
+                      age_seconds=1e9, stale_reap_seconds=0).disposition
+            is D.STRAND)
+
+
+def test_host_record_protocol_version_persists(tmp_path):
+    from agent_bridge.session_host.host_index import HostIndex, HostRecord
+
+    path = tmp_path / "hosts.json"
+    idx = HostIndex(path)
+    idx.register(HostRecord(session_id="s1", port=9000, host_pid=1, child_pid=2,
+                            protocol_version=7))
+    # Legacy record with no explicit protocol_version defaults to the baseline 1.
+    idx.register(HostRecord(session_id="s2", port=9001, host_pid=3, child_pid=4))
+    idx2 = HostIndex(path)
+    assert idx2.get("s1").protocol_version == 7
+    assert idx2.get("s2").protocol_version == 1
+
+
+def test_host_record_from_state_file_protocol_version(tmp_path):
+    from agent_bridge.session_host.host_index import HostRecord
+
+    with_pv = tmp_path / "with.json"
+    with_pv.write_text('{"pid": 1, "child_pid": 2, "port": 9000, '
+                       '"protocol_version": 5}')
+    assert HostRecord.from_state_file("s", with_pv).protocol_version == 5
+
+    # A state file written before protocol_version existed -> baseline 1.
+    legacy = tmp_path / "legacy.json"
+    legacy.write_text('{"pid": 1, "child_pid": 2, "port": 9000}')
+    assert HostRecord.from_state_file("s", legacy).protocol_version == 1
+
+
+@pytest.mark.asyncio
+async def test_reattach_strands_then_reaps_incompatible_host(tmp_path, monkeypatch):
+    """An incompatible-protocol host is left running while its child lives
+    (goal 1), then reaped once the child stops -- the Phase-4 version-mux."""
+    import os
+    import sys
+
+    from agent_bridge.db import Database
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+    fake_argv = [sys.executable, str(agent_script)]
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return fake_argv, str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+
+    dbpath = tmp_path / "s.db"
+    statedir = str(tmp_path / "hosts")
+    host_pid = None
+    child_pid = None
+    try:
+        # gen 1: start a host-backed session, then simulate a frontend restart.
+        db1 = Database(dbpath)
+        mgr1 = SessionManager(db1, session_host_enabled=True,
+                              session_host_state_dir=statedir)
+        target = SpawnTarget(type="local", cwd=str(tmp_path))
+        session = await asyncio.wait_for(mgr1.start_session(target), timeout=30)
+        sid = session.session_id
+        rec = mgr1._host_index.all()[0]
+        host_pid, child_pid = rec.host_pid, rec.child_pid
+        assert rec.protocol_version == proto.PROTOCOL_VERSION  # recorded on launch
+
+        # Rewrite the record as an incompatible future protocol generation.
+        rec.protocol_version = proto.PROTOCOL_VERSION + 1
+        mgr1._host_index.register(rec)
+        await session.client.shutdown()  # detach; host + child survive
+        db1.close()
+        assert osutil_pid_alive(host_pid)
+
+        # gen 2: reattach must STRAND the incompatible host, not drive it.
+        db2 = Database(dbpath)
+        mgr2 = SessionManager(db2, session_host_enabled=True,
+                              session_host_state_dir=statedir)
+        n = await asyncio.wait_for(mgr2.reattach_session_hosts(), timeout=30)
+        assert n == 0                                   # not reattached
+        assert osutil_pid_alive(host_pid)               # left running (goal 1)
+        assert sid in mgr2._host_index                  # record kept
+        stranded = mgr2.stranded_host_records()
+        assert [r.session_id for r in stranded] == [sid]
+        assert mgr2.get_session(sid).status == SessionStatus.STOPPED
+        db2.close()
+
+        # The child reaches its own stop -> the stranded host is now reapable.
+        from agent_bridge.session_host.osutil import kill_pid, pid_alive
+        kill_pid(child_pid)
+        for _ in range(100):
+            if not pid_alive(child_pid):
+                break
+            await asyncio.sleep(0.05)
+        assert not pid_alive(child_pid)
+
+        db3 = Database(dbpath)
+        mgr3 = SessionManager(db3, session_host_enabled=True,
+                              session_host_state_dir=statedir)
+        n3 = await asyncio.wait_for(mgr3.reattach_session_hosts(), timeout=30)
+        assert n3 == 0
+        assert sid not in mgr3._host_index               # record dropped
+        for _ in range(100):
+            if not osutil_pid_alive(host_pid):
+                break
+            await asyncio.sleep(0.05)
+        assert not osutil_pid_alive(host_pid)            # host reaped
+        db3.close()
+    finally:
+        for pid in (host_pid, child_pid):
+            if pid:
+                with contextlib.suppress(Exception):
+                    if sys.platform == "win32":
+                        import subprocess
+                        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                       stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL)
+                    else:
+                        import os as _os
+                        import signal
+                        _os.kill(pid, signal.SIGKILL)

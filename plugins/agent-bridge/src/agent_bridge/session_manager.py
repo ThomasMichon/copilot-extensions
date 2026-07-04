@@ -849,7 +849,9 @@ class SessionManager:
                 host_pid=handle.host_pid,
                 child_pid=handle.child_pid,
                 host_version=__version__,
+                protocol_version=handle.protocol_version,
                 state_file=handle.state_file,
+                created_at=time.time(),
             ))
         return client, acp_sid
 
@@ -862,16 +864,53 @@ class SessionManager:
         reattached loopback endpoint and **adopts** the existing ACP session --
         no child respawn, no lost session. Dead hosts are pruned. Returns the
         count reattached. No-op unless ``session_host_enabled``.
+
+        **Version-mux (Phase 4).** A host advertising a wire-envelope protocol
+        this frontend no longer speaks (a rare breaking host-layer change) is
+        *not* driven with incompatible client code. Per :func:`plan_host`:
+        a compatible host is reattached; an incompatible host whose child is
+        still alive is **left running** so it keeps its child until the child's
+        own stop (goal 1 -- never reap mid-turn); an incompatible host whose
+        child has already stopped is reaped so it stops pinning its old install.
         """
         if not self._session_host_enabled or self._host_index is None:
             return 0
         from .session_host.acp_adapter import open_acp_streams
         from .session_host.client import SessionHostClient
-        from .session_host.osutil import pid_alive
+        from .session_host.osutil import kill_pid, pid_alive
+        from .session_host.version_mux import HostDisposition, plan_host
 
         self._host_index.prune_dead(pid_alive)
         reattached = 0
+        now = time.time()
         for rec in self._host_index.live_records(pid_alive):
+            plan = plan_host(
+                protocol_version=rec.protocol_version,
+                child_alive=pid_alive(rec.child_pid),
+                age_seconds=(now - rec.created_at) if rec.created_at else None,
+                # The opt-in sprawl age bound is wired by a Phase-4 follow-up;
+                # for now an immortal incompatible session strands (never
+                # reaped mid-turn) rather than being force-reaped.
+                stale_reap_seconds=None,
+            )
+            if plan.disposition is HostDisposition.STRAND:
+                log.info(
+                    "Session %s pinned to incompatible Session Host "
+                    "(proto=%s, build=%s, pid=%s); %s",
+                    rec.session_id, rec.protocol_version, rec.host_version,
+                    rec.host_pid, plan.reason,
+                )
+                continue
+            if plan.disposition in (HostDisposition.REAP_STOPPED,
+                                    HostDisposition.FORCE_REAP):
+                log.info(
+                    "Reaping stranded Session Host for session %s (pid=%s): %s",
+                    rec.session_id, rec.host_pid, plan.reason,
+                )
+                kill_pid(rec.host_pid)
+                with contextlib.suppress(Exception):
+                    self._host_index.remove(rec.session_id)
+                continue
             session = self._sessions.get(rec.session_id)
             if session is None or not session.acp_session_id:
                 continue
@@ -923,6 +962,26 @@ class SessionManager:
         if reattached:
             log.info("Reattached %d session(s) to surviving Session Hosts", reattached)
         return reattached
+
+    def stranded_host_records(self) -> list[Any]:
+        """Live Session Hosts this frontend can no longer speak to (version-mux).
+
+        Returns the ``HostRecord``s for hosts whose process is alive but whose
+        wire-envelope protocol is not one this build supports -- i.e. old-version
+        hosts still keeping their children until each stops. Useful for
+        observability and for a deploy layer to know which old on-disk installs
+        are still pinned. Empty (the common case) unless a breaking host-layer
+        change has left older hosts running.
+        """
+        if not self._session_host_enabled or self._host_index is None:
+            return []
+        from .session_host.osutil import pid_alive
+        from .session_host.version_mux import is_compatible
+
+        return [
+            rec for rec in self._host_index.live_records(pid_alive)
+            if not is_compatible(rec.protocol_version)
+        ]
 
     async def start_session(
         self,
