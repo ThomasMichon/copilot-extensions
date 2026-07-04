@@ -268,11 +268,21 @@ def _resolve_local() -> tuple[str, str]:
     """(machine, env) of this host, using the registry display name when known.
 
     Falls back to ``data_local.LOCAL`` (hostname-based) if the local machine is
-    not represented in ``machines.yaml``.
+    not represented in ``machines.yaml`` -- or if config context is not yet
+    resolvable at import time (e.g. before ``main()`` establishes the active
+    project, as when the test suite imports this module).
     """
-    for s in _build_sources():
-        if s.local:
-            return s.key
+    try:
+        for s in _build_sources():
+            if s.local:
+                return s.key
+    except Exception:
+        # Import-time config I/O must never hard-crash the import. In a real
+        # picker run this module is imported after main() has established the
+        # active project, so the try succeeds; this guard only covers early /
+        # context-free imports (e.g. the test suite) where a hostname-based
+        # local is the correct, safe fallback.
+        pass
     return data_local.LOCAL
 
 
