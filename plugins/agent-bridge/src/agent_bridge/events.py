@@ -124,6 +124,11 @@ class EventLog:
             if self._db is not None and self._session_id is not None:
                 self._db.flush()
                 self._db.delete_events(self._session_id)
+                # The rebuilt log renumbers event ids from 1; monotonic delivery
+                # cursors would then point past the log and orphan consumers
+                # (NF's "odd states"). Reset them so consumers re-read the
+                # authoritative rebuilt log instead of silently stalling.
+                self._db.reset_delivery_cursors(self._session_id)
             self._events = []
             self._next_id = 1
             ts = time.time()
