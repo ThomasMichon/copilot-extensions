@@ -68,3 +68,26 @@ def kill_pid(pid: int | None, *, force: bool = False) -> None:
         os.kill(pid, signal.SIGKILL if force else signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
         pass
+
+
+def reap_zombie(pid: int | None, *, attempts: int = 30, delay: float = 0.01) -> None:
+    """POSIX: ``wait()`` on a just-killed child so it doesn't linger as a zombie.
+
+    A Session Host spawned by *this* daemon is our direct child; SIGKILLing it
+    leaves a ``<defunct>`` zombie until we reap it. This clears it. No-op on
+    Windows (``taskkill /F`` fully removes the process) and when ``pid`` is not
+    our child -- e.g. a host reattached from a *previous* daemon, which init
+    reaps instead (``ChildProcessError``).
+    """
+    if not pid or sys.platform == "win32":
+        return
+    import time as _time
+
+    for _ in range(attempts):
+        try:
+            reaped, _status = os.waitpid(pid, os.WNOHANG)
+        except (ChildProcessError, OSError):
+            return  # not our child (reattached host) -> reaped by init
+        if reaped:
+            return
+        _time.sleep(delay)

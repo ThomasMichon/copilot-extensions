@@ -1098,7 +1098,7 @@ class SessionManager:
         job also takes the child). Used for both the explicit-terminate reap
         (#1786) and the version-mux stranded/forced reap.
         """
-        from .session_host.osutil import kill_pid
+        from .session_host.osutil import kill_pid, reap_zombie
 
         log.info(
             "Reaping Session Host for session %s (host pid=%s, child pid=%s): %s",
@@ -1106,6 +1106,10 @@ class SessionManager:
         )
         kill_pid(rec.child_pid, force=True)
         kill_pid(rec.host_pid, force=True)
+        # Clear the zombie a host we parented leaves behind (no-op for a
+        # reattached host that init reaps, or on Windows).
+        reap_zombie(rec.child_pid)
+        reap_zombie(rec.host_pid)
         with contextlib.suppress(Exception):
             self._host_index.remove(rec.session_id)
 
