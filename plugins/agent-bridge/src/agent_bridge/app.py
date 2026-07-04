@@ -89,6 +89,7 @@ async def lifespan(app: FastAPI):
         timeouts=cfg.timeouts,
         retention=cfg.retention,
         session_host_enabled=cfg.session_host_enabled,
+        session_host_stale_reap_seconds=cfg.session_host_stale_reap_seconds,
     )
     app.state.session_manager = mgr
 
@@ -202,6 +203,30 @@ async def lifespan(app: FastAPI):
             idle_secs,
         )
 
+    # Version-mux sprawl sweep (Phase 4, #1765) -- periodically reap stranded
+    # incompatible Session Hosts once their child stops (or they outlive the
+    # configured age bound), so an old host-layer generation cannot pin an old
+    # on-disk install for a whole frontend lifetime. Only runs in Session-Host
+    # mode; harmless (empty) unless a breaking host-protocol change left older
+    # hosts running.
+    host_sweep_task = None
+    if cfg.session_host_enabled:
+        async def _host_sweep_loop() -> None:
+            # A few times per bound (min 60s) when a bound is set; otherwise an
+            # hourly cadence just to reap children that reached their own stop.
+            bound = cfg.session_host_stale_reap_seconds
+            interval = max(60.0, bound / 4) if bound and bound > 0 else 3600.0
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    n = await asyncio.to_thread(mgr.sweep_stranded_hosts)
+                    if n:
+                        log.info("Version-mux sweep reaped %d stranded host(s)", n)
+                except Exception:
+                    log.warning("Version-mux stranded-host sweep failed", exc_info=True)
+
+        host_sweep_task = asyncio.create_task(_host_sweep_loop())
+
     # Routing-table publish-on-ready -- a normal daemon announces its endpoint
     # to active.json once it is actually listening, so CLI clients discover it
     # via the routing table. A passive cutover instance leaves publish_on_ready
@@ -266,6 +291,12 @@ async def lifespan(app: FastAPI):
         gc_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await gc_task
+
+    # Shutdown: stop the version-mux stranded-host sweep
+    if host_sweep_task is not None:
+        host_sweep_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await host_sweep_task
 
     # Shutdown: stop credential relay
     if relay_server and relay_server.running:

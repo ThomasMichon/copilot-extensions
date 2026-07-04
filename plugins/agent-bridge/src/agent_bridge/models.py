@@ -319,3 +319,14 @@ class ServiceConfig(BaseModel):
         "active session; the frontend reattaches over a loopback endpoint. See "
         "the session_host package / effort agent-bridge-version-mux (#1759).",
     )
+    session_host_stale_reap_seconds: int = Field(
+        default=0,
+        description="Version-mux sprawl bound (Phase 4, #1765). When > 0, a "
+        "Session Host whose wire protocol this build no longer speaks (a rare "
+        "breaking host-layer change) and whose child never idles is force-reaped "
+        "once it has outlived this many seconds, so an immortal session cannot "
+        "pin an old on-disk install forever. A stranded host whose child has "
+        "already stopped is always reaped regardless. 0 disables the age bound "
+        "(the default -- such a host then strands until its child's own stop). "
+        "Only meaningful when session_host_enabled is True.",
+    )

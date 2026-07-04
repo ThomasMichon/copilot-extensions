@@ -327,6 +327,7 @@ class SessionManager:
         drain_warn_interval_s: float | None = None,
         session_host_enabled: bool = False,
         session_host_state_dir: str | None = None,
+        session_host_stale_reap_seconds: float = 0.0,
     ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
@@ -334,6 +335,7 @@ class SessionManager:
         # a survivable Session Host that outlives a frontend restart. The host
         # index is the durable session_id -> host-endpoint map used to reattach.
         self._session_host_enabled = session_host_enabled
+        self._session_host_stale_reap_seconds = session_host_stale_reap_seconds
         self._host_index: Any = None
         if session_host_enabled:
             from pathlib import Path as _Path
@@ -877,7 +879,7 @@ class SessionManager:
             return 0
         from .session_host.acp_adapter import open_acp_streams
         from .session_host.client import SessionHostClient
-        from .session_host.osutil import kill_pid, pid_alive
+        from .session_host.osutil import pid_alive
         from .session_host.version_mux import HostDisposition, plan_host
 
         self._host_index.prune_dead(pid_alive)
@@ -888,10 +890,7 @@ class SessionManager:
                 protocol_version=rec.protocol_version,
                 child_alive=pid_alive(rec.child_pid),
                 age_seconds=(now - rec.created_at) if rec.created_at else None,
-                # The opt-in sprawl age bound is wired by a Phase-4 follow-up;
-                # for now an immortal incompatible session strands (never
-                # reaped mid-turn) rather than being force-reaped.
-                stale_reap_seconds=None,
+                stale_reap_seconds=self._session_host_stale_reap_seconds,
             )
             if plan.disposition is HostDisposition.STRAND:
                 log.info(
@@ -903,13 +902,7 @@ class SessionManager:
                 continue
             if plan.disposition in (HostDisposition.REAP_STOPPED,
                                     HostDisposition.FORCE_REAP):
-                log.info(
-                    "Reaping stranded Session Host for session %s (pid=%s): %s",
-                    rec.session_id, rec.host_pid, plan.reason,
-                )
-                kill_pid(rec.host_pid)
-                with contextlib.suppress(Exception):
-                    self._host_index.remove(rec.session_id)
+                self._reap_stranded_host(rec, plan.reason)
                 continue
             session = self._sessions.get(rec.session_id)
             if session is None or not session.acp_session_id:
@@ -982,6 +975,57 @@ class SessionManager:
             rec for rec in self._host_index.live_records(pid_alive)
             if not is_compatible(rec.protocol_version)
         ]
+
+    def _reap_stranded_host(self, rec: Any, reason: str) -> None:
+        """Kill a stranded incompatible Session Host and drop its index record.
+
+        Only ever called for a host this frontend cannot speak to whose disposition
+        is REAP_STOPPED (child already at its own stop) or FORCE_REAP (past the
+        configured sprawl bound) -- never for a host with a live child under the
+        bound (that strands, honoring goal 1).
+        """
+        from .session_host.osutil import kill_pid
+
+        log.info(
+            "Reaping stranded Session Host for session %s (pid=%s): %s",
+            rec.session_id, rec.host_pid, reason,
+        )
+        kill_pid(rec.host_pid)
+        with contextlib.suppress(Exception):
+            self._host_index.remove(rec.session_id)
+
+    def sweep_stranded_hosts(self) -> int:
+        """Reap stranded incompatible Session Hosts that are now reapable.
+
+        A periodic counterpart to the startup-time gate in
+        ``reattach_session_hosts``: during a single long frontend lifetime an
+        incompatible host's child may finally reach its own stop, or an immortal
+        one may outlive the configured ``session_host_stale_reap_seconds`` sprawl
+        bound. This re-evaluates every live host and reaps those whose disposition
+        is REAP_STOPPED or FORCE_REAP -- never touching a compatible host or a
+        stranded host still within the bound. Returns the count reaped. No-op
+        unless ``session_host_enabled``.
+        """
+        if not self._session_host_enabled or self._host_index is None:
+            return 0
+        from .session_host.osutil import pid_alive
+        from .session_host.version_mux import HostDisposition, plan_host
+
+        self._host_index.prune_dead(pid_alive)
+        now = time.time()
+        reaped = 0
+        for rec in self._host_index.live_records(pid_alive):
+            plan = plan_host(
+                protocol_version=rec.protocol_version,
+                child_alive=pid_alive(rec.child_pid),
+                age_seconds=(now - rec.created_at) if rec.created_at else None,
+                stale_reap_seconds=self._session_host_stale_reap_seconds,
+            )
+            if plan.disposition in (HostDisposition.REAP_STOPPED,
+                                    HostDisposition.FORCE_REAP):
+                self._reap_stranded_host(rec, plan.reason)
+                reaped += 1
+        return reaped
 
     async def start_session(
         self,
