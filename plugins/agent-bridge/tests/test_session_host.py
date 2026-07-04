@@ -368,6 +368,83 @@ def test_host_index_corrupt_file_is_ignored(tmp_path):
     assert len(idx) == 0
 
 
+# --------------------------------------------------------------------------
+# flag-gated start_session -> Session-Host mode, end to end (real subprocesses)
+# --------------------------------------------------------------------------
+_FAKE_AGENT_SRC = (
+    "import asyncio, acp\n"
+    "from acp.schema import InitializeResponse, NewSessionResponse, AgentCapabilities\n"
+    "class Agent:\n"
+    "    async def initialize(self, protocol_version, **kw):\n"
+    "        return InitializeResponse(protocol_version=protocol_version, agent_capabilities=AgentCapabilities())\n"
+    "    async def new_session(self, cwd, **kw):\n"
+    "        return NewSessionResponse(session_id='host-mode-sess')\n"
+    "    def __getattr__(self, name):\n"
+    "        if name.startswith('_') or name == 'on_connect':\n"
+    "            raise AttributeError(name)\n"
+    "        async def _noop(*a, **k):\n"
+    "            return None\n"
+    "        return _noop\n"
+    "asyncio.run(acp.run_agent(Agent()))\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_start_session_host_mode_end_to_end(tmp_path, monkeypatch):
+    import os
+    import sys
+
+    from agent_bridge.db import Database
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+    fake_argv = [sys.executable, str(agent_script)]
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return fake_argv, str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+
+    db = Database(tmp_path / "s.db")
+    mgr = SessionManager(
+        db, session_host_enabled=True,
+        session_host_state_dir=str(tmp_path / "hosts"),
+    )
+    host_pid = None
+    child_pid = None
+    try:
+        target = SpawnTarget(type="local", cwd=str(tmp_path))
+        session = await asyncio.wait_for(mgr.start_session(target), timeout=30)
+
+        # ACP session created THROUGH the Session Host, host index registered.
+        assert session.acp_session_id == "host-mode-sess"
+        assert session.pid  # child pid surfaced via host-mode AcpClient
+        assert mgr._host_index is not None and len(mgr._host_index) == 1
+        rec = mgr._host_index.all()[0]
+        host_pid, child_pid = rec.host_pid, rec.child_pid
+        assert osutil_pid_alive(host_pid)
+
+        # host-mode teardown DETACHES -- the child survives (goal 1).
+        await session.client.shutdown()
+        await asyncio.sleep(0.2)
+        assert osutil_pid_alive(host_pid)  # host + child untouched by detach
+    finally:
+        for pid in (host_pid, child_pid):
+            if pid:
+                with contextlib.suppress(Exception):
+                    if sys.platform == "win32":
+                        import subprocess
+                        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    else:
+                        import os as _os
+                        import signal
+                        _os.kill(pid, signal.SIGKILL)
+        db.close()
+
+
 @pytest.mark.asyncio
 async def test_launch_session_host_process_owns_child(tmp_path):
     import signal

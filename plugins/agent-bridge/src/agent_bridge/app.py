@@ -88,6 +88,7 @@ async def lifespan(app: FastAPI):
         context_thresholds=cfg.context_thresholds,
         timeouts=cfg.timeouts,
         retention=cfg.retention,
+        session_host_enabled=cfg.session_host_enabled,
     )
     app.state.session_manager = mgr
 
