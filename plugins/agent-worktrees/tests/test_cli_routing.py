@@ -82,7 +82,7 @@ def test_bare_no_project_routes_to_help(monkeypatch, capsys):
     rc = m.main([])
     assert rc == 1
     err = capsys.readouterr().err
-    assert "No project context" in err
+    assert "Could not resolve a project" in err
     assert "register" in err
 
 
@@ -93,7 +93,7 @@ def test_project_requiring_command_no_project_routes_to_help(monkeypatch, capsys
     rc = m.main(["list"])
     assert rc == 1
     err = capsys.readouterr().err
-    assert "No project context for 'list'" in err
+    assert "Could not resolve a project for 'list'" in err
 
 
 def test_project_flag_sets_env_and_bypasses_help(monkeypatch):
@@ -204,25 +204,30 @@ def test_new_picker_enabled_precedence(monkeypatch):
     assert not picker_tui.new_picker_enabled(types.SimpleNamespace(new_picker=True))
 
 
-def test_project_flag_blanks_inherited_worktree_id(monkeypatch):
-    """#25: --project blanks the caller's inherited WORKTREE_ID so worktree
-    resolution falls back to CWD instead of the wrong (cross-project) id."""
+def test_project_flag_sets_active_project_and_ignores_worktree_id(monkeypatch):
+    """--project selects the project (assume CWD = its anchor). The inherited
+    WORKTREE_ID is now simply IGNORED -- identity comes from CWD -- and is no
+    longer scrubbed from the environment."""
     import os
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setenv("WORKTREE_ID", "caller-session-wt")
     monkeypatch.setenv("APERTURE_WORKTREE_ID", "caller-session-wt")
-    monkeypatch.setattr(m, "cmd_launch", lambda argv: 0)
+    monkeypatch.setitem(m.COMMAND_MAP, "status", lambda args: 0)
 
     rc = m.main(["--project", "demo", "status"])
     assert rc == 0
+    assert m.cfg.active_project() == "demo"
+    # Exported for legacy shell consumers; the Python resolver reads
+    # cfg.active_project(), not this env var.
     assert os.environ.get("WORKTREE_PROJECT") == "demo"
-    assert os.environ.get("WORKTREE_ID") is None
-    assert os.environ.get("APERTURE_WORKTREE_ID") is None
+    # No longer scrubbed -- present but irrelevant to CWD-based resolution.
+    assert os.environ.get("WORKTREE_ID") == "caller-session-wt"
+    assert os.environ.get("APERTURE_WORKTREE_ID") == "caller-session-wt"
 
 
-def test_bare_invocation_preserves_inherited_worktree_id(monkeypatch):
-    """#25: without --project, a bare invocation still inherits the session's
-    WORKTREE_ID -- the intended 'operate on my current worktree' path."""
+def test_bare_invocation_ignores_inherited_worktree_id(monkeypatch):
+    """Without --project, a bare launch resolves context from CWD; the inherited
+    WORKTREE_ID is neither consulted nor deleted (it is simply irrelevant)."""
     import os
     monkeypatch.setenv("WORKTREE_PROJECT", "demo")
     monkeypatch.setenv("WORKTREE_ID", "keep-me")

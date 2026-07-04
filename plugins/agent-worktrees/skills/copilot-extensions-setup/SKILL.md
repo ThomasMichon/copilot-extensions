@@ -230,9 +230,21 @@ Register a repo for worktree-managed sessions. Run **from inside the repo**.
 
 ### Binstub Format
 
+The binstub names its project via `--project` (context otherwise resolves from
+CWD, git-like) and routes through the Python CLI, which dispatches subcommands
+and launches sessions. It falls back to `launch-session` only when the venv is
+missing (recovery), passing the project via `WORKTREE_PROJECT` on that degraded
+path.
+
 **Windows (`{repo-name}.cmd`):**
 ```bat
 @echo off
+set "PYTHONUTF8=1"
+set "_PY=%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe"
+if not exist "%_PY%" goto :_aw_fallback
+"%_PY%" -m agent_worktrees --project {repo-name} %*
+exit /b %ERRORLEVEL%
+:_aw_fallback
 set "WORKTREE_PROJECT={repo-name}"
 "%USERPROFILE%\.agent-worktrees\bin\launch-session.cmd" %*
 ```
@@ -240,6 +252,11 @@ set "WORKTREE_PROJECT={repo-name}"
 **Linux (`{repo-name}`):**
 ```bash
 #!/usr/bin/env bash
+export PYTHONUTF8=1
+_AW="$HOME/.agent-worktrees/.venv/bin/agent-worktrees"
+if [[ -x "$_AW" ]]; then
+    exec "$_AW" --project {repo-name} "$@"
+fi
 export WORKTREE_PROJECT="{repo-name}"
 exec "$HOME/.agent-worktrees/bin/launch-session.sh" "$@"
 ```

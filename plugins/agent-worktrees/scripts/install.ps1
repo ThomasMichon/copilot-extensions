@@ -700,17 +700,15 @@ function Deploy-Binstub {
     $content = @"
 @echo off
 set "PYTHONUTF8=1"
-set "WORKTREE_PROJECT=$ProjectName"
-rem #25: a project binstub is a cross-project entry point --
-rem drop any inherited WORKTREE_ID so worktree resolution uses CWD.
-set "WORKTREE_ID="
-set "APERTURE_WORKTREE_ID="
+rem Context resolves from CWD / --project (git-like); the binstub names its
+rem project via --project, not an ambient env var.
 set "_PY=%USERPROFILE%\.agent-worktrees\.venv\Scripts\python.exe"
 if not exist "%_PY%" goto :_aw_fallback
-"%_PY%" -m agent_worktrees %*
+"%_PY%" -m agent_worktrees --project $ProjectName %*
 exit /b %ERRORLEVEL%
 :_aw_fallback
-rem Fallback: launch session directly (venv missing / recovery)
+rem Recovery (venv missing): launch-session reads WORKTREE_PROJECT
+set "WORKTREE_PROJECT=$ProjectName"
 "%USERPROFILE%\.agent-worktrees\bin\launch-session.cmd" %*
 exit /b %ERRORLEVEL%
 "@
@@ -724,29 +722,22 @@ exit /b %ERRORLEVEL%
     # to launch-session when the venv is missing (recovery).
     $ps1Content = (@'
 $env:PYTHONUTF8 = '1'
-# This .ps1 is the primary resolution for a bare `<project>` in pwsh and runs
-# in-process in the caller's session (unlike the .cmd, which got isolation via
-# a child cmd.exe). Save+restore the worktree env so it is scoped to the child
-# python only and never mutates the caller's live session. Drop inherited
-# WORKTREE_ID so resolution uses CWD (issue #25).
+# Context resolves from CWD / --project (git-like). This .ps1 runs in-process in
+# the caller's session, so it names its project via --project (not an ambient
+# env var), leaving the live session env untouched. Recovery (venv missing)
+# passes the project to launch-session via a scoped, restored WORKTREE_PROJECT.
+$_py = "$env:USERPROFILE\.agent-worktrees\.venv\Scripts\python.exe"
+if (Test-Path $_py) {
+    & $_py -m agent_worktrees --project '%%PROJECT%%' @args
+    exit $LASTEXITCODE
+}
 $_savedProj = $env:WORKTREE_PROJECT
-$_savedWid  = $env:WORKTREE_ID
-$_savedAwid = $env:APERTURE_WORKTREE_ID
 $env:WORKTREE_PROJECT = '%%PROJECT%%'
-Remove-Item Env:WORKTREE_ID -ErrorAction SilentlyContinue
-Remove-Item Env:APERTURE_WORKTREE_ID -ErrorAction SilentlyContinue
 try {
-    $_py = "$env:USERPROFILE\.agent-worktrees\.venv\Scripts\python.exe"
-    if (Test-Path $_py) {
-        & $_py -m agent_worktrees @args
-    } else {
-        & "$env:USERPROFILE\.agent-worktrees\bin\launch-session.cmd" @args
-    }
+    & "$env:USERPROFILE\.agent-worktrees\bin\launch-session.cmd" @args
     $_rc = $LASTEXITCODE
 } finally {
     if ($null -eq $_savedProj) { Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue } else { $env:WORKTREE_PROJECT = $_savedProj }
-    if ($null -eq $_savedWid)  { Remove-Item Env:WORKTREE_ID -ErrorAction SilentlyContinue }       else { $env:WORKTREE_ID = $_savedWid }
-    if ($null -eq $_savedAwid) { Remove-Item Env:APERTURE_WORKTREE_ID -ErrorAction SilentlyContinue } else { $env:APERTURE_WORKTREE_ID = $_savedAwid }
 }
 exit $_rc
 '@).Replace('%%PROJECT%%', $ProjectName)
@@ -1462,10 +1453,9 @@ function Deploy-WslBinstub {
 #!/usr/bin/env bash
 # Thin binstub for $ProjectName - deployed by agent-worktrees (Windows)
 # Requires agent-worktrees to be installed in WSL via the copilot-extensions plugin.
+# This thin launcher only starts a session (no CLI dispatch), so it passes the
+# project to launch-session via WORKTREE_PROJECT.
 export WORKTREE_PROJECT="$ProjectName"
-# #25: a project binstub is a cross-project entry point --
-# drop any inherited WORKTREE_ID so worktree resolution uses CWD.
-unset WORKTREE_ID APERTURE_WORKTREE_ID
 _launcher="`$HOME/.agent-worktrees/bin/launch-session.sh"
 if [[ -x "`$_launcher" ]]; then
     exec "`$_launcher" "`$@"

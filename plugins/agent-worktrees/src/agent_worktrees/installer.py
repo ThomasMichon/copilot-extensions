@@ -420,9 +420,10 @@ def _write_binstub_if_changed(dst: Path, content: str) -> bool:
 def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
     """Generate project-specific binstubs in ~/.local/bin/.
 
-    Creates a thin binstub that sets ``WORKTREE_PROJECT`` and routes
-    through the Python CLI for subcommand dispatch. Falls back to the
-    shell launcher if the venv is missing (recovery path).
+    Creates a thin binstub that names its project via ``--project`` (context
+    otherwise resolves from CWD, git-like) and routes through the Python CLI for
+    subcommand dispatch. Falls back to the shell launcher if the venv is missing
+    (recovery path), which passes the project via ``WORKTREE_PROJECT``.
 
     Returns True on success.
     """
@@ -431,8 +432,8 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
 
     is_windows = platform.system() == "Windows"
 
-    # Project-specific launcher (sets WORKTREE_PROJECT, routes to the CLI).
-    # Generated for every supported platform -- previously this only had a
+    # Project-specific launcher (names its project via --project, routes to the
+    # CLI). Generated for every supported platform -- previously this only had a
     # Windows code path, so on macOS/Linux `register` silently created no
     # launcher at all.
     if project:
@@ -440,18 +441,16 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
             binstub_content = (
                 "@echo off\r\n"
                 'set "PYTHONUTF8=1"\r\n'
-                f'set "WORKTREE_PROJECT={project}"\r\n'
-                'rem #25: a project binstub is a cross-project entry point --\r\n'
-                'rem drop any inherited WORKTREE_ID so worktree resolution uses CWD.\r\n'
-                'set "WORKTREE_ID="\r\n'
-                'set "APERTURE_WORKTREE_ID="\r\n'
+                'rem Context resolves from CWD / --project (git-like); the binstub\r\n'
+                'rem names its project via --project, not an ambient env var.\r\n'
                 'set "_PY=%USERPROFILE%\\.agent-worktrees'
                 '\\.venv\\Scripts\\python.exe"\r\n'
                 'if not exist "%_PY%" goto :_aw_fallback\r\n'
-                '"%_PY%" -m agent_worktrees %*\r\n'
+                f'"%_PY%" -m agent_worktrees --project {project} %*\r\n'
                 'exit /b %ERRORLEVEL%\r\n'
                 ':_aw_fallback\r\n'
-                'rem Fallback: launch session directly (venv missing / recovery)\r\n'
+                'rem Recovery (venv missing): launch-session reads WORKTREE_PROJECT\r\n'
+                f'set "WORKTREE_PROJECT={project}"\r\n'
                 '"%USERPROFILE%\\.agent-worktrees\\bin\\launch-session.cmd" %*\r\n'
                 'exit /b %ERRORLEVEL%\r\n'
             )
@@ -460,15 +459,14 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
             binstub_content = (
                 "#!/usr/bin/env bash\n"
                 "export PYTHONUTF8=1\n"
-                f'export WORKTREE_PROJECT="{project}"\n'
-                "# #25: a project binstub is a cross-project entry point --\n"
-                "# drop any inherited WORKTREE_ID so worktree resolution uses CWD.\n"
-                "unset WORKTREE_ID APERTURE_WORKTREE_ID\n"
+                "# Context resolves from CWD / --project (git-like); the binstub\n"
+                "# names its project via --project, not an ambient env var.\n"
                 '_AW="$HOME/.agent-worktrees/.venv/bin/agent-worktrees"\n'
                 'if [[ -x "$_AW" ]]; then\n'
-                '    exec "$_AW" "$@"\n'
+                f'    exec "$_AW" --project {project} "$@"\n'
                 'fi\n'
-                '# Fallback: launch session directly (venv missing / recovery)\n'
+                '# Recovery (venv missing): launch-session reads WORKTREE_PROJECT\n'
+                f'export WORKTREE_PROJECT="{project}"\n'
                 'exec "$HOME/.agent-worktrees/bin/launch-session.sh" "$@"\n'
             )
             dst = lb / project
