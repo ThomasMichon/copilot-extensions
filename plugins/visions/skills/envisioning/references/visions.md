@@ -53,8 +53,10 @@ The load-bearing relationship in the whole system:
 The cycle:
 
 1. A **vision** states the expected features and behaviors of its subject.
-2. Diffing the vision against the subject's **reality docs** (and code) surfaces
-   **misalignments** — expected-but-absent or divergent items.
+2. Diffing the vision's **should-be body** (Purpose, Concepts, Features,
+   Behaviors, Non-Goals — *not* any Provenance/Journal) against the subject's
+   **reality docs** (and code) surfaces **misalignments** — expected-but-absent
+   or divergent items.
 3. Each misalignment becomes an **issue** that *cites the vision item*.
 4. Related issues are grouped into an **effort** that plans, implements, and
    validates the work (see the `planning-efforts` skill).
@@ -122,9 +124,34 @@ source of truth for the subject's intent.
 | **Behaviors** | how the subject should behave — semantics, invariants, UX, failure modes, performance intent — stated as outcomes, not mechanisms |
 | **Non-Goals / Boundaries** | what the subject deliberately is *not*; its edges |
 | **See Also** | navigation only — parent/child visions and reality docs (never a gap list) |
+| **Provenance / Journal** | *optional* — a called-out revision history / derivation trail of the vision itself; a non-authoritative easter egg, **excluded from delta derivation** (see below) |
 
 An addendum may rename sections or add one (e.g. a `Principles` section). The
-Header, Purpose & Intent, Features, and Behaviors are the irreducible core.
+Header, Purpose & Intent, Features, and Behaviors are the irreducible core. The
+**Provenance / Journal** is the one section that is explicitly *outside* the
+should-be body — see *Provenance* below.
+
+### Provenance / Journal (optional, non-authoritative)
+
+A vision **may** carry a `## Provenance` (or `## Journal`) section — a called-out
+revision history of the vision *itself*: dated notes on when ideas were conceived
+or revised, and where the intent was mined from. Because visions are revised in
+place, **Git holds the real history**; this section is a human-facing convenience
+(color, traceability, an "easter egg" of context), not the authority.
+
+It carries two hard constraints:
+
+- **Excluded from the delta.** The delta mechanic diffs **only the should-be
+  body** (Purpose & Intent, Concepts & Components, Features, Behaviors,
+  Non-Goals). The Provenance/Journal is **never** diffed and must **never**, on
+  its own, generate a delta, an issue, or an effort. It has *no bearing* on what
+  work gets carved.
+- **Vision history, not subject status.** Its notes describe how the *vision*
+  came to be or changed — never the subject's implementation status ("feature X
+  isn't built"), which would be a gap call-out that visions do not carry.
+
+If it starts reading like a status tracker or a backlog, it has drifted out of
+its lane — trim it back to vision history.
 
 ### Enumerate for citation
 

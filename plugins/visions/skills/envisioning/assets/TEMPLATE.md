@@ -73,3 +73,29 @@
 - Parent vision: <link or "none">
 - Child visions: <links or "none (leaf)">
 - Reality docs: <links>
+
+<!--
+  OPTIONAL: Provenance / Journal (delete this whole block if unused).
+
+  A vision MAY carry a "## Provenance" (or "## Journal") section: a called-out
+  revision history / derivation trail of the vision itself — when ideas were
+  conceived or revised, and where the intent was mined from. Since visions are
+  revised in place (Git holds the real history), this is a human-facing
+  convenience, NOT the authority.
+
+  HARD RULE — it is an easter egg, not a source of deltas. This section is
+  EXCLUDED from delta derivation: when diffing the vision against reality to
+  carve issues/efforts, ONLY the should-be body counts (Purpose & Intent,
+  Concepts & Components, Features, Behaviors, Non-Goals). The Provenance/Journal
+  never generates a delta, an issue, or an effort, and it records the VISION's
+  own history — never the subject's implementation status (that would be a gap
+  call-out, which visions do not carry).
+-->
+
+## Provenance
+
+<!-- OPTIONAL, non-authoritative. Dated notes on how this vision came to be /
+     was revised. Not part of the should-be spec; not diffed for deltas. -->
+
+- **<YYYY-MM-DD>** — <what was conceived/revised, and the source it was mined from>
+
