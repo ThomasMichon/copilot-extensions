@@ -7,8 +7,9 @@
     tools/setup/setup.ps1.  Sets basic environment variables, displays
     a brief welcome banner, and launches the Copilot CLI.
 
-    The launcher (launch-session.ps1) sets WORKTREE_ID, WORKTREE_PROJECT,
-    and the working directory before calling this script.
+    The launcher (launch-session.ps1) sets the working directory before
+    calling this script. Context (project) resolves from CWD, git-like --
+    no ambient WORKTREE_PROJECT is required.
 #>
 [CmdletBinding()]
 param(
@@ -21,7 +22,10 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # ── Environment ──────────────────────────────────────────────────────────
-$project = if ($env:WORKTREE_PROJECT) { $env:WORKTREE_PROJECT } else { Split-Path -Leaf $PWD }
+# Resolve the project from CWD (git-like); fall back to the directory name if
+# the CLI is unavailable (e.g. recovery mode).
+$project = (agent-worktrees get project 2>$null | Select-Object -First 1)
+if (-not $project) { $project = Split-Path -Leaf $PWD }
 $env:WORKTREE_MACHINE = $Machine
 
 # ── Welcome banner ───────────────────────────────────────────────────────

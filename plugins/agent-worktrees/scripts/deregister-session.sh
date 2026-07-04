@@ -7,15 +7,13 @@ set -euo pipefail
 _LOG="${WORKTREE_SETUP_LOG:-${APERTURE_SETUP_LOG:-/dev/null}}"
 _log() { printf '[%s] [%s] deregister-session: %s\n' "$(date '+%H:%M:%S')" "$1" "$2" >> "$_LOG" 2>/dev/null || true; }
 
+# Worktree id is resolved from CWD by the Python command (this hook runs in the
+# worktree). WORKTREE_ID is forwarded only if present, for robustness.
 wt_id="${WORKTREE_ID:-${APERTURE_WORKTREE_ID:-}}"
 session_id="${COPILOT_AGENT_SESSION_ID:-}"
 
-if [[ -z "$wt_id" ]]; then
-    _log SKIP "WORKTREE_ID not set"
-    exit 0
-fi
 if [[ -z "$session_id" ]]; then
-    _log SKIP "COPILOT_AGENT_SESSION_ID not set (wt=$wt_id)"
+    _log SKIP "COPILOT_AGENT_SESSION_ID not set"
     exit 0
 fi
 
@@ -25,14 +23,14 @@ if [[ ! -x "$PYTHON" ]]; then
     exit 0
 fi
 
+args=(-m agent_worktrees deregister-session --session-id "$session_id")
+[[ -n "$wt_id" ]] && args+=(--worktree-id "$wt_id")
+
 export PYTHONPATH=""  # package is installed in the venv (no lib/ shadow)
-if "$PYTHON" -m agent_worktrees deregister-session \
-    --worktree-id "$wt_id" \
-    --session-id "$session_id" \
-    2>/dev/null; then
-    _log OK "deregistered session=$session_id on wt=$wt_id"
+if PYTHONPATH="" "$PYTHON" "${args[@]}" 2>/dev/null; then
+    _log OK "deregistered session=$session_id on wt=${wt_id:-<from-cwd>}"
 else
-    _log WARN "deregister-session failed (exit $?) for session=$session_id wt=$wt_id"
+    _log WARN "deregister-session failed (exit $?) for session=$session_id wt=${wt_id:-<from-cwd>}"
 fi
 
 exit 0

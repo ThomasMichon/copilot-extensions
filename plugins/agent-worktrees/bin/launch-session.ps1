@@ -432,11 +432,14 @@ if ($plan.env) {
     }
 }
 
-# Publish worktree ID so tools (finalize, mark-complete) can auto-detect
-if ($plan.worktree_id) {
-    [System.Environment]::SetEnvironmentVariable('WORKTREE_ID', $plan.worktree_id, 'Process')
-    [System.Environment]::SetEnvironmentVariable('APERTURE_WORKTREE_ID', $plan.worktree_id, 'Process')  # backward compat
-}
+# Identity vars are NOT published into the child Copilot session -- in-session
+# tools resolve context from CWD (git-like). Clear any inherited copies so the
+# session env carries no ambient project/worktree identity. The launcher uses
+# $plan.worktree_id (never $env) for its own psmux + post-exit logic, and its
+# $env:WORKTREE_PROJECT uses (recovery / self-update) are all earlier.
+Remove-Item Env:WORKTREE_ID -ErrorAction SilentlyContinue
+Remove-Item Env:APERTURE_WORKTREE_ID -ErrorAction SilentlyContinue
+Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue
 
 $cmd = @($plan.cmd)
 
@@ -580,16 +583,14 @@ if (-not $noMux -and $psmuxCmd) {
     }
 
     # Build -e flags for env propagation into the psmux server.
-    # Merge plan.env with launcher-owned vars; launcher values win.
+    # Merge plan.env with launcher-owned vars; launcher values win. Identity
+    # vars (WORKTREE_PROJECT/WORKTREE_ID) are deliberately NOT injected -- the
+    # child resolves context from CWD.
     $mergedEnv = [ordered]@{}
     if ($plan.env) {
         foreach ($prop in $plan.env.PSObject.Properties) {
             $mergedEnv[$prop.Name] = [string]$prop.Value
         }
-    }
-    if ($plan.worktree_id) {
-        $mergedEnv['WORKTREE_ID'] = [string]$plan.worktree_id
-        $mergedEnv['APERTURE_WORKTREE_ID'] = [string]$plan.worktree_id
     }
     $mergedEnv['WORKTREE_SETUP_LOG'] = [string]$script:SetupLog
     $mergedEnv['APERTURE_SETUP_LOG'] = [string]$script:SetupLog

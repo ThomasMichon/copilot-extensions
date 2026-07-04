@@ -8,6 +8,7 @@ never trusted for identity when the directory is authoritative.
 
 from __future__ import annotations
 
+import os
 import types
 from pathlib import Path
 
@@ -100,12 +101,28 @@ def test_resolve_from_worktree_cwd(adopted_repo, monkeypatch):
     assert assumed is None
 
 
-def test_project_override_assumes_anchor(adopted_repo):
+def test_project_override_reports_anchor(adopted_repo):
     anchor, *_ = adopted_repo
-    project, assumed = m._resolve_active_project("myproj")
+    project, reported = m._resolve_active_project("myproj")
     assert project == "myproj"
-    # --project X => assume CWD is X's anchor repo.
-    assert Path(assumed).resolve() == anchor.resolve()
+    # The resolver reports the anchor; main() decides whether to chdir to it.
+    assert Path(reported).resolve() == anchor.resolve()
+
+
+def test_cwd_is_inside_project(adopted_repo, monkeypatch):
+    anchor, _wt_root, wt_path, _wt_id, _conf = adopted_repo
+    monkeypatch.chdir(wt_path)
+    assert m._cwd_is_inside_project(anchor) is True
+    monkeypatch.chdir(anchor)
+    assert m._cwd_is_inside_project(anchor) is True
+
+
+def test_cwd_not_inside_other_project(adopted_repo, monkeypatch, tmp_path):
+    _anchor, _wt_root, wt_path, _wt_id, _conf = adopted_repo
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    monkeypatch.chdir(other)
+    assert m._cwd_is_inside_project(_anchor) is False
 
 
 def test_not_in_repo_resolves_nothing(adopted_repo, monkeypatch, tmp_path):
@@ -132,10 +149,11 @@ def test_worktree_id_none_at_anchor(adopted_repo, monkeypatch):
     assert m._infer_worktree_id(None, conf) is None
 
 
-def test_project_override_yields_no_worktree_id(adopted_repo):
+def test_project_override_yields_no_worktree_id_at_anchor(adopted_repo, monkeypatch):
     anchor, _wt_root, _wt_path, _wt_id, conf = adopted_repo
-    # --project set the assumed CWD to the anchor (not under worktree_root).
-    cfg.set_assumed_cwd(anchor)
+    # After main() chdir's to the anchor for a cross-project --project call, the
+    # CWD is the anchor (not under worktree_root) -> no worktree id.
+    monkeypatch.chdir(anchor)
     assert m._infer_worktree_id(None, conf) is None
 
 
@@ -162,3 +180,56 @@ def test_project_resolution_ignores_wrong_env(adopted_repo, monkeypatch):
     monkeypatch.chdir(wt_path)
     project, _assumed = m._resolve_active_project(None)
     assert project == "myproj"
+
+
+# ---------------------------------------------------------------------------
+# `main()` chdir behavior for --project (git `-C` semantics)
+# ---------------------------------------------------------------------------
+
+def test_project_binstub_from_within_worktree_keeps_worktree(adopted_repo, monkeypatch):
+    """Regression (the note): `<project> <cmd>` run from inside one of the
+    project's own worktrees must act on THAT worktree -- NOT chdir to the anchor
+    and lose it. This is the common sign-off case (`<project> push-changes`)."""
+    _anchor, _wt_root, wt_path, wt_id, _conf = adopted_repo
+    monkeypatch.chdir(wt_path)
+
+    captured = {}
+
+    def fake_status(args):
+        captured["cwd"] = Path.cwd().resolve()
+        captured["wt"] = m._infer_worktree_id_from_cwd()
+        return 0
+
+    monkeypatch.setitem(m.COMMAND_MAP, "status", fake_status)
+    orig = Path.cwd()
+    try:
+        rc = m.main(["--project", "myproj", "status"])
+    finally:
+        os.chdir(orig)
+    assert rc == 0
+    assert captured["cwd"] == wt_path.resolve()  # did NOT chdir away
+    assert captured["wt"] == wt_id               # acts on the current worktree
+
+
+def test_project_binstub_from_outside_chdirs_to_anchor(adopted_repo, monkeypatch, tmp_path):
+    """`<project> <cmd>` run from an unrelated directory chdir's to the
+    project's anchor (git `-C`), so it cleanly targets its own project."""
+    anchor, _wt_root, _wt_path, _wt_id, _conf = adopted_repo
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+
+    captured = {}
+
+    def fake_status(args):
+        captured["cwd"] = Path.cwd().resolve()
+        return 0
+
+    monkeypatch.setitem(m.COMMAND_MAP, "status", fake_status)
+    orig = Path.cwd()
+    try:
+        rc = m.main(["--project", "myproj", "status"])
+    finally:
+        os.chdir(orig)
+    assert rc == 0
+    assert captured["cwd"] == anchor.resolve()  # chdir'd to the anchor
