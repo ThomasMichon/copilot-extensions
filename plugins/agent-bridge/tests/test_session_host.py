@@ -1053,3 +1053,83 @@ async def test_reattach_strands_then_reaps_incompatible_host(tmp_path, monkeypat
                         import os as _os
                         import signal
                         _os.kill(pid, signal.SIGKILL)
+
+
+def test_config_stale_reap_default_is_disabled():
+    from agent_bridge.models import ServiceConfig
+
+    cfg = ServiceConfig()
+    assert cfg.session_host_stale_reap_seconds == 0  # age bound off by default
+
+
+@pytest.mark.asyncio
+async def test_sweep_strands_then_force_reaps_over_bound(tmp_path, monkeypatch):
+    """The periodic sweep leaves an incompatible host with a live child alone
+    under the bound (goal 1), then force-reaps it once it outlives the bound."""
+    import os
+    import sys
+    import time as _time
+
+    from agent_bridge.db import Database
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+    fake_argv = [sys.executable, str(agent_script)]
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return fake_argv, str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+
+    dbpath = tmp_path / "s.db"
+    statedir = str(tmp_path / "hosts")
+    host_pid = None
+    child_pid = None
+    try:
+        db = Database(dbpath)
+        mgr = SessionManager(db, session_host_enabled=True,
+                             session_host_state_dir=statedir,
+                             session_host_stale_reap_seconds=0)  # bound off
+        target = SpawnTarget(type="local", cwd=str(tmp_path))
+        session = await asyncio.wait_for(mgr.start_session(target), timeout=30)
+        rec = mgr._host_index.all()[0]
+        host_pid, child_pid = rec.host_pid, rec.child_pid
+        await session.client.shutdown()  # detach; host + child survive
+
+        # Make the host an incompatible generation with a live child.
+        rec.protocol_version = proto.PROTOCOL_VERSION + 1
+        mgr._host_index.register(rec)
+
+        # Bound disabled -> a live-child stranded host is left alone (goal 1).
+        assert mgr.sweep_stranded_hosts() == 0
+        assert osutil_pid_alive(host_pid)
+        assert rec.session_id in mgr._host_index
+
+        # Arm a small bound and backdate the host past it -> force-reaped.
+        mgr._session_host_stale_reap_seconds = 5.0
+        rec.created_at = _time.time() - 1000.0
+        mgr._host_index.register(rec)
+        assert mgr.sweep_stranded_hosts() == 1
+        assert rec.session_id not in mgr._host_index
+        from agent_bridge.session_host.osutil import pid_alive
+        for _ in range(100):
+            if not pid_alive(host_pid):
+                break
+            await asyncio.sleep(0.05)
+        assert not pid_alive(host_pid)  # host reaped by the sprawl bound
+        db.close()
+    finally:
+        for pid in (host_pid, child_pid):
+            if pid:
+                with contextlib.suppress(Exception):
+                    if sys.platform == "win32":
+                        import subprocess
+                        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                       stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL)
+                    else:
+                        import os as _os
+                        import signal
+                        _os.kill(pid, signal.SIGKILL)
