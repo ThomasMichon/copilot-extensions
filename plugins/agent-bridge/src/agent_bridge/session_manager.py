@@ -853,6 +853,77 @@ class SessionManager:
             ))
         return client, acp_sid
 
+    async def reattach_session_hosts(self) -> int:
+        """Reconnect to every surviving Session Host on startup (goal 3).
+
+        After an agent-bridge restart, ``_rehydrate`` has marked host-backed
+        sessions STOPPED. This reads the durable host index and, for each host
+        whose process is still alive, re-establishes the ACP connection over the
+        reattached loopback endpoint and **adopts** the existing ACP session --
+        no child respawn, no lost session. Dead hosts are pruned. Returns the
+        count reattached. No-op unless ``session_host_enabled``.
+        """
+        if not self._session_host_enabled or self._host_index is None:
+            return 0
+        from .session_host.acp_adapter import open_acp_streams
+        from .session_host.client import SessionHostClient
+        from .session_host.osutil import pid_alive
+
+        self._host_index.prune_dead(pid_alive)
+        reattached = 0
+        for rec in self._host_index.live_records(pid_alive):
+            session = self._sessions.get(rec.session_id)
+            if session is None or not session.acp_session_id:
+                continue
+
+            def _on_acp_event(event_type: str, data: dict[str, Any],
+                              _session: Session = session) -> None:
+                if _session.event_log:
+                    _session.event_log.append(event_type, data)
+                self._capture_progress(_session, event_type, data)
+                if event_type == "usage_update":
+                    self._handle_usage_update(_session, data)
+
+            try:
+                sock = await SessionHostClient.connect(port=rec.port)
+                await sock.attach(0)
+                streams = await open_acp_streams(sock)
+
+                async def _closer(_streams: Any = streams, _sock: Any = sock) -> None:
+                    await _streams.aclose()
+                    await _sock.close()
+
+                client = AcpClient(on_event=_on_acp_event)
+                await asyncio.wait_for(
+                    client.start_streams(
+                        streams.reader, streams.writer,
+                        child_pid=rec.child_pid, closer=_closer,
+                    ),
+                    timeout=self._timeouts.session_start,
+                )
+                client.adopt_session(session.acp_session_id)
+                session.client = client
+                session.status = SessionStatus.IDLE
+                self._db.update_session_status(
+                    rec.session_id, SessionStatus.IDLE.value, time.time(),
+                    pid=session.pid,
+                )
+                reattached += 1
+                log.info(
+                    "Reattached session %s to live Session Host (pid=%s, port=%s)",
+                    rec.session_id, rec.host_pid, rec.port,
+                )
+            except Exception:
+                log.warning(
+                    "Failed to reattach session %s to host pid=%s; pruning",
+                    rec.session_id, rec.host_pid, exc_info=True,
+                )
+                with contextlib.suppress(Exception):
+                    self._host_index.remove(rec.session_id)
+        if reattached:
+            log.info("Reattached %d session(s) to surviving Session Hosts", reattached)
+        return reattached
+
     async def start_session(
         self,
         target: SpawnTarget,

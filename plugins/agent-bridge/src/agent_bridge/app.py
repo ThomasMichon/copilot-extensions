@@ -92,6 +92,21 @@ async def lifespan(app: FastAPI):
     )
     app.state.session_manager = mgr
 
+    # Session-Host mode: reattach to any Session Hosts that survived a prior
+    # frontend restart (goal 3), instead of leaving those sessions STOPPED.
+    # Best-effort: a reattach failure must never block daemon startup.
+    if cfg.session_host_enabled:
+        try:
+            n = await mgr.reattach_session_hosts()
+            if n:
+                logging.getLogger("agent-bridge").info(
+                    "Reattached %d session(s) to surviving Session Hosts", n
+                )
+        except Exception:
+            logging.getLogger("agent-bridge").warning(
+                "Session-Host reattach on startup failed", exc_info=True
+            )
+
     # Load topology profiles + auto-discover local agents
     resolver = build_resolver(cfg)
     app.state.resolver = resolver
