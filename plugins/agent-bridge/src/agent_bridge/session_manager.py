@@ -992,10 +992,14 @@ class SessionManager:
                 continue
             if plan.disposition in (HostDisposition.REAP_STOPPED,
                                     HostDisposition.FORCE_REAP):
-                self._reap_stranded_host(rec, plan.reason)
+                self._reap_host_record(rec, plan.reason)
                 continue
             session = self._sessions.get(rec.session_id)
             if session is None or not session.acp_session_id:
+                # A live host with no adoptable session -- ended out from under
+                # it (its row was deleted) or a pre-#1786 orphan. Reap it rather
+                # than leak the host + child forever.
+                self._reap_host_record(rec, "no adoptable session on reattach")
                 continue
 
             def _on_acp_event(event_type: str, data: dict[str, Any],
@@ -1084,20 +1088,23 @@ class SessionManager:
             if not is_compatible(rec.protocol_version)
         ]
 
-    def _reap_stranded_host(self, rec: Any, reason: str) -> None:
-        """Kill a stranded incompatible Session Host and drop its index record.
+    def _reap_host_record(self, rec: Any, reason: str) -> None:
+        """Reap a Session Host + its child and drop the durable index record.
 
-        Only ever called for a host this frontend cannot speak to whose disposition
-        is REAP_STOPPED (child already at its own stop) or FORCE_REAP (past the
-        configured sprawl bound) -- never for a host with a live child under the
-        bound (that strands, honoring goal 1).
+        Kills the **child first** -- a POSIX SIGTERM to the host does not run its
+        cleanup, so the child could otherwise orphan -- then the host, then
+        removes the record. Cross-platform via ``osutil.kill_pid`` (on Windows
+        ``taskkill /T`` collects the process tree, and the host's kill-on-close
+        job also takes the child). Used for both the explicit-terminate reap
+        (#1786) and the version-mux stranded/forced reap.
         """
         from .session_host.osutil import kill_pid
 
         log.info(
-            "Reaping stranded Session Host for session %s (pid=%s): %s",
-            rec.session_id, rec.host_pid, reason,
+            "Reaping Session Host for session %s (host pid=%s, child pid=%s): %s",
+            rec.session_id, rec.host_pid, rec.child_pid, reason,
         )
+        kill_pid(rec.child_pid)
         kill_pid(rec.host_pid)
         with contextlib.suppress(Exception):
             self._host_index.remove(rec.session_id)
@@ -1131,7 +1138,7 @@ class SessionManager:
             )
             if plan.disposition in (HostDisposition.REAP_STOPPED,
                                     HostDisposition.FORCE_REAP):
-                self._reap_stranded_host(rec, plan.reason)
+                self._reap_host_record(rec, plan.reason)
                 reaped += 1
         return reaped
 
@@ -1756,6 +1763,16 @@ class SessionManager:
             raise SessionBusyError(session_id, session.active_background_tasks)
 
         await self._quiesce_session(session)
+
+        # Session-Host mode: an explicit end is a *sanctioned terminate*, so it
+        # must REAP the child -- unlike stop, whose host-mode shutdown only
+        # detaches to keep the child reattachable. Without this the host + child
+        # survive with a dangling index record and are never collected (#1786;
+        # goal 1: termination is intentional, not inadvertent).
+        if self._session_host_enabled and self._host_index is not None:
+            rec = self._host_index.get(session_id)
+            if rec is not None:
+                self._reap_host_record(rec, "session ended")
 
         session.status = SessionStatus.ENDED
         with contextlib.suppress(Exception):
