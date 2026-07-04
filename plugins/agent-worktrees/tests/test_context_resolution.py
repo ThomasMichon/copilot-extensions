@@ -233,3 +233,78 @@ def test_project_binstub_from_outside_chdirs_to_anchor(adopted_repo, monkeypatch
         os.chdir(orig)
     assert rc == 0
     assert captured["cwd"] == anchor.resolve()  # chdir'd to the anchor
+
+
+# ---------------------------------------------------------------------------
+# `get` keys: the rename-swap (worktree-dir = CURRENT worktree; worktrees-root
+# = the parent directory that holds all worktrees). See the
+# agent-worktrees-normalized-launch effort, Phase 1.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def active_myproj(monkeypatch):
+    """Set the module-level active project the way main() does, then restore."""
+    cfg.set_active_project("myproj")
+    yield
+    cfg.set_active_project(None)
+
+
+def test_get_worktree_dir_is_current_worktree(adopted_repo, active_myproj, monkeypatch, capsys):
+    """`get worktree-dir` from inside a worktree yields THAT worktree's root."""
+    _anchor, _wt_root, wt_path, _wt_id, _conf = adopted_repo
+    monkeypatch.chdir(wt_path)
+    rc = m.cmd_get(types.SimpleNamespace(key="worktree-dir"))
+    out = capsys.readouterr().out.strip()
+    assert rc == 0
+    assert Path(out).resolve() == wt_path.resolve()
+
+
+def test_get_worktree_dir_empty_at_anchor(adopted_repo, active_myproj, monkeypatch, capsys):
+    """At the anchor (not inside a worktree) `get worktree-dir` is empty."""
+    anchor, _wt_root, _wt_path, _wt_id, _conf = adopted_repo
+    monkeypatch.chdir(anchor)
+    rc = m.cmd_get(types.SimpleNamespace(key="worktree-dir"))
+    out = capsys.readouterr().out.strip()
+    assert rc == 0
+    assert out == ""
+
+
+def test_get_worktree_dir_empty_outside_repo(adopted_repo, active_myproj, monkeypatch, tmp_path, capsys):
+    """Outside any managed repo/worktree `get worktree-dir` is empty."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    rc = m.cmd_get(types.SimpleNamespace(key="worktree-dir"))
+    out = capsys.readouterr().out.strip()
+    assert rc == 0
+    assert out == ""
+
+
+def test_get_worktrees_root_is_parent(adopted_repo, active_myproj, monkeypatch, capsys):
+    """`get worktrees-root` yields the parent dir that holds all worktrees --
+    the OLD meaning of `worktree-dir` -- regardless of CWD."""
+    _anchor, wt_root, wt_path, _wt_id, _conf = adopted_repo
+    monkeypatch.chdir(wt_path)
+    rc = m.cmd_get(types.SimpleNamespace(key="worktrees-root"))
+    out = capsys.readouterr().out.strip()
+    assert rc == 0
+    assert Path(out).resolve() == wt_root.resolve()
+
+
+def test_get_repo_dir_is_anchor(adopted_repo, active_myproj, monkeypatch, capsys):
+    """`get repo-dir` still yields the anchor repo, from inside a worktree."""
+    anchor, _wt_root, wt_path, _wt_id, _conf = adopted_repo
+    monkeypatch.chdir(wt_path)
+    rc = m.cmd_get(types.SimpleNamespace(key="repo-dir"))
+    out = capsys.readouterr().out.strip()
+    assert rc == 0
+    assert Path(out).resolve() == anchor.resolve()
+
+
+def test_get_keys_lists_swapped_keys(adopted_repo, capsys):
+    """`get keys` advertises both the repointed worktree-dir and worktrees-root."""
+    rc = m.cmd_get(types.SimpleNamespace(key="keys"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "worktree-dir" in out
+    assert "worktrees-root" in out

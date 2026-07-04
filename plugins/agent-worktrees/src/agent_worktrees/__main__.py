@@ -5293,7 +5293,8 @@ def cmd_deploy_instructions(args: argparse.Namespace) -> int:
 
 _GET_KEYS: dict[str, str] = {
     "repo-dir":      "Anchor repo directory",
-    "worktree-dir":  "Worktree root directory",
+    "worktree-dir":  "Current worktree root (the worktree you are in; empty if not inside one)",
+    "worktrees-root": "Parent directory that holds all worktrees (formerly 'worktree-dir')",
     "src-dir":       "Source root (parent of repos)",
     "config-dir":    "Per-project config directory (~/.{project})",
     "machine":       "Machine name from config",
@@ -5321,9 +5322,16 @@ def cmd_get(args: argparse.Namespace) -> int:
         return 1
 
     repo = config.default_repo
+
+    # Current worktree root: resolve purely from CWD (git-like), via the dev107
+    # resolver. Empty when the caller is at the anchor or outside any worktree.
+    wt_id = _infer_worktree_id_from_cwd(config)
+    current_worktree = str(Path(repo.worktree_root) / wt_id) if wt_id else ""
+
     values = {
         "repo-dir":     repo.anchor,
-        "worktree-dir": repo.worktree_root,
+        "worktree-dir": current_worktree,
+        "worktrees-root": repo.worktree_root,
         "src-dir":      config.srcroot,
         "config-dir":   str(cfg.project_dir()),
         "machine":      config.machine,
