@@ -112,7 +112,10 @@ This is how a vision *does work*: it is diffed against reality.
 
 1. **Diff.** Compare the vision's expected features/behaviors (its lowest,
    most-specific level) against the subject's **architecture/reality docs** (their
-   highest level) — and the code where docs are thin.
+   highest level) — and the code where docs are thin. **Diff only the should-be
+   body** — Purpose & Intent, Concepts & Components, Features, Behaviors,
+   Non-Goals. An optional **Provenance/Journal** section (see below) is **never**
+   part of the diff.
 2. **Name misalignments.** Each expected-but-absent (or divergent) feature/behavior
    is a **delta**: file it as an issue that *cites the vision item*.
 3. **Carve efforts.** Group related deltas into an **effort** (see the
@@ -123,6 +126,27 @@ This is how a vision *does work*: it is diffed against reality.
 
 The vision is never edited to *record* this cycle. It is edited only when the
 **intent itself** changes.
+
+## Optional: a Provenance / Journal section (an easter egg, not a delta source)
+
+A vision **may** carry an optional `## Provenance` (or `## Journal`) section: a
+called-out revision history / derivation trail of the vision *itself* — when
+ideas were conceived or revised, and where the intent was mined from. It's a
+nice, human-facing convenience (visions are revised in place, so Git holds the
+*real* history; this is color and traceability on top).
+
+Two rules keep it from corrupting the model:
+
+- **It is excluded from delta derivation.** When you diff a vision against
+  reality to carve issues/efforts, **ignore this section entirely** — only the
+  should-be body counts. The Provenance/Journal must never, by itself, generate
+  a delta, an issue, or an effort. It has *no bearing* on what work gets carved.
+- **It records the vision's history, not the subject's status.** Dated notes are
+  about how the *vision* came to be or changed — never "feature X isn't built
+  yet" (that's a gap call-out, which visions do not carry).
+
+Keep it optional and lean; if it starts reading like a status tracker or a
+backlog, it has drifted out of its lane.
 
 ## Keep visions and reality legible
 
@@ -145,5 +169,8 @@ The vision is never edited to *record* this cycle. It is edited only when the
 - ❌ Duplicating a parent/sibling vision instead of revising it.
 - ❌ Editing a vision to record delta-closure progress — that state lives in the
   effort and the issues, not the vision.
+- ❌ Treating the optional **Provenance/Journal** as authoritative — never carve
+  a delta, issue, or effort from it, and never let it hold the subject's
+  implementation status (it records the *vision's* history only).
 - ❌ Letting a vision drift to match a half-built reality (a vision is the target,
   not a mirror of current code).
