@@ -1104,8 +1104,8 @@ class SessionManager:
             "Reaping Session Host for session %s (host pid=%s, child pid=%s): %s",
             rec.session_id, rec.host_pid, rec.child_pid, reason,
         )
-        kill_pid(rec.child_pid)
-        kill_pid(rec.host_pid)
+        kill_pid(rec.child_pid, force=True)
+        kill_pid(rec.host_pid, force=True)
         with contextlib.suppress(Exception):
             self._host_index.remove(rec.session_id)
 
