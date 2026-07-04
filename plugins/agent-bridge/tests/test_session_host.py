@@ -1361,3 +1361,128 @@ async def test_sse_stream_yields_events_before_shutdown():
     asyncio.ensure_future(_flip())
     await asyncio.wait_for(_collect(), timeout=3.0)
     assert any("agent_message" in c and "id: 1" in c for c in chunks)
+
+# --------------------------------------------------------------------------
+# Explicit end/destroy reaps the host-backed child (#1786)
+# --------------------------------------------------------------------------
+def _kill_pids(pids):
+    import os as _os
+    import signal
+    import subprocess
+    import sys
+    for pid in pids:
+        if not pid:
+            continue
+        with contextlib.suppress(Exception):
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                _os.kill(pid, signal.SIGKILL)
+
+
+async def _wait_dead(pid, timeout=5.0):
+    for _ in range(int(timeout / 0.05)):
+        if not osutil_pid_alive(pid):
+            return True
+        await asyncio.sleep(0.05)
+    return not osutil_pid_alive(pid)
+
+
+@pytest.mark.asyncio
+async def test_end_session_reaps_host(tmp_path, monkeypatch):
+    """end_session (the CLI `end` / DELETE) must REAP the host-backed child and
+    drop the index record -- not detach-and-orphan like stop (#1786)."""
+    import os
+    import sys
+
+    from agent_bridge.db import Database
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+    fake_argv = [sys.executable, str(agent_script)]
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return fake_argv, str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+
+    db = Database(tmp_path / "s.db")
+    host_pid = child_pid = None
+    try:
+        mgr = SessionManager(db, session_host_enabled=True,
+                             session_host_state_dir=str(tmp_path / "hosts"))
+        session = await asyncio.wait_for(
+            mgr.start_session(SpawnTarget(type="local", cwd=str(tmp_path))),
+            timeout=30)
+        rec = mgr._host_index.all()[0]
+        host_pid, child_pid = rec.host_pid, rec.child_pid
+        assert osutil_pid_alive(host_pid)
+
+        await asyncio.wait_for(mgr.end_session(session.session_id), timeout=30)
+
+        # Index record dropped, host + child reaped.
+        assert mgr._host_index.get(session.session_id) is None
+        assert len(mgr._host_index) == 0
+        assert await _wait_dead(host_pid), "host survived end_session"
+        assert await _wait_dead(child_pid), "child survived end_session"
+        db.close()
+    finally:
+        _kill_pids((host_pid, child_pid))
+
+
+@pytest.mark.asyncio
+async def test_reattach_reaps_orphaned_host(tmp_path, monkeypatch):
+    """A live host whose session is gone (row deleted / pre-#1786 orphan) is
+    reaped on reattach instead of leaking forever."""
+    import os
+    import sys
+
+    from agent_bridge.db import Database
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+    fake_argv = [sys.executable, str(agent_script)]
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return fake_argv, str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+
+    dbpath = tmp_path / "s.db"
+    statedir = str(tmp_path / "hosts")
+    host_pid = child_pid = None
+    try:
+        db1 = Database(dbpath)
+        mgr1 = SessionManager(db1, session_host_enabled=True,
+                              session_host_state_dir=statedir)
+        session = await asyncio.wait_for(
+            mgr1.start_session(SpawnTarget(type="local", cwd=str(tmp_path))),
+            timeout=30)
+        sid = session.session_id
+        rec = mgr1._host_index.all()[0]
+        host_pid, child_pid = rec.host_pid, rec.child_pid
+        # Simulate the pre-fix orphan: drop the session row + detach, but leave
+        # the host running and its index record in place.
+        await session.client.shutdown()
+        db1.delete_session(sid)
+        db1.close()
+        assert osutil_pid_alive(host_pid)
+
+        # Fresh frontend: rehydrate won't see the deleted session, so reattach
+        # finds a live host with no adoptable session -> reap it.
+        db2 = Database(dbpath)
+        mgr2 = SessionManager(db2, session_host_enabled=True,
+                              session_host_state_dir=statedir)
+        assert sid in mgr2._host_index          # orphan record present pre-reattach
+        n = await asyncio.wait_for(mgr2.reattach_session_hosts(), timeout=30)
+        assert n == 0                           # nothing adoptable
+        assert sid not in mgr2._host_index      # orphan record dropped
+        assert await _wait_dead(host_pid), "orphaned host not reaped"
+        db2.close()
+    finally:
+        _kill_pids((host_pid, child_pid))
