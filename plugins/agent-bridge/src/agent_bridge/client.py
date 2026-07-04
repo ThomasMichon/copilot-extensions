@@ -385,10 +385,23 @@ class BridgeClient:
         self, *, timeout: float = 300.0, poll: float = 1.0, force: bool = False
     ) -> dict[str, Any]:
         """POST /api/v1/drain -- stop accepting new work and wait for in-flight
-        sessions to settle (the zero-downtime pre-swap step)."""
+        sessions to settle (the zero-downtime pre-swap step).
+
+        If this process is a descendant of a Copilot session (its
+        ``AGENT_BRIDGE_SESSION_ID`` env is set -- e.g. an agent running an
+        in-session ``aperture-labs services agent-bridge update``), that session
+        is passed as ``exclude_session_id`` so the redeploy's graceful-cancel
+        does not cancel the very turn driving the update (#1790).
+        """
+        import os as _os
+
+        body: dict[str, Any] = {"timeout": timeout, "poll": poll, "force": force}
+        self_sid = _os.environ.get("AGENT_BRIDGE_SESSION_ID")
+        if self_sid:
+            body["exclude_session_id"] = self_sid
         return self._request(
             "POST", "/api/v1/drain",
-            body={"timeout": timeout, "poll": poll, "force": force},
+            body=body,
             request_timeout=timeout + 30.0,
         ) or {}
 

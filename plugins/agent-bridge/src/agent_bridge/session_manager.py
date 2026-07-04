@@ -328,6 +328,7 @@ class SessionManager:
         session_host_enabled: bool = False,
         session_host_state_dir: str | None = None,
         session_host_stale_reap_seconds: float = 0.0,
+        graceful_cancel_settle_seconds: float = 45.0,
     ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
@@ -336,6 +337,7 @@ class SessionManager:
         # index is the durable session_id -> host-endpoint map used to reattach.
         self._session_host_enabled = session_host_enabled
         self._session_host_stale_reap_seconds = session_host_stale_reap_seconds
+        self._graceful_cancel_settle_seconds = graceful_cancel_settle_seconds
         self._host_index: Any = None
         if session_host_enabled:
             from pathlib import Path as _Path
@@ -521,6 +523,76 @@ class SessionManager:
                 busy.append(sid)
         return busy
 
+    async def graceful_cancel_for_redeploy(
+        self,
+        *,
+        settle_timeout: float | None = None,
+        exclude_session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Assertively-but-nicely cancel in-flight turns ahead of a redeploy.
+
+        The Session-Host model keeps the child *alive* across a frontend
+        restart; this decides what to do with an in-flight **turn**. Rather than
+        leave it streaming blind (slow, fragile) or hard-kill it, we:
+
+        1. inject an ACP ``session/cancel`` into every session with an in-flight
+           turn (status RUNNING) -- *except* an optional ``exclude_session_id``
+           (the session that triggered the redeploy, e.g. an agent updating its
+           own bridge -- cancelling it would abort the very command doing the
+           update);
+        2. flag each such host-backed session ``resume_on_reattach`` so the
+           restarted frontend sends it a single ``Resume`` once reattached;
+        3. wait up to ``settle_timeout`` seconds for the cancelled turns to
+           reach their own stop (capturing the final streamed messages), so the
+           subsequent stop is clean and fast.
+
+        No-op unless ``session_host_enabled``. Returns a summary.
+        """
+        import asyncio as _asyncio
+
+        if not self._session_host_enabled:
+            return {"cancelled": [], "settled": True, "enabled": False}
+        settle = (self._graceful_cancel_settle_seconds
+                  if settle_timeout is None else settle_timeout)
+        # Only in-flight turns (goal: "only in-flight turns"); background-busy
+        # sessions are left alone.
+        targets = [
+            sid for sid, s in self._sessions.items()
+            if s.status == SessionStatus.RUNNING and sid != exclude_session_id
+        ]
+        cancelled: list[str] = []
+        for sid in targets:
+            session = self._sessions.get(sid)
+            if session is None or session.client is None:
+                continue
+            with contextlib.suppress(Exception):
+                await session.client.cancel_prompt()
+            if self._host_index is not None:
+                with contextlib.suppress(Exception):
+                    self._host_index.set_resume_flag(sid, True)
+            cancelled.append(sid)
+        if cancelled:
+            log.info(
+                "Graceful-cancel: sent ACP cancel to %d in-flight turn(s); "
+                "waiting up to %.0fs to settle: %s",
+                len(cancelled), settle, ", ".join(cancelled),
+            )
+        deadline = time.monotonic() + max(0.0, settle)
+        still = [s for s in cancelled
+                 if (self._sessions.get(s) is not None
+                     and self._sessions[s].status == SessionStatus.RUNNING)]
+        while still and time.monotonic() < deadline:
+            await _asyncio.sleep(0.5)
+            still = [s for s in cancelled
+                     if (self._sessions.get(s) is not None
+                         and self._sessions[s].status == SessionStatus.RUNNING)]
+        if still:
+            log.warning(
+                "Graceful-cancel: %d turn(s) did not settle within %.0fs "
+                "(proceeding anyway): %s", len(still), settle, ", ".join(still),
+            )
+        return {"cancelled": cancelled, "settled": not still, "enabled": True}
+
     async def drain(
         self,
         *,
@@ -529,6 +601,7 @@ class SessionManager:
         force: bool = False,
         reason: str | None = None,
         source: str = "drain-endpoint",
+        exclude_session_id: str | None = None,
     ) -> dict[str, Any]:
         """Open the drain gate and wait for in-flight work to settle.
 
@@ -539,6 +612,12 @@ class SessionManager:
         never hard-killed. Returns a summary; ``drained`` is False on timeout
         unless ``force`` is set (the caller accepts interrupting the laggards).
 
+        In **Session-Host mode** the drain is *assertive*: it first
+        graceful-cancels in-flight turns (ACP ``session/cancel`` + a
+        ``resume_on_reattach`` flag), bounded by ``graceful_cancel_settle_seconds``,
+        so a redeploy never blocks the full ``timeout`` on a long turn and a
+        session updating its own bridge (``exclude_session_id``) is spared.
+
         ``source``/``reason`` are recorded for observability (#1757). Note the
         gate stays open after this returns (the successor retires this daemon);
         the watchdog armed here auto-releases it if that handoff never lands.
@@ -548,15 +627,19 @@ class SessionManager:
         import asyncio as _asyncio
 
         self.set_draining(True, reason=reason, source=source)
+        if self._session_host_enabled:
+            await self.graceful_cancel_for_redeploy(
+                exclude_session_id=exclude_session_id,
+            )
         deadline = time.monotonic() + max(0.0, timeout)
-        busy = self.busy_sessions()
+        busy = [s for s in self.busy_sessions() if s != exclude_session_id]
         log.info(
             "Drain started: %d session(s) busy, timeout=%.0fs%s",
             len(busy), timeout, " (force)" if force else "",
         )
         while busy and time.monotonic() < deadline:
             await _asyncio.sleep(poll)
-            busy = self.busy_sessions()
+            busy = [s for s in self.busy_sessions() if s != exclude_session_id]
 
         drained = not busy
         if drained:
@@ -803,10 +886,17 @@ class SessionManager:
             target.cwd = work_dir
 
         with tracker.stage(ConnectStage.LAUNCH_ACP):
+            # Tag the child's environment with its own bridge session id so a
+            # command the agent runs (e.g. an in-session `aperture-labs services
+            # agent-bridge update`) can tell the drain to spare THIS session --
+            # cancelling the turn running the update would abort the update
+            # (#1790). Any descendant process inherits it.
+            child_env = dict(env or {})
+            child_env["AGENT_BRIDGE_SESSION_ID"] = session_id
             # launch_session_host blocks briefly on host readiness; keep it off
             # the event loop.
             handle = await asyncio.to_thread(
-                launch_session_host, args, cwd=work_dir, env=env,
+                launch_session_host, args, cwd=work_dir, env=child_env,
             )
             sock = await SessionHostClient.connect(port=handle.port)
             await sock.attach(0)
@@ -945,6 +1035,24 @@ class SessionManager:
                     "Reattached session %s to live Session Host (pid=%s, port=%s)",
                     rec.session_id, rec.host_pid, rec.port,
                 )
+                # If this session's in-flight turn was graceful-cancelled for the
+                # redeploy, nudge it back to work with a single "Resume" now that
+                # the frontend is reattached (operator: a bare "Resume" re-orients
+                # a Copilot session well without extra context).
+                if getattr(rec, "resume_on_reattach", False):
+                    self._host_index.set_resume_flag(rec.session_id, False)
+                    try:
+                        await self.submit_prompt(rec.session_id, "Resume")
+                        log.info(
+                            "Sent 'Resume' to reattached session %s "
+                            "(turn was graceful-cancelled for redeploy)",
+                            rec.session_id,
+                        )
+                    except Exception:
+                        log.warning(
+                            "Failed to send 'Resume' to reattached session %s",
+                            rec.session_id, exc_info=True,
+                        )
             except Exception:
                 log.warning(
                     "Failed to reattach session %s to host pid=%s; pruning",

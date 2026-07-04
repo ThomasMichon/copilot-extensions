@@ -330,3 +330,13 @@ class ServiceConfig(BaseModel):
         "(the default -- such a host then strands until its child's own stop). "
         "Only meaningful when session_host_enabled is True.",
     )
+    graceful_cancel_settle_seconds: int = Field(
+        default=45,
+        description="Redeploy graceful-cancel settle budget (Session-Host mode). "
+        "On drain/shutdown the daemon assertively-but-nicely cancels in-flight "
+        "turns (ACP session/cancel) instead of killing or blocking on them, then "
+        "waits up to this many seconds for the cancelled turns to reach their own "
+        "stop (capturing final streamed messages) before stopping. Mid-turn "
+        "sessions are flagged to receive a 'Resume' nudge once the restarted "
+        "frontend reattaches. Only meaningful when session_host_enabled is True.",
+    )

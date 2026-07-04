@@ -90,6 +90,7 @@ async def lifespan(app: FastAPI):
         retention=cfg.retention,
         session_host_enabled=cfg.session_host_enabled,
         session_host_stale_reap_seconds=cfg.session_host_stale_reap_seconds,
+        graceful_cancel_settle_seconds=cfg.graceful_cancel_settle_seconds,
     )
     app.state.session_manager = mgr
 
@@ -306,6 +307,17 @@ async def lifespan(app: FastAPI):
     # Shutdown: stop worktree discovery
     from .routes.worktrees import get_cache
     await get_cache().stop()
+
+    # Shutdown: Session-Host mode -- assertively-but-nicely cancel in-flight
+    # turns (ACP session/cancel + a resume_on_reattach flag) before tearing the
+    # sessions down, so a bare `systemctl restart` (no installer drain) is fast
+    # and clean, and mid-turn sessions get a "Resume" once the new frontend
+    # reattaches. No-op unless session_host_enabled.
+    if cfg.session_host_enabled:
+        try:
+            await mgr.graceful_cancel_for_redeploy()
+        except Exception:
+            log.warning("Graceful-cancel on shutdown failed", exc_info=True)
 
     # Shutdown: stop all active sessions gracefully
     for session in mgr.list_sessions():

@@ -52,9 +52,13 @@ async def drain(request: Request):
     # distinguishable from a manual one in logs/health (#1757).
     source = body.get("source") or "drain-endpoint"
     reason = body.get("reason")
+    # A session may exclude itself from graceful-cancel (an agent updating its
+    # own bridge must not have the turn running the update cancelled -- #1790).
+    exclude = body.get("exclude_session_id")
     return await mgr.drain(
         timeout=timeout, poll=max(0.05, poll), force=force,
         source=str(source), reason=(str(reason) if reason is not None else None),
+        exclude_session_id=(str(exclude) if exclude else None),
     )
 
 
