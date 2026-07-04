@@ -357,16 +357,18 @@ def _home() -> Path:
     return Path.home()
 
 
-# ── Active project / assumed CWD (in-process, git-like context) ──────────
-# The active project and the "assumed CWD" are resolved once per invocation
-# from the current working directory (or an explicit ``--project``) and threaded
-# in-process here -- they are NOT read from ambient environment variables.
-# ``main()`` sets these after CWD/flag resolution; every consumer reads them
-# through ``project_name()`` / ``assumed_cwd()``. This is what makes
-# agent-worktrees resolve context the way git does: from where you are, not from
-# inherited session env.
+# ── Active project (in-process, git-like context) ───────────────────────
+# The active project is resolved once per invocation from the current working
+# directory (or an explicit ``--project``) and threaded in-process here -- it is
+# NOT read from ambient environment variables. ``main()`` sets it after CWD/flag
+# resolution; every consumer reads it through ``project_name()``.
+#
+# There is deliberately no "assumed CWD" override: when ``--project`` targets a
+# project the caller is not already inside, ``main()`` performs a real
+# ``os.chdir`` to that project's anchor (git ``-C`` semantics), so *every* code
+# path -- worktree-id inference, repo discovery, git subprocesses -- resolves
+# consistently from the process's actual working directory.
 _ACTIVE_PROJECT: str | None = None
-_ASSUMED_CWD: Path | None = None
 
 
 def set_active_project(name: str | None) -> None:
@@ -378,21 +380,6 @@ def set_active_project(name: str | None) -> None:
 def active_project() -> str | None:
     """Return the in-process active project name, or ``None`` if unresolved."""
     return _ACTIVE_PROJECT
-
-
-def set_assumed_cwd(path: Path | None) -> None:
-    """Set the assumed working directory (the anchor when ``--project`` is used).
-
-    When a project is named explicitly, context resolves *as if* CWD were that
-    project's anchor repo; ``None`` restores the real ``Path.cwd()``.
-    """
-    global _ASSUMED_CWD
-    _ASSUMED_CWD = path
-
-
-def assumed_cwd() -> Path:
-    """Return the assumed CWD -- the anchor when ``--project`` set one, else CWD."""
-    return _ASSUMED_CWD if _ASSUMED_CWD is not None else Path.cwd()
 
 
 def project_name() -> str:

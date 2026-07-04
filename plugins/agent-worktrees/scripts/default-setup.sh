@@ -5,8 +5,9 @@
 # tools/setup/setup.sh.  Sets basic environment variables, displays
 # a brief welcome banner, and launches the Copilot CLI.
 #
-# The launcher (launch-session.sh) sets WORKTREE_ID, WORKTREE_PROJECT,
-# and the working directory before calling this script.
+# The launcher (launch-session.sh) sets the working directory before calling
+# this script. Context (project) resolves from CWD, git-like -- no ambient
+# WORKTREE_PROJECT is required.
 
 set -euo pipefail
 
@@ -23,7 +24,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Environment ──────────────────────────────────────────────────────────
-PROJECT="${WORKTREE_PROJECT:-$(basename "$PWD")}"
+# Resolve the project from CWD (git-like); fall back to the directory name if
+# the CLI is unavailable (e.g. recovery mode).
+_AW_PY="$HOME/.agent-worktrees/.venv/bin/python"
+PROJECT=""
+if [[ -x "$_AW_PY" ]]; then
+    PROJECT="$(PYTHONPATH="" "$_AW_PY" -m agent_worktrees get project 2>/dev/null || true)"
+fi
+[[ -z "$PROJECT" ]] && PROJECT="$(basename "$PWD")"
 export WORKTREE_MACHINE="$MACHINE"
 
 # ── Welcome banner ───────────────────────────────────────────────────────

@@ -367,11 +367,11 @@ if [[ "$ACTION" == "exec" ]]; then
         NO_MUX="1"
     fi
 
-    # Publish worktree ID so tools (finalize, mark-complete) can auto-detect
-    if [[ -n "$WORKTREE_ID" ]]; then
-        export WORKTREE_ID="$WORKTREE_ID"
-        export APERTURE_WORKTREE_ID="$WORKTREE_ID"  # backward compat
-    fi
+    # Worktree ID stays a LOCAL (non-exported) shell var: the launcher uses it
+    # for the tmux session name, activity log, handoff, and post-exit, but it is
+    # NOT exported into the child Copilot session. In-session tools resolve the
+    # worktree from CWD (git-like), so no identity env var is leaked. See the
+    # env -u prefix on the child launches below.
 
     # Export profile env vars (BYOK, offline mode, token limits, etc.)
     # Uses shlex.quote for safe shell quoting; keys are validated alphanumeric.
@@ -396,6 +396,13 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
     if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
         CMD_ARRAY+=("${COPILOT_PASSTHROUGH[@]}")
     fi
+
+    # Identity vars are stripped from the CHILD Copilot process so the session
+    # env carries no ambient project/worktree identity -- in-session tools
+    # resolve context from CWD (git-like). `env -u` runs inside the pane, so it
+    # is robust to tmux-server-env inheritance. The launcher's own logic keeps
+    # its local WORKTREE_ID / WORKTREE_PROJECT shell vars.
+    CLEAN_ENV=(env -u WORKTREE_PROJECT -u WORKTREE_ID -u APERTURE_WORKTREE_ID)
 
     if [[ -n "$WORK_DIR" ]]; then
         cd "$WORK_DIR"
@@ -477,15 +484,11 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
 
         # Propagate profile env vars into the tmux session.
         # The tmux server may predate this shell, so exported vars aren't
-        # automatically inherited by new sessions.
+        # automatically inherited by new sessions. Identity vars
+        # (WORKTREE_PROJECT/WORKTREE_ID) are deliberately NOT injected -- the
+        # child resolves context from CWD, and CLEAN_ENV strips any inherited
+        # copies inside the pane.
         TMUX_ENV_FLAGS=()
-        if [[ -n "${WORKTREE_PROJECT:-}" ]]; then
-            TMUX_ENV_FLAGS+=(-e "WORKTREE_PROJECT=$WORKTREE_PROJECT")
-        fi
-        if [[ -n "${WORKTREE_ID:-}" ]]; then
-            TMUX_ENV_FLAGS+=(-e "WORKTREE_ID=$WORKTREE_ID")
-            TMUX_ENV_FLAGS+=(-e "APERTURE_WORKTREE_ID=$WORKTREE_ID")
-        fi
         if [[ -n "${SETUP_LOG:-}" ]]; then
             TMUX_ENV_FLAGS+=(-e "WORKTREE_SETUP_LOG=$SETUP_LOG")
             TMUX_ENV_FLAGS+=(-e "APERTURE_SETUP_LOG=$SETUP_LOG")
@@ -502,10 +505,10 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
         # and always exits 0 so remain-on-exit doesn't trap the pane.
         PANE_WRAPPER="$HOME/.agent-worktrees/bin/pane-wrapper.sh"
         if [[ -r "$PANE_WRAPPER" ]]; then
-            PANE_CMD=(bash "$PANE_WRAPPER" "${CMD_ARRAY[@]}")
+            PANE_CMD=("${CLEAN_ENV[@]}" bash "$PANE_WRAPPER" "${CMD_ARRAY[@]}")
         else
             setup_log WARN "pane wrapper missing at $PANE_WRAPPER; using direct command"
-            PANE_CMD=("${CMD_ARRAY[@]}")
+            PANE_CMD=("${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}")
         fi
 
         if ! tmux new-session -d -s "$TMUX_SESS" -c "${WORK_DIR:-.}" \
@@ -544,9 +547,9 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
                             HANDOFF_PROMPT="Continuing from a previous session in this worktree. A handoff was prepared - read it for full context: cat \"$HANDOFF_PATH\""
                             HANDOFF_CMD=("${CMD_ARRAY[@]}" -i "$HANDOFF_PROMPT")
                             if [[ -r "$PANE_WRAPPER" ]]; then
-                                HANDOFF_PANE_CMD=(bash "$PANE_WRAPPER" "${HANDOFF_CMD[@]}")
+                                HANDOFF_PANE_CMD=("${CLEAN_ENV[@]}" bash "$PANE_WRAPPER" "${HANDOFF_CMD[@]}")
                             else
-                                HANDOFF_PANE_CMD=("${HANDOFF_CMD[@]}")
+                                HANDOFF_PANE_CMD=("${CLEAN_ENV[@]}" "${HANDOFF_CMD[@]}")
                             fi
                             set +e
                             tmux new-session -d -s "$TMUX_SESS" -c "$WORK_DIR" "${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}" "${HANDOFF_PANE_CMD[@]}"
@@ -585,7 +588,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
     echo ""
 
     set +e
-    "${CMD_ARRAY[@]}"
+    "${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}"
     COPILOT_EXIT=$?
     set -e
     activity_log copilot_exited "$WORKTREE_ID" mux=none "exit_code=$COPILOT_EXIT"
@@ -602,7 +605,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
                 echo ""
                 HANDOFF_PROMPT="Continuing from a previous session in this worktree. A handoff was prepared - read it for full context: cat \"$HANDOFF_PATH\""
                 set +e
-                "${CMD_ARRAY[@]}" -i "$HANDOFF_PROMPT"
+                "${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}" -i "$HANDOFF_PROMPT"
                 COPILOT_EXIT=$?
                 set -e
             fi

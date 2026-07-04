@@ -18,13 +18,20 @@ from agent_worktrees import tracking
 
 @pytest.fixture(autouse=True)
 def _reset_active_project():
+    import os
+
     from agent_worktrees import config as _cfg
 
+    _saved = os.environ.get("WORKTREE_PROJECT")
     _cfg.set_active_project(None)
-    _cfg.set_assumed_cwd(None)
     yield
     _cfg.set_active_project(None)
-    _cfg.set_assumed_cwd(None)
+    # main() writes WORKTREE_PROJECT into os.environ directly (for legacy shell
+    # consumers); restore the pre-test value so it never leaks between tests.
+    if _saved is None:
+        os.environ.pop("WORKTREE_PROJECT", None)
+    else:
+        os.environ["WORKTREE_PROJECT"] = _saved
 
 # ---------------------------------------------------------------------------
 # Path fixtures — redirect config helpers to tmp dirs
