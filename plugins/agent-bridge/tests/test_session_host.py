@@ -446,6 +446,73 @@ async def test_start_session_host_mode_end_to_end(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_reattach_session_hosts_on_restart(tmp_path, monkeypatch):
+    import os
+    import sys
+
+    from agent_bridge.db import Database
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+    fake_argv = [sys.executable, str(agent_script)]
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return fake_argv, str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+
+    dbpath = tmp_path / "s.db"
+    statedir = str(tmp_path / "hosts")
+    host_pid = None
+    child_pid = None
+    try:
+        # --- frontend generation 1: start a host-backed session ---
+        db1 = Database(dbpath)
+        mgr1 = SessionManager(db1, session_host_enabled=True, session_host_state_dir=statedir)
+        target = SpawnTarget(type="local", cwd=str(tmp_path))
+        session = await asyncio.wait_for(mgr1.start_session(target), timeout=30)
+        sid = session.session_id
+        rec = mgr1._host_index.all()[0]
+        host_pid, child_pid = rec.host_pid, rec.child_pid
+        assert osutil_pid_alive(host_pid)
+
+        # simulate a frontend restart: detach (host survives) + drop generation 1
+        await session.client.shutdown()
+        db1.close()
+        assert osutil_pid_alive(host_pid)  # host untouched by the front going away
+
+        # --- frontend generation 2: reattach to the surviving host ---
+        db2 = Database(dbpath)
+        mgr2 = SessionManager(db2, session_host_enabled=True, session_host_state_dir=statedir)
+        assert mgr2.get_session(sid) is not None  # rehydrated (STOPPED)
+
+        n = await asyncio.wait_for(mgr2.reattach_session_hosts(), timeout=30)
+        assert n == 1
+        s2 = mgr2.get_session(sid)
+        assert s2.status == SessionStatus.IDLE
+        assert s2.client is not None
+        assert s2.acp_session_id == "host-mode-sess"      # session adopted, not re-created
+        assert s2.client.pid == child_pid                 # same surviving child
+        await s2.client.shutdown()
+        db2.close()
+    finally:
+        for pid in (host_pid, child_pid):
+            if pid:
+                with contextlib.suppress(Exception):
+                    if sys.platform == "win32":
+                        import subprocess
+                        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    else:
+                        import os as _os
+                        import signal
+                        _os.kill(pid, signal.SIGKILL)
+
+
+@pytest.mark.asyncio
 async def test_launch_session_host_process_owns_child(tmp_path):
     import signal
     import sys

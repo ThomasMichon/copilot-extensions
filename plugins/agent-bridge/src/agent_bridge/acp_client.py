@@ -431,6 +431,22 @@ class AcpClient:
         self._acp_session_id = result.session_id
         return result.session_id
 
+    def adopt_session(self, acp_session_id: str) -> None:
+        """Adopt an existing ACP session id without creating/loading it.
+
+        Used on **reattach** (Session-Host mode): the surviving child still holds
+        the session it created under the previous frontend; the new frontend
+        re-establishes the ACP connection (via :meth:`start_streams`, which
+        re-runs ``initialize``) and then adopts the same session id to resume
+        driving it -- no ``new_session`` (which would fork a fresh one) and no
+        respawn.
+
+        NOTE: whether a live copilot child accepts a re-``initialize`` on an
+        existing session is validated empirically against real copilot before
+        the ``session_host_enabled`` flag is turned on in production.
+        """
+        self._acp_session_id = acp_session_id
+
     async def load_session(
         self, cwd: str, session_id: str, suppress_replay: bool = True,
     ) -> None:
