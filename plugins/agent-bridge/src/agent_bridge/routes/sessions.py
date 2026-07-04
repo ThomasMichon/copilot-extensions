@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import time
 from typing import TYPE_CHECKING
@@ -65,6 +67,66 @@ def _tool_progress_sse(active: dict, now: float) -> str:
     # JSON is single-line (newlines escaped), so the comment stays one line.
     payload = json.dumps(progress)
     return f": tool_progress {payload}\n\n"
+
+
+async def _sse_event_stream(session, start, *, server, is_disconnected):  # noqa: ANN001
+    """The SSE event generator for ``GET /{id}/events`` (extracted for testing).
+
+    Streams durable events past ``start``; on each quiet ``wait_for_events``
+    return it emits a liveness beat (tool-progress or heartbeat). Crucially it
+    **closes promptly on daemon shutdown or client disconnect**: it races the
+    (up to 30s) event wait against a fine poll of uvicorn's ``server.should_exit``
+    (set on SIGTERM *before* uvicorn waits on in-flight requests). Without this a
+    long-lived stream pins the daemon's graceful shutdown open until systemd's
+    TimeoutStopSec SIGKILL (#1789) -- which also starves the lifespan
+    graceful-cancel on a bare ``systemctl restart``. The per-cycle beat cadence
+    is unchanged.
+    """
+    cursor = start
+
+    def _shutting_down() -> bool:
+        return bool(server is not None and getattr(server, "should_exit", False))
+
+    async def _closing() -> bool:
+        if _shutting_down():
+            return True
+        if is_disconnected is not None:
+            with contextlib.suppress(Exception):
+                if await is_disconnected():
+                    return True
+        return False
+
+    while True:
+        if await _closing():
+            return
+        wait_task = asyncio.ensure_future(
+            session.event_log.wait_for_events(cursor, timeout=30.0))
+        while True:
+            done, _pending = await asyncio.wait({wait_task}, timeout=0.5)
+            if done:
+                break
+            if await _closing():
+                wait_task.cancel()
+                with contextlib.suppress(BaseException):
+                    await wait_task
+                return
+        events = wait_task.result()
+        if events:
+            for evt in events:
+                data = json.dumps({
+                    "event": evt.event,
+                    "data": evt.data,
+                    "timestamp": evt.timestamp,
+                })
+                yield f"id: {evt.id}\nevent: {evt.event}\ndata: {data}\n\n"
+                cursor = evt.id
+            continue
+        # Quiet period -- cursor-neutral liveness beat.
+        active = session.event_log.active_tool_call()
+        if active:
+            yield _tool_progress_sse(active, time.time())
+        else:
+            yield ": heartbeat\n\n"
 
 
 def _session_info(s) -> SessionInfo:  # noqa: ANN001
@@ -389,32 +451,10 @@ async def get_events(
     else:
         start = after
 
-    async def event_stream():
-        cursor = start
-        while True:
-            events = await session.event_log.wait_for_events(cursor, timeout=30.0)
-            if events:
-                for evt in events:
-                    data = json.dumps({
-                        "event": evt.event,
-                        "data": evt.data,
-                        "timestamp": evt.timestamp,
-                    })
-                    yield f"id: {evt.id}\nevent: {evt.event}\ndata: {data}\n\n"
-                    cursor = evt.id
-            else:
-                # Quiet period. If a tool call is in flight, surface a
-                # cursor-neutral liveness event carrying what the remote is
-                # working on (title + command + elapsed) so a watcher can tell
-                # a busy agent from a hung one. Otherwise, a bare heartbeat.
-                active = session.event_log.active_tool_call()
-                if active:
-                    yield _tool_progress_sse(active, time.time())
-                else:
-                    yield ": heartbeat\n\n"
-
+    server = getattr(request.app.state, "uvicorn_server", None)
     return StreamingResponse(
-        event_stream(),
+        _sse_event_stream(session, start, server=server,
+                          is_disconnected=getattr(request, "is_disconnected", None)),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

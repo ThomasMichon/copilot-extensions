@@ -1240,3 +1240,124 @@ def test_cli_drain_excludes_self_from_env(monkeypatch):
     monkeypatch.delenv("AGENT_BRIDGE_SESSION_ID", raising=False)
     _C().drain(timeout=10)
     assert "exclude_session_id" not in captured["body"]
+
+
+# --------------------------------------------------------------------------
+# SSE stream closes promptly on shutdown / disconnect (#1789)
+# --------------------------------------------------------------------------
+class _QuietLog:
+    """Fake EventLog whose wait always times out empty (a quiet stream)."""
+
+    async def wait_for_events(self, after, timeout=2.0):
+        await asyncio.sleep(min(timeout, 0.02))
+        return []
+
+    def active_tool_call(self):
+        return None
+
+
+class _FakeSession:
+    def __init__(self):
+        self.event_log = _QuietLog()
+
+
+class _FakeServer:
+    should_exit = False
+
+
+async def _drain_stream(gen):
+    async for _chunk in gen:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_sse_stream_closes_on_shutdown():
+    """The SSE generator must return once uvicorn's should_exit flips, so it
+    never pins the daemon's graceful shutdown open (#1789)."""
+    from agent_bridge.routes.sessions import _sse_event_stream
+
+    server = _FakeServer()
+
+    async def _connected():
+        return False
+
+    gen = _sse_event_stream(_FakeSession(), 0, server=server,
+                            is_disconnected=_connected)
+
+    async def _flip():
+        await asyncio.sleep(0.1)
+        server.should_exit = True
+
+    asyncio.ensure_future(_flip())
+    # Must terminate (not hang) shortly after should_exit -- fail loud on hang.
+    await asyncio.wait_for(_drain_stream(gen), timeout=3.0)
+
+
+@pytest.mark.asyncio
+async def test_sse_stream_closes_on_client_disconnect():
+    from agent_bridge.routes.sessions import _sse_event_stream
+
+    state = {"disconnected": False}
+
+    async def _is_disc():
+        return state["disconnected"]
+
+    gen = _sse_event_stream(_FakeSession(), 0, server=_FakeServer(),
+                            is_disconnected=_is_disc)
+
+    async def _flip():
+        await asyncio.sleep(0.1)
+        state["disconnected"] = True
+
+    asyncio.ensure_future(_flip())
+    await asyncio.wait_for(_drain_stream(gen), timeout=3.0)
+
+
+@pytest.mark.asyncio
+async def test_sse_stream_yields_events_before_shutdown():
+    """A stream still delivers queued events, then closes on shutdown."""
+    from agent_bridge.routes.sessions import _sse_event_stream
+
+    class _OneShotLog:
+        def __init__(self):
+            self._sent = False
+
+        async def wait_for_events(self, after, timeout=2.0):
+            if not self._sent:
+                self._sent = True
+
+                class _E:
+                    id = 1
+                    event = "agent_message"
+                    data = {"text": "hi"}
+                    timestamp = 123.0
+                return [_E()]
+            await asyncio.sleep(min(timeout, 0.02))
+            return []
+
+        def active_tool_call(self):
+            return None
+
+    class _S:
+        def __init__(self):
+            self.event_log = _OneShotLog()
+
+    server = _FakeServer()
+
+    async def _connected():
+        return False
+
+    chunks = []
+
+    async def _collect():
+        async for c in _sse_event_stream(_S(), 0, server=server,
+                                         is_disconnected=_connected):
+            chunks.append(c)
+
+    async def _flip():
+        await asyncio.sleep(0.1)
+        server.should_exit = True
+
+    asyncio.ensure_future(_flip())
+    await asyncio.wait_for(_collect(), timeout=3.0)
+    assert any("agent_message" in c and "id: 1" in c for c in chunks)
