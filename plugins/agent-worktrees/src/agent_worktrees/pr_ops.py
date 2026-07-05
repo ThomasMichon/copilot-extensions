@@ -11,9 +11,11 @@ Branch topology (PR mode)::
                         tracks master)      work commit, pushed to remote)
 
 ``create_pr`` squashes the worktree's commits into one, rebases that commit
-onto the upstream default branch, creates the feature branch at it, resets the
-worktree base branch back to the upstream tip, checks out the feature branch,
-and pushes it.  See ``docs/plans/pr-workflow.md`` in aperture-labs.
+onto the upstream default branch, creates the feature branch at it, pushes it,
+resets the worktree base branch back to the upstream tip, and returns HEAD to
+that base branch so the operator resumes on the canonical working branch (a
+later ``git sync`` then fast-forwards cleanly instead of rebasing the throwaway
+feature branch).  See ``docs/plans/pr-workflow.md`` in aperture-labs.
 """
 
 from __future__ import annotations
@@ -106,9 +108,13 @@ def create_pr(
     ``target_repo`` (``--repo owner/name``) records the PR's target repo;
     it defaults to the worktree's own repo.
 
-    Idempotent: safe to re-run.  If the worktree is already on the feature
-    branch (a prior run pushed it or failed after checkout), the branch is
-    simply (re)pushed and the tracking state advanced to ``open``.
+    Idempotent: safe to re-run.  A successful run returns HEAD to the worktree
+    base branch, so a retry after a push-that-failed-to-open is recognized from
+    there -- a live tracked PR whose feature branch still exists locally with
+    nothing new on the base -- and the branch is simply (re)pushed with the
+    tracking state advanced to ``open``.  The legacy case (HEAD still on the
+    feature branch, e.g. after a push that itself failed) is handled the same
+    way.
     """
     repo = config.default_repo
     prcfg = repo.pr
@@ -199,6 +205,27 @@ def create_pr(
         )}
 
     reusing = bool(active_is_live and not new and active and active.branch == feature_branch)
+    ahead = git_ops.get_commits_ahead(wt_branch, upstream, cwd=worktree_path)
+
+    # --- Re-run path (#1804): a *successful* create-pr now returns HEAD to the
+    #     worktree base branch (reset to the upstream tip in step 5), so an
+    #     idempotent retry -- e.g. after a push that succeeded but PR-open
+    #     failed -- lands here on wt_branch with nothing ahead of upstream,
+    #     rather than on the feature branch. The squashed work already lives on
+    #     the (still-local) feature branch and cannot be rebuilt from the now-
+    #     empty wt_branch, so re-push that branch instead of tripping the
+    #     "already exists" guard below. When wt_branch *does* have new commits
+    #     this is an iterate -- fall through and re-squash + force-push them
+    #     onto the reused branch. ---
+    if reusing and not ahead and git_ops.local_branch_exists(
+        feature_branch, cwd=worktree_path
+    ):
+        return _push_existing_feature(
+            worktree_path, feature_branch, remote, repo, prcfg, record, base,
+            config=config, worktree_id=worktree_id, title=eff_title, body=body,
+            open_pr=open_pr, hold=hold, attribution=attribution,
+        )
+
     if not reusing:
         if git_ops.local_branch_exists(feature_branch, cwd=worktree_path) or \
                 git_ops.remote_branch_exists(remote, feature_branch, cwd=worktree_path):
@@ -207,7 +234,6 @@ def create_pr(
                 f"'{remote}'. Pass --branch to choose a different name."
             )}
 
-    ahead = git_ops.get_commits_ahead(wt_branch, upstream, cwd=worktree_path)
     if not ahead:
         return {**base, "error": (
             f"No commits on {wt_branch} ahead of {upstream} -- nothing to "
@@ -295,6 +321,14 @@ def create_pr(
             f"branch exists locally; tracking state left as 'creating' for "
             f"retry (re-run create-pr)."
         )}
+
+    # 6b. Return HEAD to the worktree base branch (#1804). A successful
+    #     create-pr should leave the operator on the canonical working branch,
+    #     not stranded on the throwaway feature branch: from wt_branch (already
+    #     reset to the upstream tip in step 5) the post-merge move is a clean
+    #     `git sync` fast-forward -- no `git checkout` + `reset --hard`. The
+    #     pushed feature branch and the open PR are unaffected.
+    git_ops.checkout(wt_branch, cwd=worktree_path)
 
     # 7. Record the open state on the target PR (preserving any url/number
     #    already recorded for a reused live PR).
@@ -789,7 +823,11 @@ def _push_existing_feature(
     re-run from leaving a pushed branch with no reported PR -- which otherwise
     leads the agent to open a duplicate (#1167).
     """
-    head_sha = _rev("HEAD", cwd=worktree_path)
+    # Resolve the head from the feature branch ref, not HEAD: a #1804 re-run
+    # from the worktree base branch leaves HEAD off the feature branch, so
+    # reading HEAD would record the wrong commit. Invoked from the legacy
+    # on-feature-branch path these are identical.
+    head_sha = _rev(feature_branch, cwd=worktree_path)
     with hooks.allow_pr_push():
         pushed = git_ops.push(remote, feature_branch, cwd=worktree_path, force_with_lease=True)
     if not pushed:

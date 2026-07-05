@@ -73,9 +73,10 @@ class TestCreatePR:
         assert res["provider"] == "gitea"
         assert res["head_sha"]
 
-        # HEAD is now on the feature branch
+        # HEAD is returned to the worktree base branch (#1804), not left
+        # stranded on the throwaway feature branch.
         head = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path)
-        assert head == "feature/add-feature-aaaa"
+        assert head == f"worktree/{wid}"
 
         # Feature branch is on the remote
         assert git_ops.remote_branch_exists(
@@ -103,14 +104,22 @@ class TestCreatePR:
         assert rec.pr.provider == "gitea"
 
     def test_idempotent_rerun(self, pr_repo):
-        config, wid, _wt_path, _ = pr_repo
+        config, wid, wt_path, _ = pr_repo
         first = pr_ops.create_pr(wid, config, title="Add feature")
         assert first["success"]
-        # Re-run -- now HEAD is on the feature branch; should re-push cleanly.
+        # A successful create-pr returns HEAD to the worktree base branch (#1804).
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == \
+            f"worktree/{wid}"
+        # Re-run from that position: recognized as the idempotent retry (live PR
+        # + existing feature branch + nothing new on the base) and re-pushed
+        # cleanly, rather than tripping the "already exists" guard.
         second = pr_ops.create_pr(wid, config, title="Add feature")
         assert second["success"] is True
         assert second.get("rerun") is True
         assert second["branch"] == "feature/add-feature-aaaa"
+        # Still on the worktree base branch after the re-run.
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == \
+            f"worktree/{wid}"
 
     def test_dirty_worktree_blocks(self, pr_repo):
         config, wid, wt_path, _ = pr_repo
@@ -220,7 +229,10 @@ class TestPRFinalizeAndPush:
         from agent_worktrees import finalize as fin
         config, wid, wt_path, _ = pr_repo
         pr_ops.create_pr(wid, config, title="Add feature")
-        # Add a local commit on the feature branch without pushing.
+        # Add a local commit on the feature branch without pushing (create-pr
+        # returns HEAD to the base branch (#1804), so check out the feature
+        # branch first to add a feedback commit to it).
+        _git("checkout", "feature/add-feature-aaaa", cwd=wt_path)
         (wt_path / "c.txt").write_text("more\n")
         _git("add", "-A", cwd=wt_path)
         _git("commit", "-m", "feedback", cwd=wt_path)
@@ -237,7 +249,10 @@ class TestPRFinalizeAndPush:
 
         before = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
 
-        # New feedback commit on the feature branch
+        # New feedback commit directly on the feature branch. create-pr returns
+        # HEAD to the base branch (#1804), so check out the feature branch to
+        # add feedback commits that push-changes then pushes to the PR branch.
+        _git("checkout", "feature/add-feature-aaaa", cwd=wt_path)
         (wt_path / "c.txt").write_text("feedback\n")
         _git("add", "-A", cwd=wt_path)
         _git("commit", "-m", "address feedback", cwd=wt_path)
@@ -313,6 +328,9 @@ class TestPRFinalizeAndPush:
         config, wid, wt_path, _ = pr_repo
         pr_ops.create_pr(wid, config, title="Add feature")
         feature = "feature/add-feature-aaaa"
+        # Drift scenario: HEAD checked out on the feature branch. create-pr
+        # returns HEAD to the base branch (#1804), so establish the drift here.
+        _git("checkout", feature, cwd=wt_path)
         self._simulate_squash_merge(config, wid, feature)
         _git("fetch", "origin", cwd=str(wt_path))
         repo = config.default_repo
@@ -348,8 +366,31 @@ class TestPRFinalizeAndPush:
         assert _git("rev-parse", "master", cwd=anchor) == \
             _git("rev-parse", "origin/master", cwd=anchor)
 
+    def test_reconcile_fast_forwards_base_when_head_on_base(self, pr_repo):
+        """#1804: create-pr returns HEAD to worktree/<id>, so reconcile must
+        fast-forward the base branch *in place* (not via the free-pointer move
+        that only fires when HEAD is off the base branch)."""
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        feature = "feature/add-feature-aaaa"
+        wt_branch = f"worktree/{wid}"
+        # create-pr leaves HEAD on the worktree base branch.
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == wt_branch
 
-class TestPRRequiredEnforcement:
+        self._simulate_squash_merge(config, wid, feature)
+        _git("fetch", "origin", cwd=str(wt_path))
+        repo = config.default_repo
+        # The merge advanced origin/master, so the base branch is now behind.
+        assert _git("rev-parse", wt_branch, cwd=wt_path) != \
+            _git("rev-parse", "origin/master", cwd=wt_path)
+
+        fin._reconcile_merged_pointers(repo, str(wt_path), repo.anchor, wt_branch)
+
+        # Fast-forwarded in place: base branch == origin/master, HEAD unchanged.
+        assert _git("rev-parse", wt_branch, cwd=wt_path) == \
+            _git("rev-parse", "origin/master", cwd=wt_path)
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == wt_branch
     """``pr.required`` blocks the direct-to-master path entirely."""
 
     def _required_config(self, config):
@@ -394,6 +435,9 @@ class TestPRRequiredEnforcement:
         # The PR path remains available: create-pr then push-changes updates
         # the feature branch, never master.
         pr_ops.create_pr(wid, req_config, title="Add feature")
+        # create-pr returns HEAD to the base branch (#1804); check out the
+        # feature branch to add a feedback commit that push-changes pushes.
+        _git("checkout", "feature/add-feature-aaaa", cwd=wt_path)
         (wt_path / "c.txt").write_text("feedback\n")
         _git("add", "-A", cwd=wt_path)
         _git("commit", "-m", "address feedback", cwd=wt_path)
