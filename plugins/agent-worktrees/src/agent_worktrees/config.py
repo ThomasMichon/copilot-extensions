@@ -134,6 +134,13 @@ class RepoConfig:
     ``{anchor}``, ``{machine}``, ``{repo_name}``) -- e.g.
     ``["{work_dir}/tools/bin"]``. The generic mechanism that lets a repo expose
     its tool binstubs without an ambient PATH export in a setup script."""
+    session_env: dict[str, str] = field(default_factory=dict)
+    """Optional environment variables the launch plan applies to the Copilot
+    session (e.g. ``COPILOT_FEATURE_FLAGS``). Merged into the plan ``env`` by
+    ``_build_env`` (below the profile, so a profile can override). This is how a
+    repo contributes session env **without** an ambient export in a setup script
+    -- and it works with the normalized launcher, where the repo setup hook runs
+    as a child process and therefore cannot set env for the Copilot exec."""
     validate_paths: list[str] = field(default_factory=list)
     validate_hook: dict[str, list[str]] = field(default_factory=dict)
     service_paths: list[str] = field(default_factory=list)
@@ -679,6 +686,11 @@ def _build_repo_config(
         if isinstance(dir_list, list):
             session_path[plat_key] = [str(d) for d in dir_list]
 
+    session_env: dict[str, str] = {}
+    for env_key, env_val in (data.get("session_env") or {}).items():
+        if isinstance(env_key, str) and env_key.strip():
+            session_env[env_key.strip()] = str(env_val)
+
     raw_vpaths = data.get("validate_paths", [])
     validate_paths = (
         [str(p) for p in raw_vpaths] if isinstance(raw_vpaths, list) else []
@@ -708,6 +720,7 @@ def _build_repo_config(
         launch_recovery=launch_recovery,
         setup_hook=setup_hook,
         session_path=session_path,
+        session_env=session_env,
         validate_paths=validate_paths,
         validate_hook=validate_hook,
         service_paths=service_paths,

@@ -583,7 +583,7 @@ def _create_worktree_core(
         no_resume=False, profile=None,
     )
     launch_cmd = _build_launch_cmd(config, fake_args, worktree_path, profile=profile)
-    env = _build_env(profile)
+    env = _build_env(profile, _repo_session_env(config))
 
     return {
         "worktree": _worktree_to_dict(record),
@@ -599,11 +599,15 @@ def _create_worktree_core(
     }
 
 
-def _build_env(profile: cfg.CopilotProfile | None) -> dict[str, str]:
-    """Build env dict with auto-injected vars, then profile overrides.
+def _build_env(
+    profile: cfg.CopilotProfile | None,
+    session_env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Build env dict with auto-injected vars, repo session_env, then profile.
 
     Convention-based vars (like COPILOT_CUSTOM_INSTRUCTIONS_DIRS) are set
-    first, then profile env merges on top.  For path-list vars like
+    first, then the repo's ``session_env`` (e.g. COPILOT_FEATURE_FLAGS), then
+    profile env merges on top.  For path-list vars like
     COPILOT_CUSTOM_INSTRUCTIONS_DIRS, profile values are appended rather
     than replacing the auto-injected value.
     """
@@ -612,6 +616,10 @@ def _build_env(profile: cfg.CopilotProfile | None) -> dict[str, str]:
     # Auto-inject: dynamic instructions live in ~/.{project}
     project_dir = str(cfg.project_dir())
     env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] = project_dir
+
+    # Repo-declared session env (below the profile so a profile can override).
+    if session_env:
+        env.update(session_env)
 
     # Merge profile env, appending for path-list keys
     if profile and profile.env:
@@ -623,6 +631,14 @@ def _build_env(profile: cfg.CopilotProfile | None) -> dict[str, str]:
                 env[k] = v
 
     return env
+
+
+def _repo_session_env(config: cfg.Config) -> dict[str, str]:
+    """The default repo's ``session_env`` (or empty if unavailable)."""
+    try:
+        return config.default_repo.session_env
+    except Exception:
+        return {}
 
 
 def _build_launch_cmd(
@@ -829,7 +845,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             repo = config.default_repo
             work_dir = repo.anchor
             launch_cmd = _build_launch_cmd(config, args, work_dir)
-            env = _build_env(None)
+            env = _build_env(None, _repo_session_env(config))
 
             _emit_plan({
                 "action": "exec",
@@ -876,7 +892,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             )
 
             launch_cmd = _build_launch_cmd(config, args, record.worktree_path)
-            env = _build_env(None)
+            env = _build_env(None, _repo_session_env(config))
 
             # Auto-resume session
             no_resume = getattr(args, "no_resume", False)
@@ -2057,7 +2073,7 @@ def _resolve_base_repo(
         print()
 
     launch_cmd = _build_launch_cmd(config, args, repo.anchor, profile=profile)
-    merged_env = _build_env(profile)
+    merged_env = _build_env(profile, _repo_session_env(config))
     if args.dry_run:
         output.dry_run(f"Would launch: {' '.join(launch_cmd)}")
         if merged_env:
@@ -2240,7 +2256,7 @@ def _resolve_resume(
             print(f"   ⚠ Local commits present -- skipping auto-update ({ff.reason})")
 
     launch_cmd = _build_launch_cmd(config, args, record.worktree_path, profile=profile)
-    merged_env = _build_env(profile)
+    merged_env = _build_env(profile, _repo_session_env(config))
 
     # Auto-resume: find the most recent Copilot session for this worktree
     # and pass --resume=<session-id> so the user picks up where they left off.
@@ -2307,7 +2323,7 @@ def _resolve_new(
         output.dry_run("Would clone permissions")
         output.dry_run("Would add worktree path to trusted_folders")
         launch_cmd = _build_launch_cmd(config, args, worktree_path, profile=profile)
-        merged_env = _build_env(profile)
+        merged_env = _build_env(profile, _repo_session_env(config))
         output.dry_run(f"Would launch: {' '.join(launch_cmd)}")
         if merged_env:
             env_str = ", ".join(f"{k}={v}" for k, v in merged_env.items())
