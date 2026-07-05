@@ -103,6 +103,8 @@ repos:
 | `remote` | string | `origin` | Git remote name. |
 | `launch` | map(platform→list) | `{}` | Config-driven launch command per platform. Overrides the repo convention and built-in default. |
 | `launch_recovery` | map(platform→list) | `{}` | Launch command used in recovery mode (`-Recovery`). |
+| `setup_hook` | map(platform→**path**) | `{}` | Repo session setup hook (a script path, relative to `anchor`). Declaring it opts the repo into the **normalized launch**: agent-worktrees' launcher runs the hook (context by argument — `-Machine`/`-Recovery` — not ambient env), then execs Copilot. The hook does repo-specific setup (vault, MCP) and returns; it must NOT launch Copilot. Skipped in recovery. |
+| `session_path` | map(platform→list) | `{}` | Directories the normalized launcher prepends to `PATH` before launch (templated: `{work_dir}`, `{anchor}`, `{machine}`, `{repo_name}`) — e.g. `["{work_dir}/tools/bin"]`. The generic mechanism for a repo to expose its tool binstubs without an ambient PATH export. |
 | `validate_paths` | list[str] | `[]` | Repo-relative paths the `validate` command checks for. |
 | `validate_hook` | map(platform→list) | `{}` | Custom validation command per platform. |
 | `service_paths` | list[str] (globs) | `[]` | Globs for service discovery (`services` subcommands). |
@@ -118,6 +120,18 @@ command expressed as a list of arguments:
 launch:
   windows: ["pwsh.exe", "-NoProfile", "-File", "scripts/setup.ps1"]
   linux:   ["bash", "scripts/setup.sh"]
+```
+
+`setup_hook` is a **path** (not a command list); `session_path` is a list of
+directories. Both are platform-keyed:
+
+```yaml
+setup_hook:
+  windows: "tools/setup/session-setup.ps1"   # relative to anchor
+  linux:   "tools/setup/session-setup.sh"
+session_path:
+  windows: ["{work_dir}\\tools\\bin"]
+  linux:   ["{work_dir}/tools/bin"]
 ```
 
 ### Backend profiles — `copilot_profiles[]`

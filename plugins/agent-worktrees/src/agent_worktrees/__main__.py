@@ -635,8 +635,10 @@ def _build_launch_cmd(
 
     If the repo config has ``launch`` / ``launch_recovery`` entries for
     the current platform, those are used with variable substitution.
-    Otherwise falls back to the legacy ``tools/setup/setup.{ps1,sh}``
-    convention for backward compatibility.
+    Otherwise, in precedence order: a repo ``setup_hook`` selects the
+    **normalized** launch (the default-setup launcher runs the repo hook, then
+    execs Copilot); else a legacy ``tools/setup/setup.{ps1,sh}`` is run as the
+    session command; else the plugin's ``default-setup.{ps1,sh}``.
     """
     recovery = getattr(args, "recovery", False)
     repo = config.default_repo
@@ -656,26 +658,79 @@ def _build_launch_cmd(
         }
         cmd = [arg.format(**variables) for arg in template]
     else:
-        # Legacy fallback -- repo-specific setup script, then default.
-        # Always resolve from the anchor repo so that worktrees pinned
-        # to an older commit still pick up the latest setup script
-        # (the anchor is fetched before every launch).
+        # No config-driven launch template. Three sub-cases, in precedence:
+        #   1. NORMALIZED: repo declares a setup_hook -> the default-setup
+        #      launcher runs the hook (context by arg, not env), then execs
+        #      Copilot. This inverts the legacy setup.ps1-as-launch flow.
+        #   2. LEGACY: repo ships tools/setup/setup.{ps1,sh} -> run it as the
+        #      session command (it execs Copilot itself). Unchanged behavior.
+        #   3. DEFAULT: neither -> the plugin's default-setup launcher.
+        # Resolve from the anchor repo so a worktree pinned to an older commit
+        # still picks up the latest setup script (anchor is fetched pre-launch).
         anchor = repo.anchor
-        if platform.system() == "Windows":
+        variables = {
+            "work_dir": work_dir,
+            "anchor": anchor,
+            "machine": config.machine,
+            "repo_name": config.repo_name,
+        }
+        session_dirs = [
+            d.format(**variables) for d in repo.session_path.get(plat_key, [])
+        ]
+        session_path_arg = os.pathsep.join(session_dirs) if session_dirs else ""
+        hook_path = repo.setup_hook.get(plat_key)
+        is_windows = platform.system() == "Windows"
+
+        if hook_path:
+            # (1) Normalized launch via the default-setup launcher + repo hook.
+            resolved_hook = hook_path.format(**variables)
+            if not os.path.isabs(resolved_hook):
+                resolved_hook = str(Path(anchor) / resolved_hook)
+            if is_windows:
+                launcher = str(inst.install_dir() / "scripts" / "default-setup.ps1")
+                cmd = [
+                    "pwsh.exe", "-NoProfile", "-NoLogo", "-File",
+                    launcher, "-Machine", config.machine,
+                    "-SetupHook", resolved_hook,
+                ]
+                if session_path_arg:
+                    cmd += ["-SessionPath", session_path_arg]
+                if recovery:
+                    cmd.append("-Recovery")
+            else:
+                launcher = str(inst.install_dir() / "scripts" / "default-setup.sh")
+                cmd = [
+                    "bash", launcher, "--machine", config.machine,
+                    "--setup-hook", resolved_hook,
+                ]
+                if session_path_arg:
+                    cmd += ["--session-path", session_path_arg]
+                if recovery:
+                    cmd.append("--recovery")
+        elif is_windows:
             setup_path = str(Path(anchor) / "tools" / "setup" / "setup.ps1")
-            if not Path(setup_path).is_file():
+            legacy = Path(setup_path).is_file()
+            if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.ps1")
             cmd = [
                 "pwsh.exe", "-NoProfile", "-NoLogo", "-File",
                 setup_path, "-Machine", config.machine,
             ]
+            # session_path is only understood by the default-setup launcher;
+            # never pass it to a legacy setup.ps1 (unknown params would leak
+            # through to Copilot as bogus args).
+            if session_path_arg and not legacy:
+                cmd += ["-SessionPath", session_path_arg]
             if recovery:
                 cmd.append("-Recovery")
         else:
             setup_path = str(Path(anchor) / "tools" / "setup" / "setup.sh")
-            if not Path(setup_path).is_file():
+            legacy = Path(setup_path).is_file()
+            if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.sh")
             cmd = ["bash", setup_path, "--machine", config.machine]
+            if session_path_arg and not legacy:
+                cmd += ["--session-path", session_path_arg]
             if recovery:
                 cmd.append("--recovery")
 
