@@ -736,13 +736,17 @@ _source_version() {
     printf '%s\n' "$v"
 }
 
-# True (0) if version $1 is strictly older than version $2. Uses `sort -V`,
-# which orders our `0.4.0-devN` build stream correctly (dev71 < dev92 < dev100).
+# True (0) if version $1 is strictly older than version $2. Normalizes the PEP
+# 440 dev separator first -- plugin.json carries `0.4.0-dev93` (hyphen) but
+# importlib.metadata reports the normalized `0.4.0.dev93` (dot), so without this
+# an equal version would not compare equal. `sort -V` then orders our
+# `0.4.0.devN` build stream correctly (dev71 < dev93 < dev100).
 _version_lt() {
-    [[ "$1" == "$2" ]] && return 1
+    local a="${1//-/.}" b="${2//-/.}"
+    [[ "$a" == "$b" ]] && return 1
     local lower
-    lower="$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)"
-    [[ "$lower" == "$1" ]]
+    lower="$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n1)"
+    [[ "$lower" == "$a" ]]
 }
 
 # Downgrade guard (#1790). A stress test caught an agent running the raw
