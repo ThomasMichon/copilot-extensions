@@ -885,7 +885,9 @@ class TestRerunAutoOpen:
         assert r1["success"], r1
         assert "pr_opened" not in r1
 
-        # HEAD is now on the feature branch -> re-run should finish auto-open.
+        # create-pr returns HEAD to the base branch (#1804); the re-run is
+        # recognized from there (live PR + existing branch) and finishes
+        # auto-open.
         r2 = pr_ops.create_pr(wid, config, title="Add feature")
         assert r2.get("rerun") is True, r2
         assert r2["pr_opened"] is True
@@ -917,9 +919,11 @@ class TestRerunAutoOpen:
         assert fake.create_calls == 1                       # no duplicate PR opened
 
     def test_rerun_after_external_merge_opens_fresh_pr(self, pr_repo, monkeypatch):
-        # #1336: HEAD is left on the feature branch and that branch's PR was
-        # merged externally (auto-merge). A re-run must NOT surface the merged
-        # PR as if freshly opened -- it must open a FRESH PR for the new commit.
+        # #1336: a feature branch whose PR merged externally (auto-merge), with
+        # a new commit added on that branch, must open a FRESH PR on re-run --
+        # never surface the merged PR as if freshly opened. create-pr returns
+        # HEAD to the base branch (#1804), so this exercises the legacy on-
+        # feature-branch re-run path by checking the branch out explicitly.
         config, wid, wt_path, _ = pr_repo
         config = self._enable_open(config)
         monkeypatch.setenv("EXT_TOKEN", "tok")
@@ -932,9 +936,10 @@ class TestRerunAutoOpen:
         n1 = r1["number"]
         assert n1
 
-        # #100 merges externally; local record is still stale 'open'. HEAD stays
-        # on the feature branch, where a new commit lands.
+        # #100 merges externally; local record is still stale 'open'. Check out
+        # the feature branch and add a new commit there.
         fake.pull_states[n1] = "merged"
+        _g("checkout", "feature/add-feature-aaaa", cwd=wt_path)
         (wt_path / "more.txt").write_text("more after merge\n")
         _g("add", "-A", cwd=wt_path)
         _g("commit", "-m", "more after merge", cwd=wt_path)

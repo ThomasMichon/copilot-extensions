@@ -509,9 +509,11 @@ def _reconcile_merged_pointers(
 
     1. Fast-forward the anchor's local default branch to ``origin/<default>``.
     2. Realign the worktree base branch (``worktree/<id>``) with the origin
-       tip when it is not the live checkout -- after ``create-pr`` the worktree
-       HEAD is the feature branch, so ``worktree/<id>`` is a free pointer that
-       can move to origin without touching any working tree.
+       tip.  When HEAD is elsewhere (e.g. checked out on a feature branch),
+       ``worktree/<id>`` is a free pointer moved with ``branch -f`` in the
+       anchor.  When HEAD *is* ``worktree/<id>`` (the #1804 default -- create-pr
+       now returns HEAD there), it is the live checkout, so fast-forward it in
+       place in the worktree instead (clean, non-ahead, strictly-behind only).
 
     Best-effort and non-destructive: fast-forward / pointer-reset only, never
     on a dirty tree, never discarding unmerged commits.  All failures are
@@ -531,19 +533,25 @@ def _reconcile_merged_pointers(
     except Exception:
         pass
 
-    # 2. Realign worktree/<id> with the origin tip when it is safe to do so:
-    #    it is not the live checkout (HEAD is on the feature branch) and all of
-    #    its content is already on upstream (so moving the pointer loses no
-    #    work).
+    # 2. Realign worktree/<id> with the origin tip when safe:
+    #    - HEAD is elsewhere (the free-pointer case, e.g. a feature-branch
+    #      checkout): move the pointer with `branch -f` in the anchor.
+    #    - HEAD *is* worktree/<id> (the #1804 default -- create-pr now returns
+    #      HEAD here): fast-forward it in place in the worktree. This only
+    #      advances a clean, non-ahead, strictly-behind branch, so it never
+    #      rebases, merges, or discards local commits.
     try:
         wt_head = (
             git_ops._get_current_branch_safe(worktree_path)
             if Path(worktree_path).exists()
             else None
         )
-        if wt_head != branch and _is_content_on_upstream(
-            branch, upstream, cwd=anchor
-        ):
+        if wt_head == branch:
+            git_ops.fast_forward_worktree(
+                worktree_path, remote=repo.remote,
+                default_branch=repo.default_branch, do_fetch=True,
+            )
+        elif _is_content_on_upstream(branch, upstream, cwd=anchor):
             up_sha = git_ops.git(
                 "rev-parse", upstream, cwd=anchor, check=False
             ).stdout.strip()
@@ -589,8 +597,10 @@ def _push_changes_pr(
     if head != feature:
         output.err(
             f"PR mode: push-changes expects HEAD on a tracked feature branch "
-            f"(active: '{feature}'), but it is on '{head}'. Checkout the "
-            f"feature branch first (create-pr leaves you there)."
+            f"(active: '{feature}'), but it is on '{head}'. Checkout it first "
+            f"(`git checkout {feature}`) to push feedback commits directly to "
+            f"the PR branch, or re-run create-pr from '{head}' to re-squash new "
+            f"work onto it."
         )
         return False
 
