@@ -154,6 +154,28 @@ def test_setup_hook_config_parsing_ignores_blank():
     assert repo.setup_hook["windows"] == "hook.ps1"
 
 
+def test_session_env_config_parsing():
+    data = {"session_env": {"COPILOT_FEATURE_FLAGS": "extensions", "X": 1}}
+    repo = cfg._build_repo_config(data, "/a", "/w")
+    assert repo.session_env["COPILOT_FEATURE_FLAGS"] == "extensions"
+    assert repo.session_env["X"] == "1"  # coerced to str
+
+
+def test_build_env_merges_repo_session_env(monkeypatch):
+    """Repo session_env lands in the plan env; the profile overrides it."""
+    monkeypatch.setattr(cfg, "project_dir", lambda: __import__("pathlib").Path("/proj"))
+    env = m._build_env(None, {"COPILOT_FEATURE_FLAGS": "extensions"})
+    assert env["COPILOT_FEATURE_FLAGS"] == "extensions"
+    assert "COPILOT_CUSTOM_INSTRUCTIONS_DIRS" in env
+
+
+def test_build_env_profile_overrides_session_env(monkeypatch):
+    monkeypatch.setattr(cfg, "project_dir", lambda: __import__("pathlib").Path("/proj"))
+    prof = cfg.CopilotProfile(name="p", label="p", env={"COPILOT_FEATURE_FLAGS": "override"})
+    env = m._build_env(prof, {"COPILOT_FEATURE_FLAGS": "extensions"})
+    assert env["COPILOT_FEATURE_FLAGS"] == "override"
+
+
 # ---------------------------------------------------------------------------
 # The shipped launcher scripts must understand the normalized-launch contract.
 # ---------------------------------------------------------------------------
