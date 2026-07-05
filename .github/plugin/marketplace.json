@@ -18,7 +18,7 @@
     {
       "name": "agent-bridge",
       "description": "Persistent inter-agent communication service - session management, SSE event streaming, agent subprocess spawning, and an ACP-over-WebSocket transport (+ built-in status UX) for external ACP clients like acp-ui",
-      "version": "0.4.0-dev92",
+      "version": "0.4.0-dev93",
       "source": "plugins/agent-bridge"
     },
     {
