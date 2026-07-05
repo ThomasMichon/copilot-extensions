@@ -19,6 +19,12 @@
 #
 # Options:
 #   --purge    On uninstall: also delete config, DB, and auth token
+#   --force    On install/update: bypass the downgrade guard and install an
+#              older version over a newer one (see #1790). The sanctioned
+#              update path is the marketplace flow
+#              (`aperture-labs services agent-bridge update`), NOT a raw
+#              checkout installer -- the guard exists to stop a stale checkout
+#              silently downgrading (and de-featuring) the running daemon.
 # =============================================================================
 
 set -euo pipefail
@@ -46,10 +52,15 @@ ACTION="${1:-status}"
 shift || true
 
 PURGE=false
+# Bypass the downgrade guard (#1790). Env var lets the marketplace/ZDD paths
+# opt in without threading a flag; the CLI flag is the interactive escape hatch.
+FORCE="${AGENT_BRIDGE_ALLOW_DOWNGRADE:-false}"
+[[ "$FORCE" == "1" ]] && FORCE=true
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --purge) PURGE=true; shift ;;
+        --force) FORCE=true; shift ;;
         *)       echo "[FAIL] Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -404,6 +415,10 @@ do_install() {
 
     _migration_check
 
+    # Guard against a stale checkout downgrading an existing healthy install
+    # (#1790). No-op on first install (no installed version to compare).
+    _downgrade_guard
+
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 
     # Create venv via uv
@@ -695,6 +710,76 @@ _runtime_healthy() {
     "$VENV_DIR/bin/python" -c 'import agent_bridge, uvicorn, credential_relay, zdd' 2>/dev/null
 }
 
+# Version of the agent-bridge package currently installed in the runtime venv.
+# Prints the version to stdout; returns 1 if it cannot be determined (e.g. no
+# venv, or a broken install) so the caller can skip the downgrade guard.
+_installed_version() {
+    [[ -x "$VENV_DIR/bin/python" ]] || return 1
+    local v
+    v="$("$VENV_DIR/bin/python" -c \
+        'from importlib.metadata import version; print(version("agent-bridge"))' \
+        2>/dev/null)" || return 1
+    [[ -n "$v" ]] || return 1
+    printf '%s\n' "$v"
+}
+
+# Version of the agent-bridge source about to be installed (this checkout).
+# Read from plugin.json (single source of truth for the plugin build). Prints
+# the version to stdout; returns 1 if it cannot be determined.
+_source_version() {
+    local manifest="$PLUGIN_DIR/plugin.json"
+    [[ -f "$manifest" ]] || return 1
+    local v
+    v="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+        "$manifest" | head -n1)"
+    [[ -n "$v" ]] || return 1
+    printf '%s\n' "$v"
+}
+
+# True (0) if version $1 is strictly older than version $2. Uses `sort -V`,
+# which orders our `0.4.0-devN` build stream correctly (dev71 < dev92 < dev100).
+_version_lt() {
+    [[ "$1" == "$2" ]] && return 1
+    local lower
+    lower="$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)"
+    [[ "$lower" == "$1" ]]
+}
+
+# Downgrade guard (#1790). A stress test caught an agent running the raw
+# installer from a STALE checkout (dev71) over a live dev87 daemon, silently
+# downgrading it -- reverting the Session-Host survival code and the
+# KillMode=process fix, and stranding the agent's own session. Refuse to
+# install an OLDER version over a newer running one unless --force
+# (AGENT_BRIDGE_ALLOW_DOWNGRADE=1) is given, and steer to the marketplace path.
+# Non-fatal when either version is unknown -- the guard only fires on a
+# confirmed downgrade.
+_downgrade_guard() {
+    local installed source
+    installed="$(_installed_version)" || return 0
+    source="$(_source_version)" || {
+        _warn "Could not read source version from plugin.json -- skipping downgrade guard"
+        return 0
+    }
+    if _version_lt "$source" "$installed"; then
+        if [[ "$FORCE" == true ]]; then
+            _warn "Downgrade $installed -> $source forced (--force / AGENT_BRIDGE_ALLOW_DOWNGRADE)"
+            return 0
+        fi
+        echo ""
+        _fail "Refusing to downgrade agent-bridge: installed $installed > source $source"
+        _fail "This checkout is OLDER than the running daemon. Installing it would"
+        _fail "revert live features (e.g. Session-Host survival, KillMode=process)"
+        _fail "and can strand active Copilot sessions (#1790)."
+        _fail ""
+        _fail "Use the sanctioned marketplace update instead:"
+        _fail "    aperture-labs services agent-bridge update"
+        _fail "Or, to override intentionally (e.g. a deliberate rollback):"
+        _fail "    $0 $ACTION --force"
+        echo ""
+        exit 1
+    fi
+}
+
 _backup_venv() {
     # Snapshot $VENV_DIR so a failed update can roll back. Clears any stale copy.
     rm -rf "$VENV_DIR.bak"
@@ -801,6 +886,10 @@ do_update() {
         _fail "Install: curl -LsSf https://astral.sh/uv/install.sh | sh"
         exit 1
     fi
+
+    # Refuse a downgrade from a stale checkout before touching the live daemon
+    # (#1790). Runs first so a rejected update never drains/stops the service.
+    _downgrade_guard
 
     # Is the service currently running?
     local was_running=false
