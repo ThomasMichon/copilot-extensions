@@ -120,6 +120,20 @@ class RepoConfig:
     remote: str = "origin"
     launch: dict[str, list[str]] = field(default_factory=dict)
     launch_recovery: dict[str, list[str]] = field(default_factory=dict)
+    setup_hook: dict[str, str] = field(default_factory=dict)
+    """Optional repo **session setup hook**, keyed by platform ("windows" /
+    "linux"). The value is a path to a script (relative to ``anchor`` unless
+    absolute) that agent-worktrees' normalized launcher runs -- passing context
+    by argument (``-Machine`` / ``-Recovery``), not ambient env -- *before* it
+    execs Copilot. The hook does repo-specific work (vault, MCP) and returns; it
+    does NOT launch Copilot itself. Declaring it opts the repo into the
+    normalized launch flow (inverting the legacy ``setup.ps1``-as-launch)."""
+    session_path: dict[str, list[str]] = field(default_factory=dict)
+    """Optional directories the normalized launcher prepends to ``PATH`` before
+    launch, keyed by platform. Each entry is templated (``{work_dir}``,
+    ``{anchor}``, ``{machine}``, ``{repo_name}``) -- e.g.
+    ``["{work_dir}/tools/bin"]``. The generic mechanism that lets a repo expose
+    its tool binstubs without an ambient PATH export in a setup script."""
     validate_paths: list[str] = field(default_factory=list)
     validate_hook: dict[str, list[str]] = field(default_factory=dict)
     service_paths: list[str] = field(default_factory=list)
@@ -655,6 +669,16 @@ def _build_repo_config(
         if isinstance(cmd_list, list):
             launch_recovery[plat_key] = [str(c) for c in cmd_list]
 
+    setup_hook: dict[str, str] = {}
+    for plat_key, hook_path in (data.get("setup_hook") or {}).items():
+        if isinstance(hook_path, str) and hook_path.strip():
+            setup_hook[plat_key] = hook_path.strip()
+
+    session_path: dict[str, list[str]] = {}
+    for plat_key, dir_list in (data.get("session_path") or {}).items():
+        if isinstance(dir_list, list):
+            session_path[plat_key] = [str(d) for d in dir_list]
+
     raw_vpaths = data.get("validate_paths", [])
     validate_paths = (
         [str(p) for p in raw_vpaths] if isinstance(raw_vpaths, list) else []
@@ -682,6 +706,8 @@ def _build_repo_config(
         remote=data.get("remote", "origin"),
         launch=launch,
         launch_recovery=launch_recovery,
+        setup_hook=setup_hook,
+        session_path=session_path,
         validate_paths=validate_paths,
         validate_hook=validate_hook,
         service_paths=service_paths,
