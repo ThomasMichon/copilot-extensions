@@ -476,14 +476,17 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         if not args.no_relay:
             await _provision_dotfiles(manager, args.name, config)
 
-        # Register CodeSpace-scoped plugins (the "global" lane) into the
-        # CodeSpace user settings so they load in EVERY launch mode -- incl. a
-        # human opening the CodeSpace in interactive VS Code (no agent-bridge
-        # there to pass --plugin-dir). Best-effort; needs the relay up for the
-        # payload pre-install (`copilot plugin install`). Distinct from the
-        # repo-targeted `--stage-plugin` lane below (dispatch-scoped).
+        # Register CodeSpace-scoped plugins (the CodeSpace-scoped axis) via BOTH
+        # lanes: (1) the CodeSpace user settings so they load for interactive /
+        # `copilot -p` launches (incl. a human opening the CodeSpace in VS Code,
+        # where there's no agent-bridge to pass --plugin-dir); and (2) their
+        # on-CodeSpace payload dirs, folded into the acp launch below as
+        # --plugin-dir -- because `copilot --acp` (the dispatch) ignores
+        # enabledPlugins and only surfaces plugin skills via --plugin-dir.
+        # Best-effort; needs the relay up for the payload pre-install.
+        cs_plugin_dirs: list[str] = []
         if not args.no_relay:
-            await _register_codespace_plugins(
+            cs_plugin_dirs = await _register_codespace_plugins(
                 manager, args.name, getattr(args, "repo", None),
             )
 
@@ -503,9 +506,9 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         # Stage related-repo plugins (repo-targeted lane) onto the CodeSpace and
         # fold their --plugin-dir paths into the launch. Best-effort: a staging
         # failure drops that plugin but never blocks the dispatch.
-        plugin_dirs: list[str] = []
+        plugin_dirs: list[str] = list(cs_plugin_dirs)
         if not args.no_relay:
-            plugin_dirs = await _stage_plugins(
+            plugin_dirs += await _stage_plugins(
                 manager, args.name, getattr(args, "stage_plugins", []),
             )
         remote_cmd = _finalize_remote_cmd(plugin_dirs)
@@ -657,20 +660,28 @@ async def _provision_dotfiles(manager, name: str, config) -> None:
         log.warning("Dotfiles provisioning on %s failed: %s", name, exc)
 
 
-async def _register_codespace_plugins(manager, name: str, repo: str | None) -> None:
-    """Register CodeSpace-scoped plugins into the CodeSpace user settings.
+async def _register_codespace_plugins(
+    manager, name: str, repo: str | None
+) -> list[str]:
+    """Register CodeSpace-scoped plugins into the CodeSpace + return their dirs.
 
-    The **global** plugin lane. Resolves the harness's ``codespacePlugins``
-    declarations applicable to this CodeSpace's workspace repo
-    (:func:`codespace_plugins.resolve_codespace_plugins`) and writes them into
-    the CodeSpace's user ``~/.copilot/settings.json`` -- registering each
-    marketplace, enabling every ``<name>@<marketplace>``, and pre-installing the
-    payloads (see :mod:`codespace_register`). Because it lands in *user*
-    settings, it is honored in every launch mode (interactive VS Code included).
-    Best-effort and idempotent: logs a warning on failure but never raises.
+    The **CodeSpace-scoped** plugin axis, delivered via BOTH lanes:
+    - **user settings (interactive lane):** resolves the harness's
+      ``codespacePlugins`` for this CodeSpace's workspace repo
+      (:func:`codespace_plugins.resolve_codespace_plugins`) and writes them into
+      the CodeSpace's user ``~/.copilot/settings.json`` + pre-installs payloads
+      (see :mod:`codespace_register`). Honored by interactive / ``copilot -p``.
+    - **``--plugin-dir`` (dispatch lane):** ``copilot --acp`` (the agent-bridge
+      dispatch) does **NOT** honor ``enabledPlugins`` -- only ``--plugin-dir``
+      surfaces plugin skills under ``--acp``. So this returns the on-CodeSpace
+      payload dirs (the ones the register step just installed) for the caller to
+      fold into the acp launch as ``--plugin-dir`` args.
+
+    Best-effort and idempotent: logs a warning on failure but never raises, and
+    returns ``[]`` when there is nothing to register.
     """
     from .codespace_plugins import resolve_codespace_plugins
-    from .codespace_register import build_register_command
+    from .codespace_register import build_register_command, codespace_plugin_dirs
 
     try:
         # The dispatch path doesn't pass --repo, so resolve the CodeSpace's
@@ -683,7 +694,7 @@ async def _register_codespace_plugins(manager, name: str, repo: str | None) -> N
         specs = resolve_codespace_plugins(repo)
         command = build_register_command(specs)
         if not command:
-            return
+            return []
 
         wrapped = f"bash -l -c {shlex.quote(command)}"
         # Settings merge is quick; the pre-install (`copilot plugin install`)
@@ -694,13 +705,16 @@ async def _register_codespace_plugins(manager, name: str, repo: str | None) -> N
                 "Registered %d CodeSpace-scoped plugin(s) on %s: %s",
                 len(specs), name, ", ".join(s.source for s in specs),
             )
-        else:
-            log.warning(
-                "CodeSpace plugin registration on %s exited %s: %s",
-                name, result.exit_code, result.stderr.strip(),
-            )
+            # Fold the just-installed payloads into the --acp launch: the
+            # dispatch ignores enabledPlugins, so --plugin-dir is required.
+            return codespace_plugin_dirs(specs)
+        log.warning(
+            "CodeSpace plugin registration on %s exited %s: %s",
+            name, result.exit_code, result.stderr.strip(),
+        )
     except Exception as exc:
         log.warning("CodeSpace plugin registration on %s failed: %s", name, exc)
+    return []
 
 
 async def _verify_remote_auth(manager, name: str, config) -> None:

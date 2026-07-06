@@ -26,6 +26,38 @@ def _spec(source: str, enable: bool = True) -> CodespacePluginSpec:
 
 
 # --------------------------------------------------------------------------
+# codespace_plugin_dirs (the --acp dispatch lane)
+# --------------------------------------------------------------------------
+
+def test_plugin_dirs_maps_enabled_marketplace_specs():
+    dirs = cr.codespace_plugin_dirs(
+        [_spec("odsp-web-agent@dev-tmichon"), _spec("b@other")]
+    )
+    assert dirs == [
+        "$HOME/.copilot/installed-plugins/dev-tmichon/odsp-web-agent",
+        "$HOME/.copilot/installed-plugins/other/b",
+    ]
+
+
+def test_plugin_dirs_skips_disabled_and_non_marketplace():
+    dirs = cr.codespace_plugin_dirs(
+        [
+            _spec("a@dev-tmichon", enable=False),   # install-only -> skip
+            _spec("bare-source"),                    # not name@mkt -> skip
+            _spec("c@dev-tmichon"),                  # kept
+        ]
+    )
+    assert dirs == ["$HOME/.copilot/installed-plugins/dev-tmichon/c"]
+
+
+def test_plugin_dirs_dedups():
+    dirs = cr.codespace_plugin_dirs(
+        [_spec("a@dev-tmichon"), _spec("a@dev-tmichon")]
+    )
+    assert dirs == ["$HOME/.copilot/installed-plugins/dev-tmichon/a"]
+
+
+# --------------------------------------------------------------------------
 # build_register_payload
 # --------------------------------------------------------------------------
 
