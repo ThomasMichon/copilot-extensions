@@ -68,6 +68,12 @@
       "description": "Customize and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, and installing plugins - with the per-skill folder conventions and Agent Skills best practices; ships the authoring-skills, defining-subagents, registering-mcp-servers, and installing-plugins skills",
       "version": "0.1.0-dev4",
       "source": "plugins/customizing-copilot"
+    },
+    {
+      "name": "agent-dispatch",
+      "description": "Portable agent task-queue + per-host coordinator: a single-writer SQLite leased work queue (six-state model, capability-gated atomic claim, affinity routing, lease recovery) so agents coordinate without push latency or an account per agent.",
+      "version": "0.1.0-dev3",
+      "source": "plugins/agent-dispatch"
     }
   ]
 }

@@ -6,11 +6,26 @@ producers) coordinate work through a single, low-latency authority -- instead of
 racing each other through `origin/master` pushes or needing a dedicated user
 account per agent.
 
-> **Status: early.** This ships the queue **engine** (`agent_dispatch.queue`),
-> the per-host **coordinator daemon** (`agent-dispatch serve`), and the
-> **`agent-dispatch` CLI**. The installer + marketplace registration (making it
-> deployable as a managed service) and SSE/agent-bridge integration land in
-> subsequent slices, so it is not yet a marketplace-installed runtime.
+> **Status: early but installable.** This ships the queue **engine**
+> (`agent_dispatch.queue`), the per-host **coordinator daemon**
+> (`agent-dispatch serve`), the **`agent-dispatch` CLI**, and an **installer**
+> (marketplace-registered; `scripts/init.sh` / `scripts/init.ps1` deploy a venv +
+> binstub + deploy manifest). Still to come: SSE / agent-bridge integration and
+> facility service auto-start (systemd unit / scheduled task) — for now the
+> coordinator is launched with `agent-dispatch serve`.
+
+## Install
+
+```bash
+# via the marketplace (once published):
+copilot plugin install agent-dispatch@copilot-extensions
+# then deploy the runtime (venv + binstub + manifest):
+bash "$(copilot plugin path agent-dispatch)/scripts/init.sh"   # Linux/WSL/macOS
+# Windows:  pwsh -File <plugin>\scripts\init.ps1
+```
+
+The installer creates `~/.agent-dispatch/.venv`, an `agent-dispatch` binstub in
+`~/.local/bin`, and a schema-3 deploy manifest. Re-run with `--force` to repair.
 
 ## Why
 
