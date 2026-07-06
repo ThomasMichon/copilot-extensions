@@ -6622,15 +6622,18 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         except Exception:
             current_machine = ""
         try:
-            adopted = name in doctor._read_projects()
+            projects = doctor._read_projects()
         except Exception:
-            adopted = False
+            projects = {}
+        adopted = name in projects
+        base_repo = bool(projects.get(name, {}).get("base_repo", False))
         resn = related.build_resolution(
             entry,
             current_machine=current_machine,
             repo_class=(reg.repo_class if reg else None),
             repo_path=(reg.local_path() if reg else None),
             adopted=adopted,
+            base_repo=base_repo,
         )
         if json_out:
             _json_output({
@@ -6639,6 +6642,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 "target_machine": resn.target_machine,
                 "available_here": resn.available_here,
                 "editing_model": resn.editing_model,
+                "base_repo": base_repo,
                 "delegate_via": resn.delegate_via,
                 "current_machine": current_machine,
                 "steps": resn.steps,

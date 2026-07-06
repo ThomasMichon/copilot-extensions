@@ -466,8 +466,17 @@ def upsert_related(anchor: str | Path, entry: RelatedEntry) -> RelatedConfig:
             existing.summary = entry.summary
         if entry.doc:
             existing.doc = entry.doc
-        if not entry.locus.is_empty():
-            existing.locus = entry.locus
+        # Merge locus at the *field* level so a partial update (e.g. only
+        # ``--machines``) overwrites just that sub-field and preserves the
+        # rest (``preferred`` / ``codespace`` / ``container``).  See #128.
+        if entry.locus.preferred:
+            existing.locus.preferred = entry.locus.preferred
+        if entry.locus.machines:
+            existing.locus.machines = entry.locus.machines
+        if entry.locus.codespace:
+            existing.locus.codespace = entry.locus.codespace
+        if entry.locus.container:
+            existing.locus.container = entry.locus.container
         if entry.delegate:
             existing.delegate = entry.delegate
     write_related(anchor, cfg)
@@ -598,13 +607,19 @@ def build_resolution(
     repo_class: str | None,
     repo_path: str | None,
     adopted: bool,
+    base_repo: bool = False,
 ) -> Resolution:
     """Compute how to work on ``entry`` from the current machine.
 
     Pure planner -- the caller injects the current machine, the global-registry
-    class/path, and whether the repo is adopted (has a launch binstub).  It
-    emits a structured plan (kind, availability, editing model, delegation,
-    concrete steps) but never executes anything.
+    class/path, whether the repo is adopted (has a launch binstub), and whether
+    it is adopted as a **base_repo** (an enlistment / no-worktree monorepo, from
+    projects.yaml).  It emits a structured plan (kind, availability, editing
+    model, delegation, concrete steps) but never executes anything.
+
+    A ``worktree``-class repo adopted as a ``base_repo`` is edited **in place**
+    in the anchor enlistment (one flow at a time), never via ``--new`` worktree
+    isolation.  See #143.
     """
     name = entry.name
     kind, target = parse_preferred(entry.locus.preferred)
@@ -615,14 +630,19 @@ def build_resolution(
     res = Resolution(name=name, locus_kind=kind, target_machine=target,
                      delegate_via=entry.delegate)
 
-    # Local editing model from the global registry class.
+    # Local editing model from the global registry class.  A ``worktree`` repo
+    # adopted as a ``base_repo`` (enlistment monorepo) is edited in the anchor
+    # in place -- ``anchor`` editing, not worktree isolation (#143).
     cls = (repo_class or "").lower()
     if cls == "reference":
         res.editing_model = "read-only"
     elif cls == "singleton":
         res.editing_model = "anchor"
     elif cls == "worktree":
-        res.editing_model = "worktree" if adopted else "worktree-unadopted"
+        if base_repo:
+            res.editing_model = "anchor"
+        else:
+            res.editing_model = "worktree" if adopted else "worktree-unadopted"
     else:
         res.editing_model = "unknown"
 
@@ -630,10 +650,12 @@ def build_resolution(
         if cls == "reference":
             return [f"Read-only (reference). Resolve the path with "
                     f"`agent-worktrees repos find {name}`; do not edit it."]
-        if cls == "singleton":
+        if cls == "singleton" or (cls == "worktree" and base_repo):
             loc = repo_path or f"(run `agent-worktrees repos find {name}`)"
+            kindword = ("base_repo enlistment" if cls == "worktree"
+                        else "singleton")
             return [f"Edit the anchor checkout directly at {loc} "
-                    "(singleton: one flow at a time)."]
+                    f"({kindword}: one flow at a time; no `--new` worktree)."]
         if cls == "worktree":
             if adopted:
                 return [f"Create an isolated worktree: `{name} --new`, then "
