@@ -583,7 +583,7 @@ def _create_worktree_core(
         no_resume=False, profile=None,
     )
     launch_cmd = _build_launch_cmd(config, fake_args, worktree_path, profile=profile)
-    env = _build_env(profile, _repo_session_env(config))
+    env = _build_env(profile, _repo_session_env(config, worktree_path))
 
     return {
         "worktree": _worktree_to_dict(record),
@@ -633,12 +633,35 @@ def _build_env(
     return env
 
 
-def _repo_session_env(config: cfg.Config) -> dict[str, str]:
-    """The default repo's ``session_env`` (or empty if unavailable)."""
+def _repo_session_env(config: cfg.Config, work_dir: str = "") -> dict[str, str]:
+    """The default repo's ``session_env``, with values templated.
+
+    Values may reference ``{work_dir}``, ``{anchor}``, ``{machine}``,
+    ``{repo_name}``, and ``{home}`` -- so a repo can express a per-machine path
+    (e.g. ``SUDO_ASKPASS: "{home}/.local/bin/vault-askpass"``) portably. A value
+    with an unrecognized placeholder is passed through unchanged rather than
+    raising.
+    """
     try:
-        return config.default_repo.session_env
+        raw = config.default_repo.session_env
     except Exception:
         return {}
+    if not raw:
+        return {}
+    variables = {
+        "work_dir": work_dir,
+        "anchor": config.default_repo.anchor,
+        "machine": config.machine,
+        "repo_name": config.repo_name,
+        "home": os.path.expanduser("~"),
+    }
+    out: dict[str, str] = {}
+    for k, v in raw.items():
+        try:
+            out[k] = v.format(**variables)
+        except (KeyError, IndexError, ValueError):
+            out[k] = v
+    return out
 
 
 def _build_launch_cmd(
@@ -845,7 +868,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             repo = config.default_repo
             work_dir = repo.anchor
             launch_cmd = _build_launch_cmd(config, args, work_dir)
-            env = _build_env(None, _repo_session_env(config))
+            env = _build_env(None, _repo_session_env(config, work_dir))
 
             _emit_plan({
                 "action": "exec",
@@ -892,7 +915,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             )
 
             launch_cmd = _build_launch_cmd(config, args, record.worktree_path)
-            env = _build_env(None, _repo_session_env(config))
+            env = _build_env(None, _repo_session_env(config, record.worktree_path))
 
             # Auto-resume session
             no_resume = getattr(args, "no_resume", False)
@@ -2073,7 +2096,7 @@ def _resolve_base_repo(
         print()
 
     launch_cmd = _build_launch_cmd(config, args, repo.anchor, profile=profile)
-    merged_env = _build_env(profile, _repo_session_env(config))
+    merged_env = _build_env(profile, _repo_session_env(config, repo.anchor))
     if args.dry_run:
         output.dry_run(f"Would launch: {' '.join(launch_cmd)}")
         if merged_env:
@@ -2256,7 +2279,7 @@ def _resolve_resume(
             print(f"   ⚠ Local commits present -- skipping auto-update ({ff.reason})")
 
     launch_cmd = _build_launch_cmd(config, args, record.worktree_path, profile=profile)
-    merged_env = _build_env(profile, _repo_session_env(config))
+    merged_env = _build_env(profile, _repo_session_env(config, record.worktree_path))
 
     # Auto-resume: find the most recent Copilot session for this worktree
     # and pass --resume=<session-id> so the user picks up where they left off.
@@ -2323,7 +2346,7 @@ def _resolve_new(
         output.dry_run("Would clone permissions")
         output.dry_run("Would add worktree path to trusted_folders")
         launch_cmd = _build_launch_cmd(config, args, worktree_path, profile=profile)
-        merged_env = _build_env(profile, _repo_session_env(config))
+        merged_env = _build_env(profile, _repo_session_env(config, worktree_path))
         output.dry_run(f"Would launch: {' '.join(launch_cmd)}")
         if merged_env:
             env_str = ", ".join(f"{k}={v}" for k, v in merged_env.items())
