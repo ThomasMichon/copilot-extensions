@@ -195,6 +195,27 @@ def test_upsert_insert_then_merge(tmp_path: Path):
     assert e.delegate == "agent-bridge"  # added
 
 
+def test_upsert_merges_locus_fields_not_atomic(tmp_path: Path):
+    # Seed a full locus (preferred + machines).
+    related.upsert_related(tmp_path, RelatedEntry(
+        name="ce", role="tooling",
+        locus=Locus(preferred="machine:dev6", machines=["dev6"])))
+    # Partial update: only --machines -> must preserve preferred (#128).
+    related.upsert_related(tmp_path, RelatedEntry(
+        name="ce", locus=Locus(machines=["dev6", "cloud1"])))
+    e = related.get_related(tmp_path, "ce")
+    assert e.locus.preferred == "machine:dev6"       # preserved
+    assert e.locus.machines == ["dev6", "cloud1"]    # updated
+    assert e.role == "tooling"                        # preserved
+
+    # Partial update: only --locus preferred -> must preserve machines.
+    related.upsert_related(tmp_path, RelatedEntry(
+        name="ce", locus=Locus(preferred="local")))
+    e = related.get_related(tmp_path, "ce")
+    assert e.locus.preferred == "local"               # updated
+    assert e.locus.machines == ["dev6", "cloud1"]    # preserved
+
+
 def test_list_related_filter_by_role(tmp_path: Path):
     related.upsert_related(tmp_path, RelatedEntry(name="b", role="tooling"))
     related.upsert_related(tmp_path, RelatedEntry(name="a", role="product"))
@@ -313,6 +334,21 @@ def test_resolve_local_worktree_adopted(tmp_path: Path):
     assert r.available_here is True
     assert r.editing_model == "worktree"
     assert any("ce --new" in s for s in r.steps)
+
+
+def test_resolve_worktree_base_repo_edits_anchor(tmp_path: Path):
+    # A worktree-class repo adopted as a base_repo (enlistment) is edited in
+    # place in the anchor, never via `--new` worktree isolation (#143).
+    e = RelatedEntry(name="SPO.Core", locus=Locus(preferred="local"))
+    r = related.build_resolution(
+        e, current_machine="tmichon-dev6", repo_class="worktree",
+        repo_path="D:/Enlist/SPO", adopted=True, base_repo=True,
+    )
+    assert r.editing_model == "anchor"
+    assert not any("SPO.Core --new" in s for s in r.steps)
+    assert not any("Create an isolated worktree" in s for s in r.steps)
+    assert any("anchor checkout directly" in s for s in r.steps)
+    assert any("base_repo enlistment" in s for s in r.steps)
 
 
 def test_resolve_worktree_unadopted_suggests_register(tmp_path: Path):
