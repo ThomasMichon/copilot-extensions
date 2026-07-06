@@ -6,7 +6,8 @@ snapshots) so callers stay decoupled from the server-side dataclasses.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import json
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 import httpx
@@ -138,3 +139,13 @@ class DispatchClient:
 
     def recover(self) -> dict:
         return self._unwrap(self._http.post("/recover"))
+
+    def stream_events(self) -> Iterator[dict]:
+        """Yield task events from the coordinator's SSE stream (blocking)."""
+        with self._http.stream("GET", "/events") as resp:
+            if resp.status_code >= 400:
+                resp.read()
+                raise DispatchError(resp.status_code, resp.text)
+            for line in resp.iter_lines():
+                if line.startswith("data:"):
+                    yield json.loads(line[len("data:") :].strip())

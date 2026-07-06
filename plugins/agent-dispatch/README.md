@@ -8,9 +8,10 @@ account per agent.
 
 > **Status: early but installable.** This ships the queue **engine**
 > (`agent_dispatch.queue`), the per-host **coordinator daemon**
-> (`agent-dispatch serve`), the **`agent-dispatch` CLI**, and an **installer**
+> (`agent-dispatch serve`), the **`agent-dispatch` CLI**, an **installer**
 > (marketplace-registered; `scripts/init.sh` / `scripts/init.ps1` deploy a venv +
-> binstub + deploy manifest). Still to come: SSE / agent-bridge integration and
+> binstub + deploy manifest), and an **SSE event stream** (`GET /events` /
+> `agent-dispatch watch`). Still to come: agent-bridge spawn integration and
 > facility service auto-start (systemd unit / scheduled task) — for now the
 > coordinator is launched with `agent-dispatch serve`.
 
@@ -115,7 +116,13 @@ agent-dispatch start  <id> worker-1
 agent-dispatch complete <id> worker-1 --result-ref pr/123
 agent-dispatch list --status queued
 agent-dispatch recover                                 # requeue expired-lease tasks
+agent-dispatch watch                                   # stream task events (SSE) as JSON lines
 ```
+
+The coordinator publishes `task.created` / `.proposed` / `.approved` / `.claimed`
+/ `.started` / `.yielded` / `.completed` / `.abandoned` / `.detached` events on
+`GET /events` (Server-Sent Events) — the hook a subscriber (e.g. agent-bridge)
+reacts to.
 
 Configuration (all optional): `AGENT_DISPATCH_HOST`, `AGENT_DISPATCH_PORT`,
 `AGENT_DISPATCH_DB`, `AGENT_DISPATCH_TOKEN` (bearer auth), and
