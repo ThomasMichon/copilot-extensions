@@ -30,9 +30,15 @@ def _fake_config():
     return SimpleNamespace(default_repo=repo, machine="lambda-core")
 
 
-def _run_new(args):
+def _run_new(args, *, tty=True):
     """Drive cmd_resolve down the --new branch, capturing args.no_mux at the
-    point _resolve_new is invoked."""
+    point _resolve_new is invoked.
+
+    ``tty`` simulates a controlling terminal (the cross-env "New worktree"
+    handoff runs ``<project> --new`` over ``ssh -t``). A muxed ``--new`` with
+    no TTY is refused by cmd_resolve, so the muxed-path assertions run with
+    ``tty=True``.
+    """
     captured = {}
 
     def _fake_resolve_new(config, a, profile=None):
@@ -41,6 +47,7 @@ def _run_new(args):
 
     with patch.object(cli.cfg, "load_config", return_value=_fake_config()), \
          patch.object(cli, "_resolve_profile", return_value=None), \
+         patch.object(cli.sys.stdin, "isatty", return_value=tty), \
          patch.object(cli, "_resolve_new", side_effect=_fake_resolve_new):
         rc = cli.cmd_resolve(args)
     return rc, captured
@@ -56,3 +63,20 @@ def test_new_with_no_mux_is_honored():
     rc, captured = _run_new(_args(new_worktree=True, no_mux=True))
     assert rc == 0
     assert captured["no_mux"] is True          # explicit opt-out still works
+
+
+def test_muxed_new_without_tty_is_refused():
+    """An agent running ``<project> --new`` from a tool call (no TTY, no
+    --no-mux, no --json) would spawn an un-attachable mux session. cmd_resolve
+    refuses it and never reaches _resolve_new."""
+    rc, captured = _run_new(_args(new_worktree=True), tty=False)
+    assert rc == 2
+    assert captured == {}                       # guarded before launch
+
+
+def test_no_mux_new_without_tty_is_allowed():
+    """``--no-mux`` (what agent-bridge passes) makes non-TTY ``--new`` fine --
+    it produces clean stdio, not a mux session."""
+    rc, captured = _run_new(_args(new_worktree=True, no_mux=True), tty=False)
+    assert rc == 0
+    assert captured["no_mux"] is True

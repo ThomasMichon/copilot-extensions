@@ -70,8 +70,8 @@ continue to work unchanged.
 
 | Subcommand | Description |
 |------------|-------------|
-| `resolve` | Interactive picker -- select or create a worktree, emit JSON launch plan |
-| `create` | Create a new worktree non-interactively |
+| `resolve` | Interactive picker -- select or create a worktree, emit JSON launch plan. `--new` creates + launches a **muxed interactive** session (refused without a TTY) |
+| `create` | Create a worktree **programmatically** -- no launch, no mux; prints id + path (add `--json`). The path for agents and daemons |
 | `push-changes` | Push worktree changes to remote default branch (squash, rebase, push). Aborts if the pre-squash fails (`--allow-unsquashed` to opt into individual commits) |
 | `finalize` | Validate the branch's content is on upstream; prune the worktree/branch only when idle (deferred while a session is live) |
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
