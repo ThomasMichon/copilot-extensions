@@ -257,3 +257,26 @@ def test_claim_composes_owner_from_machine_worktree(api):
 def test_claim_without_identity_is_422(api):
     api.post("/tasks", json={"title": "x"})
     assert api.post("/claim", json={"capabilities": []}).status_code == 422
+
+
+def test_payload_endpoint_inline(api):
+    tid = api.post("/tasks", json={"title": "t", "payload_inline": "small"}).json()["id"]
+    r = api.get(f"/tasks/{tid}/payload").json()
+    assert r["inline"] is True
+    assert r["payload"] == "small"
+    assert r["ref"] is None
+
+
+def test_payload_endpoint_spilled_blob(api):
+    big = "m" * 5000  # over the default 4096 threshold -> spills to a blob
+    tid = api.post("/tasks", json={"title": "t", "payload_inline": big}).json()["id"]
+    task = api.get(f"/tasks/{tid}").json()
+    assert task["payload_inline"] is None
+    assert task["payload_ref"].startswith("blob:")
+    r = api.get(f"/tasks/{tid}/payload").json()
+    assert r["inline"] is False
+    assert r["payload"] == big
+
+
+def test_payload_endpoint_missing_task_404(api):
+    assert api.get("/tasks/nope/payload").status_code == 404

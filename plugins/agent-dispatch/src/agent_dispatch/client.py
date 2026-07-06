@@ -68,6 +68,9 @@ class DispatchClient:
     def events(self, task_id: str) -> list[dict]:
         return self._unwrap(self._http.get(f"/tasks/{task_id}/events"))
 
+    def payload(self, task_id: str) -> dict:
+        return self._unwrap(self._http.get(f"/tasks/{task_id}/payload"))
+
     def list(self, **params: Any) -> list[dict]:
         clean = {k: v for k, v in params.items() if v is not None}
         return self._unwrap(self._http.get("/tasks", params=clean))

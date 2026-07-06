@@ -55,6 +55,10 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
 
 def _cmd_create(args: argparse.Namespace) -> int:
+    payload_inline = args.payload_inline
+    if args.payload_file:
+        with open(args.payload_file, encoding="utf-8") as fh:
+            payload_inline = fh.read()
     with _client(args) as c:
         task = c.create(
             args.title,
@@ -64,7 +68,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
             affinity=_parse_affinity(args.affinity),
             labels=args.label or [],
             payload_ref=args.payload_ref,
-            payload_inline=args.payload_inline,
+            payload_inline=payload_inline,
             target_machine=args.target_machine,
             target_worktree=args.target_worktree,
             target_repo=args.target_repo,
@@ -210,6 +214,24 @@ def _cmd_watch(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_payload(args: argparse.Namespace) -> int:
+    with _client(args) as c:
+        result = c.payload(args.task_id)
+    if args.raw:
+        content = result.get("payload")
+        if content is None:
+            print(
+                f"agent-dispatch: task {args.task_id} has no resolvable payload",
+                file=sys.stderr,
+            )
+            return 4
+        sys.stdout.write(content)
+        if not content.endswith("\n"):
+            sys.stdout.write("\n")
+        return 0
+    return _emit(result)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-dispatch", description="Agent task queue + coordinator"
@@ -238,6 +260,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--label", action="append", help="free-form label (repeatable)")
     p.add_argument("--payload-ref")
     p.add_argument("--payload-inline")
+    p.add_argument(
+        "--payload-file",
+        help="read the payload from a file (large payloads spill to a blob automatically)",
+    )
     p.add_argument("--target-machine")
     p.add_argument("--target-worktree")
     p.add_argument("--target-repo")
@@ -337,6 +363,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("events", help="show a task's audit trail")
     p.add_argument("task_id")
     p.set_defaults(func=_simple("events", "task_id"))
+
+    p = sub.add_parser("payload", help="show a task's resolved payload (inline or blob)")
+    p.add_argument("task_id")
+    p.add_argument(
+        "--raw", action="store_true", help="print the payload content only (not JSON)"
+    )
+    p.set_defaults(func=_cmd_payload)
 
     p = sub.add_parser("recover", help="requeue expired-lease tasks")
     p.set_defaults(func=lambda args: _emit(_client(args).recover()))
