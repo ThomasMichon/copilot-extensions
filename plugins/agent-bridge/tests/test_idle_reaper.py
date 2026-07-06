@@ -40,10 +40,11 @@ def _session(
     idle_for: float = 0.0,
     subscribers: int = 0,
     background: bool = False,
+    turns: int = 1,
 ) -> Session:
     s = Session(sid, sid, SpawnTarget(type="local", cwd="/tmp/x"))
     s.status = status
-    s.turn_count = 1  # skip 0-turn worktree cleanup
+    s.turn_count = turns  # >=1 => has resumable state
     s.updated_at = time.time() - idle_for
     s.subscriber_count = subscribers
     if background:
@@ -142,6 +143,16 @@ async def test_reaper_never_touches_running_session(tmp_path) -> None:
 async def test_reaper_skips_active_background_tasks(tmp_path) -> None:
     mgr = _mgr(tmp_path, ttl=60)
     s = _session(mgr, "s1", idle_for=99999, background=True)
+    assert await mgr.sweep_idle_sessions() == 0
+    assert s.status == SessionStatus.IDLE
+
+
+@pytest.mark.asyncio
+async def test_reaper_skips_zero_turn_session(tmp_path) -> None:
+    # A 0-turn session has no persisted ACP conversation, so a fresh child
+    # cannot load_session it -- reaping to STOPPED would leave it unresumable.
+    mgr = _mgr(tmp_path, ttl=60)
+    s = _session(mgr, "s1", idle_for=99999, turns=0)
     assert await mgr.sweep_idle_sessions() == 0
     assert s.status == SessionStatus.IDLE
 
