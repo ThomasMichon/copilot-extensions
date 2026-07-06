@@ -89,7 +89,10 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
 - **claimed** -- leased by a worker (may evaluate before committing).
 - **started** -- under active implementation.
 - **completed** / **abandoned** -- terminal (abandon requires permission).
-- Lease expiry returns a held task to **queued** (a dead worker's task resurfaces).
+- Lease expiry returns a held task to **queued** (a dead worker's task
+  resurfaces). The coordinator runs this recovery sweep automatically every
+  `AGENT_DISPATCH_SWEEP_INTERVAL` seconds (default 60; `0` disables); `recover`
+  forces one on demand.
 
 ### Routing: `requires` (hard) vs `affinity` (soft)
 
@@ -178,6 +181,7 @@ PATH, `--spawn` **degrades gracefully** — the task is simply left queued for a
 worker to claim, so agent-dispatch stays usable without a bridge.
 
 Configuration (all optional): `AGENT_DISPATCH_HOST`, `AGENT_DISPATCH_PORT`,
-`AGENT_DISPATCH_DB`, `AGENT_DISPATCH_TOKEN` (bearer auth), and
-`AGENT_DISPATCH_URL` (the base URL the CLI talks to -- point it at a remote
-coordinator on a shared network).
+`AGENT_DISPATCH_DB`, `AGENT_DISPATCH_TOKEN` (bearer auth),
+`AGENT_DISPATCH_SWEEP_INTERVAL` (auto lease-recovery cadence in seconds; `0`
+disables), and `AGENT_DISPATCH_URL` (the base URL the CLI talks to -- point it at
+a remote coordinator on a shared network).

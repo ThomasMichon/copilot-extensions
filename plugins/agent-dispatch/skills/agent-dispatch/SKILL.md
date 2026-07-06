@@ -117,7 +117,9 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
 - **abandon requires permission** (`--permit`) -- it's not a unilateral agent
   action; it's the discard path for duplicates / dropped priorities.
 - **Lease expiry -> queued** is automatic and internal (bumps `attempts`): a
-  dead worker's task resurfaces. Sweep with `agent-dispatch recover`.
+  dead worker's task resurfaces. The coordinator sweeps expired leases on a timer
+  (`AGENT_DISPATCH_SWEEP_INTERVAL`, default 60s); `agent-dispatch recover` forces
+  a sweep on demand.
 
 ## The everyday flow
 
@@ -215,6 +217,7 @@ without a bridge.
 | `AGENT_DISPATCH_TOKEN` | bearer token (client sends, server validates) |
 | `AGENT_DISPATCH_HOST` / `AGENT_DISPATCH_PORT` | where the coordinator binds (server side) |
 | `AGENT_DISPATCH_DB` | SQLite queue file (server side) |
+| `AGENT_DISPATCH_SWEEP_INTERVAL` | auto lease-recovery cadence in seconds (server side; `0` disables) |
 
 All CLI output is JSON on stdout, so verbs compose with `jq` and other tooling.
 Global flags `--url` / `--token` override the env per-invocation.

@@ -14,7 +14,7 @@ def build_app(cfg: Config | None = None):
     cfg = cfg or load_config()
     Path(cfg.db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
     queue = TaskQueue(Path(cfg.db_path).expanduser())
-    return create_app(queue, token=cfg.token)
+    return create_app(queue, token=cfg.token, sweep_interval=cfg.sweep_interval)
 
 
 def serve(cfg: Config | None = None) -> None:

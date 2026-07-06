@@ -11,4 +11,4 @@ from __future__ import annotations
 from agent_dispatch.queue import Status, Task, TaskError, TaskQueue, worker_id_for
 
 __all__ = ["Status", "Task", "TaskError", "TaskQueue", "worker_id_for"]
-__version__ = "0.1.0-dev9"
+__version__ = "0.1.0-dev10"

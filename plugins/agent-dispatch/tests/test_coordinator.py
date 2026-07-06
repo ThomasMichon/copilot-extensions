@@ -280,3 +280,79 @@ def test_payload_endpoint_spilled_blob(api):
 
 def test_payload_endpoint_missing_task_404(api):
     assert api.get("/tasks/nope/payload").status_code == 404
+
+
+def _boot(app):
+    """Boot an app on an ephemeral port; return (url, stop). Mirrors server_url."""
+    import uvicorn
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{port}"
+    probe = DispatchClient(url)
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        try:
+            probe.health()
+            break
+        except Exception:
+            time.sleep(0.05)
+    else:
+        probe.close()
+        raise RuntimeError("coordinator did not start")
+    probe.close()
+
+    def stop():
+        server.should_exit = True
+        thread.join(timeout=5)
+
+    return url, stop
+
+
+def test_background_sweep_auto_recovers_expired_lease(tmp_path):
+    # 1s lease + 0.3s sweep: a claimed task returns to queued with no manual recover.
+    from agent_dispatch.coordinator import create_app
+    from agent_dispatch.queue import TaskQueue
+
+    q = TaskQueue(tmp_path / "tasks.db", lease_seconds=1)
+    url, stop = _boot(create_app(q, sweep_interval=0.3))
+    try:
+        c = DispatchClient(url)
+        tid = c.create("leased")["id"]
+        assert c.claim(worker_id="w1")["id"] == tid
+        assert c.get(tid)["status"] == Status.CLAIMED
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if c.get(tid)["status"] == Status.QUEUED:
+                break
+            time.sleep(0.2)
+        assert c.get(tid)["status"] == Status.QUEUED  # swept back automatically
+        assert c.get(tid)["owner"] is None
+        c.close()
+    finally:
+        stop()
+
+
+def test_sweep_disabled_by_default(tmp_path):
+    # sweep_interval=0 (default) -> a held expired lease is NOT auto-recovered.
+    from agent_dispatch.coordinator import create_app
+    from agent_dispatch.queue import TaskQueue
+
+    q = TaskQueue(tmp_path / "tasks.db", lease_seconds=1)
+    url, stop = _boot(create_app(q))  # no sweep_interval
+    try:
+        c = DispatchClient(url)
+        tid = c.create("leased")["id"]
+        c.claim(worker_id="w1")
+        time.sleep(1.5)  # lease expired, but nothing sweeps it
+        assert c.get(tid)["status"] == Status.CLAIMED
+        assert c.recover()["recovered"] == 1  # manual recover still works
+        assert c.get(tid)["status"] == Status.QUEUED
+        c.close()
+    finally:
+        stop()
