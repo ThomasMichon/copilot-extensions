@@ -90,6 +90,7 @@ class _FakeEventLog:
 class _FakeSession:
     def __init__(self, active: dict | None) -> None:
         self.event_log = _FakeEventLog(active)
+        self.session_id = "sess-1"
 
 
 class _FakeMgr:
@@ -98,6 +99,12 @@ class _FakeMgr:
 
     def get_session(self, _session_id: str) -> _FakeSession:
         return self._session
+
+    def add_subscriber(self, _session_id: str) -> None:
+        pass
+
+    def remove_subscriber(self, _session_id: str) -> None:
+        pass
 
 
 class _FakeRequest:

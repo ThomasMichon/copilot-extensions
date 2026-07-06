@@ -340,3 +340,25 @@ class ServiceConfig(BaseModel):
         "sessions are flagged to receive a 'Resume' nudge once the restarted "
         "frontend reattaches. Only meaningful when session_host_enabled is True.",
     )
+    idle_reap_ttl_seconds: int = Field(
+        default=0,
+        description="Idle-session reaper TTL (#1826, ownership inversion). When "
+        "> 0, a session that is IDLE (the agent reached its own stop, not "
+        "mid-turn), has ZERO active subscribers (no SSE stream / front watching "
+        "it), and has been idle-and-unwatched for at least this many seconds is "
+        "STOPPED -- freeing its Copilot child while preserving state for resume "
+        "(a fresh child + load_session replay). This lets the back-end own "
+        "session process lifetime by connection + state, so a front (Neuron "
+        "Forge) need only connect/disconnect and never reaps for resource "
+        "reasons. Never touches a running/mid-turn session (goal 1) nor one with "
+        "a live subscriber or active background sub-agents. Complementary to "
+        "session_host_stale_reap_seconds (which bounds a never-idle stranded "
+        "old-version host). 0 disables (the default). Only meaningful when "
+        "session_host_enabled is True.",
+    )
+    idle_reap_sweep_seconds: int = Field(
+        default=300,
+        description="How often the idle-session reaper sweep runs, in seconds "
+        "(#1826). Clamped to a 30s floor. Only meaningful when "
+        "session_host_enabled and idle_reap_ttl_seconds are both > 0.",
+    )

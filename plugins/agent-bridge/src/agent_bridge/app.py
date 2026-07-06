@@ -91,6 +91,7 @@ async def lifespan(app: FastAPI):
         session_host_enabled=cfg.session_host_enabled,
         session_host_stale_reap_seconds=cfg.session_host_stale_reap_seconds,
         graceful_cancel_settle_seconds=cfg.graceful_cancel_settle_seconds,
+        idle_reap_ttl_seconds=cfg.idle_reap_ttl_seconds,
     )
     app.state.session_manager = mgr
 
@@ -228,6 +229,33 @@ async def lifespan(app: FastAPI):
 
         host_sweep_task = asyncio.create_task(_host_sweep_loop())
 
+    # Idle-session reaper (#1826, ownership inversion) -- the bridge owns
+    # session process lifetime by connection + state, so a front need only
+    # connect/disconnect. Periodically stop idle, unwatched sessions past the
+    # TTL, freeing their Copilot children (resumable via replay). Only runs in
+    # Session-Host mode with a positive TTL configured.
+    idle_reap_task = None
+    if cfg.session_host_enabled and cfg.idle_reap_ttl_seconds > 0:
+        async def _idle_reap_loop() -> None:
+            interval = max(30.0, float(cfg.idle_reap_sweep_seconds or 300))
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    n = await mgr.sweep_idle_sessions()
+                    if n:
+                        log.info(
+                            "Idle-reaper stopped %d idle unwatched session(s)", n
+                        )
+                except Exception:
+                    log.warning("Idle-session sweep failed", exc_info=True)
+
+        idle_reap_task = asyncio.create_task(_idle_reap_loop())
+        log.info(
+            "Idle-session reaper armed: TTL=%ds, sweep every %ds",
+            cfg.idle_reap_ttl_seconds,
+            max(30, cfg.idle_reap_sweep_seconds or 300),
+        )
+
     # Routing-table publish-on-ready -- a normal daemon announces its endpoint
     # to active.json once it is actually listening, so CLI clients discover it
     # via the routing table. A passive cutover instance leaves publish_on_ready
@@ -298,6 +326,12 @@ async def lifespan(app: FastAPI):
         host_sweep_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await host_sweep_task
+
+    # Shutdown: stop the idle-session reaper (#1826)
+    if idle_reap_task is not None:
+        idle_reap_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await idle_reap_task
 
     # Shutdown: stop credential relay
     if relay_server and relay_server.running:

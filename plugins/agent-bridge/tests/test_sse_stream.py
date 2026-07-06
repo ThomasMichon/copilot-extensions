@@ -43,8 +43,12 @@ def _request_for(log: EventLog, sid: str = "sess-1") -> SimpleNamespace:
     ``get_events`` only touches ``request.app.state.session_manager`` and, for
     that manager, ``get_session(sid).event_log``.
     """
-    session = SimpleNamespace(event_log=log)
-    mgr = SimpleNamespace(get_session=lambda s: session if s == sid else None)
+    session = SimpleNamespace(event_log=log, session_id=sid)
+    mgr = SimpleNamespace(
+        get_session=lambda s: session if s == sid else None,
+        add_subscriber=lambda s: None,
+        remove_subscriber=lambda s: None,
+    )
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(session_manager=mgr)))
 
 

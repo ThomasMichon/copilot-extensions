@@ -261,6 +261,10 @@ class Session:
         self._crossed_thresholds: set[str] = set()
         self.created_at = time.time()
         self.updated_at = self.created_at
+        # Count of active event subscribers (SSE streams / attached fronts).
+        # Drives the idle reaper (#1826): a session with zero subscribers is
+        # "unwatched" and eligible for idle reclamation. In-memory only.
+        self.subscriber_count = 0
         self.event_log: EventLog | None = None
         self.acp_session_id: str | None = None
         # Structured milestone markers the dispatched agent has reported via
@@ -329,6 +333,7 @@ class SessionManager:
         session_host_state_dir: str | None = None,
         session_host_stale_reap_seconds: float = 0.0,
         graceful_cancel_settle_seconds: float = 45.0,
+        idle_reap_ttl_seconds: float = 0.0,
     ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
@@ -338,6 +343,10 @@ class SessionManager:
         self._session_host_enabled = session_host_enabled
         self._session_host_stale_reap_seconds = session_host_stale_reap_seconds
         self._graceful_cancel_settle_seconds = graceful_cancel_settle_seconds
+        # Idle-session reaper TTL (#1826): stop an idle, unwatched session past
+        # this many seconds to free its Copilot child (resumable via replay).
+        # 0 disables. Only acts in Session-Host mode.
+        self._idle_reap_ttl_seconds = idle_reap_ttl_seconds
         self._host_index: Any = None
         if session_host_enabled:
             from pathlib import Path as _Path
@@ -1146,6 +1155,78 @@ class SessionManager:
                 reaped += 1
         return reaped
 
+    # -- Subscriber tracking + idle reaper (#1826) ----------------------------
+
+    def add_subscriber(self, session_id: str) -> None:
+        """Register an active event subscriber (an SSE stream / attached front).
+
+        Increments the session's live-subscriber count so the idle reaper knows
+        the session is being watched. Paired with ``remove_subscriber`` in the
+        SSE stream's teardown. No-op for an unknown session.
+        """
+        sid = self._resolve_ref(session_id) or session_id
+        s = self._sessions.get(sid)
+        if s is not None:
+            s.subscriber_count += 1
+
+    def remove_subscriber(self, session_id: str) -> None:
+        """Deregister an event subscriber; clamp at zero.
+
+        When the last subscriber leaves, ``touch()`` the session so the
+        idle-reaper TTL clock starts from the moment it became unwatched (not
+        from the last turn).
+        """
+        sid = self._resolve_ref(session_id) or session_id
+        s = self._sessions.get(sid)
+        if s is not None:
+            s.subscriber_count = max(0, s.subscriber_count - 1)
+            if s.subscriber_count == 0:
+                s.touch()
+
+    async def sweep_idle_sessions(self, *, now: float | None = None) -> int:
+        """Stop idle, unwatched sessions past the reap TTL (#1826).
+
+        The bridge owns session process lifetime: a session that is IDLE (agent
+        at its own stop -- never mid-turn), has ZERO active subscribers, holds no
+        active background sub-agents, and has been idle+unwatched at least
+        ``idle_reap_ttl_seconds`` is **stopped with its host child reaped** --
+        freeing the Copilot process while leaving the session resumable (fresh
+        child + ``load_session`` replay). This is what lets a front (Neuron
+        Forge) merely connect/disconnect and never reap for resource reasons.
+        Returns the count reaped. No-op unless enabled + Session-Host mode.
+        """
+        ttl = self._idle_reap_ttl_seconds
+        if not ttl or ttl <= 0 or not self._session_host_enabled:
+            return 0
+        now = now if now is not None else time.time()
+        reaped = 0
+        for sid, s in list(self._sessions.items()):
+            if s.status != SessionStatus.IDLE:
+                continue
+            if s.subscriber_count > 0:
+                continue
+            if s.has_active_background_tasks:
+                continue
+            idle_for = now - s.updated_at
+            if idle_for < ttl:
+                continue
+            try:
+                await self.stop_session(sid, reap_host=True)
+            except SessionBusyError:
+                continue
+            except Exception:
+                log.warning(
+                    "Idle reap of session %s failed", sid, exc_info=True
+                )
+                continue
+            reaped += 1
+            log.info(
+                "Idle-reaped session %s (%s): idle+unwatched %.0fs >= %.0fs TTL "
+                "-- child freed, session resumable",
+                sid, s.name, idle_for, ttl,
+            )
+        return reaped
+
     async def start_session(
         self,
         target: SpawnTarget,
@@ -1707,7 +1788,9 @@ class SessionManager:
                 session.session_id, exc_info=True,
             )
 
-    async def stop_session(self, session_id: str, *, force: bool = False) -> None:
+    async def stop_session(
+        self, session_id: str, *, force: bool = False, reap_host: bool = False
+    ) -> None:
         """Stop a session -- shut down ACP client, preserve state for resume.
 
         Refuses with SessionBusyError when the session is hosting active
@@ -1717,6 +1800,14 @@ class SessionManager:
         Teardown is **never gated by the drain flag** (#1755): stopping a
         session is exactly what lets the busy sessions ``drain()`` waits on
         settle, so gating it here would self-deadlock a redeploy.
+
+        ``reap_host`` (idle-reaper path, #1826): a plain stop in Session-Host
+        mode only *detaches* the client, leaving the child **reattachable**; the
+        idle reaper instead wants the child **freed** for resource reclamation,
+        so it reaps the host record too. The session still ends STOPPED and is
+        resumable via ``load_session`` replay (a *fresh* child) -- allowed
+        because the reaper only ever stops an IDLE session, never mid-turn
+        (goal 1).
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
@@ -1727,6 +1818,13 @@ class SessionManager:
             raise SessionBusyError(session_id, session.active_background_tasks)
 
         await self._quiesce_session(session)
+
+        # Idle-reaper only: free the Session Host child (a plain stop detaches
+        # to keep it reattachable). Safe here because the session is idle.
+        if reap_host and self._session_host_enabled and self._host_index is not None:
+            rec = self._host_index.get(session_id)
+            if rec is not None:
+                self._reap_host_record(rec, "idle reap (#1826)")
 
         session.status = SessionStatus.STOPPED
         now = time.time()

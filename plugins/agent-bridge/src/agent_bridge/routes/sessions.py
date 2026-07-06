@@ -69,7 +69,7 @@ def _tool_progress_sse(active: dict, now: float) -> str:
     return f": tool_progress {payload}\n\n"
 
 
-async def _sse_event_stream(session, start, *, server, is_disconnected):  # noqa: ANN001
+async def _sse_event_stream(session, start, *, server, is_disconnected, mgr=None):  # noqa: ANN001
     """The SSE event generator for ``GET /{id}/events`` (extracted for testing).
 
     Streams durable events past ``start``; on each quiet ``wait_for_events``
@@ -81,8 +81,16 @@ async def _sse_event_stream(session, start, *, server, is_disconnected):  # noqa
     TimeoutStopSec SIGKILL (#1789) -- which also starves the lifespan
     graceful-cancel on a bare ``systemctl restart``. The per-cycle beat cadence
     is unchanged.
+
+    While a stream is live it counts as an active **subscriber** (#1826) via
+    ``mgr.add_subscriber``/``remove_subscriber`` so the idle reaper never reaps
+    a session someone is watching. The decrement is in a ``finally`` so it runs
+    on shutdown, client disconnect, or generator close.
     """
     cursor = start
+
+    if mgr is not None:
+        mgr.add_subscriber(session.session_id)
 
     def _shutting_down() -> bool:
         return bool(server is not None and getattr(server, "should_exit", False))
@@ -96,37 +104,41 @@ async def _sse_event_stream(session, start, *, server, is_disconnected):  # noqa
                     return True
         return False
 
-    while True:
-        if await _closing():
-            return
-        wait_task = asyncio.ensure_future(
-            session.event_log.wait_for_events(cursor, timeout=30.0))
+    try:
         while True:
-            done, _pending = await asyncio.wait({wait_task}, timeout=0.5)
-            if done:
-                break
             if await _closing():
-                wait_task.cancel()
-                with contextlib.suppress(BaseException):
-                    await wait_task
                 return
-        events = wait_task.result()
-        if events:
-            for evt in events:
-                data = json.dumps({
-                    "event": evt.event,
-                    "data": evt.data,
-                    "timestamp": evt.timestamp,
-                })
-                yield f"id: {evt.id}\nevent: {evt.event}\ndata: {data}\n\n"
-                cursor = evt.id
-            continue
-        # Quiet period -- cursor-neutral liveness beat.
-        active = session.event_log.active_tool_call()
-        if active:
-            yield _tool_progress_sse(active, time.time())
-        else:
-            yield ": heartbeat\n\n"
+            wait_task = asyncio.ensure_future(
+                session.event_log.wait_for_events(cursor, timeout=30.0))
+            while True:
+                done, _pending = await asyncio.wait({wait_task}, timeout=0.5)
+                if done:
+                    break
+                if await _closing():
+                    wait_task.cancel()
+                    with contextlib.suppress(BaseException):
+                        await wait_task
+                    return
+            events = wait_task.result()
+            if events:
+                for evt in events:
+                    data = json.dumps({
+                        "event": evt.event,
+                        "data": evt.data,
+                        "timestamp": evt.timestamp,
+                    })
+                    yield f"id: {evt.id}\nevent: {evt.event}\ndata: {data}\n\n"
+                    cursor = evt.id
+                continue
+            # Quiet period -- cursor-neutral liveness beat.
+            active = session.event_log.active_tool_call()
+            if active:
+                yield _tool_progress_sse(active, time.time())
+            else:
+                yield ": heartbeat\n\n"
+    finally:
+        if mgr is not None:
+            mgr.remove_subscriber(session.session_id)
 
 
 def _session_info(s) -> SessionInfo:  # noqa: ANN001
@@ -454,7 +466,8 @@ async def get_events(
     server = getattr(request.app.state, "uvicorn_server", None)
     return StreamingResponse(
         _sse_event_stream(session, start, server=server,
-                          is_disconnected=getattr(request, "is_disconnected", None)),
+                          is_disconnected=getattr(request, "is_disconnected", None),
+                          mgr=mgr),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
