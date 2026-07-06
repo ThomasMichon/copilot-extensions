@@ -28,6 +28,21 @@ bash "$(copilot plugin path agent-dispatch)/scripts/init.sh"   # Linux/WSL/macOS
 The installer creates `~/.agent-dispatch/.venv`, an `agent-dispatch` binstub in
 `~/.local/bin`, and a schema-3 deploy manifest. Re-run with `--force` to repair.
 
+### Running the coordinator as a service
+
+On the host that *is* the coordinator, add `--service` (Linux/WSL) to install a
+**systemd user unit** that runs `agent-dispatch serve` and restarts on failure:
+
+```bash
+bash "$(copilot plugin path agent-dispatch)/scripts/init.sh" --service
+systemctl --user status agent-dispatch          # manage it
+# edit ~/.agent-dispatch/service.env (host/port/token), then: systemctl --user restart agent-dispatch
+```
+
+A machine that is only a *client* of a remote coordinator omits `--service` and
+just points `AGENT_DISPATCH_URL` at the coordinator host. (A Windows scheduled-task
+equivalent for `init.ps1` is a follow-up; on Windows run `agent-dispatch serve`.)
+
 ## Why
 
 A queue needs an **atomic leased claim** to be a correct coordinator: two agents
