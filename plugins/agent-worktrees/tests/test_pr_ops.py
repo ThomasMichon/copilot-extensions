@@ -384,6 +384,60 @@ class TestPRFinalizeAndPush:
         ok = fin.push_changes(wid, config)
         assert ok is False
 
+    # --- #1815: refspec-mode push-changes updates the PR head from wt_branch --
+
+    def _refspec_config(self, config):
+        import dataclasses
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(repo.pr, head_scheme="refspec")
+        return dataclasses.replace(config, repos={"ext": dataclasses.replace(repo, pr=pr)})
+
+    def test_push_changes_refspec_updates_head_ref(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        config = self._refspec_config(config)
+        pr_ops.create_pr(wid, config, title="Add feature")
+        # Refspec: HEAD stayed on the worktree branch; PR head is a remote ref.
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == f"worktree/{wid}"
+        before = _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path)
+
+        # A feedback commit lands directly on worktree/<id> -- no checkout needed.
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        ok = fin.push_changes(wid, config)
+        assert ok is True
+
+        after = _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path)
+        assert after != before  # remote PR head advanced
+        # HEAD never left the worktree branch; the head ref is its tip.
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == f"worktree/{wid}"
+        assert _git("rev-parse", f"worktree/{wid}", cwd=wt_path) == \
+            _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path)
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.pr.head_sha == _git("rev-parse", "HEAD", cwd=wt_path)
+        assert rec.pr.state == "open"
+
+    def test_push_changes_refspec_rejects_wrong_branch(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        config = self._refspec_config(config)
+        pr_ops.create_pr(wid, config, title="Add feature")
+        # Move HEAD off the worktree branch -- refspec push-changes must refuse.
+        _git("checkout", "-b", "sidebar", cwd=wt_path)
+        ok = fin.push_changes(wid, config)
+        assert ok is False
+
+    def test_push_changes_refspec_dirty_refused(self, pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        config = self._refspec_config(config)
+        pr_ops.create_pr(wid, config, title="Add feature")
+        (wt_path / "dirty.txt").write_text("uncommitted\n")
+        ok = fin.push_changes(wid, config)
+        assert ok is False
+
     # --- #1045: finalize must not false-block once the PR is merged -----------
 
     def _simulate_squash_merge(self, config, wid, feature):
