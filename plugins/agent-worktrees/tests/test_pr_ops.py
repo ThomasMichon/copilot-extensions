@@ -43,6 +43,39 @@ class TestFeatureBranchName:
         assert name.endswith("-abcd")
 
 
+class TestPRHeadName:
+    def test_snapshot_default_matches_feature_branch_name(self):
+        prcfg = cfg.PRConfig(enabled=True, branch_prefix="feature")
+        assert pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa") == \
+            pr_ops.feature_branch_name("feature", "Add auth", "wt-x-aaaa")
+        assert pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa") == "feature/add-auth-aaaa"
+
+    def test_refspec_default_is_pr_namespace(self):
+        prcfg = cfg.PRConfig(enabled=True, head_scheme="refspec")
+        assert pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa") == "pr/add-auth-aaaa"
+
+    def test_explicit_user_pattern_resolves_username(self, tmp_path):
+        repo = tmp_path / "r"
+        repo.mkdir()
+        _git("init", cwd=repo)
+        _git("config", "user.email", "cjohnson@example.com", cwd=repo)
+        prcfg = cfg.PRConfig(enabled=True, head_pattern="user/{username}/{slug}-{suffix}")
+        name = pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa", cwd=str(repo))
+        assert name == "user/cjohnson/add-auth-aaaa"
+
+    def test_sanitizes_unresolved_segments(self):
+        # No cwd -> username falls back to "user"; no empty // segments.
+        prcfg = cfg.PRConfig(enabled=True, head_pattern="user/{username}/{slug}-{suffix}")
+        name = pr_ops.pr_head_name(prcfg, "X", "wt-aaaa")
+        assert "//" not in name
+        assert name == "user/user/x-aaaa"
+
+    def test_malformed_pattern_falls_back(self):
+        prcfg = cfg.PRConfig(enabled=True, head_pattern="{nope}/{slug}")
+        name = pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa")
+        assert name == "feature/add-auth-aaaa"
+
+
 # ---------------------------------------------------------------------------
 # create_pr -- git-level integration
 # ---------------------------------------------------------------------------
@@ -136,6 +169,80 @@ class TestCreatePR:
         # Still on the worktree branch -- nothing happened
         head = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path)
         assert head == f"worktree/{wid}"
+
+
+# ---------------------------------------------------------------------------
+# create_pr -- refspec head scheme (#1815)
+# ---------------------------------------------------------------------------
+
+class TestCreatePRRefspec:
+    def _refspec_config(self, config, **pr_overrides):
+        import dataclasses
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(repo.pr, head_scheme="refspec", **pr_overrides)
+        return dataclasses.replace(config, repos={"ext": dataclasses.replace(repo, pr=pr)})
+
+    def test_pushes_from_worktree_branch_no_feature_branch(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        config = self._refspec_config(config)
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+        assert res["success"] is True, res
+        assert res["branch"] == "pr/add-feature-aaaa"
+
+        # HEAD never leaves the worktree branch.
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == f"worktree/{wid}"
+        # No local feature/pr branch is created.
+        assert not git_ops.local_branch_exists("pr/add-feature-aaaa", cwd=str(wt_path))
+        # The head ref exists on the remote.
+        assert git_ops.remote_branch_exists("origin", "pr/add-feature-aaaa", cwd=str(wt_path))
+        # worktree/<id> sits 1 ahead of master (NOT reset to upstream).
+        ahead = git_ops.get_commits_ahead(f"worktree/{wid}", "origin/master", cwd=str(wt_path))
+        assert len(ahead) == 1
+        # The remote head is the worktree branch's own commit.
+        assert _git("rev-parse", f"worktree/{wid}", cwd=wt_path) == \
+            _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path)
+
+    def test_tracking_records_refspec_head(self, pr_repo):
+        config, wid, _wt, _ = pr_repo
+        config = self._refspec_config(config)
+        pr_ops.create_pr(wid, config, title="Add feature")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.pr is not None
+        assert rec.pr.branch == "pr/add-feature-aaaa"
+        assert rec.pr.state == "open"
+
+    def test_refspec_rerun_is_idempotent(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        config = self._refspec_config(config)
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+        before = _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path)
+        # Re-run from worktree/<id> (still 1-ahead, live PR) re-pushes cleanly --
+        # no "already exists" error, HEAD stays put, no duplicate PR record.
+        second = pr_ops.create_pr(wid, config, title="Add feature")
+        assert second["success"] is True, second
+        assert second["branch"] == "pr/add-feature-aaaa"
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == f"worktree/{wid}"
+        after = _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path)
+        assert after == before  # same squashed content re-pushed
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert len(rec.prs) == 1
+
+    def test_custom_head_pattern(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        config = self._refspec_config(config, head_pattern="submit/{slug}-{suffix}")
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+        assert res["branch"] == "submit/add-feature-aaaa"
+        assert git_ops.remote_branch_exists("origin", "submit/add-feature-aaaa", cwd=str(wt_path))
+        assert not git_ops.local_branch_exists("submit/add-feature-aaaa", cwd=str(wt_path))
+
+    def test_snapshot_mode_still_default(self, pr_repo):
+        # The stock pr_repo (no head_scheme) uses snapshot: a local feature
+        # branch is created and pushed under the feature/ namespace.
+        config, wid, wt_path, _ = pr_repo
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+        assert res["branch"] == "feature/add-feature-aaaa"
+        assert git_ops.local_branch_exists("feature/add-feature-aaaa", cwd=str(wt_path))
 
 
 # ---------------------------------------------------------------------------

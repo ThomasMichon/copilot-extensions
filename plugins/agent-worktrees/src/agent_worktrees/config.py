@@ -93,6 +93,25 @@ class PRConfig:
     provider: str = "gitea"        # gitea | github | azure-devops
     strategy: str = "detach"       # default disposition: keep-alive | detach
     branch_prefix: str = "feature"
+    # ``head_scheme`` selects HOW create-pr publishes the PR head (#1815):
+    #
+    # - ``snapshot`` (default, legacy) -- create a separate local
+    #   ``{prefix}/<slug>`` branch at the squashed commit, reset the worktree
+    #   base branch to upstream, and push that branch. HEAD returns to the
+    #   worktree branch (#1804).
+    # - ``refspec`` -- keep the squashed work ON ``worktree/<id>`` and push it
+    #   directly to the PR head ref via a refspec (no local feature branch, no
+    #   checkout dance; the worktree stays on its own branch, which sits ahead
+    #   of master while the PR is open). Opt-in during migration.
+    #
+    # ``head_pattern`` is the PR head-name template (tokens ``{prefix}``,
+    # ``{slug}``, ``{suffix}``, ``{username}``, ``{machine}``). Empty means the
+    # scheme default: ``{prefix}/{slug}-{suffix}`` under ``snapshot`` (keeping
+    # today's ``feature/<slug>`` names byte-for-byte) and ``pr/{slug}-{suffix}``
+    # under ``refspec``. Repos that want e.g. ``user/<username>/<slug>-<suffix>``
+    # set it explicitly.
+    head_scheme: str = "snapshot"  # snapshot | refspec
+    head_pattern: str = ""         # empty -> scheme default (see above)
     # Provider-plugin settings (PR creation via a provider CLI). ``api_base``
     # is the hosting endpoint -- required for self-hosted Gitea
     # (e.g. https://host/gitea) and Azure DevOps org URLs; GitHub defaults to
@@ -764,12 +783,17 @@ def _parse_pr(raw: Any) -> PRConfig:
         labels = (str(raw_labels),)
     else:
         labels = ()
+    head_scheme = str(raw.get("head_scheme", "snapshot")).strip().lower()
+    if head_scheme not in ("snapshot", "refspec"):
+        head_scheme = "snapshot"
     return PRConfig(
         enabled=enabled,
         required=required,
         provider=str(raw.get("provider", "gitea")),
         strategy=str(raw.get("strategy", "detach")),
         branch_prefix=str(raw.get("branch_prefix", "feature")),
+        head_scheme=head_scheme,
+        head_pattern=str(raw.get("head_pattern", "")),
         api_base=str(raw.get("api_base", "")),
         token_env=str(raw.get("token_env", "")),
         token_command=str(raw.get("token_command", "")),

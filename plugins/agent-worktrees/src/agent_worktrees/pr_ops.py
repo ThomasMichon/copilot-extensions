@@ -10,12 +10,21 @@ Branch topology (PR mode)::
       (upstream)       (local base,        (the PR branch: one squashed
                         tracks master)      work commit, pushed to remote)
 
-``create_pr`` squashes the worktree's commits into one, rebases that commit
-onto the upstream default branch, creates the feature branch at it, pushes it,
-resets the worktree base branch back to the upstream tip, and returns HEAD to
-that base branch so the operator resumes on the canonical working branch (a
-later ``git sync`` then fast-forwards cleanly instead of rebasing the throwaway
-feature branch).  See ``docs/plans/pr-workflow.md`` in aperture-labs.
+``create_pr`` squashes the worktree's commits into one and rebases that commit
+onto the upstream default branch.  How it then publishes the PR head depends on
+``pr.head_scheme``:
+
+- ``snapshot`` (default, legacy): create the ``feature/{slug}-{suffix}`` branch
+  at the squashed commit, reset the worktree base branch back to the upstream
+  tip, push the feature branch, and return HEAD to the worktree base branch so
+  the operator resumes on the canonical working branch (#1804) -- a later
+  ``git sync`` fast-forwards cleanly instead of rebasing the throwaway branch.
+- ``refspec`` (#1815): keep the squashed work ON ``worktree/{id}`` and push it
+  directly to the PR head ref (``worktree/{id}:refs/heads/{head}``) -- no local
+  feature branch, no checkout dance; the worktree stays on its own branch,
+  which sits ahead of master while the PR is open.
+
+See ``docs/plans/pr-workflow.md`` in aperture-labs.
 """
 
 from __future__ import annotations
@@ -34,8 +43,10 @@ __all__ = [
     "HOLD_LABEL",
     "create_pr",
     "feature_branch_name",
+    "pr_head_name",
     "pr_ready",
     "pr_status",
+    "resolve_head_pattern",
     "set_pr",
     "slugify",
 ]
@@ -58,6 +69,85 @@ def feature_branch_name(prefix: str, title: str, worktree_id: str) -> str:
     suffix = worktree_id.rsplit("-", 1)[-1] if "-" in worktree_id else worktree_id
     slug = slugify(title)
     return f"{(prefix or 'feature')}/{slug}-{suffix}"
+
+
+def _worktree_suffix(worktree_id: str) -> str:
+    """The final dash-delimited token of a worktree id (its short hash)."""
+    return worktree_id.rsplit("-", 1)[-1] if "-" in worktree_id else worktree_id
+
+
+def _sanitize_head_ref(name: str) -> str:
+    """Collapse a formatted head-name template into a tidy, valid git ref.
+
+    Trims each ``/``-delimited segment and drops empty ones (e.g. an
+    unresolved ``{username}`` that expanded to nothing), so a pattern like
+    ``user/{username}/{slug}-{suffix}`` never yields a ``//`` or trailing/
+    leading slash.
+    """
+    parts = [seg.strip().strip("-") for seg in name.split("/")]
+    parts = [seg for seg in parts if seg]
+    return "/".join(parts) or "pr/change"
+
+
+def _resolve_username(cwd: str | None) -> str:
+    """Resolve the ``{username}`` token from the repo's git identity.
+
+    Prefers the local-part of ``user.email`` (e.g. ``cjohnson@...`` ->
+    ``cjohnson``), then ``user.name``, slugified; falls back to ``user``.
+    """
+    if not cwd:
+        return "user"
+    for key in ("user.email", "user.name"):
+        r = git_ops.git("config", key, cwd=cwd, check=False)
+        val = r.stdout.strip() if r.returncode == 0 else ""
+        if val:
+            local = val.split("@", 1)[0]
+            slug = re.sub(r"[^a-zA-Z0-9]+", "-", local.lower()).strip("-")
+            if slug:
+                return slug
+    return "user"
+
+
+def resolve_head_pattern(prcfg) -> str:
+    """The PR head-name template for *prcfg* (explicit override or scheme default).
+
+    An explicit ``head_pattern`` wins.  Otherwise the default depends on the
+    scheme: ``refspec`` uses the clean ``pr/{slug}-{suffix}`` namespace, while
+    ``snapshot`` keeps today's ``{prefix}/{slug}-{suffix}`` (``feature/<slug>``)
+    names byte-for-byte.
+    """
+    if getattr(prcfg, "head_pattern", ""):
+        return prcfg.head_pattern
+    if getattr(prcfg, "head_scheme", "snapshot") == "refspec":
+        return "pr/{slug}-{suffix}"
+    return "{prefix}/{slug}-{suffix}"
+
+
+def pr_head_name(
+    prcfg, title: str, worktree_id: str, *, cwd: str | None = None, machine: str = "",
+) -> str:
+    """Build the PR head branch name from the repo's configured template.
+
+    Resolves the ``head_pattern`` template (scheme-aware default) against the
+    ``{prefix}`` / ``{slug}`` / ``{suffix}`` / ``{username}`` / ``{machine}``
+    tokens.  With the ``snapshot`` default this returns exactly
+    ``feature_branch_name(prefix, title, worktree_id)``.
+    """
+    pattern = resolve_head_pattern(prcfg)
+    tokens = {
+        "prefix": (getattr(prcfg, "branch_prefix", "") or "feature"),
+        "slug": slugify(title),
+        "suffix": _worktree_suffix(worktree_id),
+        "username": _resolve_username(cwd),
+        "machine": machine or "",
+    }
+    try:
+        name = pattern.format(**tokens)
+    except (KeyError, IndexError, ValueError):
+        # A malformed template must never break create-pr -- fall back to the
+        # legacy default rather than raising.
+        name = f"{tokens['prefix']}/{tokens['slug']}-{tokens['suffix']}"
+    return _sanitize_head_ref(name)
 
 
 def _rollback(worktree_path: str, wt_branch: str, orig_sha: str | None) -> None:
@@ -165,7 +255,10 @@ def create_pr(
     elif active_is_live and not new and active.branch:
         feature_branch = active.branch
     else:
-        feature_branch = feature_branch_name(prcfg.branch_prefix, eff_title, worktree_id)
+        feature_branch = pr_head_name(
+            prcfg, eff_title, worktree_id,
+            cwd=worktree_path, machine=config.machine,
+        )
 
     if dry_run:
         return {
@@ -299,36 +392,58 @@ def create_pr(
 
     head_sha = _rev("HEAD", cwd=worktree_path)
 
-    # 3. Create (or move) the feature branch at the squashed work commit.
-    git_ops.git("branch", "-f", feature_branch, "HEAD", cwd=worktree_path, check=False)
+    if prcfg.head_scheme == "refspec":
+        # Refspec mode (#1815): keep the squashed work ON worktree/<id> and push
+        # it directly to the PR head ref. No local feature branch, no checkout
+        # dance; HEAD never leaves wt_branch, and wt_branch is NOT reset to
+        # upstream -- it legitimately sits ahead of master while the PR is open
+        # (a later `git sync` fast-forwards it clean on merge).
+        with hooks.allow_pr_push():
+            pushed = git_ops.push(
+                remote, f"{wt_branch}:refs/heads/{feature_branch}",
+                cwd=worktree_path, force_with_lease=reusing,
+            )
+        if not pushed:
+            return {**base, "error": (
+                f"Failed to push '{wt_branch}' to '{remote}/{feature_branch}'. "
+                f"The squashed work is on '{wt_branch}'; tracking state left as "
+                f"'creating' for retry (re-run create-pr)."
+            )}
+    else:
+        # Snapshot mode (legacy): snapshot the squashed commit onto a separate
+        # local feature branch, reset wt_branch to upstream, push that branch,
+        # then return HEAD to wt_branch (#1804).
+        # 3. Create (or move) the feature branch at the squashed work commit.
+        git_ops.git("branch", "-f", feature_branch, "HEAD", cwd=worktree_path, check=False)
 
-    # 4. Checkout the feature branch (worktree/{id} stays as the local base).
-    git_ops.checkout(feature_branch, cwd=worktree_path)
+        # 4. Checkout the feature branch (worktree/{id} stays as the local base).
+        git_ops.checkout(feature_branch, cwd=worktree_path)
 
-    # 5. Reset the worktree base branch to the upstream tip -- it is a
-    #    local-only base that tracks master and is never pushed.
-    if base_sha:
-        git_ops.git("branch", "-f", wt_branch, upstream, cwd=worktree_path, check=False)
+        # 5. Reset the worktree base branch to the upstream tip -- it is a
+        #    local-only base that tracks master and is never pushed.
+        if base_sha:
+            git_ops.git("branch", "-f", wt_branch, upstream, cwd=worktree_path, check=False)
 
-    # 6. Push the feature branch.
-    with hooks.allow_pr_push():
-        pushed = git_ops.push(
-            remote, feature_branch, cwd=worktree_path, force_with_lease=reusing
-        )
-    if not pushed:
-        return {**base, "error": (
-            f"Failed to push '{feature_branch}' to '{remote}'. The feature "
-            f"branch exists locally; tracking state left as 'creating' for "
-            f"retry (re-run create-pr)."
-        )}
+        # 6. Push the feature branch.
+        with hooks.allow_pr_push():
+            pushed = git_ops.push(
+                remote, feature_branch, cwd=worktree_path, force_with_lease=reusing
+            )
+        if not pushed:
+            return {**base, "error": (
+                f"Failed to push '{feature_branch}' to '{remote}'. The feature "
+                f"branch exists locally; tracking state left as 'creating' for "
+                f"retry (re-run create-pr)."
+            )}
 
-    # 6b. Return HEAD to the worktree base branch (#1804). A successful
-    #     create-pr should leave the operator on the canonical working branch,
-    #     not stranded on the throwaway feature branch: from wt_branch (already
-    #     reset to the upstream tip in step 5) the post-merge move is a clean
-    #     `git sync` fast-forward -- no `git checkout` + `reset --hard`. The
-    #     pushed feature branch and the open PR are unaffected.
-    git_ops.checkout(wt_branch, cwd=worktree_path)
+        # 6b. Return HEAD to the worktree base branch (#1804). A successful
+        #     create-pr should leave the operator on the canonical working
+        #     branch, not stranded on the throwaway feature branch: from
+        #     wt_branch (already reset to the upstream tip in step 5) the
+        #     post-merge move is a clean `git sync` fast-forward -- no
+        #     `git checkout` + `reset --hard`. The pushed feature branch and the
+        #     open PR are unaffected.
+        git_ops.checkout(wt_branch, cwd=worktree_path)
 
     # 7. Record the open state on the target PR (preserving any url/number
     #    already recorded for a reused live PR).
