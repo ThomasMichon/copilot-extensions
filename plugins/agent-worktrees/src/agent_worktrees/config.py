@@ -93,19 +93,21 @@ class PRConfig:
     provider: str = "gitea"        # gitea | github | azure-devops
     strategy: str = "detach"       # default disposition: keep-alive | detach
     branch_prefix: str = "feature"
-    # ``head_scheme`` selects HOW create-pr publishes the PR head (#1815):
+    # ``head_scheme`` selects how create-pr *publishes* the PR head (#1815) --
+    # its NAME + push mechanism. It does NOT change the local worktree, which
+    # ALWAYS lands on the squashed commit: HEAD stays on ``worktree/<id>`` and
+    # the branch is never reset off it (#1804), under either scheme.
     #
-    # - ``snapshot`` (default, legacy) -- create a separate local
-    #   ``{prefix}/<slug>`` branch at the squashed commit, reset the worktree
-    #   base branch to upstream, and push that branch. HEAD returns to the
-    #   worktree branch (#1804).
-    # - ``refspec`` -- keep the squashed work ON ``worktree/<id>`` and push it
-    #   directly to the PR head ref via a refspec (no local feature branch, no
-    #   checkout dance; the worktree stays on its own branch). Feature-complete
-    #   but **opt-in** until every PR-mode repo's pre-push hook allows the
-    #   mediated refspec push (a facility hook that blocks ``worktree/*`` by ref
-    #   name must honor ``AGENT_WORKTREES_PR_PUSH=1`` first -- see aperture-labs
-    #   #1815). A parallel ``--new`` PR auto-falls-back to a snapshot ref.
+    # - ``snapshot`` (default) -- copy the squashed commit onto a separate local
+    #   ``{prefix}/<slug>`` branch (older ``feature/`` namespace) and push that.
+    #   ``worktree/<id>`` keeps the squashed commit (sits ahead of master while
+    #   the PR is open; a later ``git sync`` reconciles it on merge).
+    # - ``refspec`` -- push ``worktree/<id>`` directly to the PR head ref via a
+    #   refspec (no local feature branch). Requires every PR-mode repo's pre-push
+    #   hook to allow the mediated refspec push (a facility hook that blocks
+    #   ``worktree/*`` by ref name must honor ``AGENT_WORKTREES_PR_PUSH=1``
+    #   first -- see aperture-labs #1815). A parallel ``--new`` PR auto-falls-back
+    #   to a snapshot ref.
     #
     # ``head_pattern`` is the PR head-name template (tokens ``{prefix}``,
     # ``{slug}``, ``{suffix}``, ``{username}``, ``{machine}``). Empty means the

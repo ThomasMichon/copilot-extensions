@@ -116,10 +116,21 @@ class TestCreatePR:
             "origin", "feature/add-feature-aaaa", cwd=str(wt_path)
         )
 
-        # worktree base branch was reset to upstream (clean base == master)
-        wt_sha = _git("rev-parse", f"worktree/{wid}", cwd=wt_path)
-        up_sha = _git("rev-parse", "origin/master", cwd=wt_path)
-        assert wt_sha == up_sha
+        # The local worktree lands on the squashed commit: worktree/<id> is NOT
+        # reset to upstream -- it sits exactly one commit ahead of master (the
+        # squashed work) and HEAD stays on it. Only the PUBLISH differs from
+        # refspec (a feature/ branch vs a pr/ refspec).
+        ahead_wt = git_ops.get_commits_ahead(
+            f"worktree/{wid}", "origin/master", cwd=str(wt_path)
+        )
+        assert len(ahead_wt) == 1
+
+        # The snapshot feature branch is created locally at that same commit.
+        assert git_ops.local_branch_exists(
+            "feature/add-feature-aaaa", cwd=str(wt_path)
+        )
+        assert _git("rev-parse", f"worktree/{wid}", cwd=wt_path) == \
+            _git("rev-parse", "feature/add-feature-aaaa", cwd=wt_path)
 
         # Feature branch is exactly one commit ahead of master (squashed)
         ahead = git_ops.get_commits_ahead(
@@ -140,19 +151,24 @@ class TestCreatePR:
         config, wid, wt_path, _ = pr_repo
         first = pr_ops.create_pr(wid, config, title="Add feature")
         assert first["success"]
-        # A successful create-pr returns HEAD to the worktree base branch (#1804).
+        # A successful create-pr leaves HEAD on the worktree branch at the
+        # squashed commit (#1804); worktree/<id> sits 1 ahead of master.
         assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == \
             f"worktree/{wid}"
-        # Re-run from that position: recognized as the idempotent retry (live PR
-        # + existing feature branch + nothing new on the base) and re-pushed
-        # cleanly, rather than tripping the "already exists" guard.
+        first_head = _git("rev-parse", f"worktree/{wid}", cwd=wt_path)
+        # Re-run from that position: the live PR + its feature branch are reused
+        # and the head is re-squashed + force-pushed cleanly (no "already
+        # exists" guard, no duplicate PR).
         second = pr_ops.create_pr(wid, config, title="Add feature")
-        assert second["success"] is True
-        assert second.get("rerun") is True
+        assert second["success"] is True, second
+        assert "error" not in second
         assert second["branch"] == "feature/add-feature-aaaa"
-        # Still on the worktree base branch after the re-run.
+        # Still on the worktree branch, still at the same squashed commit.
         assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == \
             f"worktree/{wid}"
+        assert _git("rev-parse", f"worktree/{wid}", cwd=wt_path) == first_head
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert len(rec.prs) == 1
 
     def test_dirty_worktree_blocks(self, pr_repo):
         config, wid, wt_path, _ = pr_repo
@@ -431,12 +447,44 @@ class TestPRFinalizeAndPush:
         assert rec.pr.head_sha == local_head
         assert rec.pr.state == "open"
 
+    def test_push_changes_from_worktree_branch_snapshot(self, pr_repo):
+        # New primary flow: create-pr leaves HEAD on worktree/<id> at the
+        # squashed commit, so feedback commits land there. push-changes rebases
+        # worktree/<id>, re-snapshots the feature branch to its tip, and pushes
+        # it -- HEAD never leaves the worktree branch.
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == \
+            f"worktree/{wid}"
+        before = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
+
+        # Feedback commit directly on worktree/<id> (no checkout).
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        ok = fin.push_changes(wid, config)
+        assert ok is True
+
+        after = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
+        assert after != before  # remote feature branch advanced
+        # HEAD stayed on the worktree branch; the pushed head is its tip.
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == \
+            f"worktree/{wid}"
+        assert _git("rev-parse", f"worktree/{wid}", cwd=wt_path) == \
+            _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.pr.head_sha == _git("rev-parse", f"worktree/{wid}", cwd=wt_path)
+        assert rec.pr.state == "open"
+
     def test_push_changes_rejects_wrong_branch(self, pr_repo):
         from agent_worktrees import finalize as fin
         config, wid, wt_path, _ = pr_repo
         pr_ops.create_pr(wid, config, title="Add feature")
-        # Switch back to the worktree base branch -- push-changes should refuse.
-        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        # HEAD on worktree/<id> (or a tracked feature branch) is valid now, so
+        # push-changes only refuses a genuinely unrelated branch.
+        _git("checkout", "-b", "unrelated-branch", cwd=wt_path)
         ok = fin.push_changes(wid, config)
         assert ok is False
 
@@ -584,9 +632,11 @@ class TestPRFinalizeAndPush:
             _git("rev-parse", "origin/master", cwd=anchor)
 
     def test_reconcile_fast_forwards_base_when_head_on_base(self, pr_repo):
-        """#1804: create-pr returns HEAD to worktree/<id>, so reconcile must
-        fast-forward the base branch *in place* (not via the free-pointer move
-        that only fires when HEAD is off the base branch)."""
+        """#1804: create-pr leaves HEAD on worktree/<id> at the squashed commit,
+        so after the squash-merge the base is *diverged* (1 ahead + behind).
+        Reconcile realigns it in place to origin/master once the content is
+        confirmed on upstream -- HEAD never leaves worktree/<id>, no work lost.
+        (Same in-place path the refspec scheme uses.)"""
         from agent_worktrees import finalize as fin
         config, wid, wt_path, _ = pr_repo
         pr_ops.create_pr(wid, config, title="Add feature")

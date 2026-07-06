@@ -591,11 +591,16 @@ def _push_changes_pr(
     *,
     dry_run: bool = False,
 ) -> bool:
-    """PR-mode push-changes: update the feature branch, not master.
+    """PR-mode push-changes: update the PR head branch, not master.
 
-    Runs the rebase chain (worktree/{id} onto upstream, feature onto
-    worktree/{id}) and force-with-lease pushes the *feature* branch.  Never
-    touches master or the worktree base branch on the remote.
+    Feedback commits ride on ``worktree/{id}`` (create-pr leaves HEAD there at
+    the squashed commit, #1804).  Rebase ``worktree/{id}`` onto upstream,
+    snapshot the active PR's feature branch to its tip, and force-with-lease
+    push that branch.  Mirrors the refspec push-changes; only the publish step
+    differs (a named ``feature/`` branch vs a refspec to ``pr/<slug>``).  A
+    worktree still checked out on a tracked feature branch (legacy flow) is
+    accepted too, and that branch is rebased + pushed as-is.  Never touches
+    master or the worktree base branch on the remote.
     """
     repo = config.default_repo
     remote = repo.remote
@@ -616,23 +621,29 @@ def _push_changes_pr(
         )
 
     head = git_ops._get_current_branch_safe(worktree_path)
-    # Accept ANY tracked PR branch as the feature to push (a worktree may carry
-    # parallel PRs): prefer the branch matching the current HEAD over the
-    # active PR's branch.
-    if head and any(p.branch == head for p in record.prs):
-        feature = head
-    if head != feature:
+    on_wt = head == wt_branch
+    on_feature = bool(head and any(p.branch == head for p in record.prs))
+    if not (on_wt or on_feature):
         output.err(
-            f"PR mode: push-changes expects HEAD on a tracked feature branch "
-            f"(active: '{feature}'), but it is on '{head}'. Checkout it first "
-            f"(`git checkout {feature}`) to push feedback commits directly to "
-            f"the PR branch, or re-run create-pr from '{head}' to re-squash new "
-            f"work onto it."
+            f"PR mode: push-changes expects HEAD on '{wt_branch}' (feedback "
+            f"commits ride on the worktree branch) or on a tracked feature "
+            f"branch, but it is on '{head}'. Checkout '{wt_branch}' first."
         )
         return False
 
-    # The PRRecord this push updates -- the one matching the branch being pushed.
-    pushed_pr = next((p for p in record.prs if p.branch == feature), record.pr)
+    if on_wt:
+        # New model: the active PR's feature branch is (re)snapshotted from
+        # worktree/<id>'s tip.
+        pushed_pr = record.active_pr() or record.pr
+        feature = pushed_pr.branch if (pushed_pr and pushed_pr.branch) else feature
+    else:
+        # Legacy: HEAD is on a tracked feature branch -- push that one directly.
+        feature = head
+        pushed_pr = next((p for p in record.prs if p.branch == feature), record.pr)
+
+    if not feature:
+        output.err("PR mode: no tracked PR feature branch to update.")
+        return False
 
     if not git_ops.is_clean(cwd=worktree_path):
         dirty = git_ops.get_dirty_files(cwd=worktree_path)
@@ -644,11 +655,18 @@ def _push_changes_pr(
         return False
 
     if dry_run:
-        print(
-            f"[dry-run] Would rebase {wt_branch} onto {upstream}, rebase "
-            f"{feature} onto {wt_branch}, then push {feature} to {remote} "
-            f"(--force-with-lease)."
-        )
+        if on_wt:
+            print(
+                f"[dry-run] Would rebase {wt_branch} onto {upstream}, snapshot "
+                f"{feature} to its tip, then push {feature} to {remote} "
+                f"(--force-with-lease)."
+            )
+        else:
+            print(
+                f"[dry-run] Would rebase {wt_branch} onto {upstream}, rebase "
+                f"{feature} onto {wt_branch}, then push {feature} to {remote} "
+                f"(--force-with-lease)."
+            )
         return True
 
     lock = FinalizeLock(lock_path)
@@ -662,23 +680,38 @@ def _push_changes_pr(
         print(f"Fetching from {remote}...")
         git_ops.fetch(remote, cwd=worktree_path)
 
-        # Rebase chain: base onto master, then feature onto the updated base.
         if git_ops.ref_exists(upstream, cwd=worktree_path):
-            git_ops.checkout(wt_branch, cwd=worktree_path)
-            if not git_ops.rebase(upstream, cwd=worktree_path):
-                output.err(
-                    f"Rebase of {wt_branch} onto {upstream} hit conflicts. "
-                    f"Resolve them and retry push-changes."
+            if on_wt:
+                # HEAD is on worktree/<id>: rebase it forward, then snapshot the
+                # feature branch to the new tip. No checkout dance -- HEAD never
+                # leaves the worktree branch.
+                if not git_ops.rebase(upstream, cwd=worktree_path):
+                    output.err(
+                        f"Rebase of {wt_branch} onto {upstream} hit conflicts. "
+                        f"Resolve them on '{wt_branch}' and retry push-changes."
+                    )
+                    return False
+                git_ops.git(
+                    "branch", "-f", feature, "HEAD", cwd=worktree_path, check=False
                 )
+            else:
+                # Legacy: HEAD on the feature branch. Old two-step rebase chain
+                # (base onto master, then feature onto the updated base).
+                git_ops.checkout(wt_branch, cwd=worktree_path)
+                if not git_ops.rebase(upstream, cwd=worktree_path):
+                    output.err(
+                        f"Rebase of {wt_branch} onto {upstream} hit conflicts. "
+                        f"Resolve them and retry push-changes."
+                    )
+                    git_ops.checkout(feature, cwd=worktree_path)
+                    return False
                 git_ops.checkout(feature, cwd=worktree_path)
-                return False
-            git_ops.checkout(feature, cwd=worktree_path)
-            if not git_ops.rebase(wt_branch, cwd=worktree_path):
-                output.err(
-                    f"Rebase of {feature} onto {wt_branch} hit conflicts. "
-                    f"Resolve them and retry push-changes."
-                )
-                return False
+                if not git_ops.rebase(wt_branch, cwd=worktree_path):
+                    output.err(
+                        f"Rebase of {feature} onto {wt_branch} hit conflicts. "
+                        f"Resolve them and retry push-changes."
+                    )
+                    return False
 
         with hooks.allow_pr_push():
             pushed = git_ops.push(remote, feature, cwd=worktree_path, force_with_lease=True)
@@ -689,7 +722,7 @@ def _push_changes_pr(
             return False
 
         head_sha = git_ops.git(
-            "rev-parse", "HEAD", cwd=worktree_path, check=False
+            "rev-parse", feature, cwd=worktree_path, check=False
         ).stdout.strip()
         if pushed_pr is not None:
             pushed_pr.head_sha = head_sha
