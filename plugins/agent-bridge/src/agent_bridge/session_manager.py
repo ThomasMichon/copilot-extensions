@@ -1188,12 +1188,14 @@ class SessionManager:
 
         The bridge owns session process lifetime: a session that is IDLE (agent
         at its own stop -- never mid-turn), has ZERO active subscribers, holds no
-        active background sub-agents, and has been idle+unwatched at least
-        ``idle_reap_ttl_seconds`` is **stopped with its host child reaped** --
-        freeing the Copilot process while leaving the session resumable (fresh
-        child + ``load_session`` replay). This is what lets a front (Neuron
-        Forge) merely connect/disconnect and never reap for resource reasons.
-        Returns the count reaped. No-op unless enabled + Session-Host mode.
+        active background sub-agents, **has run at least one turn** (so it has a
+        persisted ACP conversation a fresh child can ``load_session``), and has
+        been idle+unwatched at least ``idle_reap_ttl_seconds`` is **stopped with
+        its host child reaped** -- freeing the Copilot process while leaving the
+        session resumable (fresh child + ``load_session`` replay). This is what
+        lets a front (Neuron Forge) merely connect/disconnect and never reap for
+        resource reasons. Returns the count reaped. No-op unless enabled +
+        Session-Host mode.
         """
         ttl = self._idle_reap_ttl_seconds
         if not ttl or ttl <= 0 or not self._session_host_enabled:
@@ -1206,6 +1208,13 @@ class SessionManager:
             if s.subscriber_count > 0:
                 continue
             if s.has_active_background_tasks:
+                continue
+            if s.turn_count <= 0:
+                # A 0-turn session has no persisted ACP conversation, so a fresh
+                # child cannot load_session it -- reaping it to STOPPED would
+                # leave it unresumable (validated live: resume -> "session not
+                # found"). Only reap sessions with resumable state; leave empties
+                # to the existing 0-turn worktree cleanup.
                 continue
             idle_for = now - s.updated_at
             if idle_for < ttl:
