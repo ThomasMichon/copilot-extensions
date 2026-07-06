@@ -115,6 +115,7 @@ def test_worktree_status_without_identity(server_url):
 def test_build_server_registers_tools():
     import asyncio
 
+    pytest.importorskip("mcp", reason="requires the optional 'mcp' extra")
     mcp = build_server(
         DispatchTools(client_factory=lambda: None, identity_resolver=lambda: (None, None))
     )

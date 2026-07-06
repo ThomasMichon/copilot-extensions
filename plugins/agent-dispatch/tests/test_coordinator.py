@@ -141,6 +141,24 @@ def test_list_and_find(api):
     assert len(found) == 1 and found[0]["title"] == "alpha task"
 
 
+def test_list_comma_separated_status(api):
+    api.post("/tasks", json={"title": "q"})
+    api.post("/tasks", json={"title": "draft", "proposed": True})
+    got = api.get("/tasks", params={"status": "queued,proposed"}).json()
+    assert {t["title"] for t in got} == {"q", "draft"}
+    only_q = api.get("/tasks", params={"status": "queued"}).json()
+    assert [t["title"] for t in only_q] == ["q"]
+
+
+def test_sweep_endpoint_excludes_abandoned(api):
+    api.post("/tasks", json={"title": "live"})
+    gone = api.post("/tasks", json={"title": "dead"}).json()
+    api.post("/tasks/" + gone["id"] + "/abandon", json={"permitted": True})
+    swept = api.get("/tasks", params={"sweep": True}).json()
+    titles = {t["title"] for t in swept}
+    assert "live" in titles and "dead" not in titles
+
+
 # -- auth --------------------------------------------------------------------
 
 

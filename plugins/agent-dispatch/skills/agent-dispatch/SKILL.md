@@ -125,13 +125,28 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
 
 ### 1. Browse & dedup BEFORE creating
 
-Always check for an existing task before ideating a new one -- the coordinator
-also backstops with a unique `dedup_key`.
+Always check for existing work before ideating a new task. The base dedup
+mechanism is an **agent-driven sweep**: pull the corpus of live tasks, read
+their descriptions, and verify with a normal *explore* pass whether the work
+already exists. This is why every task must carry a **self-contained title +
+prompt** -- enough for a sweeping agent to judge duplication without extra
+context. The coordinator also backstops with a unique `dedup_key`.
 
 ```bash
-agent-dispatch find "narration track"        # substring search over title/prompt
-agent-dispatch list --status queued          # or filter by --target-machine/--target-repo/--label
+agent-dispatch sweep                         # the dedup corpus: every non-abandoned
+                                             #   task (proposed/queued/claimed/started/
+                                             #   completed), newest first -- read these,
+                                             #   then explore/verify before creating
+agent-dispatch find "narration track"        # quick substring probe over title/prompt
+agent-dispatch list --status queued,started  # filter by status (comma-separate for several),
+                                             #   --target-machine/--target-repo/--label
 ```
+
+> **VEI is a future optimization, not a requirement.** Correctness rests on the
+> agent-driven sweep over descriptive task text; a semantic index (VEI) is a
+> pluggable *performance* layer over the same corpus that can be added later
+> without changing the flow. Keep the plugin portable -- it must dedup fine on a
+> lone box with no facility VEI.
 
 ### 2. Create a task
 
@@ -143,6 +158,10 @@ agent-dispatch create "Add narration track" \
   --label media \
   --dedup-key narration-seg42        # makes create idempotent
 ```
+
+Write the title + prompt to be **self-describing** (see the sweep note above):
+a producer scanning existing tasks should be able to tell yours apart from
+theirs from the description alone.
 
 Create a **draft** instead with `--proposed` (unclaimable until `approve`).
 Defer with `--not-before <epoch>` (scheduled creation). Attach a payload with
@@ -241,8 +260,9 @@ Global flags `--url` / `--token` override the env per-invocation.
   a failing claim usually means the URL is wrong or the daemon is down, not that
   the queue is empty (`claim` exits non-zero with "no claimable task" when the
   queue simply has nothing for you).
-- **Dedup before create.** `find` / `list` first; rely on `--dedup-key` as the
-  backstop, not the first line of defense.
+- **Dedup before create.** `sweep` (then explore/verify) is the primary check;
+  `find` is a quick probe; rely on `--dedup-key` as the backstop, not the first
+  line of defense. Write self-contained titles/prompts so the sweep can work.
 - **Keep the yield note.** `started -> queued` is only useful to the next agent
   if you say *why* you yielded.
 - **Don't fake identity.** Let `claim` / `worktree-status` resolve it from CWD;

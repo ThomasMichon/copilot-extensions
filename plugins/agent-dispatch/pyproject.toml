@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-dispatch"
-version = "0.1.0-dev12"
+version = "0.1.0-dev13"
 description = "Portable agent task-queue + per-host coordinator: a leased SQLite work queue so agents coordinate without push latency or an account per agent."
 readme = "README.md"
 license = "MIT"
