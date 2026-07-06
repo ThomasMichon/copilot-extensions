@@ -33,6 +33,25 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# ── --stdio (ACP) mode: keep human output off the JSON-RPC channel ────────
+# In --stdio mode stdout is the ACP JSON-RPC stream (SSH merges Information into
+# stdout), so redirect all Write-Host to stderr. The repo setup hook runs as a
+# child process, so its output is redirected at invocation (below).
+$script:StdioMode = ($CopilotArgs -contains '--stdio')
+if ($script:StdioMode) {
+    function global:Write-Host {
+        param(
+            [Parameter(Position = 0, ValueFromRemainingArguments)]
+            [object[]]$Object,
+            [switch]$NoNewline,
+            [ConsoleColor]$ForegroundColor,
+            [ConsoleColor]$BackgroundColor
+        )
+        $text = ($Object -join ' ')
+        if ($NoNewline) { [Console]::Error.Write($text) } else { [Console]::Error.WriteLine($text) }
+    }
+}
+
 # ── Session PATH prepend (generic; repo-provided dirs) ───────────────────
 if ($SessionPath) {
     $dirs = $SessionPath.Split([IO.Path]::PathSeparator) | Where-Object { $_ }
@@ -55,7 +74,13 @@ $env:WORKTREE_MACHINE = $Machine
 if ($SetupHook -and -not $Recovery) {
     if (Test-Path -LiteralPath $SetupHook) {
         Write-Host "  Setup:    $SetupHook" -ForegroundColor DarkGray
-        & pwsh.exe -NoProfile -NoLogo -File $SetupHook -Machine $Machine
+        if ($script:StdioMode) {
+            # Keep the hook's stdout off the ACP channel.
+            & pwsh.exe -NoProfile -NoLogo -File $SetupHook -Machine $Machine 2>&1 |
+                ForEach-Object { [Console]::Error.WriteLine($_) }
+        } else {
+            & pwsh.exe -NoProfile -NoLogo -File $SetupHook -Machine $Machine
+        }
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Setup hook exited with code $LASTEXITCODE; continuing to launch."
         }
