@@ -216,12 +216,21 @@ def create_app(
         target_repo: str | None = None,
         label: str | None = None,
         q: str | None = None,
+        sweep: bool = False,
         limit: int = 200,
     ) -> list[dict]:
+        if sweep:
+            return [_task_dict(t) for t in queue.sweep(limit=limit)]
         if q is not None:
             return [_task_dict(t) for t in queue.find(q, limit=limit)]
+        # ``status`` may be a single state or a comma-separated set (multi-state
+        # browse), e.g. ``?status=queued,started``.
+        status_filter: str | list[str] | None = None
+        if status is not None:
+            parts = [s.strip() for s in status.split(",") if s.strip()]
+            status_filter = parts[0] if len(parts) == 1 else parts
         tasks = queue.list(
-            status=status,
+            status=status_filter,
             target_machine=target_machine,
             target_repo=target_repo,
             label=label,

@@ -78,6 +78,10 @@ class DispatchClient:
     def find(self, query: str, *, limit: int = 50) -> list[dict]:
         return self._unwrap(self._http.get("/tasks", params={"q": query, "limit": limit}))
 
+    def sweep(self, *, limit: int = 500) -> list[dict]:
+        """The dedup corpus: every non-abandoned task, newest first."""
+        return self._unwrap(self._http.get("/tasks", params={"sweep": True, "limit": limit}))
+
     # -- producers / transitions --------------------------------------------
 
     def create(self, title: str, **kwargs: Any) -> dict:

@@ -308,3 +308,78 @@ def test_mine_returns_assigned_and_owned(q):
     assert machine_wide.id in assigned_ids  # machine-wide, no worktree pin
     assert to_own.id in owned_ids
     assert all(t.title != "open-to-all" for t in inbox["assigned"])
+
+
+# -- browse: multi-status list + dedup sweep ---------------------------------
+
+
+def _seed_all_states(q):
+    """Create one task in each of the six states; return {state: task}."""
+    proposed = q.propose("proposed one", prompt="p")
+    queued = q.create("queued one", prompt="q")
+
+    claimed_t = q.create("claimed one", prompt="c")
+    q.claim_one("w", task_id=claimed_t.id)
+
+    started_t = q.create("started one", prompt="s")
+    q.claim_one("w", task_id=started_t.id)
+    q.start(started_t.id, "w")
+
+    completed_t = q.create("completed one", prompt="done")
+    q.claim_one("w", task_id=completed_t.id)
+    q.start(completed_t.id, "w")
+    q.complete(completed_t.id, "w")
+
+    abandoned_t = q.create("abandoned one", prompt="x")
+    q.abandon(abandoned_t.id, permitted=True)
+
+    return {
+        Status.PROPOSED: proposed,
+        Status.QUEUED: queued,
+        Status.CLAIMED: claimed_t,
+        Status.STARTED: started_t,
+        Status.COMPLETED: completed_t,
+        Status.ABANDONED: abandoned_t,
+    }
+
+
+def test_list_single_status_still_works(q):
+    seed = _seed_all_states(q)
+    got = q.list(status=Status.QUEUED)
+    assert [t.id for t in got] == [seed[Status.QUEUED].id]
+
+
+def test_list_accepts_multiple_statuses(q):
+    seed = _seed_all_states(q)
+    got = q.list(status=[Status.QUEUED, Status.STARTED])
+    assert {t.id for t in got} == {seed[Status.QUEUED].id, seed[Status.STARTED].id}
+
+
+def test_list_empty_status_sequence_matches_all(q):
+    _seed_all_states(q)
+    # An empty sequence adds no clause -> behaves like an unfiltered list.
+    assert len(q.list(status=[])) == 6
+
+
+def test_sweep_spans_all_states_except_abandoned(q):
+    seed = _seed_all_states(q)
+    swept = {t.id for t in q.sweep()}
+    assert swept == {
+        seed[s].id
+        for s in (
+            Status.PROPOSED,
+            Status.QUEUED,
+            Status.CLAIMED,
+            Status.STARTED,
+            Status.COMPLETED,
+        )
+    }
+    assert seed[Status.ABANDONED].id not in swept
+
+
+def test_sweep_is_newest_first(q):
+    q.create("first")
+    q.create("second")
+    titles = [t.title for t in q.sweep()]
+    assert titles[:2] == ["second", "first"]
+

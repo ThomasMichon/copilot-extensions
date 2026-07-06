@@ -178,6 +178,18 @@ class TaskQueue:
     claims without a process-wide lock.
     """
 
+    #: The states a dedup *sweep* spans -- every state except the terminal
+    #: ``abandoned`` (an abandoned task is not a live duplicate of new work).
+    #: This is the corpus the agent-driven "sweep + explore + verify" dedup
+    #: flow reads before creating a task; see :meth:`sweep`.
+    SWEEP_STATES = (
+        Status.PROPOSED,
+        Status.QUEUED,
+        Status.CLAIMED,
+        Status.STARTED,
+        Status.COMPLETED,
+    )
+
     def __init__(
         self,
         db_path: str | Path,
@@ -720,18 +732,26 @@ class TaskQueue:
     def list(
         self,
         *,
-        status: str | None = None,
+        status: str | Sequence[str] | None = None,
         target_machine: str | None = None,
         target_repo: str | None = None,
         label: str | None = None,
         limit: int = 200,
     ) -> list[Task]:
-        """List tasks, optionally filtered. Newest first."""
+        """List tasks, optionally filtered. Newest first.
+
+        ``status`` accepts a single status *or* a sequence of statuses (an
+        ``IN (...)`` filter), so a producer can browse several states in one
+        call. :meth:`sweep` uses this to pull the whole non-abandoned corpus.
+        """
         clauses: list[str] = []
         params: list[object] = []
         if status is not None:
-            clauses.append("status = ?")
-            params.append(status)
+            statuses = [status] if isinstance(status, str) else list(status)
+            if statuses:
+                placeholders = ",".join("?" for _ in statuses)
+                clauses.append(f"status IN ({placeholders})")
+                params.extend(statuses)
         if target_machine is not None:
             clauses.append("target_machine = ?")
             params.append(target_machine)
@@ -751,7 +771,10 @@ class TaskQueue:
         return tasks
 
     def find(self, text: str, *, limit: int = 50) -> list[Task]:
-        """Substring search over title/prompt (the pre-ideation dedup browse)."""
+        """Substring search over title/prompt -- one primitive in the
+        agent-driven dedup flow (a quick targeted probe). For a full pre-create
+        review of existing work, prefer :meth:`sweep`.
+        """
         like = f"%{text}%"
         with self._connect() as conn:
             rows = conn.execute(
@@ -760,6 +783,19 @@ class TaskQueue:
                 (like, like, limit),
             ).fetchall()
         return [Task._from_row(r) for r in rows]
+
+    def sweep(self, *, limit: int = 500) -> list[Task]:
+        """Return the dedup corpus: every non-abandoned task, newest first.
+
+        Backs the agent-driven *sweep + explore + verify* flow a producer runs
+        before creating a task: it enumerates every ``proposed``/``queued``/
+        ``claimed``/``started``/``completed`` task so the producer can read the
+        descriptions and judge whether the work already exists -- no semantic
+        index required. Correctness rests on each task carrying a self-contained
+        title + prompt. (A future VEI adapter is a pluggable *optimization* over
+        this same corpus, never a prerequisite.)
+        """
+        return self.list(status=self.SWEEP_STATES, limit=limit)
 
     def events(self, task_id: str) -> list[dict[str, object]]:
         """Return the append-only audit trail for a task, oldest first."""

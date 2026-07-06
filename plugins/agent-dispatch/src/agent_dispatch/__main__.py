@@ -202,6 +202,11 @@ def _cmd_find(args: argparse.Namespace) -> int:
         return _emit(c.find(args.query, limit=args.limit))
 
 
+def _cmd_sweep(args: argparse.Namespace) -> int:
+    with _client(args) as c:
+        return _emit(c.sweep(limit=args.limit))
+
+
 def _cmd_watch(args: argparse.Namespace) -> int:
     with _client(args) as c:
         try:
@@ -256,9 +261,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db")
     p.set_defaults(func=_cmd_serve)
 
-    p = sub.add_parser("create", help="enqueue a task")
-    p.add_argument("title")
-    p.add_argument("--prompt", default="")
+    p = sub.add_parser(
+        "create",
+        help="enqueue a task (write a self-contained title + --prompt so a "
+             "producer sweeping existing tasks can judge duplication)",
+    )
+    p.add_argument("title", help="short, specific, self-contained summary of the work")
+    p.add_argument(
+        "--prompt", default="",
+        help="the task instruction -- describe the work fully enough to dedup "
+             "against and to execute without extra context",
+    )
     p.add_argument("--proposed", action="store_true", help="create as an unclaimable draft")
     p.add_argument(
         "--require", action="append", help="hard capability/identity token (repeatable)"
@@ -351,17 +364,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=_simple("detach", "task_id"))
 
     p = sub.add_parser("list", help="list tasks")
-    p.add_argument("--status")
+    p.add_argument("--status", help="filter by status; comma-separate for several (e.g. queued,started)")
     p.add_argument("--target-machine")
     p.add_argument("--target-repo")
     p.add_argument("--label")
     p.add_argument("--limit", type=int, default=200)
     p.set_defaults(func=_cmd_list)
 
-    p = sub.add_parser("find", help="substring search over title/prompt")
+    p = sub.add_parser(
+        "find", help="substring search over title/prompt (a quick dedup probe)"
+    )
     p.add_argument("query")
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(func=_cmd_find)
+
+    p = sub.add_parser(
+        "sweep",
+        help="the dedup corpus: every non-abandoned task, newest first -- read "
+             "these before creating a task to verify the work doesn't already exist",
+    )
+    p.add_argument("--limit", type=int, default=500)
+    p.set_defaults(func=_cmd_sweep)
 
     p = sub.add_parser("show", help="show one task")
     p.add_argument("task_id")
