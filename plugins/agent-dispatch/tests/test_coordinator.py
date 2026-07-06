@@ -11,7 +11,8 @@ from fastapi.testclient import TestClient
 
 from agent_dispatch.client import DispatchClient, DispatchError
 from agent_dispatch.coordinator import create_app
-from agent_dispatch.queue import Status, TaskQueue
+from agent_dispatch.queue import Status
+from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 
 @pytest.fixture
@@ -157,6 +158,37 @@ def test_sweep_endpoint_excludes_abandoned(api):
     swept = api.get("/tasks", params={"sweep": True}).json()
     titles = {t["title"] for t in swept}
     assert "live" in titles and "dead" not in titles
+
+
+def test_repo_param_scopes_list_sweep_find(api):
+    # POST carries an explicit repo lane; the RepoDefaultingQueue only defaults
+    # when repo is omitted, so these land in distinct lanes.
+    api.post("/tasks", json={"title": "widget work", "repo": "example.com/acme/widget"})
+    api.post("/tasks", json={"title": "gadget work", "repo": "example.com/acme/gadget"})
+    widget = api.get("/tasks", params={"repo": "example.com/acme/widget"}).json()
+    assert [t["title"] for t in widget] == ["widget work"]
+    swept = api.get(
+        "/tasks", params={"sweep": True, "repo": "example.com/acme/gadget"}
+    ).json()
+    assert [t["title"] for t in swept] == ["gadget work"]
+    found = api.get(
+        "/tasks", params={"q": "work", "repo": "example.com/acme/widget"}
+    ).json()
+    assert [t["title"] for t in found] == ["widget work"]
+
+
+def test_claim_is_repo_scoped(api):
+    api.post("/tasks", json={"title": "widget task", "repo": "example.com/acme/widget"})
+    api.post("/tasks", json={"title": "gadget task", "repo": "example.com/acme/gadget"})
+    # a worker in the gadget lane only ever claims the gadget task
+    claimed = api.post(
+        "/claim", json={"worker_id": "w", "repo": "example.com/acme/gadget"}
+    ).json()
+    assert claimed["title"] == "gadget task"
+    again = api.post(
+        "/claim", json={"worker_id": "w2", "repo": "example.com/acme/gadget"}
+    ).json()
+    assert again is None  # nothing else in this lane; the widget task is invisible
 
 
 # -- auth --------------------------------------------------------------------
@@ -335,7 +367,6 @@ def _boot(app):
 def test_background_sweep_auto_recovers_expired_lease(tmp_path):
     # 1s lease + 0.3s sweep: a claimed task returns to queued with no manual recover.
     from agent_dispatch.coordinator import create_app
-    from agent_dispatch.queue import TaskQueue
 
     q = TaskQueue(tmp_path / "tasks.db", lease_seconds=1)
     url, stop = _boot(create_app(q, sweep_interval=0.3))
@@ -359,7 +390,6 @@ def test_background_sweep_auto_recovers_expired_lease(tmp_path):
 def test_sweep_disabled_by_default(tmp_path):
     # sweep_interval=0 (default) -> a held expired lease is NOT auto-recovered.
     from agent_dispatch.coordinator import create_app
-    from agent_dispatch.queue import TaskQueue
 
     q = TaskQueue(tmp_path / "tasks.db", lease_seconds=1)
     url, stop = _boot(create_app(q))  # no sweep_interval

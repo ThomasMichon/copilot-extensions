@@ -55,6 +55,10 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
 
 def _cmd_create(args: argparse.Namespace) -> int:
+    repo = _scope_repo(args)
+    if not repo:
+        print(_REPO_UNRESOLVED, file=sys.stderr)
+        return 2
     payload_inline = args.payload_inline
     if args.payload_file:
         with open(args.payload_file, encoding="utf-8") as fh:
@@ -62,6 +66,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
     with _client(args) as c:
         task = c.create(
             args.title,
+            repo=repo,
             prompt=args.prompt,
             proposed=args.proposed,
             requires=args.require or [],
@@ -79,7 +84,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
         )
     if args.spawn and not args.proposed:
         _spawn_worker_for(args, task)
-    return _emit(task)
+    return _emit(_enrich(task))
 
 
 def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
@@ -123,12 +128,54 @@ def _identity(args: argparse.Namespace) -> tuple[str | None, str | None]:
     return (machine, worktree)
 
 
+_REPO_UNRESOLVED = (
+    "agent-dispatch: could not resolve the calling repo (lane). Run inside a repo/"
+    "worktree, or pass --repo <name|remote>. Tasks are scoped per repo, so a lane "
+    "is required."
+)
+
+
+def _scope_repo(args: argparse.Namespace) -> str | None:
+    """Resolve the lane for this command: an explicit ``--repo`` (a local repo
+    name or a remote URL) wins; otherwise the calling repo, resolved from the
+    CWD. Returns a canonical remote, or ``None`` if nothing resolves.
+    """
+    from .identity import resolve_repo, resolve_repo_selector
+
+    selector = getattr(args, "repo", None)
+    return resolve_repo_selector(selector) if selector else resolve_repo()
+
+
+def _enrich(result: Any) -> Any:
+    """Annotate task dict(s) with a display-only ``repo_name`` (the local name
+    for the canonical ``repo`` remote, when the registry knows it)."""
+    from .identity import name_for_repo
+
+    def one(d: Any) -> Any:
+        if isinstance(d, dict) and "repo" in d and "repo_name" not in d:
+            name = name_for_repo(d.get("repo"))
+            if name:
+                d = {**d, "repo_name": name}
+        return d
+
+    if isinstance(result, list):
+        return [one(x) for x in result]
+    if isinstance(result, dict) and any(k in result for k in ("assigned", "owned")):
+        return {k: (_enrich(v) if isinstance(v, list) else v) for k, v in result.items()}
+    return one(result)
+
+
 def _cmd_claim(args: argparse.Namespace) -> int:
     machine, worktree = _identity(args)
+    repo = _scope_repo(args)
+    if not repo:
+        print(_REPO_UNRESOLVED, file=sys.stderr)
+        return 2
     with _client(args) as c:
         task = c.claim(
             worker_id=args.worker_id,
             capabilities=args.capability or [],
+            repo=repo,
             machine=machine,
             worktree=worktree,
             task_id=args.task,
@@ -137,7 +184,7 @@ def _cmd_claim(args: argparse.Namespace) -> int:
     if task is None:
         print("no claimable task", file=sys.stderr)
         return 3
-    return _emit(task)
+    return _emit(_enrich(task))
 
 
 def _cmd_worktree_status(args: argparse.Namespace) -> int:
@@ -149,9 +196,13 @@ def _cmd_worktree_status(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    repo = _scope_repo(args)
+    if not repo:
+        print(_REPO_UNRESOLVED, file=sys.stderr)
+        return 2
     with _client(args) as c:
-        inbox = c.mine(machine, worktree)
-    return _emit({"machine": machine, "worktree": worktree, **inbox})
+        inbox = c.mine(machine, worktree, repo=repo)
+    return _emit(_enrich({"machine": machine, "worktree": worktree, "repo": repo, **inbox}))
 
 
 def _simple(method: str, *arg_names: str):
@@ -185,26 +236,39 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
+    repo = _scope_repo(args)
+    if not repo:
+        print(_REPO_UNRESOLVED, file=sys.stderr)
+        return 2
     with _client(args) as c:
-        return _emit(
+        return _emit(_enrich(
             c.list(
+                repo=repo,
                 status=args.status,
                 target_machine=args.target_machine,
                 target_repo=args.target_repo,
                 label=args.label,
                 limit=args.limit,
             )
-        )
+        ))
 
 
 def _cmd_find(args: argparse.Namespace) -> int:
+    repo = _scope_repo(args)
+    if not repo:
+        print(_REPO_UNRESOLVED, file=sys.stderr)
+        return 2
     with _client(args) as c:
-        return _emit(c.find(args.query, limit=args.limit))
+        return _emit(_enrich(c.find(args.query, repo=repo, limit=args.limit)))
 
 
 def _cmd_sweep(args: argparse.Namespace) -> int:
+    repo = _scope_repo(args)
+    if not repo:
+        print(_REPO_UNRESOLVED, file=sys.stderr)
+        return 2
     with _client(args) as c:
-        return _emit(c.sweep(limit=args.limit))
+        return _emit(_enrich(c.sweep(repo=repo, limit=args.limit)))
 
 
 def _cmd_watch(args: argparse.Namespace) -> int:
@@ -272,6 +336,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="the task instruction -- describe the work fully enough to dedup "
              "against and to execute without extra context",
     )
+    p.add_argument(
+        "--repo",
+        help="lane (repo) this task belongs to: a local repo name or a remote "
+             "URL. Default: the calling repo resolved from the CWD. Tasks stay "
+             "in their producing repo's lane -- for a cross-repo *code* target "
+             "use --target-repo and let the lane agent do it via working-cross-repo.",
+    )
     p.add_argument("--proposed", action="store_true", help="create as an unclaimable draft")
     p.add_argument(
         "--require", action="append", help="hard capability/identity token (repeatable)"
@@ -319,6 +390,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--worktree", help="override the resolved worktree id (targeting identity)")
     p.add_argument("--capability", action="append", help="advertised capability (repeatable)")
     p.add_argument("--task", help="claim this specific task id (if eligible)")
+    p.add_argument(
+        "--repo",
+        help="lane to claim from (local name or remote URL). Default: the calling "
+             "repo. A worker only claims tasks in its own repo's lane.",
+    )
     p.add_argument("--lease-seconds", type=int)
     p.set_defaults(func=_cmd_claim)
 
@@ -328,6 +404,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--machine", help="override the resolved machine")
     p.add_argument("--worktree", help="override the resolved worktree id")
+    p.add_argument(
+        "--repo",
+        help="lane to scope the inbox to (local name or remote URL). Default: the calling repo.",
+    )
     p.set_defaults(func=_cmd_worktree_status)
 
     p = sub.add_parser("start", help="mark a claimed task started")
@@ -363,7 +443,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("task_id")
     p.set_defaults(func=_simple("detach", "task_id"))
 
-    p = sub.add_parser("list", help="list tasks")
+    p = sub.add_parser("list", help="list tasks (scoped to the calling repo by default)")
+    p.add_argument("--repo", help="lane to list (local name or remote URL); default: calling repo")
     p.add_argument("--status", help="filter by status; comma-separate for several (e.g. queued,started)")
     p.add_argument("--target-machine")
     p.add_argument("--target-repo")
@@ -372,17 +453,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=_cmd_list)
 
     p = sub.add_parser(
-        "find", help="substring search over title/prompt (a quick dedup probe)"
+        "find", help="substring search over title/prompt (a quick dedup probe; calling repo)"
     )
     p.add_argument("query")
+    p.add_argument("--repo", help="lane to search (local name or remote URL); default: calling repo")
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(func=_cmd_find)
 
     p = sub.add_parser(
         "sweep",
-        help="the dedup corpus: every non-abandoned task, newest first -- read "
-             "these before creating a task to verify the work doesn't already exist",
+        help="the dedup corpus for the calling repo: every non-abandoned task, "
+             "newest first -- read these before creating a task to verify the "
+             "work doesn't already exist",
     )
+    p.add_argument("--repo", help="lane to sweep (local name or remote URL); default: calling repo")
     p.add_argument("--limit", type=int, default=500)
     p.set_defaults(func=_cmd_sweep)
 

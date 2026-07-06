@@ -10,7 +10,8 @@ import pytest
 
 from agent_dispatch.client import DispatchClient
 from agent_dispatch.coordinator import create_app
-from agent_dispatch.queue import Status, TaskQueue
+from agent_dispatch.queue import Status
+from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 mcp = pytest.importorskip("mcp")
 from mcp import ClientSession  # noqa: E402

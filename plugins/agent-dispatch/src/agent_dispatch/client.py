@@ -75,12 +75,18 @@ class DispatchClient:
         clean = {k: v for k, v in params.items() if v is not None}
         return self._unwrap(self._http.get("/tasks", params=clean))
 
-    def find(self, query: str, *, limit: int = 50) -> list[dict]:
-        return self._unwrap(self._http.get("/tasks", params={"q": query, "limit": limit}))
+    def find(self, query: str, *, repo: str | None = None, limit: int = 50) -> list[dict]:
+        params: dict[str, Any] = {"q": query, "limit": limit}
+        if repo is not None:
+            params["repo"] = repo
+        return self._unwrap(self._http.get("/tasks", params=params))
 
-    def sweep(self, *, limit: int = 500) -> list[dict]:
-        """The dedup corpus: every non-abandoned task, newest first."""
-        return self._unwrap(self._http.get("/tasks", params={"sweep": True, "limit": limit}))
+    def sweep(self, *, repo: str | None = None, limit: int = 500) -> list[dict]:
+        """The dedup corpus: every non-abandoned task in the lane, newest first."""
+        params: dict[str, Any] = {"sweep": True, "limit": limit}
+        if repo is not None:
+            params["repo"] = repo
+        return self._unwrap(self._http.get("/tasks", params=params))
 
     # -- producers / transitions --------------------------------------------
 
@@ -98,6 +104,7 @@ class DispatchClient:
         worker_id: str | None = None,
         capabilities: Sequence[str] = (),
         *,
+        repo: str | None = None,
         machine: str | None = None,
         worktree: str | None = None,
         task_id: str | None = None,
@@ -105,6 +112,7 @@ class DispatchClient:
     ) -> dict | None:
         body = {
             "worker_id": worker_id,
+            "repo": repo,
             "machine": machine,
             "worktree": worktree,
             "capabilities": list(capabilities),
@@ -113,10 +121,11 @@ class DispatchClient:
         }
         return self._unwrap(self._http.post("/claim", json=body))
 
-    def mine(self, machine: str, worktree: str) -> dict:
-        return self._unwrap(
-            self._http.get("/tasks/mine", params={"machine": machine, "worktree": worktree})
-        )
+    def mine(self, machine: str, worktree: str, *, repo: str | None = None) -> dict:
+        params: dict[str, Any] = {"machine": machine, "worktree": worktree}
+        if repo is not None:
+            params["repo"] = repo
+        return self._unwrap(self._http.get("/tasks/mine", params=params))
 
     def start(self, task_id: str, worker_id: str) -> dict:
         return self._unwrap(

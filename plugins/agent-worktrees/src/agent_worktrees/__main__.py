@@ -5423,10 +5423,34 @@ _GET_KEYS: dict[str, str] = {
     "machine":       "Machine name from config",
     "platform":      "Platform (win/wsl/linux)",
     "project":       "Project name",
+    "repo-remote":   "Canonical remote URL of this repo (registry remote; falls back to git origin) -- the device-independent repo key",
     "pr-enabled":    "Whether PR mode is enabled (true/false)",
     "pr-required":   "Whether PRs are required, blocking direct-to-master (true/false)",
     "pr-provider":   "PR provider (gitea|github|azure-devops) when PR mode is on",
 }
+
+
+def _resolve_repo_remote(config: "cfg.Config", repo: "cfg.RepoConfig") -> str:
+    """Canonical remote URL for the active repo -- the device-independent key.
+
+    Prefers the **registry** remote for this project (curated and consistent
+    across machines, so a shared consumer keys every device the same way), and
+    falls back to the anchor's ``git remote get-url origin`` when the project is
+    not in the repos registry. Returns ``""`` when neither resolves.
+    """
+    from . import repos
+    try:
+        entry = repos.find_repo(config.repo_name)
+        if entry and entry.remote:
+            return entry.remote
+        result = git_ops.git("remote", "get-url", "origin", cwd=repo.anchor, check=False)
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except OSError:
+        # anchor may not exist yet (e.g. a freshly-configured project); the
+        # remote is simply unknown rather than an error.
+        pass
+    return ""
 
 
 def cmd_get(args: argparse.Namespace) -> int:
@@ -5460,6 +5484,7 @@ def cmd_get(args: argparse.Namespace) -> int:
         "machine":      config.machine,
         "platform":     config.platform,
         "project":      config.repo_name,
+        "repo-remote":  _resolve_repo_remote(config, repo),
         "pr-enabled":    "true" if repo.pr.enabled else "false",
         "pr-required":   "true" if repo.pr.required else "false",
         "pr-provider":   repo.pr.provider if repo.pr.enabled else "",

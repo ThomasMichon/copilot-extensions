@@ -9,11 +9,13 @@ import pytest
 
 from agent_dispatch.queue import (
     DEFAULT_LEASE_SECONDS,
+    LEGACY_REPO,
     Status,
     TaskError,
-    TaskQueue,
     worker_id_for,
 )
+from agent_dispatch.queue import TaskQueue as RealTaskQueue
+from tests._helpers import OTHER_REPO, TEST_REPO, RepoDefaultingQueue as TaskQueue
 
 
 @pytest.fixture
@@ -382,4 +384,63 @@ def test_sweep_is_newest_first(q):
     q.create("second")
     titles = [t.title for t in q.sweep()]
     assert titles[:2] == ["second", "first"]
+
+
+# -- repo lane (scoping / isolation) -----------------------------------------
+
+
+def test_create_requires_repo(tmp_path):
+    q = RealTaskQueue(tmp_path / "t.db")  # no defaulting -- repo is mandatory
+    with pytest.raises(TaskError):
+        q.create("no lane")
+
+
+def test_list_find_sweep_are_lane_scoped(q):
+    a = q.create("alpha task", repo=TEST_REPO)
+    b = q.create("beta task", repo=OTHER_REPO)
+    assert [t.id for t in q.list(repo=TEST_REPO)] == [a.id]
+    assert [t.id for t in q.sweep(repo=OTHER_REPO)] == [b.id]
+    assert {t.id for t in q.find("task", repo=TEST_REPO)} == {a.id}
+    # unscoped list still sees both (engine default; the CLI always scopes)
+    assert {t.id for t in q.list()} == {a.id, b.id}
+
+
+def test_claim_never_crosses_lanes(q):
+    a = q.create("in my lane", repo=TEST_REPO)
+    b = q.create("other lane", repo=OTHER_REPO)
+    got = q.claim_one("w", repo=OTHER_REPO)
+    assert got is not None and got.id == b.id  # never the TEST_REPO task
+    assert q.get(a.id).status == Status.QUEUED  # untouched
+
+
+def test_claim_by_id_respects_lane(q):
+    a = q.create("mine", repo=TEST_REPO)
+    # a worker in another lane can't claim it even by explicit id
+    assert q.claim_one("w", repo=OTHER_REPO, task_id=a.id) is None
+    # same lane succeeds
+    got = q.claim_one("w", repo=TEST_REPO, task_id=a.id)
+    assert got is not None and got.id == a.id
+
+
+def test_mine_is_lane_scoped(q):
+    here = q.create("for wt in my lane", repo=TEST_REPO, target_worktree="wt-1")
+    other = q.create("for wt other lane", repo=OTHER_REPO, target_worktree="wt-1")
+    inbox = q.mine("m", "wt-1", repo=TEST_REPO)
+    ids = {t.id for t in inbox["assigned"]}
+    assert here.id in ids and other.id not in ids
+
+
+def test_sentinel_backfill_on_migration(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "legacy.db"
+    q = RealTaskQueue(db)
+    t = q.create("legacy row", repo="temp")
+    # Simulate a pre-repo row by nulling the lane, then reopen to re-migrate.
+    con = sqlite3.connect(db)
+    con.execute("UPDATE tasks SET repo = NULL WHERE id = ?", (t.id,))
+    con.commit()
+    con.close()
+    q2 = RealTaskQueue(db)
+    assert q2.get(t.id).repo == LEGACY_REPO
 

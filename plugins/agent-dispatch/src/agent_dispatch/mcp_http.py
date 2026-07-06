@@ -26,10 +26,12 @@ from dataclasses import asdict
 from typing import Any
 
 from .events import EventBus
+from .identity import canonicalize_remote
 from .queue import TaskError, TaskQueue, worker_id_for
 
 MACHINE_HEADER = "x-agent-machine"
 WORKTREE_HEADER = "x-agent-worktree"
+REPO_HEADER = "x-agent-repo"
 
 
 def _headers_of(ctx: Any) -> dict[str, str]:
@@ -70,11 +72,21 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         h = _headers_of(ctx)
         return (machine or h.get(MACHINE_HEADER), worktree or h.get(WORKTREE_HEADER))
 
+    def _repo(ctx: Context, repo: str | None) -> str | None:
+        """Resolve the lane key from an explicit arg or the ``X-Agent-Repo``
+        header, canonicalized. Server-side we do *not* map local names (the
+        caller's registry lives on its own device), so the caller sends a
+        remote URL (the agent-mcp bridge injects the header, like identity)."""
+        raw = repo or _headers_of(ctx).get(REPO_HEADER)
+        return canonicalize_remote(raw)
+
     # -- producers -----------------------------------------------------------
 
     @mcp.tool(name="dispatch_create")
     def create(
+        ctx: Context,
         title: str,
+        repo: str | None = None,
         prompt: str = "",
         payload: str | None = None,
         payload_ref: str | None = None,
@@ -90,12 +102,18 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
     ) -> dict:
         """Enqueue a task (``proposed=True`` for an unclaimable draft).
 
-        ``payload`` is inline Markdown; a large one spills to a
-        content-addressed blob. ``find`` before ``create`` to avoid duplicates.
+        ``repo`` is the **lane** (a remote URL, or the ``X-Agent-Repo`` header);
+        it is required -- tasks stay in their producing repo's lane. ``payload``
+        is inline Markdown; a large one spills to a content-addressed blob.
+        ``sweep``/``find`` before ``create`` to avoid duplicates.
         """
+        lane = _repo(ctx, repo)
+        if not lane:
+            return {"error": "no repo (lane): send X-Agent-Repo or pass repo=<remote URL>"}
         make = queue.propose if proposed else queue.create
         task = make(
             title,
+            repo=lane,
             prompt=prompt,
             payload_inline=payload,
             payload_ref=payload_ref,
@@ -120,22 +138,30 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
     # -- browse --------------------------------------------------------------
 
     @mcp.tool(name="dispatch_find")
-    def find(query: str, limit: int = 50) -> list[dict]:
-        """Substring-search task titles/prompts -- run before ``create`` to dedup."""
-        return [asdict(t) for t in queue.find(query, limit=limit)]
+    def find(ctx: Context, query: str, limit: int = 50, repo: str | None = None) -> list[dict]:
+        """Substring-search task titles/prompts in the lane -- a quick dedup probe."""
+        return [asdict(t) for t in queue.find(query, repo=_repo(ctx, repo), limit=limit)]
+
+    @mcp.tool(name="dispatch_sweep")
+    def sweep(ctx: Context, limit: int = 500, repo: str | None = None) -> list[dict]:
+        """The dedup corpus for the lane: every non-abandoned task, newest first."""
+        return [asdict(t) for t in queue.sweep(repo=_repo(ctx, repo), limit=limit)]
 
     @mcp.tool(name="dispatch_list")
     def list_tasks(
+        ctx: Context,
         status: str | None = None,
         target_machine: str | None = None,
         target_repo: str | None = None,
         label: str | None = None,
         limit: int = 200,
+        repo: str | None = None,
     ) -> list[dict]:
-        """List tasks, optionally filtered by status/machine/repo/label."""
+        """List tasks in the lane, optionally filtered by status/machine/repo/label."""
         return [
             asdict(t)
             for t in queue.list(
+                repo=_repo(ctx, repo),
                 status=status,
                 target_machine=target_machine,
                 target_repo=target_repo,
@@ -172,20 +198,25 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
 
     @mcp.tool(name="dispatch_worktree_status")
     def worktree_status(
-        ctx: Context, machine: str | None = None, worktree: str | None = None
+        ctx: Context,
+        machine: str | None = None,
+        worktree: str | None = None,
+        repo: str | None = None,
     ) -> dict:
         """This worktree's inbox: tasks targeted at + owned by its identity.
 
-        Identity comes from ``X-Agent-Machine``/``X-Agent-Worktree`` headers
-        unless the ``machine``/``worktree`` arguments override them.
+        Identity comes from ``X-Agent-Machine``/``X-Agent-Worktree`` headers and
+        the lane from ``X-Agent-Repo`` unless the arguments override them.
         """
         machine, worktree = _identity(ctx, machine, worktree)
         if not machine or not worktree:
             return {"error": "no identity: send X-Agent-Machine/X-Agent-Worktree or pass args"}
-        inbox = queue.mine(machine, worktree)
+        lane = _repo(ctx, repo)
+        inbox = queue.mine(machine, worktree, repo=lane)
         return {
             "machine": machine,
             "worktree": worktree,
+            "repo": lane,
             **{k: [asdict(t) for t in v] for k, v in inbox.items()},
         }
 
@@ -197,11 +228,13 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         lease_seconds: int | None = None,
         machine: str | None = None,
         worktree: str | None = None,
+        repo: str | None = None,
     ) -> dict | None:
-        """Atomically lease one eligible task (identity via header or args).
+        """Atomically lease one eligible task (identity + lane via header or args).
 
-        The claim honors targeting: only untargeted tasks or tasks targeted at
-        this identity are eligible. Returns the claimed task, or ``None``.
+        The claim honors the repo lane and targeting: only tasks in this repo's
+        lane that are untargeted or targeted at this identity are eligible.
+        Returns the claimed task, or ``None``.
         """
         machine, worktree = _identity(ctx, machine, worktree)
         if not machine or not worktree:
@@ -209,6 +242,7 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         task = queue.claim_one(
             worker_id_for(machine, worktree),
             capabilities or [],
+            repo=_repo(ctx, repo),
             machine=machine,
             worktree=worktree,
             task_id=task_id,
