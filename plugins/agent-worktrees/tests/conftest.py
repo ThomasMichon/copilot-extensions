@@ -24,6 +24,12 @@ def _reset_active_project():
 
     _saved = os.environ.get("WORKTREE_PROJECT")
     _cfg.set_active_project(None)
+    # Also clear the WORKTREE_PROJECT env fallback that project_name() consults.
+    # Otherwise a value leaked from the launching shell (or a prior test that
+    # ran main()) satisfies project_name() and makes tests pass or fail
+    # depending on the ambient environment / test order. Tests that need a
+    # project set it explicitly (e.g. via monkeypatch_config or set_active_project).
+    os.environ.pop("WORKTREE_PROJECT", None)
     yield
     _cfg.set_active_project(None)
     # main() writes WORKTREE_PROJECT into os.environ directly (for legacy shell
@@ -203,6 +209,13 @@ def pr_repo(tmp_path: Path, monkeypatch):
     )
 
     monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: tracking_d)
+    # pr_ops helpers that are called without an explicit ``config`` fall back to
+    # ``cfg.load_config()``, which resolves the on-disk config for the active
+    # project. In tests there is no active project, so pin load_config to this
+    # fixture's config -- otherwise the call raises (no project) or, worse,
+    # silently reads a real ~/.<project>/config.yaml when the launching shell
+    # leaked WORKTREE_PROJECT, making these tests order/environment dependent.
+    monkeypatch.setattr("agent_worktrees.config.load_config", lambda *a, **k: config)
 
     tracking.create_new_record(
         worktree_id, f"worktree/{worktree_id}", str(wt_path),

@@ -6327,7 +6327,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
 
 def _related_usage() -> None:
     """Print related subcommand usage."""
-    project = cfg.project_name()
+    project = cfg.active_project() or "agent-worktrees"
     print(f"Usage: {project} related <command>")
     print()
     print("Per-project, directional 'related repos' index (this repo's POV),")
@@ -6432,7 +6432,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             })
         elif not entries:
             print("No related repos linked.")
-            print(f"Link one with: {cfg.project_name()} related add <name>")
+            print(f"Link one with: {cfg.active_project() or 'agent-worktrees'} related add <name>")
         else:
             output.header("Related Repos")
             for e in entries:
@@ -6525,8 +6525,8 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         if repos.find_repo(name) is None:
             output.warn(
                 f"'{name}' is not in the repos registry. Link recorded anyway; "
-                f"register it with: {cfg.project_name()} repos add {name} <path> "
-                "--class <class>"
+                f"register it with: {cfg.active_project() or 'agent-worktrees'} "
+                f"repos add {name} <path> --class <class>"
             )
         related.upsert_related(anchor, entry)
         if "--primary" in rest:
