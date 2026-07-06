@@ -6,11 +6,11 @@ producers) coordinate work through a single, low-latency authority -- instead of
 racing each other through `origin/master` pushes or needing a dedicated user
 account per agent.
 
-> **Status: early.** This slice ships the queue **engine** only
-> (`agent_dispatch.queue`). The per-host coordinator daemon, the `agent-dispatch`
-> CLI, and the installer land in subsequent slices, at which point the plugin
-> registers in the marketplace and becomes installable. It is not yet a
-> deployable runtime.
+> **Status: early.** This ships the queue **engine** (`agent_dispatch.queue`),
+> the per-host **coordinator daemon** (`agent-dispatch serve`), and the
+> **`agent-dispatch` CLI**. The installer + marketplace registration (making it
+> deployable as a managed service) and SSE/agent-bridge integration land in
+> subsequent slices, so it is not yet a marketplace-installed runtime.
 
 ## Why
 
@@ -85,3 +85,24 @@ pip install -e '.[dev]'
 pytest
 ruff check .
 ```
+
+## Coordinator + CLI
+
+Run the per-host coordinator (loopback by default), then drive it with the CLI:
+
+```bash
+agent-dispatch serve                     # binds 127.0.0.1:9330 (AGENT_DISPATCH_* to override)
+
+# from any agent/producer (AGENT_DISPATCH_URL points at the coordinator):
+agent-dispatch create "Add narration track" --require logger --dedup-key seg42
+agent-dispatch claim worker-1 --capability logger      # atomically leases one eligible task
+agent-dispatch start  <id> worker-1
+agent-dispatch complete <id> worker-1 --result-ref pr/123
+agent-dispatch list --status queued
+agent-dispatch recover                                 # requeue expired-lease tasks
+```
+
+Configuration (all optional): `AGENT_DISPATCH_HOST`, `AGENT_DISPATCH_PORT`,
+`AGENT_DISPATCH_DB`, `AGENT_DISPATCH_TOKEN` (bearer auth), and
+`AGENT_DISPATCH_URL` (the base URL the CLI talks to -- point it at a remote
+coordinator on a shared network).
