@@ -112,6 +112,47 @@ def _marketplace_of(source: str) -> str:
     return (source or "").strip().partition("@")[2].strip()
 
 
+def _name_of(source: str) -> str:
+    """The plugin name of a ``name@marketplace`` source (else the trimmed source)."""
+    return (source or "").strip().partition("@")[0].strip()
+
+
+# Where ``copilot plugin install <name>@<marketplace>`` lays the payload down on
+# the CodeSpace: ``~/.copilot/installed-plugins/<marketplace>/<name>``. ``$HOME``
+# is expanded by the remote login shell.
+_INSTALLED_ROOT_REMOTE = "$HOME/.copilot/installed-plugins"
+
+
+def codespace_plugin_dirs(specs: Iterable[CodespacePluginSpec]) -> list[str]:
+    """On-CodeSpace ``--plugin-dir`` paths for the register step's payloads.
+
+    The register step (:func:`build_register_command`) pre-installs each enabled
+    plugin into ``~/.copilot/installed-plugins/<marketplace>/<name>``. User-level
+    ``enabledPlugins`` is honored by interactive / ``copilot -p`` launches but
+    **NOT** by the ``copilot --acp`` agent-bridge dispatch (which, like autopilot,
+    ignores ``enabledPlugins``). So for the dispatch path the caller must **also**
+    fold these payload dirs into the launch as ``--plugin-dir`` args -- the only
+    mechanism that surfaces plugin skills under ``--acp`` (proven Phase-4 spike).
+    Reuses the payloads the register step already installed (no extra staging).
+
+    Returns the remote dirs for the **enabled** ``name@marketplace`` specs only
+    (install-only / non-marketplace-form specs are skipped).
+    """
+    dirs: list[str] = []
+    seen: set[str] = set()
+    for spec in specs:
+        if not spec.enable:
+            continue
+        mkt, name = _marketplace_of(spec.source), _name_of(spec.source)
+        if not mkt or not name:
+            continue
+        path = f"{_INSTALLED_ROOT_REMOTE}/{mkt}/{name}"
+        if path not in seen:
+            seen.add(path)
+            dirs.append(path)
+    return dirs
+
+
 def build_register_payload(
     specs: Iterable[CodespacePluginSpec],
     marketplaces: dict[str, Any],
