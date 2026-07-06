@@ -10,6 +10,7 @@ later slice; this module is the task CRUD + claim/lease API.
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 
@@ -21,6 +22,26 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .events import EventBus, sse_format
 from .queue import Task, TaskError, TaskQueue, worker_id_for
+
+log = logging.getLogger("agent-dispatch.coordinator")
+
+
+async def _sweep_loop(queue: TaskQueue, interval: float, bus: EventBus) -> None:
+    """Periodically recover expired leases so a crashed worker's task resurfaces.
+
+    Runs the (synchronous) recovery sweep off the event loop via a worker thread.
+    Cancelled cleanly on shutdown.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            recovered = await asyncio.to_thread(queue.recover_expired_leases)
+        except Exception:  # pragma: no cover -- never let the loop die on a blip
+            log.exception("lease-recovery sweep failed")
+            continue
+        if recovered:
+            log.info("lease-recovery sweep requeued %d expired task(s)", recovered)
+            bus.publish({"type": "task.swept", "recovered": recovered})
 
 
 class CreateBody(BaseModel):
@@ -86,14 +107,34 @@ def _make_auth(token: str | None):
     return check
 
 
-def create_app(queue: TaskQueue, *, token: str | None = None) -> FastAPI:
-    """Build the coordinator app over an existing :class:`TaskQueue`."""
+def create_app(
+    queue: TaskQueue, *, token: str | None = None, sweep_interval: float = 0.0
+) -> FastAPI:
+    """Build the coordinator app over an existing :class:`TaskQueue`.
+
+    When ``sweep_interval > 0`` the coordinator runs a background lease-recovery
+    sweep every ``sweep_interval`` seconds so a crashed worker's held task
+    automatically returns to ``queued`` without a manual ``recover`` call.
+    """
     bus = EventBus()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         bus.bind_loop(asyncio.get_running_loop())
-        yield
+        sweeper = (
+            asyncio.create_task(_sweep_loop(queue, sweep_interval, bus))
+            if sweep_interval and sweep_interval > 0
+            else None
+        )
+        try:
+            yield
+        finally:
+            if sweeper is not None:
+                sweeper.cancel()
+                try:
+                    await sweeper
+                except asyncio.CancelledError:
+                    pass
 
     app = FastAPI(
         title="agent-dispatch",
