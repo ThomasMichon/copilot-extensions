@@ -106,11 +106,27 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
         )
 
 
+def _identity(args: argparse.Namespace) -> tuple[str | None, str | None]:
+    """(machine, worktree): explicit flags override the agent-worktrees resolution."""
+    machine = getattr(args, "machine", None)
+    worktree = getattr(args, "worktree", None)
+    if machine is None or worktree is None:
+        from .identity import resolve_identity
+
+        r_machine, r_worktree = resolve_identity()
+        machine = machine or r_machine
+        worktree = worktree or r_worktree
+    return (machine, worktree)
+
+
 def _cmd_claim(args: argparse.Namespace) -> int:
+    machine, worktree = _identity(args)
     with _client(args) as c:
         task = c.claim(
-            args.worker_id,
-            args.capability or [],
+            worker_id=args.worker_id,
+            capabilities=args.capability or [],
+            machine=machine,
+            worktree=worktree,
             task_id=args.task,
             lease_seconds=args.lease_seconds,
         )
@@ -118,6 +134,20 @@ def _cmd_claim(args: argparse.Namespace) -> int:
         print("no claimable task", file=sys.stderr)
         return 3
     return _emit(task)
+
+
+def _cmd_worktree_status(args: argparse.Namespace) -> int:
+    machine, worktree = _identity(args)
+    if not machine or not worktree:
+        print(
+            "agent-dispatch: could not resolve worktree identity — pass --machine and --worktree "
+            "(agent-worktrees not found, or not inside a worktree)",
+            file=sys.stderr,
+        )
+        return 2
+    with _client(args) as c:
+        inbox = c.mine(machine, worktree)
+    return _emit({"machine": machine, "worktree": worktree, **inbox})
 
 
 def _simple(method: str, *arg_names: str):
@@ -233,12 +263,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("task_id")
     p.set_defaults(func=_simple("approve", "task_id"))
 
-    p = sub.add_parser("claim", help="atomically lease one eligible task")
-    p.add_argument("worker_id")
+    p = sub.add_parser(
+        "claim", help="atomically lease one eligible task (identity auto-resolved from CWD)"
+    )
+    p.add_argument(
+        "worker_id", nargs="?", help="owner id (default: composed from machine/worktree)"
+    )
+    p.add_argument("--machine", help="override the resolved machine (targeting identity)")
+    p.add_argument("--worktree", help="override the resolved worktree id (targeting identity)")
     p.add_argument("--capability", action="append", help="advertised capability (repeatable)")
     p.add_argument("--task", help="claim this specific task id (if eligible)")
     p.add_argument("--lease-seconds", type=int)
     p.set_defaults(func=_cmd_claim)
+
+    p = sub.add_parser(
+        "worktree-status",
+        help="this worktree's inbox: tasks assigned to + owned by it (identity auto-resolved)",
+    )
+    p.add_argument("--machine", help="override the resolved machine")
+    p.add_argument("--worktree", help="override the resolved worktree id")
+    p.set_defaults(func=_cmd_worktree_status)
 
     p = sub.add_parser("start", help="mark a claimed task started")
     p.add_argument("task_id")

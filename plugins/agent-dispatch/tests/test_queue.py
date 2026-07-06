@@ -7,7 +7,13 @@ import threading
 
 import pytest
 
-from agent_dispatch.queue import DEFAULT_LEASE_SECONDS, Status, TaskError, TaskQueue
+from agent_dispatch.queue import (
+    DEFAULT_LEASE_SECONDS,
+    Status,
+    TaskError,
+    TaskQueue,
+    worker_id_for,
+)
 
 
 @pytest.fixture
@@ -242,3 +248,63 @@ def test_events_record_transitions(q):
     q.complete(t.id, "w1")
     trail = [e["to_status"] for e in q.events(t.id)]
     assert trail == [Status.QUEUED, Status.CLAIMED, Status.STARTED, Status.COMPLETED]
+
+
+# -- worker identity + targeting-in-claim ------------------------------------
+
+
+def test_worker_id_for():
+    assert worker_id_for("host-a", "wt-1") == "host-a/wt-1"
+
+
+def test_claim_gated_by_target_machine(q):
+    q.create("m1-only", target_machine="m1")
+    assert q.claim_one("a", machine="m2", worktree="w") is None
+    got = q.claim_one("a", machine="m1", worktree="w")
+    assert got is not None and got.target_machine == "m1"
+
+
+def test_claim_gated_by_target_worktree(q):
+    q.create("wtX-only", target_worktree="wtX")
+    assert q.claim_one("a", machine="m", worktree="other") is None
+    assert q.claim_one("a", machine="m", worktree="wtX") is not None
+
+
+def test_untargeted_task_claimable_by_any_identity(q):
+    q.create("open")
+    assert q.claim_one("a", machine="m", worktree="w") is not None
+
+
+def test_machineless_claimer_gets_only_untargeted(q):
+    q.create("targeted", target_machine="m1")
+    q.create("open")
+    got = q.claim_one("a")  # no machine/worktree declared
+    assert got.title == "open"
+
+
+def test_claim_stamps_composite_owner(q):
+    t = q.create("x")
+    owner = worker_id_for("host-a", "wt-9")
+    got = q.claim_one(owner, machine="host-a", worktree="wt-9", task_id=t.id)
+    assert got.owner == "host-a/wt-9"
+
+
+def test_mine_returns_assigned_and_owned(q):
+    assigned = q.create("for-wt1", target_worktree="wt-1")
+    machine_wide = q.create("for-machine", target_machine="host-a")
+    to_own = q.create("to-own")
+    q.claim_one(
+        worker_id_for("host-a", "wt-1"),
+        machine="host-a",
+        worktree="wt-1",
+        task_id=to_own.id,
+    )
+    q.create("open-to-all")  # untargeted -- not "assigned to me"
+
+    inbox = q.mine("host-a", "wt-1")
+    assigned_ids = {t.id for t in inbox["assigned"]}
+    owned_ids = {t.id for t in inbox["owned"]}
+    assert assigned.id in assigned_ids
+    assert machine_wide.id in assigned_ids  # machine-wide, no worktree pin
+    assert to_own.id in owned_ids
+    assert all(t.title != "open-to-all" for t in inbox["assigned"])

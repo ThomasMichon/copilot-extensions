@@ -41,6 +41,16 @@ _BUSY_TIMEOUT_MS = 5000
 _MAX_AFFINITY = 1000
 
 
+def worker_id_for(machine: str, worktree: str) -> str:
+    """The canonical agent identity: the ``machine/worktree`` composite.
+
+    This pair is the only durable agent id the facility has; the coordinator
+    stamps it as a task's ``owner`` on claim, and an agent finds its own work by
+    querying with the same pair (see :meth:`TaskQueue.mine`).
+    """
+    return f"{machine}/{worktree}"
+
+
 class Status:
     """The six task states (string constants, stored verbatim)."""
 
@@ -319,20 +329,28 @@ class TaskQueue:
         worker_id: str,
         capabilities: Iterable[str] = (),
         *,
+        machine: str | None = None,
+        worktree: str | None = None,
         task_id: str | None = None,
         now: float | None = None,
         lease_seconds: int | None = None,
     ) -> Task | None:
         """Atomically lease the best eligible ``queued`` task, or ``None``.
 
-        Eligible = ``status='queued'``, ``not_before <= now``, and every token in
-        the task's ``requires`` is present in ``capabilities``. Candidates are
-        ordered by affinity match then age. The winning row is flipped to
-        ``claimed`` under a write lock, so concurrent callers never double-claim.
+        Eligible = ``status='queued'``, ``not_before <= now``, every token in the
+        task's ``requires`` present in ``capabilities``, and — the **targeting
+        gate** — the task's ``target_machine`` / ``target_worktree`` are unset or
+        match the claiming agent's ``machine`` / ``worktree``. So an agent only
+        claims work that is unassigned *or* assigned to it. A claimer that leaves
+        ``machine`` / ``worktree`` unset can therefore only take *untargeted*
+        tasks. The winning row is flipped to ``claimed`` under a write lock, so
+        concurrent callers never double-claim.
 
         If ``task_id`` is given, only that task is considered (a spawned worker
-        deterministically claiming *its* task) — still subject to the same
-        eligibility gate, so it returns ``None`` if that task isn't claimable.
+        deterministically claiming *its* task) — still subject to the same gates.
+
+        ``worker_id`` is stamped as the task ``owner``; in the facility it is the
+        canonical ``machine/worktree`` composite (see :func:`worker_id_for`).
         """
         ts = self._now(now)
         caps = set(capabilities)
@@ -355,6 +373,10 @@ class TaskQueue:
             for row in rows:
                 requires = set(json.loads(row["requires"] or "[]"))
                 if not requires.issubset(caps):
+                    continue
+                if row["target_machine"] is not None and row["target_machine"] != machine:
+                    continue
+                if row["target_worktree"] is not None and row["target_worktree"] != worktree:
                     continue
                 score = self._affinity_score(json.loads(row["affinity"] or "{}"), worker_id, caps)
                 if score > best_affinity:
@@ -381,6 +403,34 @@ class TaskQueue:
             task = self._fetch(conn, chosen["id"])
             conn.execute("COMMIT")
         return task
+
+    def mine(self, machine: str, worktree: str) -> dict[str, list[Task]]:
+        """Return an agent's inbox: tasks ``assigned`` to it and ``owned`` by it.
+
+        - ``assigned``: ``queued`` tasks targeted specifically at this agent —
+          ``target_worktree == worktree``, or a machine-wide assignment
+          (``target_machine == machine`` with no worktree pin). Untargeted open
+          tasks are *not* listed here (they belong to no one in particular).
+        - ``owned``: non-terminal tasks this agent has claimed/started
+          (``owner == machine/worktree``).
+        """
+        owner = worker_id_for(machine, worktree)
+        with self._connect() as conn:
+            assigned_rows = conn.execute(
+                "SELECT * FROM tasks WHERE status = ? AND ("
+                "  target_worktree = ?"
+                "  OR (target_machine = ? AND target_worktree IS NULL)"
+                ") ORDER BY created_at ASC",
+                (Status.QUEUED, worktree, machine),
+            ).fetchall()
+            owned_rows = conn.execute(
+                "SELECT * FROM tasks WHERE owner = ? AND status IN (?, ?) ORDER BY created_at ASC",
+                (owner, Status.CLAIMED, Status.STARTED),
+            ).fetchall()
+        return {
+            "assigned": [Task._from_row(r) for r in assigned_rows],
+            "owned": [Task._from_row(r) for r in owned_rows],
+        }
 
     @staticmethod
     def _affinity_score(affinity: dict[str, str], worker_id: str, caps: set[str]) -> int:
@@ -544,7 +594,8 @@ class TaskQueue:
             if task.target_worktree:
                 affinity["worktree"] = task.target_worktree
             conn.execute(
-                "UPDATE tasks SET requires = ?, affinity = ?, updated_at = ? WHERE id = ?",
+                "UPDATE tasks SET requires = ?, affinity = ?, target_worktree = NULL,"
+                " updated_at = ? WHERE id = ?",
                 (json.dumps(requires), json.dumps(affinity), ts, task_id),
             )
             result = self._fetch(conn, task_id)
