@@ -1,0 +1,55 @@
+"""Runtime configuration for the agent-dispatch coordinator and CLI.
+
+All values come from the environment so the same code runs loopback-only on a
+lone dev box or against a designated coordinator host on a shared network:
+
+- ``AGENT_DISPATCH_HOST`` / ``AGENT_DISPATCH_PORT`` -- where the coordinator binds.
+- ``AGENT_DISPATCH_DB`` -- the SQLite queue file (server side).
+- ``AGENT_DISPATCH_TOKEN`` -- optional bearer token (server validates, client sends).
+- ``AGENT_DISPATCH_URL`` -- the coordinator base URL the CLI talks to (defaults to
+  ``http://<host>:<port>``); set this to point the CLI at a remote coordinator.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 9330
+DEFAULT_DB = Path.home() / ".agent-dispatch" / "tasks.db"
+
+
+@dataclass(frozen=True)
+class Config:
+    """Resolved coordinator configuration."""
+
+    host: str = DEFAULT_HOST
+    port: int = DEFAULT_PORT
+    db_path: str = str(DEFAULT_DB)
+    token: str | None = None
+
+    @property
+    def url(self) -> str:
+        return f"http://{self.host}:{self.port}"
+
+
+def load_config() -> Config:
+    """Resolve the coordinator config from the environment."""
+    return Config(
+        host=os.environ.get("AGENT_DISPATCH_HOST", DEFAULT_HOST),
+        port=int(os.environ.get("AGENT_DISPATCH_PORT", str(DEFAULT_PORT))),
+        db_path=os.environ.get("AGENT_DISPATCH_DB", str(DEFAULT_DB)),
+        token=os.environ.get("AGENT_DISPATCH_TOKEN") or None,
+    )
+
+
+def client_url() -> str:
+    """The base URL the CLI should talk to (``AGENT_DISPATCH_URL`` overrides)."""
+    return os.environ.get("AGENT_DISPATCH_URL") or load_config().url
+
+
+def client_token() -> str | None:
+    """The bearer token the CLI should send, if any."""
+    return os.environ.get("AGENT_DISPATCH_TOKEN") or None
