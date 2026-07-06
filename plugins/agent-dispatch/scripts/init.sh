@@ -18,10 +18,12 @@ _fail() { printf '  [FAIL] %s\n' "$1" >&2; }
 _step() { printf '  ...    %s\n' "$1"; }
 
 FORCE=0
+SERVICE=0
 INSTALL_DIR=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force) FORCE=1; shift ;;
+        --service) SERVICE=1; shift ;;
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
         *) shift ;;
     esac
@@ -180,7 +182,59 @@ case ":$PATH:" in
     *) _step "Add $LOCAL_BIN to your PATH (e.g. in ~/.bashrc): export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
 esac
 
+# -- 7. Optional coordinator service (systemd user unit) ---------------
+# The coordinator is the always-on single writer. Install it as a service only
+# when asked (--service); a machine that is only a *client* of a remote
+# coordinator does not run a local one.
+if [[ "$SERVICE" -eq 1 ]]; then
+    SYSTEMD_UNIT="agent-dispatch.service"
+    if ! command -v systemctl >/dev/null 2>&1; then
+        _skip "systemd not available -- skipping coordinator service (run 'agent-dispatch serve')"
+    else
+        UNIT_DIR="$HOME/.config/systemd/user"
+        ENV_FILE="$INSTALL_DIR/service.env"
+        mkdir -p "$UNIT_DIR"
+        if [[ ! -f "$ENV_FILE" ]]; then
+            cat > "$ENV_FILE" << 'ENVEOF'
+# agent-dispatch coordinator service environment (edit + `systemctl --user restart agent-dispatch`)
+AGENT_DISPATCH_HOST=127.0.0.1
+AGENT_DISPATCH_PORT=9330
+# AGENT_DISPATCH_DB=%h/.agent-dispatch/tasks.db   # default; uncomment to override
+# AGENT_DISPATCH_TOKEN=                            # set to require bearer auth
+ENVEOF
+            _ok "Service env: $ENV_FILE (defaults; edit to expose on the network / add a token)"
+        else
+            _skip "Service env already exists: $ENV_FILE"
+        fi
+        cat > "$UNIT_DIR/$SYSTEMD_UNIT" << EOF
+[Unit]
+Description=agent-dispatch -- portable agent task-queue coordinator
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-$ENV_FILE
+Environment=PYTHONUTF8=1
+ExecStart=$VENV_PYTHON -m agent_dispatch serve
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=$INSTALL_DIR
+
+[Install]
+WantedBy=default.target
+EOF
+        systemctl --user daemon-reload 2>/dev/null || true
+        systemctl --user enable "$SYSTEMD_UNIT" 2>/dev/null || true
+        systemctl --user restart "$SYSTEMD_UNIT" 2>/dev/null || true
+        _ok "Coordinator service installed + started ($SYSTEMD_UNIT)"
+    fi
+fi
+
 echo ''
 echo '=== agent-dispatch init complete ==='
-echo '  Try: agent-dispatch version'
+if [[ "$SERVICE" -eq 1 ]]; then
+    echo '  Coordinator: systemctl --user status agent-dispatch'
+else
+    echo '  Try: agent-dispatch version   (add --service to run the coordinator as a systemd unit)'
+fi
 exit 0
