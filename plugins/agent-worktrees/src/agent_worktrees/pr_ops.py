@@ -11,18 +11,22 @@ Branch topology (PR mode)::
                         tracks master)      work commit, pushed to remote)
 
 ``create_pr`` squashes the worktree's commits into one and rebases that commit
-onto the upstream default branch.  How it then publishes the PR head depends on
-``pr.head_scheme``:
+onto the upstream default branch.  The local worktree then **always lands on
+that squashed commit** -- HEAD stays on ``worktree/{id}`` and the branch is
+never reset off it (#1804) -- regardless of ``pr.head_scheme``.  The scheme only
+selects how the PR head is *published* (its name + push mechanism):
 
-- ``snapshot`` (default, legacy): create the ``feature/{slug}-{suffix}`` branch
-  at the squashed commit, reset the worktree base branch back to the upstream
-  tip, push the feature branch, and return HEAD to the worktree base branch so
-  the operator resumes on the canonical working branch (#1804) -- a later
-  ``git sync`` fast-forwards cleanly instead of rebasing the throwaway branch.
-- ``refspec`` (#1815): keep the squashed work ON ``worktree/{id}`` and push it
-  directly to the PR head ref (``worktree/{id}:refs/heads/{head}``) -- no local
-  feature branch, no checkout dance; the worktree stays on its own branch,
-  which sits ahead of master while the PR is open.
+- ``snapshot`` (default): copy the squashed commit onto a ``feature/{slug}-
+  {suffix}`` branch (the older namespace) and push THAT.  ``worktree/{id}`` is
+  left on the squashed commit (sitting ahead of master while the PR is open); a
+  later ``git sync`` reconciles it on merge.
+- ``refspec`` (#1815): push ``worktree/{id}`` straight to the PR head ref
+  (``worktree/{id}:refs/heads/{head}``, e.g. ``pr/{slug}``) -- no local feature
+  branch.
+
+Either way the worktree stays on its own branch at the squashed commit; the
+``head_scheme`` toggle is purely about PR-head naming + publish mechanism, not
+about whether the worktree is reset.
 
 See ``docs/plans/pr-workflow.md`` in aperture-labs.
 """
@@ -198,13 +202,16 @@ def create_pr(
     ``target_repo`` (``--repo owner/name``) records the PR's target repo;
     it defaults to the worktree's own repo.
 
-    Idempotent: safe to re-run.  A successful run returns HEAD to the worktree
-    base branch, so a retry after a push-that-failed-to-open is recognized from
-    there -- a live tracked PR whose feature branch still exists locally with
-    nothing new on the base -- and the branch is simply (re)pushed with the
-    tracking state advanced to ``open``.  The legacy case (HEAD still on the
-    feature branch, e.g. after a push that itself failed) is handled the same
-    way.
+    Idempotent: safe to re-run.  A successful run leaves HEAD on the worktree
+    branch (``worktree/{id}``) at the squashed commit -- it is never reset off
+    it -- so a retry after a push-that-failed-to-open lands there with the
+    squashed work still in place and is recognized as a re-run of the live
+    tracked PR: the head is simply (re)pushed (force-with-lease) with the
+    tracking state advanced to ``open``.  Two legacy/migration cases are handled
+    the same way: HEAD still on the feature branch (a push that failed before the
+    old code returned HEAD), and ``worktree/{id}`` sitting at the upstream tip
+    with the feature branch still local (a worktree created under the old
+    reset-to-upstream scheme).
     """
     repo = config.default_repo
     prcfg = repo.pr
@@ -300,16 +307,17 @@ def create_pr(
     reusing = bool(active_is_live and not new and active and active.branch == feature_branch)
     ahead = git_ops.get_commits_ahead(wt_branch, upstream, cwd=worktree_path)
 
-    # --- Re-run path (#1804): a *successful* create-pr now returns HEAD to the
-    #     worktree base branch (reset to the upstream tip in step 5), so an
-    #     idempotent retry -- e.g. after a push that succeeded but PR-open
-    #     failed -- lands here on wt_branch with nothing ahead of upstream,
-    #     rather than on the feature branch. The squashed work already lives on
-    #     the (still-local) feature branch and cannot be rebuilt from the now-
-    #     empty wt_branch, so re-push that branch instead of tripping the
-    #     "already exists" guard below. When wt_branch *does* have new commits
-    #     this is an iterate -- fall through and re-squash + force-push them
-    #     onto the reused branch. ---
+    # --- Re-run fast path: a live PR whose head is already published and whose
+    #     base has nothing new to squash. This is hit by (a) a legacy/migration
+    #     worktree created under the old scheme that DID reset worktree/<id> to
+    #     upstream (so it now sits at the tip, `not ahead`), and (b) any repo
+    #     where the merged content has already synced back. In both cases the
+    #     squashed work already lives on the (still-local) feature branch, so
+    #     re-push that branch instead of tripping the "already exists" guard or
+    #     the "nothing ahead" error below. Under the current scheme a *successful*
+    #     create-pr leaves worktree/<id> ONE ahead (the squashed commit is kept
+    #     in place, never reset), so a normal iterate/retry has `ahead` non-empty
+    #     and falls through to re-squash + force-push onto the reused branch. ---
     if reusing and not ahead and git_ops.local_branch_exists(
         feature_branch, cwd=worktree_path
     ):
@@ -421,44 +429,37 @@ def create_pr(
                 f"'creating' for retry (re-run create-pr)."
             )}
     else:
-        # Snapshot mode: snapshot the squashed commit onto a separate local
-        # feature branch and push it. Used by the legacy snapshot scheme *and*
-        # by a refspec repo's parallel --new PR (``parallel_snapshot``). The two
-        # differ only in step 5: a legacy snapshot resets worktree/<id> to
-        # upstream (it is a throwaway local base), whereas a refspec parallel PR
-        # must LEAVE worktree/<id> alone -- it is the other PR's live head.
-        # 3. Create (or move) the feature branch at the squashed work commit.
+        # Snapshot publish: the local worktree lands on the squashed commit
+        # exactly as in refspec mode -- HEAD never leaves worktree/<id> and
+        # worktree/<id> is NOT reset to upstream (it legitimately sits ahead of
+        # master while the PR is open; a later `git sync` reconciles it on
+        # merge, see finalize._reconcile_merged_pointers). The ONLY thing the
+        # scheme changes is HOW the PR head is *published*: snapshot copies the
+        # squashed commit onto a separately-named local ``feature/<slug>`` branch
+        # (the older namespace) and pushes THAT, whereas refspec pushes
+        # worktree/<id> straight to ``pr/<slug>`` via a refspec. "Land on the
+        # squashed commit" is universal (#1804); ``head_scheme`` only selects the
+        # PR-head NAME + push mechanism, never whether the worktree is reset.
+        #
+        # This path also serves a refspec repo's parallel --new PR
+        # (``parallel_snapshot``): its head cannot be worktree/<id> (that is the
+        # first PR's live refspec head), so it snapshots onto its own feature
+        # branch -- and, crucially, still leaves worktree/<id> and HEAD alone.
+        #
+        # No checkout dance: `git push` publishes the named local ref while HEAD
+        # stays on worktree/<id>.
         git_ops.git("branch", "-f", feature_branch, "HEAD", cwd=worktree_path, check=False)
-
-        # 4. Checkout the feature branch (worktree/{id} stays as the local base).
-        git_ops.checkout(feature_branch, cwd=worktree_path)
-
-        # 5. Reset the worktree base branch to the upstream tip -- ONLY in the
-        #    legacy snapshot scheme. For a refspec parallel PR, worktree/<id> is
-        #    the live refspec head of the other PR and must not be reset.
-        if base_sha and not parallel_snapshot:
-            git_ops.git("branch", "-f", wt_branch, upstream, cwd=worktree_path, check=False)
-
-        # 6. Push the feature branch.
         with hooks.allow_pr_push():
             pushed = git_ops.push(
                 remote, feature_branch, cwd=worktree_path, force_with_lease=reusing
             )
         if not pushed:
             return {**base, "error": (
-                f"Failed to push '{feature_branch}' to '{remote}'. The feature "
-                f"branch exists locally; tracking state left as 'creating' for "
-                f"retry (re-run create-pr)."
+                f"Failed to push '{feature_branch}' to '{remote}'. The squashed "
+                f"work is on '{wt_branch}' (and the local '{feature_branch}' "
+                f"snapshot); tracking state left as 'creating' for retry "
+                f"(re-run create-pr)."
             )}
-
-        # 6b. Return HEAD to the worktree base branch (#1804). A successful
-        #     create-pr should leave the operator on the canonical working
-        #     branch, not stranded on the throwaway feature branch: from
-        #     wt_branch (already reset to the upstream tip in step 5) the
-        #     post-merge move is a clean `git sync` fast-forward -- no
-        #     `git checkout` + `reset --hard`. The pushed feature branch and the
-        #     open PR are unaffected.
-        git_ops.checkout(wt_branch, cwd=worktree_path)
 
     # 7. Record the open state on the target PR (preserving any url/number
     #    already recorded for a reused live PR).
@@ -482,6 +483,12 @@ def create_pr(
         "pr_count": len(record.prs) if record else 0,
         "held": bool(hold),
     }
+    if reusing:
+        # This call iterated an existing *live* PR (re-squash + force-push onto
+        # the reused head) rather than opening a fresh one -- flag it so callers
+        # recognize the idempotent re-run and don't treat it as a new PR. Mirrors
+        # the fast-path re-run signal in ``_push_existing_feature``.
+        result["rerun"] = True
 
     # 8. Auto-open the PR via the configured provider plugin (Phase 2/3):
     #    open the PR, embed the source-worktree attribution marker, and
