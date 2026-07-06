@@ -32,6 +32,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# In --stdio (ACP) mode, stdout is the JSON-RPC channel; keep all human-facing
+# output (banner, hook output) off it. `say` and the hook redirect to stderr.
+STDIO=false
+for _a in "${COPILOT_ARGS[@]:-}"; do
+    [[ "$_a" == "--stdio" ]] && STDIO=true
+done
+say() { if $STDIO; then echo "$@" >&2; else echo "$@"; fi; }
+
 # -- Session PATH prepend (generic; repo-provided dirs) -------------------
 if [[ -n "$SESSION_PATH" ]]; then
     export PATH="${SESSION_PATH}:${PATH}"
@@ -54,8 +62,13 @@ export WORKTREE_MACHINE="$MACHINE"
 # non-zero exit warns but does not abort the launch.
 if [[ -n "$SETUP_HOOK" && "$RECOVERY" != true ]]; then
     if [[ -f "$SETUP_HOOK" ]]; then
-        echo "  Setup:    $SETUP_HOOK"
-        if ! bash "$SETUP_HOOK" --machine "$MACHINE"; then
+        say "  Setup:    $SETUP_HOOK"
+        if $STDIO; then
+            # Keep the hook's stdout off the ACP channel.
+            if ! bash "$SETUP_HOOK" --machine "$MACHINE" >&2; then
+                echo "  WARN: setup hook exited non-zero; continuing to launch." >&2
+            fi
+        elif ! bash "$SETUP_HOOK" --machine "$MACHINE"; then
             echo "  WARN: setup hook exited non-zero; continuing to launch." >&2
         fi
     else
@@ -69,12 +82,12 @@ DIRTY=$(git status --porcelain 2>/dev/null)
 STATUS="clean"
 [[ -n "$DIRTY" ]] && STATUS="dirty"
 
-echo ""
-echo "  Project:  $PROJECT"
-echo "  Branch:   $BRANCH ($STATUS)"
-echo "  Machine:  $MACHINE"
-echo "  Path:     $PWD"
-echo ""
+say ""
+say "  Project:  $PROJECT"
+say "  Branch:   $BRANCH ($STATUS)"
+say "  Machine:  $MACHINE"
+say "  Path:     $PWD"
+say ""
 
 # -- Launch Copilot -------------------------------------------------------
 if command -v copilot &>/dev/null; then

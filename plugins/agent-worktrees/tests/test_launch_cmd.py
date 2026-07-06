@@ -223,6 +223,9 @@ def test_default_setup_sh_supports_hook_and_session_path():
     # PATH is prepended, and Copilot is exec'd (launcher owns the exec)
     assert 'export PATH="${SESSION_PATH}:${PATH}"' in text
     assert "exec copilot" in text
+    # --stdio (ACP) mode keeps human output off the JSON-RPC channel
+    assert "STDIO=true" in text
+    assert 'bash "$SETUP_HOOK" --machine "$MACHINE" >&2' in text
 
 
 def test_default_setup_ps1_supports_hook_and_session_path():
@@ -232,3 +235,6 @@ def test_default_setup_ps1_supports_hook_and_session_path():
     assert "-not $Recovery" in text  # hook skipped in recovery
     assert "$env:PATH" in text
     assert "copilot @CopilotArgs" in text
+    # --stdio (ACP) mode redirects Write-Host + hook output to stderr
+    assert "StdioMode" in text
+    assert "[Console]::Error.WriteLine" in text
