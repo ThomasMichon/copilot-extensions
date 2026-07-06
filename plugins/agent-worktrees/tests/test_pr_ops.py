@@ -45,7 +45,7 @@ class TestFeatureBranchName:
 
 class TestPRHeadName:
     def test_snapshot_default_matches_feature_branch_name(self):
-        prcfg = cfg.PRConfig(enabled=True, branch_prefix="feature")
+        prcfg = cfg.PRConfig(enabled=True, branch_prefix="feature", head_scheme="snapshot")
         assert pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa") == \
             pr_ops.feature_branch_name("feature", "Add auth", "wt-x-aaaa")
         assert pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa") == "feature/add-auth-aaaa"
@@ -236,9 +236,10 @@ class TestCreatePRRefspec:
         assert git_ops.remote_branch_exists("origin", "submit/add-feature-aaaa", cwd=str(wt_path))
         assert not git_ops.local_branch_exists("submit/add-feature-aaaa", cwd=str(wt_path))
 
-    def test_snapshot_mode_still_default(self, pr_repo):
-        # The stock pr_repo (no head_scheme) uses snapshot: a local feature
-        # branch is created and pushed under the feature/ namespace.
+    def test_snapshot_mode_when_pinned(self, pr_repo):
+        # The stock pr_repo pins head_scheme=snapshot: a local feature branch is
+        # created and pushed under the feature/ namespace. (The plugin default is
+        # now refspec (#1815); the fixture pins snapshot to keep exercising it.)
         config, wid, wt_path, _ = pr_repo
         res = pr_ops.create_pr(wid, config, title="Add feature")
         assert res["branch"] == "feature/add-feature-aaaa"
@@ -679,6 +680,7 @@ class TestPRFinalizeAndPush:
                 pr=cfg.PRConfig(
                     enabled=True, required=True,
                     provider="gitea", branch_prefix="feature",
+                    head_scheme="snapshot",
                 ),
             )},
         )
