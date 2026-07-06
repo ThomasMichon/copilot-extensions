@@ -158,7 +158,9 @@ in-repo overlay (below); the in-repo version wins when both are present.
 | `required` | bool | `false` | **Enforce** PRs: `push-changes` and the unmerged-work guard in `finalize` refuse the direct-to-default-branch path. The only way to land work is `create-pr` → open PR → merge. **Implies `enabled`.** |
 | `provider` | string | `gitea` | `gitea` \| `github` \| `azure-devops`. Selects which sub-agent / CLI opens the PR. |
 | `strategy` | string | `detach` | Default disposition after `create-pr`: `keep-alive` (keep the worktree open to iterate on review feedback, pushing updates to the feature branch) or `detach` (finalize the worktree immediately; resume later via a fresh `create`). Does **not** affect squash timing — squashing always happens at `create-pr`. |
-| `branch_prefix` | string | `feature` | Prefix for generated feature-branch names (e.g. `feature/<slug>-<suffix>`). |
+| `branch_prefix` | string | `feature` | Prefix for generated feature-branch names (e.g. `feature/<slug>-<suffix>`). Used by the `snapshot` head scheme and as the `{prefix}` token in `head_pattern`. |
+| `head_scheme` | string | `snapshot` | How `create-pr` publishes the PR head. `snapshot` (legacy): snapshot the squashed commit onto a separate local `feature/<slug>` branch, reset the worktree base to upstream, push that branch, and return HEAD to the worktree branch (#1804). `refspec` (#1815): keep the squashed work **on** `worktree/<id>` and push it directly to the PR head ref (`worktree/<id>:refs/heads/<head>`) — no local feature branch, no checkout dance; the worktree stays on its own branch (which sits ahead of master while the PR is open). |
+| `head_pattern` | string | *(scheme default)* | Template for the PR head branch name. Tokens: `{prefix}` `{slug}` `{suffix}` `{username}` `{machine}`. Empty ⇒ scheme default: `{prefix}/{slug}-{suffix}` under `snapshot` (keeps `feature/<slug>` names) and `pr/{slug}-{suffix}` under `refspec`. Repos that want e.g. `user/{username}/{slug}-{suffix}` set it explicitly. `{username}` resolves from the repo's git identity (`user.email` local-part, then `user.name`). |
 
 Query the effective (post-merge) values at runtime:
 
