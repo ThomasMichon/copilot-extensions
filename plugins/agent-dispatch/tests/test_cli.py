@@ -65,3 +65,32 @@ def test_spawn_helper_degrades_gracefully(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "--spawn skipped" in err
     assert "t1" in err
+
+
+def test_parser_worktree_status():
+    args = build_parser().parse_args(["worktree-status"])
+    assert args.command == "worktree-status"
+
+
+def test_identity_flags_take_precedence(monkeypatch):
+    import argparse
+
+    from agent_dispatch import __main__, identity
+
+    # If both flags are present, no resolution subprocess is attempted.
+    def boom():
+        raise AssertionError("resolve_identity should not be called when both flags given")
+
+    monkeypatch.setattr(identity, "resolve_identity", boom)
+    args = argparse.Namespace(machine="m1", worktree="w1")
+    assert __main__._identity(args) == ("m1", "w1")
+
+
+def test_identity_falls_back_to_resolution(monkeypatch):
+    import argparse
+
+    from agent_dispatch import __main__, identity
+
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("host-a", "wt-7"))
+    args = argparse.Namespace(machine=None, worktree=None)
+    assert __main__._identity(args) == ("host-a", "wt-7")

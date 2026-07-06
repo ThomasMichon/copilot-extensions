@@ -8,7 +8,7 @@ daemon and CLI land in a subsequent slice.
 
 from __future__ import annotations
 
-from agent_dispatch.queue import Status, Task, TaskError, TaskQueue
+from agent_dispatch.queue import Status, Task, TaskError, TaskQueue, worker_id_for
 
-__all__ = ["Status", "Task", "TaskError", "TaskQueue"]
-__version__ = "0.1.0-dev6"
+__all__ = ["Status", "Task", "TaskError", "TaskQueue", "worker_id_for"]
+__version__ = "0.1.0-dev7"

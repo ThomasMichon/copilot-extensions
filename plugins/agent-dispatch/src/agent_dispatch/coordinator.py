@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .events import EventBus, sse_format
-from .queue import Task, TaskError, TaskQueue
+from .queue import Task, TaskError, TaskQueue, worker_id_for
 
 
 class CreateBody(BaseModel):
@@ -42,7 +42,9 @@ class CreateBody(BaseModel):
 
 
 class ClaimBody(BaseModel):
-    worker_id: str
+    worker_id: str | None = None
+    machine: str | None = None
+    worktree: str | None = None
     capabilities: list[str] = Field(default_factory=list)
     task_id: str | None = None
     lease_seconds: int | None = None
@@ -161,6 +163,11 @@ def create_app(queue: TaskQueue, *, token: str | None = None) -> FastAPI:
         )
         return [_task_dict(t) for t in tasks]
 
+    @app.get("/tasks/mine")
+    def mine(machine: str, worktree: str) -> dict:
+        result = queue.mine(machine, worktree)
+        return {k: [_task_dict(t) for t in v] for k, v in result.items()}
+
     @app.get("/tasks/{task_id}")
     def get_task(task_id: str) -> dict:
         return _task_dict(_require(queue.get(task_id)))
@@ -176,9 +183,18 @@ def create_app(queue: TaskQueue, *, token: str | None = None) -> FastAPI:
 
     @app.post("/claim")
     def claim(body: ClaimBody) -> dict | None:
+        owner = body.worker_id
+        if owner is None and body.machine and body.worktree:
+            owner = worker_id_for(body.machine, body.worktree)
+        if owner is None:
+            raise HTTPException(
+                status_code=422, detail="claim requires worker_id, or both machine and worktree"
+            )
         task = queue.claim_one(
-            body.worker_id,
+            owner,
             body.capabilities,
+            machine=body.machine,
+            worktree=body.worktree,
             task_id=body.task_id,
             lease_seconds=body.lease_seconds,
         )

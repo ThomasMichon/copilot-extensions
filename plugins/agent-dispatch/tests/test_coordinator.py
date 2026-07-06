@@ -237,3 +237,23 @@ def test_claim_by_id_over_http(api):
     assert got["id"] == tid_b
     # a different specific-id claim for an already-claimed task returns null
     assert api.post("/claim", json={"worker_id": "w2", "task_id": tid_b}).json() is None
+
+
+def test_mine_over_http(api):
+    api.post("/tasks", json={"title": "for-me", "target_worktree": "wt-1"})
+    tid = api.post("/tasks", json={"title": "to-own"}).json()["id"]
+    api.post("/claim", json={"machine": "m1", "worktree": "wt-1", "task_id": tid})
+    r = api.get("/tasks/mine", params={"machine": "m1", "worktree": "wt-1"}).json()
+    assert any(t["title"] == "for-me" for t in r["assigned"])
+    assert any(t["id"] == tid and t["owner"] == "m1/wt-1" for t in r["owned"])
+
+
+def test_claim_composes_owner_from_machine_worktree(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    got = api.post("/claim", json={"machine": "m1", "worktree": "wt-1", "task_id": tid}).json()
+    assert got["owner"] == "m1/wt-1"
+
+
+def test_claim_without_identity_is_422(api):
+    api.post("/tasks", json={"title": "x"})
+    assert api.post("/claim", json={"capabilities": []}).status_code == 422

@@ -88,19 +88,28 @@ class DispatchClient:
 
     def claim(
         self,
-        worker_id: str,
+        worker_id: str | None = None,
         capabilities: Sequence[str] = (),
         *,
+        machine: str | None = None,
+        worktree: str | None = None,
         task_id: str | None = None,
         lease_seconds: int | None = None,
     ) -> dict | None:
         body = {
             "worker_id": worker_id,
+            "machine": machine,
+            "worktree": worktree,
             "capabilities": list(capabilities),
             "task_id": task_id,
             "lease_seconds": lease_seconds,
         }
         return self._unwrap(self._http.post("/claim", json=body))
+
+    def mine(self, machine: str, worktree: str) -> dict:
+        return self._unwrap(
+            self._http.get("/tasks/mine", params={"machine": machine, "worktree": worktree})
+        )
 
     def start(self, task_id: str, worker_id: str) -> dict:
         return self._unwrap(

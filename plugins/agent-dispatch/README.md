@@ -126,13 +126,25 @@ agent-dispatch serve                     # binds 127.0.0.1:9330 (AGENT_DISPATCH_
 
 # from any agent/producer (AGENT_DISPATCH_URL points at the coordinator):
 agent-dispatch create "Add narration track" --require logger --dedup-key seg42
-agent-dispatch claim worker-1 --capability logger      # atomically leases one eligible task
-agent-dispatch start  <id> worker-1
-agent-dispatch complete <id> worker-1 --result-ref pr/123
+agent-dispatch worktree-status           # this worktree's inbox: tasks assigned to + owned by it
+agent-dispatch claim                     # lease my assigned/eligible task (identity auto-resolved)
+agent-dispatch start  <id>  <owner>
+agent-dispatch complete <id> <owner> --result-ref pr/123
 agent-dispatch list --status queued
 agent-dispatch recover                                 # requeue expired-lease tasks
 agent-dispatch watch                                   # stream task events (SSE) as JSON lines
 ```
+
+### Worker identity
+
+An agent's identity is the **`machine`/`worktree_id`** pair — the only durable
+agent id the facility has. `claim` and `worktree-status` **resolve it from the
+current directory** by delegating to `agent-worktrees` (the same CWD resolution
+git uses), so an agent in its worktree just runs `agent-dispatch worktree-status`
+/ `agent-dispatch claim` with no arguments. Claiming stamps that pair as the
+task's `owner`, and **claim honors targeting**: an agent only leases tasks that
+are untargeted or targeted at its own machine/worktree. Pass `--machine` /
+`--worktree` to override the resolution (or where `agent-worktrees` is absent).
 
 The coordinator publishes `task.created` / `.proposed` / `.approved` / `.claimed`
 / `.started` / `.yielded` / `.completed` / `.abandoned` / `.detached` events on
