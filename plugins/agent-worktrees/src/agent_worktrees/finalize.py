@@ -512,11 +512,15 @@ def _reconcile_merged_pointers(
        tip.  When HEAD is elsewhere (e.g. checked out on a feature branch),
        ``worktree/<id>`` is a free pointer moved with ``branch -f`` in the
        anchor.  When HEAD *is* ``worktree/<id>`` (the #1804 default -- create-pr
-       now returns HEAD there), it is the live checkout, so fast-forward it in
-       place in the worktree instead (clean, non-ahead, strictly-behind only).
+       returns HEAD there), it is the live checkout, so fast-forward it in place
+       (clean, non-ahead, strictly-behind only); under the refspec scheme
+       (#1815) the branch sits ahead while the PR is open, so once merged it is
+       *diverged* and, when its content is confirmed on upstream, it is realigned
+       to the tip in place (the ahead commit is the now-merged squash).
 
-    Best-effort and non-destructive: fast-forward / pointer-reset only, never
-    on a dirty tree, never discarding unmerged commits.  All failures are
+    Best-effort and non-destructive: fast-forward / pointer-realign only, never
+    on a dirty tree, never discarding unmerged commits (a realign only happens
+    once the branch's content is confirmed on upstream).  All failures are
     swallowed -- reconciliation is a tidiness pass, not a correctness gate.
     """
     upstream = f"{repo.remote}/{repo.default_branch}"
@@ -536,10 +540,14 @@ def _reconcile_merged_pointers(
     # 2. Realign worktree/<id> with the origin tip when safe:
     #    - HEAD is elsewhere (the free-pointer case, e.g. a feature-branch
     #      checkout): move the pointer with `branch -f` in the anchor.
-    #    - HEAD *is* worktree/<id> (the #1804 default -- create-pr now returns
-    #      HEAD here): fast-forward it in place in the worktree. This only
-    #      advances a clean, non-ahead, strictly-behind branch, so it never
-    #      rebases, merges, or discards local commits.
+    #    - HEAD *is* worktree/<id> (the #1804 default -- create-pr returns HEAD
+    #      here): fast-forward it in place. A plain FF only advances a clean,
+    #      non-ahead, strictly-behind branch. Under the refspec scheme (#1815)
+    #      the worktree branch legitimately sits AHEAD of master while the PR is
+    #      open, so once the PR squash-merges it is ahead+behind (diverged) and
+    #      the FF no-ops; when its content is then confirmed on upstream (merged)
+    #      we realign to the tip -- the "ahead" commit is the now-merged squash,
+    #      so no unmerged work is discarded. Guarded on a clean tree.
     try:
         wt_head = (
             git_ops._get_current_branch_safe(worktree_path)
@@ -547,10 +555,23 @@ def _reconcile_merged_pointers(
             else None
         )
         if wt_head == branch:
-            git_ops.fast_forward_worktree(
+            ff = git_ops.fast_forward_worktree(
                 worktree_path, remote=repo.remote,
                 default_branch=repo.default_branch, do_fetch=True,
             )
+            if (
+                not ff.updated
+                and git_ops.is_clean(cwd=worktree_path)
+                and _is_content_on_upstream(branch, upstream, cwd=worktree_path)
+            ):
+                up_sha = git_ops.git(
+                    "rev-parse", upstream, cwd=worktree_path, check=False
+                ).stdout.strip()
+                if up_sha:
+                    git_ops.git(
+                        "reset", "--hard", up_sha, "--quiet",
+                        cwd=worktree_path, check=False,
+                    )
         elif _is_content_on_upstream(branch, upstream, cwd=anchor):
             up_sha = git_ops.git(
                 "rev-parse", upstream, cwd=anchor, check=False
