@@ -101,6 +101,17 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
 - **`affinity`** -- soft preferences (preferred agent/worktree) that order
   candidates but never exclude.
 
+### Payloads (inline + content-addressed blobs)
+
+A task carries a Markdown `payload` (the graduated handoff's asset). Small
+payloads live **inline** in the row; a payload over `blob_threshold` bytes
+(default 4 KiB) is spilled to a **content-addressed blob** under
+`~/.agent-dispatch/payloads/<sha256>.md`, and the row keeps only a `blob:<hash>`
+ref -- so `list`/`find` stay lean and identical payloads dedupe to one file (no
+external deps). `read_payload()` (engine) / `GET /tasks/{id}/payload` /
+`agent-dispatch payload <id> [--raw]` resolve either form transparently; an
+external `payload_ref` (e.g. `pr/123`) is left opaque for the caller.
+
 ### Dedup & scheduling
 
 - `dedup_key` (unique) makes `create` idempotent -- a duplicate returns the

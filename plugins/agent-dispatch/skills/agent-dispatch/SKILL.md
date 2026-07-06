@@ -144,7 +144,9 @@ agent-dispatch create "Add narration track" \
 
 Create a **draft** instead with `--proposed` (unclaimable until `approve`).
 Defer with `--not-before <epoch>` (scheduled creation). Attach a payload with
-`--payload-inline` (small) or `--payload-ref` (a path/ref to a larger asset).
+`--payload-inline` (small), `--payload-file <path>` (reads a file; a large one
+spills to a content-addressed blob automatically), or `--payload-ref` (an
+external pointer like `pr/123`).
 
 ### 3. Claim, work, finish
 
@@ -171,9 +173,10 @@ agent-dispatch abandon <id> --worker-id <owner> --permit --reason "duplicate of 
 ### Inspect
 
 ```bash
-agent-dispatch show   <id>       # full task record
-agent-dispatch events <id>       # append-only audit trail of every transition
-agent-dispatch watch             # stream task.* events (SSE) as JSON lines
+agent-dispatch show    <id>       # full task record
+agent-dispatch events  <id>       # append-only audit trail of every transition
+agent-dispatch payload <id>       # resolved payload (inline or blob); --raw prints content only
+agent-dispatch watch              # stream task.* events (SSE) as JSON lines
 ```
 
 ## Routing: `requires` (hard) vs `affinity` (soft)

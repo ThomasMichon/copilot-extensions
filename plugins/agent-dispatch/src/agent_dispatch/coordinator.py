@@ -177,6 +177,17 @@ def create_app(queue: TaskQueue, *, token: str | None = None) -> FastAPI:
         _require(queue.get(task_id))
         return queue.events(task_id)
 
+    @app.get("/tasks/{task_id}/payload")
+    def get_payload(task_id: str) -> dict:
+        task = _require(queue.get(task_id))
+        content = queue.read_payload(task)
+        return {
+            "task_id": task.id,
+            "ref": task.payload_ref,
+            "inline": task.payload_inline is not None,
+            "payload": content,
+        }
+
     @app.post("/tasks/{task_id}/approve")
     def approve(task_id: str) -> dict:
         return _guard(lambda: queue.approve(task_id), "task.approved")

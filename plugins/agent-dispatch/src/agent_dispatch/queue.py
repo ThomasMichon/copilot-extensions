@@ -36,7 +36,12 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .payload import PayloadStore, is_blob_ref
+
 DEFAULT_LEASE_SECONDS = 15 * 60
+#: Payloads whose UTF-8 size exceeds this are spilled to a content-addressed blob
+#: instead of being stored inline in the row.
+DEFAULT_BLOB_THRESHOLD = 4096
 _BUSY_TIMEOUT_MS = 5000
 _MAX_AFFINITY = 1000
 
@@ -173,9 +178,22 @@ class TaskQueue:
     claims without a process-wide lock.
     """
 
-    def __init__(self, db_path: str | Path, *, lease_seconds: int = DEFAULT_LEASE_SECONDS):
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        payload_dir: str | Path | None = None,
+        blob_threshold: int = DEFAULT_BLOB_THRESHOLD,
+    ):
         self.db_path = str(db_path)
         self.lease_seconds = lease_seconds
+        self.blob_threshold = blob_threshold
+        # Blobs live in a ``payloads/`` directory beside the queue DB unless the
+        # caller overrides it (e.g. a shared blob volume).
+        if payload_dir is None:
+            payload_dir = Path(self.db_path).parent / "payloads"
+        self.payloads = PayloadStore(payload_dir)
         self._migrate()
 
     # -- connection / schema -------------------------------------------------
@@ -241,6 +259,41 @@ class TaskQueue:
         row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
         return Task._from_row(row) if row else None
 
+    # -- payload -------------------------------------------------------------
+
+    def _spill_payload(
+        self, payload_ref: str | None, payload_inline: str | None
+    ) -> tuple[str | None, str | None]:
+        """Spill an oversized inline payload to a content-addressed blob.
+
+        A caller-supplied ``payload_ref`` is always respected (the caller took
+        control of storage). Otherwise, an inline payload larger than
+        ``blob_threshold`` bytes is written to the blob store and replaced by its
+        ``blob:<hash>`` ref, keeping the row (and every list/find result) small.
+        """
+        if payload_ref is not None or payload_inline is None:
+            return payload_ref, payload_inline
+        if len(payload_inline.encode("utf-8")) <= self.blob_threshold:
+            return payload_ref, payload_inline
+        return self.payloads.put(payload_inline), None
+
+    def read_payload(self, task_or_id: Task | str) -> str | None:
+        """Resolve a task's payload content (inline or blob), or ``None``.
+
+        Returns the inline text when present, the blob content when
+        ``payload_ref`` is a ``blob:`` ref, and ``None`` for an absent payload or
+        an external/opaque ``payload_ref`` (e.g. ``pr/123``) the caller resolves
+        itself.
+        """
+        task = self.get(task_or_id) if isinstance(task_or_id, str) else task_or_id
+        if task is None:
+            raise TaskError(f"no such task: {task_or_id}")
+        if task.payload_inline is not None:
+            return task.payload_inline
+        if is_blob_ref(task.payload_ref):
+            return self.payloads.get(task.payload_ref)  # type: ignore[arg-type]
+        return None
+
     # -- producers -----------------------------------------------------------
 
     def create(
@@ -270,6 +323,7 @@ class TaskQueue:
         """
         if status not in (Status.QUEUED, Status.PROPOSED):
             raise TaskError(f"new task must be 'queued' or 'proposed', not {status!r}")
+        payload_ref, payload_inline = self._spill_payload(payload_ref, payload_inline)
         ts = self._now(now)
         task_id = uuid.uuid4().hex
         with self._connect() as conn:
