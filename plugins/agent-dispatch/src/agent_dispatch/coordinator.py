@@ -44,6 +44,7 @@ class CreateBody(BaseModel):
 class ClaimBody(BaseModel):
     worker_id: str
     capabilities: list[str] = Field(default_factory=list)
+    task_id: str | None = None
     lease_seconds: int | None = None
 
 
@@ -176,7 +177,10 @@ def create_app(queue: TaskQueue, *, token: str | None = None) -> FastAPI:
     @app.post("/claim")
     def claim(body: ClaimBody) -> dict | None:
         task = queue.claim_one(
-            body.worker_id, body.capabilities, lease_seconds=body.lease_seconds
+            body.worker_id,
+            body.capabilities,
+            task_id=body.task_id,
+            lease_seconds=body.lease_seconds,
         )
         if task is None:
             return None

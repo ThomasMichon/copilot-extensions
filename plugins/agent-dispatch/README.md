@@ -10,9 +10,9 @@ account per agent.
 > (`agent_dispatch.queue`), the per-host **coordinator daemon**
 > (`agent-dispatch serve`), the **`agent-dispatch` CLI**, an **installer**
 > (marketplace-registered; `scripts/init.sh` / `scripts/init.ps1` deploy a venv +
-> binstub + deploy manifest), and an **SSE event stream** (`GET /events` /
-> `agent-dispatch watch`). Still to come: agent-bridge spawn integration and
-> facility service auto-start (systemd unit / scheduled task) — for now the
+> binstub + deploy manifest), an **SSE event stream** (`GET /events` /
+> `agent-dispatch watch`), and **agent-bridge spawn** (`create --spawn`). Still to
+> come: facility service auto-start (systemd unit / scheduled task) — for now the
 > coordinator is launched with `agent-dispatch serve`.
 
 ## Install
@@ -123,6 +123,21 @@ The coordinator publishes `task.created` / `.proposed` / `.approved` / `.claimed
 / `.started` / `.yielded` / `.completed` / `.abandoned` / `.detached` events on
 `GET /events` (Server-Sent Events) — the hook a subscriber (e.g. agent-bridge)
 reacts to.
+
+### Spawning a worker (agent-bridge)
+
+`create --spawn` asks **agent-bridge** to spawn a worker agent that claims and
+executes the task:
+
+```bash
+agent-dispatch create "Summarize PR 42" --require review --spawn            # managed (waits)
+agent-dispatch create "Summarize PR 42" --spawn --spawn-agent task-worker --async  # fire-and-forget
+```
+
+The worker is instructed to claim the specific task by id
+(`agent-dispatch claim <id> --task <task>`). If the `agent-bridge` CLI isn't on
+PATH, `--spawn` **degrades gracefully** — the task is simply left queued for any
+worker to claim, so agent-dispatch stays usable without a bridge.
 
 Configuration (all optional): `AGENT_DISPATCH_HOST`, `AGENT_DISPATCH_PORT`,
 `AGENT_DISPATCH_DB`, `AGENT_DISPATCH_TOKEN` (bearer auth), and

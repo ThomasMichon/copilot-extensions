@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import uuid
 from typing import Any
 
 from . import __version__
@@ -72,12 +73,47 @@ def _cmd_create(args: argparse.Namespace) -> int:
             dedup_key=args.dedup_key,
             not_before=args.not_before,
         )
+    if args.spawn and not args.proposed:
+        _spawn_worker_for(args, task)
     return _emit(task)
+
+
+def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
+    """Spawn a worker via agent-bridge for a freshly created task (best effort)."""
+    from . import bridge
+
+    worker_id = f"spawn-{uuid.uuid4().hex[:8]}"
+    try:
+        result = bridge.spawn_worker(
+            task["id"],
+            agent=args.spawn_agent,
+            coordinator_url=args.url or client_url(),
+            worker_id=worker_id,
+            wait=not args.run_async,
+        )
+    except bridge.BridgeUnavailable as exc:
+        print(
+            f"agent-dispatch: --spawn skipped ({exc}); task {task['id']} left queued "
+            "for any worker to claim",
+            file=sys.stderr,
+        )
+        return
+    if result.returncode != 0:
+        print(
+            f"agent-dispatch: spawn via agent-bridge failed (exit {result.returncode}); "
+            f"task {task['id']} remains queued. stderr: {result.stderr.strip()[:400]}",
+            file=sys.stderr,
+        )
 
 
 def _cmd_claim(args: argparse.Namespace) -> int:
     with _client(args) as c:
-        task = c.claim(args.worker_id, args.capability or [], lease_seconds=args.lease_seconds)
+        task = c.claim(
+            args.worker_id,
+            args.capability or [],
+            task_id=args.task,
+            lease_seconds=args.lease_seconds,
+        )
     if task is None:
         print("no claimable task", file=sys.stderr)
         return 3
@@ -179,6 +215,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--origin-ref")
     p.add_argument("--dedup-key")
     p.add_argument("--not-before", type=float, default=0.0)
+    p.add_argument(
+        "--spawn", action="store_true",
+        help="after creating, spawn a worker via agent-bridge to execute it",
+    )
+    p.add_argument(
+        "--spawn-agent", default="task-worker",
+        help="agent-bridge agent name to spawn (default: task-worker)",
+    )
+    p.add_argument(
+        "--async", dest="run_async", action="store_true",
+        help="with --spawn, don't wait for the worker (fire-and-forget)",
+    )
     p.set_defaults(func=_cmd_create)
 
     p = sub.add_parser("approve", help="move a proposed task to queued")
@@ -188,6 +236,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("claim", help="atomically lease one eligible task")
     p.add_argument("worker_id")
     p.add_argument("--capability", action="append", help="advertised capability (repeatable)")
+    p.add_argument("--task", help="claim this specific task id (if eligible)")
     p.add_argument("--lease-seconds", type=int)
     p.set_defaults(func=_cmd_claim)
 
