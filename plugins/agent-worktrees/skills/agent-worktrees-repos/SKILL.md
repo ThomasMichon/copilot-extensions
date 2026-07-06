@@ -62,8 +62,13 @@ lifecycle so concurrent flows stay isolated:
 agent-worktrees register <repo>          # or: repos add <name> <path> --class worktree
 
 # Per task: create an isolated worktree, edit there, push, finalize
-<repo> --new                             # launch/create a worktree (headless adoption also supported)
-# ... edit, commit inside the worktree ...
+#   Agents/automation: create the worktree WITHOUT launching a session. This
+#   prints the worktree path; cd into it and edit in your CURRENT session.
+agent-worktrees create                   # prints id + path (add --json for a plan)
+#   Interactive (human at a terminal) only: launch a fresh muxed session in a
+#   new worktree. Refused without a TTY -- never use it from a tool call.
+<repo> --new
+# ... edit, commit inside the worktree path ...
 <repo> push-changes                      # push to the remote default branch
 <repo> finalize                          # validate on upstream + clean up the worktree
 ```

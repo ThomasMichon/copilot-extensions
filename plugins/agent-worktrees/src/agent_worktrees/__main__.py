@@ -11,7 +11,7 @@ Usage (direct):
     agent-worktrees resolve [--dry-run] [--recovery] [--no-mux] [-- args...]
     agent-worktrees resolve --json --worktree-id <id>
     agent-worktrees list [--json] [--tracking-status active|complete|...]
-    agent-worktrees create [--json]
+    agent-worktrees create [--json]       # programmatic: make a worktree, no launch
     agent-worktrees finalize [worktree-id] [--dry-run] [--json]
     agent-worktrees mark-complete [worktree-id] [--title T] [--title-only]
     agent-worktrees status [--json]
@@ -814,10 +814,14 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     session unless ``--no-mux`` is passed (agent-bridge passes it; it also
     uses ``--json``, which forces ``--no-mux``).
 
-    When stdin is not a TTY and no non-interactive flag is set
-    (``--json``, ``--base``, ``--new``), resolve errors out instead of
-    running the picker.  Use ``--new`` to create a worktree
-    non-interactively, or ``--json --worktree-id <id>`` to resume one.
+    When stdin is not a TTY and no worktree is specified, resolve errors out
+    instead of running the picker.  Note ``--new`` on its own still launches a
+    *muxed interactive* session, so it is refused without a TTY: an agent
+    running non-interactively cannot attach to the tmux/psmux session and would
+    leak a terminal.  Programmatic callers (agents, daemons) should instead use
+    ``agent-worktrees create [--json]`` -- it creates a worktree and prints its
+    id + path WITHOUT launching Copilot or a mux session -- then resume later
+    with ``--json --worktree-id <id>``.
     """
     use_json = getattr(args, "json", False)
     use_base = getattr(args, "base", False)
@@ -835,6 +839,27 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     if use_base:
         args.no_mux = True
         args.no_resume = True
+
+    # Guard: refuse a muxed ``--new`` launch when there is no TTY.  ``--new``
+    # creates a worktree AND launches an *interactive* (tmux/psmux) session, so
+    # an agent that discovers ``<project> --new`` and runs it from inside a tool
+    # call (no controlling terminal) would spawn a detached, un-attachable mux
+    # session plus a stray terminal process -- the exact misuse this blocks.
+    # There is no legitimate non-TTY muxed ``--new``: the picker's cross-env
+    # handoff runs it over ``ssh -t`` (a TTY is present) and agent-bridge passes
+    # ``--no-mux`` / ``--json`` (which force clean stdio).  Point the caller at
+    # the programmatic command instead.
+    if (use_new and not use_json and not use_base
+            and not getattr(args, "no_mux", False)
+            and not sys.stdin.isatty()):
+        output.err("Refusing '--new' without a TTY: it launches an interactive "
+                   "tmux/psmux session that a non-interactive caller cannot "
+                   "attach to (and would leak a terminal + mux session).")
+        output.err("To create a worktree programmatically (no launch, no mux):")
+        output.err("    agent-worktrees create --json")
+        output.err("Then start Copilot in the returned path, or resume later:")
+        output.err("    agent-worktrees resolve --json --worktree-id <id>")
+        return 2
 
     # NOTE: ``--new`` does NOT force ``--no-mux``. A new worktree gets a muxed
     # session like a resume (the cross-env/cross-machine "New worktree" picker
@@ -946,12 +971,16 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         config = cfg.load_config()
         repo = config.default_repo
 
-        # Non-interactive: require explicit --new to create a worktree.
-        # Without a TTY the picker can't run, so error out with guidance.
+        # Non-interactive: without a TTY the picker can't run. Steer
+        # programmatic callers to ``create`` (no launch, no mux) rather than
+        # ``--new`` (which launches a muxed interactive session).
         if not use_new and not sys.stdin.isatty():
             output.err("No TTY detected and no worktree specified.")
-            output.err("Use --new to create a new worktree,")
-            output.err("or --json --worktree-id <id> to resume an existing one.")
+            output.err("To create a worktree programmatically (no launch, no "
+                       "tmux/psmux session):")
+            output.err("    agent-worktrees create --json")
+            output.err("To resume an existing worktree non-interactively:")
+            output.err("    agent-worktrees resolve --json --worktree-id <id>")
             output.err("Run 'agent-worktrees list' to see available worktrees.")
             return 1
 
@@ -6921,8 +6950,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--auto", action="store_true",
                    help=argparse.SUPPRESS)  # deprecated alias for --new
     p.add_argument("--new", action="store_true", dest="new_worktree",
-                   help="Create a new worktree non-interactively (muxed unless "
-                        "--no-mux is also passed)")
+                   help="Create a worktree AND launch an interactive (muxed) "
+                        "session in it -- for humans and TTY handoffs (refused "
+                        "without a TTY). Agents/daemons should use "
+                        "'agent-worktrees create --json' instead (no launch, no mux).")
     p.add_argument("--bridge", action="store_true",
                    help="With --new: mark the worktree as agent-bridge-owned "
                         "(kind=bridge: hidden from the Picker by default, exempt "
@@ -7102,7 +7133,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "dirty; JSON only). Slower: ~5 git calls per worktree.")
 
     # create (non-interactive worktree creation; --system for daemon-owned)
-    p = sub.add_parser("create", help="Create a new worktree non-interactively")
+    p = sub.add_parser(
+        "create",
+        help="Create a worktree programmatically (no launch, no mux) -- the "
+             "path for agents/daemons; prints id + dir (add --json for a plan)",
+    )
     p.add_argument("--system", action="store_true",
                    help="Create a daemon-owned worktree (hidden from Picker, "
                         "cleanup-exempt; tear down with remove-system)")

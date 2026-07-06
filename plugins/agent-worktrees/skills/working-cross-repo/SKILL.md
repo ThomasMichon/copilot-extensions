@@ -48,10 +48,13 @@ proceed).
   `agent-worktrees repos find <name>` and read it. **Never edit** a reference
   repo locally.
 - **singleton** -- edit the **anchor checkout directly**; one flow at a time.
-- **worktree** -- never edit the anchor. Create an isolated worktree
-  (`<name> --new`), edit/commit there, then `<name> push-changes` / `finalize`.
-  If the repo is worktree-class but **not adopted**, adopt it first
-  (`agent-worktrees register <name>`).
+- **worktree** -- never edit the anchor. Create an isolated worktree, edit and
+  commit there, then `push-changes` / `finalize`. To make the worktree from a
+  tool call, use `agent-worktrees create` (prints the worktree path; cd in and
+  edit in your current session -- no new session, no mux). `<name> --new`
+  launches a fresh *interactive* muxed session and is refused without a TTY, so
+  it is for humans at a terminal, not agents. If the repo is worktree-class but
+  **not adopted**, adopt it first (`agent-worktrees register <name>`).
 
 Always read the repo's `CONTRIBUTING.md` / `AGENTS.md` and its narrative
 (`agent-worktrees related doc <name>`) before changing it.
@@ -90,8 +93,8 @@ A repo's local path **varies by machine**. Always resolve it with
 1. `related resolve <name>` (link it first if needed).
 2. Read its narrative + `CONTRIBUTING.md`/`AGENTS.md`.
 3. Act on the plan:
-   - local -> edit per class (worktree `--new` / singleton anchor / reference
-     read-only);
+   - local -> edit per class (worktree `agent-worktrees create` / singleton
+     anchor / reference read-only);
    - elsewhere -> delegate via agent-bridge / agent-codespaces.
 4. Land changes through the **target repo's** own contribution flow (its branch
    naming, PR/merge policy, version-bump rules) -- not this repo's.
