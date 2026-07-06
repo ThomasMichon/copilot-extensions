@@ -176,6 +176,37 @@ def test_build_env_profile_overrides_session_env(monkeypatch):
     assert env["COPILOT_FEATURE_FLAGS"] == "override"
 
 
+def test_repo_session_env_templates_values(monkeypatch):
+    """session_env values are templated with {home}/{work_dir}/{machine} etc."""
+    cfg_ = cfg.Config(
+        srcroot="/s", machine="dev6", platform="linux", repo_name="ext",
+        repos={"ext": cfg.RepoConfig(
+            anchor="/a", worktree_root="/w",
+            session_env={
+                "SUDO_ASKPASS": "{home}/.local/bin/vault-askpass",
+                "WD": "{work_dir}/x",
+                "M": "{machine}",
+            },
+        )},
+    )
+    out = m._repo_session_env(cfg_, "/w/wt")
+    assert out["SUDO_ASKPASS"] == os.path.expanduser("~") + "/.local/bin/vault-askpass"
+    assert out["WD"] == "/w/wt/x"
+    assert out["M"] == "dev6"
+
+
+def test_repo_session_env_passthrough_on_bad_placeholder():
+    cfg_ = cfg.Config(
+        srcroot="/s", machine="dev6", platform="linux", repo_name="ext",
+        repos={"ext": cfg.RepoConfig(
+            anchor="/a", worktree_root="/w",
+            session_env={"K": "{unknown_placeholder}/x"},
+        )},
+    )
+    out = m._repo_session_env(cfg_, "/w/wt")
+    assert out["K"] == "{unknown_placeholder}/x"  # passed through, no crash
+
+
 # ---------------------------------------------------------------------------
 # The shipped launcher scripts must understand the normalized-launch contract.
 # ---------------------------------------------------------------------------
