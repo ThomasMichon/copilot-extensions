@@ -392,7 +392,18 @@ def create_pr(
 
     head_sha = _rev("HEAD", cwd=worktree_path)
 
-    if prcfg.head_scheme == "refspec":
+    # Effective per-invocation head scheme. In a refspec repo, a *parallel* PR
+    # (--new while another PR is still live) cannot use worktree/<id> as its
+    # head -- that branch is the live refspec head of the other PR -- so it
+    # falls back to snapshotting onto a separate feature branch, WITHOUT
+    # resetting worktree/<id> (#1815 Phase 3). The single-PR serial flow (no
+    # parallel) stays pure refspec.
+    parallel_snapshot = bool(
+        prcfg.head_scheme == "refspec" and new and active_is_live
+    )
+    use_refspec = prcfg.head_scheme == "refspec" and not parallel_snapshot
+
+    if use_refspec:
         # Refspec mode (#1815): keep the squashed work ON worktree/<id> and push
         # it directly to the PR head ref. No local feature branch, no checkout
         # dance; HEAD never leaves wt_branch, and wt_branch is NOT reset to
@@ -410,18 +421,22 @@ def create_pr(
                 f"'creating' for retry (re-run create-pr)."
             )}
     else:
-        # Snapshot mode (legacy): snapshot the squashed commit onto a separate
-        # local feature branch, reset wt_branch to upstream, push that branch,
-        # then return HEAD to wt_branch (#1804).
+        # Snapshot mode: snapshot the squashed commit onto a separate local
+        # feature branch and push it. Used by the legacy snapshot scheme *and*
+        # by a refspec repo's parallel --new PR (``parallel_snapshot``). The two
+        # differ only in step 5: a legacy snapshot resets worktree/<id> to
+        # upstream (it is a throwaway local base), whereas a refspec parallel PR
+        # must LEAVE worktree/<id> alone -- it is the other PR's live head.
         # 3. Create (or move) the feature branch at the squashed work commit.
         git_ops.git("branch", "-f", feature_branch, "HEAD", cwd=worktree_path, check=False)
 
         # 4. Checkout the feature branch (worktree/{id} stays as the local base).
         git_ops.checkout(feature_branch, cwd=worktree_path)
 
-        # 5. Reset the worktree base branch to the upstream tip -- it is a
-        #    local-only base that tracks master and is never pushed.
-        if base_sha:
+        # 5. Reset the worktree base branch to the upstream tip -- ONLY in the
+        #    legacy snapshot scheme. For a refspec parallel PR, worktree/<id> is
+        #    the live refspec head of the other PR and must not be reset.
+        if base_sha and not parallel_snapshot:
             git_ops.git("branch", "-f", wt_branch, upstream, cwd=worktree_path, check=False)
 
         # 6. Push the feature branch.

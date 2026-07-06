@@ -244,6 +244,61 @@ class TestCreatePRRefspec:
         assert res["branch"] == "feature/add-feature-aaaa"
         assert git_ops.local_branch_exists("feature/add-feature-aaaa", cwd=str(wt_path))
 
+    def test_refspec_open_failed_rerun_idempotent(self, pr_repo):
+        # push-succeeded-but-open-not-done leaves a live tracked PR at 'open'
+        # with number=None (auto_open off). Re-running create-pr must be
+        # idempotent -- reuse the tracked PR, re-push, no "already exists".
+        config, wid, wt_path, _ = pr_repo
+        config = self._refspec_config(config)
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"]
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.pr.number is None and rec.pr.state == "open"
+        second = pr_ops.create_pr(wid, config, title="Add feature")
+        assert second["success"] is True, second
+        assert "error" not in second
+        assert second["branch"] == "pr/add-feature-aaaa"
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert len(rec.prs) == 1
+
+    def test_refspec_new_without_live_pr_uses_refspec(self, pr_repo):
+        # --new with no existing live PR is still pure refspec (no snapshot
+        # fallback -- the fallback only triggers for a *parallel* live PR).
+        config, wid, wt_path, _ = pr_repo
+        config = self._refspec_config(config)
+        res = pr_ops.create_pr(wid, config, title="Add feature", new=True)
+        assert res["branch"] == "pr/add-feature-aaaa"
+        assert not git_ops.local_branch_exists("pr/add-feature-aaaa", cwd=str(wt_path))
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == f"worktree/{wid}"
+
+    def test_refspec_new_parallel_snapshots_without_disturbing_first(self, pr_repo):
+        # --new while a refspec PR is live: the parallel PR snapshots onto its
+        # own branch WITHOUT resetting worktree/<id> or touching PR #1's head.
+        config, wid, wt_path, _ = pr_repo
+        config = self._refspec_config(config)
+        r1 = pr_ops.create_pr(wid, config, title="Add feature")
+        assert r1["branch"] == "pr/add-feature-aaaa"
+        wt_before = _git("rev-parse", f"worktree/{wid}", cwd=wt_path)
+        pr1_head_before = _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path)
+
+        r2 = pr_ops.create_pr(wid, config, title="Second thing", new=True)
+        assert r2["success"], r2
+        assert r2["branch"] == "pr/second-thing-aaaa"
+
+        # HEAD never left the worktree branch; worktree/<id> was NOT reset.
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == f"worktree/{wid}"
+        assert _git("rev-parse", f"worktree/{wid}", cwd=wt_path) == wt_before
+        # PR #1's remote head is untouched by the parallel push.
+        assert _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path) == pr1_head_before
+        # Both PR heads exist on the remote; two PRs tracked.
+        assert git_ops.remote_branch_exists("origin", "pr/add-feature-aaaa", cwd=str(wt_path))
+        assert git_ops.remote_branch_exists("origin", "pr/second-thing-aaaa", cwd=str(wt_path))
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert len(rec.prs) == 2
+        assert {p.branch for p in rec.prs} == {
+            "pr/add-feature-aaaa", "pr/second-thing-aaaa",
+        }
+
 
 # ---------------------------------------------------------------------------
 # set_pr / pr_status
