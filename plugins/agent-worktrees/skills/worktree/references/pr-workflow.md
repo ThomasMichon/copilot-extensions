@@ -100,8 +100,9 @@ through to merge. Never skip the PR entirely when `pr-required` is `true`.
 
 `create-pr` publishes the PR head one of two ways, set by `pr.head_scheme`:
 
-**`refspec` (default, #1815).** The **invariant: a worktree is always checked
-out on its own `worktree/{id}` branch** — before, during, and after a PR.
+**`refspec` (feature-complete, opt-in, #1815).** The **invariant: a worktree is
+always checked out on its own `worktree/{id}` branch** — before, during, and
+after a PR.
 `create-pr` squashes in place on `worktree/{id}` and pushes that branch's
 commits *directly* to a disposable PR head ref via a refspec — no local feature
 branch, no checkout dance:
@@ -117,7 +118,7 @@ squash drops as already-applied). The head ref (`pr/{slug}-{suffix}` by default;
 templated via `pr.head_pattern`, e.g. `user/{username}/{slug}-{suffix}`) is
 ephemeral and provider-deleted on merge.
 
-**`snapshot` (legacy, opt-in).** Snapshots the squashed commit onto a separate
+**`snapshot` (current default).** Snapshots the squashed commit onto a separate
 local `feature/{slug}` branch, resets `worktree/{id}` to upstream, and pushes
 that branch; HEAD returns to `worktree/{id}` (#1804):
 
@@ -127,14 +128,18 @@ origin/master  <-  worktree/{id}  <-  feature/{slug}-{suffix}
                     tracks master)      work commit, pushed to remote)
 ```
 
-Set `head_scheme: snapshot` to opt in. A parallel `--new` PR auto-falls-back to
-a snapshot ref even under `refspec` (one worktree branch hosts only one live
-refspec PR).
+Set `head_scheme: refspec` to opt in. Refspec is **feature-complete** but stays
+opt-in until the facility pre-push hook fix — which lets the mediated
+`worktree/{id} → pr/{slug}` push through — is deployed to **every** PR-mode
+repo/machine; flipping the default before then breaks `create-pr` for every
+agent on a machine that still has the old hook. A parallel `--new` PR
+auto-falls-back to a snapshot ref even under `refspec` (one worktree branch
+hosts only one live refspec PR).
 
-> **`feature/` is reclaimed.** Under the default refspec scheme the per-PR head
-> lives in the `pr/` namespace, freeing `feature/<name>` for its other meaning —
-> a **coordinated multi-agent shared branch** (see the `git-collaboration`
-> skill). Don't conflate the two.
+> **`feature/` is reclaimed under refspec.** Under the refspec scheme the per-PR
+> head lives in the `pr/` namespace, freeing `feature/<name>` for its other
+> meaning — a **coordinated multi-agent shared branch** (see the
+> `git-collaboration` skill). Don't conflate the two.
 
 ### Step 1: `create-pr`
 
@@ -143,12 +148,12 @@ agent-worktrees create-pr --title "Concise PR title"
 ```
 
 Squashes the worktree's commits into one and rebases onto upstream. Under the
-default **refspec** scheme it then pushes `worktree/{id}` straight to the PR head
-ref (`pr/{slug}`) — HEAD never leaves `worktree/{id}`, and no local feature
-branch is created. Under **snapshot** it instead creates the `feature/{slug}`
-branch off `worktree/{id}`, resets the worktree base to the upstream tip, checks
-out and **pushes the feature branch**, then returns HEAD to `worktree/{id}`
-(#1804). Records `pr.state` and prints the branch, base/head SHAs, and provider.
+default **snapshot** scheme it creates the `feature/{slug}` branch off
+`worktree/{id}`, resets the worktree base to the upstream tip, checks out and
+**pushes the feature branch**, then returns HEAD to `worktree/{id}` (#1804).
+Under **refspec** (opt-in) it instead pushes `worktree/{id}` straight to the PR
+head ref (`pr/{slug}`) — HEAD never leaves `worktree/{id}`, and no local feature
+branch is created. Records `pr.state` and prints the branch, base/head SHAs, and provider.
 Add `--json`
 to capture the metadata, or `--branch NAME` to override the generated name.
 Use `--repo owner/name` to target a different repo than the worktree's own,
@@ -301,13 +306,13 @@ branch, then update the PR branch with:
 agent-worktrees push-changes
 ```
 
-In PR mode `push-changes` updates the PR head, never master. Under **refspec**
-(default) it rebases `worktree/{id}` onto master and force-with-lease pushes it
-to the PR head ref — HEAD stays on `worktree/{id}`, so commit feedback there and
-just run `push-changes`. Under **snapshot** it runs the rebase chain (worktree
-base onto master, feature onto the base) and force-with-lease pushes the
-**feature branch** (checkout the feature branch to add feedback commits). It
-does not create a PR; it updates the existing one.
+In PR mode `push-changes` updates the PR head, never master. Under **snapshot**
+(default) it runs the rebase chain (worktree base onto master, feature onto the
+base) and force-with-lease pushes the **feature branch** (checkout the feature
+branch to add feedback commits). Under **refspec** (opt-in) it rebases
+`worktree/{id}` onto master and force-with-lease pushes it to the PR head ref —
+HEAD stays on `worktree/{id}`, so commit feedback there and just run
+`push-changes`. It does not create a PR; it updates the existing one.
 
 ### Finalizing a PR-mode worktree
 
