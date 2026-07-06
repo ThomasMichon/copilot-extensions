@@ -513,8 +513,17 @@ def load_config(path: Path | None = None) -> Config:
 
     # Tier 1 (lowest): global machine-wide defaults.
     global_raw = _load_yaml_safe(global_config_path())
-    # Tier 3 (highest): machine-local. Optional -- absent is fine.
+    # Tier 3 (highest): machine-local. Optional -- absent is fine. Service
+    # config-drop-ins (``<config-dir>/config.d/*.yaml``) form a base UNDER the
+    # machine-local ``config.yaml`` (so an explicit config.yaml still wins),
+    # letting a service register machine-local settings -- e.g. the vault
+    # contributing ``session_env.SUDO_ASKPASS`` -- without editing the shared
+    # config.yaml. Drop-ins deep-merge with everything else, so a per-repo
+    # ``session_env`` addition survives alongside the repo's own keys.
     machine_raw = _load_yaml_safe(path)
+    dropins = _load_config_d(path.parent / "config.d")
+    if dropins:
+        machine_raw = _deep_merge(dropins, machine_raw)
 
     # Resolved top-level fields: machine-local > global > detected.
     platform = (
@@ -625,6 +634,26 @@ def _load_yaml_safe(path: Path) -> dict[str, Any]:
         with open(path, encoding="utf-8") as f:
             raw = yaml.safe_load(f)
         return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def _load_config_d(config_d: Path) -> dict[str, Any]:
+    """Deep-merge every ``*.yaml`` in a ``config.d`` directory (sorted by name).
+
+    A drop-in lets a service register machine-local config without editing the
+    shared ``config.yaml`` (e.g. the vault registering
+    ``session_env.SUDO_ASKPASS``). Files merge in lexical order (later names win
+    among drop-ins); the caller layers the result UNDER ``config.yaml``. Never
+    raises -- a missing dir or a bad file degrades to what parsed cleanly.
+    """
+    try:
+        if not config_d.is_dir():
+            return {}
+        merged: dict[str, Any] = {}
+        for f in sorted(config_d.glob("*.yaml")):
+            merged = _deep_merge(merged, _load_yaml_safe(f))
+        return merged
     except Exception:
         return {}
 

@@ -361,6 +361,61 @@ class TestLayeredConfig:
         assert repo.pr.required is True
         assert repo.pr.provider == "gitea"
 
+    # -- config.d drop-ins (service-contributed machine-local config) --------
+
+    def test_config_d_dropin_merges_session_env(self, tmp_path: Path):
+        # A config.d drop-in contributes repos.ext.session_env WITHOUT clobbering
+        # the in-repo session_env (deep-merge), so both keys reach the session --
+        # the vault-owns-SUDO_ASKPASS pattern.
+        anchor = tmp_path / "ext"
+        (anchor / cfg.INREPO_CONFIG_DIRNAME).mkdir(parents=True)
+        cfg.inrepo_config_path(anchor).write_text(
+            "session_env:\n  COPILOT_FEATURE_FLAGS: extensions\n"
+        )
+        cfgfile = tmp_path / "config.yaml"
+        self._machine(cfgfile, anchor)
+        cdir = tmp_path / "config.d"
+        cdir.mkdir()
+        (cdir / "vault.yaml").write_text(
+            "repos:\n  ext:\n    session_env:\n"
+            "      SUDO_ASKPASS: /h/.local/bin/vault-askpass\n"
+        )
+        repo = cfg.load_config(cfgfile).repos["ext"]
+        assert repo.session_env["COPILOT_FEATURE_FLAGS"] == "extensions"
+        assert repo.session_env["SUDO_ASKPASS"] == "/h/.local/bin/vault-askpass"
+
+    def test_config_yaml_wins_over_dropin(self, tmp_path: Path):
+        # config.yaml (operator) overrides a drop-in on a conflicting scalar.
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        cfgfile = tmp_path / "config.yaml"
+        self._machine(cfgfile, anchor, extra="    remote: from-config-yaml\n")
+        cdir = tmp_path / "config.d"
+        cdir.mkdir()
+        (cdir / "z.yaml").write_text("repos:\n  ext:\n    remote: from-dropin\n")
+        repo = cfg.load_config(cfgfile).repos["ext"]
+        assert repo.remote == "from-config-yaml"
+
+    def test_config_d_dropins_sorted_last_wins(self, tmp_path: Path):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        cfgfile = tmp_path / "config.yaml"
+        self._machine(cfgfile, anchor)
+        cdir = tmp_path / "config.d"
+        cdir.mkdir()
+        (cdir / "10-a.yaml").write_text("repos:\n  ext:\n    remote: a\n")
+        (cdir / "20-b.yaml").write_text("repos:\n  ext:\n    remote: b\n")
+        repo = cfg.load_config(cfgfile).repos["ext"]
+        assert repo.remote == "b"
+
+    def test_no_config_d_dir_is_fine(self, tmp_path: Path):
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        cfgfile = tmp_path / "config.yaml"
+        self._machine(cfgfile, anchor)  # no config.d dir alongside
+        repo = cfg.load_config(cfgfile).repos["ext"]
+        assert repo.remote == "origin"
+
     def test_global_carries_no_per_repo_settings(self, tmp_path: Path, monkeypatch):
         # The global tier holds only machine-wide top-level settings; any
         # per-repo keys placed there (e.g. repo_defaults) are NOT applied.
