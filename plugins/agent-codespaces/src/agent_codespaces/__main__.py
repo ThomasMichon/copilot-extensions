@@ -476,6 +476,17 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         if not args.no_relay:
             await _provision_dotfiles(manager, args.name, config)
 
+        # Register CodeSpace-scoped plugins (the "global" lane) into the
+        # CodeSpace user settings so they load in EVERY launch mode -- incl. a
+        # human opening the CodeSpace in interactive VS Code (no agent-bridge
+        # there to pass --plugin-dir). Best-effort; needs the relay up for the
+        # payload pre-install (`copilot plugin install`). Distinct from the
+        # repo-targeted `--stage-plugin` lane below (dispatch-scoped).
+        if not args.no_relay:
+            await _register_codespace_plugins(
+                manager, args.name, getattr(args, "repo", None),
+            )
+
         # Run repo-declared provision hooks (by-convention extras from the
         # adopted repo's codespaces.yaml). Best-effort, idempotent.
         await _provision_repo_hooks(
@@ -644,6 +655,52 @@ async def _provision_dotfiles(manager, name: str, config) -> None:
             )
     except Exception as exc:
         log.warning("Dotfiles provisioning on %s failed: %s", name, exc)
+
+
+async def _register_codespace_plugins(manager, name: str, repo: str | None) -> None:
+    """Register CodeSpace-scoped plugins into the CodeSpace user settings.
+
+    The **global** plugin lane. Resolves the harness's ``codespacePlugins``
+    declarations applicable to this CodeSpace's workspace repo
+    (:func:`codespace_plugins.resolve_codespace_plugins`) and writes them into
+    the CodeSpace's user ``~/.copilot/settings.json`` -- registering each
+    marketplace, enabling every ``<name>@<marketplace>``, and pre-installing the
+    payloads (see :mod:`codespace_register`). Because it lands in *user*
+    settings, it is honored in every launch mode (interactive VS Code included).
+    Best-effort and idempotent: logs a warning on failure but never raises.
+    """
+    from .codespace_plugins import resolve_codespace_plugins
+    from .codespace_register import build_register_command
+
+    try:
+        # The dispatch path doesn't pass --repo, so resolve the CodeSpace's
+        # workspace repo ourselves (needed to apply repo-scoped codespacePlugins
+        # entries; global entries apply regardless). A single `gh` lookup, only
+        # paid when we don't already know the repo.
+        if repo is None:
+            repo = _lookup_codespace_repo(name)
+
+        specs = resolve_codespace_plugins(repo)
+        command = build_register_command(specs)
+        if not command:
+            return
+
+        wrapped = f"bash -l -c {shlex.quote(command)}"
+        # Settings merge is quick; the pre-install (`copilot plugin install`)
+        # clones the marketplace over the relay, so allow a generous window.
+        result = await manager.exec_command(name, wrapped, timeout=240.0)
+        if result.exit_code == 0:
+            log.info(
+                "Registered %d CodeSpace-scoped plugin(s) on %s: %s",
+                len(specs), name, ", ".join(s.source for s in specs),
+            )
+        else:
+            log.warning(
+                "CodeSpace plugin registration on %s exited %s: %s",
+                name, result.exit_code, result.stderr.strip(),
+            )
+    except Exception as exc:
+        log.warning("CodeSpace plugin registration on %s failed: %s", name, exc)
 
 
 async def _verify_remote_auth(manager, name: str, config) -> None:
