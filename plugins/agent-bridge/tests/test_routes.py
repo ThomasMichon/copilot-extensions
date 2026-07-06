@@ -482,6 +482,71 @@ class TestWorktreeRoutes:
         assert entry["session_id"] == "sess-acp-1"
         assert entry["acp_session_id"] == "acp-uuid-abcdef"
 
+    def test_worktree_without_mux_reports_no_interactive_cli(self, client) -> None:
+        """Default (no mux session) decorates as interactive_cli=none (#1883)."""
+        wt_id = "lambda-core-wsl-20250101-150500-nomux"
+        self._seed_worktree("test-agent", wt_id)
+
+        resp = client.get("/api/v1/worktrees")
+        entry = resp.json()["groups"]["test-agent"][0]
+        assert entry["mux_session"] is False
+        assert entry["interactive_cli"] == "none"
+
+    def test_mux_held_worktree_decorates_interactive_cli(self, client) -> None:
+        """An attached wt-<id> mux session -> interactive_cli=held (#1883)."""
+        from agent_bridge.routes import worktrees as wt_routes
+
+        wt_id = "lambda-core-wsl-20250101-150600-held"
+        entry = wt_routes._WorktreeEntry(
+            id=wt_id, agent_name="test-agent", machine="test-agent",
+            path=f"/wt/{wt_id}", branch=f"worktree/{wt_id}", status="active",
+            mux_session=True, mux_clients=1, mux_attached=True,
+        )
+        wt_routes.get_cache()._cache = {"test-agent": [entry]}
+
+        resp = client.get("/api/v1/worktrees")
+        got = resp.json()["groups"]["test-agent"][0]
+        assert got["mux_session"] is True
+        assert got["mux_attached"] is True
+        assert got["interactive_cli"] == "held"
+
+    def test_mux_detached_worktree_is_at_rest(self) -> None:
+        """A detached mux session -> interactive_cli=at-rest (running, unwatched)."""
+        from agent_bridge.routes import worktrees as wt_routes
+
+        entry = wt_routes._WorktreeEntry(
+            id="wt", agent_name="a", machine="a", path="/wt", branch="b",
+            status="active", mux_session=True, mux_clients=0, mux_attached=False,
+        )
+        assert entry.interactive_cli_state() == "at-rest"
+        assert entry.to_dict()["interactive_cli"] == "at-rest"
+
+    def test_mux_unknown_attachment_defaults_to_held(self) -> None:
+        """Unknown attachment (psmux fallback) is treated as held (safest)."""
+        from agent_bridge.routes import worktrees as wt_routes
+
+        entry = wt_routes._WorktreeEntry(
+            id="wt", agent_name="a", machine="a", path="/wt", branch="b",
+            status="active", mux_session=True, mux_clients=None, mux_attached=None,
+        )
+        assert entry.interactive_cli_state() == "held"
+
+    def test_parse_worktree_list_reads_mux_details(self) -> None:
+        """_parse_worktree_list threads mux_details fields from list --json."""
+        from agent_bridge.routes import worktrees as wt_routes
+
+        raw = (
+            '{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
+            ' "branch": "b1", "status": "active", "mux_session": true,'
+            ' "mux_clients": 2, "mux_attached": true}]}'
+        )
+        entries = wt_routes._parse_worktree_list(raw, "test-agent")
+        assert len(entries) == 1
+        assert entries[0].mux_session is True
+        assert entries[0].mux_clients == 2
+        assert entries[0].mux_attached is True
+        assert entries[0].interactive_cli_state() == "held"
+
     def test_resume_worktree_with_no_session_404s(self, client) -> None:
         self._seed_worktree("test-agent", "lambda-core-wsl-20250101-160000-empty")
         resp = client.post(

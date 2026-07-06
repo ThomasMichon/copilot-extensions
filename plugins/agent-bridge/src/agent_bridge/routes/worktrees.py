@@ -41,6 +41,30 @@ class _WorktreeEntry:
     resume_count: int = 0
     session_count: int = 0
     turn_count: int = 0
+    # Interactive-mux (wt-<id> tmux/psmux) liveness on the owning machine.
+    # This is the *second ownership* NF must see (#1883): a worktree held by a
+    # live picker-launched Copilot CLI, distinct from a bridge ACP session.
+    mux_session: bool = False
+    mux_clients: int | None = None
+    mux_attached: bool | None = None
+
+    def interactive_cli_state(self) -> str:
+        """Classify interactive-CLI ownership from mux liveness.
+
+        - ``held``    -- a wt-<id> mux session exists and a terminal is
+          attached (or attachment is unknown): a live interactive Copilot CLI
+          owns the worktree and is being actively viewed.  Do-not-disturb.
+        - ``at-rest`` -- a wt-<id> mux session exists but is detached (no
+          terminal attached): the interactive Copilot is still running but
+          nobody is watching.  Still a live process -- reclaim via take-over.
+        - ``none``    -- no interactive mux session; the worktree is not held
+          by an interactive Copilot CLI.
+        """
+        if not self.mux_session:
+            return "none"
+        if self.mux_attached is False:
+            return "at-rest"
+        return "held"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +79,10 @@ class _WorktreeEntry:
             "resume_count": self.resume_count,
             "session_count": self.session_count,
             "turn_count": self.turn_count,
+            "mux_session": self.mux_session,
+            "mux_clients": self.mux_clients,
+            "mux_attached": self.mux_attached,
+            "interactive_cli": self.interactive_cli_state(),
         }
 
 
@@ -148,7 +176,7 @@ class WorktreeDiscoveryCache:
 
         if not config.host:
             # Local
-            raw = await _run_local(config.project)
+            raw = await _run_local(config.project, ["list", "--json", "--mux-details"])
         else:
             # SSH -- resolve through topology for correct alias/user
             try:
@@ -160,12 +188,13 @@ class WorktreeDiscoveryCache:
             # If the resolved target is the local machine, run locally
             # instead of SSH (avoids loopback SSH failures)
             if _is_local_target(target.host, resolver):
-                raw = await _run_local(config.project)
+                raw = await _run_local(config.project, ["list", "--json", "--mux-details"])
             else:
                 raw = await _run_ssh(
                     host=target.host or config.host,
                     user=target.user or config.ssh_user,
                     project=config.project,
+                    args=["list", "--json", "--mux-details"],
                 )
 
         if raw is None:
@@ -333,6 +362,9 @@ def _parse_worktree_list(raw: str, agent_name: str) -> list[_WorktreeEntry]:
             resume_count=w.get("resume_count", 0),
             session_count=w.get("session_count", 0),
             turn_count=w.get("turn_count", 0),
+            mux_session=bool(w.get("mux_session", False)),
+            mux_clients=w.get("mux_clients"),
+            mux_attached=w.get("mux_attached"),
         ))
     return entries
 
@@ -368,6 +400,18 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
     - ``session_turn_count``: number of prompt turns on that session
     - ``session_live``: True if the session is currently running or idle
       with a live process (i.e. attached/active, not stopped or ended)
+
+    Each worktree also carries interactive-mux (``wt-<id>`` tmux/psmux)
+    liveness on its owning machine -- the *second ownership* a consumer must
+    respect (a live picker-launched Copilot CLI, distinct from a bridge ACP
+    session, #1883):
+
+    - ``mux_session``: True if a ``wt-<id>`` mux session exists on the machine
+    - ``mux_clients``: attached terminal count (None if unknown)
+    - ``mux_attached``: whether a terminal is attached (None if unknown)
+    - ``interactive_cli``: ``held`` (attached/unknown), ``at-rest``
+      (detached but running), or ``none`` -- so a consumer can render a
+      do-not-disturb badge and route to take-over instead of a blind connect
 
     When periodic discovery is disabled, the first request triggers an
     on-demand crawl (subsequent requests return cached results).
