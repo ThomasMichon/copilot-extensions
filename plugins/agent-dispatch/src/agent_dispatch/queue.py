@@ -319,6 +319,7 @@ class TaskQueue:
         worker_id: str,
         capabilities: Iterable[str] = (),
         *,
+        task_id: str | None = None,
         now: float | None = None,
         lease_seconds: int | None = None,
     ) -> Task | None:
@@ -328,16 +329,27 @@ class TaskQueue:
         the task's ``requires`` is present in ``capabilities``. Candidates are
         ordered by affinity match then age. The winning row is flipped to
         ``claimed`` under a write lock, so concurrent callers never double-claim.
+
+        If ``task_id`` is given, only that task is considered (a spawned worker
+        deterministically claiming *its* task) — still subject to the same
+        eligibility gate, so it returns ``None`` if that task isn't claimable.
         """
         ts = self._now(now)
         caps = set(capabilities)
         lease = self.lease_seconds if lease_seconds is None else lease_seconds
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            rows = conn.execute(
-                "SELECT * FROM tasks WHERE status = ? AND not_before <= ? ORDER BY created_at ASC",
-                (Status.QUEUED, ts),
-            ).fetchall()
+            if task_id is not None:
+                rows = conn.execute(
+                    "SELECT * FROM tasks WHERE id = ? AND status = ? AND not_before <= ?",
+                    (task_id, Status.QUEUED, ts),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM tasks WHERE status = ? AND not_before <= ?"
+                    " ORDER BY created_at ASC",
+                    (Status.QUEUED, ts),
+                ).fetchall()
             chosen: sqlite3.Row | None = None
             best_affinity = -1
             for row in rows:

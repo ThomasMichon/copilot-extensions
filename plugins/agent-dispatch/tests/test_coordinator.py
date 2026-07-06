@@ -228,3 +228,12 @@ def test_sse_stream_delivers_lifecycle_events(server_url):
 
 def test_health_reports_zero_subscribers_initially(api):
     assert api.get("/health").json()["subscribers"] == 0
+
+
+def test_claim_by_id_over_http(api):
+    api.post("/tasks", json={"title": "a"})
+    tid_b = api.post("/tasks", json={"title": "b"}).json()["id"]
+    got = api.post("/claim", json={"worker_id": "w1", "task_id": tid_b}).json()
+    assert got["id"] == tid_b
+    # a different specific-id claim for an already-claimed task returns null
+    assert api.post("/claim", json={"worker_id": "w2", "task_id": tid_b}).json() is None

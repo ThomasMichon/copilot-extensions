@@ -35,3 +35,33 @@ def test_parser_requires_subcommand():
 
     with pytest.raises(SystemExit):
         build_parser().parse_args([])
+
+
+def test_parser_create_spawn_flags():
+    args = build_parser().parse_args(
+        ["create", "x", "--spawn", "--spawn-agent", "w", "--async"]
+    )
+    assert args.spawn is True
+    assert args.spawn_agent == "w"
+    assert args.run_async is True
+
+
+def test_parser_claim_task_flag():
+    args = build_parser().parse_args(["claim", "w1", "--task", "t9"])
+    assert args.task == "t9"
+
+
+def test_spawn_helper_degrades_gracefully(monkeypatch, capsys):
+    import argparse
+
+    from agent_dispatch import __main__, bridge
+
+    def boom(*_a, **_k):
+        raise bridge.BridgeUnavailable("no bridge")
+
+    monkeypatch.setattr(bridge, "spawn_worker", boom)
+    args = argparse.Namespace(spawn_agent="task-worker", run_async=False, url=None)
+    __main__._spawn_worker_for(args, {"id": "t1"})
+    err = capsys.readouterr().err
+    assert "--spawn skipped" in err
+    assert "t1" in err

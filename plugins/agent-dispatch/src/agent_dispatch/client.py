@@ -87,11 +87,17 @@ class DispatchClient:
         return self._unwrap(self._http.post(f"/tasks/{task_id}/approve"))
 
     def claim(
-        self, worker_id: str, capabilities: Sequence[str] = (), *, lease_seconds: int | None = None
+        self,
+        worker_id: str,
+        capabilities: Sequence[str] = (),
+        *,
+        task_id: str | None = None,
+        lease_seconds: int | None = None,
     ) -> dict | None:
         body = {
             "worker_id": worker_id,
             "capabilities": list(capabilities),
+            "task_id": task_id,
             "lease_seconds": lease_seconds,
         }
         return self._unwrap(self._http.post("/claim", json=body))
