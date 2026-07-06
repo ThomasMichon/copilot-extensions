@@ -588,6 +588,12 @@ def _push_changes_pr(
         output.err(f"Worktree path not found: {worktree_path}")
         return False
 
+    if repo.pr.head_scheme == "refspec":
+        return _push_changes_pr_refspec(
+            worktree_id, config, record, wt_branch, worktree_path, lock_path,
+            dry_run=dry_run,
+        )
+
     head = git_ops._get_current_branch_safe(worktree_path)
     # Accept ANY tracked PR branch as the feature to push (a worktree may carry
     # parallel PRs): prefer the branch matching the current HEAD over the
@@ -675,6 +681,113 @@ def _push_changes_pr(
         )
         output.ok(
             f"Pushed {feature} to {remote} (--force-with-lease). "
+            f"The open PR is updated."
+        )
+        return True
+    finally:
+        lock.release()
+
+
+def _push_changes_pr_refspec(
+    worktree_id: str,
+    config: Config,
+    record: tracking.WorktreeRecord,
+    wt_branch: str,
+    worktree_path: str,
+    lock_path: Path,
+    *,
+    dry_run: bool = False,
+) -> bool:
+    """Refspec-mode push-changes (#1815): update the PR head ref directly.
+
+    The work lives on ``worktree/<id>`` (the only local branch); the PR head is
+    a remote-only ref.  Rebase ``worktree/<id>`` onto upstream -- so it picks up
+    the default branch and any feedback commits ride on top -- then push it to
+    the PR head ref via a refspec.  No checkout dance; HEAD never leaves
+    ``worktree/<id>``.  Never touches master or the base branch on the remote.
+    """
+    repo = config.default_repo
+    remote = repo.remote
+    upstream = f"{remote}/{repo.default_branch}"
+
+    head = git_ops._get_current_branch_safe(worktree_path)
+    if head != wt_branch:
+        output.err(
+            f"PR mode (refspec): push-changes updates the PR head from "
+            f"'{wt_branch}', but HEAD is on '{head}'. Checkout '{wt_branch}' "
+            f"first."
+        )
+        return False
+
+    # The PR head ref to update is the active (live) PR's branch.
+    pushed_pr = record.active_pr() or record.pr
+    feature = pushed_pr.branch if (pushed_pr and pushed_pr.branch) else ""
+    if not feature:
+        output.err("PR mode (refspec): no tracked PR head ref to update.")
+        return False
+
+    if not git_ops.is_clean(cwd=worktree_path):
+        dirty = git_ops.get_dirty_files(cwd=worktree_path)
+        detail = "\n".join(f"    {ln}" for ln in dirty)
+        output.err(
+            "Working tree has uncommitted changes. Commit them before "
+            f"push-changes:\n{detail}"
+        )
+        return False
+
+    if dry_run:
+        print(
+            f"[dry-run] Would rebase {wt_branch} onto {upstream}, then push "
+            f"{wt_branch}:refs/heads/{feature} to {remote} (--force-with-lease)."
+        )
+        return True
+
+    lock = FinalizeLock(lock_path)
+    try:
+        lock.acquire()
+    except TimeoutError:
+        output.err("Timed out waiting for finalization lock.")
+        return False
+
+    try:
+        print(f"Fetching from {remote}...")
+        git_ops.fetch(remote, cwd=worktree_path)
+
+        # Rebase the worktree branch forward onto the default branch; feedback
+        # commits ride on top. HEAD stays on wt_branch throughout.
+        if git_ops.ref_exists(upstream, cwd=worktree_path):
+            if not git_ops.rebase(upstream, cwd=worktree_path):
+                output.err(
+                    f"Rebase of {wt_branch} onto {upstream} hit conflicts. "
+                    f"Resolve them on '{wt_branch}' and retry push-changes."
+                )
+                return False
+
+        with hooks.allow_pr_push():
+            pushed = git_ops.push(
+                remote, f"{wt_branch}:refs/heads/{feature}",
+                cwd=worktree_path, force_with_lease=True,
+            )
+        if not pushed:
+            output.err(f"Failed to push {wt_branch} to {remote}/{feature}.")
+            if pushed_pr is not None and pushed_pr.state in ("", "creating"):
+                tracking.save_record(record)
+            return False
+
+        head_sha = git_ops.git(
+            "rev-parse", "HEAD", cwd=worktree_path, check=False
+        ).stdout.strip()
+        if pushed_pr is not None:
+            pushed_pr.head_sha = head_sha
+            if pushed_pr.state in ("", "creating"):
+                pushed_pr.state = "open"
+        tracking.save_record(record)
+
+        activity.log_event(
+            "pr_changes_pushed", worktree_id=worktree_id, branch=feature,
+        )
+        output.ok(
+            f"Pushed {wt_branch} to {remote}/{feature} (--force-with-lease). "
             f"The open PR is updated."
         )
         return True
