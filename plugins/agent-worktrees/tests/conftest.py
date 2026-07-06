@@ -193,8 +193,12 @@ def pr_repo(tmp_path: Path, monkeypatch):
         repos={"ext": cfg.RepoConfig(
             anchor=str(anchor), worktree_root=str(wt_root),
             default_branch="master", remote="origin",
+            # Pin the legacy ``snapshot`` scheme here so the base fixture keeps
+            # exercising it explicitly. The default is now ``refspec`` (#1815);
+            # refspec is covered by the ``_refspec_config`` tests + the config
+            # default tests, which override/assert the scheme directly.
             pr=cfg.PRConfig(enabled=True, provider="gitea", branch_prefix="feature",
-                            auto_open=False),
+                            head_scheme="snapshot", auto_open=False),
         )},
     )
 
