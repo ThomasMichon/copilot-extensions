@@ -88,6 +88,37 @@ resolve it -- let the resolution stand.
 or **targeted at its own** machine/worktree. That's what makes a bound handoff
 stick to its worktree while a portable task floats to anyone.
 
+## Repo lanes -- tasks stay in their own repo
+
+Every task belongs to a **repo lane** -- the canonical remote of the *producing
+agent's harness repo*. **Repos stay in their own lanes:** a task made by an
+`aperture-labs` agent is for `aperture-labs` agents, and every subcommand is
+**scoped to the calling repo by default**. You never see or claim another repo's
+tasks. Like identity, the lane is **auto-resolved from your CWD** (via
+`agent-worktrees get repo-remote`, falling back to `git remote get-url origin`),
+so you pass nothing:
+
+```bash
+agent-dispatch create "..."      # lane auto-stamped from the calling repo
+agent-dispatch sweep             # dedup corpus for THIS repo only
+agent-dispatch list --status queued
+```
+
+- **Cross-repo *code* work stays in the producing lane.** If an `aperture-labs`
+  agent wants a change made in `copilot-extensions`, it files the task in the
+  **aperture-labs** lane (optionally tagging the code target with
+  `--target-repo copilot-extensions`). Another **aperture-labs** agent picks it
+  up and does the cross-repo work via the **`working-cross-repo`** flow -- it
+  does **not** spawn a `copilot-extensions` harness. (We don't run agents out of
+  `copilot-extensions` as a harness at all.)
+- **Targeting another lane is explicit.** `--repo <name|remote>` scopes a command
+  to a specific other lane (`--repo aperture-labs` or a full remote URL). There
+  is **no** all-repos view -- the queue never exposes tasks globally.
+- **Hybrid keys.** The wire/DB stores a device-independent **canonical remote**
+  (so one shared coordinator keys every machine the same); the CLI lets you
+  *type* and *reads back* the local repo **name** (resolved through the
+  agent-worktrees registry). Output carries both `repo` (remote) and `repo_name`.
+
 ## The six-state lifecycle
 
 ```
@@ -156,8 +187,14 @@ agent-dispatch create "Add narration track" \
   --require logger \                 # hard: only a worker advertising 'logger' can claim
   --affinity worktree=same \         # soft: bias toward the same worktree, never exclude
   --label media \
+  --target-repo copilot-extensions \ # OPTIONAL: the cross-repo *code* target (stays in THIS lane)
   --dedup-key narration-seg42        # makes create idempotent
 ```
+
+The **lane** (`--repo`) defaults to the calling repo -- omit it inside your
+worktree. `--target-repo` is different: it's metadata naming the *code* a
+cross-repo task touches; the task still lives in **your** lane and a same-lane
+agent does the cross-repo work via `working-cross-repo`.
 
 Write the title + prompt to be **self-describing** (see the sweep note above):
 a producer scanning existing tasks should be able to tell yours apart from
@@ -256,6 +293,15 @@ Global flags `--url` / `--token` override the env per-invocation.
 
 ## Gotchas
 
+- **Everything is lane-scoped.** By default you only see/claim **your repo's**
+  tasks. An "empty" sweep or "no claimable task" may just mean *your lane* is
+  empty -- another repo's tasks are invisible by design. Use `--repo <name>` to
+  look at a specific other lane; there is no all-repos view.
+- **Lane != code target.** `--repo` is the owning lane (defaults to the calling
+  repo). `--target-repo` is the cross-repo *code* a task touches -- the task
+  still lives in the producing lane and a same-lane agent does the work via
+  `working-cross-repo`. Don't file a task into another repo's lane to "send" it
+  there.
 - **Check `health` first.** Every non-`serve` verb needs a reachable coordinator;
   a failing claim usually means the URL is wrong or the daemon is down, not that
   the queue is empty (`claim` exits non-zero with "no claimable task" when the

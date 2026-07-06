@@ -22,11 +22,12 @@ from typing import Any
 
 from .client import DispatchClient
 from .config import client_token, client_url
-from .identity import resolve_identity
+from .identity import resolve_identity, resolve_repo, resolve_repo_selector
 from .queue import worker_id_for
 
 ClientFactory = Callable[[], DispatchClient]
 IdentityResolver = Callable[[], "tuple[str | None, str | None]"]
+RepoResolver = Callable[[], "str | None"]
 
 
 def _default_client() -> DispatchClient:
@@ -38,16 +39,21 @@ class DispatchTools:
 
     Each method opens a short-lived client to the coordinator. Identity-bearing
     tools (``claim``, ``worktree_status``) resolve ``machine``/``worktree`` from
-    the working directory unless the caller overrides them.
+    the working directory unless the caller overrides them. Repo-scoped tools
+    (``create``, ``find``, ``list``, ``sweep``, ``claim``, ``worktree_status``)
+    resolve the caller's **lane** (repo) the same way -- tasks stay in their
+    producing repo's lane.
     """
 
     def __init__(
         self,
         client_factory: ClientFactory = _default_client,
         identity_resolver: IdentityResolver = resolve_identity,
+        repo_resolver: RepoResolver = resolve_repo,
     ):
         self._client_factory = client_factory
         self._identity = identity_resolver
+        self._repo = repo_resolver
 
     def _resolve(self, machine: str | None, worktree: str | None) -> tuple[str | None, str | None]:
         if machine is None or worktree is None:
@@ -56,12 +62,18 @@ class DispatchTools:
             worktree = worktree or r_worktree
         return machine, worktree
 
+    def _scope_repo(self, repo: str | None) -> str | None:
+        """Resolve the lane: an explicit ``repo`` (local name or remote) wins,
+        else the calling repo from the CWD. Returns a canonical remote or None."""
+        return resolve_repo_selector(repo) if repo else self._repo()
+
     # -- producers -----------------------------------------------------------
 
     def create(
         self,
         title: str,
         *,
+        repo: str | None = None,
         prompt: str = "",
         payload: str | None = None,
         payload_ref: str | None = None,
@@ -77,13 +89,24 @@ class DispatchTools:
     ) -> dict:
         """Enqueue a task (``proposed=True`` for an unclaimable draft).
 
+        ``repo`` is the **lane** (a local repo name or remote URL); it defaults
+        to the calling repo resolved from the CWD. Tasks stay in their producing
+        repo's lane -- for a cross-repo *code* target use ``target_repo`` and let
+        the lane agent do it via ``working-cross-repo``.
+
         ``payload`` is inline Markdown; the coordinator spills it to a
-        content-addressed blob when large. Prefer ``find`` before ``create`` to
-        avoid duplicates (``dedup_key`` backstops it).
+        content-addressed blob when large. Prefer ``sweep``/``find`` before
+        ``create`` to avoid duplicates (``dedup_key`` backstops it).
         """
+        lane = self._scope_repo(repo)
+        if not lane:
+            raise ValueError(
+                "could not resolve the repo (lane); pass repo=<local name|remote URL>"
+            )
         with self._client_factory() as c:
             return c.create(
                 title,
+                repo=lane,
                 prompt=prompt,
                 proposed=proposed,
                 payload_inline=payload,
@@ -105,10 +128,18 @@ class DispatchTools:
 
     # -- browse --------------------------------------------------------------
 
-    def find(self, query: str, limit: int = 50) -> list[dict]:
-        """Substring-search task titles/prompts -- run before ``create`` to dedup."""
+    def find(self, query: str, limit: int = 50, repo: str | None = None) -> list[dict]:
+        """Substring-search task titles/prompts in the lane -- a quick dedup probe."""
         with self._client_factory() as c:
-            return c.find(query, limit=limit)
+            return c.find(query, repo=self._scope_repo(repo), limit=limit)
+
+    def sweep(self, limit: int = 500, repo: str | None = None) -> list[dict]:
+        """The dedup corpus for the lane: every non-abandoned task, newest first.
+
+        Read this before ``create`` to verify the work doesn't already exist.
+        """
+        with self._client_factory() as c:
+            return c.sweep(repo=self._scope_repo(repo), limit=limit)
 
     def list(
         self,
@@ -117,10 +148,12 @@ class DispatchTools:
         target_repo: str | None = None,
         label: str | None = None,
         limit: int = 200,
+        repo: str | None = None,
     ) -> list[dict]:
-        """List tasks, optionally filtered by status/machine/repo/label."""
+        """List tasks in the lane, optionally filtered by status/machine/repo/label."""
         with self._client_factory() as c:
             return c.list(
+                repo=self._scope_repo(repo),
                 status=status,
                 target_machine=target_machine,
                 target_repo=target_repo,
@@ -146,18 +179,19 @@ class DispatchTools:
     # -- identity-bearing ----------------------------------------------------
 
     def worktree_status(
-        self, machine: str | None = None, worktree: str | None = None
+        self, machine: str | None = None, worktree: str | None = None, repo: str | None = None
     ) -> dict:
         """This worktree's inbox: tasks targeted at + owned by its identity.
 
-        Identity is resolved from the working directory unless overridden.
+        Identity and lane are resolved from the working directory unless overridden.
         """
         machine, worktree = self._resolve(machine, worktree)
         if not machine or not worktree:
             return {"error": "could not resolve worktree identity; pass machine and worktree"}
+        lane = self._scope_repo(repo)
         with self._client_factory() as c:
-            inbox = c.mine(machine, worktree)
-        return {"machine": machine, "worktree": worktree, **inbox}
+            inbox = c.mine(machine, worktree, repo=lane)
+        return {"machine": machine, "worktree": worktree, "repo": lane, **inbox}
 
     def claim(
         self,
@@ -166,12 +200,13 @@ class DispatchTools:
         lease_seconds: int | None = None,
         machine: str | None = None,
         worktree: str | None = None,
+        repo: str | None = None,
     ) -> dict | None:
-        """Atomically lease one eligible task (identity auto-resolved from CWD).
+        """Atomically lease one eligible task (identity + lane auto-resolved from CWD).
 
-        The claim honors targeting: only untargeted tasks or tasks targeted at
-        this identity are eligible. Returns the claimed task, or ``None`` when
-        nothing is claimable.
+        The claim honors the repo lane and targeting: only tasks in this repo's
+        lane that are untargeted or targeted at this identity are eligible.
+        Returns the claimed task, or ``None`` when nothing is claimable.
         """
         machine, worktree = self._resolve(machine, worktree)
         worker_id = worker_id_for(machine, worktree) if machine and worktree else None
@@ -179,6 +214,7 @@ class DispatchTools:
             return c.claim(
                 worker_id=worker_id,
                 capabilities=capabilities or [],
+                repo=self._scope_repo(repo),
                 machine=machine,
                 worktree=worktree,
                 task_id=task_id,
@@ -250,6 +286,7 @@ def build_server(tools: DispatchTools | None = None) -> Any:
     mcp.tool(name="dispatch_create")(t.create)
     mcp.tool(name="dispatch_approve")(t.approve)
     mcp.tool(name="dispatch_find")(t.find)
+    mcp.tool(name="dispatch_sweep")(t.sweep)
     mcp.tool(name="dispatch_list")(t.list)
     mcp.tool(name="dispatch_show")(t.show)
     mcp.tool(name="dispatch_events")(t.events)

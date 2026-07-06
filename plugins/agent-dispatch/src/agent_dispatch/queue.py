@@ -42,6 +42,9 @@ DEFAULT_LEASE_SECONDS = 15 * 60
 #: Payloads whose UTF-8 size exceeds this are spilled to a content-addressed blob
 #: instead of being stored inline in the row.
 DEFAULT_BLOB_THRESHOLD = 4096
+#: Sentinel lane for rows created before ``repo`` became required. Backfilled on
+#: migration so legacy tasks never leak into a real repo's default-scoped views.
+LEGACY_REPO = "(legacy)"
 _BUSY_TIMEOUT_MS = 5000
 _MAX_AFFINITY = 1000
 
@@ -86,6 +89,7 @@ class Task:
     title: str
     prompt: str
     status: str
+    repo: str | None = None
     requires: list[str] = field(default_factory=list)
     affinity: dict[str, str] = field(default_factory=dict)
     labels: list[str] = field(default_factory=list)
@@ -115,6 +119,7 @@ class Task:
             title=row["title"],
             prompt=row["prompt"],
             status=row["status"],
+            repo=row["repo"],
             requires=json.loads(row["requires"] or "[]"),
             affinity=json.loads(row["affinity"] or "{}"),
             labels=json.loads(row["labels"] or "[]"),
@@ -145,6 +150,7 @@ _COLUMNS: dict[str, str] = {
     "title": "TEXT NOT NULL DEFAULT ''",
     "prompt": "TEXT NOT NULL DEFAULT ''",
     "status": "TEXT NOT NULL DEFAULT 'queued'",
+    "repo": "TEXT",
     "requires": "TEXT NOT NULL DEFAULT '[]'",
     "affinity": "TEXT NOT NULL DEFAULT '{}'",
     "labels": "TEXT NOT NULL DEFAULT '[]'",
@@ -232,6 +238,14 @@ class TaskQueue:
                 "ON tasks(dedup_key) WHERE dedup_key IS NOT NULL"
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_repo ON tasks(repo)")
+            # Sentinel-backfill rows created before ``repo`` became required so a
+            # legacy task never leaks into a real repo's default-scoped views.
+            # Idempotent: after the first run there are no NULL-repo rows (create
+            # requires a repo).
+            conn.execute(
+                "UPDATE tasks SET repo = ? WHERE repo IS NULL", (LEGACY_REPO,)
+            )
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS task_events ("
                 "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -312,6 +326,7 @@ class TaskQueue:
         self,
         title: str,
         *,
+        repo: str | None = None,
         prompt: str = "",
         status: str = Status.QUEUED,
         requires: Sequence[str] | None = None,
@@ -330,11 +345,23 @@ class TaskQueue:
     ) -> Task:
         """Insert a task (default status ``queued``; ``proposed`` for a draft).
 
+        ``repo`` is the **lane** -- the canonical remote of the producing agent's
+        harness repo -- and is **required**: tasks stay in their own repo's lane,
+        so a consumer only sees/claims work for its own repo. (A cross-repo
+        *code* target is separate metadata, ``target_repo``; the lane agent does
+        that work via ``working-cross-repo``, never by launching another repo's
+        harness.)
+
         If ``dedup_key`` collides with an existing task, no new row is created
         and the *existing* task is returned (ideation-time duplicate guard).
         """
         if status not in (Status.QUEUED, Status.PROPOSED):
             raise TaskError(f"new task must be 'queued' or 'proposed', not {status!r}")
+        if not repo:
+            raise TaskError(
+                "task requires a repo (the lane -- the producing repo's canonical "
+                "remote); the CLI resolves it from the CWD or --repo"
+            )
         payload_ref, payload_inline = self._spill_payload(payload_ref, payload_inline)
         ts = self._now(now)
         task_id = uuid.uuid4().hex
@@ -348,15 +375,16 @@ class TaskQueue:
                     conn.execute("COMMIT")
                     return Task._from_row(existing)
             conn.execute(
-                "INSERT INTO tasks (id, title, prompt, status, requires, affinity, labels,"
+                "INSERT INTO tasks (id, title, prompt, status, repo, requires, affinity, labels,"
                 " payload_ref, payload_inline, target_machine, target_worktree, target_repo,"
                 " source, origin_ref, dedup_key, not_before, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     task_id,
                     title,
                     prompt,
                     status,
+                    repo,
                     json.dumps(list(requires or [])),
                     json.dumps(dict(affinity or {})),
                     json.dumps(list(labels or [])),
@@ -395,6 +423,7 @@ class TaskQueue:
         worker_id: str,
         capabilities: Iterable[str] = (),
         *,
+        repo: str | None = None,
         machine: str | None = None,
         worktree: str | None = None,
         task_id: str | None = None,
@@ -403,17 +432,20 @@ class TaskQueue:
     ) -> Task | None:
         """Atomically lease the best eligible ``queued`` task, or ``None``.
 
-        Eligible = ``status='queued'``, ``not_before <= now``, every token in the
-        task's ``requires`` present in ``capabilities``, and — the **targeting
-        gate** — the task's ``target_machine`` / ``target_worktree`` are unset or
-        match the claiming agent's ``machine`` / ``worktree``. So an agent only
-        claims work that is unassigned *or* assigned to it. A claimer that leaves
+        Eligible = ``status='queued'``, ``not_before <= now``, in the claimer's
+        ``repo`` **lane** (when given -- a worker only claims its own repo's
+        tasks), every token in the task's ``requires`` present in
+        ``capabilities``, and — the **targeting gate** — the task's
+        ``target_machine`` / ``target_worktree`` are unset or match the claiming
+        agent's ``machine`` / ``worktree``. So an agent only claims work in its
+        lane that is unassigned *or* assigned to it. A claimer that leaves
         ``machine`` / ``worktree`` unset can therefore only take *untargeted*
         tasks. The winning row is flipped to ``claimed`` under a write lock, so
         concurrent callers never double-claim.
 
         If ``task_id`` is given, only that task is considered (a spawned worker
-        deterministically claiming *its* task) — still subject to the same gates.
+        deterministically claiming *its* task) — still subject to the same gates,
+        including the ``repo`` lane.
 
         ``worker_id`` is stamped as the task ``owner``; in the facility it is the
         canonical ``machine/worktree`` composite (see :func:`worker_id_for`).
@@ -437,6 +469,8 @@ class TaskQueue:
             chosen: sqlite3.Row | None = None
             best_affinity = -1
             for row in rows:
+                if repo is not None and row["repo"] != repo:
+                    continue  # lane isolation: never claim another repo's work
                 requires = set(json.loads(row["requires"] or "[]"))
                 if not requires.issubset(caps):
                     continue
@@ -470,8 +504,13 @@ class TaskQueue:
             conn.execute("COMMIT")
         return task
 
-    def mine(self, machine: str, worktree: str) -> dict[str, list[Task]]:
+    def mine(
+        self, machine: str, worktree: str, *, repo: str | None = None
+    ) -> dict[str, list[Task]]:
         """Return an agent's inbox: tasks ``assigned`` to it and ``owned`` by it.
+
+        Scoped to the ``repo`` lane when given (an agent's inbox is its own
+        repo's work only).
 
         - ``assigned``: ``queued`` tasks targeted specifically at this agent —
           ``target_worktree == worktree``, or a machine-wide assignment
@@ -481,17 +520,20 @@ class TaskQueue:
           (``owner == machine/worktree``).
         """
         owner = worker_id_for(machine, worktree)
+        repo_clause = " AND repo = ?" if repo is not None else ""
+        repo_param: tuple = (repo,) if repo is not None else ()
         with self._connect() as conn:
             assigned_rows = conn.execute(
                 "SELECT * FROM tasks WHERE status = ? AND ("
                 "  target_worktree = ?"
                 "  OR (target_machine = ? AND target_worktree IS NULL)"
-                ") ORDER BY created_at ASC",
-                (Status.QUEUED, worktree, machine),
+                ")" + repo_clause + " ORDER BY created_at ASC",
+                (Status.QUEUED, worktree, machine, *repo_param),
             ).fetchall()
             owned_rows = conn.execute(
-                "SELECT * FROM tasks WHERE owner = ? AND status IN (?, ?) ORDER BY created_at ASC",
-                (owner, Status.CLAIMED, Status.STARTED),
+                "SELECT * FROM tasks WHERE owner = ? AND status IN (?, ?)" + repo_clause
+                + " ORDER BY created_at ASC",
+                (owner, Status.CLAIMED, Status.STARTED, *repo_param),
             ).fetchall()
         return {
             "assigned": [Task._from_row(r) for r in assigned_rows],
@@ -732,6 +774,7 @@ class TaskQueue:
     def list(
         self,
         *,
+        repo: str | None = None,
         status: str | Sequence[str] | None = None,
         target_machine: str | None = None,
         target_repo: str | None = None,
@@ -740,12 +783,16 @@ class TaskQueue:
     ) -> list[Task]:
         """List tasks, optionally filtered. Newest first.
 
-        ``status`` accepts a single status *or* a sequence of statuses (an
+        ``repo`` scopes to a single lane (the caller's repo by default, at the
+        CLI). ``status`` accepts a single status *or* a sequence of statuses (an
         ``IN (...)`` filter), so a producer can browse several states in one
         call. :meth:`sweep` uses this to pull the whole non-abandoned corpus.
         """
         clauses: list[str] = []
         params: list[object] = []
+        if repo is not None:
+            clauses.append("repo = ?")
+            params.append(repo)
         if status is not None:
             statuses = [status] if isinstance(status, str) else list(status)
             if statuses:
@@ -770,32 +817,37 @@ class TaskQueue:
             tasks = [t for t in tasks if label in t.labels]
         return tasks
 
-    def find(self, text: str, *, limit: int = 50) -> list[Task]:
+    def find(self, text: str, *, repo: str | None = None, limit: int = 50) -> list[Task]:
         """Substring search over title/prompt -- one primitive in the
-        agent-driven dedup flow (a quick targeted probe). For a full pre-create
-        review of existing work, prefer :meth:`sweep`.
+        agent-driven dedup flow (a quick targeted probe). Scoped to the ``repo``
+        lane when given. For a full pre-create review, prefer :meth:`sweep`.
         """
         like = f"%{text}%"
+        repo_clause = " AND repo = ?" if repo is not None else ""
+        repo_param: tuple = (repo,) if repo is not None else ()
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM tasks WHERE title LIKE ? OR prompt LIKE ? "
-                "ORDER BY created_at DESC LIMIT ?",
-                (like, like, limit),
+                "SELECT * FROM tasks WHERE (title LIKE ? OR prompt LIKE ?)" + repo_clause
+                + " ORDER BY created_at DESC LIMIT ?",
+                (like, like, *repo_param, limit),
             ).fetchall()
         return [Task._from_row(r) for r in rows]
 
-    def sweep(self, *, limit: int = 500) -> list[Task]:
+    def sweep(self, *, repo: str | None = None, limit: int = 500) -> list[Task]:
         """Return the dedup corpus: every non-abandoned task, newest first.
 
-        Backs the agent-driven *sweep + explore + verify* flow a producer runs
-        before creating a task: it enumerates every ``proposed``/``queued``/
-        ``claimed``/``started``/``completed`` task so the producer can read the
-        descriptions and judge whether the work already exists -- no semantic
-        index required. Correctness rests on each task carrying a self-contained
-        title + prompt. (A future VEI adapter is a pluggable *optimization* over
-        this same corpus, never a prerequisite.)
+        Scoped to the ``repo`` lane when given (the CLI always passes the
+        caller's repo -- a producer dedups against *its own* lane, since another
+        repo's tasks are invisible to it). Backs the agent-driven
+        *sweep + explore + verify* flow a producer runs before creating a task:
+        it enumerates every ``proposed``/``queued``/``claimed``/``started``/
+        ``completed`` task so the producer can read the descriptions and judge
+        whether the work already exists -- no semantic index required.
+        Correctness rests on each task carrying a self-contained title + prompt.
+        (A future VEI adapter is a pluggable *optimization* over this same
+        corpus, never a prerequisite.)
         """
-        return self.list(status=self.SWEEP_STATES, limit=limit)
+        return self.list(repo=repo, status=self.SWEEP_STATES, limit=limit)
 
     def events(self, task_id: str) -> list[dict[str, object]]:
         """Return the append-only audit trail for a task, oldest first."""

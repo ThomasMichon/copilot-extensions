@@ -11,7 +11,8 @@ import pytest
 from agent_dispatch.client import DispatchClient
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.mcp_server import DispatchTools, build_server
-from agent_dispatch.queue import Status, TaskQueue
+from agent_dispatch.queue import Status
+from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 
 @pytest.fixture

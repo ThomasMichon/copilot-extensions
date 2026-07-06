@@ -7,7 +7,8 @@ import subprocess
 import pytest
 
 from agent_dispatch import bridge
-from agent_dispatch.queue import Status, TaskQueue
+from agent_dispatch.queue import Status
+from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 # -- claim by id -------------------------------------------------------------
 

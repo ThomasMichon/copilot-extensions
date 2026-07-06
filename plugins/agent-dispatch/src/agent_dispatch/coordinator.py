@@ -47,6 +47,7 @@ async def _sweep_loop(queue: TaskQueue, interval: float, bus: EventBus) -> None:
 
 class CreateBody(BaseModel):
     title: str
+    repo: str | None = None
     prompt: str = ""
     proposed: bool = False
     requires: list[str] = Field(default_factory=list)
@@ -65,6 +66,7 @@ class CreateBody(BaseModel):
 
 class ClaimBody(BaseModel):
     worker_id: str | None = None
+    repo: str | None = None
     machine: str | None = None
     worktree: str | None = None
     capabilities: list[str] = Field(default_factory=list)
@@ -211,6 +213,7 @@ def create_app(
 
     @app.get("/tasks")
     def list_tasks(
+        repo: str | None = None,
         status: str | None = None,
         target_machine: str | None = None,
         target_repo: str | None = None,
@@ -220,9 +223,9 @@ def create_app(
         limit: int = 200,
     ) -> list[dict]:
         if sweep:
-            return [_task_dict(t) for t in queue.sweep(limit=limit)]
+            return [_task_dict(t) for t in queue.sweep(repo=repo, limit=limit)]
         if q is not None:
-            return [_task_dict(t) for t in queue.find(q, limit=limit)]
+            return [_task_dict(t) for t in queue.find(q, repo=repo, limit=limit)]
         # ``status`` may be a single state or a comma-separated set (multi-state
         # browse), e.g. ``?status=queued,started``.
         status_filter: str | list[str] | None = None
@@ -230,6 +233,7 @@ def create_app(
             parts = [s.strip() for s in status.split(",") if s.strip()]
             status_filter = parts[0] if len(parts) == 1 else parts
         tasks = queue.list(
+            repo=repo,
             status=status_filter,
             target_machine=target_machine,
             target_repo=target_repo,
@@ -239,8 +243,8 @@ def create_app(
         return [_task_dict(t) for t in tasks]
 
     @app.get("/tasks/mine")
-    def mine(machine: str, worktree: str) -> dict:
-        result = queue.mine(machine, worktree)
+    def mine(machine: str, worktree: str, repo: str | None = None) -> dict:
+        result = queue.mine(machine, worktree, repo=repo)
         return {k: [_task_dict(t) for t in v] for k, v in result.items()}
 
     @app.get("/tasks/{task_id}")
@@ -279,6 +283,7 @@ def create_app(
         task = queue.claim_one(
             owner,
             body.capabilities,
+            repo=body.repo,
             machine=body.machine,
             worktree=body.worktree,
             task_id=body.task_id,

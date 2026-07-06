@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agent_dispatch.payload import BLOB_PREFIX, PayloadStore, is_blob_ref
-from agent_dispatch.queue import TaskQueue
+from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 
 @pytest.fixture

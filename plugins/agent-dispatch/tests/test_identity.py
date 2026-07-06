@@ -41,3 +41,61 @@ def test_resolve_identity_not_in_worktree(monkeypatch):
     machine, worktree = identity.resolve_identity()
     assert machine == "host-a"
     assert worktree is None
+
+
+# -- repo (lane) resolution --------------------------------------------------
+
+
+def test_canonicalize_remote_variants():
+    c = identity.canonicalize_remote
+    expected = "gitea.michon.ski/tmichon/aperture-labs"
+    assert c("https://gitea.michon.ski/tmichon/aperture-labs.git") == expected
+    assert c("https://user@gitea.michon.ski:443/tmichon/aperture-labs") == expected
+    assert c("git@gitea.michon.ski:tmichon/aperture-labs.git") == expected
+    assert c("https://GITEA.michon.ski/tmichon/aperture-labs/") == expected  # host lowercased
+    # nested path prefix is preserved
+    assert (
+        c("https://home.thomasmichon.com/gitea/tmichon/aperture-labs.git")
+        == "home.thomasmichon.com/gitea/tmichon/aperture-labs"
+    )
+    assert c(None) is None
+    assert c("") is None
+
+
+def test_resolve_repo_prefers_aw_key(monkeypatch):
+    monkeypatch.setattr(
+        identity, "_aw_get",
+        lambda key: "https://github.com/ThomasMichon/copilot-extensions.git"
+        if key == "repo-remote" else None,
+    )
+    # host is lowercased; the path (owner/repo) is preserved as-is
+    assert identity.resolve_repo() == "github.com/ThomasMichon/copilot-extensions"
+
+
+def test_resolve_repo_falls_back_to_git_origin(monkeypatch):
+    monkeypatch.setattr(identity, "_aw_get", lambda _key: None)
+    monkeypatch.setattr(identity, "_git_origin", lambda: "git@github.com:acme/widget.git")
+    assert identity.resolve_repo() == "github.com/acme/widget"
+
+
+def test_resolve_repo_selector_name_and_remote(monkeypatch):
+    identity._repo_registry.cache_clear()
+    monkeypatch.setattr(
+        identity, "_repo_registry",
+        lambda: (("aperture-labs", "gitea.michon.ski/tmichon/aperture-labs"),),
+    )
+    # a known local name resolves to its canonical remote
+    assert (
+        identity.resolve_repo_selector("aperture-labs")
+        == "gitea.michon.ski/tmichon/aperture-labs"
+    )
+    # an unknown value is treated as a remote URL and canonicalized
+    assert (
+        identity.resolve_repo_selector("git@example.com:x/y.git") == "example.com/x/y"
+    )
+    # reverse: canonical remote -> local name
+    assert (
+        identity.name_for_repo("gitea.michon.ski/tmichon/aperture-labs") == "aperture-labs"
+    )
+    assert identity.name_for_repo("example.com/x/y") is None
+
