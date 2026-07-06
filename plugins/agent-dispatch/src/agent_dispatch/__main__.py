@@ -132,6 +132,18 @@ def _cmd_find(args: argparse.Namespace) -> int:
         return _emit(c.find(args.query, limit=args.limit))
 
 
+def _cmd_watch(args: argparse.Namespace) -> int:
+    with _client(args) as c:
+        try:
+            for event in c.stream_events():
+                json.dump(event, sys.stdout)
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+        except KeyboardInterrupt:
+            return 0
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-dispatch", description="Agent task queue + coordinator"
@@ -235,6 +247,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("recover", help="requeue expired-lease tasks")
     p.set_defaults(func=lambda args: _emit(_client(args).recover()))
+
+    p = sub.add_parser("watch", help="stream task events (SSE) as JSON lines")
+    p.set_defaults(func=_cmd_watch)
 
     p = sub.add_parser("health", help="check coordinator health")
     p.set_defaults(func=lambda args: _emit(_client(args).health()))

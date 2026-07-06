@@ -9,13 +9,17 @@ later slice; this module is the task CRUD + claim/lease API.
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from . import __version__
+from .events import EventBus, sse_format
 from .queue import Task, TaskError, TaskQueue
 
 
@@ -81,28 +85,60 @@ def _make_auth(token: str | None):
 
 def create_app(queue: TaskQueue, *, token: str | None = None) -> FastAPI:
     """Build the coordinator app over an existing :class:`TaskQueue`."""
+    bus = EventBus()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        bus.bind_loop(asyncio.get_running_loop())
+        yield
+
     app = FastAPI(
         title="agent-dispatch",
         version=__version__,
         dependencies=[Depends(_make_auth(token))],
+        lifespan=lifespan,
     )
+    app.state.bus = bus
 
     def _require(task: Task | None) -> Task:
         if task is None:
             raise HTTPException(status_code=404, detail="no such task")
         return task
 
+    def _emit(event_type: str, task: dict) -> None:
+        bus.publish({"type": event_type, "task": task})
+
+    def _guard(op, event_type: str | None = None) -> dict:
+        """Run a queue mutation (TaskError -> 409 / missing -> 404), then emit."""
+        try:
+            result = _task_dict(op())
+        except TaskError as exc:
+            msg = str(exc)
+            status = 404 if msg.startswith("no such task") else 409
+            raise HTTPException(status_code=status, detail=msg) from exc
+        if event_type is not None:
+            _emit(event_type, result)
+        return result
+
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok", "version": __version__}
+        return {"status": "ok", "version": __version__, "subscribers": bus.subscriber_count}
+
+    @app.get("/events")
+    async def events_stream() -> StreamingResponse:
+        async def gen():
+            async for event in bus.subscribe():
+                yield sse_format(event)
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
 
     @app.post("/tasks")
     def create(body: CreateBody) -> dict:
         data = body.model_dump()
         proposed = data.pop("proposed")
-        if proposed:
-            return _task_dict(queue.propose(**data))
-        return _task_dict(queue.create(**data))
+        task = _task_dict(queue.propose(**data) if proposed else queue.create(**data))
+        _emit("task.proposed" if proposed else "task.created", task)
+        return task
 
     @app.get("/tasks")
     def list_tasks(
@@ -135,33 +171,43 @@ def create_app(queue: TaskQueue, *, token: str | None = None) -> FastAPI:
 
     @app.post("/tasks/{task_id}/approve")
     def approve(task_id: str) -> dict:
-        return _guard(lambda: queue.approve(task_id))
+        return _guard(lambda: queue.approve(task_id), "task.approved")
 
     @app.post("/claim")
     def claim(body: ClaimBody) -> dict | None:
         task = queue.claim_one(
             body.worker_id, body.capabilities, lease_seconds=body.lease_seconds
         )
-        return _task_dict(task) if task is not None else None
+        if task is None:
+            return None
+        result = _task_dict(task)
+        _emit("task.claimed", result)
+        return result
 
     @app.post("/tasks/{task_id}/start")
     def start(task_id: str, body: WorkerBody) -> dict:
-        return _guard(lambda: queue.start(task_id, body.worker_id))
+        return _guard(lambda: queue.start(task_id, body.worker_id), "task.started")
 
     @app.post("/tasks/{task_id}/yield")
     def yield_task(task_id: str, body: YieldBody) -> dict:
-        return _guard(lambda: queue.yield_task(task_id, body.worker_id, note=body.note))
+        return _guard(
+            lambda: queue.yield_task(task_id, body.worker_id, note=body.note), "task.yielded"
+        )
 
     @app.post("/tasks/{task_id}/complete")
     def complete(task_id: str, body: CompleteBody) -> dict:
-        return _guard(lambda: queue.complete(task_id, body.worker_id, result_ref=body.result_ref))
+        return _guard(
+            lambda: queue.complete(task_id, body.worker_id, result_ref=body.result_ref),
+            "task.completed",
+        )
 
     @app.post("/tasks/{task_id}/abandon")
     def abandon(task_id: str, body: AbandonBody) -> dict:
         return _guard(
             lambda: queue.abandon(
                 task_id, worker_id=body.worker_id, permitted=body.permitted, reason=body.reason
-            )
+            ),
+            "task.abandoned",
         )
 
     @app.post("/tasks/{task_id}/heartbeat")
@@ -170,20 +216,10 @@ def create_app(queue: TaskQueue, *, token: str | None = None) -> FastAPI:
 
     @app.post("/tasks/{task_id}/detach")
     def detach(task_id: str) -> dict:
-        return _guard(lambda: queue.detach(task_id))
+        return _guard(lambda: queue.detach(task_id), "task.detached")
 
     @app.post("/recover")
     def recover() -> dict:
         return {"recovered": queue.recover_expired_leases()}
 
     return app
-
-
-def _guard(op) -> dict:
-    """Run a queue mutation, mapping TaskError -> 409 and missing task -> 404."""
-    try:
-        return _task_dict(op())
-    except TaskError as exc:
-        msg = str(exc)
-        status = 404 if msg.startswith("no such task") else 409
-        raise HTTPException(status_code=status, detail=msg) from exc

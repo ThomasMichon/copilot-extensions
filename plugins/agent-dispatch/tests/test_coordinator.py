@@ -25,8 +25,9 @@ def api(app):
 
 
 @pytest.fixture
-def client(app):
-    # Drive the real (synchronous) DispatchClient against a live uvicorn server.
+def server_url(app):
+    # Run a real uvicorn server on an ephemeral port so the sync client (and SSE)
+    # can be exercised over real HTTP.
     import uvicorn
 
     sock = socket.socket()
@@ -39,22 +40,31 @@ def client(app):
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
 
-    c = DispatchClient(f"http://127.0.0.1:{port}")
+    url = f"http://127.0.0.1:{port}"
+    probe = DispatchClient(url)
     deadline = time.time() + 10
     while time.time() < deadline:
         try:
-            c.health()
+            probe.health()
             break
         except Exception:  # server still starting up
             time.sleep(0.05)
     else:
+        probe.close()
         raise RuntimeError("coordinator did not start")
+    probe.close()
 
-    yield c
+    yield url
 
-    c.close()
     server.should_exit = True
     thread.join(timeout=5)
+
+
+@pytest.fixture
+def client(server_url):
+    c = DispatchClient(server_url)
+    yield c
+    c.close()
 
 
 # -- coordinator routes ------------------------------------------------------
@@ -170,3 +180,51 @@ def test_client_recover(client):
     client.claim("w1", lease_seconds=0)  # already expired
     assert client.recover()["recovered"] == 1
     assert client.get(t["id"])["status"] == Status.QUEUED
+
+
+# -- SSE event stream --------------------------------------------------------
+
+
+def test_sse_stream_delivers_lifecycle_events(server_url):
+    streamer = DispatchClient(server_url)
+    mutator = DispatchClient(server_url)
+    received: list[dict] = []
+
+    def collect():
+        try:
+            for ev in streamer.stream_events():
+                received.append(ev)
+                if ev.get("type") == "task.completed":
+                    break
+        except Exception:
+            return  # stream closed / server stopped -- best effort
+
+    t = threading.Thread(target=collect, daemon=True)
+    t.start()
+
+    # Deterministic readiness: wait until the streamer's subscription is
+    # registered server-side before producing events.
+    deadline = time.time() + 5
+    while time.time() < deadline and mutator.health().get("subscribers", 0) < 1:
+        time.sleep(0.05)
+    assert mutator.health()["subscribers"] >= 1
+
+    tid = mutator.create("streamed")["id"]
+    mutator.claim("w1")
+    mutator.start(tid, "w1")
+    mutator.complete(tid, "w1")
+
+    t.join(timeout=5)
+    streamer.close()
+    mutator.close()
+
+    types = [e["type"] for e in received]
+    assert "task.created" in types
+    assert "task.claimed" in types
+    assert "task.completed" in types
+    created = next(e for e in received if e["type"] == "task.created")
+    assert created["task"]["id"] == tid
+
+
+def test_health_reports_zero_subscribers_initially(api):
+    assert api.get("/health").json()["subscribers"] == 0
