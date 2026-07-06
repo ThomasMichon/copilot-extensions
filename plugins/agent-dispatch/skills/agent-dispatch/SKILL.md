@@ -218,7 +218,9 @@ operations as tools (`dispatch_create`, `dispatch_find`, `dispatch_claim`,
 from the working directory just like the CLI, so `dispatch_claim` /
 `dispatch_worktree_status` are auto-scoped with no arguments. Point a sub-agent's
 `.mcp.json` at `{"command": "agent-dispatch", "args": ["mcp"]}` (needs the `mcp`
-extra). The CLI and MCP tools are interchangeable — use whichever fits.
+extra). The coordinator also hosts the **same tools over HTTP at `/mcp`** for
+remote clients that supply identity via `X-Agent-Machine`/`X-Agent-Worktree`
+headers. The CLI and MCP tools are interchangeable — use whichever fits.
 
 ## Config quick reference
 

@@ -10,6 +10,7 @@ later slice; this module is the task CRUD + claim/lease API.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -108,15 +109,35 @@ def _make_auth(token: str | None):
 
 
 def create_app(
-    queue: TaskQueue, *, token: str | None = None, sweep_interval: float = 0.0
+    queue: TaskQueue,
+    *,
+    token: str | None = None,
+    sweep_interval: float = 0.0,
+    enable_mcp: bool = True,
 ) -> FastAPI:
     """Build the coordinator app over an existing :class:`TaskQueue`.
 
     When ``sweep_interval > 0`` the coordinator runs a background lease-recovery
     sweep every ``sweep_interval`` seconds so a crashed worker's held task
     automatically returns to ``queued`` without a manual ``recover`` call.
+
+    When ``enable_mcp`` is set and the ``mcp`` extra is installed, a
+    coordinator-hosted MCP endpoint is mounted at ``/mcp`` (identity via
+    ``X-Agent-Machine``/``X-Agent-Worktree`` headers or explicit tool args).
     """
     bus = EventBus()
+
+    mcp_app = None
+    if enable_mcp:
+        try:
+            from .mcp_http import bearer_guard_middleware, build_coordinator_mcp
+
+            mcp_app = build_coordinator_mcp(queue, bus).streamable_http_app()
+            if token:
+                mcp_app.add_middleware(bearer_guard_middleware(token))
+        except ImportError:
+            log.warning("mcp extra not installed; coordinator /mcp endpoint disabled")
+            mcp_app = None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -126,15 +147,19 @@ def create_app(
             if sweep_interval and sweep_interval > 0
             else None
         )
-        try:
-            yield
-        finally:
-            if sweeper is not None:
-                sweeper.cancel()
-                try:
-                    await sweeper
-                except asyncio.CancelledError:
-                    pass
+        async with contextlib.AsyncExitStack() as stack:
+            if mcp_app is not None:
+                # Run the MCP session manager alongside the coordinator lifespan.
+                await stack.enter_async_context(mcp_app.router.lifespan_context(_app))
+            try:
+                yield
+            finally:
+                if sweeper is not None:
+                    sweeper.cancel()
+                    try:
+                        await sweeper
+                    except asyncio.CancelledError:
+                        pass
 
     app = FastAPI(
         title="agent-dispatch",
@@ -293,5 +318,9 @@ def create_app(
     @app.post("/recover")
     def recover() -> dict:
         return {"recovered": queue.recover_expired_leases()}
+
+    if mcp_app is not None:
+        # Mounted last so the coordinator's own routes take precedence.
+        app.mount("/mcp", mcp_app)
 
     return app

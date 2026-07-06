@@ -12,9 +12,9 @@ account per agent.
 > (`agent-dispatch mcp`), an **installer** (marketplace-registered;
 > `scripts/init.sh` / `scripts/init.ps1` deploy a venv + binstub + deploy
 > manifest), an **SSE event stream** (`GET /events` / `agent-dispatch watch`),
-> and **agent-bridge spawn** (`create --spawn`). Still to come: a
-> coordinator-hosted HTTP MCP and the Windows scheduled-task service — the Linux
-> systemd unit already ships (`init.sh --service`).
+> and **agent-bridge spawn** (`create --spawn`). Still to come: the Windows
+> scheduled-task service — the Linux systemd unit already ships
+> (`init.sh --service`).
 
 ## Install
 
@@ -212,6 +212,22 @@ It exposes the queue as tools: `dispatch_create` / `dispatch_find` /
 `dispatch_heartbeat` / `dispatch_approve` / `dispatch_detach` /
 `dispatch_recover`. `dispatch_create` takes an inline `payload` the coordinator
 spills to a blob when large.
+
+### Two MCP surfaces
+
+There are **two** ways to reach the tools — pick by where the client runs:
+
+| Surface | Command / endpoint | Identity | Use when |
+|---------|--------------------|----------|----------|
+| **Local stdio shim** | `agent-dispatch mcp` | resolved from the caller's **CWD** (like the CLI) | the agent has `agent-dispatch` installed locally in its worktree |
+| **Coordinator-hosted HTTP** | mounted at **`/mcp`** on the coordinator | `X-Agent-Machine` / `X-Agent-Worktree` **request headers** (or explicit tool args) | a remote MCP client (e.g. an `agent-mcp` bridge on another host) that can't resolve local identity |
+
+Both expose the same 16 `dispatch_*` tools and publish the same `task.*` events;
+they only differ in how identity is supplied. The coordinator mounts `/mcp`
+automatically when the `mcp` extra is installed (pass `enable_mcp=False` to
+`create_app` to suppress it); if a bearer token is configured it also guards the
+`/mcp` mount. A remote client points at, e.g.,
+`http://<coordinator-host>:9330/mcp` and sets the identity headers per agent.
 
 Configuration (all optional): `AGENT_DISPATCH_HOST`, `AGENT_DISPATCH_PORT`,
 `AGENT_DISPATCH_DB`, `AGENT_DISPATCH_TOKEN` (bearer auth),
