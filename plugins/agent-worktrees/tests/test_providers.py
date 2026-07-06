@@ -736,28 +736,28 @@ class TestAutoOpenDefault:
 
 
 class TestHeadSchemeConfig:
-    def test_defaults_to_refspec(self):
+    def test_defaults_to_snapshot(self):
         from agent_worktrees.config import _parse_pr
-        assert cfg.PRConfig().head_scheme == "refspec"
+        assert cfg.PRConfig().head_scheme == "snapshot"
         assert cfg.PRConfig().head_pattern == ""
         pr = _parse_pr({"provider": "gitea"})
-        assert pr.head_scheme == "refspec"
+        assert pr.head_scheme == "snapshot"
         assert pr.head_pattern == ""
 
-    def test_parses_snapshot_and_pattern(self):
+    def test_parses_refspec_and_pattern(self):
         from agent_worktrees.config import _parse_pr
         pr = _parse_pr({
-            "head_scheme": "snapshot",
+            "head_scheme": "refspec",
             "head_pattern": "user/{username}/{slug}-{suffix}",
         })
-        assert pr.head_scheme == "snapshot"
+        assert pr.head_scheme == "refspec"
         assert pr.head_pattern == "user/{username}/{slug}-{suffix}"
 
-    def test_unknown_scheme_falls_back_to_refspec(self):
+    def test_unknown_scheme_falls_back_to_snapshot(self):
         from agent_worktrees.config import _parse_pr
-        assert _parse_pr({"head_scheme": "bogus"}).head_scheme == "refspec"
-        # Explicit snapshot + case-insensitive normalization still honored.
-        assert _parse_pr({"head_scheme": "SNAPSHOT"}).head_scheme == "snapshot"
+        assert _parse_pr({"head_scheme": "bogus"}).head_scheme == "snapshot"
+        # Explicit refspec + case-insensitive normalization still honored.
+        assert _parse_pr({"head_scheme": "REFSPEC"}).head_scheme == "refspec"
 
 
 # ---------------------------------------------------------------------------

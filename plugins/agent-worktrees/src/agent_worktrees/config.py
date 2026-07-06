@@ -95,23 +95,24 @@ class PRConfig:
     branch_prefix: str = "feature"
     # ``head_scheme`` selects HOW create-pr publishes the PR head (#1815):
     #
-    # - ``refspec`` (default) -- keep the squashed work ON ``worktree/<id>`` and
-    #   push it directly to the PR head ref via a refspec (no local feature
-    #   branch, no checkout dance; the worktree stays on its own branch, which
-    #   sits ahead of master while the PR is open). The invariant: a worktree is
-    #   always checked out on ``worktree/<id>``.
-    # - ``snapshot`` (legacy, opt-in) -- create a separate local
+    # - ``snapshot`` (default, legacy) -- create a separate local
     #   ``{prefix}/<slug>`` branch at the squashed commit, reset the worktree
     #   base branch to upstream, and push that branch. HEAD returns to the
-    #   worktree branch (#1804). Kept as the fallback (and for the parallel
-    #   ``--new`` PR case, which auto-falls-back to a snapshot ref).
+    #   worktree branch (#1804).
+    # - ``refspec`` -- keep the squashed work ON ``worktree/<id>`` and push it
+    #   directly to the PR head ref via a refspec (no local feature branch, no
+    #   checkout dance; the worktree stays on its own branch). Feature-complete
+    #   but **opt-in** until every PR-mode repo's pre-push hook allows the
+    #   mediated refspec push (a facility hook that blocks ``worktree/*`` by ref
+    #   name must honor ``AGENT_WORKTREES_PR_PUSH=1`` first -- see aperture-labs
+    #   #1815). A parallel ``--new`` PR auto-falls-back to a snapshot ref.
     #
     # ``head_pattern`` is the PR head-name template (tokens ``{prefix}``,
     # ``{slug}``, ``{suffix}``, ``{username}``, ``{machine}``). Empty means the
-    # scheme default: ``pr/{slug}-{suffix}`` under ``refspec`` and
-    # ``{prefix}/{slug}-{suffix}`` under ``snapshot`` (``feature/<slug>``).
+    # scheme default: ``{prefix}/{slug}-{suffix}`` under ``snapshot``
+    # (``feature/<slug>``) and ``pr/{slug}-{suffix}`` under ``refspec``.
     # Repos that want e.g. ``user/<username>/<slug>-<suffix>`` set it explicitly.
-    head_scheme: str = "refspec"   # refspec | snapshot
+    head_scheme: str = "snapshot"  # snapshot | refspec
     head_pattern: str = ""         # empty -> scheme default (see above)
     # Provider-plugin settings (PR creation via a provider CLI). ``api_base``
     # is the hosting endpoint -- required for self-hosted Gitea
@@ -813,9 +814,9 @@ def _parse_pr(raw: Any) -> PRConfig:
         labels = (str(raw_labels),)
     else:
         labels = ()
-    head_scheme = str(raw.get("head_scheme", "refspec")).strip().lower()
+    head_scheme = str(raw.get("head_scheme", "snapshot")).strip().lower()
     if head_scheme not in ("snapshot", "refspec"):
-        head_scheme = "refspec"
+        head_scheme = "snapshot"
     return PRConfig(
         enabled=enabled,
         required=required,
