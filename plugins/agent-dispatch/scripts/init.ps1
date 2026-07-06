@@ -216,10 +216,11 @@ $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 # Pre-strip any locked console-script trampoline so uv can overwrite it (os err 5).
 Remove-ConsoleTrampolines -VenvDir $VenvDir
+# The [mcp] extra ships the `agent-dispatch mcp` stdio server dependency.
 if (Get-Command uv -ErrorAction SilentlyContinue) {
-    & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
+    & uv pip install --python $VenvPython "$($PluginDir)[mcp]" --quiet 2>&1 | Out-Null
 } else {
-    & $VenvPython -m pip install --quiet "$PluginDir" 2>&1 | Out-Null
+    & $VenvPython -m pip install --quiet "$($PluginDir)[mcp]" 2>&1 | Out-Null
 }
 $pkgResult = $LASTEXITCODE
 $ErrorActionPreference = $prevEAP

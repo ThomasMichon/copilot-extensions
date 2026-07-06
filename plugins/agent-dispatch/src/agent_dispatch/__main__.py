@@ -232,6 +232,13 @@ def _cmd_payload(args: argparse.Namespace) -> int:
     return _emit(result)
 
 
+def _cmd_mcp(args: argparse.Namespace) -> int:
+    from .mcp_server import serve_stdio
+
+    serve_stdio()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-dispatch", description="Agent task queue + coordinator"
@@ -376,6 +383,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("watch", help="stream task events (SSE) as JSON lines")
     p.set_defaults(func=_cmd_watch)
+
+    p = sub.add_parser(
+        "mcp", help="run the local stdio MCP server (per-agent interaction layer)"
+    )
+    p.set_defaults(func=_cmd_mcp)
 
     p = sub.add_parser("health", help="check coordinator health")
     p.set_defaults(func=lambda args: _emit(_client(args).health()))

@@ -8,12 +8,13 @@ account per agent.
 
 > **Status: early but installable.** This ships the queue **engine**
 > (`agent_dispatch.queue`), the per-host **coordinator daemon**
-> (`agent-dispatch serve`), the **`agent-dispatch` CLI**, an **installer**
-> (marketplace-registered; `scripts/init.sh` / `scripts/init.ps1` deploy a venv +
-> binstub + deploy manifest), an **SSE event stream** (`GET /events` /
-> `agent-dispatch watch`), and **agent-bridge spawn** (`create --spawn`). Still to
-> come: facility service auto-start (systemd unit / scheduled task) — for now the
-> coordinator is launched with `agent-dispatch serve`.
+> (`agent-dispatch serve`), the **`agent-dispatch` CLI**, **local MCP tools**
+> (`agent-dispatch mcp`), an **installer** (marketplace-registered;
+> `scripts/init.sh` / `scripts/init.ps1` deploy a venv + binstub + deploy
+> manifest), an **SSE event stream** (`GET /events` / `agent-dispatch watch`),
+> and **agent-bridge spawn** (`create --spawn`). Still to come: a
+> coordinator-hosted HTTP MCP and the Windows scheduled-task service — the Linux
+> systemd unit already ships (`init.sh --service`).
 
 ## Install
 
@@ -179,6 +180,38 @@ The worker is instructed to claim the specific task by id
 (`agent-dispatch claim <id> --task <task>`). If the `agent-bridge` CLI isn't on
 PATH, `--spawn` **degrades gracefully** — the task is simply left queued for any
 worker to claim, so agent-dispatch stays usable without a bridge.
+
+## MCP tools (`agent-dispatch mcp`)
+
+For agents that prefer **tools over a CLI**, `agent-dispatch mcp` runs a local
+**stdio MCP server** — the per-agent interaction layer. It resolves the caller's
+`machine`/`worktree` identity from the working directory (like the CLI) and
+proxies each tool call to the coordinator, so `dispatch_claim` /
+`dispatch_worktree_status` are auto-scoped to the agent's worktree with no
+per-agent credential wiring. Requires the `mcp` extra
+(`pip install 'agent-dispatch[mcp]'`).
+
+Point a Copilot sub-agent (or any MCP client) at it:
+
+```json
+{
+  "mcpServers": {
+    "agent-dispatch": {
+      "command": "agent-dispatch",
+      "args": ["mcp"],
+      "env": { "AGENT_DISPATCH_URL": "http://127.0.0.1:9330" }
+    }
+  }
+}
+```
+
+It exposes the queue as tools: `dispatch_create` / `dispatch_find` /
+`dispatch_list` / `dispatch_show` / `dispatch_events` / `dispatch_payload` /
+`dispatch_worktree_status` / `dispatch_claim` / `dispatch_start` /
+`dispatch_yield` / `dispatch_complete` / `dispatch_abandon` /
+`dispatch_heartbeat` / `dispatch_approve` / `dispatch_detach` /
+`dispatch_recover`. `dispatch_create` takes an inline `payload` the coordinator
+spills to a blob when large.
 
 Configuration (all optional): `AGENT_DISPATCH_HOST`, `AGENT_DISPATCH_PORT`,
 `AGENT_DISPATCH_DB`, `AGENT_DISPATCH_TOKEN` (bearer auth),

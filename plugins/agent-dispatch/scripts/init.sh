@@ -92,13 +92,14 @@ else
 fi
 
 # -- 3. Install the package into the venv ------------------------------
+# The [mcp] extra ships the `agent-dispatch mcp` stdio server dependency.
 if [[ "$HAVE_UV" -eq 1 ]]; then
-    if ! uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
+    if ! uv pip install --python "$VENV_PYTHON" "${PLUGIN_DIR}[mcp]" --quiet 2>/dev/null; then
         _fail 'Failed to install agent-dispatch package into venv'
         exit 1
     fi
 else
-    if ! "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR" 2>/dev/null; then
+    if ! "$VENV_PYTHON" -m pip install --quiet "${PLUGIN_DIR}[mcp]" 2>/dev/null; then
         _fail 'Failed to install agent-dispatch package into venv'
         exit 1
     fi

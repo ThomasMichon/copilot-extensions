@@ -209,6 +209,17 @@ If the `agent-bridge` CLI isn't on PATH, `--spawn` **degrades gracefully**: the
 task is left queued for any worker to claim. agent-dispatch stays fully usable
 without a bridge.
 
+## MCP tools instead of the CLI
+
+`agent-dispatch mcp` runs a local **stdio MCP server** exposing the same
+operations as tools (`dispatch_create`, `dispatch_find`, `dispatch_claim`,
+`dispatch_start`, `dispatch_complete`, `dispatch_payload`,
+`dispatch_worktree_status`, ...). It resolves your `machine`/`worktree` identity
+from the working directory just like the CLI, so `dispatch_claim` /
+`dispatch_worktree_status` are auto-scoped with no arguments. Point a sub-agent's
+`.mcp.json` at `{"command": "agent-dispatch", "args": ["mcp"]}` (needs the `mcp`
+extra). The CLI and MCP tools are interchangeable — use whichever fits.
+
 ## Config quick reference
 
 | Env var | Role |
