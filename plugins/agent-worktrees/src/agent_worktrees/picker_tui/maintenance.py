@@ -17,6 +17,7 @@ case the engine runs the walker instead of this executor.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 
@@ -26,13 +27,19 @@ PENDING, RUNNING, DONE, FAILED = "pending", "running", "done", "failed"
 
 def _ssh_json(argv, timeout=120):
     """Run a remote op over SSH and parse its single JSON result object."""
-    proc = subprocess.run(
-        argv, capture_output=True, text=True,
+    kwargs = dict(
+        capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=timeout,
         # Detach from the console stdin so the remote ``ssh`` op can't read the
         # operator's keystrokes out from under the TUI (see data_ssh._run).
         stdin=subprocess.DEVNULL,
     )
+    # On Windows, also keep the child off our console so a failing ssh can't
+    # clear the console's VT-input mode and break arrow keys (see data_ssh).
+    _cnw = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if os.name == "nt" and _cnw:
+        kwargs["creationflags"] = _cnw
+    proc = subprocess.run(argv, **kwargs)
     out = proc.stdout or ""
     i = out.find("{")
     if i < 0:
