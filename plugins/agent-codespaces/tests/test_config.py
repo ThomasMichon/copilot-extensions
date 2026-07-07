@@ -181,7 +181,7 @@ class TestEffectiveAcpCommand:
         then launch copilot with auto-approve."""
         config = CodespacesConfig()
         assert config.effective_acp_command == (
-            'cd "${CODESPACE_VSCODE_FOLDER:-${VM_REPO_PATH:-.}}" '
+            'cd "${CODESPACE_VSCODE_FOLDER:-${WORKING_DIRECTORY:-${VM_REPO_PATH:-.}}}" '
             "&& copilot --acp --stdio --allow-all-tools"
         )
 
@@ -275,7 +275,11 @@ class TestPerRepoWorkspaceFolder:
         config = self._config(workspace_repo="odsp-web")
         # A repo with no per-repo entry and no global default → remote-resolved.
         cmd = config.effective_acp_command_for("org/unmapped")
-        assert "CODESPACE_VSCODE_FOLDER" in cmd and "VM_REPO_PATH" in cmd
+        assert (
+            "CODESPACE_VSCODE_FOLDER" in cmd
+            and "WORKING_DIRECTORY" in cmd
+            and "VM_REPO_PATH" in cmd
+        )
 
     def test_global_acp_command_still_overrides(self):
         config = self._config(workspace_repo="odsp-web")

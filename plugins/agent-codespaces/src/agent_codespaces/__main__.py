@@ -357,6 +357,37 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _build_launch_command(
+    remote_cmd: str | None,
+    plugin_dirs: list[str],
+    *,
+    is_stdio: bool,
+    relay_env: str,
+    breadcrumb: str,
+) -> str | None:
+    """Assemble the remote command string, folding in ``--plugin-dir`` args.
+
+    The ``--plugin-dir`` args are ONLY valid when ``remote_cmd`` *is* the
+    ``copilot --acp`` launch -- i.e. the ``--stdio`` transport agent-bridge
+    uses, where the copilot invocation is the tail of the command so appending
+    is correct. A plain diagnostic ``--remote-cmd`` (non-stdio) is an arbitrary
+    shell command, so appending flags to its tail corrupts it (issue #152: the
+    last token -- e.g. ``tail``/``ls``/a script -- receives the unexpected
+    ``--plugin-dir=...``). Fold them in only for the stdio launch.
+
+    Prepends the relay env + arrival breadcrumb and wraps in ``bash -l -c`` so
+    the CodeSpace platform env loads. Returns ``None`` when there is no command.
+    """
+    if not remote_cmd:
+        return None
+    acp = remote_cmd
+    if is_stdio:
+        for d in plugin_dirs:
+            acp += f' --plugin-dir="{d}"'
+    inner = relay_env + breadcrumb + "; " + acp
+    return f"bash -l -c {shlex.quote(inner)}"
+
+
 def _cmd_ssh(args: argparse.Namespace) -> int:
     """SSH into a CodeSpace using ssh-manager."""
     from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
@@ -413,20 +444,18 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     tracker = ConnectTracker(session_id=args.name)
 
     def _finalize_remote_cmd(plugin_dirs: list[str]) -> str | None:
-        """Wrap args.remote_cmd in a login shell, folding in --plugin-dir args.
+        """Wrap args.remote_cmd in a login shell (see _build_launch_command).
 
-        Appends ``--plugin-dir=<dir>`` for each staged plugin to the acp payload
-        (the copilot invocation is the tail of the command, so appending is
-        correct), then prepends the relay env + arrival breadcrumb and wraps in
-        ``bash -l -c`` so the CodeSpace platform env loads.
+        Folds ``--plugin-dir`` args in ONLY for the ``--stdio`` copilot launch,
+        never for a plain diagnostic ``--remote-cmd`` (issue #152).
         """
-        if not args.remote_cmd:
-            return None
-        acp = args.remote_cmd
-        for d in plugin_dirs:
-            acp += f' --plugin-dir="{d}"'
-        inner = relay_env + breadcrumb_prelude(args.name) + "; " + acp
-        return f"bash -l -c {shlex.quote(inner)}"
+        return _build_launch_command(
+            args.remote_cmd,
+            plugin_dirs,
+            is_stdio=args.stdio,
+            relay_env=relay_env,
+            breadcrumb=breadcrumb_prelude(args.name),
+        )
 
     async def _run() -> int:
         # Stage 3 (ssh-to-target): a Shutdown CodeSpace boots on connect, so be
@@ -1443,7 +1472,11 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
             print("Refusing to delete after a failed recovery. Diagnose and "
                   "resolve the error above (often a still-booting CodeSpace or "
                   "an SSH/relay issue), then re-run finalize so the sessions "
-                  "are captured.", file=sys.stderr)
+                  "are captured. If the CodeSpace is genuinely unbootable (never "
+                  "reaches SSH), its session-state is unrecoverable -- retire it "
+                  "with `agent-codespaces finalize <name> --delete --force` (or "
+                  "`delete <name> --force --no-sync`) to skip recovery.",
+                  file=sys.stderr)
             return 1
 
     if args.delete:

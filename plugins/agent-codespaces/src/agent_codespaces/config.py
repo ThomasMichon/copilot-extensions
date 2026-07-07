@@ -34,10 +34,15 @@ def ensure_runtime_dir() -> None:
 # ``workspace_folder`` is configured (#33). Expanded by the remote
 # ``bash -l -c`` at launch, so the agent lands in the repo checkout rather than
 # ``/home/vscode``. Order: ``$CODESPACE_VSCODE_FOLDER`` (the VS Code/Codespaces
-# convention, when exported to the shell) -> ``$VM_REPO_PATH`` (set by many
-# devcontainers) -> ``.`` (no-op: keep the SSH
-# default cwd, which Codespaces sets to the workspace -- never forces $HOME).
-_WORKSPACE_CD = 'cd "${CODESPACE_VSCODE_FOLDER:-${VM_REPO_PATH:-.}}"'
+# convention, when exported to the shell) -> ``$WORKING_DIRECTORY`` (set by
+# Codespaces to the devcontainer workspace folder; reliably present in the
+# ``bash -l`` login shell the --stdio launch uses -- this is what rescues a
+# dispatched agent from landing in ``/home/vscode`` when the other vars aren't
+# exported, #134) -> ``$VM_REPO_PATH`` (set by many devcontainers) -> ``.``
+# (no-op last resort: keep the SSH default cwd -- never forces $HOME).
+_WORKSPACE_CD = (
+    'cd "${CODESPACE_VSCODE_FOLDER:-${WORKING_DIRECTORY:-${VM_REPO_PATH:-.}}}"'
+)
 
 
 @dataclass

@@ -173,7 +173,11 @@ def sync_codespace_sessions(name: str, *, timeout: float = 300.0, verbose: bool 
     async def _run() -> dict:
         try:
             await _connect_with_retry(manager, name, timeout=_BOOT_TIMEOUT)
-        except (ConnectionError, TimeoutError) as exc:
+        except (ConnectionError, TimeoutError, RuntimeError) as exc:
+            # RuntimeError covers the SSH-config-fetch timeout / gh failures
+            # (codespace_config) that an unbootable CodeSpace raises -- treat
+            # them as a connect failure, never propagate, so a --force
+            # delete/finalize is not blocked by an unreachable target (#155).
             return {"ok": False, "session_count": 0, "detail": f"could not connect: {exc}"}
         try:
             tar_bytes = await _pull_tar_bytes(manager, name, timeout=timeout)
@@ -185,5 +189,12 @@ def sync_codespace_sessions(name: str, *, timeout: float = 300.0, verbose: bool 
 
     try:
         return asyncio.run(_run())
+    except Exception as exc:  # recovery must never block delete (#155)
+        # The contract is "never raise for routine connect/pull failures". Any
+        # unexpected error here (e.g. an SSH/relay failure surfacing as a plain
+        # Exception) must still return a failed-recovery result so a --force
+        # finalize/delete can proceed rather than aborting.
+        return {"ok": False, "session_count": 0,
+                "detail": f"session recovery error: {exc}"}
     finally:
         lock.release()
