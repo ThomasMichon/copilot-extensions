@@ -29,13 +29,18 @@ from acp.schema import (
     ConfigOptionUpdate,
     CreateTerminalResponse,
     CurrentModeUpdate,
+    EnvVariable,
+    HttpHeader,
+    HttpMcpServer,
     Implementation,
     KillTerminalResponse,
+    McpServerStdio,
     PermissionOption,
     ReadTextFileResponse,
     ReleaseTerminalResponse,
     RequestPermissionResponse,
     SessionInfoUpdate,
+    SseMcpServer,
     TerminalOutputResponse,
     TextContentBlock,
     ToolCallProgress,
@@ -99,8 +104,64 @@ _BG_TASK_INACTIVE_STATUSES = frozenset(
     }
 )
 
+# ACP MCP server transports agent-bridge can mount per session.
+_McpServer = HttpMcpServer | SseMcpServer | McpServerStdio
 
-async def _terminate_process_tree(proc: asyncio.subprocess.Process) -> None:
+
+def build_mcp_servers(
+    specs: list[dict[str, Any]] | None,
+) -> list[_McpServer]:
+    """Convert caller-supplied MCP server dicts into ACP schema objects for
+    ``session/new`` / ``session/load``.
+
+    Each spec's ``type`` selects the transport and defaults to ``stdio``:
+      - ``stdio``: ``{name, command, args?, env?}`` (``env`` a name->value map)
+      - ``http`` / ``sse``: ``{name, url, headers?}`` (``headers`` a name->value map)
+
+    ``None`` (or an empty list) yields ``[]`` -- the historic behavior of an
+    empty per-session toolset -- so existing callers are unaffected.
+    """
+    servers: list[_McpServer] = []
+    for spec in specs or []:
+        kind = str(spec.get("type") or "stdio").lower()
+        name = spec.get("name")
+        if not name:
+            raise ValueError(f"MCP server spec missing 'name': {spec!r}")
+        if kind == "stdio":
+            command = spec.get("command")
+            if not command:
+                raise ValueError(f"stdio MCP server {name!r} missing 'command'")
+            env = [
+                EnvVariable(name=str(k), value=str(v))
+                for k, v in (spec.get("env") or {}).items()
+            ]
+            servers.append(
+                McpServerStdio(
+                    name=name,
+                    command=command,
+                    args=[str(a) for a in (spec.get("args") or [])],
+                    env=env,
+                )
+            )
+        elif kind in ("http", "sse"):
+            url = spec.get("url")
+            if not url:
+                raise ValueError(f"{kind} MCP server {name!r} missing 'url'")
+            headers = [
+                HttpHeader(name=str(k), value=str(v))
+                for k, v in (spec.get("headers") or {}).items()
+            ]
+            cls = HttpMcpServer if kind == "http" else SseMcpServer
+            servers.append(cls(type=kind, name=name, url=url, headers=headers))
+        else:
+            raise ValueError(
+                f"unknown MCP server type {kind!r} for {name!r} "
+                "(expected stdio, http, or sse)"
+            )
+    return servers
+
+
+async def _terminate_process_tree(proc: asyncio.subprocess.Process) -> None: 
     """Terminate a spawned agent process **and its child tree**.
 
     ``proc.terminate()`` only signals the direct child. On Windows that child
@@ -423,11 +484,19 @@ class AcpClient:
             ),
         )
 
-    async def new_session(self, cwd: str) -> str:
-        """Create a new ACP session. Returns the ACP session ID."""
+    async def new_session(
+        self, cwd: str, mcp_servers: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """Create a new ACP session. Returns the ACP session ID.
+
+        ``mcp_servers`` optionally mounts a per-session MCP toolset (see
+        :func:`build_mcp_servers`); ``None`` preserves the historic empty set.
+        """
         if not self._connection:
             raise RuntimeError("ACP connection not initialized")
-        result = await self._connection.new_session(cwd=cwd, mcp_servers=[])
+        result = await self._connection.new_session(
+            cwd=cwd, mcp_servers=build_mcp_servers(mcp_servers),
+        )
         self._acp_session_id = result.session_id
         return result.session_id
 
@@ -448,7 +517,11 @@ class AcpClient:
         self._acp_session_id = acp_session_id
 
     async def load_session(
-        self, cwd: str, session_id: str, suppress_replay: bool = True,
+        self,
+        cwd: str,
+        session_id: str,
+        suppress_replay: bool = True,
+        mcp_servers: list[dict[str, Any]] | None = None,
     ) -> None:
         """Reload a previously persisted ACP session (for resume).
 
@@ -461,6 +534,10 @@ class AcpClient:
         Pass ``suppress_replay=False`` to let the replay flow through as
         normal events (the resync flow uses this to rebuild a truncated log
         from the agent's authoritative history).
+
+        ``mcp_servers`` re-mounts the session's per-session MCP toolset on
+        reattach/resume (see :func:`build_mcp_servers`); ``None`` preserves the
+        historic empty set.
         """
         if not self._connection:
             raise RuntimeError("ACP connection not initialized")
@@ -468,7 +545,8 @@ class AcpClient:
         self._suppress_replay = suppress_replay
         try:
             await self._connection.load_session(
-                cwd=cwd, session_id=session_id, mcp_servers=[],
+                cwd=cwd, session_id=session_id,
+                mcp_servers=build_mcp_servers(mcp_servers),
             )
         finally:
             self._loading_session = False

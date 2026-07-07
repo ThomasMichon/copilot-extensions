@@ -873,6 +873,7 @@ class SessionManager:
         session_id: str,
         on_acp_event: Any,
         permission_callback: Any | None,
+        mcp_servers: list[dict[str, Any]] | None = None,
     ) -> tuple[AcpClient, str]:
         """Spawn a local child inside a survivable Session Host and drive ACP
         over the reattachable loopback endpoint (Session-Host mode).
@@ -931,7 +932,7 @@ class SessionManager:
                 )
                 session_cwd = target.cwd or _default_cwd(target)
                 acp_sid = await asyncio.wait_for(
-                    client.new_session(cwd=session_cwd),
+                    client.new_session(cwd=session_cwd, mcp_servers=mcp_servers),
                     timeout=self._timeouts.session_start,
                 )
             except (TimeoutError, asyncio.TimeoutError) as exc:
@@ -1242,6 +1243,7 @@ class SessionManager:
         agent_name: str | None = None,
         caller_id: str | None = None,
         permission_callback: Any | None = None,
+        mcp_servers: list[dict[str, Any]] | None = None,
     ) -> Session:
         """Create and start a new agent session.
 
@@ -1258,6 +1260,9 @@ class SessionManager:
             permission_callback: Optional async callback for permission
                 requests. Signature: (session_id, options, tool_call) ->
                 RequestPermissionResponse. If set, auto_approve is disabled.
+            mcp_servers: Optional per-session MCP toolset (ACP server specs)
+                mounted into the ACP session at session/new. None preserves
+                the historic empty toolset.
         """
         if self._draining:
             raise DaemonDrainingError("session")
@@ -1326,6 +1331,7 @@ class SessionManager:
                     session_id=session_id,
                     on_acp_event=on_acp_event,
                     permission_callback=permission_callback,
+                    mcp_servers=mcp_servers,
                 )
             else:
                 # Spawn the subprocess (local/SSH/command). Emits per-stage
@@ -1356,7 +1362,9 @@ class SessionManager:
                         # requires an absolute path.  Derive a home-dir default.
                         session_cwd = target.cwd or _default_cwd(target)
                         acp_sid = await asyncio.wait_for(
-                            client.new_session(cwd=session_cwd),
+                            client.new_session(
+                                cwd=session_cwd, mcp_servers=mcp_servers,
+                            ),
                             timeout=self._timeouts.session_start,
                         )
                     except (TimeoutError, asyncio.TimeoutError) as exc:

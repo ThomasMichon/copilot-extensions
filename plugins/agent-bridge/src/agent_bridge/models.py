@@ -122,6 +122,14 @@ class StartSessionRequest(BaseModel):
     worktree_id: str | None = None  # agent-worktrees worktree ID for session roll
     caller_id: str | None = None  # caller identity for session affinity
     force_new: bool = False  # skip caller_id reuse and always create a fresh session
+    # Per-session MCP servers mounted into the ACP session at session/new, giving
+    # this session a bespoke, run-bound toolset (e.g. the Intelligence Dampener
+    # review tools). Each entry is an ACP MCP server spec; ``type`` selects the
+    # transport and defaults to ``stdio``:
+    #   {"type": "stdio", "name": ..., "command": ..., "args": [...], "env": {...}}
+    #   {"type": "http" | "sse", "name": ..., "url": ..., "headers": {...}}
+    # None / omitted preserves the historic empty-toolset behavior.
+    mcp_servers: list[dict[str, Any]] | None = None
 
 
 class SubmitPromptRequest(BaseModel):
