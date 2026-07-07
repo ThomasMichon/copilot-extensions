@@ -16,13 +16,15 @@ that squashed commit** -- HEAD stays on ``worktree/{id}`` and the branch is
 never reset off it (#1804) -- regardless of ``pr.head_scheme``.  The scheme only
 selects how the PR head is *published* (its name + push mechanism):
 
-- ``snapshot`` (default): copy the squashed commit onto a ``feature/{slug}-
-  {suffix}`` branch (the older namespace) and push THAT.  ``worktree/{id}`` is
-  left on the squashed commit (sitting ahead of master while the PR is open); a
-  later ``git sync`` reconciles it on merge.
-- ``refspec`` (#1815): push ``worktree/{id}`` straight to the PR head ref
-  (``worktree/{id}:refs/heads/{head}``, e.g. ``pr/{slug}``) -- no local feature
-  branch.
+- ``refspec`` (default, #1815/#1899): push ``worktree/{id}`` straight to the PR
+  head ref (``worktree/{id}:refs/heads/{head}``, e.g. ``pr/{slug}``) -- no local
+  feature branch.
+- ``snapshot`` (legacy/compatible): copy the squashed commit onto a
+  ``feature/{slug}-{suffix}`` branch (the older namespace) and push THAT.
+  ``worktree/{id}`` is left on the squashed commit (sitting ahead of master
+  while the PR is open); a later ``git sync`` reconciles it on merge. Needs no
+  pre-push-hook cooperation, so it is the safe opt-out for a repo whose hook
+  still blocks the mediated refspec push.
 
 Either way the worktree stays on its own branch at the squashed commit; the
 ``head_scheme`` toggle is purely about PR-head naming + publish mechanism, not
