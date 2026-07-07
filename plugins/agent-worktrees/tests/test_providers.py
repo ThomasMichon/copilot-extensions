@@ -883,6 +883,89 @@ class TestCreatePRReconcile:
         assert fake.create_calls == 1                       # provider not re-called
         assert rec.prs[0].number == n1
 
+    def test_stale_merged_and_pruned_branch_not_reused(self, pr_repo, monkeypatch):
+        # #1984: the provider state query can RACE the merge (the PR is merged a
+        # beat after the query) or the provider can be briefly unreachable, so
+        # the reconcile leaves the record stale at 'open'. If the host deleted
+        # the feature branch on merge (auto-merge + delete-branch), reusing it
+        # would force-push (with lease) onto a now-absent ref -- the lease check
+        # rejects it and tracking wedges at 'creating'. create-pr must instead
+        # detect the branch is gone from the remote, treat the PR as terminal,
+        # and open a FRESH branch/PR derived from --title.
+        config, wid, wt_path, remote_dir = pr_repo
+        config = self._enable_open(config)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _StatefulFakeProvider()
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake
+        )
+
+        r1 = pr_ops.create_pr(wid, config, title="Add feature")   # opens #100
+        n1 = r1["number"]
+        assert r1["pr_opened"] is True, r1
+        assert r1["branch"] == "feature/add-feature-aaaa"
+
+        # The PR merged externally and the host auto-pruned its branch, but the
+        # provider still reports 'open' (query raced the merge) so the reconcile
+        # cannot catch it -- exactly the stale-'open' record #1984 hits.
+        _g("push", "origin", "--delete", "feature/add-feature-aaaa", cwd=wt_path)
+        assert git_ops.remote_branch_state(
+            "origin", "feature/add-feature-aaaa", cwd=wt_path
+        ) == "absent"
+        # (fake.pull_states[n1] stays "open" -- the reconcile agrees it's live.)
+
+        # New work for the next change, with a DIFFERENT title.
+        _g("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "d.txt").write_text("second\n")
+        _g("add", "-A", cwd=wt_path)
+        _g("commit", "-m", "second work", cwd=wt_path)
+
+        r2 = pr_ops.create_pr(wid, config, title="Second feature")
+        assert r2["success"], r2
+        assert "rerun" not in r2                            # NOT the reuse path
+        assert r2["branch"] == "feature/second-feature-aaaa"   # fresh, from title
+        assert r2["number"] != n1                           # a fresh PR
+        assert r2["pr_opened"] is True
+
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert len(rec.prs) == 2
+        assert rec.prs[0].number == n1
+        assert rec.prs[0].state == "merged"                 # pruned branch -> terminal
+        assert rec.prs[0].branch == "feature/add-feature-aaaa"
+        assert rec.prs[1].state == "open"
+        assert rec.prs[1].branch == "feature/second-feature-aaaa"
+
+    def test_present_remote_branch_still_reused(self, pr_repo, monkeypatch):
+        # The #1984 guard must be surgical: when the active PR is live AND its
+        # branch still exists on the remote, the legitimate iterate path is
+        # untouched (branch reused, no duplicate PR) even if a new title is
+        # passed. Only a *confirmed-absent* remote branch downgrades the PR.
+        config, wid, wt_path, _ = pr_repo
+        config = self._enable_open(config)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _StatefulFakeProvider()
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake
+        )
+
+        r1 = pr_ops.create_pr(wid, config, title="Add feature")   # opens #100
+        n1 = r1["number"]
+        assert git_ops.remote_branch_state(
+            "origin", "feature/add-feature-aaaa", cwd=wt_path
+        ) == "present"
+
+        _g("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "more.txt").write_text("more\n")
+        _g("add", "-A", cwd=wt_path)
+        _g("commit", "-m", "more work", cwd=wt_path)
+
+        r2 = pr_ops.create_pr(wid, config, title="Different title")
+        assert r2["success"], r2
+        assert r2["branch"] == "feature/add-feature-aaaa"   # reused, branch present
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert len(rec.prs) == 1
+        assert rec.prs[0].number == n1
+
 
 class TestRerunAutoOpen:
     """The create-pr re-run path (already on the feature branch) must complete
