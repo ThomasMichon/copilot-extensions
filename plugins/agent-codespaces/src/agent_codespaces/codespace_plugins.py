@@ -32,9 +32,10 @@ from __future__ import annotations
 
 import fnmatch
 import json
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 MANIFEST_FIELD = "codespacePlugins"
 
@@ -230,11 +231,43 @@ def parse_codespace_plugins(
     return specs
 
 
+def parse_operator_plugins(
+    entries: Any, declared_by: str = "codespaces.yaml"
+) -> list[CodespacePluginSpec]:
+    """Parse an operator's ``codespace_plugins`` list (from codespaces.yaml).
+
+    Same entry shape + tolerance as a manifest's ``codespacePlugins`` array
+    (harness-plugin sources are dropped defensively). ``declared_by`` marks the
+    control-plane origin so a resolved spec's provenance is clear.
+    """
+    return parse_codespace_plugins({MANIFEST_FIELD: entries}, declared_by)
+
+
+def _merge_spec(
+    merged: dict[str, CodespacePluginSpec], spec: CodespacePluginSpec
+) -> None:
+    """Merge one spec into ``merged`` (dedup by source, OR-merge enable)."""
+    existing = merged.get(spec.source)
+    if existing is None:
+        merged[spec.source] = spec
+        return
+    merged[spec.source] = CodespacePluginSpec(
+        source=spec.source,
+        enable=existing.enable or spec.enable,
+        # Union of filters preserves the broadest applicable scope.
+        for_workspace_repo=tuple(
+            dict.fromkeys(existing.for_workspace_repo + spec.for_workspace_repo)
+        ),
+        declared_by=tuple(dict.fromkeys(existing.declared_by + spec.declared_by)),
+    )
+
+
 def resolve_codespace_plugins(
     workspace_repo: str | None,
     *,
     copilot_home: Path | None = None,
     only_enabled: bool = True,
+    extra_specs: Iterable[CodespacePluginSpec] = (),
 ) -> list[CodespacePluginSpec]:
     """Resolve the CodeSpace-scoped plugins to inject into ``workspace_repo``'s CodeSpace.
 
@@ -243,6 +276,14 @@ def resolve_codespace_plugins(
     to ``workspace_repo`` (global entries always apply). Entries are de-duplicated
     by ``source``: ``enable`` is OR-merged (any declarer asking to enable wins),
     and every declaring plugin is recorded in ``declared_by``.
+
+    ``extra_specs`` are operator-declared specs (e.g. parsed from the control
+    plane's ``codespaces.yaml`` ``codespace_plugins`` list via
+    :func:`parse_operator_plugins`) merged in on equal footing with the swept
+    ones -- the seam an operator uses to put generic plugins (agent-worktrees,
+    efforts, ...) on every CodeSpace without editing a shared/repo plugin.json.
+    They are NOT subject to the ``only_enabled`` harness-enablement filter (the
+    operator declared them explicitly).
 
     When ``only_enabled`` is true and the harness's enabled-plugin set can be
     determined, declarations from plugins that are *not* enabled on the harness
@@ -259,21 +300,11 @@ def resolve_codespace_plugins(
         for spec in parse_codespace_plugins(manifest, declared_by=name):
             if not repo_matches(spec.for_workspace_repo, workspace_repo):
                 continue
-            existing = merged.get(spec.source)
-            if existing is None:
-                merged[spec.source] = spec
-            else:
-                merged[spec.source] = CodespacePluginSpec(
-                    source=spec.source,
-                    enable=existing.enable or spec.enable,
-                    # Union of filters preserves the broadest applicable scope.
-                    for_workspace_repo=tuple(
-                        dict.fromkeys(existing.for_workspace_repo + spec.for_workspace_repo)
-                    ),
-                    declared_by=tuple(
-                        dict.fromkeys(existing.declared_by + spec.declared_by)
-                    ),
-                )
+            _merge_spec(merged, spec)
+    for spec in extra_specs:
+        if not repo_matches(spec.for_workspace_repo, workspace_repo):
+            continue
+        _merge_spec(merged, spec)
     return [merged[k] for k in sorted(merged)]
 
 

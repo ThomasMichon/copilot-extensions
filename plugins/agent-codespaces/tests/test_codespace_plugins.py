@@ -263,3 +263,68 @@ def test_resolve_drops_harness_declarations(tmp_path):
     _set_enabled(tmp_path, "odsp-web-harness@dev-tmichon")
     specs = resolve_codespace_plugins("odsp-microsoft/odsp-web", copilot_home=tmp_path)
     assert [s.source for s in specs] == ["odsp-web-agent@dev-tmichon"]
+
+
+# --------------------------------------------------------------------------
+# Operator-declared globals (codespaces.yaml `codespace_plugins`)
+# --------------------------------------------------------------------------
+
+def test_parse_operator_plugins_drops_harness_and_parses():
+    from agent_codespaces.codespace_plugins import parse_operator_plugins
+    specs = parse_operator_plugins([
+        {"source": "agent-worktrees@copilot-extensions"},
+        {"source": "efforts@copilot-extensions", "enable": True},
+        {"source": "foo-harness@dev-tmichon"},          # dropped
+        "not-a-dict",                                     # ignored
+    ])
+    assert [s.source for s in specs] == [
+        "agent-worktrees@copilot-extensions",
+        "efforts@copilot-extensions",
+    ]
+    assert all(s.declared_by == ("codespaces.yaml",) for s in specs)
+    assert all(s.is_global for s in specs)  # no forWorkspaceRepo -> global
+
+
+def test_extra_specs_merged_as_global(tmp_path):
+    # No installed harness plugins; operator declares two globals.
+    from agent_codespaces.codespace_plugins import parse_operator_plugins
+    extra = parse_operator_plugins([
+        {"source": "agent-worktrees@copilot-extensions"},
+        {"source": "efforts@copilot-extensions"},
+    ])
+    specs = resolve_codespace_plugins(
+        "odsp-microsoft/odsp-web-codespaces", copilot_home=tmp_path, extra_specs=extra
+    )
+    assert [s.source for s in specs] == [
+        "agent-worktrees@copilot-extensions",
+        "efforts@copilot-extensions",
+    ]
+
+
+def test_extra_specs_union_with_swept(tmp_path):
+    from agent_codespaces.codespace_plugins import parse_operator_plugins
+    _install_plugin(
+        tmp_path, "dev-tmichon", "odsp-web-harness",
+        codespace_plugins=[{"source": "odsp-web-agent@dev-tmichon",
+                            "forWorkspaceRepo": "odsp-microsoft/odsp-web*"}],
+    )
+    _set_enabled(tmp_path, "odsp-web-harness@dev-tmichon")
+    extra = parse_operator_plugins([{"source": "agent-worktrees@copilot-extensions"}])
+    specs = resolve_codespace_plugins(
+        "odsp-microsoft/odsp-web-codespaces", copilot_home=tmp_path, extra_specs=extra
+    )
+    assert [s.source for s in specs] == [
+        "agent-worktrees@copilot-extensions",     # sorted() order
+        "odsp-web-agent@dev-tmichon",
+    ]
+
+
+def test_extra_specs_respect_repo_filter(tmp_path):
+    from agent_codespaces.codespace_plugins import parse_operator_plugins
+    extra = parse_operator_plugins([
+        {"source": "x@mkt", "forWorkspaceRepo": "contoso/*"},  # non-matching
+    ])
+    specs = resolve_codespace_plugins(
+        "odsp-microsoft/odsp-web", copilot_home=tmp_path, extra_specs=extra
+    )
+    assert specs == []
