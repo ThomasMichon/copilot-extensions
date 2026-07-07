@@ -1159,3 +1159,120 @@ def test_maintenance_ssh_detaches_console_stdin(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     maintenance._ssh_json(["ssh", "host", "agent-worktrees sync"], timeout=5)
     assert seen.get("stdin") is subprocess.DEVNULL
+
+
+def test_profiles_pivot_survives_empty_host_cols():
+    """Arrowing through the Profiles pivot with **no** configured host columns
+    must not crash (issue #149).
+
+    ``_fixture_source`` exposes no ``host_cols`` hook, so the engine falls back
+    to the empty ``_DEFAULT_HOST_COLS`` -- the exact state a machines.yaml with
+    no native-terminal copilot host produces. Previously this raised
+    ``IndexError`` in ``_visible_pcols`` (grid render), ``IndexError`` in the
+    PR-zone footer hint, and ``ZeroDivisionError`` on Left/Right (``% len(
+    host_cols)``)."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            assert scr.host_cols == []          # precondition: no host columns
+            scr.htab = 2                          # Profiles pivot
+            scr.sel = scr.default_sel()           # lands in the PR zone
+            await pilot.pause()                   # render body + footer (no crash)
+            for k in ("right", "left", "space", "down", "up", "right"):
+                await pilot.press(k)
+                await pilot.pause()
+            # Reaching here without an exception is the assertion.
+
+    asyncio.run(run())
+
+
+def test_run_spawns_ssh_off_console_on_windows(monkeypatch):
+    """``data_ssh._run`` must keep the ssh child off our console on Windows so a
+    failing ssh can't clear the console VT-input mode and break arrows (#148)."""
+    import subprocess
+
+    from agent_worktrees.picker_tui import data_ssh
+
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+    monkeypatch.setattr(data_ssh.os, "name", "nt")
+    monkeypatch.setattr(data_ssh, "_CREATE_NO_WINDOW", 0x08000000)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    data_ssh._run(["ssh", "host", "agent-worktrees list"], timeout=5)
+    assert seen.get("creationflags", 0) & 0x08000000
+    assert seen.get("stdin") is subprocess.DEVNULL
+
+
+def test_run_no_creationflags_on_posix(monkeypatch):
+    """On POSIX ``_run`` passes no Windows creationflags (would error)."""
+    import subprocess
+
+    from agent_worktrees.picker_tui import data_ssh
+
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+    monkeypatch.setattr(data_ssh.os, "name", "posix")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    data_ssh._run(["ssh", "host", "agent-worktrees list"], timeout=5)
+    assert "creationflags" not in seen
+
+
+def test_spawn_spawns_ssh_off_console_on_windows(monkeypatch):
+    """``LiveLoader._spawn`` must add CREATE_NO_WINDOW on Windows (#148),
+    alongside the existing CREATE_NEW_PROCESS_GROUP."""
+    import subprocess
+
+    from agent_worktrees.picker_tui import data_ssh
+
+    seen = {}
+
+    class _FakeProc:
+        returncode = 0
+
+        def __init__(self, argv, **kwargs):
+            seen.update(kwargs)
+
+        def communicate(self, timeout=None):
+            return ("{}", "")
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(data_ssh.os, "name", "nt")
+    monkeypatch.setattr(data_ssh, "_CREATE_NO_WINDOW", 0x08000000)
+    monkeypatch.setattr(subprocess, "Popen", _FakeProc)
+    loader = data_ssh.LiveLoader(sources=[])
+    loader._spawn(["ssh", "host", "agent-worktrees list"], timeout=5)
+    assert seen.get("creationflags", 0) & 0x08000000
+    assert seen.get("stdin") is subprocess.DEVNULL
+
+
+def test_maintenance_ssh_off_console_on_windows(monkeypatch):
+    """Remote Maintenance ssh ops must also run off our console on Windows."""
+    import subprocess
+
+    from agent_worktrees.picker_tui import maintenance
+
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+    monkeypatch.setattr(maintenance.os, "name", "nt")
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    maintenance._ssh_json(["ssh", "host", "agent-worktrees sync"], timeout=5)
+    assert seen.get("creationflags", 0) & 0x08000000
+    assert seen.get("stdin") is subprocess.DEVNULL

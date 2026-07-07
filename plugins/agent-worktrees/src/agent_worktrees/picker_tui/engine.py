@@ -615,7 +615,15 @@ class PickerScreen(Widget):
         return heads
 
     def default_sel(self):
-        return {0: ("BTN", 0), 1: ("BTN", 0), 2: ("PR", 0)}[self.htab]
+        d = {0: ("BTN", 0), 1: ("BTN", 0), 2: ("PR", 0)}[self.htab]
+        # The Profiles default (``("PR", 0)``) is only valid when there is at
+        # least one target row. With no targets (or no host columns) that stop
+        # doesn't exist, so fall back to the first real stop instead of handing
+        # back a phantom the caller would ``stops.index()`` on (ValueError).
+        stops = self.stops()
+        if d not in stops:
+            return stops[0] if stops else d
+        return d
 
     def anchors(self):
         return self.region_heads()
@@ -1095,6 +1103,10 @@ class PickerScreen(Widget):
         (caller switches to transposed mode)."""
         colw = self.profile_col_widths()
         n = len(colw)
+        if n == 0:
+            return None                # no host columns -- caller placeholders
+        if self.pcol >= n:
+            self.pcol = n - 1          # host set shrank; clamp the cursor column
         avail = width - lblw - 4   # reserve for ‹ / › markers
         if avail < colw[self.pcol]:
             return None
@@ -1168,6 +1180,22 @@ class PickerScreen(Widget):
         return t
 
     def _build_profiles(self, add, width, sel):
+        if not self.host_cols:
+            # No Profiles host columns -- no ``copilot`` machine in
+            # machines.yaml exposes a native-terminal (windows/linux) env, so
+            # ``_DEFAULT_HOST_COLS`` ([]) is the only fallback. Render a
+            # placeholder instead of indexing the empty column list, which used
+            # to raise IndexError in ``_visible_pcols`` when the operator
+            # arrowed into the Profiles pivot (issue #149).
+            add(Text(
+                "  No profile hosts configured -- add a copilot machine with a "
+                "windows/linux env to machines.yaml.",
+                style=C_DIM,
+            ))
+            add(Text(""))
+            add(self._profiles_button_row(width, sel == ("BTN", 0), self.btn_idx),
+                stop=("BTN", 0))
+            return
         colw = self.profile_col_widths()
         lblw = 30
         vis = self._visible_pcols(width, lblw)
@@ -1596,6 +1624,8 @@ class PickerScreen(Widget):
             return f"Space / Enter: select all {st} · ↓ rows · Tab region"
         if zone == "PR":
             ti = self.sel[1]
+            if not self.host_cols:
+                return "No profile hosts configured · Tab region"
             host = "{1} {2}".format(*self.host_cols[self.pcol])
             tlabel = (self.targets[ti]["label"]
                       if 0 <= ti < len(self.targets) else "?")
@@ -2022,7 +2052,8 @@ class PickerScreen(Widget):
                 if bset:
                     self.btn_idx = (self.btn_idx + d) % len(bset)
             elif zone == "PR":
-                self.pcol = (self.pcol + d) % len(self.host_cols)
+                if self.host_cols:
+                    self.pcol = (self.pcol + d) % len(self.host_cols)
             # L / C rows: bare ←/→ is a no-op (machine = Ctrl+←/→)
             return
 
@@ -2099,6 +2130,8 @@ class PickerScreen(Widget):
         self.sel = ("V", 0) if was_v else self.default_sel()
 
     def _toggle_cell(self):
+        if not self.host_cols:
+            return                       # no profile hosts -> nothing to toggle
         ti = self.sel[1]
         if self.cell_locked(ti, self.pcol):
             self.debug = "self · agent profile is mandatory (locked)"

@@ -321,20 +321,31 @@ def _is_classify_unsupported(stderr: str) -> bool:
     return "unrecognized arguments" in s and "--classify" in s
 
 
+# On Windows, keep ssh children off the picker's console. A child ``ssh.exe``
+# otherwise opens the shared CONIN$/CONOUT$ directly -- writing its errors over
+# the TUI and, worse, calling SetConsoleMode which clears the
+# ENABLE_VIRTUAL_TERMINAL_INPUT bit Textual set on that console. After that,
+# arrow-key escape sequences decode as NUL (ctrl+@) and Up/Down stop working
+# until the picker is relaunched, while single-byte keys ([, ], Tab, Enter,
+# Esc) keep working. This bites hardest when the ssh *fails* (e.g. an
+# unreachable remote), because the failing child mangles the console mode and
+# never restores it. CREATE_NO_WINDOW gives the child its own (absent) console
+# so it can't touch ours. stdin=DEVNULL additionally stops ssh from reading the
+# operator's keystrokes.
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def _run(argv, timeout):
-    return subprocess.run(
-        argv, capture_output=True, text=True,
+    kwargs = dict(
+        capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=timeout,
-        # Detach the child from the console's stdin. Without this, an ``ssh``
-        # child inherits the terminal's keyboard input and *reads* it (ssh
-        # forwards stdin to the remote) -- so while the picker's background
-        # load fan-out is alive, the operator's keystrokes are swallowed by
-        # the ssh processes instead of reaching Textual's input reader
-        # (which reads the same console handle). Input only "unblocks" once
-        # the SSH calls finish. DEVNULL gives ssh an empty stdin (instant
-        # EOF) and leaves the console input with the TUI.
+        # DEVNULL gives ssh an empty stdin (instant EOF) so a background ssh
+        # child can't read the operator's keystrokes out from under the TUI.
         stdin=subprocess.DEVNULL,
     )
+    if os.name == "nt" and _CREATE_NO_WINDOW:
+        kwargs["creationflags"] = _CREATE_NO_WINDOW
+    return subprocess.run(argv, **kwargs)
 
 
 def _kill_proc_tree(proc):
@@ -498,8 +509,13 @@ class LiveLoader:
         if os.name == "posix":
             kwargs["start_new_session"] = True   # own group -> killpg on cancel
         else:
-            kwargs["creationflags"] = getattr(
-                subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            # CREATE_NEW_PROCESS_GROUP: killable as a group on cancel.
+            # CREATE_NO_WINDOW: keep the ssh child off our console so a failing
+            # ssh can't clear the console's VT-input mode and break arrow keys.
+            kwargs["creationflags"] = (
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                | _CREATE_NO_WINDOW
+            )
         proc = subprocess.Popen(argv, **kwargs)
         with self._procs_lock:
             self._procs.append(proc)
