@@ -12,9 +12,9 @@ account per agent.
 > (`agent-dispatch mcp`), an **installer** (marketplace-registered;
 > `scripts/init.sh` / `scripts/init.ps1` deploy a venv + binstub + deploy
 > manifest), an **SSE event stream** (`GET /events` / `agent-dispatch watch`),
-> and **agent-bridge spawn** (`create --spawn`). Still to come: the Windows
-> scheduled-task service — the Linux systemd unit already ships
-> (`init.sh --service`).
+> and **agent-bridge spawn** (`create --spawn`). The coordinator can auto-start
+> as a service on both platforms: a **systemd user unit** (`init.sh --service`)
+> and a **Windows Scheduled Task** (`init.ps1 -Service`).
 
 ## Install
 
@@ -31,18 +31,26 @@ The installer creates `~/.agent-dispatch/.venv`, an `agent-dispatch` binstub in
 
 ### Running the coordinator as a service
 
-On the host that *is* the coordinator, add `--service` (Linux/WSL) to install a
-**systemd user unit** that runs `agent-dispatch serve` and restarts on failure:
+On the host that *is* the coordinator, install an auto-starting service that runs
+`agent-dispatch serve` and restarts on failure:
 
 ```bash
+# Linux/WSL -- a systemd user unit:
 bash "$(copilot plugin path agent-dispatch)/scripts/init.sh" --service
 systemctl --user status agent-dispatch          # manage it
 # edit ~/.agent-dispatch/service.env (host/port/token), then: systemctl --user restart agent-dispatch
 ```
 
-A machine that is only a *client* of a remote coordinator omits `--service` and
-just points `AGENT_DISPATCH_URL` at the coordinator host. (A Windows scheduled-task
-equivalent for `init.ps1` is a follow-up; on Windows run `agent-dispatch serve`.)
+```powershell
+# Windows -- a Scheduled Task (starts at logon):
+pwsh -File <plugin>\scripts\init.ps1 -Service
+Get-ScheduledTask -TaskName agent-dispatch | Get-ScheduledTaskInfo   # manage it
+# edit %USERPROFILE%\.agent-dispatch\service.env, then: Start-ScheduledTask -TaskName agent-dispatch
+```
+
+Both read an editable `service.env` (host/port/db/token) beside the runtime. A
+machine that is only a *client* of a remote coordinator omits the service flag
+and just points `AGENT_DISPATCH_URL` at the coordinator host.
 
 ## Why
 
