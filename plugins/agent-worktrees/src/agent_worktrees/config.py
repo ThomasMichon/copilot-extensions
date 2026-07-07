@@ -98,23 +98,25 @@ class PRConfig:
     # ALWAYS lands on the squashed commit: HEAD stays on ``worktree/<id>`` and
     # the branch is never reset off it (#1804), under either scheme.
     #
-    # - ``snapshot`` (default) -- copy the squashed commit onto a separate local
-    #   ``{prefix}/<slug>`` branch (older ``feature/`` namespace) and push that.
-    #   ``worktree/<id>`` keeps the squashed commit (sits ahead of master while
-    #   the PR is open; a later ``git sync`` reconciles it on merge).
-    # - ``refspec`` -- push ``worktree/<id>`` directly to the PR head ref via a
-    #   refspec (no local feature branch). Requires every PR-mode repo's pre-push
-    #   hook to allow the mediated refspec push (a facility hook that blocks
-    #   ``worktree/*`` by ref name must honor ``AGENT_WORKTREES_PR_PUSH=1``
-    #   first -- see aperture-labs #1815). A parallel ``--new`` PR auto-falls-back
-    #   to a snapshot ref.
+    # - ``refspec`` (default, #1815/#1899) -- push ``worktree/<id>`` directly to
+    #   the PR head ref via a refspec (no local feature branch; PR head named
+    #   ``pr/<slug>``). Requires every PR-mode repo's pre-push hook to allow the
+    #   mediated refspec push (a facility hook that blocks ``worktree/*`` by ref
+    #   name must honor ``AGENT_WORKTREES_PR_PUSH=1`` first -- see aperture-labs
+    #   #1815/#1889). A parallel ``--new`` PR auto-falls-back to a snapshot ref.
+    # - ``snapshot`` (legacy/compatible) -- copy the squashed commit onto a
+    #   separate local ``{prefix}/<slug>`` branch (older ``feature/`` namespace)
+    #   and push that. Needs no pre-push-hook cooperation, so it is the safe
+    #   opt-out for a repo whose hook still blocks the refspec push.
+    #   ``worktree/<id>`` keeps the squashed commit either way (sits ahead of
+    #   master while the PR is open; a later ``git sync`` reconciles it on merge).
     #
     # ``head_pattern`` is the PR head-name template (tokens ``{prefix}``,
     # ``{slug}``, ``{suffix}``, ``{username}``, ``{machine}``). Empty means the
-    # scheme default: ``{prefix}/{slug}-{suffix}`` under ``snapshot``
-    # (``feature/<slug>``) and ``pr/{slug}-{suffix}`` under ``refspec``.
+    # scheme default: ``pr/{slug}-{suffix}`` under ``refspec`` and
+    # ``{prefix}/{slug}-{suffix}`` under ``snapshot`` (``feature/<slug>``).
     # Repos that want e.g. ``user/<username>/<slug>-<suffix>`` set it explicitly.
-    head_scheme: str = "snapshot"  # snapshot | refspec
+    head_scheme: str = "refspec"   # refspec (default) | snapshot
     head_pattern: str = ""         # empty -> scheme default (see above)
     # Provider-plugin settings (PR creation via a provider CLI). ``api_base``
     # is the hosting endpoint -- required for self-hosted Gitea
@@ -816,8 +818,12 @@ def _parse_pr(raw: Any) -> PRConfig:
         labels = (str(raw_labels),)
     else:
         labels = ()
-    head_scheme = str(raw.get("head_scheme", "snapshot")).strip().lower()
+    head_scheme = str(raw.get("head_scheme", "refspec")).strip().lower()
     if head_scheme not in ("snapshot", "refspec"):
+        # A present-but-garbage value signals misconfiguration -- fall back to
+        # the maximally-compatible scheme (snapshot needs no pre-push-hook
+        # cooperation), NOT the refspec default, so a typo can't silently break
+        # pushes in a repo whose hook isn't refspec-ready.
         head_scheme = "snapshot"
     return PRConfig(
         enabled=enabled,

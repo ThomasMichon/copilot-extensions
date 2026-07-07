@@ -736,12 +736,13 @@ class TestAutoOpenDefault:
 
 
 class TestHeadSchemeConfig:
-    def test_defaults_to_snapshot(self):
+    def test_defaults_to_refspec(self):
         from agent_worktrees.config import _parse_pr
-        assert cfg.PRConfig().head_scheme == "snapshot"
+        # #1899: refspec is the default scheme (missing key + dataclass default).
+        assert cfg.PRConfig().head_scheme == "refspec"
         assert cfg.PRConfig().head_pattern == ""
         pr = _parse_pr({"provider": "gitea"})
-        assert pr.head_scheme == "snapshot"
+        assert pr.head_scheme == "refspec"
         assert pr.head_pattern == ""
 
     def test_parses_refspec_and_pattern(self):
@@ -755,6 +756,9 @@ class TestHeadSchemeConfig:
 
     def test_unknown_scheme_falls_back_to_snapshot(self):
         from agent_worktrees.config import _parse_pr
+        # A garbage value falls back to the compatible snapshot scheme, NOT the
+        # refspec default (#1899) -- a typo must not silently break pushes in a
+        # repo whose pre-push hook isn't refspec-ready.
         assert _parse_pr({"head_scheme": "bogus"}).head_scheme == "snapshot"
         # Explicit refspec + case-insensitive normalization still honored.
         assert _parse_pr({"head_scheme": "REFSPEC"}).head_scheme == "refspec"
