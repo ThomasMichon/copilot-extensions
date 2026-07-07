@@ -19,8 +19,11 @@ tunnel:
   extension updates.
 
 The generic git-credential proxy that used to live alongside these is no
-longer needed: the CodeSpace's native Git Credential Helper stack already
-includes ``ado-auth-helper``, so git credentials resolve through it.
+longer needed: ``build_provision_command`` pins git's per-host
+``credential.<host>.helper`` for the ADO hosts and github.com to the relay-first
+``~/ado-auth-helper`` wrapper, so headless ``git push`` resolves credentials
+through the relay (the native config points ADO at the VS Code broker -- empty
+headless -- and GitHub at a codespace-scoped token, #133/#112/#159).
 
 The host-side relay server lives in the ``credential_relay`` lib (run by
 agent-bridge; sources injected by agent-codespaces ``relay_provider``).
@@ -147,6 +150,27 @@ def build_provision_command() -> str:
         'ln -sf "$HOME/$_n" "$HOME/.local/bin/$_n"; '
         'done; '
         'rm -f "$HOME/.agent-codespaces-auth-wrapper"; '
+        # --- #133/#112/#159: pin the relay-first git credential helper --------
+        # The native git config points ADO (onedrive.visualstudio.com /
+        # dev.azure.com) at the VS Code broker (`external-git ado-helper`), which
+        # returns EMPTY over headless SSH -> `git push` fails with "could not
+        # read Username"; and GitHub at the codespace-scoped
+        # `gitcredential_github.sh` -- a valid token, but scoped to the
+        # CodeSpaces repo, so pushing to another GitHub repo (e.g. the
+        # dotfiles/harness repo) 403s. Both fail headless even though the relay
+        # itself serves working creds. Point these hosts at the relay-first
+        # ~/ado-auth-helper wrapper (host identity over the relay): the leading
+        # empty value resets any lower-priority helper so ours is authoritative,
+        # and the wrapper falls back to the real VS Code helper when no relay is
+        # active, so interactive VS Code auth is unaffected. Best-effort.
+        "( "
+        'for _h in "https://onedrive.visualstudio.com" '
+        '"https://dev.azure.com" "https://github.com"; do '
+        'git config --global --unset-all "credential.${_h}.helper" 2>/dev/null || true; '
+        'git config --global --add "credential.${_h}.helper" ""; '
+        'git config --global --add "credential.${_h}.helper" "$HOME/ado-auth-helper"; '
+        "done "
+        ") || true; "
         # --- #18: headless-boot git hardening ---------------------------------
         # Persist GIT_TERMINAL_PROMPT=0 for ALL login shells so a cold
         # start-from-stopped boot step (e.g. setup-agency calling
