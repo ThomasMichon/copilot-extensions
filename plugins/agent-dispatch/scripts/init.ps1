@@ -407,7 +407,12 @@ if (Test-Path `$envFile) {
             -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
             -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
             -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
-        $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" `
+        # UserId must be a resolvable SID. $env:USERDOMAIN is 'WORKGROUP' on a
+        # non-domain machine, and 'WORKGROUP\<user>' has no SID mapping, so build
+        # the principal from the current Windows identity's fully-qualified name
+        # (yields 'HOSTNAME\user' on a workgroup box, 'DOMAIN\user' on a domain).
+        $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $principal = New-ScheduledTaskPrincipal -UserId $currentUser `
             -LogonType Interactive -RunLevel Limited
 
         $prevEAP = $ErrorActionPreference
