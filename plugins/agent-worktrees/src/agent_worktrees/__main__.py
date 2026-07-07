@@ -7572,7 +7572,18 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         return 0  # nothing to register -- silent no-op
 
     if not wt_id and cwd:
-        wt_id = tracking.find_worktree_id_by_cwd(cwd)
+        # The sessionStart hook runs from the *plugin install dir*, not the
+        # worktree, and register-session is a no-project command -- so main()
+        # never resolved a project and cfg.tracking_dir() (used by the lookup
+        # below) would raise.  The payload's cwd *is* the worktree, so resolve
+        # project context from it before the lookup (mirrors status-updater's
+        # _activate_project_for_path fix).  Guard the lookup so a cwd outside
+        # any adopted project stays a silent no-op rather than an error.
+        _activate_project_for_path(cwd)
+        try:
+            wt_id = tracking.find_worktree_id_by_cwd(cwd)
+        except Exception:
+            return 0
     if not wt_id:
         return 0  # cwd isn't a tracked worktree (base repo / unrelated dir)
 
@@ -8051,9 +8062,13 @@ def _git_toplevel(path: Path) -> Path | None:
 
 
 # Commands that work without a project context (no load_config/project_name).
+# register-session is hook-invoked from the *plugin install dir* (not a
+# worktree), so CWD-based project resolution in main() would balk; it resolves
+# its own project from the sessionStart payload's cwd instead (see
+# cmd_register_session -> _activate_project_for_path).
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "install", "register", "hook",
-    "picker", "reap-sessions", "status-updater", "restart",
+    "picker", "reap-sessions", "status-updater", "restart", "register-session",
 }
 
 
