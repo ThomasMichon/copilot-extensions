@@ -157,6 +157,16 @@ class CodespacesConfig:
     # Global provisioning hooks (apply to every CodeSpace)
     provision: ProvisionConfig = field(default_factory=lambda: ProvisionConfig())
 
+    # Operator-declared CodeSpace-scoped plugins (the control-plane's own
+    # `codespace_plugins:` list in codespaces.yaml). Same entry shape as a
+    # harness plugin's `codespacePlugins` manifest array
+    # (``{source, enable?, forWorkspaceRepo?}``) -- resolved by
+    # ``codespace_plugins.resolve_codespace_plugins`` alongside the ones swept
+    # from installed harness plugins. This is where an operator declares the
+    # generic plugins every CodeSpace should get (e.g. agent-worktrees, efforts)
+    # WITHOUT baking that choice into a shared or repo-specific plugin.json.
+    codespace_plugins: list[dict] = field(default_factory=list)
+
     # Source tracking
     source_paths: list[Path] = field(default_factory=list)
 
@@ -416,6 +426,13 @@ def load_merged_config() -> CodespacesConfig:
             merged.provision.files.extend(parsed.files)
             merged.provision.on_connect.extend(parsed.on_connect)
             merged.provision.on_create.extend(parsed.on_create)
+
+        # Operator-declared CodeSpace-scoped plugins (union across adopted repos).
+        cs_plugins_raw = raw.get("codespace_plugins")
+        if isinstance(cs_plugins_raw, list):
+            merged.codespace_plugins.extend(
+                e for e in cs_plugins_raw if isinstance(e, dict)
+            )
 
     return merged
 

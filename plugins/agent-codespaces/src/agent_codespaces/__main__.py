@@ -487,7 +487,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         cs_plugin_dirs: list[str] = []
         if not args.no_relay:
             cs_plugin_dirs = await _register_codespace_plugins(
-                manager, args.name, getattr(args, "repo", None),
+                manager, args.name, getattr(args, "repo", None), config,
             )
 
         # Run repo-declared provision hooks (by-convention extras from the
@@ -661,16 +661,19 @@ async def _provision_dotfiles(manager, name: str, config) -> None:
 
 
 async def _register_codespace_plugins(
-    manager, name: str, repo: str | None
+    manager, name: str, repo: str | None, config
 ) -> list[str]:
     """Register CodeSpace-scoped plugins into the CodeSpace + return their dirs.
 
     The **CodeSpace-scoped** plugin axis, delivered via BOTH lanes:
     - **user settings (interactive lane):** resolves the harness's
-      ``codespacePlugins`` for this CodeSpace's workspace repo
-      (:func:`codespace_plugins.resolve_codespace_plugins`) and writes them into
-      the CodeSpace's user ``~/.copilot/settings.json`` + pre-installs payloads
-      (see :mod:`codespace_register`). Honored by interactive / ``copilot -p``.
+      ``codespacePlugins`` for this CodeSpace's workspace repo -- both those
+      swept from installed harness plugins AND the operator-declared
+      ``codespaces.yaml`` ``codespace_plugins`` list
+      (:func:`codespace_plugins.resolve_codespace_plugins`) -- and writes them
+      into the CodeSpace's user ``~/.copilot/settings.json`` + pre-installs the
+      payloads (see :mod:`codespace_register`). Honored by interactive /
+      ``copilot -p``.
     - **``--plugin-dir`` (dispatch lane):** ``copilot --acp`` (the agent-bridge
       dispatch) does **NOT** honor ``enabledPlugins`` -- only ``--plugin-dir``
       surfaces plugin skills under ``--acp``. So this returns the on-CodeSpace
@@ -680,7 +683,7 @@ async def _register_codespace_plugins(
     Best-effort and idempotent: logs a warning on failure but never raises, and
     returns ``[]`` when there is nothing to register.
     """
-    from .codespace_plugins import resolve_codespace_plugins
+    from .codespace_plugins import parse_operator_plugins, resolve_codespace_plugins
     from .codespace_register import build_register_command, codespace_plugin_dirs
 
     try:
@@ -691,7 +694,12 @@ async def _register_codespace_plugins(
         if repo is None:
             repo = _lookup_codespace_repo(name)
 
-        specs = resolve_codespace_plugins(repo)
+        # Merge the operator-declared globals (codespaces.yaml `codespace_plugins`)
+        # with the set swept from installed harness plugins.
+        operator_specs = parse_operator_plugins(
+            getattr(config, "codespace_plugins", []) or []
+        )
+        specs = resolve_codespace_plugins(repo, extra_specs=operator_specs)
         command = build_register_command(specs)
         if not command:
             return []
