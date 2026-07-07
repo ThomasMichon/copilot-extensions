@@ -461,9 +461,15 @@ def scan_sessions_fast(
         if not rec.worktree_path:
             continue
 
-        # sessions=None means pre-registry -- needs full scan fallback
+        # sessions=None means pre-registry; an empty list means the registry
+        # is active but no session was recorded for this worktree (e.g. the
+        # register-session hook never fired).  Both need the full-scan
+        # fallback -- otherwise the fast path scans nothing and the worktree
+        # silently loses its session summary + turn count (so the status bar
+        # shows a bare UNUSED state with no title).  Mirrors the same
+        # empty-or-None fallback in ``find_latest_session_id_fast``.
         sessions = getattr(rec, "sessions", None)
-        if sessions is None:
+        if not sessions:
             fallback_paths.append(rec.worktree_path)
             continue
 

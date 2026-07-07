@@ -280,7 +280,7 @@ class TestScanSessionsFast:
         assert ctx.session_count[_normalize_path(wt_legacy)] == 1
 
     def test_empty_sessions_list(self, tmp_session_state_dir: Path):
-        """sessions=[] (indexed, none registered) should produce empty context."""
+        """sessions=[] with nothing on disk -> empty context (via fallback)."""
         rec = self._make_record("empty-wt", "/tmp/empty", sessions=[])
 
         with patch(
@@ -290,6 +290,30 @@ class TestScanSessionsFast:
             ctx = scan_sessions_fast([rec])
 
         assert ctx.session_count == {}
+
+    def test_empty_sessions_falls_back_to_full_scan(
+        self, tmp_session_state_dir: Path,
+    ):
+        """sessions=[] (registry active but hook never recorded the session)
+        must fall back to a full cwd-based scan so the worktree still gets its
+        summary + turn count -- otherwise the status bar loses its title and
+        reads a bare UNUSED state.  Mirrors find_latest_session_id_fast."""
+        wt_path = "/tmp/wt-empty-recovered"
+        make_session_dir(
+            tmp_session_state_dir, "unregistered-sess", wt_path,
+            summary="Recovered session",
+        )
+        rec = self._make_record("empty-recovered-wt", wt_path, sessions=[])
+
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            ctx = scan_sessions_fast([rec])
+
+        norm = _normalize_path(wt_path)
+        assert ctx.session_count[norm] == 1
+        assert "Recovered session" in ctx.latest_summary[norm]
 
 
 # ---------------------------------------------------------------------------
