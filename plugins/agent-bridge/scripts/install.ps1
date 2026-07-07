@@ -941,27 +941,42 @@ function Invoke-Start {
     $logFile = Join-Path $InstallDir 'agent-bridge.log'
     $errFile = Join-Path $InstallDir 'agent-bridge-err.log'
 
-    # Headless (non-interactive) mode: the daemon MUST be started by the
-    # scheduled task so it runs in session 0 and survives the installer session
-    # closing. A direct spawn here is parented to the installer (often an SSH
-    # session) and dies when that session ends -- leaving the daemon down until
-    # the next boot trigger. Detect the headless task by its S4U/Password
-    # principal and start it via Start-ScheduledTask, health-gating as usual.
+    # Prefer the scheduled task to start the daemon whenever one is registered
+    # -- for BOTH headless (S4U/Password, session 0) and at-logon (interactive)
+    # tasks. The Task Scheduler owns the resulting process, so it is NOT parented
+    # to the installer: a direct spawn here is a child of the installer (often an
+    # SSH session) and Windows OpenSSH kills that whole process tree when the
+    # session ends, taking the daemon down until the next boot/logon trigger.
+    # Starting via Start-ScheduledTask makes the daemon survive the installer
+    # session closing regardless of task type. (For an at-logon task this runs in
+    # the logged-on user's interactive session; if nobody is logged on -- e.g. an
+    # SSH install with no desktop session -- the task can't run, so we fall
+    # through to a best-effort direct spawn and advise -NonInteractive.)
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if ($task -and ($task.Principal.LogonType -in @('S4U', 'Password'))) {
-        Write-Step 'Starting agent-bridge via scheduled task (headless)...'
+    if ($task) {
+        $headless = $task.Principal.LogonType -in @('S4U', 'Password')
+        $mode = if ($headless) { 'headless' } else { 'logon session' }
+        Write-Step "Starting agent-bridge via scheduled task ($mode)..."
         Start-ScheduledTask -TaskName $TaskName
         for ($i = 0; $i -lt 30; $i++) {
             Start-Sleep -Seconds 1
             if (Test-HealthOnce) {
                 $rp = Get-RunningProcess
                 $pidTxt = if ($rp) { "pid=$($rp.Id), " } else { '' }
-                Write-Ok ("agent-bridge started ({0}port={1}, headless)" -f $pidTxt, $Port)
+                Write-Ok ("agent-bridge started ({0}port={1}, {2})" -f $pidTxt, $Port, $mode)
                 return
             }
         }
-        Write-Warn 'agent-bridge did not become healthy within 30s via the scheduled task -- check agent-bridge-err.log'
-        return
+        # Headless tasks have no interactive-session dependency, so a miss here
+        # is a real failure -- report and stop. An at-logon task that didn't come
+        # up is most likely "nobody logged on"; fall through to the direct spawn
+        # as a last resort so the daemon isn't left down, and hint the durable fix.
+        if ($headless) {
+            Write-Warn 'agent-bridge did not become healthy within 30s via the scheduled task -- check agent-bridge-err.log'
+            return
+        }
+        Write-Warn 'at-logon scheduled task did not yield a healthy daemon (no interactive session?) -- falling back to a direct start'
+        Write-Warn '  For an always-on host reached over SSH, reinstall headless: install.ps1 update -NonInteractive'
     }
 
     # Start the service through a DETACHED, hidden pwsh launched via
