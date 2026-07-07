@@ -3461,6 +3461,35 @@ def cmd_status_context(args: argparse.Namespace) -> int:
     return 0
 
 
+def _activate_project_for_path(path: str | None) -> None:
+    """Resolve + thread the active project in-process from a worktree path.
+
+    ``status-updater`` is a ``_NO_PROJECT_COMMANDS`` entry, so ``main()``
+    deliberately skips CWD-based project resolution for it -- but the updater
+    *does* know its target worktree via ``--path``.  Without an active project,
+    ``cfg.tracking_dir()`` raises inside ``_find_record_for_path`` (which
+    swallows it and returns ``None``), so every status-bar field that comes
+    only from the tracking record -- the ``repo:id4`` identity locus and the
+    session title -- silently disappears from the bar.
+
+    Resolve the project git-like from the path's anchor (the same reverse
+    lookup ``main()`` uses for CWD) and set it in process, so the status
+    renderers can find the worktree's record.  A no-op when a project is
+    already active or the path is not inside an adopted repo.
+    """
+    if cfg.active_project():
+        return
+    try:
+        anchor = _git_toplevel(Path(path) if path else Path.cwd())
+        if anchor is None:
+            return
+        name = _reverse_lookup_project(anchor)
+        if name:
+            cfg.set_active_project(name)
+    except Exception:
+        pass
+
+
 def cmd_status_updater(args: argparse.Namespace) -> int:
     """Keep a session's status-bar vars fresh without per-render spawns.
 
@@ -3492,6 +3521,12 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     mux_bin = shutil.which(mux) or mux
     path = args.path or os.getcwd()
     interval = args.interval if args.interval and args.interval >= 2 else 15
+
+    # status-updater is a no-project command, so main() never resolved a
+    # project for us -- but the status renderers need one to find the
+    # worktree's tracking record (repo:id locus + session title).  Resolve it
+    # git-like from --path before rendering anything.
+    _activate_project_for_path(path)
 
     def _mux(*a: str) -> "subprocess.CompletedProcess[str] | None":
         try:

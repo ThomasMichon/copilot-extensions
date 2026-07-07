@@ -171,3 +171,67 @@ def test_status_updater_survives_render_errors(monkeypatch):
     assert rc == 0
     # ctx render raised -> no @aw_ctx; seg render raised -> empty @aw_seg set.
     assert ("@aw_seg", "") in calls
+
+
+def test_status_updater_activates_project_from_path(monkeypatch):
+    """The loop must resolve project context from --path before rendering.
+
+    ``status-updater`` is a no-project command, so ``main()`` never sets an
+    active project for it; without this the status renderers can't find the
+    worktree's tracking record and the bar loses its repo:id locus + title.
+    """
+    seen: list[str | None] = []
+    monkeypatch.setattr(subprocess, "run", _fake_mux([0, 0, 1], []))
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda p: seen.append(p))
+
+    rc = m.cmd_status_updater(_ns(path="/w/x"))
+
+    assert rc == 0
+    assert seen == ["/w/x"]
+
+
+def test_activate_project_for_path_sets_from_anchor(monkeypatch):
+    """Resolve the project git-like from the path anchor and thread it in."""
+    from pathlib import Path
+
+    set_to: list[str | None] = []
+    monkeypatch.setattr(m.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(m.cfg, "set_active_project", lambda n: set_to.append(n))
+    monkeypatch.setattr(m, "_git_toplevel", lambda p: Path("/anchor/proj"))
+    monkeypatch.setattr(m, "_reverse_lookup_project", lambda a: "proj")
+
+    m._activate_project_for_path("/w/x")
+
+    assert set_to == ["proj"]
+
+
+def test_activate_project_for_path_noop_when_already_active(monkeypatch):
+    """When a project is already active, don't touch resolution."""
+    called: list[bool] = []
+    monkeypatch.setattr(m.cfg, "active_project", lambda: "already")
+    monkeypatch.setattr(
+        m, "_git_toplevel", lambda p: called.append(True) or None
+    )
+    monkeypatch.setattr(
+        m.cfg, "set_active_project",
+        lambda n: (_ for _ in ()).throw(AssertionError("should not set")),
+    )
+
+    m._activate_project_for_path("/w/x")
+
+    assert called == []
+
+
+def test_activate_project_for_path_noop_outside_repo(monkeypatch):
+    """No anchor (path not in a repo) -> leave the active project unset."""
+    monkeypatch.setattr(m.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
+    monkeypatch.setattr(
+        m.cfg, "set_active_project",
+        lambda n: (_ for _ in ()).throw(AssertionError("should not set")),
+    )
+
+    m._activate_project_for_path("/not/a/repo")  # must not raise
