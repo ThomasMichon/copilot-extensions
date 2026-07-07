@@ -72,6 +72,23 @@ class TestProvisionCommand:
         assert "grep -q ado-auth-helper-relay" in cmd
         assert '"$HOME/.$_n-vscode"' in cmd
 
+    def test_pins_relay_credential_helper_for_ado_and_github(self) -> None:
+        """#133/#112/#159: git's per-host credential.<host>.helper must be
+        pinned to the relay-first ~/ado-auth-helper for the ADO hosts and
+        github.com, with a leading empty reset so it overrides the native
+        broker/codespace-token helpers, so headless `git push` works."""
+        cmd = build_provision_command()
+        for host in (
+            "https://onedrive.visualstudio.com",
+            "https://dev.azure.com",
+            "https://github.com",
+        ):
+            assert host in cmd
+        # The pin points at the relay-first wrapper...
+        assert 'git config --global --add "credential.${_h}.helper" "$HOME/ado-auth-helper"' in cmd
+        # ...preceded by an empty reset so lower-priority helpers don't win.
+        assert 'git config --global --add "credential.${_h}.helper" ""' in cmd
+
     def test_embedded_payload_roundtrips(self) -> None:
         cmd = build_provision_command()
         # Extract base64 blobs and confirm they decode to the asset text. There
