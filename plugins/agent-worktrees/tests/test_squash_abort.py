@@ -118,10 +118,25 @@ def test_squash_bad_upstream_returns_reason(tmp_path: Path):
 # finalize.push_changes -- abort vs. opt-in fallback
 # ---------------------------------------------------------------------------
 
-def _make_pushable_repo(tmp_path: Path, n_commits: int):
+def _make_pushable_repo(tmp_path: Path, n_commits: int, monkeypatch):
     """Build a repo at <tmp_path>/repo on branch worktree/repo, n commits ahead
-    of an `origin/base` remote-tracking ref. Returns (repo_path, worktree_id)."""
+    of an `origin/base` remote-tracking ref. Returns (repo_path, worktree_id).
+
+    Pins ``config.tracking_dir`` to a scratch dir (mirroring the ``pr_repo``
+    fixture in conftest): ``finalize.push_changes`` reads the tracking record
+    via the module-global ``cfg.tracking_dir()``, which resolves the *active
+    project* from CWD/``WORKTREE_PROJECT`` and raises when none can be found.
+    These tests supply a ``Config`` directly but never enter a managed project,
+    so without this patch ``tracking_dir()`` raises before the squash logic
+    under test even runs.
+    """
     from agent_worktrees import config as cfg
+
+    tracking_d = tmp_path / "tracking"
+    tracking_d.mkdir()
+    monkeypatch.setattr(
+        "agent_worktrees.config.tracking_dir", lambda: tracking_d
+    )
 
     repo = _make_repo(tmp_path)  # branch `base`, one commit
     base_sha = git_ops.git("rev-parse", "HEAD", cwd=str(repo), check=False).stdout.strip()
@@ -151,7 +166,7 @@ def _make_pushable_repo(tmp_path: Path, n_commits: int):
 def test_push_changes_aborts_on_squash_failure(tmp_path: Path, monkeypatch):
     from agent_worktrees import finalize
 
-    repo, wt_id, config = _make_pushable_repo(tmp_path, 3)
+    repo, wt_id, config = _make_pushable_repo(tmp_path, 3, monkeypatch)
     orig_head = git_ops.git("rev-parse", "HEAD", cwd=str(repo), check=False).stdout.strip()
     _install_failing_pre_commit_hook(repo)
 
@@ -175,7 +190,7 @@ def test_push_changes_surfaces_reason_in_output(tmp_path: Path, monkeypatch, cap
     not just return it internally (issue #783 acceptance)."""
     from agent_worktrees import finalize
 
-    repo, wt_id, config = _make_pushable_repo(tmp_path, 3)
+    repo, wt_id, config = _make_pushable_repo(tmp_path, 3, monkeypatch)
     _install_failing_pre_commit_hook(repo)
     monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
 
@@ -199,7 +214,7 @@ def test_allow_unsquashed_proceeds_past_squash(tmp_path: Path, monkeypatch):
     step -- the flow continues (here we stop it right after via a sentinel)."""
     from agent_worktrees import finalize
 
-    repo, wt_id, config = _make_pushable_repo(tmp_path, 3)
+    repo, wt_id, config = _make_pushable_repo(tmp_path, 3, monkeypatch)
     _install_failing_pre_commit_hook(repo)
     monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
 
