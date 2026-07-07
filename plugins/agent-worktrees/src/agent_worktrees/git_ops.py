@@ -743,6 +743,33 @@ def remote_branch_exists(remote: str, branch: str, *, cwd: str | Path) -> bool:
     return result.returncode == 0 and bool(result.stdout.strip())
 
 
+def remote_branch_state(remote: str, branch: str, *, cwd: str | Path) -> str:
+    """Return the tri-state presence of *branch* on *remote* (via ls-remote).
+
+    Unlike :func:`remote_branch_exists` (which collapses "absent" and
+    "unreachable" into ``False``), this distinguishes:
+
+    - ``"present"``  -- the remote is reachable and advertises the branch.
+    - ``"absent"``   -- the remote is reachable but has no such branch (e.g. it
+      was auto-deleted after a merge).
+    - ``"unknown"``  -- ``ls-remote`` failed (remote unreachable / auth error);
+      the caller must not infer deletion from this.
+
+    Callers that would take a destructive or irreversible action on the
+    strength of a branch being *gone* (e.g. refusing to reuse it) must treat
+    only ``"absent"`` as authoritative and fall back to their prior behavior on
+    ``"unknown"``.
+    """
+    result = git(
+        *_auth_config_args(remote, cwd=cwd),
+        "ls-remote", "--heads", remote, branch,
+        cwd=cwd, check=False,
+    )
+    if result.returncode != 0:
+        return "unknown"
+    return "present" if result.stdout.strip() else "absent"
+
+
 def local_branch_exists(branch: str, *, cwd: str | Path) -> bool:
     """Return True if a local branch named *branch* exists."""
     result = git(

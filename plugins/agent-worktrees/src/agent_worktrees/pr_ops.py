@@ -258,6 +258,34 @@ def create_pr(
     active = record.active_pr() if record else None
     active_is_live = active is not None and not tracking._pr_is_terminal(active)
 
+    # Second line of defense (#1984): the provider reconcile above can still
+    # miss an externally-merged PR when its state query *races* the merge (the
+    # PR is merged a beat later) or the provider is briefly unreachable -- the
+    # record is then left stale at 'open'. Reusing that PR's feature branch
+    # would force-push (with lease) onto a ref the host DELETED on merge, which
+    # the lease check rejects, wedging tracking at 'creating' with no PR opened
+    # (a regression/uncovered variant of #1163 / #1336). So when we would
+    # otherwise reuse a "live" PR's branch, verify that branch still exists on
+    # the remote: one that is *confirmed gone* (remote reachable, ref absent)
+    # means the PR merged and its branch was auto-pruned -- mark it terminal so
+    # the fresh-branch-from-title path is taken instead. Only "absent" is
+    # authoritative; an unreachable remote ("unknown") keeps the prior
+    # (reuse) behavior. Looping lets a stack of stale merged+pruned PRs all
+    # reconcile down to the genuinely-live (or no) active PR.
+    if not new and not branch and git_ops.has_remote(remote, cwd=worktree_path):
+        while active_is_live and active is not None and active.branch:
+            if git_ops.remote_branch_state(
+                remote, active.branch, cwd=worktree_path
+            ) != "absent":
+                break
+            active.state = "merged"
+            if not active.closed_at:
+                active.closed_at = tracking._now_iso()
+            if record is not None:
+                tracking.save_record(record)
+            active = record.active_pr() if record else None
+            active_is_live = active is not None and not tracking._pr_is_terminal(active)
+
     # Resolve the feature branch name: explicit > live active PR > derived.
     if branch:
         feature_branch = branch
