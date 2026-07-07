@@ -299,3 +299,74 @@ def test_background_tasks_multiple_independent() -> None:
     _terminal(client, "c", "Agent failed. agent_id: one, status: failed")
     assert client.active_background_tasks == ["two"]
     assert client.has_active_background_tasks is True
+
+
+# --- per-session MCP injection (build_mcp_servers) ---------------------------
+
+import pytest  # noqa: E402
+
+from acp.schema import (  # noqa: E402
+    HttpMcpServer,
+    McpServerStdio,
+    SseMcpServer,
+)
+
+from agent_bridge.acp_client import build_mcp_servers  # noqa: E402
+
+
+def test_build_mcp_servers_none_and_empty_yield_empty() -> None:
+    assert build_mcp_servers(None) == []
+    assert build_mcp_servers([]) == []
+
+
+def test_build_mcp_servers_stdio_default_type() -> None:
+    servers = build_mcp_servers(
+        [
+            {
+                "name": "review-broker",
+                "command": "/opt/id/.venv/bin/python",
+                "args": ["-m", "broker.server"],
+                "env": {"TOKEN": "abc", "PR": "42"},
+            }
+        ]
+    )
+    assert len(servers) == 1
+    s = servers[0]
+    assert isinstance(s, McpServerStdio)
+    assert s.name == "review-broker"
+    assert s.command == "/opt/id/.venv/bin/python"
+    assert s.args == ["-m", "broker.server"]
+    assert {e.name: e.value for e in s.env} == {"TOKEN": "abc", "PR": "42"}
+
+
+def test_build_mcp_servers_http_and_sse() -> None:
+    servers = build_mcp_servers(
+        [
+            {"type": "http", "name": "h", "url": "https://x/mcp",
+             "headers": {"Authorization": "Bearer t"}},
+            {"type": "sse", "name": "s", "url": "https://y/sse"},
+        ]
+    )
+    assert isinstance(servers[0], HttpMcpServer)
+    assert servers[0].url == "https://x/mcp"
+    assert {h.name: h.value for h in servers[0].headers} == {"Authorization": "Bearer t"}
+    assert isinstance(servers[1], SseMcpServer)
+    assert servers[1].url == "https://y/sse"
+    assert servers[1].headers == []
+
+
+def test_build_mcp_servers_stdio_minimal_defaults() -> None:
+    servers = build_mcp_servers([{"name": "m", "command": "/bin/echo"}])
+    assert servers[0].args == []
+    assert servers[0].env == []
+
+
+def test_build_mcp_servers_rejects_bad_specs() -> None:
+    with pytest.raises(ValueError):
+        build_mcp_servers([{"command": "/bin/echo"}])  # missing name
+    with pytest.raises(ValueError):
+        build_mcp_servers([{"name": "m"}])  # stdio missing command
+    with pytest.raises(ValueError):
+        build_mcp_servers([{"type": "http", "name": "m"}])  # http missing url
+    with pytest.raises(ValueError):
+        build_mcp_servers([{"type": "bogus", "name": "m"}])  # unknown type
