@@ -103,3 +103,33 @@ def test_push_via_session_sync_missing_cli():
         ok, detail = sessions._push_via_session_sync(Path("."), ".codespaces/x", verbose=False)
     assert ok is False
     assert "session-sync" in detail
+
+
+def test_sync_never_raises_on_ssh_config_runtimeerror(monkeypatch):
+    """#155: an unbootable CodeSpace raises RuntimeError from the SSH-config
+    fetch. sync_codespace_sessions must catch it and return a failed-recovery
+    dict (never propagate), so a --force finalize/delete can still delete."""
+    import ssh_manager
+
+    class _FakeLock:
+        def __init__(self, *a, **k):
+            pass
+
+        def acquire(self, *a, **k):
+            pass
+
+        def release(self):
+            pass
+
+    async def _raise_runtime(*a, **k):
+        raise RuntimeError(
+            "Timed out fetching SSH config for codespace x after 3 attempt(s)"
+        )
+
+    monkeypatch.setattr(ssh_manager, "TargetLock", _FakeLock)
+    monkeypatch.setattr(ssh_manager, "ConnectionManager", lambda *a, **k: object())
+    monkeypatch.setattr(sessions, "_connect_with_retry", _raise_runtime)
+
+    res = sessions.sync_codespace_sessions("x", timeout=1.0)
+    assert res["ok"] is False
+    assert "could not connect" in res["detail"]

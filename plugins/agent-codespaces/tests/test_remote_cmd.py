@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from agent_codespaces.__main__ import _emit_remote_cmd_result
+from agent_codespaces.__main__ import _build_launch_command, _emit_remote_cmd_result
 
 
 def _result(stdout="", stderr="", exit_code=0, timed_out=False):
@@ -45,3 +45,45 @@ def test_timeout_fails_loudly_with_124_and_surfaces_output(capsys):
     # cause hints for the common no-PTY hangs
     assert "sudo -n" in err
     assert "nohup" in err
+
+
+# --- #152: --plugin-dir must fold in ONLY for the --stdio copilot launch ------
+
+_PLUGIN_DIRS = [
+    "/home/vscode/.copilot/installed-plugins/copilot-extensions/agent-worktrees",
+    "/home/vscode/.copilot/installed-plugins/dev-tmichon/odsp-web-agent",
+]
+
+
+def test_plugin_dirs_folded_for_stdio_launch():
+    cmd = _build_launch_command(
+        "copilot --acp --stdio --allow-all-tools",
+        _PLUGIN_DIRS,
+        is_stdio=True,
+        relay_env="",
+        breadcrumb="true",
+    )
+    assert cmd is not None
+    # both plugin dirs appended to the copilot launch
+    for d in _PLUGIN_DIRS:
+        assert f'--plugin-dir="{d}"' in cmd
+
+
+def test_plugin_dirs_NOT_folded_for_plain_remote_cmd():
+    """A diagnostic --remote-cmd (non-stdio) must run verbatim -- no
+    --plugin-dir spliced onto its tail (#152)."""
+    cmd = _build_launch_command(
+        "ls ~/.copilot/skills/",
+        _PLUGIN_DIRS,
+        is_stdio=False,
+        relay_env="",
+        breadcrumb="true",
+    )
+    assert cmd is not None
+    assert "--plugin-dir" not in cmd
+    assert "ls ~/.copilot/skills/" in cmd
+
+
+def test_no_remote_cmd_returns_none():
+    assert _build_launch_command(None, _PLUGIN_DIRS, is_stdio=True,
+                                 relay_env="", breadcrumb="true") is None
