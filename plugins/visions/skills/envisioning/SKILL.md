@@ -164,6 +164,36 @@ This is how a vision *does work*: it is diffed against reality.
 The vision is never edited to *record* this cycle. It is edited only when the
 **intent itself** changes.
 
+### Extend before you regenerate (the stability bias)
+
+An additive delta says a capability is *absent or divergent* — it does **not**
+say "rebuild the subject from scratch." The default response to a delta is to
+**extend or compose what already exists** to reach the vision, not to regenerate
+the subject from whole cloth:
+
+- **A blank rewrite is a trap.** From-scratch always *looks* like a cleaner match
+  to a vision than a messy extension of the real thing. Resist it: a working
+  system encodes edge cases and fixes hammered out over prior rounds, and a
+  regeneration re-surfaces a *fresh* crop of those same classes of bug — distinct
+  from, but no cheaper than, the ones already solved. Extension conserves that
+  hard-won stability.
+- **Hunt for prior art first.** Before proposing to *build*, search the repo and
+  its tracker/history for existing components, efforts, and issues that already
+  deliver part of the intent, and decide where each fits. The default outcome of a
+  delta is **"extend/compose these existing building blocks,"** not "write it
+  fresh."
+- **Dedupe at two levels.** Don't open a **redundant issue/effort** (dedupe
+  against existing trackers before carving), and don't carve an effort that would
+  **produce a redundant thing** (extend or consume an existing capability instead
+  of building a parallel copy alongside it).
+- **"To a point" — when to replace instead.** Extension is the default, not
+  dogma. Replacement is the right call when the existing thing **violates the
+  vision's Non-Goals** (not merely lacks a feature), its **boundaries no longer
+  fit** the intent, or **accrued complexity makes extending it the riskier path**.
+  That judgment belongs to the operator and the review gate — it is deliberately
+  *not* mechanical, which matters most for an autonomous fleet acting on a
+  committed vision diff.
+
 ## Optional: a Provenance / Journal section (an easter egg, not a delta source)
 
 A vision **may** carry an optional `## Provenance` (or `## Journal`) section: a
@@ -213,5 +243,9 @@ backlog, it has drifted out of its lane.
   deletion only withdraws a *requirement*; state a **Non-Goal** to force removal.
 - ❌ Carving a removal delta from a *merely unmentioned* capability — absence is
   latitude; only a stated **negative** justifies removing something.
+- ❌ **Regenerating a subject from scratch** to satisfy an additive delta when you
+  could **extend** what already exists — regeneration re-exposes bugs the prior
+  version already paid down; hunt for prior art and reuse it, and replace only when
+  the existing thing violates a Non-Goal, no longer fits, or is too complex to grow.
 - ❌ Letting a vision drift to match a half-built reality (a vision is the target,
   not a mirror of current code).

@@ -69,6 +69,34 @@ The vision is **never edited to record this cycle**. It changes only when the
 *intent itself* changes. Efforts, issues, and docs move; the vision holds still
 until the north star itself moves.
 
+### Extend before you regenerate (the stability bias)
+
+The delta cycle says *what* is misaligned; it does not say *rebuild from scratch*.
+The default response to an additive delta is to **extend or compose what already
+exists** to reach the vision — regeneration from whole cloth is the exception, not
+the reflex:
+
+- **A blank rewrite is a trap.** From-scratch always *looks* like a cleaner match
+  to a vision than a messy extension of the real thing. But a working system
+  encodes edge cases and fixes hammered out over prior rounds, and regenerating it
+  re-surfaces a *fresh* crop of those same classes of bug — distinct from, but no
+  cheaper than, the ones already solved. Extension conserves that hard-won
+  stability.
+- **Hunt for prior art first.** Before proposing to build, search the repo and its
+  tracker/history for existing components, efforts, and issues that already deliver
+  part of the intent, and slot each into the plan. Reuse is the expected outcome of
+  a delta.
+- **Dedupe at two levels.** Don't open a **redundant issue/effort**, and don't
+  carve an effort that would **produce a redundant thing** — extend or consume an
+  existing capability rather than building a parallel copy beside it.
+- **When to replace instead ("to a point").** Extension is the default, not dogma.
+  Replacement is right when the existing thing **violates the vision's Non-Goals**
+  (not merely lacks a feature), its **boundaries no longer fit** the intent, or
+  **accrued complexity makes extending it the riskier path**. Like destructive
+  removal above, this is a **deliberate, reviewed** decision — never a mechanical
+  reflex, and never a safe default for an autonomous fleet acting on a committed
+  vision diff.
+
 ### Positive and negative intent (add / stop-requiring / remove)
 
 A vision is **open-world**: authoritative about what it *states*, silent-with-
