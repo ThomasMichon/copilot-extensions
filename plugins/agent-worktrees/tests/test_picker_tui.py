@@ -438,6 +438,77 @@ def test_bucket_sections_key_off_state():
     assert sorted(w["state"] for w in recent) == ["UNUSED", "WIP"]
 
 
+def test_sessionless_flag_only_when_count_known_zero():
+    """#1026: sessionless is flagged only when session_count is present and 0,
+    with no turns / mux ownership and not a managed kind."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+
+    def n(**extra):
+        base = {"id": "lambda-core-win-zzzz", "status": "active",
+                "state": "wip", "started_at": "2026-06-27T17:00:00"}
+        base.update(extra)
+        return derive.norm(base, "m", "Win")
+
+    assert n(session_count=0)["sessionless"] is True            # the orphan
+    assert n(session_count=2)["sessionless"] is False           # owned
+    assert n()["sessionless"] is False                          # unknown (absent)
+    assert n(session_count=0, turn_count=3)["sessionless"] is False   # had turns
+    assert n(session_count=0, mux_attached=True)["sessionless"] is False
+    assert n(session_count=0, kind="bridge")["sessionless"] is False  # managed
+
+
+def _sessionless_source():
+    """One normal (owned) worktree + one sessionless orphan (session_count 0)."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("lambda-core", "Win")
+    raws = [
+        {"id": "lambda-core-win-owned", "title": "Owned wip",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 4, "state": "wip", "session_count": 1},
+        {"id": "lambda-core-win-orph", "title": "Orphan wip",
+         "status": "active", "started_at": "2026-06-27T16:00:00",
+         "turn_count": 0, "state": "wip", "session_count": 0,
+         "pr": {"number": 99, "state": "open"}},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "lambda-core · win"
+    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+    return src
+
+
+def test_picker_buckets_sessionless_into_unowned():
+    """#1026: a worktree with no owning session lands in a distinct 'Unowned'
+    section (not Recent), and its sub-menu omits Resume."""
+    src = _sessionless_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            _cols, sections = scr.current_list()
+            labels = [lbl for lbl, _rows in sections]
+            unowned = next(rows for lbl, rows in sections if lbl.startswith("Unowned"))
+            recent = next(rows for lbl, rows in sections if lbl == "Recent")
+            assert any(lbl.startswith("Unowned") for lbl in labels)
+            assert [w["id4"] for w in unowned] == ["orph"[-4:]]
+            assert all(not w.get("sessionless") for w in recent)
+            # Select the orphan and open its sub-menu -> no Resume offered.
+            recs = scr.list_records()
+            oi = next(i for i, w in enumerate(recs) if w.get("sessionless"))
+            scr.sel = ("L", oi)
+            scr._open_submenu()
+            assert "Resume" not in scr.submenu["actions"]
+            assert "Open" in scr.submenu["actions"]
+
+    asyncio.run(run())
+
+
 def test_bucket_fallback_no_classify_finalized_is_clean_not_wip():
     """An old remote (no --classify -> no state) must not show FINAL + unmerged."""
     # status finalized, no git classification -> display FINAL, bucket clean.

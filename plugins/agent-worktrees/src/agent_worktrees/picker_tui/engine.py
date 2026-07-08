@@ -571,9 +571,18 @@ class PickerScreen(Widget):
         """(cols, [(section_label, [records])]) for the selected machine tab.
         'All' interleaves every READY machine and shows the machine/env columns;
         a specific machine hides them (implied by the tab). Bridge/system
-        worktrees are hidden unless Toggle-hidden is on (#1422)."""
+        worktrees are hidden unless Toggle-hidden is on (#1422). Worktrees with
+        no owning Copilot session are split into a distinct 'Unowned' section so
+        selecting one never silently cold-starts a blank conversation (#1026)."""
         cols = ACTIVE_SPECS if self.is_all() else LIST_SPECS
         a, r, c = self.src.bucket(self._visible_scope_data())
+        unowned = [w for w in r if w.get("sessionless")]
+        if unowned:
+            r = [w for w in r if not w.get("sessionless")]
+            return cols, [
+                ("Active", a), ("Recent", r), ("Completed", c),
+                ("Unowned · no prior session (Open starts fresh)", unowned),
+            ]
         return cols, [("Active", a), ("Recent", r), ("Completed", c)]
 
     def list_records(self):
@@ -1450,17 +1459,26 @@ class PickerScreen(Widget):
     def status_text(self, compact=False):
         t = Text()
         if self.htab == 0:
-            a, r, c = (len(sec[1]) for sec in self.current_list()[1])
+            secs = dict((lbl, len(rows)) for lbl, rows in self.current_list()[1])
+            a = secs.get("Active", 0)
+            r = secs.get("Recent", 0)
+            c = secs.get("Completed", 0)
+            u = sum(n for lbl, n in secs.items() if lbl.startswith("Unowned"))
             t.append("●", style=C_PULSE[self.pulse])
             if compact:
                 t.append(f"{a} ", style="grey78")
                 t.append(f"◷{r} ✓{c}", style="grey62")
+                if u:
+                    t.append(f" ?{u}", style="grey62")
             else:
                 t.append(f" {a} active", style="grey78")
                 t.append(" · ", style=C_DIM)
                 t.append(f"{r} recent", style="grey70")
                 t.append(" · ", style=C_DIM)
                 t.append(f"{c} done", style="grey70")
+                if u:
+                    t.append(" · ", style=C_DIM)
+                    t.append(f"{u} unowned", style="grey70")
         elif self.htab == 1:
             rows = self.cleanup_rows()
             mib = sum(_size_mb(w) for w in rows)
@@ -2622,8 +2640,10 @@ class PickerScreen(Widget):
         if not rec:
             return
         # Open + Resume always; Sync only when FF-eligible; Cleanup only when
-        # the bucket is cleanable; Restart always (#1343).
-        acts = ["Open", "Resume"]
+        # the bucket is cleanable; Restart always (#1343). A sessionless worktree
+        # has nothing to resume -- offering Resume would cold-start a blank
+        # conversation and read as a silent failure -- so drop it (#1026).
+        acts = ["Open"] if rec.get("sessionless") else ["Open", "Resume"]
         if rec.get("ff_eligible"):
             acts.append("Sync")
         if self._cleanable(rec):
