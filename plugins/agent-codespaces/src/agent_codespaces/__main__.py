@@ -49,6 +49,7 @@ from .lifecycle import (
     create_codespace,
     delete_codespace,
     list_codespaces,
+    stop_codespace,
     wait_for_available,
 )
 from .sessions import sync_codespace_sessions
@@ -189,6 +190,22 @@ def main(argv: list[str] | None = None) -> int:
              "unrecovered sessions)",
     )
     finalize_parser.add_argument(
+        "--timeout", type=float, default=300.0,
+        help="Seconds for the session pull (default: 300)",
+    )
+
+    # --- stop ---
+    stop_parser = sub.add_parser(
+        "stop",
+        help="Gracefully stop a CodeSpace (recover Copilot sessions, then shut "
+             "down) -- PRESERVES it for later resume; never deletes",
+    )
+    stop_parser.add_argument("name", help="CodeSpace name")
+    stop_parser.add_argument(
+        "--no-sync", action="store_true",
+        help="Skip the pre-stop Copilot session recovery",
+    )
+    stop_parser.add_argument(
         "--timeout", type=float, default=300.0,
         help="Seconds for the session pull (default: 300)",
     )
@@ -339,6 +356,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_delete(args)
         if args.command == "finalize":
             return _cmd_finalize(args)
+        if args.command == "stop":
+            return _cmd_stop(args)
         if args.command == "create":
             return _cmd_create(args)
         if args.command == "bridge":
@@ -1532,6 +1551,36 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
         _release_lease_quietly(args.name)
 
     return 0 if res.get("ok") else 1
+
+
+def _cmd_stop(args: argparse.Namespace) -> int:
+    """Gracefully stop a CodeSpace, PRESERVING it for later resume.
+
+    The pause-and-keep counterpart to ``finalize --delete``: recover Copilot
+    session-state into the agent-logger hub (unless --no-sync), then
+    ``gh codespace stop``. Unlike ``finalize --delete``, a failed recovery does
+    NOT block the stop -- stopping is non-destructive, so the sessions remain on
+    the (preserved) CodeSpace and can be recovered on a later connect/finalize.
+    Idempotent: a no-op if the CodeSpace is already Shutdown. Never deletes.
+    """
+    if not getattr(args, "no_sync", False):
+        res = sync_codespace_sessions(
+            args.name, timeout=args.timeout, verbose=args.verbose,
+        )
+        if res.get("ok"):
+            print(f"[OK] Recovered {res.get('session_count', 0)} session(s) "
+                  f"before stop: {res.get('detail', '')}")
+        else:
+            print(f"[WARN] Pre-stop session recovery failed (continuing -- the "
+                  f"CodeSpace is preserved, so sessions can be recovered "
+                  f"later): {res.get('detail')}", file=sys.stderr)
+
+    stopped = stop_codespace(args.name)
+    if stopped:
+        print(f"Stopped: {args.name} (preserved -- boots on next connect)")
+    else:
+        print(f"Already stopped: {args.name}")
+    return 0
 
 
 def _release_lease_quietly(codespace: str) -> None:
