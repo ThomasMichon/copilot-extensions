@@ -183,6 +183,23 @@ case ":$PATH:" in
     *) _step "Add $LOCAL_BIN to your PATH (e.g. in ~/.bashrc): export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
 esac
 
+# -- 6b. Register the worktree-picker "Tasks" pivot --------------------
+# agent-worktrees discovers contributed picker pivots from a filesystem
+# manifest registry (separate venvs rule out Python entry-points). Drop our
+# manifest into the shared runtime root so the picker grows a "Tasks" pivot.
+# Best-effort: never fail the install if the copy can't happen.
+PIVOT_SRC="$PLUGIN_DIR/pivots/agent-dispatch.json"
+PIVOT_DIR="$HOME/.agent-worktrees/pivots"
+if [[ -f "$PIVOT_SRC" ]]; then
+    if mkdir -p "$PIVOT_DIR" 2>/dev/null && cp -f "$PIVOT_SRC" "$PIVOT_DIR/agent-dispatch.json" 2>/dev/null; then
+        _ok "Picker pivot registered: $PIVOT_DIR/agent-dispatch.json"
+    else
+        _skip "Could not register picker pivot (agent-worktrees runtime root not writable)"
+    fi
+else
+    _skip "Picker pivot manifest not found at $PIVOT_SRC"
+fi
+
 # -- 7. Optional coordinator service (systemd user unit) ---------------
 # The coordinator is the always-on single writer. Install it as a service only
 # when asked (--service); a machine that is only a *client* of a remote

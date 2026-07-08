@@ -349,6 +349,25 @@ if ($pathDirs -contains $LocalBin) {
     }
 }
 
+# -- 6b. Register the worktree-picker "Tasks" pivot ---------------------
+# agent-worktrees discovers contributed picker pivots from a filesystem
+# manifest registry (separate venvs rule out Python entry-points). Drop our
+# manifest into the shared runtime root so the picker grows a "Tasks" pivot.
+# Best-effort: never fail the install if the copy can't happen.
+$pivotSrc = Join-Path $PluginDir 'pivots\agent-dispatch.json'
+$pivotDir = Join-Path $env:USERPROFILE '.agent-worktrees\pivots'
+if (Test-Path $pivotSrc) {
+    try {
+        if (-not (Test-Path $pivotDir)) { New-Item -ItemType Directory -Force -Path $pivotDir | Out-Null }
+        Copy-Item -Force $pivotSrc (Join-Path $pivotDir 'agent-dispatch.json')
+        Write-Ok "Picker pivot registered: $pivotDir\agent-dispatch.json"
+    } catch {
+        Write-Skip 'Could not register picker pivot (agent-worktrees runtime root not writable)'
+    }
+} else {
+    Write-Skip "Picker pivot manifest not found at $pivotSrc"
+}
+
 # -- 7. Optional coordinator service (Windows Scheduled Task) -----------
 # The coordinator is the always-on single writer. Install it as an auto-starting
 # Scheduled Task only when asked (-Service) -- the Windows analogue of the Linux

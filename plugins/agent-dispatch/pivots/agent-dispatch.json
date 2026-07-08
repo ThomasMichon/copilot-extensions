@@ -1,0 +1,28 @@
+{
+  "label": "Tasks",
+  "after": "Worktrees",
+  "list": ["agent-dispatch", "inbox", "--machine", "{machine}"],
+  "entry": {
+    "id": "id",
+    "title": "title",
+    "worktree": "target_worktree",
+    "subtitle": "repo_name",
+    "badges": ["labels"]
+  },
+  "empty_hint": "No proposed tasks for this machine.",
+  "actions": [
+    {
+      "key": "kick",
+      "label": "Kick to a headless bridge agent",
+      "run": ["agent-bridge", "create", "{machine}", "{title}", "--no-wait"],
+      "description": "Spawn a background bridge agent on this machine to work the task."
+    },
+    {
+      "key": "abandon",
+      "label": "Abandon the task",
+      "run": ["agent-dispatch", "abandon", "{task_id}", "--permit", "--reason", "abandoned from picker"],
+      "confirm": true,
+      "description": "Terminally abandon this proposed task."
+    }
+  ]
+}
