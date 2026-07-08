@@ -271,6 +271,86 @@ def test_profiles_apply_confirm_cancel_is_noop():
     asyncio.run(run())
 
 
+def _profiles_source_unavailable():
+    """Profiles fixture where the Borealis host column fails to load, as an
+    old/unreachable remote does over SSH (#1370)."""
+    from agent_worktrees.picker_tui import profiles_io
+    src = _profiles_source()
+    inner = src.load_profile_column
+
+    def load_col(machine, env):
+        if machine == "Borealis":
+            return profiles_io.UNAVAILABLE
+        return inner(machine, env)
+
+    src.load_profile_column = load_col
+    return src
+
+
+def test_profiles_unavailable_column_is_readonly():
+    """A host column that couldn't load is marked read-only: cells show '?',
+    toggling is a no-op, and Apply excludes it (#1370)."""
+    src = _profiles_source_unavailable()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 2
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline and not scr._prof_loaded:
+                await pilot.pause()
+            # Borealis (host col 1) is unavailable; the local col 0 is not.
+            assert 1 in scr._prof_unavailable
+            assert 0 not in scr._prof_unavailable
+            # Cells in the unavailable column render the "unknown" marker.
+            ti = next(t for t in range(len(scr.targets))
+                      if not scr.cell_locked(t, 1))
+            ch, _st = scr._cell_visual(ti, 1, scr.cell_locked(ti, 1))
+            assert ch == "?"
+            # Toggling that column is a read-only no-op.
+            scr.sel = ("PR", ti)
+            scr.pcol = 1
+            scr._toggle_cell()
+            assert not scr.grid_dirty()
+            # Apply finds nothing to change (the column is excluded).
+            scr._apply_profiles()
+            assert scr.prof_confirm is None
+            # The legend keys the agent/shell rows and flags the unavailable col.
+            body = "\n".join(v.text.plain for v in scr.build_body(118))
+            assert "plain SSH login shell" in body
+            assert "remote unavailable" in body
+
+    asyncio.run(run())
+
+
+def test_profiles_apply_progress_carries_restart_summary():
+    """After confirming an Apply, the progress dict carries the add/remove
+    counts the done-state surfaces alongside the restart reminder (#1368)."""
+    src = _profiles_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 2
+            await pilot.pause()
+            hi = 1
+            ti = next(t for t in range(len(scr.targets))
+                      if not scr.cell_locked(t, hi))
+            scr.sel = ("PR", ti)
+            scr.pcol = hi
+            scr._toggle_cell()
+            scr._apply_profiles()
+            assert scr.prof_confirm is not None
+            scr._key_prof_confirm("enter")
+            await pilot.pause()
+            assert scr.progress["op"] == "profiles"
+            assert scr.progress["n_add"] + scr.progress["n_rem"] >= 1
+
+    asyncio.run(run())
+
+
 def test_run_tui_picker_redirects_stdout_when_captured(monkeypatch):
     """When stdout is captured (launcher) but stderr is a TTY, Textual must
     render to stderr while the real stdout stays reserved for the plan."""

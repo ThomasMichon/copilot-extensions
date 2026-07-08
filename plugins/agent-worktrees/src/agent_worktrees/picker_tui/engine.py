@@ -313,6 +313,7 @@ class PickerScreen(Widget):
         self.show_hidden = False      # reveal bridge/system worktrees (#1422)
         self.targets = []
         self.host_cols = list(_DEFAULT_HOST_COLS)   # config-bound in setup()
+        self._prof_unavailable = set()  # host-col idxs that couldn't load (#1370)
         self._prof_lock = threading.Lock()
         self._prof_load = None        # src.load_profile_column (real sources)
         self._prof_apply = None       # src.apply_profile_column (real sources)
@@ -470,6 +471,7 @@ class PickerScreen(Widget):
             for hi in range(len(self.host_cols)):
                 self.grid[(ti, hi)] = self.cell_locked(ti, hi)
         self.applied = dict(self.grid)   # everything starts "applied"
+        self._prof_unavailable = set()   # cleared until a load marks columns
         # Real per-host columns: when the data source exposes profile IO
         # (production data_local / data_ssh), stream each host's saved column
         # in on a background thread so SSH never blocks the UI. Sources without
@@ -788,8 +790,9 @@ class PickerScreen(Widget):
         inversion cursor, since the real cursor lives in the grid cell."""
         _lbl, m, e = self.host_cols[j]
         active = j == self.pcol
-        name_base = "bold white" if active else C_TABOFF
-        env_base = C_ENV.get(e, name_base)
+        unavail = j in self._prof_unavailable
+        name_base = C_DISABLED if unavail else ("bold white" if active else C_TABOFF)
+        env_base = C_DISABLED if unavail else C_ENV.get(e, name_base)
         cell = Text()
         cell.append(m, style=self._hl(name_base, active, False))
         cell.append(" ", style=self._hl("", active, False))
@@ -821,6 +824,7 @@ class PickerScreen(Widget):
         self._prof_loading = True
 
         def work():
+            from . import profiles_io
             cols = {}
             for hi, (_lbl, hm, he) in enumerate(self.host_cols):
                 try:
@@ -831,7 +835,18 @@ class PickerScreen(Widget):
                 # Don't clobber edits the user already started before the load
                 # resolved -- only project columns onto a pristine grid.
                 if not self.grid_dirty():
+                    unavail = set()
                     for hi, sels in cols.items():
+                        if sels is profiles_io.UNAVAILABLE:
+                            # Unreachable / too-old remote: we can't know its
+                            # real column, so mark it read-only. Seed just the
+                            # locked self-diagonal so the grid stays consistent;
+                            # cells render as "?" and are never editable or
+                            # applied (#1370).
+                            unavail.add(hi)
+                            for ti in range(len(self.targets)):
+                                self.grid[(ti, hi)] = self.cell_locked(ti, hi)
+                            continue
                         if sels is None:
                             # Legacy/unmanaged host: every target is "on" (the
                             # mirror's historical emit-everything behavior), so
@@ -844,6 +859,7 @@ class PickerScreen(Widget):
                             on = self._target_sel(ti).key in keys or \
                                 self.cell_locked(ti, hi)
                             self.grid[(ti, hi)] = on
+                    self._prof_unavailable = unavail
                     self.applied = dict(self.grid)
                 self._prof_loading = False
                 self._prof_loaded = True
@@ -875,6 +891,8 @@ class PickerScreen(Widget):
         changed = []
         diffs = {}
         for hi in range(len(self.host_cols)):
+            if hi in self._prof_unavailable:
+                continue             # read-only column: never diffed or applied
             added, removed = [], []
             for ti in range(len(self.targets)):
                 now = bool(self.grid.get((ti, hi)))
@@ -893,6 +911,9 @@ class PickerScreen(Widget):
         """Execute the confirmed Apply: one progress item per changed host."""
         from . import maintenance
         changed = self.prof_confirm["changed"]
+        diffs = self.prof_confirm.get("diffs", {})
+        n_add = sum(len(diffs[hi][0]) for hi in changed if hi in diffs)
+        n_rem = sum(len(diffs[hi][1]) for hi in changed if hi in diffs)
         self.prof_confirm = None
         items, tasks = [], []
         for hi in changed:
@@ -910,6 +931,7 @@ class PickerScreen(Widget):
             "items": items, "recs": [], "picked": [],
             "ticks": 0, "steps": 3, "done": False, "armed": True,
             "include_unused": False, "include_conversations": False,
+            "n_add": n_add, "n_rem": n_rem,
         }
         self.executor.start()
 
@@ -1178,6 +1200,10 @@ class PickerScreen(Widget):
 
     def _cell_visual(self, ti, j, locked):
         """(glyph_char, style) for a matrix cell, reflecting applied vs pending."""
+        if j in self._prof_unavailable:
+            # Column we couldn't load (unreachable / too-old remote): show an
+            # "unknown" marker, not a fabricated selection (#1370).
+            return "?", C_DISABLED
         present = self.grid.get((ti, j), False)
         applied = self.applied.get((ti, j), False)
         agent = self.targets[ti]["agent"]
@@ -1219,6 +1245,23 @@ class PickerScreen(Widget):
         t.append(" " * max(0, width - t.cell_len))
         return t
 
+    def _profiles_legend(self, width):
+        """One dim line keying the grid's agent/shell rows (and any unreachable
+        column) to plain language, so a round-trip edit doesn't silently drop
+        the bare-SSH ``shell`` profiles (#1369)."""
+        t = Text("  ")
+        t.append("agent", style="grey78")
+        t.append(" = launch worktree", style=C_DIM)
+        t.append("   ")
+        t.append("shell", style="grey54")
+        t.append(" = plain SSH login shell", style=C_DIM)
+        if self._prof_unavailable:
+            t.append("   ")
+            t.append("?", style=C_DISABLED)
+            t.append(" = remote unavailable (needs upgrade)", style=C_DIM)
+        t.append(" " * max(0, width - t.cell_len))
+        return t
+
     def _build_profiles(self, add, width, sel):
         if not self.host_cols:
             # No Profiles host columns -- no ``copilot`` machine in
@@ -1242,6 +1285,7 @@ class PickerScreen(Widget):
         if vis is None:
             return self._build_profiles_transposed(add, width, sel)
         lo, hi, ml, mr = vis
+        add(self._profiles_legend(width))
         hdr = Text(" " + "TARGET \\ HOST".ljust(lblw - 1), style=C_HEADER)
         hdr.append("‹" if ml else " ", style=C_HINT)
         for j in range(lo, hi + 1):
@@ -1280,12 +1324,15 @@ class PickerScreen(Widget):
         """Too narrow for a grid: one host is the header, each target a
         space-toggleable checkbox row. ◀▶ switches which host you're editing."""
         _lbl, hm, he = self.host_cols[self.pcol]
+        add(self._profiles_legend(width))
         head = Text(" HOST  ", style=C_HEADER)
         head.append(hm, style=self._hl("bold white", True, False))
         head.append(" ", style=self._hl("", True, False))
         head.append(he, style=self._hl(C_ENV.get(he, "bold white"), True, False))
         head.append(f"   ‹ {self.pcol + 1}/{len(self.host_cols)} ›  ◀▶ host",
                     style=C_HINT)
+        if self.pcol in self._prof_unavailable:
+            head.append("  · unavailable (needs upgrade)", style=C_DISABLED)
         head.append(" " * max(0, width - head.cell_len))
         add(head, kind="colhdr")
         for ti, t in enumerate(self.targets):
@@ -1345,6 +1392,9 @@ class PickerScreen(Widget):
             t.append(e, style=self._hl(env_base, sel, focused))
             t.append(" ", style=self._hl("", sel, focused))
             if state == "disabled":
+                # #1289: a reliably single-width ASCII glyph (the old empty-set
+                # marker U+2205 rendered ~1.5 cells on some terminals, shifting
+                # the tab bar).
                 mk, mkb = "-", C_DISABLED
             elif state == "loading":
                 mk, mkb = self.spin(), C_LOAD
@@ -2050,6 +2100,17 @@ class PickerScreen(Widget):
             panel.append(row)
         if len(items) > maxr:
             panel.append(self._prow(f" … {len(items)} total", pw, style="grey54"))
+        if p.get("op") == "profiles" and p["done"]:
+            # #1368: after Apply the fragment is regenerated, but the terminal
+            # app only re-reads it on a FULL restart -- spell out what changed
+            # and that a restart is required so a "no visible change" reads as
+            # expected, not as a silent failure.
+            na, nr = p.get("n_add", 0), p.get("n_rem", 0)
+            panel.append(self._prow(
+                f" +{na} added · -{nr} removed", pw, style="grey78"))
+            panel.append(self._prow(
+                " ⚠ Fully restart the terminal app (close all its windows) to "
+                "see the changes.", pw, style="yellow"))
         panel.append(self._prow("", pw))
         brow = Text("│", style=C_DIM)
         inner = Text("   ")
@@ -2202,6 +2263,11 @@ class PickerScreen(Widget):
     def _toggle_cell(self):
         if not self.host_cols:
             return                       # no profile hosts -> nothing to toggle
+        if self.pcol in self._prof_unavailable:
+            _lbl, hm, he = self.host_cols[self.pcol]
+            self.debug = (f"{hm} {he}: profiles unavailable "
+                          "(remote unreachable or needs upgrade) · read-only")
+            return
         ti = self.sel[1]
         if self.cell_locked(ti, self.pcol):
             self.debug = "self · agent profile is mandatory (locked)"
@@ -2314,7 +2380,8 @@ class PickerScreen(Widget):
                 self.progress = None
                 self.executor = None
                 tail = f" · {failed} failed" if failed else ""
-                self.debug = f"{verb} {state} · {n} host column(s){tail}"
+                self.debug = (f"{verb} {state} · {n} host column(s){tail}"
+                              " · restart the terminal app to see changes")
                 return
             was_real = self.executor is not None and p["done"]
             self.progress = None
