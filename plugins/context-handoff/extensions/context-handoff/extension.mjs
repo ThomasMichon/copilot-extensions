@@ -21,10 +21,10 @@
 // generate_handoff_prompt, compose prose, and call save_handoff_prompt.
 // The user then copies the short prompt and pastes it into a new session.
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { execSync } from "node:child_process";
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { execSync, execFileSync } from "node:child_process";
+import { join, basename } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 
@@ -135,6 +135,78 @@ function saveHandoffPrompt(promptText, sid) {
   const promptPath = join(stateDir, `${sid}-prompt.md`);
   writeFileSync(promptPath, promptText, "utf-8");
   return promptPath;
+}
+
+// --- agent-dispatch integration (soft dependency) ---
+// When an agent-dispatch coordinator is reachable, a handoff is stored as a
+// *task* (payload = the handoff markdown) instead of a session-folder file, so
+// it becomes durable, browsable, and claimable -- consumed next session with
+// /resume-handoff (or by pasting the "Claim and act on the handoff <id>"
+// prompt). context-handoff sits *on top of* agent-dispatch when it exists, and
+// falls back to the file flow when it doesn't. All best-effort: any failure
+// returns null / a safe default so the caller degrades to the file path.
+
+// True if the `agent-dispatch` CLI answers a health probe (a live coordinator).
+function agentDispatchAvailable() {
+  try {
+    execSync("agent-dispatch health", { timeout: 5000, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Resolve an agent-worktrees identity value for the current CWD (null on miss).
+function agentWorktreesGet(key, cwd) {
+  try {
+    const out = execFileSync("agent-worktrees", ["get", key], {
+      cwd,
+      timeout: 5000,
+      encoding: "utf-8",
+    }).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+// Store a handoff as a proposed, handoff-labeled agent-dispatch task pinned to
+// the current worktree; payload = the handoff markdown. Returns the task id, or
+// null if anything fails (the caller then falls back to a session file).
+function dispatchHandoff(promptText, sid, cwd, title) {
+  const tmp = join(tmpdir(), `handoff-${sid}.md`);
+  try {
+    writeFileSync(tmp, promptText, "utf-8");
+    const machine = agentWorktreesGet("machine", cwd);
+    const wtDir = agentWorktreesGet("worktree-dir", cwd);
+    const worktree = wtDir ? basename(wtDir) : null;
+    // A handoff must land in *its own* worktree; if we can't resolve one, bail
+    // to the file flow rather than file an unpinned, anyone-can-claim task.
+    if (!worktree) return null;
+    const argv = [
+      "create",
+      title || "Handoff: continue this session",
+      "--proposed",
+      "--label", "handoff",
+      "--source", "context-handoff",
+      "--dedup-key", `handoff-${sid}`,
+      "--payload-file", tmp,
+      "--target-worktree", worktree,
+      "--affinity", `worktree=${worktree}`,
+    ];
+    if (machine) argv.push("--target-machine", machine);
+    const out = execFileSync("agent-dispatch", argv, {
+      cwd,
+      timeout: 15000,
+      encoding: "utf-8",
+    });
+    const task = JSON.parse(out);
+    return task?.id || null;
+  } catch {
+    return null;
+  } finally {
+    try { unlinkSync(tmp); } catch { /* temp already gone -- fine */ }
+  }
 }
 
 // Persist a small context-usage sidecar that the agent-worktrees picker
@@ -284,16 +356,17 @@ const session = await joinSession({
             "1. Compose the FULL handoff markdown — direction + motivation of the",
             "   work, key next action items, and target goals — from this data",
             "   plus your live context. Lead with the original topic/request.",
-            "2. Call save_handoff_prompt with the full markdown as `prompt_text`;",
-            "   it writes the file to the session state folder and returns its",
-            "   absolute path.",
-            "3. Reply with ONLY a short wrapper prompt the user copies verbatim",
-            "   into '/clear' (or '/new'): addressed to the NEXT session's agent,",
-            "   it names the returned path and tells that agent to READ the",
-            "   handoff file and continue.",
-            "Do NOT paste the file's contents, commit the file, store it outside",
-            "the session folder, hide the path, or claim it auto-loads on restart",
-            "(it will not).",
+            "2. Call save_handoff_prompt with the full markdown as `prompt_text`",
+            "   (and an optional short `title`). It stores the handoff — as an",
+            "   agent-dispatch task when a coordinator is reachable, else a",
+            "   session file — and returns EXACTLY the short prompt to reply with.",
+            "3. Reply with ONLY that short prompt (the tool tells you which form):",
+            "   either 'Claim and act on the handoff <id> from agent-dispatch: …'",
+            "   or 'Read the handoff at <path> and continue: …'. The user pastes",
+            "   it into '/clear' (or '/new'); the dispatch form is also resumable",
+            "   via /resume-handoff.",
+            "Do NOT paste the handoff contents, commit anything, or claim the",
+            "handoff auto-loads on restart (it does not).",
           ].join("\n"),
           resultType: "success",
         };
@@ -302,12 +375,15 @@ const session = await joinSession({
     {
       name: "save_handoff_prompt",
       description:
-        "Persist the full handoff markdown to the CURRENT session's state " +
-        "folder and return its absolute path. Call this after composing the " +
-        "handoff from generate_handoff_prompt data. Pass the markdown as " +
-        "`prompt_text` (the `prompt` alias is also accepted). The file is NOT " +
-        "loaded automatically by any future session -- the agent must reply " +
-        "with a short wrapper prompt that points the next agent at the path.",
+        "Store the full handoff markdown and return what short prompt to reply " +
+        "with. When an agent-dispatch coordinator is reachable, the handoff is " +
+        "stored as a *proposed, handoff-labeled task* pinned to this worktree " +
+        "(payload = the markdown, no session file) and resumed next session via " +
+        "/resume-handoff; otherwise it falls back to a file in the CURRENT " +
+        "session's state folder. Call this after composing the handoff from " +
+        "generate_handoff_prompt data. Pass the markdown as `prompt_text` (the " +
+        "`prompt` alias is also accepted); an optional short `title` labels the " +
+        "task. The handoff is NEVER loaded automatically by a future session.",
       skipPermission: true,
       parameters: {
         type: "object",
@@ -315,6 +391,13 @@ const session = await joinSession({
           prompt_text: {
             type: "string",
             description: "The full composed handoff markdown text.",
+          },
+          title: {
+            type: "string",
+            description:
+              "Optional short, specific title for the handoff task (e.g. " +
+              "'Continue: agent-dispatch producers'). Used only in the " +
+              "agent-dispatch task path.",
           },
           prompt: {
             type: "string",
@@ -340,15 +423,37 @@ const session = await joinSession({
           );
         }
 
+        const cwd = state.cwd || process.cwd();
+        const title = (args?.title ?? "").toString().trim();
+
+        // Prefer agent-dispatch: store the handoff as a claimable task (no file).
+        if (agentDispatchAvailable()) {
+          const taskId = dispatchHandoff(text, sid, cwd, title);
+          if (taskId) {
+            return (
+              `Handoff stored as agent-dispatch task ${taskId} (proposed, label ` +
+              `'handoff', pinned to this worktree). No session file was written.\n\n` +
+              `Reply to the user with ONLY this short prompt. They resume by ` +
+              `running /resume-handoff in a fresh session in this worktree, or by ` +
+              `pasting it into '/clear' (or '/new'):\n` +
+              `  Claim and act on the handoff ${taskId} from agent-dispatch: <one-line topic>.\n` +
+              `Do NOT paste the handoff contents -- the payload lives in the task, ` +
+              `and it is never loaded automatically.`
+            );
+          }
+          // Task creation failed -- fall through to the file flow.
+        }
+
         const promptPath = saveHandoffPrompt(text, sid);
 
         return (
           `Handoff saved to ${promptPath}\n\n` +
-          `Now reply to the user with ONLY a short wrapper prompt they will copy ` +
-          `verbatim into '/clear' (or '/new'). The wrapper is addressed to the ` +
-          `NEXT session's agent and must (1) name this absolute path (a ~/ form ` +
-          `is fine) and (2) instruct that agent to READ the handoff file and ` +
-          `continue. For example:\n` +
+          `(Stored as a session file — no reachable agent-dispatch coordinator, ` +
+          `or the worktree couldn't be resolved.) Reply to the user with ONLY a ` +
+          `short wrapper prompt they copy verbatim into '/clear' (or '/new'). ` +
+          `The wrapper is addressed to the NEXT session's agent and must (1) name ` +
+          `this absolute path (a ~/ form is fine) and (2) instruct that agent to ` +
+          `READ the handoff file and continue. For example:\n` +
           `  Read the handoff at ${promptPath} and continue: <one-line topic>.\n` +
           `Do NOT paste the file's contents, and do NOT claim it loads ` +
           `automatically on restart -- it does not.`
