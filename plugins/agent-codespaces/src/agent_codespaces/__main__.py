@@ -398,6 +398,29 @@ injected static PATs are found.
 """
 
 
+def _build_relay_env(
+    relay_port: int, relay_token: str | None, *, use_relay: bool
+) -> str:
+    """Build the CodeSpace launch-prelude env string.
+
+    ALWAYS neutralizes injected static PATs (``_SCRUB_ENV_VARS``, #160/#77) so a
+    dispatched agent can't rely on an expired token instead of the credential
+    relay; when the relay is in use, ALSO exports the relay vars. The PAT scrub
+    is prepended and the relay exports are appended -- so the scrub can never be
+    clobbered by the exports (a dev46 regression was a ``relay_env = ...``
+    reassignment that dropped the scrub). ``GIT_TERMINAL_PROMPT=0`` keeps git
+    from blocking on an interactive prompt when a credential can't be resolved.
+    """
+    env = "".join(f"unset {v}; " for v in _SCRUB_ENV_VARS)
+    if use_relay:
+        env += (
+            f"export LC_GIT_CREDENTIAL_RELAY={relay_port}; "
+            f"export LC_GIT_CREDENTIAL_RELAY_TOKEN={relay_token}; "
+            "export GIT_TERMINAL_PROMPT=0; "
+        )
+    return env
+
+
 def _relay_listening(port: int, timeout: float = 0.5) -> bool:
     """True if the host credential relay is accepting TCP on 127.0.0.1:<port>.
 
@@ -478,8 +501,9 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     # login-shell profile loads, so it wins even if a profile re-exports the
     # var, and applies to both the copilot --acp launch and a diagnostic
     # --remote-cmd (not a human's interactive VS Code shell). Kept unconditional
-    # -- even with --no-relay we never want an injected PAT relied on.
-    relay_env = "".join(f"unset {v}; " for v in _SCRUB_ENV_VARS)
+    # -- even with --no-relay we never want an injected PAT relied on. Built via
+    # _build_relay_env AFTER the relay token is minted so the scrub is never
+    # clobbered by the relay exports.
     relay_token: str | None = None
     if not args.no_relay:
         port_forwards.append(f"-R {relay_port}:127.0.0.1:{relay_port}")
@@ -511,15 +535,13 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         from .relay_token import token_for
 
         relay_token = token_for(args.name)
-        # GIT_TERMINAL_PROMPT=0 ensures git never blocks on an interactive
-        # prompt if a credential cannot be resolved over the relay -- it aborts
-        # with a prompt error instead of hanging (belt-and-suspenders alongside
-        # the relay's quit=1 fail-fast).
-        relay_env = (
-            f"export LC_GIT_CREDENTIAL_RELAY={relay_port}; "
-            f"export LC_GIT_CREDENTIAL_RELAY_TOKEN={relay_token}; "
-            "export GIT_TERMINAL_PROMPT=0; "
-        )
+
+    # Launch prelude: always scrub injected PATs (#160/#77); add the relay
+    # exports only when the relay is in use. Built here (after the token mint)
+    # so the PAT scrub can NEVER be clobbered by the relay exports.
+    relay_env = _build_relay_env(
+        relay_port, relay_token, use_relay=not args.no_relay
+    )
 
     manager = ConnectionManager()
 
