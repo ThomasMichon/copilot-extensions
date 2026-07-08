@@ -149,3 +149,21 @@ def test_borrow_clears_eligibility_marker(store):
     rc = main(["borrow", "effort-x", "cs-one"])
     assert rc == 0
     assert status_mod.get_status("cs-one") is None
+
+
+# --- mark: skill-side promotion lever --------------------------------------
+
+def test_mark_promotes_recovered_to_prunable(store):
+    status_mod.set_status("cs-one", status_mod.STATE_RECOVERED)
+    rc = main(["mark", "cs-one", "prunable", "--reason", "PR merged"])
+    assert rc == 0
+    st = status_mod.get_status("cs-one")
+    assert st.state == status_mod.STATE_PRUNABLE
+    assert st.reason == "PR merged"
+
+
+def test_mark_active_clears(store):
+    status_mod.set_status("cs-one", status_mod.STATE_PRUNABLE)
+    rc = main(["mark", "cs-one", "active"])
+    assert rc == 0
+    assert status_mod.get_status("cs-one") is None

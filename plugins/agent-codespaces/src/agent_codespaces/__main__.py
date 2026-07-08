@@ -225,6 +225,23 @@ def main(argv: list[str] | None = None) -> int:
         help="Prune at most N boxes, oldest-first (0 = all, default)",
     )
 
+    # --- mark ---
+    mark_parser = sub.add_parser(
+        "mark",
+        help="Set/clear a CodeSpace's prune-lifecycle marker "
+             "(recovered | prunable | active) -- used by cleaning-codespaces to "
+             "promote a recovered box to prunable once its PR merges",
+    )
+    mark_parser.add_argument("name", help="CodeSpace name")
+    mark_parser.add_argument(
+        "state", choices=["recovered", "prunable", "active"],
+        help="Lifecycle state to set ('active' clears the marker)",
+    )
+    mark_parser.add_argument(
+        "--reason", default="",
+        help="Optional note (e.g. 'PR 2285861 merged + effort archived')",
+    )
+
     # --- create ---
     create_parser = sub.add_parser(
         "create", help="Create a CodeSpace and run post-create provisioning",
@@ -377,6 +394,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_create(args)
         if args.command == "prune":
             return _cmd_prune(args)
+        if args.command == "mark":
+            return _cmd_mark(args)
         if args.command == "bridge":
             return _cmd_bridge(args)
         if args.command == "cleanup":
@@ -1710,6 +1729,25 @@ def _clear_status_quietly(codespace: str) -> None:
         clear_status(codespace)
     except Exception as exc:  # pragma: no cover - defensive
         log.debug("status clear for %s failed: %s", codespace, exc)
+
+
+def _cmd_mark(args: argparse.Namespace) -> int:
+    """Set or clear a CodeSpace's prune-lifecycle marker.
+
+    The skill-side promotion lever: ``cleaning-codespaces`` (which has the ADO
+    PR-merged context) runs ``mark <name> prunable`` once a box is safe to
+    reclaim, so the plugin's ``prune`` can delete it. ``active`` clears the
+    marker (e.g. a manual un-mark to reuse a box).
+    """
+    from .status import STATE_ACTIVE, set_status
+
+    set_status(args.name, args.state, reason=args.reason)
+    if args.state == STATE_ACTIVE:
+        print(f"[OK] {args.name} marker cleared (active)")
+    else:
+        suffix = f" ({args.reason})" if args.reason else ""
+        print(f"[OK] {args.name} marked '{args.state}'{suffix}")
+    return 0
 
 
 def _cmd_prune(args: argparse.Namespace) -> int:
