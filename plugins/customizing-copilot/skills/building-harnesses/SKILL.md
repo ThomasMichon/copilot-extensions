@@ -52,10 +52,11 @@ The runbook is the source of truth. Read it before acting.
   `AGENTS.md` + connective-tissue skills, SSH + agent-bridge, Picker validation,
   efforts + visions, skill/agent review, agent-mcp + MCP delegation.
 - **Unopinionated — the product:** target repo structure, where product code
-  lives (do **not** replicate a full `tools/`/`services/` suite — only
-  lightweight harness helpers), git provider, issue provider, PR/review policy,
-  execution substrate (local / Codespaces / containers), voice/personality, and
-  any extra control mechanisms.
+  lives (don't force this repo's product organization onto a *related* repo, and
+  don't copy a related repo's product in — but a harness may itself be a monorepo
+  that also holds its own product), git provider, issue provider, PR/review
+  policy, execution substrate (local / Codespaces / containers), voice/personality,
+  and any extra control mechanisms.
 
 On an unopinionated seam, **ask** the operator (structured question); on an
 opinionated one, apply the opinion and move on.

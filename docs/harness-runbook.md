@@ -83,10 +83,14 @@ Never impose a default on these. Detect the operator's existing choice, or ask.
 
 1. **Target/product repo structure.** The harness does not dictate how the code
    it operates on is laid out.
-2. **Where product code lives.** Do **not** replicate a full `tools/`/`services/`
-   suite (generators, installers, a whole service framework) into the harness.
-   The harness carries only **lightweight helpers** it needs to drive work; the real
-   product lives in its own repos, adopted as *related* repos (Phase 3).
+2. **Where product code lives.** The harness never **forcibly replicates one
+   repo's product-side organization into another party's repo**, and never
+   **copies a *related* repo's product into itself** (adopt it as a related repo
+   instead — Phase 3). It carries only the **lightweight helpers** it needs to
+   drive work. *That said, a harness may legitimately **be its own monorepo**
+   that also holds its own product* (`services/`, `tools/`, generators) — being
+   both harness and product in one repo is fine. The rule is about **not imposing
+   layout across repo boundaries**, not about keeping the harness empty.
 3. **Git provider / hosting.** GitHub, Gitea, GitLab, self-hosted — all fine.
    Commands here use forge-neutral git; only fetch/push remotes are
    provider-specific.
@@ -190,11 +194,15 @@ operator's product):
   acp-agents.json            # bridged agents, if any (Phase 5)
 ```
 
-**Keep it lightweight.** Do **not** scaffold a `services/` tree, tool
-generators, or installers unless the harness genuinely needs a helper. The
-product's real `tools/`/`services/` live in the *product* repos, adopted as
-related repos in Phase 3. `tools/setup/` here is only for the **session setup
-script** (below) and small harness helpers.
+**Keep the harness-driving helpers lightweight — but the repo may be a
+monorepo.** If this repo is *only* a control plane, don't scaffold a `services/`
+tree, tool generators, or installers unless the harness genuinely needs a
+helper; `tools/setup/` is then just the **session setup script** (below) and
+small helpers. **If this repo is a monorepo that is both harness and product,
+its own `services/`/`tools/` belong here** — that's not a violation. The line
+the harness must not cross is **forcing this repo's product organization onto a
+*related* repo, or copying a related repo's product in** (adopt it via Phase 3
+instead).
 
 **Session setup script (optional but recommended).** If sessions should run
 setup before the agent launches (install deps, print status, set env), use the
@@ -320,8 +328,20 @@ reaching across machines, and never hardcode a checkout path (resolve with
 > `authoring-harness-plugins` skill; `harness-copilot-extensions` is the
 > reference example.
 
-**Done when:** `<harness>` launches the Picker; each product repo resolves via
-`agent-worktrees related resolve <name>` with a concrete plan and a narrative.
+> **Reference / machine-specific / not-locally-checked-out related repos.** Not
+> every related repo is a locally-editable worktree on *this* machine. A repo may
+> be **reference-class** (read-only), **checked out only on another machine**, or
+> a **codespace**. In those cases `agent-worktrees related resolve <name>` may
+> report the repo as unknown/unavailable *here* — that is expected, not a failure.
+> The Phase-3 bar is that each related repo is **registered and classified where
+> it lives** (via `agent-worktrees-repos`) and its narrative records the class +
+> locus; a narrative with **no registry entry on any machine** is the actual gap
+> to reconcile (register it, or drop the stale narrative).
+
+**Done when:** `<harness>` launches the Picker; each product repo either resolves
+via `agent-worktrees related resolve <name>` with a concrete plan **or** is
+explicitly reference-class / owned by another machine, and every narrative has a
+matching registry entry somewhere.
 
 ---
 
@@ -445,8 +465,17 @@ Walk one full lifecycle:
    (list agents with `agent-bridge agents`) to a second agent/machine and
    confirm the round-trip.
 
+> **In Audit mode, don't side-effect.** Step 3 creates a commit/PR — appropriate
+> when *building* a harness, but wrong during a read-only audit. To audit Phase 6
+> without touching anything, verify the finalization path is **configured**
+> instead of exercised: the session is in an isolated worktree (not the anchor),
+> plugins/skills loaded, a setup script is present and ACP-safe, and the PR/branch
+> policy is wired (`agent-worktrees get pr-required`, the `pr:`/hooks config) —
+> no trivial commit required.
+
 **Done when:** a worktree session launches from the Picker, plugins/skills load,
-and a trivial change completes the harness's finalization path cleanly.
+and — when building — a trivial change completes the harness's finalization path
+cleanly (or, when auditing, that path is verified configured without a commit).
 
 ---
 
@@ -462,6 +491,14 @@ Run the **`efforts-setup`** skill ("set up efforts"): it scaffolds `efforts/`
 bindings (grouping, participants seam, archive layout). Day-to-day work uses the
 **`planning-efforts`** skill. Start new planning as an **effort**, not an ad-hoc
 `docs/plans/*.md`.
+
+> **Legacy plan trees are a transitional backlog, not instant drift.** A mature
+> repo often has a pre-existing `docs/plans/*.md` (or similar) tree. The Phase-7
+> bar is **not** "zero legacy plans" — it is that **new** planning starts as an
+> effort *and* the legacy tree is a **documented, shrinking migration backlog**
+> (a README stating those docs are valid-until-promoted). An undocumented pile of
+> active plans that new work keeps adding to is the real drift; a labelled
+> migration backlog is acceptable.
 
 ### visions — the north-star
 
@@ -541,9 +578,29 @@ them, and reports back to the host when they are not (the host can fall back to
 a CLI). If `agent-dispatch` is in the set, its MCP surface is a natural fit for a
 delegated queue sub-agent.
 
+### The primary-session exception (narrow)
+
+Delegation targets **heavy or narrowly-scoped credentialed** MCP toolsets — the
+ones that bloat context or widen credential blast-radius on the primary agent.
+Two kinds of server may **legitimately load in the primary session**:
+
+- **An always-on, broadly-useful, read-mostly server** — e.g. a **semantic-
+  search / knowledge index** (VEI-style) the agent reaches for constantly. The
+  friction of delegating every lookup outweighs the context saved.
+- **A single low-risk host-auth server** whose credential is already the host's
+  own (a git-credential/`gh`/vault-injected token) and whose tool surface is
+  small.
+
+Keep the exception **narrow and deliberate**: still wrap the server with
+`agent-mcp` for host-credential injection (never a hardcoded PAT), keep its tool
+list tight, and **document why** it rides in the primary session. Everything
+heavier or more privileged still goes to a delegated sub-agent.
+
 **Done when:** any authenticated MCP the harness uses is wrapped by an
-`agent-mcp` bridge with host-credential injection, and each MCP capability is
-owned by a delegated sub-agent (not piled onto the primary agent).
+`agent-mcp` bridge with host-credential injection; MCP-heavy or narrowly-
+credentialed capabilities are owned by delegated sub-agents; and any server that
+rides in the primary session is a **documented, narrow** exception (always-on
+read-mostly, or a small low-risk host-auth surface).
 
 ---
 
