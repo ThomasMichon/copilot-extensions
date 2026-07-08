@@ -524,14 +524,14 @@ class TaskQueue:
         repo_param: tuple = (repo,) if repo is not None else ()
         with self._connect() as conn:
             assigned_rows = conn.execute(
-                "SELECT * FROM tasks WHERE status = ? AND ("
+                "SELECT * FROM tasks WHERE status = ? AND ("  # noqa: S608 (repo_clause is a constant; all values parameterized)
                 "  target_worktree = ?"
                 "  OR (target_machine = ? AND target_worktree IS NULL)"
                 ")" + repo_clause + " ORDER BY created_at ASC",
                 (Status.QUEUED, worktree, machine, *repo_param),
             ).fetchall()
             owned_rows = conn.execute(
-                "SELECT * FROM tasks WHERE owner = ? AND status IN (?, ?)" + repo_clause
+                "SELECT * FROM tasks WHERE owner = ? AND status IN (?, ?)" + repo_clause  # noqa: S608 (constant clause; parameterized)
                 + " ORDER BY created_at ASC",
                 (owner, Status.CLAIMED, Status.STARTED, *repo_param),
             ).fetchall()
@@ -827,7 +827,7 @@ class TaskQueue:
         repo_param: tuple = (repo,) if repo is not None else ()
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM tasks WHERE (title LIKE ? OR prompt LIKE ?)" + repo_clause
+                "SELECT * FROM tasks WHERE (title LIKE ? OR prompt LIKE ?)" + repo_clause  # noqa: S608 (constant clause; parameterized)
                 + " ORDER BY created_at DESC LIMIT ?",
                 (like, like, *repo_param, limit),
             ).fetchall()
