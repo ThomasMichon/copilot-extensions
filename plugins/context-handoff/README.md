@@ -6,8 +6,8 @@ This plugin ships two cooperating pieces:
 
 | Piece | Type | Role |
 |-------|------|------|
-| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; injects `additionalContext` nudges at 55% / 70% utilization; provides `generate_handoff_prompt` + `save_handoff_prompt` tools. `save_handoff_prompt` sits **on top of agent-dispatch**: when a coordinator is reachable it stores the handoff as a `proposed`/`handoff` **task** (payload = the markdown, pinned to the worktree, no session file); otherwise it falls back to a session-folder file |
-| **context-handoff skill** | Skill | The `/handoff` workflow -- composes the continuation prompt from the extension's structured facts and the agent's live context -- and **`/resume-handoff`**, which consumes this worktree's pending handoff task in the foreground next session |
+| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; injects `additionalContext` nudges at 55% / 70% utilization; provides `generate_handoff_prompt` + `save_handoff_prompt` tools and the **`/resume-handoff`** slash command. `save_handoff_prompt` sits **on top of agent-dispatch**: when a coordinator is reachable it stores the handoff as a `proposed`/`handoff` **task** (payload = the markdown, pinned to the worktree, no session file); otherwise it falls back to a session-folder file. `/resume-handoff` digs up this worktree's pending handoff (task, else file) and **injects its continuation prompt into the current session** |
+| **context-handoff skill** | Skill | The `/handoff` workflow -- composes the continuation prompt from the extension's structured facts and the agent's live context. (Resume is handled by the extension's `/resume-handoff` command, which injects the handoff; the skill documents both) |
 
 ## Why an extension (and not a pure plugin)
 
