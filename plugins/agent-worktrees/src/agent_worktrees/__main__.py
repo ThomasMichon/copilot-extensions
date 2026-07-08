@@ -2201,6 +2201,14 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
     action = decision.get("action")
     profile = _resolve_profile(config, args)
 
+    if action == "refresh":
+        # The picker's refresh icon (#1430): apply the staged update and
+        # relaunch. The picker runs from the runtime venv the update replaces,
+        # so it can't apply in place -- hand back to the launcher, which applies
+        # then re-execs resolve on the new version.
+        _emit_plan({"action": "refresh"})
+        return 0
+
     # A selection on another machine hands off over SSH. The picker's target
     # carries machine *and* env, so resolve the env-specific SSH alias (not the
     # machine's primary -- see ``_emit_remote_plan_for_env``). The selected

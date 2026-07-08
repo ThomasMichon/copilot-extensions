@@ -308,6 +308,44 @@ def read_status(status: Path | None = None) -> dict:
         return {}
 
 
+def indicator_state(
+    *,
+    status: Path | None = None,
+    lock: Path | None = None,
+) -> str:
+    """Picker-facing update state for the version indicator (#1430).
+
+    Returns one of:
+      "checking"  -- a background stage is in flight (live, fresh lock, or the
+                     last stage recorded ``skipped: locked`` because a peer
+                     stage owns the lock);
+      "available" -- the stage finished and the marketplace payload changed
+                     (an update is staged, ready to apply on launch/refresh);
+      "current"   -- the stage finished and nothing changed (up to date);
+      "idle"      -- no stage has run / it was skipped (no plugin dir, etc.).
+
+    Read-only and cheap (two small files); safe to poll on the render tick.
+    """
+    lk = lock or lock_path()
+    try:
+        if lk.exists():
+            data = json.loads(lk.read_text(encoding="utf-8"))
+            started = float(data.get("started", 0.0))
+            owner = int(data.get("pid", -1))
+            if (time.time() - started) < _LOCK_TTL_SECS and _pid_alive(owner):
+                return "checking"
+    except Exception:
+        pass
+    st = read_status(status)
+    if not st or not st.get("stage_done"):
+        return "idle"
+    if st.get("skipped") == "locked":
+        return "checking"
+    if st.get("skipped"):
+        return "idle"
+    return "available" if st.get("plugin_changed") else "current"
+
+
 def cmd_stage_update(args) -> int:
     """CLI: run one background staging pass (launcher backgrounds this)."""
     st = getattr(args, "status", None)

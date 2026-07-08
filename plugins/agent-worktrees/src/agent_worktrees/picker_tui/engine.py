@@ -23,6 +23,7 @@ from textual.app import App, ComposeResult
 from textual.widget import Widget
 
 from .. import profiles as profiles_mod
+from ..update_stage import indicator_state
 from . import derive
 
 
@@ -334,6 +335,13 @@ class PickerScreen(Widget):
         self.setup()
         self.sel = self.default_sel()
         self.focus()
+        # Update indicator (#1430): the launcher stages the marketplace update
+        # in the background; the picker polls its status file to show a
+        # spinner -> checkmark (current) / refresh (update available) next to
+        # the version. Poll immediately so the first paint is accurate.
+        self.update_state = "idle"
+        self._upd_poll_frame = -1
+        self._poll_update_state()
         # ~10 fps drives the SSH spinner and the slower live-glyph pulse.
         self.set_interval(0.1, self._tick)
 
@@ -349,6 +357,18 @@ class PickerScreen(Widget):
             except Exception:
                 pass
 
+    def _poll_update_state(self):
+        """Refresh the cached update-indicator state from the stage status.
+
+        Cheap (two small files) and never fatal -- a read hiccup leaves the
+        last state in place. Kept off the SSH/tmux hot path by the frame
+        throttle in ``_tick``.
+        """
+        try:
+            self.update_state = indicator_state()
+        except Exception:
+            pass
+
     def _tick(self):
         self.frame += 1
         self.pulse = (self.frame // 5) % 2
@@ -358,6 +378,12 @@ class PickerScreen(Widget):
             self.data = self.loader.records()
             _ready, loading, _failed = self.loader.counts()
             busy = busy or loading > 0
+        # Poll the launcher's update stage ~twice a second (#1430). While a
+        # stage is in flight the spinner should animate, so keep the tick busy.
+        if self.frame % 5 == 0:
+            self._poll_update_state()
+        if self.update_state == "checking":
+            busy = True
         # Drive the mock cleanup/sync progress dialog forward.
         if self.progress and not self.progress["done"]:
             self._advance_progress()
@@ -563,15 +589,29 @@ class PickerScreen(Widget):
         m, e, _ = self.cur_machine()
         return (m, e)
 
+    def _update_actionable(self) -> bool:
+        """True when the update indicator is a focusable action (#1430).
+
+        Only when an update is *staged* (``available``) is there something to do
+        (Enter = apply + restart); the spinner/✓ states are informational.
+        """
+        return getattr(self, "update_state", "idle") == "available"
+
+    def _v_stops(self):
+        """Top (View) region stops: the view pivot, plus the refresh icon
+        ("V", 1) when an update is staged so Up/Tab can reach it."""
+        return [("V", 0), ("V", 1)] if self._update_actionable() else [("V", 0)]
+
     def stops(self):
-        """Vertical Up/Down flow. ("V",0)=View nav, ("M",0)=machine picker,
+        """Vertical Up/Down flow. ("V",0)=View nav, ("V",1)=update refresh icon
+        (only when an update is staged), ("M",0)=machine picker,
         ("BTN",0)=button row, then the table/grid rows."""
         if self.htab == 0:
-            out = [("V", 0), ("M", 0), ("BTN", 0)]
+            out = [*self._v_stops(), ("M", 0), ("BTN", 0)]
             for i in range(len(self.list_records())):
                 out.append(("L", i))
         elif self.htab == 1:
-            out = [("V", 0), ("M", 0), ("BTN", 0)]
+            out = [*self._v_stops(), ("M", 0), ("BTN", 0)]
             groups = self.maint_groups()
             if any(rows for _st, rows in groups):
                 out.append(("SA", 0))   # the "Select all" checkbox
@@ -582,7 +622,7 @@ class PickerScreen(Widget):
                     out.append(("C", li))
                     li += 1
         else:
-            out = [("V", 0)]
+            out = [*self._v_stops()]
             for i in range(len(self.targets)):
                 out.append(("PR", i))
             out.append(("BTN", 0))   # Apply/Reset at the bottom
@@ -1511,6 +1551,24 @@ class PickerScreen(Widget):
         t.append(" " * max(0, W - t.cell_len))
         return t
 
+    def _update_seg(self, focused: bool):
+        """Version-indicator glyph for the launcher's update stage (#1430).
+
+        checking -> animated spinner; current -> ✓; available -> ↻ (focusable,
+        Enter applies + restarts). Returns a Text segment, or None when idle.
+        """
+        st = getattr(self, "update_state", "idle")
+        if st == "idle":
+            return None
+        t = Text()
+        if st == "checking":
+            t.append(" " + self.spin(), style=C_SPIN)
+        elif st == "current":
+            t.append(" ✓", style=C_READY)
+        elif st == "available":
+            t.append(" ↻", style=(C_BTN_SEL if focused else C_HINT_ON))
+        return t
+
     def topbar(self, W):
         # Right-side segments, dropped in this order as width shrinks:
         # version, branch, env, repo. Always kept: "Agent Worktrees" + machine.
@@ -1524,13 +1582,22 @@ class PickerScreen(Widget):
         # fabricated name.
         repo = getattr(self.src, "REPO", "") or ""
         branch = getattr(self.src, "BRANCH", "") or ""
-        present = {"version": True, "repo": bool(repo), "env": True,
-                   "branch": bool(branch)}
+        present = {"update_text": True, "version": True, "repo": bool(repo),
+                   "env": True, "branch": bool(branch)}
+        upd_focused = self.sel == ("V", 1)
 
         def build():
             left = Text(" Agent Worktrees", style="bold")
             if present["version"]:
                 left.append(ver, style=C_DIM)
+            # Update indicator (#1430): spinner while the launcher stages the
+            # marketplace update, ✓ when current, ↻ when an update is staged.
+            seg = self._update_seg(upd_focused)
+            if seg is not None:
+                left.append_text(seg)
+                if present["update_text"] and self.update_state == "available":
+                    left.append(" Update available…",
+                                style=(C_BTN_SEL if upd_focused else C_HINT_ON))
             right = Text("host ", style=C_DIM)
             right.append(host, style="grey70")
             if present["env"]:
@@ -1542,7 +1609,7 @@ class PickerScreen(Widget):
                 right.append(f" · {branch}", style=C_DIM)
             return left, right
 
-        for drop in ("version", "branch", "env", "repo"):
+        for drop in ("update_text", "version", "branch", "env", "repo"):
             left, right = build()
             if left.cell_len + 1 + right.cell_len + 1 <= W:
                 break
@@ -1575,6 +1642,9 @@ class PickerScreen(Widget):
         current focus, naming the concrete target (#1344)."""
         zone = self.sel[0]
         if zone == "V":
+            if self.sel == ("V", 1):
+                return ("Enter: apply staged update + restart the picker"
+                        " · ↑↓ move · Tab region")
             return (f"◀▶ switch view (on {HTABS[self.htab]}) · Enter: focus body"
                     f" · Tab region · [ ] view")
         if zone == "M":
@@ -2398,6 +2468,12 @@ class PickerScreen(Widget):
     def _activate(self):
         zone = self.sel[0]
         if zone == "V":
+            if self.sel == ("V", 1):
+                # Refresh icon: apply the staged update and restart the picker
+                # on the new version. The picker can't swap its own runtime
+                # venv, so the launcher does it (action=refresh). #1430.
+                self._decide({"action": "refresh"})
+                return
             self.sel = ("M", 0) if self.htab in (0, 1) else ("PR", 0)
         elif zone == "M":
             self.sel = ("BTN", 0)
