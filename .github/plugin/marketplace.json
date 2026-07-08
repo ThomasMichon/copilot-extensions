@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, and CLI customization",
-    "version": "1.7.4-dev200"
+    "version": "1.7.4-dev201"
   },
   "plugins": [
     {
@@ -65,8 +65,8 @@
     },
     {
       "name": "customizing-copilot",
-      "description": "Customize and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, and reviewing customizations - with the per-skill folder conventions and Agent Skills best practices; ships the authoring-skills, defining-subagents, registering-mcp-servers, installing-plugins, building-harnesses, and reviewing-customizations skills",
-      "version": "0.1.0-dev5",
+      "description": "Customize and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, and authoring harness-<repo> plugins - with the per-skill folder conventions and Agent Skills best practices; ships the authoring-skills, defining-subagents, registering-mcp-servers, installing-plugins, building-harnesses, reviewing-customizations, and authoring-harness-plugins skills",
+      "version": "0.1.0-dev6",
       "source": "plugins/customizing-copilot"
     },
     {
@@ -74,6 +74,12 @@
       "description": "Portable agent task-queue + per-host coordinator: a single-writer SQLite leased work queue (six-state model, capability-gated atomic claim, affinity routing, lease recovery) so agents coordinate without push latency or an account per agent.",
       "version": "0.1.0-dev18",
       "source": "plugins/agent-dispatch"
+    },
+    {
+      "name": "harness-copilot-extensions",
+      "description": "Operator harness for the copilot-extensions repo - portable, owner-authored skills to work ON the plugin suite (contribute changes and diagnose the deployed runtimes). Any control repo can enable it instead of hand-writing a per-repo narrative. Reference implementation of the harness-<repo> plugin standard; ships the contributing-to-copilot-extensions and diagnosing-copilot-extensions skills.",
+      "version": "0.1.0-dev1",
+      "source": "plugins/harness-copilot-extensions"
     }
   ]
 }
