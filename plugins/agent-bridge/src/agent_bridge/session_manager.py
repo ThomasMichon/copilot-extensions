@@ -17,6 +17,7 @@ import re
 import sys
 import time
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -1244,6 +1245,7 @@ class SessionManager:
         caller_id: str | None = None,
         permission_callback: Any | None = None,
         mcp_servers: list[dict[str, Any]] | None = None,
+        copilot_args: list[str] | None = None,
     ) -> Session:
         """Create and start a new agent session.
 
@@ -1263,9 +1265,20 @@ class SessionManager:
             mcp_servers: Optional per-session MCP toolset (ACP server specs)
                 mounted into the ACP session at session/new. None preserves
                 the historic empty toolset.
+            copilot_args: Optional extra ``copilot`` CLI args appended to
+                ``target.copilot_args`` for this session only (e.g. a per-run
+                ``--additional-mcp-config``). None preserves the agent's args.
         """
         if self._draining:
             raise DaemonDrainingError("session")
+        # Per-session copilot args: append to the resolved target's args for
+        # THIS spawn only (a fresh target copy so a shared/cached AgentConfig
+        # target is never mutated). Every spawn path appends target.copilot_args,
+        # so this reaches local, SSH, and command launches uniformly.
+        if copilot_args:
+            target = replace(
+                target, copilot_args=[*target.copilot_args, *copilot_args]
+            )
         session_id = str(uuid.uuid4())[:12]
         name = _generate_name()
         now = time.time()
