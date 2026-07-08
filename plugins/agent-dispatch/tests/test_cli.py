@@ -94,3 +94,76 @@ def test_identity_falls_back_to_resolution(monkeypatch):
     monkeypatch.setattr(identity, "resolve_identity", lambda: ("host-a", "wt-7"))
     args = argparse.Namespace(machine=None, worktree=None)
     assert __main__._identity(args) == ("host-a", "wt-7")
+
+
+def test_parser_inbox_defaults():
+    args = build_parser().parse_args(["inbox"])
+    assert args.command == "inbox"
+    assert args.status == "proposed"
+    assert args.machine is None
+    assert args.limit == 200
+
+
+def test_parser_inbox_flags():
+    args = build_parser().parse_args(
+        ["inbox", "--machine", "host-a", "--status", "proposed,queued", "--limit", "5"]
+    )
+    assert args.machine == "host-a"
+    assert args.status == "proposed,queued"
+    assert args.limit == 5
+
+
+class _FakeClient:
+    """A stand-in DispatchClient capturing the params passed to ``list``."""
+
+    def __init__(self, tasks):
+        self._tasks = tasks
+        self.calls: list[dict] = []
+
+    def list(self, **params):
+        self.calls.append(params)
+        return list(self._tasks)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return None
+
+
+def test_inbox_scopes_cross_lane_to_this_machine(monkeypatch, capsys):
+    import json
+
+    from agent_dispatch import __main__, identity
+
+    tasks = [
+        {"id": "t1", "target_machine": "host-a", "status": "proposed"},
+        {"id": "t2", "target_machine": None, "status": "proposed"},
+        {"id": "t3", "target_machine": "host-b", "status": "proposed"},
+    ]
+    fake = _FakeClient(tasks)
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("host-a", "wt-1"))
+
+    args = build_parser().parse_args(["inbox"])
+    rc = args.func(args)
+    assert rc == 0
+
+    # Cross-lane query: repo is None (all lanes), status defaulted to proposed.
+    assert fake.calls == [{"repo": None, "status": "proposed", "label": None, "limit": 200}]
+
+    emitted = json.loads(capsys.readouterr().out)
+    ids = {t["id"] for t in emitted}
+    # host-a match + machine-agnostic kept; host-b dropped.
+    assert ids == {"t1", "t2"}
+
+
+def test_inbox_requires_a_machine(monkeypatch, capsys):
+    from agent_dispatch import __main__, identity
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _FakeClient([]))
+    monkeypatch.setattr(identity, "resolve_identity", lambda: (None, None))
+
+    args = build_parser().parse_args(["inbox"])
+    assert args.func(args) == 2
+    assert "could not resolve this machine" in capsys.readouterr().err

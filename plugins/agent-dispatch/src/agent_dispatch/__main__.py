@@ -253,6 +253,35 @@ def _cmd_list(args: argparse.Namespace) -> int:
         ))
 
 
+def _cmd_inbox(args: argparse.Namespace) -> int:
+    """Machine-scoped, cross-lane view of pickable tasks.
+
+    Unlike ``list`` (which scopes to the calling repo's lane), ``inbox`` asks
+    the coordinator for tasks across *every* lane and keeps those this machine
+    can pick up: a matching ``target_machine`` plus machine-agnostic tasks
+    (``target_machine`` unset). Defaults to ``proposed`` -- the "available to
+    start" state. Each entry carries ``target_worktree``, ``affinity``,
+    ``labels`` and the display-only ``repo_name`` so a consumer (e.g. the
+    worktree picker's task pivot) can group by worktree and badge handoffs.
+    """
+    machine = args.machine
+    if not machine:
+        from .identity import resolve_identity
+
+        machine = resolve_identity()[0]
+    if not machine:
+        print(
+            "agent-dispatch: could not resolve this machine — pass --machine "
+            "(agent-worktrees not found, or not inside a worktree)",
+            file=sys.stderr,
+        )
+        return 2
+    with _client(args) as c:
+        tasks = c.list(repo=None, status=args.status, label=args.label, limit=args.limit)
+    inbox = [t for t in tasks if t.get("target_machine") in (None, machine)]
+    return _emit(_enrich(inbox))
+
+
 def _cmd_find(args: argparse.Namespace) -> int:
     repo = _scope_repo(args)
     if not repo:
@@ -486,6 +515,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--label")
     p.add_argument("--limit", type=int, default=200)
     p.set_defaults(func=_cmd_list)
+
+    p = sub.add_parser(
+        "inbox",
+        help="machine-scoped, cross-lane pickable tasks (default: proposed) -- "
+             "what this machine can start, across every repo lane",
+    )
+    p.add_argument(
+        "--machine",
+        help="machine to scope to (default: this machine, resolved via agent-worktrees)",
+    )
+    p.add_argument(
+        "--status",
+        default="proposed",
+        help="status filter; comma-separate for several (default: proposed)",
+    )
+    p.add_argument("--label")
+    p.add_argument("--limit", type=int, default=200)
+    p.set_defaults(func=_cmd_inbox)
 
     p = sub.add_parser(
         "find", help="substring search over title/prompt (a quick dedup probe; calling repo)"
