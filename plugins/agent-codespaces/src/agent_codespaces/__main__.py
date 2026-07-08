@@ -366,6 +366,24 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _relay_listening(port: int, timeout: float = 0.5) -> bool:
+    """True if the host credential relay is accepting TCP on 127.0.0.1:<port>.
+
+    ``agent-codespaces ssh`` only sets up the ``-R`` reverse-forward and assumes
+    the relay (owned/run by the agent-bridge daemon) is up. If the daemon is
+    down or its relay failed to bind, the forward dead-ends and git auth over
+    the tunnel silently returns nothing (#122/#112). A quick pre-connect probe
+    lets us warn loudly instead of failing silently.
+    """
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def _build_launch_command(
     remote_cmd: str | None,
     plugin_dirs: list[str],
@@ -426,6 +444,26 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     relay_token: str | None = None
     if not args.no_relay:
         port_forwards.append(f"-R {relay_port}:127.0.0.1:{relay_port}")
+        # #122: the relay is owned/run by the agent-bridge daemon; this command
+        # only forwards the port. If the relay isn't listening host-side, the
+        # -R forward dead-ends and git auth over the tunnel silently returns
+        # nothing (ADO 'could not read Username', GitHub/dotfiles 403). Probe it
+        # up front and warn LOUDLY with remediation rather than failing silently.
+        if not _relay_listening(relay_port):
+            log.warning(
+                "Credential relay not listening on 127.0.0.1:%d before connecting "
+                "to %s -- git auth over the relay will fail (#122)",
+                relay_port, args.name,
+            )
+            print(
+                f"[WARN] Host credential relay is NOT listening on "
+                f"127.0.0.1:{relay_port} -- the SSH -R forward will dead-end and "
+                f"git auth over the relay (ADO push, GitHub/dotfiles push, headless "
+                f"PR/REST) will FAIL on CodeSpace '{args.name}'. The relay is owned "
+                f"by the agent-bridge daemon; start/repair it with "
+                f"`agent-bridge service restart`, then reconnect. (#122)",
+                file=sys.stderr,
+            )
         # Per-codespace relay token: the shared relay gates get-azure-token
         # (it also serves network-reachable containers), so the codespace path
         # must present its own secret for the official azure-auth-helper scope

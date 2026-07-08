@@ -10,6 +10,25 @@ import pytest
 from agent_codespaces.__main__ import main
 
 
+def test_relay_listening_detects_open_and_closed_ports():
+    """#122: _relay_listening must return True for a bound port and False for a
+    closed one, so the ssh path can warn loudly when the relay is down."""
+    import socket
+
+    from agent_codespaces.__main__ import _relay_listening
+
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+        assert _relay_listening(port) is True
+    finally:
+        srv.close()
+    # Port is now closed -> not listening.
+    assert _relay_listening(port) is False
+
+
 class TestCLI:
     def test_no_args_shows_help(self, capsys):
         rc = main([])
