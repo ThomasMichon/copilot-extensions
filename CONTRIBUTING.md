@@ -48,7 +48,18 @@ Do **not** bump minor or major versions unless explicitly instructed.
 ### Where the version lives (ALL THREE must be bumped together)
 
 Each plugin has its own version triplet. Bump only the files for the
-plugin you changed:
+plugin you changed.
+
+> **General rule (applies to every plugin, present and future).** For a plugin
+> `<p>`: bump `plugins/<p>/plugin.json` (`version`), `plugins/<p>/pyproject.toml`
+> (`[project].version`, runtime plugins only — payload-only plugins have none),
+> and `<p>`'s entry in `.github/plugin/marketplace.json` (find it **by name**,
+> not a hardcoded index). **agent-worktrees** additionally bumps
+> `metadata.version`; **adding a new plugin** appends a `plugins[]` entry and
+> bumps `metadata.version`. The per-plugin tables below are concrete examples for
+> the original plugins — the same rule covers agent-logger, agent-dispatch,
+> context-handoff, efforts, visions, customizing-copilot,
+> harness-copilot-extensions, and anything added later.
 
 **agent-worktrees:**
 

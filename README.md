@@ -4,8 +4,8 @@ A [Copilot CLI](https://docs.github.com/copilot/how-tos/use-copilot-agents/use-c
 plugin suite that gives every session its **own isolated git worktree** and lets
 your agents **talk to each other** — across worktrees, across machines, and into
 **GitHub Codespaces** and **local dev containers** — with credentials forwarded
-securely along the way. A fifth plugin wraps authenticated **MCP servers** so
-those same host credentials reach your tools.
+securely along the way. The **agent-mcp** plugin wraps authenticated **MCP
+servers** so those same host credentials reach your tools.
 
 Plugins, one marketplace. Install what you need; they compose.
 
@@ -142,8 +142,9 @@ copilot plugin install customizing-copilot@copilot-extensions # optional — how
 ```
 
 Each `copilot plugin install` only vendors the plugin's **payload** (source,
-skills, hooks, extensions). The six runtime plugins (everything except `efforts`,
-`context-handoff`, and `customizing-copilot`) then need their runtime deployed once — that's Step 2,
+skills, hooks, extensions). The seven runtime plugins (every plugin except the
+payload-only `efforts`, `visions`, `context-handoff`, `customizing-copilot`, and
+`harness-copilot-extensions`) then need their runtime deployed once — that's Step 2,
 which runs each installer to build a `uv` venv under `~/.agent-*` and drop a
 binstub in `~/.local/bin`.
 
@@ -312,7 +313,7 @@ Your source repos and their `.worktrees` content are never touched.
 | Document | What's inside |
 |----------|---------------|
 | [Control-Harness Runbook](docs/harness-runbook.md) | Opinionated, phase-by-phase procedure for building/extending/auditing an agent harness with these plugins |
-| [Plugin consolidation](docs/plans/plugin-consolidation.md) | Discussion: whether to collapse the eleven-plugin suite into fewer plugins, with decision criteria |
+| [Plugin consolidation](docs/plans/plugin-consolidation.md) | Discussion: whether to collapse the multi-plugin suite into fewer plugins, with decision criteria |
 | [Architecture overview](docs/architecture.md) | How the plugins fit together: install topology, runtimes, ports, credential relay |
 | [Rollout plan](docs/plans/rollout-readiness.md) | Onboarding-readiness plan and fixes |
 | [Fresh dev box validation](docs/plans/fresh-devbox-validation.md) | Step-by-step validation on a clean machine |
