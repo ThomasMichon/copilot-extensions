@@ -8,6 +8,9 @@ description: >
   Trigger phrases include:
   - 'handoff'
   - '/handoff'
+  - '/resume-handoff'
+  - 'resume handoff'
+  - 'consume handoff'
   - 'continuation prompt'
   - 'next session'
   - 'context is getting large'
@@ -115,6 +118,7 @@ answers, propose the task:
 # Skip silently if agent-dispatch isn't installed or no coordinator answers:
 agent-dispatch health >/dev/null 2>&1 && \
 agent-dispatch create "Continue: <short title>" --proposed \
+  --label handoff \
   --payload-file "<returned handoff file path>" \
   --prompt "<the same wrapper prompt you reply with>" \
   --affinity worktree=<worktree_id> \
@@ -128,6 +132,10 @@ agent-dispatch create "Continue: <short title>" --proposed \
   machine`); or just let `agent-dispatch` resolve them and omit the flags.
 - Keep it **`proposed`** (not `queued`): a handoff is a draft for the operator to
   approve, and `proposed` tasks are never auto-claimed by another agent.
+- Tag it **`--label handoff`**: this is the marker `/resume-handoff` (and the
+  Worktree Picker's handoff views) filter on to find *this worktree's* pending
+  handoff. Combined with `--target-worktree`, it pins the handoff to the worktree
+  that wrote it.
 - Use **`worktree` affinity** (soft), matching "a handoff is in-place: same
   worktree, new session." The `--dedup-key` makes re-running `/handoff` in the
   same session idempotent.
@@ -137,17 +145,26 @@ agent-dispatch create "Continue: <short title>" --proposed \
   a coordinator just to graduate a handoff.
 
 When you do graduate it, mention it briefly after the wrapper prompt — e.g.
-"Also filed as proposed task `<id>` (approve it to queue)." The user still pastes
-the wrapper prompt to resume; the task is for tracking/dispatch, not resumption.
+"Also filed as proposed task `<id>` — resume it next session with
+`/resume-handoff` (or paste the wrapper prompt)." The task is a durable,
+browsable, claimable second copy of the handoff; either resume path works.
 
 ---
 
 ## Resuming From a Handoff
 
-A handoff is **not** auto-loaded. The user resumes by pasting the wrapper prompt
-(from the previous session) as the first message in a new session. That prompt
-names the handoff file path and tells you to read it; read that file to orient
-yourself, then continue.
+A handoff is **not** auto-loaded. There are two ways to resume — both run in the
+**same, foreground Copilot CLI session** you're sitting in (a handoff is
+continued by *you*, in a fresh context window, **never** by a spawned background
+ACP agent unless the operator explicitly asks):
+
+1. **Paste the wrapper prompt** (the classic path). The previous session's
+   wrapper prompt, pasted as the first message in a new session, names the
+   handoff file path and tells you to read it and continue.
+2. **`/resume-handoff`** (when the handoff was graduated into a task). After
+   `/clear` (or `/new`) in the same worktree, the operator runs
+   `/resume-handoff` with no argument; you find and **consume** this worktree's
+   pending handoff task and continue from its payload. See below.
 
 > **A handoff is in-place: same worktree, new session.** The point of a handoff
 > is to continue *this* work with a fresh context window, so the new session
@@ -157,6 +174,56 @@ yourself, then continue.
 > continuation of its own work (see the **`worktree`** skill). If a PR merged in
 > the previous session, the next session simply syncs the worktree forward
 > (`agent-worktrees git sync`) and keeps going.
+
+### `/resume-handoff` — consume this worktree's pending handoff task
+
+When the operator runs `/resume-handoff` (no argument), **in the target
+worktree**, resume from the graduated handoff task rather than a pasted prompt.
+Do it **in this foreground session** — do not spawn a background agent.
+
+1. **Find this worktree's pending handoff.** Query the coordinator for
+   `proposed`, `handoff`-labeled tasks in the calling repo's lane, and pick the
+   one whose `target_worktree` matches the current worktree (newest wins if
+   several):
+
+   ```bash
+   agent-dispatch health >/dev/null 2>&1 || { echo "no coordinator — paste the wrapper prompt instead"; }
+   agent-dispatch list --status proposed --label handoff
+   # match target_worktree to `agent-worktrees get worktree-dir` (basename)
+   ```
+
+2. **Consume it.** Approve the draft, then claim it (claim honors targeting, so
+   it only leases a task pinned to *your* worktree) — this "consumes" the
+   handoff, stamping your session as its owner and moving it out of the pending
+   list:
+
+   ```bash
+   agent-dispatch approve <id>
+   agent-dispatch claim --task <id>          # identity auto-resolved from the CWD
+   agent-dispatch start <id> <owner>          # owner is echoed by claim
+   ```
+
+3. **Read the payload and continue.** The task payload **is** the full handoff
+   markdown; read it and orient yourself exactly as if you'd opened the handoff
+   file:
+
+   ```bash
+   agent-dispatch payload <id> --raw
+   ```
+
+   Then carry the work forward. When the handoff's target goals are met (or you
+   hand off again), close the loop:
+
+   ```bash
+   agent-dispatch complete <id> <owner> --result-ref <pr-or-commit>
+   ```
+
+- **Graceful degrade.** If no coordinator answers, or no matching `proposed`
+  handoff task exists for this worktree, say so and fall back to the pasted
+  wrapper prompt (path 1). Never invent a handoff.
+- **Foreground only.** `/resume-handoff` continues the work in *this* session.
+  It does not launch a background ACP worker — handoffs are resumed by the
+  operator's own foreground session.
 
 ### If the user says "pick up from last session" with no pasted prompt
 
