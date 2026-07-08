@@ -509,6 +509,97 @@ def test_picker_buckets_sessionless_into_unowned():
     asyncio.run(run())
 
 
+def test_reconcile_prs_counts_terminal_transitions(monkeypatch):
+    """#1423: reconcile_prs reconciles each non-terminal active PR and counts
+    those that moved to a terminal state, skipping no-PR / already-terminal."""
+    from pathlib import Path
+
+    from agent_worktrees.picker_tui import data_local
+
+    class FakePR:
+        def __init__(self, number, state):
+            self.number, self.state = number, state
+
+    class FakeRec:
+        def __init__(self, pr):
+            self._pr = pr
+
+        def active_pr(self):
+            return self._pr
+
+    open_pr = FakePR(1, "open")
+    recs = [FakeRec(open_pr), FakeRec(FakePR(2, "merged")), FakeRec(None)]
+    monkeypatch.setattr(data_local.cfg, "load_config", lambda: object())
+    monkeypatch.setattr(data_local.cfg, "tracking_dir", lambda: Path("."))
+    monkeypatch.setattr(data_local.cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(data_local.tracking, "list_records",
+                        lambda p, platform_filter=None: recs)
+
+    def fake_reconcile(rec, config):
+        if rec.active_pr() is open_pr:        # provider reports it merged
+            open_pr.state = "merged"
+
+    monkeypatch.setattr("agent_worktrees.pr_ops._reconcile_active_pr",
+                        fake_reconcile)
+    assert data_local.reconcile_prs() == 1
+
+
+def test_picker_background_pr_reconcile_reloads_on_change():
+    """#1423: when the background reconcile reports a change, the non-live path
+    reloads local data so the render reflects the corrected PR state."""
+    src = _fixture_source()
+    calls = {"reconcile": 0, "load": 0}
+    orig_load = src.load
+
+    def load2():
+        calls["load"] += 1
+        return orig_load()
+
+    def reconcile_prs():
+        calls["reconcile"] += 1
+        return 1
+
+    src.load = load2
+    src.reconcile_prs = reconcile_prs
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline and not scr._pr_reconciled:
+                await pilot.pause()
+            assert calls["reconcile"] == 1
+            assert calls["load"] >= 2       # setup load + post-reconcile reload
+
+    asyncio.run(run())
+
+
+def test_picker_background_pr_reconcile_no_change_no_reload():
+    """A reconcile that changes nothing must not trigger a reload."""
+    src = _fixture_source()
+    calls = {"load": 0}
+    orig_load = src.load
+
+    def load2():
+        calls["load"] += 1
+        return orig_load()
+
+    src.load = load2
+    src.reconcile_prs = lambda: 0
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline and not scr._pr_reconciled:
+                await pilot.pause()
+            assert calls["load"] == 1       # only the setup load
+
+    asyncio.run(run())
+
+
 def test_bucket_fallback_no_classify_finalized_is_clean_not_wip():
     """An old remote (no --classify -> no state) must not show FINAL + unmerged."""
     # status finalized, no git classification -> display FINAL, bucket clean.

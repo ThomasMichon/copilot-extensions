@@ -71,6 +71,46 @@ def apply_profile_column(machine, env, sels, *, mirror=True):
     return profiles_io.apply_column(machine, env, sels, mirror=mirror)
 
 
+def reconcile_prs() -> int:
+    """Best-effort: reconcile this machine's worktrees' active PR state against
+    the provider, writing merged/closed back into the tracking YAML (#1423).
+
+    A PR merged externally (the ``auto-merge`` label / provider API, bypassing
+    ``finalize``/``pr-status``) leaves the local record stale at ``open``, so the
+    Picker shows already-merged worktrees as having open PRs. This reconciles
+    every local worktree whose active PR is still non-terminal and persists the
+    resolved state, so the next render is honest.
+
+    Returns the count of records whose active PR moved to a terminal state.
+    Never raises: an unconfigured/unreachable provider leaves state untouched.
+    Local machine only -- remote worktrees reconcile on their owning machine.
+    """
+    from .. import pr_ops
+
+    try:
+        config = cfg.load_config()
+        tracking_path = cfg.tracking_dir()
+        plat = cfg.detect_platform()
+        records = tracking.list_records(tracking_path, platform_filter=plat)
+    except Exception:
+        return 0
+    changed = 0
+    for rec in records:
+        active = rec.active_pr()
+        if active is None or active.number is None:
+            continue
+        if tracking._pr_is_terminal(active):
+            continue
+        try:
+            pr_ops._reconcile_active_pr(rec, config)
+        except Exception:
+            continue
+        new_active = rec.active_pr()
+        if new_active is not None and tracking._pr_is_terminal(new_active):
+            changed += 1
+    return changed
+
+
 def load(machine: str | None = None, env: str | None = None):
     """Normalized records for this machine's worktrees (tracking + classify).
 
