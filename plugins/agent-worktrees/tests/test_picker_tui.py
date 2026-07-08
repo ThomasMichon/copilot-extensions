@@ -600,6 +600,51 @@ def test_picker_background_pr_reconcile_no_change_no_reload():
     asyncio.run(run())
 
 
+def test_maybe_repoll_gating(monkeypatch):
+    """#1421: _maybe_repoll fires once per interval, and is suppressed on the
+    Profiles tab, during a progress dialog, and when POLL_SECS <= 0."""
+    from agent_worktrees.picker_tui import engine as eng
+
+    class FakeLoader:
+        def __init__(self):
+            self.polls = 0
+
+        def repoll_silent(self, keys=None):
+            self.polls += 1
+            return 0
+
+    loader = FakeLoader()
+
+    def fresh_obj():
+        return types.SimpleNamespace(
+            loader=loader, progress=None, htab=0,
+            _last_poll=time.monotonic() - 1000,
+            _poll_keys=lambda: {("m", "Win")})
+
+    monkeypatch.setattr(eng, "POLL_SECS", 45.0)
+    obj = fresh_obj()
+
+    eng.PickerScreen._maybe_repoll(obj)
+    assert loader.polls == 1                 # due -> fires
+    eng.PickerScreen._maybe_repoll(obj)
+    assert loader.polls == 1                 # within interval -> no-op
+
+    obj._last_poll = time.monotonic() - 1000
+    obj.htab = 2                             # Profiles tab -> suppressed
+    eng.PickerScreen._maybe_repoll(obj)
+    assert loader.polls == 1
+
+    obj.htab = 0
+    obj.progress = {"done": False}           # dialog up -> suppressed
+    eng.PickerScreen._maybe_repoll(obj)
+    assert loader.polls == 1
+
+    obj.progress = None
+    monkeypatch.setattr(eng, "POLL_SECS", 0.0)   # disabled
+    eng.PickerScreen._maybe_repoll(obj)
+    assert loader.polls == 1
+
+
 def test_bucket_fallback_no_classify_finalized_is_clean_not_wip():
     """An old remote (no --classify -> no state) must not show FINAL + unmerged."""
     # status finalized, no git classification -> display FINAL, bucket clean.

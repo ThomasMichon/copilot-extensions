@@ -443,9 +443,17 @@ class LiveLoader:
         self._procs = []
         self._procs_lock = threading.Lock()
         self._cancelled = threading.Event()
+        # Keys with a silent background refresh in flight (#1421) -- a per-source
+        # guard so a slow machine isn't re-hit every poll interval.
+        self._refreshing: set = set()
+        # Per-source generation: bumped by reload() so an in-flight silent
+        # repoll that started earlier never commits stale rows over a newer
+        # intentional reload (#1421, ordering fix).
+        self._gen: dict = {}
         for s in all_sources:
             self._state[s.key] = "loading" if s.ready else "failed"
             self._records[s.key] = []
+            self._gen[s.key] = 0
 
     def start(self):
         derive.NOW = _dt.datetime.now()
@@ -477,12 +485,74 @@ class LiveLoader:
             if s.key == (machine, env):
                 with self._lock:
                     self._state[s.key] = "loading"
+                    # Invalidate any in-flight silent repoll of this source so
+                    # its (older) rows can't land after this reload (#1421).
+                    self._gen[s.key] = self._gen.get(s.key, 0) + 1
                 threading.Thread(
                     target=self._load_one, args=(s,),
                     name=f"reload-{s.machine}-{s.env}", daemon=True,
                 ).start()
                 return True
         return False
+
+    def repoll_silent(self, keys=None):
+        """Background-refresh currently-ready sources *in place* (#1421).
+
+        Unlike :meth:`reload`, this never flips a source back to ``loading`` --
+        no spinner, no transient empty list. Each ready source re-fetches on a
+        daemon thread and swaps its records only on success; a failed refresh
+        silently keeps the last-good rows. A per-source in-flight guard means a
+        slow machine is skipped (not re-hit) on the next poll. ``keys`` bounds
+        the pass to a set of ``(machine, env)`` -- the picker passes only the
+        machines currently in view so a specific-machine tab never fans out to
+        the whole fleet. No-op once the loader is cancelled (picker teardown).
+
+        Returns the number of sources a refresh was actually started for.
+        """
+        if self._cancelled.is_set():
+            return 0
+        started = 0
+        with self._lock:
+            for s in self._sources:
+                if keys is not None and s.key not in keys:
+                    continue
+                if self._state.get(s.key) != "ready":
+                    continue
+                if s.key in self._refreshing:
+                    continue
+                self._refreshing.add(s.key)
+                gen = self._gen.get(s.key, 0)
+                started += 1
+                threading.Thread(
+                    target=self._refresh_one, args=(s, gen),
+                    name=f"repoll-{s.machine}-{s.env}", daemon=True,
+                ).start()
+        return started
+
+    def _refresh_one(self, source: Source, gen: int):
+        """Silent re-fetch for :meth:`repoll_silent`: swap records on success,
+        keep last-good on failure, and always clear the in-flight guard.
+
+        ``gen`` is the source's generation captured when the refresh started;
+        the fetched rows are committed only if the generation is unchanged --
+        i.e. no :meth:`reload` superseded this refresh while it ran (#1421)."""
+        try:
+            if self._cancelled.is_set():
+                return
+            recs = _fetch(source, runner=self._spawn)
+        except Exception:
+            return  # keep last-good records; no state flip
+        else:
+            with self._lock:
+                # Commit only when still ready, not cancelled, and not
+                # superseded by a newer reload() (generation unchanged).
+                if (not self._cancelled.is_set()
+                        and self._state.get(source.key) == "ready"
+                        and self._gen.get(source.key, 0) == gen):
+                    self._records[source.key] = recs
+        finally:
+            with self._lock:
+                self._refreshing.discard(source.key)
 
     def cancel(self):
         """Stop loading and kill any in-flight prefetch ssh children.
@@ -528,6 +598,11 @@ class LiveLoader:
         proc = subprocess.Popen(argv, **kwargs)
         with self._procs_lock:
             self._procs.append(proc)
+        # Close the cancel/spawn race: if cancel() ran between the top-of-method
+        # check and the Popen above, it never saw this child. Re-check now that
+        # it's registered and kill it so a late spawn can't orphan an ssh child.
+        if self._cancelled.is_set():
+            _kill_proc_tree(proc)
         try:
             out, err = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
