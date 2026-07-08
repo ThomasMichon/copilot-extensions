@@ -130,6 +130,13 @@ class StartSessionRequest(BaseModel):
     #   {"type": "http" | "sse", "name": ..., "url": ..., "headers": {...}}
     # None / omitted preserves the historic empty-toolset behavior.
     mcp_servers: list[dict[str, Any]] | None = None
+    # Extra ``copilot`` CLI args APPENDED to the resolved agent's copilot_args
+    # for THIS session only (e.g. a per-run ``--additional-mcp-config @<file>``
+    # to mount a run-bound MCP toolset the argv way -- copilot honors this over
+    # --acp, unlike the ACP session/new ``mcp_servers`` path). The registered
+    # agent's own args are preserved; these are added after them. None / omitted
+    # changes nothing.
+    copilot_args: list[str] | None = None
 
 
 class SubmitPromptRequest(BaseModel):

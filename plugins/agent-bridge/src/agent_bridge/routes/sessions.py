@@ -264,6 +264,7 @@ async def start_session(req: StartSessionRequest, request: Request):
         session = await mgr.start_session(
             target, agent_name=req.agent, caller_id=req.caller_id,
             mcp_servers=req.mcp_servers,
+            copilot_args=req.copilot_args,
         )
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
