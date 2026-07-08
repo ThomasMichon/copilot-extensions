@@ -143,6 +143,39 @@ much back-and-forth. That layer is a deliberate **future option**. This system
 names it as the escape hatch and does not build it; do not absorb spec-level
 rigidity into a vision to compensate for its absence.
 
+**Intent altitude is a boundary, not vagueness.** Staying at intent does not mean
+staying abstract. Three kinds of detail are *in-bounds* because they remain
+should-be, not implementation: **architectural intent** (the shape a design must
+take, and *why* — "a browse tier responsive independent of a heavy-work engine"),
+**correctness/resilience intent** (guarantees — "durable before shown; rebuildable
+from the source of truth with a graceful fallback"), and **interaction intent**
+(promises to the user — "no dead controls; switching context preserves position").
+What stays *out*: exact APIs/schemas, ports, file layouts, model names, and
+step-by-step mechanics. Name the shape / guarantee / promise and the *why*; leave
+the wiring to reality (or the spec layer).
+
+### Validate a vision (the generativity check)
+
+The cleanest test of whether a vision sits at the right altitude is to run it
+**backwards**: have an *isolated* agent re-derive the subject's design from the
+vision **alone** (reality pointers stripped, repo/search/web denied — audit its
+tool log), then have a reality-aware **judge** score that blind proposal against a
+checklist it built **before** seeing it. Sort the gaps into three bins:
+**vision-ahead** (reality hasn't caught up — the healthy delta, feeds efforts),
+**genuine blind spot** (reality embodies *intent* the vision missed — fold back at
+the detail ceiling above), and **spec-level** (ports/schemas/mechanics — *not* a
+vision concern; leave to reality or the spec layer). Attribute each match to the
+*vision* vs. the repo's generic framework defaults, so you measure the vision's
+own generative weight, not the framework's.
+
+The characteristic result — a vision regenerates the **conceptual skeleton** but
+not an **implementable** design — is not a defect; it is intent behaving as intent.
+It is also the **empirical trigger** for the `specifications` layer: when faithful
+regeneration genuinely needs the binding detail, that detail wants a spec, not a
+harder vision. (An adopting repo may ship tooling for this check — a vision
+sanitizer, isolated-derive/judge prompt templates, a scorecard format; its
+addendum points at them.)
+
 ## Layout
 
 ```

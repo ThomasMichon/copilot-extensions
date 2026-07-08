@@ -54,10 +54,17 @@ If no addendum exists, the repo hasn't adopted visions yet — use the
 
 ## What a vision is (and is not)
 
-- A vision is **intent-level.** It states *what* should be true and leaves agents
-  **latitude in how** to realize it. It is **not** a specification — do not pin
-  APIs, schemas, or step-by-step mechanics into it. (If translation to reality
-  proves too loose, the remedy is a separate `specifications` middle layer, not a
+- A vision is **intent-level** — a boundary, not a vow of vagueness. It states
+  *what* should be true and leaves agents **latitude in how** to realize it. It
+  **may** name *architectural intent* (the shape a design must take — e.g. "a
+  browse tier that stays responsive independent of a separate heavy-work engine"),
+  *correctness/resilience intent* (guarantees — "durable before it is shown;
+  the catalog is rebuildable from the source of truth"), and *interaction intent*
+  (promises to the user — "no dead controls"). It is **not** a specification: do
+  not pin APIs, schemas, ports, file layouts, model names, or step-by-step
+  mechanics — name the shape / guarantee / promise and the *why*, never the
+  wiring. (If vision→reality translation proves too loose for faithful
+  regeneration, the remedy is a separate `specifications` middle layer, not a
   harder vision — see the reference guide.)
 - A vision is **pure should-be.** It describes only the reality it wants or
   expects. It does **not** enumerate gaps, deviations, TODOs, or "known issues" —
@@ -194,6 +201,50 @@ the subject from whole cloth:
   *not* mechanical, which matters most for an autonomous fleet acting on a
   committed vision diff.
 
+## Validate a vision (the generativity check)
+
+A vision is only as good as what it would *generate*. To check one, run it
+**backwards**: have an agent **re-derive** the subject's design from the vision
+**alone**, then diff that blind proposal against reality. Where the derivation
+lands close, the vision carries real generative weight; where it doesn't, the gap
+is diagnostic — and tells you *which* kind of gap.
+
+**Isolate by construction, not on the honor system.** A "design from the vision
+alone" done by an agent that can *see* the reality is contaminated — it silently
+leans on what it reads and reports an inflated match. The honest form gives the
+deriving agent **only** the vision, with its reality pointers stripped (See Also,
+reality-doc links, any Provenance), and **denies it repo/search/web access**; then
+audit its tool log to confirm isolation held. A separate, reality-aware **judge**
+builds a checklist of the *real* design **before** reading the proposal
+(pre-registration guards against leniency) and scores each item against quoted
+evidence.
+
+**Read the delta in three bins** — this is the load-bearing judgment:
+
+- **Vision-ahead** — the vision states intent reality hasn't built yet. This is
+  the **healthy** delta (the whole point of a north star); it feeds **efforts**,
+  not vision edits.
+- **Genuine blind spot** — reality embodies *intent* the vision failed to state (a
+  structural shape, a correctness/resilience guarantee, an interaction promise).
+  **Fold it back** into the vision as pure should-be — at the detail ceiling (the
+  shape/guarantee/promise, never the mechanism).
+- **Spec-level detail** — ports, schemas, exact APIs, file layouts, model names. A
+  vision **should not** carry these; they belong to reality docs or a
+  `specifications` layer. A "miss" here is **not** a vision defect — do not inflate
+  the vision to absorb it.
+
+**Attribute the matches.** Separate what the *vision* drove from what any agent
+would reach by applying the repo's generic framework standards (a default service
+shape, a default store). The vision's real generativity is the vision-driven
+share, not the raw coverage number.
+
+A vision that regenerates the *conceptual skeleton* but not an implementable
+design is behaving **correctly** — it is intent, not spec. That gap is the
+strongest signal that binding detail wants a **`specifications` layer**, not a
+harder vision. (Adopting repos may ship tooling and bindings for this check — a
+sanitizer, isolated-derive/judge prompt templates, a scorecard format; see the
+repo's addendum.)
+
 ## Optional: a Provenance / Journal section (an easter egg, not a delta source)
 
 A vision **may** carry an optional `## Provenance` (or `## Journal`) section: a
@@ -249,3 +300,13 @@ backlog, it has drifted out of its lane.
   the existing thing violates a Non-Goal, no longer fits, or is too complex to grow.
 - ❌ Letting a vision drift to match a half-built reality (a vision is the target,
   not a mirror of current code).
+- ❌ Trusting a **repo-aware "design from the vision alone"** as a generativity
+  measure — an agent that can see reality is contaminated and over-scores. Isolate
+  the derivation (strip the vision's reality pointers, deny search/repo/web) and
+  audit its tool log.
+- ❌ Folding **spec-level detail** (APIs/schemas/ports/model names/mechanics) into
+  a vision to "raise coverage" against reality — that turns the vision into a spec;
+  fold back only should-be *intent*, and route binding detail to a `specifications`
+  layer.
+- ❌ Treating a **vision-ahead** item (reality simply hasn't caught up) as a blind
+  spot — it is the healthy delta; feed it to efforts, not vision edits.
