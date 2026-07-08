@@ -939,6 +939,42 @@ def _list_mux_sessions() -> dict[str, int] | None:
         return None
 
 
+def _mux_session_activity() -> dict[str, int]:
+    """Query each mux session's last-activity time (epoch seconds).
+
+    ``#{session_activity}`` reflects real pane output/input, so a session whose
+    Copilot is mid-turn or running a background task reads *recent*, while one
+    parked idle at a prompt goes stale -- exactly the signal the reaper needs to
+    never kill a **busy** session (#713). Returns ``session_name -> epoch``;
+    ``{}`` when the mux or the field is unavailable (both tmux and psmux support
+    it, but degrade safely to an empty map rather than crash).
+    """
+    import subprocess
+
+    if platform.system() == "Windows":
+        cmd = ["psmux", "list-sessions", "-F",
+               "#{session_name}:#{session_activity}"]
+    else:
+        cmd = ["tmux", "list-sessions", "-F",
+               "#{session_name}:#{session_activity}"]
+    out: dict[str, int] = {}
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        if result.returncode != 0:
+            return {}
+        for line in result.stdout.strip().splitlines():
+            if ":" not in line:
+                continue
+            name, _, ts = line.rpartition(":")
+            try:
+                out[name] = int(ts)
+            except ValueError:
+                continue
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    return out
+
+
 def mux_status_many(worktree_ids: list[str]) -> dict[str, MuxInfo]:
     """Get mux session status for multiple worktrees efficiently.
 
