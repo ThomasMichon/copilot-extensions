@@ -203,6 +203,7 @@ agent-dispatch serve                     # binds 127.0.0.1:9330 (AGENT_DISPATCH_
 # from any agent/producer (AGENT_DISPATCH_URL points at the coordinator):
 agent-dispatch create "Add narration track" --require logger --dedup-key seg42
 agent-dispatch worktree-status           # this worktree's inbox: tasks assigned to + owned by it
+agent-dispatch inbox                      # machine-scoped, cross-lane pickable tasks (default: proposed)
 agent-dispatch claim                     # lease my assigned/eligible task (identity auto-resolved)
 agent-dispatch start  <id>  <owner>
 agent-dispatch complete <id> <owner> --result-ref pr/123
@@ -210,6 +211,15 @@ agent-dispatch list --status queued
 agent-dispatch recover                                 # requeue expired-lease tasks
 agent-dispatch watch                                   # stream task events (SSE) as JSON lines
 ```
+
+`inbox` complements the two lane-scoped reads: `worktree-status` is *this
+worktree's* assigned/owned tasks, and `list` is scoped to the calling repo's
+lane, but `inbox` spans **every** lane and returns the tasks *this machine* can
+pick up — a matching `target_machine` plus machine-agnostic ones — defaulting to
+the `proposed` state. Each entry carries `target_worktree`, `affinity`, `labels`
+and `repo_name`, so a consumer (e.g. the worktree picker's task pivot) can group
+by worktree and badge handoffs. The machine is resolved from the CWD via
+`agent-worktrees`; pass `--machine <name>` to override.
 
 ### Worker identity
 
