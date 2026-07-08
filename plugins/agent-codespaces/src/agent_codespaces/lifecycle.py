@@ -35,6 +35,7 @@ _TERMINAL_FAILED_STATES = frozenset({
     "Failed", "Unavailable", "Deleted", "Moved", "Archived",
 })
 _AVAILABLE_STATE = "Available"
+_SHUTDOWN_STATE = "Shutdown"
 
 
 def classify_state(state: str) -> str:
@@ -319,6 +320,43 @@ def delete_codespace(name: str, force: bool = False) -> None:
 
     if result.returncode != 0:
         raise RuntimeError(f"gh codespace delete failed: {result.stderr.strip()}")
+
+
+def stop_codespace(name: str) -> bool:
+    """Gracefully stop (shut down) a CodeSpace, PRESERVING it for later resume.
+
+    The pause-and-keep counterpart to ``delete_codespace`` -- the compute is
+    released but the CodeSpace (and its volume) is kept, so it boots again on
+    the next connect. Returns ``True`` when a stop was issued, ``False`` when
+    the CodeSpace was already ``Shutdown`` (idempotent no-op). Raises
+    ``RuntimeError`` on an unexpected failure.
+    """
+    # Idempotency: skip the call if the CodeSpace is already shut down.
+    try:
+        for cs in list_codespaces():
+            if cs.name == name and cs.state == _SHUTDOWN_STATE:
+                log.info("CodeSpace %s already Shutdown; nothing to stop", name)
+                return False
+    except RuntimeError:
+        # Can't list (auth/network) -- fall through and let `gh` decide.
+        pass
+
+    args = ["gh", "codespace", "stop", "-c", name]
+    log.info("Stopping codespace: %s", name)
+
+    result = subprocess.run(
+        args, capture_output=True, text=True, timeout=120,
+        creationflags=_creation_flags(),
+    )
+
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        # Tolerate an "already stopped" race as a no-op rather than an error.
+        if "not running" in stderr.lower() or "already" in stderr.lower():
+            log.info("CodeSpace %s already stopped: %s", name, stderr)
+            return False
+        raise RuntimeError(f"gh codespace stop failed: {stderr}")
+    return True
 
 
 def cleanup_stale(

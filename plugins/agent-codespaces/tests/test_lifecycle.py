@@ -15,6 +15,7 @@ from agent_codespaces.lifecycle import (
     list_codespaces,
     list_devcontainers,
     resolve_devcontainer_path,
+    stop_codespace,
 )
 from agent_codespaces.config import CodespacesConfig, RepoConfig
 
@@ -298,3 +299,52 @@ class TestCreateCodespaceDevcontainer:
         create_codespace("org/repo", CodespacesConfig())
         call_args = mock_run.call_args[0][0]
         assert "--devcontainer-path" not in call_args
+
+
+def _cs(name, state):
+    return CodespaceInfo(
+        name=name, display_name=name, repository="org/repo",
+        branch="main", state=state, machine="large",
+    )
+
+
+class TestStopCodespace:
+    @patch("agent_codespaces.lifecycle.list_codespaces")
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_stops_available(self, mock_run, mock_list):
+        mock_list.return_value = [_cs("cs-1", "Available")]
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        assert stop_codespace("cs-1") is True
+        call_args = mock_run.call_args[0][0]
+        assert call_args[:4] == ["gh", "codespace", "stop", "-c"]
+        assert call_args[4] == "cs-1"
+
+    @patch("agent_codespaces.lifecycle.list_codespaces")
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_already_shutdown_is_noop(self, mock_run, mock_list):
+        mock_list.return_value = [_cs("cs-1", "Shutdown")]
+        assert stop_codespace("cs-1") is False
+        mock_run.assert_not_called()
+
+    @patch("agent_codespaces.lifecycle.list_codespaces")
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_tolerates_already_stopped_race(self, mock_run, mock_list):
+        mock_list.return_value = [_cs("cs-1", "Available")]
+        mock_run.return_value = MagicMock(
+            returncode=1, stderr="codespace is not running",
+        )
+        assert stop_codespace("cs-1") is False
+
+    @patch("agent_codespaces.lifecycle.list_codespaces")
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_raises_on_real_failure(self, mock_run, mock_list):
+        mock_list.return_value = [_cs("cs-1", "Available")]
+        mock_run.return_value = MagicMock(returncode=1, stderr="boom")
+        with pytest.raises(RuntimeError, match="boom"):
+            stop_codespace("cs-1")
+
+    @patch("agent_codespaces.lifecycle.list_codespaces", side_effect=RuntimeError("auth"))
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_list_failure_falls_through_to_gh(self, mock_run, mock_list):
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        assert stop_codespace("cs-1") is True

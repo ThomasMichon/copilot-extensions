@@ -1,7 +1,7 @@
 ---
 name: codespaces-lifecycle
 description: >
-  GitHub Codespaces operations -- SSH into codespaces, list/delete/status,
+  GitHub Codespaces operations -- SSH into codespaces, list/stop/delete/status,
   credential relay monitoring, and agent-bridge registration. Use this skill
   for day-to-day codespace management.
   Trigger phrases include:
@@ -9,6 +9,7 @@ description: >
   - 'codespace ssh'
   - 'ssh into codespace'
   - 'list codespaces'
+  - 'stop codespace'
   - 'delete codespace'
   - 'codespace status'
   - 'credential relay'
@@ -207,6 +208,29 @@ the delete gated on a successful recovery.
 > isn't installed, recovery reports a clear error and (for plain `delete`) the
 > deletion still proceeds.
 
+## Stop — pause-and-keep (preserve, don't delete)
+
+When an effort is **paused but not done** (e.g. waiting on an external gate — a
+feed publish, a redeploy, a review), release the compute but **keep** the
+CodeSpace so it resumes later. `stop` is the pause-and-keep counterpart to
+`finalize --delete`: it recovers session-state (same hook as `finalize`) and
+then shuts the CodeSpace down gracefully via `gh codespace stop`. It **never
+deletes**, and a stopped CodeSpace **boots again on the next connect** (no
+explicit start needed).
+
+```bash
+# Recover sessions, then gracefully stop (preserve for later resume)
+agent-codespaces stop <codespace-name>
+agent-codespaces stop <codespace-name> --no-sync   # skip pre-stop session recovery
+```
+
+Unlike `finalize --delete`, a failed pre-stop recovery does **not** block the
+stop — stopping is non-destructive, so the sessions stay on the preserved
+CodeSpace and can be recovered on a later connect. `stop` is **idempotent**: a
+no-op if the CodeSpace is already `Shutdown`.
+
+Never use a bare `gh codespace stop` — it bypasses the session-recovery hook.
+
 ## Syncing Dotfiles on CodeSpaces
 
 Use `agent-codespaces ssh` to pull latest:
@@ -307,8 +331,10 @@ targets. For day-to-day dispatch, prefer `codespace:<name>`.
   Common cause: wrong `ssh_user` in `codespaces.yaml`.
 - **Credential relay not working** -- ensure relay port (9857) is not
   blocked. Check that `--no-relay` was not accidentally passed.
-- **Quota exceeded** -- `gh codespace start` returns HTTP 400 "too many
-  codespaces running". Stop idle CodeSpaces first, then retry.
+- **Quota exceeded** -- creating or connecting to a CodeSpace (a Shutdown one
+  boots on connect) returns HTTP 400 "too many codespaces running" once the
+  concurrently-running cap is hit. `agent-codespaces stop <name>` idle
+  CodeSpaces first (preserves them), then retry.
 - **"gh CLI not found"** -- install from https://cli.github.com/
 - **WSL credential slowness** -- first GCM call through PowerShell
   takes ~25s. Subsequent calls use the 300s cache.
