@@ -436,6 +436,19 @@ remove_legacy_binstubs() {
     fi
 }
 
+reconcile_binstubs() {
+    # Reconcile project binstubs in ~/.local/bin against projects.yaml: deploy
+    # for every registered project and remove signature-matched stubs for
+    # deregistered ones. Delegates to the Python implementation (single,
+    # cross-platform source of truth) so it runs regardless of project context.
+    if [[ ! -x "$VENV_PYTHON" ]]; then
+        return 0
+    fi
+    PYTHONUTF8=1 "$VENV_PYTHON" -m agent_worktrees reconcile-binstubs 2>&1 |
+        while IFS= read -r line; do echo "  $line"; done || \
+        warn "Binstub reconciliation skipped"
+}
+
 deploy_binstub() {
     mkdir -p "$LOCAL_BIN"
     # Generate project-specific binstub that routes through the Python CLI.
@@ -1146,6 +1159,7 @@ case "$ACTION" in
         deploy_wrappers || exit 1
         remove_legacy_scripts
         remove_legacy_binstubs
+        reconcile_binstubs
         deploy_copilot_plugin
         ensure_copilot_experimental
         assert_path
@@ -1389,6 +1403,7 @@ case "$ACTION" in
         deploy_wrappers || exit 1
         remove_legacy_scripts
         remove_legacy_binstubs
+        reconcile_binstubs
         deploy_copilot_plugin
         ensure_copilot_experimental
         # Machine-wide terminal integration: redeploy the per-session options +

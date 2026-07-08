@@ -4913,6 +4913,10 @@ def cmd_install(args: argparse.Namespace) -> int:
     _expose_agent = _entry.agent if _entry else True
     inst.register_project(project, repo_dir=repo_dir, expose_agent=_expose_agent)
 
+    # Reconcile all project binstubs against the registry (add missing, incl.
+    # the .ps1 primary on Windows; remove stubs for deregistered projects).
+    inst.reconcile_binstubs()
+
     # Run post-install hook (project-specific, e.g. icon deployment)
     try:
         config = cfg.load_config(config_path)
@@ -7478,6 +7482,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--repo", default=None,
                     help="Repo path to reconcile (defaults to the resolved anchor)")
 
+    # reconcile-binstubs (project launchers in ~/.local/bin vs projects.yaml)
+    sub.add_parser(
+        "reconcile-binstubs",
+        help="Reconcile ~/.local/bin project binstubs against projects.yaml "
+             "(add for every registered project, remove deregistered ones)")
+
     # dev (repo development tooling)
     sp = sub.add_parser("dev", help="Dev venv and test runner")
     sp.add_argument("dev_action", nargs="?", default="status",
@@ -7909,6 +7919,12 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reconcile_binstubs(args: argparse.Namespace) -> int:
+    """Reconcile ~/.local/bin project binstubs against the projects registry."""
+    inst.reconcile_binstubs()
+    return 0
+
+
 def cmd_anchor_check(args: argparse.Namespace) -> int:
     """Check anchor repo for uncommitted work and stash entries."""
     from . import anchor_hygiene
@@ -7974,6 +7990,7 @@ COMMAND_MAP = {
     "pre-launch": cmd_pre_launch,
     "stage-update": cmd_stage_update,
     "reconcile-plugins": cmd_reconcile_plugins,
+    "reconcile-binstubs": cmd_reconcile_binstubs,
     "dev": cmd_dev,
     "register-session": cmd_register_session,
     "deregister-session": cmd_deregister_session,

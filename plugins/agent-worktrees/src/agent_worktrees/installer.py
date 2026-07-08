@@ -417,6 +417,184 @@ def _write_binstub_if_changed(dst: Path, content: str) -> bool:
     return True
 
 
+# The global ``agent-worktrees`` command shares ~/.local/bin with the project
+# launchers, so its name is reserved: reconciliation never deploys it as a
+# project stub (that would clobber the global launcher) and never removes it
+# (it is owned by Deploy-GlobalBinstub / the global section of deploy_binstubs).
+# A project accidentally registered under a reserved name (e.g. install.ps1 run
+# from the plugin checkout) is therefore inert to binstub reconciliation.
+_RESERVED_BINSTUB_NAMES = frozenset({"agent-worktrees"})
+
+
+# A file in ~/.local/bin is one of *our* project binstubs when it carries this
+# routing signature -- the module dispatch (`agent_worktrees --project`) or the
+# recovery fallback (`WORKTREE_PROJECT` + the runtime dir). Foreign stubs from
+# other tools (vav-consumer, codespace-ssh, sibling plugins) lack both and are
+# never touched by reconciliation. The global `agent-worktrees` stub matches too,
+# so callers must exclude it by name.
+def _is_project_binstub(text: str) -> bool:
+    if "agent_worktrees --project" in text:
+        return True
+    return "WORKTREE_PROJECT" in text and ".agent-worktrees" in text
+
+
+def _project_binstub_specs(project: str) -> list[tuple[Path, str]]:
+    """Return ``(dst_path, content)`` for each project binstub on this platform.
+
+    Single source of truth for project-launcher content -- kept byte-compatible
+    (newline-normalized) with ``install.ps1``'s ``Deploy-Binstub`` so the two
+    generators never fight over the same files. Windows gets a ``.ps1`` (the
+    primary pwsh resolution) plus a ``.cmd`` fallback; posix gets one bare stub.
+    """
+    lb = local_bin()
+    if platform.system() == "Windows":
+        cmd_content = "\r\n".join([
+            "@echo off",
+            'set "PYTHONUTF8=1"',
+            "rem Context resolves from CWD / --project (git-like); the binstub names its",
+            "rem project via --project, not an ambient env var.",
+            'set "_PY=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe"',
+            'if not exist "%_PY%" goto :_aw_fallback',
+            f'"%_PY%" -m agent_worktrees --project {project} %*',
+            "exit /b %ERRORLEVEL%",
+            ":_aw_fallback",
+            "rem Recovery (venv missing): launch-session reads WORKTREE_PROJECT",
+            f'set "WORKTREE_PROJECT={project}"',
+            '"%USERPROFILE%\\.agent-worktrees\\bin\\launch-session.cmd" %*',
+            "exit /b %ERRORLEVEL%",
+        ])
+        ps1_content = "\r\n".join([
+            "$env:PYTHONUTF8 = '1'",
+            "# Context resolves from CWD / --project (git-like). This .ps1 runs in-process in",
+            "# the caller's session, so it names its project via --project (not an ambient",
+            "# env var), leaving the live session env untouched. Recovery (venv missing)",
+            "# passes the project to launch-session via a scoped, restored WORKTREE_PROJECT.",
+            '$_py = "$env:USERPROFILE\\.agent-worktrees\\.venv\\Scripts\\python.exe"',
+            "if (Test-Path $_py) {",
+            f"    & $_py -m agent_worktrees --project '{project}' @args",
+            "    exit $LASTEXITCODE",
+            "}",
+            "$_savedProj = $env:WORKTREE_PROJECT",
+            f"$env:WORKTREE_PROJECT = '{project}'",
+            "try {",
+            '    & "$env:USERPROFILE\\.agent-worktrees\\bin\\launch-session.cmd" @args',
+            "    $_rc = $LASTEXITCODE",
+            "} finally {",
+            "    if ($null -eq $_savedProj) { Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue } else { $env:WORKTREE_PROJECT = $_savedProj }",
+            "}",
+            "exit $_rc",
+        ])
+        return [
+            (lb / f"{project}.ps1", ps1_content),
+            (lb / f"{project}.cmd", cmd_content),
+        ]
+    sh_content = (
+        "#!/usr/bin/env bash\n"
+        "export PYTHONUTF8=1\n"
+        "# Context resolves from CWD / --project (git-like); the binstub\n"
+        "# names its project via --project, not an ambient env var.\n"
+        '_AW="$HOME/.agent-worktrees/.venv/bin/agent-worktrees"\n'
+        'if [[ -x "$_AW" ]]; then\n'
+        f'    exec "$_AW" --project {project} "$@"\n'
+        'fi\n'
+        '# Recovery (venv missing): launch-session reads WORKTREE_PROJECT\n'
+        f'export WORKTREE_PROJECT="{project}"\n'
+        'exec "$HOME/.agent-worktrees/bin/launch-session.sh" "$@"\n'
+    )
+    return [(lb / project, sh_content)]
+
+
+def _deploy_project_binstub(project: str) -> int:
+    """Write a single project's binstub file(s). Returns the count written."""
+    if not project:
+        return 0
+    is_windows = platform.system() == "Windows"
+    written = 0
+    for dst, content in _project_binstub_specs(project):
+        if _write_binstub_if_changed(dst, content):
+            written += 1
+        if not is_windows:
+            try:
+                dst.chmod(0o755)
+            except OSError:
+                pass
+    return written
+
+
+def _discover_project_binstubs() -> dict[str, list[Path]]:
+    """Map ``project -> [binstub paths]`` for *our* project stubs in ~/.local/bin.
+
+    Signature-scoped (see :func:`_is_project_binstub`) so foreign binaries are
+    never returned. The global ``agent-worktrees`` stub is excluded by name.
+    """
+    lb = local_bin()
+    if not lb.is_dir():
+        return {}
+    is_windows = platform.system() == "Windows"
+    found: dict[str, list[Path]] = {}
+    for f in lb.iterdir():
+        if not f.is_file():
+            continue
+        if is_windows:
+            if f.suffix.lower() not in (".cmd", ".ps1"):
+                continue
+        elif f.suffix:
+            continue
+        name = f.stem if is_windows else f.name
+        if name in _RESERVED_BINSTUB_NAMES:
+            continue
+        try:
+            text = f.read_text(errors="replace")
+        except OSError:
+            continue
+        if _is_project_binstub(text):
+            found.setdefault(name, []).append(f)
+    return found
+
+
+def reconcile_binstubs() -> dict:
+    """Reconcile project binstubs against the projects registry.
+
+    Deploys a complete binstub set for every registered project (add / refresh
+    missing or stale files) and removes signature-matched stubs whose project is
+    no longer registered. Runs without a project context, so it is safe to call
+    from a plugin-driven ``update`` where no single project is in scope.
+    """
+    registered = set(read_projects_registry().get("projects", {}).keys())
+
+    added = 0
+    for project in sorted(registered):
+        if project in _RESERVED_BINSTUB_NAMES:
+            continue
+        added += _deploy_project_binstub(project)
+
+    removed: list[Path] = []
+    for name, paths in _discover_project_binstubs().items():
+        if name in registered:
+            continue
+        for p in paths:
+            try:
+                p.unlink()
+                removed.append(p)
+            except OSError:
+                pass
+
+    if added:
+        output.ok(f"Binstubs: deployed/refreshed {added} file(s) for "
+                  f"{len(registered)} registered project(s)")
+    if removed:
+        output.changed(
+            "Binstubs: removed "
+            f"{len(removed)} stale file(s): {', '.join(p.name for p in removed)}"
+        )
+    if not added and not removed:
+        output.skipped(f"Binstubs: in sync ({len(registered)} project(s))")
+
+    return {"registered": sorted(registered),
+            "added": added,
+            "removed": [str(p) for p in removed]}
+
+
 def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
     """Generate project-specific binstubs in ~/.local/bin/.
 
@@ -425,6 +603,9 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
     subcommand dispatch. Falls back to the shell launcher if the venv is missing
     (recovery path), which passes the project via ``WORKTREE_PROJECT``.
 
+    On Windows both a ``.ps1`` (primary pwsh resolution) and a ``.cmd`` fallback
+    are written; posix gets one bare stub.
+
     Returns True on success.
     """
     lb = local_bin()
@@ -432,48 +613,14 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
 
     is_windows = platform.system() == "Windows"
 
-    # Project-specific launcher (names its project via --project, routes to the
-    # CLI). Generated for every supported platform -- previously this only had a
-    # Windows code path, so on macOS/Linux `register` silently created no
-    # launcher at all.
+    # Project-specific launcher(s). Generated for every supported platform --
+    # previously this only had a Windows code path, so on macOS/Linux `register`
+    # silently created no launcher at all; and on Windows it emitted only the
+    # `.cmd`, leaving pwsh to fall through to the child-cmd path.
     if project:
-        if is_windows:
-            binstub_content = (
-                "@echo off\r\n"
-                'set "PYTHONUTF8=1"\r\n'
-                'rem Context resolves from CWD / --project (git-like); the binstub\r\n'
-                'rem names its project via --project, not an ambient env var.\r\n'
-                'set "_PY=%USERPROFILE%\\.agent-worktrees'
-                '\\.venv\\Scripts\\python.exe"\r\n'
-                'if not exist "%_PY%" goto :_aw_fallback\r\n'
-                f'"%_PY%" -m agent_worktrees --project {project} %*\r\n'
-                'exit /b %ERRORLEVEL%\r\n'
-                ':_aw_fallback\r\n'
-                'rem Recovery (venv missing): launch-session reads WORKTREE_PROJECT\r\n'
-                f'set "WORKTREE_PROJECT={project}"\r\n'
-                '"%USERPROFILE%\\.agent-worktrees\\bin\\launch-session.cmd" %*\r\n'
-                'exit /b %ERRORLEVEL%\r\n'
-            )
-            dst = lb / f"{project}.cmd"
-        else:
-            binstub_content = (
-                "#!/usr/bin/env bash\n"
-                "export PYTHONUTF8=1\n"
-                "# Context resolves from CWD / --project (git-like); the binstub\n"
-                "# names its project via --project, not an ambient env var.\n"
-                '_AW="$HOME/.agent-worktrees/.venv/bin/agent-worktrees"\n'
-                'if [[ -x "$_AW" ]]; then\n'
-                f'    exec "$_AW" --project {project} "$@"\n'
-                'fi\n'
-                '# Recovery (venv missing): launch-session reads WORKTREE_PROJECT\n'
-                f'export WORKTREE_PROJECT="{project}"\n'
-                'exec "$HOME/.agent-worktrees/bin/launch-session.sh" "$@"\n'
-            )
-            dst = lb / project
-        _write_binstub_if_changed(dst, binstub_content)
-        if not is_windows:
-            dst.chmod(0o755)
-        output.ok(f"Binstub: {dst}")
+        _deploy_project_binstub(project)
+        for dst, _ in _project_binstub_specs(project):
+            output.ok(f"Binstub: {dst}")
 
     # Unified agent-worktrees command (project-agnostic; routes straight to the
     # venv console script). It must NOT require WORKTREE_PROJECT -- global

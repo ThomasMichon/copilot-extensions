@@ -1816,6 +1816,22 @@ function Remove-LegacyBinstubs {
     }
 }
 
+function Reconcile-Binstubs {
+    <# Reconcile project binstubs in ~/.local/bin against projects.yaml:
+       deploy a complete set (.ps1 + .cmd) for every registered project and
+       remove signature-matched stubs for deregistered ones. Delegates to the
+       Python implementation (single, cross-platform source of truth) so it runs
+       regardless of whether this install has a project context. #>
+    if (-not (Test-Path $VenvPython)) { return }
+    try {
+        $env:PYTHONUTF8 = '1'
+        & $VenvPython -m agent_worktrees reconcile-binstubs 2>&1 |
+            ForEach-Object { Write-Host "  $_" }
+    } catch {
+        Write-ServiceWarn "Binstub reconciliation skipped: $_"
+    }
+}
+
 # -- Actions --------------------------------------------------------------
 
 switch ($Action) {
@@ -1861,6 +1877,7 @@ switch ($Action) {
         Ensure-CopilotExperimental
         Assert-PathIncludes $LocalBin
         Remove-LegacyBinstubs
+        Reconcile-Binstubs
         # Machine-wide terminal integration: deploy the per-session psmux
         # options + opt-in keybind scripts. We do NOT own ~/.psmux.conf -- the
         # launcher stamps the status bar + behaviors per-session at runtime.
@@ -2139,6 +2156,7 @@ switch ($Action) {
         Deploy-GlobalBinstub
         Ensure-CopilotExperimental
         Remove-LegacyBinstubs
+        Reconcile-Binstubs
         # Machine-wide terminal integration (see install path): deploy the
         # per-session options + opt-in keybind scripts regardless of project
         # context.
