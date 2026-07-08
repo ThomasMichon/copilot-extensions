@@ -202,6 +202,26 @@ BUCKET_REASON = {
 }
 
 
+def _sessionless(w):
+    """True when we positively know a worktree has **no owning Copilot session**
+    and is not otherwise in use -- the #1026 cold-start hazard.
+
+    Only flagged when ``session_count`` is present and 0 (real data always
+    carries it now that the session-start hook is reliable, #662); an absent
+    count -- a fixture or a remote too old to report it -- stays *unknown* and is
+    never flagged. Any past turns or a live mux session count as ownership, and
+    daemon-owned ``system``/``bridge`` kinds have their own bucket.
+    """
+    sc = w.get("session_count")
+    if sc is None or sc > 0:
+        return False
+    if (w.get("kind") or "session") in ("system", "bridge"):
+        return False
+    if w.get("turn_count", 0) > 0 or w.get("mux_session") or w.get("mux_attached"):
+        return False
+    return True
+
+
 def norm(w, machine, env):
     """Normalize one raw worktree dict into the engine's record shape."""
     kind = w.get("kind") or "session"
@@ -225,6 +245,8 @@ def norm(w, machine, env):
         "age_secs": _age_secs(w),
         "sess": _sess(w),
         "turns": w.get("turn_count", 0),
+        "session_count": w.get("session_count"),
+        "sessionless": _sessionless(w),
         "pr": _pr(w),
         "cleanup_bucket": _bucket_from_raw(w),
         "ff_eligible": _ff_from_raw(w),
