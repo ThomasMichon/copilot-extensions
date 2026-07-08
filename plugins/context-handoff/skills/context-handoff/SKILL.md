@@ -99,6 +99,47 @@ folder, hide the path inside a tool call, or tell the user it will be picked
 up automatically on restart — **it will not**. The user must paste the wrapper
 prompt themselves.
 
+### Graduate the handoff into a task (when a coordinator is reachable)
+
+A handoff **is** a worktree-targeted task. If the **agent-dispatch** coordinator
+is reachable, ALSO file the handoff as a **`proposed`** task so it becomes
+durable, browsable, and claimable — not just a file the user must remember to
+paste. This is **additive**: it never replaces steps 3–4. The wrapper-prompt
+paste flow is still the primary handoff mechanism; the task is a second copy the
+operator can approve into the queue when they want it worked.
+
+After `save_handoff_prompt` returns the file path, and only if a coordinator
+answers, propose the task:
+
+```bash
+# Skip silently if agent-dispatch isn't installed or no coordinator answers:
+agent-dispatch health >/dev/null 2>&1 && \
+agent-dispatch create "Continue: <short title>" --proposed \
+  --payload-file "<returned handoff file path>" \
+  --prompt "<the same wrapper prompt you reply with>" \
+  --affinity worktree=<worktree_id> \
+  --target-worktree <worktree_id> --target-machine <machine> \
+  --source context-handoff \
+  --dedup-key "handoff-<sessionId>"
+```
+
+- Resolve `<worktree_id>` / `<machine>` the way agent-dispatch does — from the
+  CWD (`agent-worktrees get worktree-dir` basename / `agent-worktrees get
+  machine`); or just let `agent-dispatch` resolve them and omit the flags.
+- Keep it **`proposed`** (not `queued`): a handoff is a draft for the operator to
+  approve, and `proposed` tasks are never auto-claimed by another agent.
+- Use **`worktree` affinity** (soft), matching "a handoff is in-place: same
+  worktree, new session." The `--dedup-key` makes re-running `/handoff` in the
+  same session idempotent.
+- **Graceful degrade:** if `agent-dispatch health` fails (no coordinator on this
+  machine and none configured via `AGENT_DISPATCH_URL`), **skip this step
+  entirely** — the file + wrapper prompt are unaffected. Do not install or start
+  a coordinator just to graduate a handoff.
+
+When you do graduate it, mention it briefly after the wrapper prompt — e.g.
+"Also filed as proposed task `<id>` (approve it to queue)." The user still pastes
+the wrapper prompt to resume; the task is for tracking/dispatch, not resumption.
+
 ---
 
 ## Resuming From a Handoff
