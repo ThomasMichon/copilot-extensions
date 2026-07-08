@@ -55,20 +55,24 @@ is a task list.
 
 ## How to Generate
 
-A handoff produces **two things**:
+A handoff has two parts: the **stored handoff** (the full continuation context)
+and a **short reply prompt** you post inline so the next session can pick it up.
+**Where the handoff is stored depends on whether an `agent-dispatch` coordinator
+is running** — the `save_handoff_prompt` tool decides and returns the exact
+prompt to reply with:
 
-1. **A handoff file** written to the current session's state folder at
-   `~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md`
-   (via the `save_handoff_prompt` tool, passing the markdown as `prompt_text`).
-   This holds the **full** handoff: the direction and **motivation** of the
-   work, key **next action items**, and the **target goals** — plus enough file
-   paths and gotchas to resume.
+- **agent-dispatch present →** the handoff is stored as a **`proposed`,
+  `handoff`-labeled task** pinned to this worktree (payload = the full markdown;
+  **no** session file). Reply form:
+  `Claim and act on the handoff <id> from agent-dispatch: <one-line topic>.`
+- **agent-dispatch absent →** the handoff is written to a **file** in the session
+  state folder. Reply form:
+  `Read the handoff at <path> and continue: <one-line topic>.`
 
-2. **A short wrapper prompt** you reply with inline. It is **addressed to the
-   next session's agent** and the user copies it **verbatim** into `/clear` (or
-   `/new`). It must (a) name the **full path** to the handoff file and (b)
-   instruct that agent to **read** the file and continue. It does **not** repeat
-   the handoff contents — the file holds those.
+Either way the reply is short, addressed to the **next** session's agent, and
+**never repeats the handoff contents**. context-handoff sits *on top of*
+agent-dispatch when it exists and falls back to the file otherwise — you don't
+choose; the tool does.
 
 ### Steps
 
@@ -81,90 +85,85 @@ A handoff produces **two things**:
    and gotchas.
 
 3. **Call `save_handoff_prompt`** with that full markdown **as the `prompt_text`
-   argument** (the `prompt` alias is also accepted). It writes the file to the
-   session state folder and **returns the absolute path**.
+   argument** (the `prompt` alias is also accepted), plus an optional short
+   `title`. It stores the handoff — **as an agent-dispatch task when a
+   coordinator is reachable, else a session file** — and **returns the exact
+   short prompt to reply with**.
 
-4. **Reply with the short wrapper prompt.** One or two sentences, **addressed to
-   the next agent**, that name the returned path (a `~/` form is fine) and tell
-   that agent to **read** the handoff file and continue. The user pastes it
-   verbatim into `/clear` (or `/new`). For example:
+4. **Reply with ONLY that short prompt** (the tool tells you which form). The
+   user pastes it into `/clear` (or `/new`); the agent-dispatch form is *also*
+   resumable by running `/resume-handoff` in a fresh session in this worktree
+   (see below). Do **not** paste the handoff contents.
 
-   > Read the handoff at `~/.copilot/session-state/<id>/files/<id>-prompt.md`
-   > and continue: config-reflect + system-worktrees efforts (HA drift tracking
-   > → multi-system framework).
+If `generate_handoff_prompt` / `save_handoff_prompt` are unavailable (extension
+not loaded), compose the handoff manually: if `agent-dispatch health` answers,
+create the task yourself (see "Where the handoff is stored" below); otherwise
+write the file with the `create` tool to
+`~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md`.
 
-If the `generate_handoff_prompt` tool is unavailable (extension not loaded),
-compose the handoff manually and write the file with the `create` tool to the
-same session-folder path.
+**Do not** commit the handoff, write a file anywhere outside the session folder,
+hide the reply prompt inside a tool call, or tell the user the handoff will be
+picked up automatically on restart — **it will not**. The user resumes it
+themselves (paste the reply prompt, or run `/resume-handoff`).
 
-**Do not** commit the handoff file, write it anywhere outside the session
-folder, hide the path inside a tool call, or tell the user it will be picked
-up automatically on restart — **it will not**. The user must paste the wrapper
-prompt themselves.
+### Where the handoff is stored (agent-dispatch vs file)
 
-### Graduate the handoff into a task (when a coordinator is reachable)
+`save_handoff_prompt` handles this automatically — **prefer the task, fall back
+to the file** — so you normally just call it and reply with what it returns.
+The mechanics, for when you must do it by hand (extension not loaded):
 
-A handoff **is** a worktree-targeted task. If the **agent-dispatch** coordinator
-is reachable, ALSO file the handoff as a **`proposed`** task so it becomes
-durable, browsable, and claimable — not just a file the user must remember to
-paste. This is **additive**: it never replaces steps 3–4. The wrapper-prompt
-paste flow is still the primary handoff mechanism; the task is a second copy the
-operator can approve into the queue when they want it worked.
+- **A coordinator answers (`agent-dispatch health` exits 0):** store the handoff
+  as a **`proposed`, `handoff`-labeled task** pinned to this worktree, payload =
+  the full markdown. This is the **whole** handoff — there is **no** session
+  file in this mode.
 
-After `save_handoff_prompt` returns the file path, and only if a coordinator
-answers, propose the task:
+  ```bash
+  # write the markdown to a temp file, then:
+  agent-dispatch create "Continue: <short title>" --proposed \
+    --label handoff \
+    --payload-file "<temp markdown path>" \
+    --affinity worktree=<worktree_id> \
+    --target-worktree <worktree_id> --target-machine <machine> \
+    --source context-handoff \
+    --dedup-key "handoff-<sessionId>"
+  # then reply: Claim and act on the handoff <id> from agent-dispatch: <topic>.
+  ```
 
-```bash
-# Skip silently if agent-dispatch isn't installed or no coordinator answers:
-agent-dispatch health >/dev/null 2>&1 && \
-agent-dispatch create "Continue: <short title>" --proposed \
-  --label handoff \
-  --payload-file "<returned handoff file path>" \
-  --prompt "<the same wrapper prompt you reply with>" \
-  --affinity worktree=<worktree_id> \
-  --target-worktree <worktree_id> --target-machine <machine> \
-  --source context-handoff \
-  --dedup-key "handoff-<sessionId>"
-```
+  - **`proposed`** (not `queued`): a handoff is a draft the operator resumes
+    deliberately; `proposed` tasks are never auto-claimed by another agent.
+  - **`--label handoff`** + **`--target-worktree`** pin it to *this* worktree —
+    the marker `/resume-handoff` (and the Worktree Picker's handoff views) filter
+    on. Resolve `<worktree_id>`/`<machine>` from the CWD (`agent-worktrees get
+    worktree-dir` basename / `... get machine`). If you can't resolve a worktree,
+    use the file flow instead — never file an unpinned, anyone-can-claim handoff.
+  - **`--dedup-key handoff-<sessionId>`** makes re-running `/handoff` in the same
+    session idempotent.
 
-- Resolve `<worktree_id>` / `<machine>` the way agent-dispatch does — from the
-  CWD (`agent-worktrees get worktree-dir` basename / `agent-worktrees get
-  machine`); or just let `agent-dispatch` resolve them and omit the flags.
-- Keep it **`proposed`** (not `queued`): a handoff is a draft for the operator to
-  approve, and `proposed` tasks are never auto-claimed by another agent.
-- Tag it **`--label handoff`**: this is the marker `/resume-handoff` (and the
-  Worktree Picker's handoff views) filter on to find *this worktree's* pending
-  handoff. Combined with `--target-worktree`, it pins the handoff to the worktree
-  that wrote it.
-- Use **`worktree` affinity** (soft), matching "a handoff is in-place: same
-  worktree, new session." The `--dedup-key` makes re-running `/handoff` in the
-  same session idempotent.
-- **Graceful degrade:** if `agent-dispatch health` fails (no coordinator on this
-  machine and none configured via `AGENT_DISPATCH_URL`), **skip this step
-  entirely** — the file + wrapper prompt are unaffected. Do not install or start
-  a coordinator just to graduate a handoff.
-
-When you do graduate it, mention it briefly after the wrapper prompt — e.g.
-"Also filed as proposed task `<id>` — resume it next session with
-`/resume-handoff` (or paste the wrapper prompt)." The task is a durable,
-browsable, claimable second copy of the handoff; either resume path works.
+- **No coordinator:** write the file to
+  `~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md` and reply
+  with `Read the handoff at <path> and continue: <topic>.`
 
 ---
 
 ## Resuming From a Handoff
 
-A handoff is **not** auto-loaded. There are two ways to resume — both run in the
-**same, foreground Copilot CLI session** you're sitting in (a handoff is
-continued by *you*, in a fresh context window, **never** by a spawned background
-ACP agent unless the operator explicitly asks):
+A handoff is **not** auto-loaded. How you resume depends on which form the
+previous session produced — but **both run in the same, foreground Copilot CLI
+session** you're sitting in (a handoff is continued by *you*, in a fresh context
+window, **never** by a spawned background ACP agent unless the operator
+explicitly asks):
 
-1. **Paste the wrapper prompt** (the classic path). The previous session's
-   wrapper prompt, pasted as the first message in a new session, names the
-   handoff file path and tells you to read it and continue.
-2. **`/resume-handoff`** (when the handoff was graduated into a task). After
-   `/clear` (or `/new`) in the same worktree, the operator runs
-   `/resume-handoff` with no argument; you find and **consume** this worktree's
-   pending handoff task and continue from its payload. See below.
+1. **agent-dispatch form** (the default when a coordinator is running). The
+   previous session's reply was `Claim and act on the handoff <id> from
+   agent-dispatch: …`. Resume either by:
+   - running **`/resume-handoff`** (no argument) after `/clear`/`/new` in the
+     same worktree — you find and **consume** this worktree's pending handoff
+     task (see below); or
+   - pasting that `Claim and act on the handoff <id> …` prompt, which tells you
+     to claim `<id>` and act on its payload.
+2. **File form** (the fallback when no coordinator was running). The reply was
+   `Read the handoff at <path> and continue: …`; pasted into a new session, it
+   names the file and tells you to read it and continue.
 
 > **A handoff is in-place: same worktree, new session.** The point of a handoff
 > is to continue *this* work with a fresh context window, so the new session
@@ -178,8 +177,10 @@ ACP agent unless the operator explicitly asks):
 ### `/resume-handoff` — consume this worktree's pending handoff task
 
 When the operator runs `/resume-handoff` (no argument), **in the target
-worktree**, resume from the graduated handoff task rather than a pasted prompt.
-Do it **in this foreground session** — do not spawn a background agent.
+worktree**, resume from the pending handoff task. Do it **in this foreground
+session** — do not spawn a background agent. (This is also exactly what to do
+when the operator pastes a `Claim and act on the handoff <id> from
+agent-dispatch` prompt — skip the search in step 1 and claim that `<id>`.)
 
 1. **Find this worktree's pending handoff.** Query the coordinator for
    `proposed`, `handoff`-labeled tasks in the calling repo's lane, and pick the
@@ -187,7 +188,7 @@ Do it **in this foreground session** — do not spawn a background agent.
    several):
 
    ```bash
-   agent-dispatch health >/dev/null 2>&1 || { echo "no coordinator — paste the wrapper prompt instead"; }
+   agent-dispatch health >/dev/null 2>&1 || { echo "no coordinator — use the file-form reply prompt instead"; }
    agent-dispatch list --status proposed --label handoff
    # match target_worktree to `agent-worktrees get worktree-dir` (basename)
    ```
@@ -219,8 +220,9 @@ Do it **in this foreground session** — do not spawn a background agent.
    ```
 
 - **Graceful degrade.** If no coordinator answers, or no matching `proposed`
-  handoff task exists for this worktree, say so and fall back to the pasted
-  wrapper prompt (path 1). Never invent a handoff.
+  handoff task exists for this worktree, say so and fall back to the **file
+  form** (a pasted `Read the handoff at <path>` prompt, path 2 above). Never
+  invent a handoff.
 - **Foreground only.** `/resume-handoff` continues the work in *this* session.
   It does not launch a background ACP worker — handoffs are resumed by the
   operator's own foreground session.
@@ -234,12 +236,12 @@ summarize what was worked on, or look for a
 
 ---
 
-## Handoff File Template
+## Handoff Template
 
-Write this (via `save_handoff_prompt`) to
-`~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md`. Full
-template: [`references/handoff-template.md`](references/handoff-template.md).
-Its sections:
+Compose this markdown and pass it to `save_handoff_prompt` as `prompt_text`
+(it becomes the agent-dispatch **task payload**, or the file contents in
+fallback mode). Full template:
+[`references/handoff-template.md`](references/handoff-template.md). Its sections:
 
 ```markdown
 ## Session Continuation
@@ -255,32 +257,38 @@ Its sections:
 
 ## Rules
 
-- **The handoff FILE can be as long as needed** — it's read on demand when the
-  next agent opens it, not injected into any context automatically. Capture
-  direction/motivation, next actions, and target goals in full.
-- **The inline WRAPPER prompt must be short — one or two sentences.** It is
-  addressed to the **next agent**: it names the full handoff file path (a `~/`
-  form is fine) and tells that agent to **read** the file and continue. It is
+- **The handoff CONTENT can be as long as needed** — whether it lands in the
+  task payload or a file, it's read on demand when the next agent resumes, not
+  injected into any context automatically. Capture direction/motivation, next
+  actions, and target goals in full.
+- **The inline REPLY prompt must be short — one or two sentences.** It is
+  addressed to the **next agent** and is whichever form `save_handoff_prompt`
+  returned: `Claim and act on the handoff <id> from agent-dispatch: <topic>.`
+  (task) or `Read the handoff at <path> and continue: <topic>.` (file). It is
   copy-pasted verbatim into `/clear` (or `/new`); keep it scannable and do
-  **not** repeat the file's contents.
+  **not** repeat the handoff contents.
 - **Lead with the original topic.** The "Original Request" must reference the
   session's founding purpose, not just recent activity.
 - **Be specific.** "Fix the auth bug" is useless. "JWT refresh in
   `src/auth/token.ts:142` has a race — mutex added but error handler uses old
   non-awaited path" is useful. Include file paths, what failed, and the why.
 - **Never claim auto-pickup.** A handoff is never loaded automatically on
-  restart. Do not imply Copilot will resume on its own — the user must paste
-  the wrapper prompt.
-- **Keep it in the session folder.** Do not commit the handoff file or write it
-  anywhere outside `~/.copilot/session-state/<sessionId>/files/`. Do not hide
-  the path inside a tool call — show it to the user in your reply.
+  restart. Do not imply Copilot will resume on its own — the user resumes it
+  (`/resume-handoff`, or paste the reply prompt).
+- **One home, not two.** A handoff lives in **one** place — the agent-dispatch
+  task when a coordinator is running, else a session file. Don't write a file
+  *and* a task. In file mode, keep the file in
+  `~/.copilot/session-state/<sessionId>/files/` (never commit it or write it
+  elsewhere); in task mode there is no file. Show the reply prompt to the user;
+  don't hide it in a tool call.
 
 ---
 
 ## Integration Notes
 
-- Handoff files are stored in the session's state folder:
-  `~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md`
-- `save_handoff_prompt` writes that file and returns its absolute path; surface
-  that path to the user verbatim in the wrapper prompt. Pass the markdown as the
-  **`prompt_text`** argument (the `prompt` alias is also accepted).
+- **Storage is mode-dependent.** `save_handoff_prompt` prefers an agent-dispatch
+  task (payload = the markdown, no file) and falls back to a session file at
+  `~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md` only when no
+  coordinator is reachable. It returns the exact short prompt to reply with in
+  either case. Pass the markdown as the **`prompt_text`** argument (the `prompt`
+  alias is also accepted) plus an optional short **`title`** (task mode only).
