@@ -13,6 +13,8 @@ from agent_codespaces.lifecycle import (
     create_codespace,
     delete_codespace,
     list_codespaces,
+    list_devcontainers,
+    resolve_devcontainer_path,
 )
 from agent_codespaces.config import CodespacesConfig, RepoConfig
 
@@ -185,3 +187,114 @@ class TestCleanupStale:
         result = cleanup_stale()
         assert result["ssh_configs"] == []
         assert result["sockets"] == []
+
+
+class TestListDevcontainers:
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_parses_paths(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=".devcontainer/devcontainer.json\n"
+                   ".devcontainer/docker/devcontainer.json\n",
+        )
+        assert list_devcontainers("org/repo") == [
+            ".devcontainer/devcontainer.json",
+            ".devcontainer/docker/devcontainer.json",
+        ]
+
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_api_failure_degrades_to_empty(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stderr="not found")
+        assert list_devcontainers("org/repo") == []
+
+    @patch("agent_codespaces.lifecycle.subprocess.run", side_effect=FileNotFoundError)
+    def test_missing_gh_degrades_to_empty(self, mock_run):
+        assert list_devcontainers("org/repo") == []
+
+
+class TestResolveDevcontainerPath:
+    @patch("agent_codespaces.lifecycle.list_devcontainers")
+    def test_single_devcontainer_returns_none(self, mock_list):
+        mock_list.return_value = [".devcontainer/devcontainer.json"]
+        assert resolve_devcontainer_path("org/repo", CodespacesConfig()) is None
+
+    @patch("agent_codespaces.lifecycle.list_devcontainers")
+    def test_zero_devcontainers_returns_none(self, mock_list):
+        mock_list.return_value = []
+        assert resolve_devcontainer_path("org/repo", CodespacesConfig()) is None
+
+    @patch("agent_codespaces.lifecycle.list_devcontainers")
+    def test_explicit_override_wins_without_enumeration(self, mock_list):
+        assert resolve_devcontainer_path(
+            "org/repo", CodespacesConfig(), override=".devcontainer/docker/devcontainer.json",
+        ) == ".devcontainer/docker/devcontainer.json"
+        mock_list.assert_not_called()
+
+    @patch("agent_codespaces.lifecycle.list_devcontainers")
+    def test_multiple_uses_repo_config(self, mock_list):
+        mock_list.return_value = [
+            ".devcontainer/devcontainer.json",
+            ".devcontainer/docker/devcontainer.json",
+        ]
+        config = CodespacesConfig(
+            repos={"org/repo": RepoConfig(
+                devcontainer_path=".devcontainer/docker/devcontainer.json"
+            )},
+        )
+        assert resolve_devcontainer_path("org/repo", config) == \
+            ".devcontainer/docker/devcontainer.json"
+
+    @patch("agent_codespaces.lifecycle.list_devcontainers")
+    def test_multiple_falls_back_to_canonical(self, mock_list):
+        mock_list.return_value = [
+            ".devcontainer/docker/devcontainer.json",
+            ".devcontainer/devcontainer.json",
+        ]
+        assert resolve_devcontainer_path("org/repo", CodespacesConfig()) == \
+            ".devcontainer/devcontainer.json"
+
+    @patch("agent_codespaces.lifecycle.list_devcontainers")
+    def test_multiple_no_canonical_uses_first(self, mock_list):
+        mock_list.return_value = [
+            ".devcontainer/alpha/devcontainer.json",
+            ".devcontainer/beta/devcontainer.json",
+        ]
+        assert resolve_devcontainer_path("org/repo", CodespacesConfig()) == \
+            ".devcontainer/alpha/devcontainer.json"
+
+    @patch("agent_codespaces.lifecycle.list_devcontainers")
+    def test_global_default_used_when_present(self, mock_list):
+        mock_list.return_value = [
+            ".devcontainer/alpha/devcontainer.json",
+            ".devcontainer/custom/devcontainer.json",
+        ]
+        config = CodespacesConfig(
+            default_devcontainer_path=".devcontainer/custom/devcontainer.json",
+        )
+        assert resolve_devcontainer_path("org/repo", config) == \
+            ".devcontainer/custom/devcontainer.json"
+
+
+class TestCreateCodespaceDevcontainer:
+    @patch("agent_codespaces.lifecycle.list_devcontainers")
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_passes_devcontainer_path_when_multiple(self, mock_run, mock_list):
+        mock_run.return_value = MagicMock(returncode=0, stdout="cs-name\n")
+        mock_list.return_value = [
+            ".devcontainer/devcontainer.json",
+            ".devcontainer/docker/devcontainer.json",
+        ]
+        create_codespace("org/repo", CodespacesConfig())
+        call_args = mock_run.call_args[0][0]
+        assert "--devcontainer-path" in call_args
+        idx = call_args.index("--devcontainer-path")
+        assert call_args[idx + 1] == ".devcontainer/devcontainer.json"
+
+    @patch("agent_codespaces.lifecycle.list_devcontainers")
+    @patch("agent_codespaces.lifecycle.subprocess.run")
+    def test_omits_flag_when_single(self, mock_run, mock_list):
+        mock_run.return_value = MagicMock(returncode=0, stdout="cs-name\n")
+        mock_list.return_value = [".devcontainer/devcontainer.json"]
+        create_codespace("org/repo", CodespacesConfig())
+        call_args = mock_run.call_args[0][0]
+        assert "--devcontainer-path" not in call_args

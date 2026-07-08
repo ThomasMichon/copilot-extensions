@@ -9,6 +9,10 @@ defaults:
   machine_type: largePremiumLinux        # default `gh codespace create` VM size
   location: EastUs                        # default Azure region
   ssh_user: vscode                        # SSH user (match your CodeSpace user)
+  # Fallback devcontainer config used ONLY when a repo has multiple discoverable
+  # devcontainer.json files (otherwise `gh codespace create` prompts and fails
+  # headless). Single-devcontainer repos are unaffected. Override per-repo below.
+  # devcontainer_path: .devcontainer/devcontainer.json
   # Your ACCOUNT-WIDE dotfiles repo -- the single repo GitHub clones into every
   # CodeSpace (set at github.com/settings/codespaces; no API to read it, so
   # declare it once here). Should host an install.sh; run by connect-time
@@ -55,6 +59,12 @@ repos:
     workspace_repo: <your-repo>           # -> workspace_folder = /workspaces/<your-repo>
     # workspace_folder: /workspaces/<checkout>   # explicit override if the
     #                                            # checkout isn't /workspaces/<basename>
+    # Which devcontainer to build from when this repo ships more than one (e.g. a
+    # local-Docker config alongside the CodeSpaces one). agent-codespaces only
+    # passes --devcontainer-path when the repo actually has multiple configs, so
+    # this keeps headless `create` non-interactive without affecting other repos.
+    # An agent can still override per-create: `agent-codespaces create --devcontainer-path ...`.
+    # devcontainer_path: .devcontainer/devcontainer.json
     # Repo-specific provisioning -- deployed into the CodeSpace by
     # agent-codespaces on SSH connect (by-convention hook).
     # provision:

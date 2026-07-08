@@ -91,6 +91,15 @@ class RepoConfig:
     workspace_folder: str | None = None
     machine_type: str | None = None
     location: str | None = None
+    # Which devcontainer config ``gh codespace create`` should use for this
+    # repo. Only consulted when the repo exposes MORE THAN ONE discoverable
+    # ``devcontainer.json`` -- in which case ``gh`` would otherwise prompt and
+    # hard-fail headless (``failed to prompt: no terminal``). Set this to the
+    # config a CodeSpace should be built from (e.g.
+    # ``.devcontainer/devcontainer.json``) when the repo also ships alternate
+    # devcontainers not meant for CodeSpaces (e.g. a local-Docker one). See
+    # ``lifecycle.resolve_devcontainer_path``.
+    devcontainer_path: str | None = None
     bootstrap_post_create: str | None = None
     provision: ProvisionConfig | None = None
 
@@ -139,6 +148,14 @@ class CodespacesConfig:
     default_location: str = "EastUs"
     dotfiles_repo: str | None = None
     ssh_user: str = "vscode"
+
+    # Fallback devcontainer config path used when a repo exposes more than one
+    # discoverable ``devcontainer.json`` and no per-repo ``devcontainer_path``
+    # (nor an explicit CLI override) is set. The GitHub Codespaces default
+    # location, so single-devcontainer repos are unaffected (the path is only
+    # PASSED to ``gh`` when the repo actually has multiple configs). See
+    # ``lifecycle.resolve_devcontainer_path``.
+    default_devcontainer_path: str = ".devcontainer/devcontainer.json"
 
     # Workspace folder on the CodeSpace.  When set, the remote agent
     # command ``cd``s into this directory before launching Copilot CLI,
@@ -346,6 +363,7 @@ def _parse_repo_config(raw: dict[str, Any], repo_dir: Path | None = None) -> Rep
         workspace_folder=raw.get("workspace_folder"),
         machine_type=raw.get("machine_type"),
         location=raw.get("location"),
+        devcontainer_path=raw.get("devcontainer_path"),
         bootstrap_post_create=bootstrap.get("post_create"),
         provision=(
             _parse_provision(provision_raw, repo_dir) if provision_raw else None
@@ -382,6 +400,9 @@ def load_merged_config() -> CodespacesConfig:
             )
             merged.default_location = defaults.get(
                 "location", merged.default_location
+            )
+            merged.default_devcontainer_path = defaults.get(
+                "devcontainer_path", merged.default_devcontainer_path
             )
             merged.dotfiles_repo = defaults.get(
                 "dotfiles_repo", merged.dotfiles_repo

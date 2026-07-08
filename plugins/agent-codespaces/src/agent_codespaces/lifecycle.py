@@ -98,21 +98,115 @@ def list_codespaces() -> list[CodespaceInfo]:
     return codespaces
 
 
+def list_devcontainers(repo: str) -> list[str]:
+    """Return the discoverable devcontainer config paths for a repo.
+
+    Queries ``gh api repos/{repo}/codespaces/devcontainers`` -- the same set
+    ``gh codespace create`` would otherwise prompt over. Returns an empty list
+    on any failure (missing API, auth, network) so callers degrade gracefully
+    to "don't pass ``--devcontainer-path``" (today's behavior).
+    """
+    args = [
+        "gh", "api", f"repos/{repo}/codespaces/devcontainers",
+        "--jq", ".devcontainers[].path",
+    ]
+    try:
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=30,
+            creationflags=_creation_flags(),
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return []
+    if result.returncode != 0:
+        log.debug(
+            "Could not enumerate devcontainers for %s: %s",
+            repo, result.stderr.strip(),
+        )
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def resolve_devcontainer_path(
+    repo: str,
+    config: CodespacesConfig,
+    override: str | None = None,
+) -> str | None:
+    """Pick the ``--devcontainer-path`` to pass ``gh codespace create``, or None.
+
+    ``gh codespace create`` prompts (and hard-fails headless with ``failed to
+    prompt: no terminal``) when a repo exposes MORE THAN ONE discoverable
+    ``devcontainer.json``. This resolves which config to build from so creation
+    stays non-interactive, and is self-healing: a repo (or a newly-added
+    devcontainer) never re-breaks headless create without any config change.
+
+    Returns ``None`` -- meaning *don't pass the flag* -- when the repo has 0 or
+    1 devcontainer (the common case; no prompt, no risk for other repos) or when
+    enumeration is unavailable. When there are multiple, the config to use is
+    chosen by precedence (most specific first):
+
+    1. ``override`` -- an explicit ``--devcontainer-path`` from the caller/agent
+       (the "do the right thing" escape hatch, e.g. to pick an alternate config).
+    2. ``repos.<repo>.devcontainer_path`` -- the operator's per-repo choice.
+    3. ``defaults.devcontainer_path`` -- the global fallback, if it is actually
+       one of the repo's configs.
+    4. The canonical ``.devcontainer/devcontainer.json`` if present.
+    5. The first config reported (deterministic last resort).
+
+    The chosen path and how to override it are logged so a headless caller can
+    see (and change) what was picked.
+    """
+    if override:
+        log.info("Using devcontainer path (explicit override): %s", override)
+        return override
+
+    paths = list_devcontainers(repo)
+    if len(paths) <= 1:
+        # 0 or 1 config -> gh won't prompt; passing the flag would risk naming a
+        # path that doesn't exist for repos whose sole config lives elsewhere.
+        return None
+
+    repo_cfg = config.repos.get(repo, RepoConfig())
+    candidates = [
+        repo_cfg.devcontainer_path,
+        config.default_devcontainer_path
+        if config.default_devcontainer_path in paths
+        else None,
+        ".devcontainer/devcontainer.json"
+        if ".devcontainer/devcontainer.json" in paths
+        else None,
+        paths[0],
+    ]
+    chosen = next(c for c in candidates if c)
+    log.info(
+        "Repo %s has %d devcontainer configs %s; building from %r "
+        "(override with --devcontainer-path or repos.%s.devcontainer_path)",
+        repo, len(paths), paths, chosen, repo,
+    )
+    return chosen
+
+
 def create_codespace(
     repo: str,
     config: CodespacesConfig,
     branch: str | None = None,
     display_name: str | None = None,
+    devcontainer_path: str | None = None,
 ) -> CodespaceInfo:
     """Create a CodeSpace for the given repo using config defaults.
 
     Dotfiles are applied automatically by GitHub from the account-level
     dotfiles setting -- there is no ``--dotfiles`` flag on ``gh codespace
     create``. ``--default-permissions`` avoids an interactive prompt.
+
+    ``--devcontainer-path`` is passed when the repo has multiple devcontainer
+    configs (see ``resolve_devcontainer_path``) so creation stays headless.
     """
     repo_config = config.repos.get(repo, RepoConfig())
     machine_type = repo_config.machine_type or config.default_machine_type
     location = repo_config.location or config.default_location
+    resolved_devcontainer = resolve_devcontainer_path(
+        repo, config, override=devcontainer_path,
+    )
 
     args = [
         "gh", "codespace", "create",
@@ -121,6 +215,8 @@ def create_codespace(
         "--location", location,
         "--default-permissions",
     ]
+    if resolved_devcontainer:
+        args.extend(["--devcontainer-path", resolved_devcontainer])
     if branch:
         args.extend(["--branch", branch])
     if display_name:
