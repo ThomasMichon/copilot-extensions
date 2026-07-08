@@ -311,6 +311,15 @@ reaching across machines, and never hardcode a checkout path (resolve with
 > PR policy are all properties of the *related* repo, recorded in its narrative —
 > not imposed by the harness.
 
+> **Prefer a harness plugin over a hand-written narrative when one exists.** If a
+> target repo ships its own `harness-<repo>` plugin (a payload-only plugin
+> providing the skills to work *on* that repo — contribute + diagnose), **enable
+> it** in `.github/copilot/settings.json` instead of hand-writing the operator
+> guidance. Keep the local narrative/redirect thin — just the consumer-specific
+> bits (which machines deploy it, adoption status). See the
+> `authoring-harness-plugins` skill; `harness-copilot-extensions` is the
+> reference example.
+
 **Done when:** `<harness>` launches the Picker; each product repo resolves via
 `agent-worktrees related resolve <name>` with a concrete plan and a narrative.
 

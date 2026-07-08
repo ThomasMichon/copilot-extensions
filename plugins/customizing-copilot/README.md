@@ -1,7 +1,7 @@
 # customizing-copilot
 
 A **payload-only** Copilot CLI plugin that teaches an agent how to customize and
-extend the GitHub Copilot CLI. It bundles six focused skills covering the main
+extend the GitHub Copilot CLI. It bundles seven focused skills covering the main
 extensibility surfaces, with the per-skill folder conventions and Agent Skills
 best practices baked in.
 
@@ -13,6 +13,7 @@ best practices baked in.
 | [installing-plugins](skills/installing-plugins/SKILL.md) | Repo-scoped plugin registration via `.github/copilot/settings.json` (+ experimental mode) vs global installs, the payload-vs-runtime model, and launch-time reconciliation |
 | [building-harnesses](skills/building-harnesses/SKILL.md) | The in-session entry point to the [Control-Harness Runbook](../../docs/harness-runbook.md) — greenfield / brownfield / audit build of an agent harness, the opinion contract, and the phase map |
 | [reviewing-customizations](skills/reviewing-customizations/SKILL.md) | A structured review pass over a harness's skills, sub-agents, `AGENTS.md`, hooks, and MCP configs — a rubber-duck design critique plus a conformance check against the four authoring skills |
+| [authoring-harness-plugins](skills/authoring-harness-plugins/SKILL.md) | The `harness-<repo>` standard — ship a payload-only plugin from a repo that provides the skills to work *on* it (contribute + diagnose), portable to any control repo that enables it |
 
 Each skill supplements knowledge the CLI does not ship natively and points at the
 authoritative GitHub Copilot CLI and Anthropic Agent Skills documentation.
