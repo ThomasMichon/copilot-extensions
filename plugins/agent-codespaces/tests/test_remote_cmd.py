@@ -87,3 +87,23 @@ def test_plugin_dirs_NOT_folded_for_plain_remote_cmd():
 def test_no_remote_cmd_returns_none():
     assert _build_launch_command(None, _PLUGIN_DIRS, is_stdio=True,
                                  relay_env="", breadcrumb="true") is None
+
+
+# --- #160/#77: injected static PATs are neutralized in the launch prelude -----
+
+def test_launch_prelude_scrubs_injected_ms_ado_pat():
+    """A dispatched agent must not rely on the expired injected MS_ADO_PAT: the
+    launch prelude unsets it (and any _SCRUB_ENV_VARS) BEFORE the agent command
+    so the relay path is used instead."""
+    from agent_codespaces.__main__ import _SCRUB_ENV_VARS
+
+    assert "MS_ADO_PAT" in _SCRUB_ENV_VARS
+    scrub = "".join(f"unset {v}; " for v in _SCRUB_ENV_VARS)
+    cmd = _build_launch_command(
+        "copilot --acp --stdio --allow-all-tools", [],
+        is_stdio=True, relay_env=scrub, breadcrumb="true",
+    )
+    assert cmd is not None
+    assert "unset MS_ADO_PAT" in cmd
+    # The unset must precede the copilot launch.
+    assert cmd.index("unset MS_ADO_PAT") < cmd.index("copilot --acp")

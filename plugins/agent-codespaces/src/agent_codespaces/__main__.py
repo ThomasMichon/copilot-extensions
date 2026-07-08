@@ -385,6 +385,19 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+_SCRUB_ENV_VARS: tuple[str, ...] = ("MS_ADO_PAT",)
+"""Static PAT / injected-credential env vars neutralized on every
+agent-codespaces connect so a dispatched agent authenticates via the credential
+relay, never a stale/expired token baked into the CodeSpace env.
+
+``MS_ADO_PAT`` is the odsp-web CodeSpaces' static Azure DevOps PAT: it expires,
+and once lapsed, agents/tools that reach for it first fail ADO REST / PR creation
+(#160/#77). Nothing on the CodeSpace legitimately needs it (npm/nuget feed auth
+derives ``ODSP_NPM_AUTH_TOKEN`` from the relay, not this PAT). Extend as other
+injected static PATs are found.
+"""
+
+
 def _relay_listening(port: int, timeout: float = 0.5) -> bool:
     """True if the host credential relay is accepting TCP on 127.0.0.1:<port>.
 
@@ -459,7 +472,14 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
 
     # Build port forwards for credential relay
     port_forwards: list[str] = []
-    relay_env = ""
+    # Neutralize static PATs the CodeSpace injects (e.g. MS_ADO_PAT) so a
+    # dispatched agent never relies on a stale/expired token instead of the
+    # credential relay (#160/#77). This runs in the launch prelude AFTER the
+    # login-shell profile loads, so it wins even if a profile re-exports the
+    # var, and applies to both the copilot --acp launch and a diagnostic
+    # --remote-cmd (not a human's interactive VS Code shell). Kept unconditional
+    # -- even with --no-relay we never want an injected PAT relied on.
+    relay_env = "".join(f"unset {v}; " for v in _SCRUB_ENV_VARS)
     relay_token: str | None = None
     if not args.no_relay:
         port_forwards.append(f"-R {relay_port}:127.0.0.1:{relay_port}")
