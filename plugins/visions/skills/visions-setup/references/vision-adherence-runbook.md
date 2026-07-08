@@ -82,6 +82,25 @@ review flow checks the declaration is present and coherent. This gates *merge*,
 never an operation, and stays proportionate (often just "below-altitude"). Keep it
 optional; the habit + the entry-point flow deliver most of the value without it.
 
+**Anti-dampening guardrails (mandatory *before* enabling teeth).** A review flow
+reads the guidance corpus, so the moment adherence becomes reviewable it risks
+**over-firing** — nagging that a PR (or the code around it) "doesn't match the
+vision." That is the wrong bar: the vision→reality gap is expected and healthy,
+and a vision only regenerates a system's conceptual *skeleton* (the generativity
+check quantifies how partial — often a minority of a complex reality). So a
+reviewer must:
+
+- judge only the **delta the PR introduces**, never the ambient vision gap;
+- treat **vision-ahead** and **below-altitude** changes as **non-violations**;
+- never require a PR to *advance* the vision — only to not *silently contradict or
+  bypass* stated intent;
+- **fail open** — default to pass; accept a plausible "below-altitude"; raise
+  adherence only for a *clear, undeclared* contradiction/bypass of a **stated**
+  vision item.
+
+Do not turn on teeth until these guardrails are written into the repo's review
+protocol. While guide-only, adherence is **not** a review axis at all.
+
 ## Anti-patterns
 
 - ❌ Turning adherence into an operation gate ("blocked: no vision") — it guides;
