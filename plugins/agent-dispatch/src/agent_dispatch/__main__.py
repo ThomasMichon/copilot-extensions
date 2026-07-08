@@ -308,6 +308,38 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_schedule(args: argparse.Namespace) -> int:
+    from .producers import schedule
+
+    if args.schedule_command == "serve":
+        schedule.serve(
+            args.spec,
+            url=args.url or client_url(),
+            token=args.token or client_token(),
+            interval=args.interval,
+        )
+        return 0
+    spec = schedule.load_spec(args.spec)
+    with _client(args) as c:
+        result = schedule.run_tick(c, spec)
+    return _emit({
+        "created": [_enrich(t) for t in result["created"]],
+        "errors": result["errors"],
+    })
+
+
+def _cmd_webhook(args: argparse.Namespace) -> int:
+    from .producers import webhook
+
+    config = webhook.load_config(args.config) if args.config else {}
+    if args.url:
+        config["url"] = args.url
+    if args.token:
+        config["coordinator_token"] = args.token
+    webhook.serve(config, host=args.host, port=args.port)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-dispatch", description="Agent task queue + coordinator"
@@ -445,7 +477,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("list", help="list tasks (scoped to the calling repo by default)")
     p.add_argument("--repo", help="lane to list (local name or remote URL); default: calling repo")
-    p.add_argument("--status", help="filter by status; comma-separate for several (e.g. queued,started)")
+    p.add_argument(
+        "--status",
+        help="filter by status; comma-separate for several (e.g. queued,started)",
+    )
     p.add_argument("--target-machine")
     p.add_argument("--target-repo")
     p.add_argument("--label")
@@ -456,7 +491,9 @@ def build_parser() -> argparse.ArgumentParser:
         "find", help="substring search over title/prompt (a quick dedup probe; calling repo)"
     )
     p.add_argument("query")
-    p.add_argument("--repo", help="lane to search (local name or remote URL); default: calling repo")
+    p.add_argument(
+        "--repo", help="lane to search (local name or remote URL); default: calling repo"
+    )
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(func=_cmd_find)
 
@@ -466,7 +503,9 @@ def build_parser() -> argparse.ArgumentParser:
              "newest first -- read these before creating a task to verify the "
              "work doesn't already exist",
     )
-    p.add_argument("--repo", help="lane to sweep (local name or remote URL); default: calling repo")
+    p.add_argument(
+        "--repo", help="lane to sweep (local name or remote URL); default: calling repo"
+    )
     p.add_argument("--limit", type=int, default=500)
     p.set_defaults(func=_cmd_sweep)
 
@@ -495,6 +534,38 @@ def build_parser() -> argparse.ArgumentParser:
         "mcp", help="run the local stdio MCP server (per-agent interaction layer)"
     )
     p.set_defaults(func=_cmd_mcp)
+
+    p = sub.add_parser(
+        "schedule",
+        help="scheduler/timer producer: turn a JSON schedule spec into deferred "
+             "tasks (idempotent per occurrence via not_before + dedup_key)",
+    )
+    sched_sub = p.add_subparsers(dest="schedule_command", required=True)
+    sp = sched_sub.add_parser(
+        "tick",
+        help="create every currently-due occurrence once, then exit (drive from "
+             "cron / a systemd timer / manage_schedule)",
+    )
+    sp.add_argument("spec", help="path to the JSON schedule spec")
+    sp.set_defaults(func=_cmd_schedule)
+    sp = sched_sub.add_parser(
+        "serve", help="built-in timer: reload the spec and tick every --interval seconds"
+    )
+    sp.add_argument("spec", help="path to the JSON schedule spec")
+    sp.add_argument(
+        "--interval", type=float, default=60.0, help="seconds between ticks (default: 60)"
+    )
+    sp.set_defaults(func=_cmd_schedule)
+
+    p = sub.add_parser(
+        "webhook",
+        help="reactive producer: serve an HTTP app mapping git-forge PR-merge "
+             "and telemetry events onto tasks",
+    )
+    p.add_argument("--config", help="path to the JSON webhook config (optional)")
+    p.add_argument("--host", default="127.0.0.1", help="bind host (default: 127.0.0.1)")
+    p.add_argument("--port", type=int, default=9331, help="bind port (default: 9331)")
+    p.set_defaults(func=_cmd_webhook)
 
     p = sub.add_parser("health", help="check coordinator health")
     p.set_defaults(func=lambda args: _emit(_client(args).health()))

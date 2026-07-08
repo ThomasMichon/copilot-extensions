@@ -11,6 +11,7 @@ import pytest
 from agent_dispatch.client import DispatchClient
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.queue import Status
+from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 mcp = pytest.importorskip("mcp")
@@ -76,7 +77,7 @@ def test_mcp_endpoint_lists_tools(coord):
     names = asyncio.new_event_loop().run_until_complete(go())
     assert "dispatch_create" in names
     assert "dispatch_claim" in names
-    assert len(names) == 16
+    assert len(names) == 17
 
 
 def test_mcp_create_visible_over_rest(coord):
@@ -84,7 +85,7 @@ def test_mcp_create_visible_over_rest(coord):
     import json
 
     res = asyncio.new_event_loop().run_until_complete(
-        _call(coord, "dispatch_create", {"title": "via mcp", "dedup_key": "m1"})
+        _call(coord, "dispatch_create", {"title": "via mcp", "dedup_key": "m1", "repo": TEST_REPO})
     )
     task = json.loads(res.content[0].text)
     assert task["status"] == Status.QUEUED
@@ -139,7 +140,7 @@ def test_mcp_events_reach_rest_sse(coord):
     t.start()
     time.sleep(0.5)  # let the subscriber attach
     asyncio.new_event_loop().run_until_complete(
-        _call(coord, "dispatch_create", {"title": "emit me"})
+        _call(coord, "dispatch_create", {"title": "emit me", "repo": TEST_REPO})
     )
     t.join(timeout=5)
     assert any(e.get("type") == "task.created" for e in seen)

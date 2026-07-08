@@ -15,7 +15,8 @@ from agent_dispatch.queue import (
     worker_id_for,
 )
 from agent_dispatch.queue import TaskQueue as RealTaskQueue
-from tests._helpers import OTHER_REPO, TEST_REPO, RepoDefaultingQueue as TaskQueue
+from tests._helpers import OTHER_REPO, TEST_REPO
+from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 
 @pytest.fixture

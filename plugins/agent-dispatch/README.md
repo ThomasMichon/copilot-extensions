@@ -130,6 +130,59 @@ external `payload_ref` (e.g. `pr/123`) is left opaque for the caller.
   existing task, so agents can browse/`find` before ideating.
 - `not_before` defers a task until a wall-clock time (scheduled creation).
 
+## Producers
+
+The coordinator core only owns the queue -- it runs **no** scheduler and **no**
+PR/alert logic. Anything that *creates* tasks is a **producer**: any client that
+can POST. Two ship in-box (both driven by a declarative JSON spec, both talking
+to the coordinator through the ordinary client):
+
+### Scheduler / timer producer (`agent-dispatch schedule`)
+
+Turns recurring task templates into deferred tasks. Each *tick* creates one task
+per due occurrence, with `not_before` set to the occurrence time and a
+deterministic `dedup_key` (`sched:<id>:<epoch>`) so re-ticks never double-create.
+
+```jsonc
+// schedules.json
+{
+  "default_repo": "example.com/acme/widget",   // lane fallback
+  "schedules": [
+    { "id": "hourly-sweep", "title": "Sweep service health", "interval_seconds": 3600 },
+    { "id": "morning-digest", "title": "Morning digest", "at": ["09:00"],
+      "require": ["logger"], "labels": ["scheduled"] }
+  ]
+}
+```
+
+A schedule uses **either** `interval_seconds` **or** `at` (a list of local
+`"HH:MM"` times). Drive it one-shot from any external timer, or use the built-in
+loop:
+
+```bash
+agent-dispatch schedule tick  schedules.json          # one pass (cron / systemd timer / manage_schedule)
+agent-dispatch schedule serve schedules.json --interval 60   # built-in timer loop
+```
+
+### Reactive webhook producer (`agent-dispatch webhook`)
+
+A small HTTP app that maps two generic, forge-neutral event shapes onto tasks:
+
+- `POST /webhook/pr` -- a git-forge PR event; when **merged**, creates a
+  follow-up task (`source=pr-webhook`, `origin_ref=pr/<n>`) in the lane derived
+  from the payload's repository remote. Handles the shape GitHub and Gitea share.
+- `POST /webhook/telemetry` -- a monitoring alert; a **firing** alert creates a
+  remediation task (`source=telemetry`). Accepts an Alertmanager-style
+  `{"alerts": [...]}` batch or a single flat alert object.
+
+Every task carries a deterministic `dedup_key`, so a redelivered webhook doesn't
+double-enqueue. Behavior (templates, base-branch/severity allowlists, an optional
+inbound bearer token, the coordinator URL) is set in an optional JSON config:
+
+```bash
+agent-dispatch webhook --config webhook.json --host 127.0.0.1 --port 9331
+```
+
 ## Development
 
 ```bash

@@ -206,6 +206,25 @@ Defer with `--not-before <epoch>` (scheduled creation). Attach a payload with
 spills to a content-addressed blob automatically), or `--payload-ref` (an
 external pointer like `pr/123`).
 
+### Producers -- scheduled + reactive task creation
+
+The coordinator only owns the queue; anything that *creates* tasks is a
+**producer**. Two ship in-box, each driven by a declarative JSON spec:
+
+- **`agent-dispatch schedule tick <spec>`** (and `schedule serve <spec>
+  --interval N`) -- a scheduler/timer producer. Each tick creates one task per
+  due occurrence of every schedule (`interval_seconds`, or daily `at: ["HH:MM"]`
+  times), stamping `not_before` and a deterministic `dedup_key`
+  (`sched:<id>:<epoch>`) so re-ticks are idempotent. Drive `tick` from cron / a
+  systemd timer / `manage_schedule`, or run the built-in `serve` loop.
+- **`agent-dispatch webhook --config <cfg>`** -- a reactive producer: an HTTP app
+  with `POST /webhook/pr` (a **merged** PR -> follow-up task, `source=pr-webhook`,
+  `origin_ref=pr/<n>`, lane from the payload's repo remote) and
+  `POST /webhook/telemetry` (a **firing** alert -> remediation task,
+  `source=telemetry`). Deterministic `dedup_key`s make redelivery safe.
+
+See the plugin README (**Producers**) for the spec/config shapes.
+
 ### 3. Claim, work, finish
 
 ```bash
