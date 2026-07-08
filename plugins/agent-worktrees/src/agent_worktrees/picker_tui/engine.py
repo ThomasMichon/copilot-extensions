@@ -481,6 +481,48 @@ class PickerScreen(Widget):
         self._prof_loaded = False
         if callable(self._prof_load):
             self._start_profile_load()
+        # Best-effort background PR-state reconcile (#1423): correct already-
+        # merged-but-stale PRs in the tracking store, then re-render so the
+        # Picker stops showing merged worktrees as having open PRs. Sources
+        # without the hook (fixtures/tests) skip it.
+        self._pr_reconciled = False
+        rec_fn = getattr(self.src, "reconcile_prs", None)
+        if callable(rec_fn):
+            self._start_pr_reconcile(rec_fn)
+
+    def _start_pr_reconcile(self, rec_fn):
+        """Reconcile stale local PR states off the UI thread, then reload (#1423).
+
+        Never blocks the first paint and never raises: a provider that is
+        unconfigured/unreachable simply leaves the tracking state as-is. Only
+        triggers a reload when something actually changed, so an all-current
+        store costs one silent pass.
+        """
+        def work():
+            try:
+                changed = rec_fn()
+            except Exception:
+                changed = 0
+            if changed:
+                try:
+                    self._reload_local_after_reconcile()
+                except Exception:
+                    pass
+            self._pr_reconciled = True
+
+        threading.Thread(target=work, name="pr-reconcile", daemon=True).start()
+
+    def _reload_local_after_reconcile(self):
+        """Re-fetch the local machine's rows after a PR reconcile wrote back.
+
+        Mirrors the post-maintenance reload (#1421): in live mode the local
+        source re-threads and the render tick picks up the fresh records; in the
+        non-live path the data is reloaded in-place."""
+        m, e = self.src.LOCAL
+        if self.live and self.loader is not None:
+            self.loader.reload(m, e)
+        elif not self.live:
+            self.data = self.src.load()
 
     def button_set(self):
         if self.htab == 2:

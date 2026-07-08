@@ -264,6 +264,15 @@ def apply_profile_column(machine, env, sels, *, mirror=True):
     return profiles_io.apply_column(machine, env, sels, mirror=mirror)
 
 
+def reconcile_prs() -> int:
+    """Reconcile the LOCAL machine's stale PR states against the provider (#1423).
+
+    Delegates to :func:`data_local.reconcile_prs`; remote worktrees reconcile on
+    their own owning machine (a remote-over-SSH reconcile is a follow-up).
+    """
+    return data_local.reconcile_prs()
+
+
 def _resolve_local() -> tuple[str, str]:
     """(machine, env) of this host, using the registry display name when known.
 
