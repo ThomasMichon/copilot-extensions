@@ -616,10 +616,14 @@ def test_maybe_repoll_gating(monkeypatch):
     loader = FakeLoader()
 
     def fresh_obj():
-        return types.SimpleNamespace(
+        obj = types.SimpleNamespace(
             loader=loader, progress=None, htab=0,
+            pivots=[{"kind": "worktrees"}, {"kind": "maintenance"}, {"kind": "profiles"}],
             _last_poll=time.monotonic() - 1000,
             _poll_keys=lambda: {("m", "Win")})
+        # Dispatch is keyed off pivot *kind* now, not the raw htab index.
+        obj._kind = lambda idx=None: obj.pivots[obj.htab if idx is None else idx]["kind"]
+        return obj
 
     monkeypatch.setattr(eng, "POLL_SECS", 45.0)
     obj = fresh_obj()
@@ -1604,3 +1608,186 @@ def test_maintenance_ssh_off_console_on_windows(monkeypatch):
     maintenance._ssh_json(["ssh", "host", "agent-worktrees sync"], timeout=5)
     assert seen.get("creationflags", 0) & 0x08000000
     assert seen.get("stdin") is subprocess.DEVNULL
+
+
+# --- Registered (cross-plugin) pivot: TASKS ---------------------------------
+
+def _write_tasks_manifest(directory):
+    import json
+    manifest = {
+        "label": "Tasks",
+        "after": "Worktrees",
+        "list": ["true"],
+        "entry": {
+            "id": "id", "title": "title", "worktree": "target_worktree",
+            "subtitle": "repo_name", "badges": ["labels"],
+        },
+        "empty_hint": "No proposed tasks.",
+        "actions": [
+            {"key": "open", "label": "Open into a CLI session", "run": ["echo", "{id}"]},
+            {"key": "abandon", "label": "Abandon", "run": ["echo", "{task_id}"],
+             "confirm": True},
+        ],
+    }
+    (directory / "agent-dispatch.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+class _FakeRuntime:
+    def __init__(self, rows):
+        self.rows = rows
+        self.actions = []
+        self.invalidated = False
+
+    def ensure(self, machine):
+        pass
+
+    def get(self, machine):
+        return ("ready", self.rows, "")
+
+    def invalidate(self, machine=None):
+        self.invalidated = True
+
+    def run_action(self, action, ctx):
+        self.actions.append((action.key, dict(ctx)))
+        return (True, "done")
+
+
+def _seed_fake_tasks(scr, rows):
+    reg = scr.registered_pivots[0]
+    rt = _FakeRuntime(rows)
+    scr._pivot_runtimes[reg.name] = rt
+    return rt
+
+
+def test_registered_pivot_inserted_between_worktrees_and_maintenance(tmp_path, monkeypatch):
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_tasks_manifest(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            assert scr.htabs == ["Worktrees", "Tasks", "Maintenance", "Profiles"]
+            assert scr._kind(1) == "registered"
+            assert scr._kind(2) == "maintenance"     # built-ins shifted, not renumbered logic
+            assert scr._kind(3) == "profiles"
+
+    asyncio.run(run())
+
+
+def test_registered_pivot_lists_and_navigates(tmp_path, monkeypatch):
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_tasks_manifest(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [
+        {"id": "t1", "title": "First task", "target_worktree": "wt-a",
+         "repo_name": "repoA", "labels": ["handoff"]},
+        {"id": "t2", "title": "Second task", "target_worktree": None,
+         "repo_name": "repoB", "labels": []},
+    ]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            _seed_fake_tasks(scr, rows)
+            scr.htab = scr.htabs.index("Tasks")
+            scr.sel = scr.default_sel()
+            await pilot.pause()
+
+            assert scr._task_rows() == rows
+            # One ('T', i) stop per task; machine sub-nav ('M') present.
+            zones = [z for z, _ in scr.stops()]
+            assert zones.count("T") == 2
+            assert ("M", 0) in scr.stops()
+            # Grouped by worktree.
+            groups = dict((g, [i for i, _ in items]) for g, items in scr._task_groups())
+            assert "wt-a" in groups
+            # Body renders the task titles.
+            plain = scr.render().plain
+            assert "First task" in plain
+            assert "Second task" in plain
+
+    asyncio.run(run())
+
+
+def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch):
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_tasks_manifest(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [{"id": "t1", "title": "First task", "target_worktree": "wt-a",
+             "repo_name": "repoA", "labels": ["handoff"]}]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            rt = _seed_fake_tasks(scr, rows)
+            scr.htab = scr.htabs.index("Tasks")
+            # Focus the first task row.
+            scr.sel = ("T", 0)
+            await pilot.pause()
+
+            # Enter opens the action sub-menu with the manifest's actions.
+            scr._open_task_menu()
+            assert scr.task_menu is not None
+            assert [a.label for a in scr.task_menu["actions"]] == [
+                "Open into a CLI session", "Abandon"]
+
+            # Select "Abandon" and run it.
+            scr.task_menu_idx = 1
+            scr._key_task_menu("enter")
+            assert scr.task_menu is None
+            assert rt.actions and rt.actions[0][0] == "abandon"
+            # Placeholders resolved: {task_id} -> the entry id.
+            _key, ctx = rt.actions[0]
+            assert ctx["task_id"] == "t1"
+            assert ctx["machine"] == "lambda-core"
+            assert rt.invalidated is True
+
+    asyncio.run(run())
+
+
+def test_registered_pivot_switch_pivot_wraps_all_four(tmp_path, monkeypatch):
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_tasks_manifest(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            kinds = []
+            for _ in range(len(scr.pivots)):
+                kinds.append(scr._kind())
+                scr._switch_pivot(1)
+            assert kinds == ["worktrees", "registered", "maintenance", "profiles"]
+            # Wrapped back to the start.
+            assert scr.htab == 0
+
+    asyncio.run(run())
