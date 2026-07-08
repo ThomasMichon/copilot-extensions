@@ -21,7 +21,15 @@
 // generate_handoff_prompt, compose prose, and call save_handoff_prompt.
 // The user then copies the short prompt and pastes it into a new session.
 
-import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+  unlinkSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import { join, basename } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -207,6 +215,110 @@ function dispatchHandoff(promptText, sid, cwd, title) {
   } finally {
     try { unlinkSync(tmp); } catch { /* temp already gone -- fine */ }
   }
+}
+
+// Run an `agent-dispatch` subcommand, returning parsed JSON (or null on error).
+function agentDispatchJson(argv, cwd) {
+  try {
+    const out = execFileSync("agent-dispatch", argv, {
+      cwd,
+      timeout: 15000,
+      encoding: "utf-8",
+    });
+    return JSON.parse(out);
+  } catch {
+    return null;
+  }
+}
+
+// Find this worktree's newest pending handoff task (proposed + label 'handoff',
+// pinned to `worktree`). Returns the task object, or null if none / no CLI.
+function findHandoffTask(cwd, worktree) {
+  const tasks = agentDispatchJson(
+    ["list", "--status", "proposed", "--label", "handoff"],
+    cwd,
+  );
+  if (!Array.isArray(tasks)) return null;
+  const mine = tasks.filter((t) => t?.target_worktree === worktree);
+  if (mine.length === 0) return null;
+  mine.sort((a, b) => (a.created_at < b.created_at ? 1 : -1)); // newest first
+  return mine[0];
+}
+
+// Consume a handoff task (approve -> claim -> start -> complete: a handoff is a
+// baton, delivered once picked up) and return { payload, prompt, id } for
+// injection, or null if any step fails (e.g. another session claimed it first).
+function consumeHandoffTask(cwd, task, sid) {
+  const id = task.id;
+  if (!agentDispatchJson(["approve", id], cwd)) return null;
+  const claimed = agentDispatchJson(["claim", "--task", id], cwd);
+  const owner = claimed?.owner;
+  if (!owner) return null;
+  agentDispatchJson(["start", id, owner], cwd);
+  agentDispatchJson(
+    ["complete", id, owner, "--result-ref", `resumed:${sid}`],
+    cwd,
+  );
+  let payload = "";
+  try {
+    payload = execFileSync("agent-dispatch", ["payload", id, "--raw"], {
+      cwd,
+      timeout: 15000,
+      encoding: "utf-8",
+    });
+  } catch {
+    payload = "";
+  }
+  return { id, owner, payload: payload.trim(), prompt: task.prompt || "" };
+}
+
+// Fallback (no coordinator): find the newest session-folder handoff file whose
+// recorded CWD matches the current one. Returns { path, text } or null.
+function findHandoffFile(cwd) {
+  const root = join(homedir(), ".copilot", "session-state");
+  if (!existsSync(root)) return null;
+  let best = null;
+  let bestMtime = 0;
+  let sessions;
+  try {
+    sessions = readdirSync(root);
+  } catch {
+    return null;
+  }
+  for (const sid of sessions) {
+    const path = join(root, sid, "files", `${sid}-prompt.md`);
+    if (!existsSync(path)) continue;
+    let text;
+    let mtime;
+    try {
+      text = readFileSync(path, "utf-8");
+      mtime = statSync(path).mtimeMs;
+    } catch {
+      continue;
+    }
+    // Prefer files whose recorded "**CWD:** <path>" matches this worktree.
+    const cwdMatch = text.includes(`**CWD:** ${cwd}`) || text.includes(cwd);
+    const score = mtime + (cwdMatch ? 1e15 : 0); // CWD match dominates recency
+    if (score > bestMtime) {
+      bestMtime = score;
+      best = { path, text };
+    }
+  }
+  return best;
+}
+
+// Compose the prompt injected into the current session on resume.
+function buildResumePrompt(handoffText, source) {
+  return [
+    `You are resuming a handoff (${source}). The full continuation context`,
+    `follows -- treat it as the founding brief for this session and carry the`,
+    `work forward from where the previous session left off. Do NOT start over`,
+    `or spin up a fresh worktree; continue in place.`,
+    ``,
+    `---`,
+    ``,
+    handoffText,
+  ].join("\n");
 }
 
 // Persist a small context-usage sidecar that the agent-worktrees picker
@@ -457,6 +569,62 @@ const session = await joinSession({
           `  Read the handoff at ${promptPath} and continue: <one-line topic>.\n` +
           `Do NOT paste the file's contents, and do NOT claim it loads ` +
           `automatically on restart -- it does not.`
+        );
+      },
+    },
+  ],
+
+  commands: [
+    {
+      name: "resume-handoff",
+      description:
+        "Dig up this worktree's pending handoff and inject its continuation " +
+        "prompt into THIS session (foreground). Consumes the agent-dispatch " +
+        "handoff task if present, else the newest matching session file.",
+      handler: async (ctx) => {
+        const cwd = state.cwd || process.cwd();
+        const sid = state.sessionId || ctx?.sessionId || "unknown";
+
+        // Prefer an agent-dispatch handoff task pinned to this worktree.
+        if (agentDispatchAvailable()) {
+          const wtDir = agentWorktreesGet("worktree-dir", cwd);
+          const worktree = wtDir ? basename(wtDir) : null;
+          if (worktree) {
+            const task = findHandoffTask(cwd, worktree);
+            if (task) {
+              const consumed = consumeHandoffTask(cwd, task, sid);
+              const body = consumed?.payload || consumed?.prompt;
+              if (consumed && body) {
+                await session.send({
+                  prompt: buildResumePrompt(body, "agent-dispatch task"),
+                  displayPrompt: `Resuming handoff ${consumed.id.slice(0, 8)} from agent-dispatch`,
+                });
+                return;
+              }
+              await session.log(
+                `Found handoff task ${task.id.slice(0, 8)} but could not consume it ` +
+                  `(it may have been claimed by another session). Nothing injected.`,
+                { level: "warning" },
+              );
+              return;
+            }
+          }
+        }
+
+        // Fallback: the newest session-folder handoff file for this worktree.
+        const file = findHandoffFile(cwd);
+        if (file) {
+          await session.send({
+            prompt: buildResumePrompt(file.text, `file ${file.path}`),
+            displayPrompt: `Resuming handoff from ${basename(file.path)}`,
+          });
+          return;
+        }
+
+        await session.log(
+          "No pending handoff found for this worktree (no agent-dispatch task " +
+            "and no matching session file). If you have a handoff prompt, paste it directly.",
+          { level: "warning" },
         );
       },
     },

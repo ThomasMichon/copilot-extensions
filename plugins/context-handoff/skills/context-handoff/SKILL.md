@@ -157,8 +157,8 @@ explicitly asks):
    previous session's reply was `Claim and act on the handoff <id> from
    agent-dispatch: …`. Resume either by:
    - running **`/resume-handoff`** (no argument) after `/clear`/`/new` in the
-     same worktree — you find and **consume** this worktree's pending handoff
-     task (see below); or
+     same worktree — the extension consumes this worktree's pending handoff task
+     and **injects its continuation prompt** as your next turn (see below); or
    - pasting that `Claim and act on the handoff <id> …` prompt, which tells you
      to claim `<id>` and act on its payload.
 2. **File form** (the fallback when no coordinator was running). The reply was
@@ -174,58 +174,40 @@ explicitly asks):
 > the previous session, the next session simply syncs the worktree forward
 > (`agent-worktrees git sync`) and keeps going.
 
-### `/resume-handoff` — consume this worktree's pending handoff task
+### `/resume-handoff` — an injected slash command (extension-provided)
 
-When the operator runs `/resume-handoff` (no argument), **in the target
-worktree**, resume from the pending handoff task. Do it **in this foreground
-session** — do not spawn a background agent. (This is also exactly what to do
-when the operator pastes a `Claim and act on the handoff <id> from
-agent-dispatch` prompt — skip the search in step 1 and claim that `<id>`.)
+**`/resume-handoff` is a real slash command registered by the context-handoff
+extension — not a skill gesture.** When the operator runs it (no argument) in the
+target worktree, the *extension* does the work and **injects the handoff's
+continuation prompt into this session as your next turn**. You don't run any
+commands — you simply receive the injected handoff and continue the work in this
+foreground session (never a background agent).
 
-1. **Find this worktree's pending handoff.** Query the coordinator for
-   `proposed`, `handoff`-labeled tasks in the calling repo's lane, and pick the
-   one whose `target_worktree` matches the current worktree (newest wins if
-   several):
+What the extension does under the hood, in order:
 
-   ```bash
-   agent-dispatch health >/dev/null 2>&1 || { echo "no coordinator — use the file-form reply prompt instead"; }
-   agent-dispatch list --status proposed --label handoff
-   # match target_worktree to `agent-worktrees get worktree-dir` (basename)
-   ```
+1. **agent-dispatch task (preferred).** If a coordinator answers, it finds this
+   worktree's newest `proposed`, `handoff`-labeled task (matching
+   `target_worktree`), **consumes** it (approve → claim → start → complete — a
+   handoff is a baton, delivered once picked up), reads its payload, and injects
+   that payload framed as "you are resuming a handoff; continue in place."
+2. **Session file (fallback).** If no coordinator (or no matching task), it finds
+   the newest session-folder `*-prompt.md` whose recorded CWD matches this
+   worktree and injects its contents the same way.
+3. **Nothing found.** It tells the operator (a log line); paste a handoff prompt
+   directly instead.
 
-2. **Consume it.** Approve the draft, then claim it (claim honors targeting, so
-   it only leases a task pinned to *your* worktree) — this "consumes" the
-   handoff, stamping your session as its owner and moving it out of the pending
-   list:
+So your job on resume is just: **read the injected handoff and keep going.** The
+task is already marked complete by the time you see it — don't re-claim or
+re-complete it; the continuation *work* is tracked by its effort/issue, not the
+handoff task.
 
-   ```bash
-   agent-dispatch approve <id>
-   agent-dispatch claim --task <id>          # identity auto-resolved from the CWD
-   agent-dispatch start <id> <owner>          # owner is echoed by claim
-   ```
-
-3. **Read the payload and continue.** The task payload **is** the full handoff
-   markdown; read it and orient yourself exactly as if you'd opened the handoff
-   file:
-
-   ```bash
-   agent-dispatch payload <id> --raw
-   ```
-
-   Then carry the work forward. When the handoff's target goals are met (or you
-   hand off again), close the loop:
-
-   ```bash
-   agent-dispatch complete <id> <owner> --result-ref <pr-or-commit>
-   ```
-
-- **Graceful degrade.** If no coordinator answers, or no matching `proposed`
-  handoff task exists for this worktree, say so and fall back to the **file
-  form** (a pasted `Read the handoff at <path>` prompt, path 2 above). Never
-  invent a handoff.
-- **Foreground only.** `/resume-handoff` continues the work in *this* session.
-  It does not launch a background ACP worker — handoffs are resumed by the
-  operator's own foreground session.
+> The command needs the context-handoff **extension** loaded (it registers the
+> slash command). If the extension isn't loaded, `/resume-handoff` won't exist —
+> resume by pasting the previous session's reply prompt instead (`Claim and act
+> on the handoff <id> …` or `Read the handoff at <path> …`). When you *do* get a
+> pasted `Claim and act on the handoff <id> from agent-dispatch` prompt, act on
+> it directly: `agent-dispatch payload <id> --raw` for the handoff, then
+> `agent-dispatch claim --task <id>` / `start` / `complete` to consume it.
 
 ### If the user says "pick up from last session" with no pasted prompt
 
