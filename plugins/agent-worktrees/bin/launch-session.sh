@@ -454,25 +454,6 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
                 --path "${WORK_DIR:-$PWD}" >/dev/null 2>&1 < /dev/null &
             disown 2>/dev/null || true
         }
-        # #713 prevention: install a tmux client-detached hook that targeted-
-        # reaps this worktree's session when the last terminal detaches -- a tab
-        # close (SIGHUP kills only the attach client, so post-exit never runs)
-        # OR an explicit detach. ``reap-sessions --id`` applies the SAME
-        # spare-active/attached/system predicate as the startup sweep, so this
-        # is a NO-OP for an active worktree (it stays alive to reattach) and only
-        # tears down a finalized/gone orphan -- immediately, instead of lingering
-        # until the next picker launch reaps it. Server-side + run-shell -b keeps
-        # tmux non-blocking and sees accurate (post-detach) attach state.
-        _aw_install_reap_hook() {
-            local sess="$1"
-            [[ -n "${WORKTREE_ID:-}" ]] || return 0
-            local aw; aw="$(command -v agent-worktrees 2>/dev/null || true)"
-            [[ -x "$aw" ]] || aw="$HOME/.local/bin/agent-worktrees"
-            [[ -x "$aw" ]] || return 0
-            tmux set-hook -t "=$sess" client-detached \
-                "run-shell -b \"'$aw' reap-sessions --id '$WORKTREE_ID' >/dev/null 2>&1\"" \
-                2>/dev/null || true
-        }
 
         # If a tmux session already exists for this worktree, join it.
         # The attacher gets the shared view; no post-exit responsibility.
@@ -483,7 +464,6 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             # session picks up the current bar without us owning the global.
             _aw_apply_session_opts "$TMUX_SESS"
             _aw_spawn_status_updater "$TMUX_SESS"
-            _aw_install_reap_hook "$TMUX_SESS"
             if [[ -n "${TMUX:-}" ]]; then
                 exec tmux switch-client -t "=$TMUX_SESS"
             else
@@ -543,7 +523,6 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             activity_log mux_attached "$WORKTREE_ID" mux=create
             _aw_apply_session_opts "$TMUX_SESS"
             _aw_spawn_status_updater "$TMUX_SESS"
-            _aw_install_reap_hook "$TMUX_SESS"
             if [[ -n "${TMUX:-}" ]]; then
                 tmux switch-client -t "=$TMUX_SESS"
             else

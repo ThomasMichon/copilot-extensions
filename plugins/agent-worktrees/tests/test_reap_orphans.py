@@ -35,20 +35,32 @@ def _rec(wt_id, *, status="active", path="/tmp/wt", kind="session"):
     )
 
 
-def _run(sessions_map, records, *, dry_run=False, only_id=None):
-    """Invoke the reaper with patched mux + tracking, capturing killed ids."""
+def _run(sessions_map, records, *, dry_run=False, only_id=None,
+         activity=None, now=None):
+    """Invoke the reaper with patched mux + tracking, capturing killed ids.
+
+    ``activity`` maps session_name -> last-activity epoch (defaults every session
+    to epoch 0, i.e. long-idle, so predicate tests reap as before); pass recent
+    timestamps to exercise the #713 busy-spare gate.
+    """
     killed: list[str] = []
 
     def _kill(wt_id):
         killed.append(wt_id)
         return True
 
+    act = ({name: 0 for name in (sessions_map or {})}
+           if activity is None else activity)
+
     with patch("agent_worktrees.sessions._list_mux_sessions",
                return_value=sessions_map), \
+         patch("agent_worktrees.sessions._mux_session_activity",
+               return_value=act), \
          patch("agent_worktrees.sessions.kill_tmux_session", side_effect=_kill), \
          patch("agent_worktrees.tracking.list_records", return_value=records), \
          patch("agent_worktrees.config.tracking_dir", return_value=Path("/tmp")):
-        result = cli.reap_orphan_mux_sessions(dry_run=dry_run, only_id=only_id)
+        result = cli.reap_orphan_mux_sessions(
+            dry_run=dry_run, only_id=only_id, now=now)
     return result, killed
 
 
@@ -159,3 +171,47 @@ class TestReapOrphans:
         result, killed = _run({"wt-fin": 0}, [rec], only_id="nope")
         assert killed == []
         assert result["reaped"] == [] and result["skipped"] == []
+
+    # ── #713 idle gate: never reap a busy (recently-active) session ───────────
+
+    def test_busy_finalized_is_spared(self, tmp_path):
+        """A finalized session with fresh pane activity (Copilot still working)
+        is spared, even unattended -- closing a tab preserves a live session."""
+        now = 1_000_000.0
+        rec = _rec("fin", status="finalized", path=str(tmp_path))
+        result, killed = _run(
+            {"wt-fin": 0}, [rec], activity={"wt-fin": now - 60}, now=now)
+        assert killed == []
+        assert {"id": "fin", "reason": "busy"} in result["skipped"]
+
+    def test_idle_finalized_past_grace_is_reaped(self, tmp_path):
+        """Once quiet past the 6h grace window, the finalized orphan is reaped."""
+        now = 1_000_000.0
+        rec = _rec("fin", status="finalized", path=str(tmp_path))
+        result, killed = _run(
+            {"wt-fin": 0}, [rec],
+            activity={"wt-fin": now - 7 * 3600}, now=now)
+        assert killed == ["fin"]
+        assert result["reaped"] == ["fin"]
+
+    def test_only_id_spares_busy(self, tmp_path):
+        now = 1_000_000.0
+        rec = _rec("fin", status="finalized", path=str(tmp_path))
+        result, killed = _run(
+            {"wt-fin": 0}, [rec], only_id="fin",
+            activity={"wt-fin": now - 30}, now=now)
+        assert killed == []
+        assert {"id": "fin", "reason": "busy"} in result["skipped"]
+
+    def test_activity_unknown_is_spared(self):
+        """No activity signal at all -> spare (never risk killing a busy one)."""
+        result, killed = _run({"wt-ghost": 0}, [], activity={})
+        assert killed == []
+        assert {"id": "ghost", "reason": "activity-unknown"} in result["skipped"]
+
+    def test_activity_falls_back_to_tracking_timestamp(self, tmp_path):
+        """When the mux reports no activity for the session, the tracking
+        record's last-resumed time is used (here: long ago -> reaped)."""
+        rec = _rec("fin", status="finalized", path=str(tmp_path))  # 2026-06-01
+        result, killed = _run({"wt-fin": 0}, [rec], activity={})
+        assert killed == ["fin"]

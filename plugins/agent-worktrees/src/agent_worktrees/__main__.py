@@ -3959,41 +3959,65 @@ def reap_one(
                     "state": info.state.value, "warnings": warnings})
 
 
+def _iso_epoch(ts: str | None) -> float | None:
+    """Parse an ISO-8601 tracking timestamp to epoch seconds, or ``None``."""
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts).timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
+# #713: a finalized/idle session is only reaped once it has been quiet this
+# long, so a session whose Copilot is still working (mid-turn, background task,
+# scheduled prompt -> fresh pane activity) is never killed out from under it.
+# The operator sets the window; the future inactivity monitor reuses it.
+REAP_IDLE_GRACE_SECS = 6 * 3600
+
+
 def reap_orphan_mux_sessions(*, dry_run: bool = False,
-                             only_id: str | None = None) -> dict:
-    """Reap leaked tmux/psmux sessions whose worktree is gone or done.
+                             only_id: str | None = None,
+                             idle_grace_secs: float = REAP_IDLE_GRACE_SECS,
+                             now: float | None = None) -> dict:
+    """Reap leaked tmux/psmux sessions whose worktree is gone or done **and idle**.
 
     Enumerates live ``wt-<id>`` multiplexer sessions and kills those that no
     longer have an owning, resumable worktree -- the *finalized-still-present*
-    orphans plus untracked / path-missing leaks (issue #713). Without this, a
-    finalized worktree's tmux session + idle Copilot process linger forever and
-    the picker presents the dead session as resumable.
+    orphans plus untracked / path-missing leaks (issue #713) -- **but only once
+    the session has been quiet for ``idle_grace_secs``**. Without the idle gate a
+    finalized-from-inside session whose Copilot is still working (you finalized
+    the PR but the agent is mid-task, or a scheduled prompt is pending) would be
+    killed the moment it's unattended; closing a tab is meant to *preserve* a
+    live session, not end it. The sweep is the safety net; the proactive
+    inactivity monitor reuses this same predicate on a timer.
 
-    ``only_id`` restricts the sweep to a **single** worktree's session (the
-    targeted tab-close/detach prevention path, #713): the exact same
-    spare-active/attached/system predicate is applied, so a targeted reap can
-    only kill what the full sweep would kill -- it never touches an attached or
-    active session even when asked by id.
+    ``only_id`` restricts the sweep to a **single** worktree's session; the exact
+    same spare-attached/system/active/**busy** predicate is applied.
 
     **Conservative by design** -- a session is never reaped when:
 
     - a terminal client is **attached** (a human is using it),
-    - its worktree record is ``kind: system`` (daemon-owned; torn down by its
-      owning service), or
-    - its worktree is still **active** (tracked, dir present, just unattended) --
-      it may be doing background work, so the sweep leaves it alone.
+    - its worktree record is ``kind: system`` (daemon-owned), or
+    - its worktree is still **active** (tracked, dir present), or
+    - it has been **active within the grace window** (fresh pane activity => the
+      Copilot inside is busy), or the activity signal is **unknown** (never risk
+      killing a session we can't prove is idle).
 
     Returns a JSON-ready dict::
 
         {"available": bool,                  # False when no mux is installed
          "reaped": ["<id>", ...],
-         "skipped": [{"id": "<id>", "reason": "attached|system|active"}, ...],
+         "skipped": [{"id": "<id>",
+                      "reason": "attached|system|active|busy|activity-unknown"}, ...],
          "errors":  [{"id": "<id>", "reason": "..."}, ...]}
     """
     all_sessions = sessions._list_mux_sessions()
     if all_sessions is None:
         return {"available": False, "reaped": [], "skipped": [], "errors": []}
 
+    now = time.time() if now is None else now
+    activity_by_name = sessions._mux_session_activity()
     tracking_path = cfg.tracking_dir()
     by_id: dict[str, tracking.WorktreeRecord] = {
         rec.worktree_id: rec for rec in tracking.list_records(tracking_path)
@@ -4024,6 +4048,18 @@ def reap_orphan_mux_sessions(*, dry_run: bool = False,
         else:
             skipped.append({"id": wt_id, "reason": "active"})
             continue
+        # Idle gate (#713): never reap a session that is still busy. Prefer the
+        # mux's real pane-activity clock; fall back to the tracking record's
+        # last-resumed/started time; if nothing is knowable, spare it.
+        last_active = activity_by_name.get(name)
+        if last_active is None and rec is not None:
+            last_active = _iso_epoch(rec.last_resumed_at) or _iso_epoch(rec.started_at)
+        if last_active is None:
+            skipped.append({"id": wt_id, "reason": "activity-unknown"})
+            continue
+        if now - last_active < idle_grace_secs:
+            skipped.append({"id": wt_id, "reason": "busy"})
+            continue
         if dry_run:
             reaped.append(wt_id)
             continue
@@ -4044,13 +4080,16 @@ def reap_orphan_mux_sessions(*, dry_run: bool = False,
 def cmd_reap_sessions(args: argparse.Namespace) -> int:
     """``reap-sessions`` -- sweep orphaned mux sessions (issue #713).
 
-    With ``--id`` it targets a single worktree (the launcher's tab-close/detach
-    prevention hook), applying the identical spare-active/attached/system
-    predicate as the full sweep.
+    With ``--id`` it targets a single worktree, applying the identical
+    spare-attached/system/active/busy predicate as the full sweep.
     """
     dry = getattr(args, "dry_run", False)
     only_id = getattr(args, "id", None)
-    payload = reap_orphan_mux_sessions(dry_run=dry, only_id=only_id)
+    grace_hours = getattr(args, "grace_hours", None)
+    kwargs = {"dry_run": dry, "only_id": only_id}
+    if grace_hours is not None:
+        kwargs["idle_grace_secs"] = float(grace_hours) * 3600
+    payload = reap_orphan_mux_sessions(**kwargs)
     if getattr(args, "json", False):
         _json_output(payload)
         return 0
@@ -7272,12 +7311,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "reap-sessions",
         help="Reap leaked tmux/psmux sessions whose worktree is finalized, "
-             "gone, or untracked (never touches attached or active sessions)")
+             "gone, or untracked AND has been idle past the grace window "
+             "(never touches attached, active, or busy sessions)")
     p.add_argument("--dry-run", action="store_true",
                    help="Report what would be reaped without killing anything")
     p.add_argument("--id", default=None,
-                   help="Target a single worktree id (the launcher's tab-close "
-                        "prevention path); same spare-active/attached predicate")
+                   help="Target a single worktree id; same spare-attached/"
+                        "active/busy predicate as the full sweep")
+    p.add_argument("--grace-hours", type=float, default=None,
+                   help="Idle window before a finalized/idle session is "
+                        "eligible (default 6h); a busy session is never reaped")
     p.add_argument("--json", action="store_true",
                    help="Emit a single JSON result object")
 
