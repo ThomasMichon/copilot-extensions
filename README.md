@@ -213,6 +213,13 @@ standalone — its bridge configs are per-agent files, preferably in-repo via
 `--config` for repo-scoped agents, or under `~/.agent-mcp/bridges/` for personal
 ones; not the control repo.)
 
+> **Building or auditing a harness?** Point an agent at the
+> [Control-Harness Runbook](docs/harness-runbook.md) — an opinionated,
+> phase-by-phase procedure for turning a repo into an effective agent harness
+> with these plugins. It works from a fresh folder ("make me a control repo like
+> this"), on an existing repo ("build out my harness"), or as an audit ("make
+> sure my repo follows best practices").
+
 ---
 
 ## Usage flow: a CodeSpace session end-to-end
@@ -300,6 +307,8 @@ Your source repos and their `.worktrees` content are never touched.
 
 | Document | What's inside |
 |----------|---------------|
+| [Control-Harness Runbook](docs/harness-runbook.md) | Opinionated, phase-by-phase procedure for building/extending/auditing an agent harness with these plugins |
+| [Plugin consolidation](docs/plans/plugin-consolidation.md) | Discussion: whether to collapse the eleven-plugin suite into fewer plugins, with decision criteria |
 | [Architecture overview](docs/architecture.md) | How the plugins fit together: install topology, runtimes, ports, credential relay |
 | [Rollout plan](docs/plans/rollout-readiness.md) | Onboarding-readiness plan and fixes |
 | [Fresh dev box validation](docs/plans/fresh-devbox-validation.md) | Step-by-step validation on a clean machine |
