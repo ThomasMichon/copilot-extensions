@@ -206,6 +206,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Display name for the CodeSpace",
     )
     create_parser.add_argument(
+        "--devcontainer-path", dest="devcontainer_path", default=None,
+        help=(
+            "Devcontainer config to build from (e.g. "
+            ".devcontainer/devcontainer.json). Only needed when the repo has "
+            "multiple devcontainer configs; overrides codespaces.yaml. "
+            "Auto-resolved otherwise."
+        ),
+    )
+    create_parser.add_argument(
         "--no-wait", action="store_true",
         help="Don't wait for Available / run provisioning",
     )
@@ -1507,6 +1516,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
     info = create_codespace(
         args.repo, config, branch=args.branch,
         display_name=getattr(args, "display_name", None),
+        devcontainer_path=getattr(args, "devcontainer_path", None),
     )
     print(f"Created: {info.name}")
 

@@ -167,6 +167,7 @@ agent-codespaces config show
 | `location` | string | `EastUs` | Default Azure region |
 | `dotfiles_repo` | string | -- | Your **account-wide** dotfiles repo (the single repo GitHub clones into every CodeSpace; set at `github.com/settings/codespaces`). Records the choice so connect-time housekeeping finds it — GitHub has no API to read it. See "Declare your dotfiles repo" above. Not per-repo. |
 | `ssh_user` | string | `vscode` | SSH user on CodeSpaces |
+| `devcontainer_path` | string | `.devcontainer/devcontainer.json` | Fallback devcontainer config, used **only** when a repo exposes more than one discoverable `devcontainer.json` (otherwise `gh codespace create` prompts and hard-fails headless). Single-devcontainer repos are unaffected — the flag is passed only when there are multiple. Override per-repo (`repos.<repo>.devcontainer_path`) or per-create (`--devcontainer-path`). |
 | `workspace_folder` | string | -- | **Global** workspace root applied to every CodeSpace (e.g., `/workspaces/<your-repo>`). Used to `cd` before launching Copilot, preventing CWD race conditions during cold starts. When you adopt more than one CodeSpaces repo, prefer per-repo `repos.<repo>.workspace_repo`/`workspace_folder` instead (see `repos`). |
 | `acp_command` | string | -- | Explicit override for the remote agent command. If omitted, built automatically from the resolved workspace folder. |
 
@@ -281,6 +282,7 @@ repos:
 | `location` | string | from `defaults` | Azure region for this repo's CodeSpaces |
 | `workspace_repo` | string | -- | The **product repo** this CodeSpaces repo hosts. Records the directional "we consume CodeSpaces from here for repo X" link (mirrors agent-worktrees' *related repos*). The remote workspace folder derives from it as `/workspaces/<basename>`. |
 | `workspace_folder` | string | from `workspace_repo`, then `defaults` | Explicit per-repo workspace root override. Use when the checkout path isn't `/workspaces/<basename(workspace_repo)>`. |
+| `devcontainer_path` | string | from `defaults`, then canonical `.devcontainer/devcontainer.json` | Which devcontainer config `gh codespace create` builds from. Consulted **only** when the repo has multiple discoverable devcontainers (e.g. a local-Docker config alongside the CodeSpaces one); pins headless create to the right one. An agent can still override per-create with `agent-codespaces create --devcontainer-path`. |
 | `provision` | map | -- | Repo-specific provision hooks (see Provisioning). |
 
 #### Per-repo workspace folder (CodeSpaces repo ≠ checkout)
