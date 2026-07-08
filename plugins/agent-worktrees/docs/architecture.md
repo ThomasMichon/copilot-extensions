@@ -162,3 +162,37 @@ All three version sources must agree:
 | `.github/plugin/marketplace.json` | GitHub-hosted marketplace catalog |
 
 See [CONTRIBUTING.md](../../CONTRIBUTING.md) for versioning details.
+
+## Picker Pivot Registry (Cross-Plugin)
+
+The interactive Textual picker (`picker_tui/engine.py`) shows top-level
+**pivots** -- Worktrees, Maintenance, Profiles. Another plugin, installed in
+its **own separate venv**, can contribute an additional pivot without
+agent-worktrees importing its Python. Because each plugin installs standalone,
+setuptools entry-points do not cross venvs; a **filesystem manifest registry**
+does.
+
+```
+~/.agent-worktrees/pivots/<name>.json     # one manifest per contributed pivot
+    { "label": "Tasks", "after": "Worktrees",
+      "list": ["agent-dispatch", "inbox", "--machine", "{machine}"],
+      "entry":   { "id": "id", "title": "title",
+                   "worktree": "target_worktree", "badges": ["labels"] },
+      "actions": [ { "label": "Abandon", "run": ["agent-dispatch", "abandon",
+                     "{task_id}", "--permit"] }, ... ] }
+```
+
+- **Discovery** (`picker_tui/pivots.py`): the picker scans the directory at
+  startup (and on `r`-refresh), weaving each manifest into the built-in order by
+  its `after` hint. `AGENT_WORKTREES_PIVOTS_DIR` overrides the location (tests,
+  escape hatch). A missing dir or a malformed manifest is skipped -- never fatal.
+- **Data + actions** (`picker_tui/tasks.py`): the `list` command is run as a
+  **subprocess** (argv[0] resolved on `PATH`) on a background thread, cached per
+  machine, and expected to print a JSON array. `actions` argv templates are run
+  the same way. Placeholders (`{machine}`, `{worktree}`, `{id}`/`{task_id}`,
+  `{title}`, plus any entry field) are substituted at activation time. Data
+  flows **only** through the contributing plugin's CLI -- never a cross-venv
+  import -- so the seam stays generic for future pivots (Bridges, Containers, ...).
+- **Dispatch is kind-keyed, not index-keyed.** Built-in pivot logic switches on
+  the pivot *kind* (`worktrees`/`maintenance`/`profiles`/`registered`), so an
+  inserted pivot never renumbers the built-ins.

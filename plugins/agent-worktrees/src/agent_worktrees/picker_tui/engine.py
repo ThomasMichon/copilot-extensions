@@ -213,6 +213,12 @@ LIST_SPECS = [
     ("title", "title", 10, "l", 1),
 ]
 HTABS = ["Worktrees", "Maintenance", "Profiles"]
+#: The built-in pivots, in their canonical order. Registered pivots (contributed
+#: by other plugins via ``picker_tui.pivots``) are woven into this order at
+#: runtime by their ``after`` hint (see ``PickerScreen._load_pivots``). Built-in
+#: dispatch keys off the pivot *kind* (the lowercased label) rather than a magic
+#: index, so an inserted pivot never renumbers the built-ins.
+BUILTIN_PIVOTS = list(HTABS)
 
 
 def _poll_secs() -> float:
@@ -238,7 +244,10 @@ MAINT_GROUP_ORDER = ["DIRTY", "WIP", "ACTIVE", "ORPHAN", "CONVO", "UNUSED",
 # Per-tab button sets — Tab/Shift+Tab rotate within these when focused.
 # Worktrees has a single "New worktree…" entry that opens the options dialog
 # directly (aperture-labs #1346); the old separate "More options…" is gone.
-BUTTON_SETS = {0: ["N"], 1: ["K", "SY"], 2: ["PA", "PReset"]}
+# Per-pivot button sets, keyed by pivot *kind* (Tab/Shift+Tab rotate within
+# these when focused). Worktrees and Profiles are handled inline in
+# ``button_set`` (their sets are dynamic); registered pivots have none.
+BUTTON_SETS = {"maintenance": ["K", "SY"]}
 
 # ---- Profiles matrix model ----------------------------------------------------
 # Axes are config-bound from machines.yaml at runtime (see picker_tui.roster and
@@ -301,7 +310,17 @@ class PickerScreen(Widget):
 
     def __init__(self, source, live=False):
         super().__init__()
-        self.htab = 0                 # 0 Worktrees 1 Maint 2 Profiles
+        self.htab = 0                 # index into self.pivots (built-ins + registered)
+        # Cross-plugin pivot registry (Worktrees/Maintenance/Profiles + any
+        # pivot a sibling plugin contributed via a manifest). Built here so the
+        # tab bar and dispatch are index-agnostic; _load_pivots re-scans on 'r'.
+        self.pivots = []              # list of {"label","kind","pivot"} descriptors
+        self.htabs = list(BUILTIN_PIVOTS)   # display labels (rebuilt in _load_pivots)
+        self.registered_pivots = []   # RegisteredPivot list from the manifest scan
+        self.task_menu = None         # registered-pivot Enter action sub-menu
+        self.task_menu_idx = 0
+        self._pivot_runtimes = {}     # pivot name -> RegisteredPivotRuntime (lazy)
+        self._load_pivots()
         self.machine_idx = 0          # selected machine sub-pivot (Worktrees/Maint)
         self.sel = ("N", 0)           # (zone, index) -> default New Worktree
         self.top = 0                  # scroll offset into body vrows
@@ -349,6 +368,64 @@ class PickerScreen(Widget):
         self.src = source
         self.live = live
         self.loader = None            # async loader (live/multi-machine only)
+
+    # ---- pivot registry (built-ins + cross-plugin registered pivots) ----
+    def _load_pivots(self):
+        """(Re)scan the manifest registry and rebuild the ordered pivot list.
+
+        Defensive: any discovery failure degrades to the built-ins alone, so a
+        bad manifest can never keep the picker from opening. Clamps ``htab`` in
+        case a rescan shrank the list.
+        """
+        try:
+            from . import pivots as pivots_mod
+
+            registered = pivots_mod.discover_pivots()
+            descriptors = pivots_mod.order_pivots(BUILTIN_PIVOTS, registered)
+        except Exception:
+            registered, descriptors = [], [
+                {"label": b, "kind": b.lower(), "pivot": None} for b in BUILTIN_PIVOTS
+            ]
+        self.registered_pivots = registered
+        self.pivots = descriptors
+        self.htabs = [d["label"] for d in descriptors]
+        if self.htab >= len(self.pivots):
+            self.htab = 0
+
+    def _kind(self, idx=None):
+        """The current pivot's kind: 'worktrees' | 'maintenance' | 'profiles' |
+        'registered'. Built-in dispatch keys off this, never a magic index."""
+        i = self.htab if idx is None else idx
+        if 0 <= i < len(self.pivots):
+            return self.pivots[i]["kind"]
+        return "worktrees"
+
+    def _reg_pivot(self):
+        """The RegisteredPivot for the current pivot, or None for a built-in."""
+        if 0 <= self.htab < len(self.pivots):
+            return self.pivots[self.htab]["pivot"]
+        return None
+
+    def _pivot_machine(self):
+        """The machine name the registered pivot's ``list``/actions run against:
+        the selected machine sub-tab, or the local machine when 'All' is
+        selected (a registered pivot is inherently machine-scoped)."""
+        label, m, _e, _ok = self.machines[self.machine_idx]
+        if m is not None:
+            return m
+        loc = self.machines[self.local_index()] if self.machines else (None, None, None, None)
+        return loc[1]
+
+    def _pivot_runtime(self, reg):
+        """Lazily build (and cache) the background runtime for a registered
+        pivot -- it shells out to the pivot's ``list`` CLI off the render path."""
+        rt = self._pivot_runtimes.get(reg.name)
+        if rt is None:
+            from . import tasks
+
+            rt = tasks.RegisteredPivotRuntime(reg)
+            self._pivot_runtimes[reg.name] = rt
+        return rt
 
     def on_mount(self):
         self.setup()
@@ -402,7 +479,7 @@ class PickerScreen(Widget):
         """
         if POLL_SECS <= 0 or self.loader is None:
             return
-        if self.htab == 2 or self.progress is not None:
+        if self._kind() not in ("worktrees", "maintenance") or self.progress is not None:
             return
         now = time.monotonic()
         if now - self._last_poll < POLL_SECS:
@@ -482,6 +559,9 @@ class PickerScreen(Widget):
                     it["state"] = "done"
 
     def setup(self):
+        # Re-scan the pivot registry so a refresh ('r') picks up a newly
+        # installed (or removed) contributed pivot without a picker restart.
+        self._load_pivots()
         # Machine tabs gain a leading "All" entry that interleaves every machine.
         self.machines = [("All", None, None, True)] + self.src.machines()
         self.machine_idx = self.local_index()
@@ -578,15 +658,16 @@ class PickerScreen(Widget):
             self.data = self.src.load()
 
     def button_set(self):
-        if self.htab == 2:
+        kind = self._kind()
+        if kind == "profiles":
             return ["PA", "PReset"] if self.grid_dirty() else ["PA"]
-        if self.htab == 0:
+        if kind == "worktrees":
             # Toggle-hidden joins the button row only when there's something to
             # reveal (or it's already revealing), so it never clutters (#1422).
             if self.show_hidden or self._hidden_count() > 0:
                 return ["N", "TH"]
             return ["N"]
-        return BUTTON_SETS.get(self.htab, [])
+        return BUTTON_SETS.get(kind, [])
 
     def active_button(self):
         bset = self.button_set()
@@ -639,6 +720,51 @@ class PickerScreen(Widget):
     # ---- model helpers ----
     def is_all(self):
         return self.machines[self.machine_idx][1] is None
+
+    # ---- registered-pivot task data (read-only, background-loaded) ----
+    def _task_state(self):
+        """(state, rows, error) for the current registered pivot at the current
+        machine. ``state`` is idle|loading|ready|error. Triggers a background
+        fetch of the pivot's ``list`` CLI on first view of a machine."""
+        reg = self._reg_pivot()
+        if reg is None:
+            return ("idle", [], "")
+        machine = self._pivot_machine()
+        rt = self._pivot_runtime(reg)
+        rt.ensure(machine)
+        return rt.get(machine)
+
+    def _task_rows(self):
+        """The flat, selectable list of task entries (dicts) for the current
+        registered pivot -- the ('T', i) stops index into this."""
+        rows = self._task_state()[1]
+        return rows if isinstance(rows, list) else []
+
+    def _task_groups(self):
+        """Task rows grouped by the pivot's worktree field for display. Returns
+        ``[(group_label, [(row_index, entry), ...]), ...]`` in first-seen order."""
+        reg = self._reg_pivot()
+        rows = self._task_rows()
+        if reg is None:
+            return []
+        groups: dict[str, list] = {}
+        order: list[str] = []
+        for i, r in enumerate(rows):
+            wt = r.get(reg.worktree_field) if reg.worktree_field else None
+            key = wt or "· unpinned"
+            if key not in groups:
+                groups[key] = []
+                order.append(key)
+            groups[key].append((i, r))
+        return [(k, groups[k]) for k in order]
+
+    def _selected_task(self):
+        """The task entry under the ('T', i) cursor, or None."""
+        if self.sel[0] != "T":
+            return None
+        rows = self._task_rows()
+        i = self.sel[1]
+        return rows[i] if 0 <= i < len(rows) else None
 
     def cur_machine(self):
         label, m, e, ok = self.machines[self.machine_idx]
@@ -712,11 +838,11 @@ class PickerScreen(Widget):
         """Vertical Up/Down flow. ("V",0)=View nav, ("V",1)=update refresh icon
         (only when an update is staged), ("M",0)=machine picker,
         ("BTN",0)=button row, then the table/grid rows."""
-        if self.htab == 0:
+        if self._kind() == "worktrees":
             out = [*self._v_stops(), ("M", 0), ("BTN", 0)]
             for i in range(len(self.list_records())):
                 out.append(("L", i))
-        elif self.htab == 1:
+        elif self._kind() == "maintenance":
             out = [*self._v_stops(), ("M", 0), ("BTN", 0)]
             groups = self.maint_groups()
             if any(rows for _st, rows in groups):
@@ -727,6 +853,12 @@ class PickerScreen(Widget):
                 for _ in rows:
                     out.append(("C", li))
                     li += 1
+        elif self._kind() == "registered":
+            # Registered pivot: View nav + machine sub-nav, then one stop per
+            # task row (grouped rows are flattened in first-seen order).
+            out = [*self._v_stops(), ("M", 0)]
+            for i in range(len(self._task_rows())):
+                out.append(("T", i))
         else:
             out = [*self._v_stops()]
             for i in range(len(self.targets)):
@@ -748,20 +880,26 @@ class PickerScreen(Widget):
 
     def region_heads(self):
         """Tab/Shift+Tab jump targets — the entry point of each major region."""
-        if self.htab == 0:
+        if self._kind() == "worktrees":
             heads = [("V", 0), ("M", 0), ("BTN", 0)]
             if self.list_records():
                 heads.append(("L", 0))
-        elif self.htab == 1:
+        elif self._kind() == "maintenance":
             heads = [("V", 0), ("M", 0), ("BTN", 0)]
             if self.maint_records():
                 heads.append(("SA", 0))   # Tab into the selection/list region
+        elif self._kind() == "registered":
+            heads = [("V", 0), ("M", 0)]
+            if self._task_rows():
+                heads.append(("T", 0))
         else:
             heads = [("V", 0), self._pr_head(), ("BTN", 0)]
         return heads
 
     def default_sel(self):
-        d = {0: ("BTN", 0), 1: ("BTN", 0), 2: ("PR", 0)}[self.htab]
+        kind = self._kind()
+        d = {"worktrees": ("BTN", 0), "maintenance": ("BTN", 0),
+             "profiles": ("PR", 0), "registered": ("M", 0)}.get(kind, ("BTN", 0))
         # The Profiles default (``("PR", 0)``) is only valid when there is at
         # least one target row. With no targets (or no host columns) that stop
         # doesn't exist, so fall back to the first real stop instead of handing
@@ -1134,6 +1272,49 @@ class PickerScreen(Widget):
     def _checkbox(self, checked):
         return ("☑", "green") if checked else ("☐", "grey50")
 
+    # ---- Registered-pivot (Tasks) row rendering ----
+    def _task_status_row(self, reg, state, rows, err, width):
+        """The header line for a registered pivot: a count, a load spinner, or
+        the empty/error hint."""
+        machine = self._pivot_machine() or "this machine"
+        t = Text("  ")
+        if state == "loading":
+            t.append(f"{self.spin()} ", style=C_LOAD)
+            t.append(f"loading {reg.label.lower()} for {machine}…", style=C_LOAD)
+        elif state == "error":
+            t.append("✗ ", style="red")
+            t.append(f"{reg.label} unavailable: {err or 'command failed'}", style="grey70")
+        elif not rows:
+            t.append(reg.empty_hint, style=C_DIM)
+        else:
+            t.append("●", style=C_PULSE[self.pulse])
+            t.append(f" {len(rows)} on {machine}", style="grey78")
+        t.append(" " * max(0, width - t.cell_len))
+        return t
+
+    def _task_row(self, reg, rec, width, selected):
+        """One task entry: title, then dim badges (labels) + subtitle."""
+        title = str(rec.get(reg.title_field) or rec.get(reg.id_field) or "(untitled)")
+        t = Text("    ")
+        t.append(title, style="grey85" if not selected else "bold white")
+        badges: list[str] = []
+        for f in reg.badge_fields:
+            v = rec.get(f)
+            if isinstance(v, (list, tuple)):
+                badges.extend(str(x) for x in v)
+            elif v:
+                badges.append(str(v))
+        for b in badges:
+            t.append(f"  [{b}]", style=C_ENV.get(b, "cyan"))
+        if reg.subtitle_field:
+            sub = rec.get(reg.subtitle_field)
+            if sub:
+                t.append(f"  · {sub}", style=C_DIM)
+        t.append(" " * max(0, width - t.cell_len))
+        if selected:
+            t.stylize(C_SEL)
+        return t
+
     def _maint_selectall_row(self, width, focus):
         ids = self._maint_ids()
         all_on = bool(ids) and ids <= self.maint_sel
@@ -1202,7 +1383,7 @@ class PickerScreen(Widget):
 
         sel = self.sel
         btn_focus = sel == ("BTN", 0)
-        if self.htab == 0:
+        if self._kind() == "worktrees":
             add(self.tab_bar(width, sel == ("M", 0)))
             add(Text(""))  # breathing room above the buttons
             add(self.new_worktree_row(width, btn_focus, self.btn_idx),
@@ -1227,7 +1408,7 @@ class PickerScreen(Widget):
                         # Revealed bridge/system worktree -> dim it (#1422).
                         vr.text.stylize("grey42")
                     li += 1
-        elif self.htab == 1:
+        elif self._kind() == "maintenance":
             add(self.tab_bar(width, sel == ("M", 0)))
             groups = self.maint_groups()
             recs = self.maint_records()
@@ -1259,6 +1440,24 @@ class PickerScreen(Widget):
                                         checked, self.pulse),
                         stop=("C", li), data=rec)
                     li += 1
+        elif self._kind() == "registered":
+            reg = self._reg_pivot()
+            add(self.tab_bar(width, sel == ("M", 0)))
+            add(Text(""))
+            state, rows, err = self._task_state()
+            add(self._task_status_row(reg, state, rows, err, width))
+            add(Text(""))
+            if state in ("ready", "idle") and rows:
+                li = 0
+                for grp, entries in self._task_groups():
+                    sec = Text(f"  ── {grp} ", style=C_SECTION)
+                    sec.append("─" * max(0, width - sec.cell_len), style=C_DIM)
+                    cur_section = (grp, len(vrows))
+                    add(sec, kind="section")
+                    for _idx, rec in entries:
+                        add(self._task_row(reg, rec, width, sel == ("T", li)),
+                            stop=("T", li), data=rec)
+                        li += 1
         else:
             self._build_profiles(add, width, sel)
         return vrows
@@ -1553,7 +1752,7 @@ class PickerScreen(Widget):
 
     def status_text(self, compact=False):
         t = Text()
-        if self.htab == 0:
+        if self._kind() == "worktrees":
             secs = dict((lbl, len(rows)) for lbl, rows in self.current_list()[1])
             a = secs.get("Active", 0)
             r = secs.get("Recent", 0)
@@ -1574,20 +1773,27 @@ class PickerScreen(Widget):
                 if u:
                     t.append(" · ", style=C_DIM)
                     t.append(f"{u} unowned", style="grey70")
-        elif self.htab == 1:
+        elif self._kind() == "maintenance":
             rows = self.cleanup_rows()
             mib = sum(_size_mb(w) for w in rows)
             if compact:
                 t.append(f"⌫ {len(rows)}", style="grey70")
             else:
                 t.append(f"{len(rows)} candidates · ~{mib} MiB", style="grey70")
+        elif self._kind() == "registered":
+            reg = self._reg_pivot()
+            state, rows, _err = self._task_state()
+            glyph = self.spin() if state == "loading" else "◆"
+            t.append(f"{glyph} ", style=C_LOAD if state == "loading" else "grey62")
+            label = reg.label if reg else "tasks"
+            t.append(f"{len(rows)}{'' if compact else ' ' + label.lower()}", style="grey78")
         else:
             n = self.profiles_present()
             t.append("⚙ ", style="grey62")
             t.append(f"{n}{' set' if not compact else ''}", style="grey78")
         # Live mode: surface how many machines are still loading / failed so the
         # All view's streaming fill-in is legible.
-        if self.live and self.loader is not None and self.htab == 0:
+        if self.live and self.loader is not None and self._kind() == "worktrees":
             # Only the loading-spinner count is surfaced. A machine-load (SSH)
             # failure is NOT a failed worktree -- the per-machine tab already
             # shows its ✗ -- so totalling them here only confused (aperture-labs
@@ -1642,7 +1848,7 @@ class PickerScreen(Widget):
         # body offset = title+htabs+header_border+stats = len(top)+2
         modal = (self.submenu or self.maint_menu or self.cleanup
                  or self.optmenu or self.prof_confirm or self.progress
-                 or self.quit_confirm)
+                 or self.quit_confirm or self.task_menu)
         if modal:
             # Gray out ALL background content behind the dialog.
             lines = [Text((ln if isinstance(ln, Text) else Text(str(ln))).plain,
@@ -1652,6 +1858,8 @@ class PickerScreen(Widget):
                 self._overlay_quit_confirm(lines, W, off, bh)
             elif self.submenu:
                 self._overlay_submenu(lines, W, off, bh)
+            elif self.task_menu:
+                self._overlay_task_menu(lines, W, off, bh)
             elif self.maint_menu:
                 self._overlay_maint_menu(lines, W, off, bh)
             elif self.cleanup:
@@ -1686,7 +1894,7 @@ class PickerScreen(Widget):
     def _stats_row(self, W):
         """Left: the region's sub-pivot hint (◀ machine ▶ etc). Right: the
         section counts (with a glyph-compact fallback when narrow)."""
-        hint = "Host  ◀▶" if self.htab == 2 else "Machine  Ctrl ◀▶"
+        hint = "Host  ◀▶" if self._kind() == "profiles" else "Machine  Ctrl ◀▶"
         use = self.status_text(False)
         if 1 + len(hint) + 3 + use.cell_len + 1 > W:
             use = self.status_text(True)
@@ -1785,7 +1993,7 @@ class PickerScreen(Widget):
         l1.append(" " * max(0, W - l1.cell_len))
         l2 = Text("  ")
         v_focus = self.sel[0] == "V"
-        for i, label in enumerate(HTABS):
+        for i, label in enumerate(self.htabs):
             if i:
                 l2.append("     ")
             if i == self.htab:
@@ -1808,7 +2016,7 @@ class PickerScreen(Widget):
             if self.sel == ("V", 1):
                 return ("Enter: apply staged update + restart the picker"
                         " · ↑↓ move · Tab region")
-            return (f"◀▶ switch view (on {HTABS[self.htab]}) · Enter: focus body"
+            return (f"◀▶ switch view (on {self.htabs[self.htab]}) · Enter: focus body"
                     f" · Tab region · [ ] view")
         if zone == "M":
             m, e, _ = self.cur_machine()
@@ -1993,6 +2201,34 @@ class PickerScreen(Widget):
             panel.append(self._prow(mark + label, pw, selected=(i == idx)))
         panel.append(self._prow("", pw))
         desc = ACTION_DESC.get(acts[idx], "")
+        panel.append(self._prow(" " + desc, pw, style="grey62"))
+        panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
+        self._blit_panel(lines, W, panel, top_off, body_h)
+
+    def _overlay_task_menu(self, lines, W, top_off, body_h):
+        menu = self.task_menu
+        reg = menu["reg"]
+        rec = menu["rec"]
+        acts = menu["actions"]
+        idx = self.task_menu_idx
+        pw = min(W - 8, 72)
+        title = f" {rec.get(reg.title_field) or rec.get(reg.id_field) or ''}"
+        sub_bits = []
+        if reg.worktree_field and rec.get(reg.worktree_field):
+            sub_bits.append(str(rec.get(reg.worktree_field)))
+        if reg.subtitle_field and rec.get(reg.subtitle_field):
+            sub_bits.append(str(rec.get(reg.subtitle_field)))
+        header = f"─ {reg.label} "
+        panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮", style=C_BAND)]
+        panel.append(self._prow(title, pw, style="bold white"))
+        if sub_bits:
+            panel.append(self._prow(" " + " · ".join(sub_bits), pw, style=C_DIM))
+        panel.append(self._prow("", pw))
+        for i, a in enumerate(acts):
+            mark = " ▸ " if i == idx else "   "
+            panel.append(self._prow(mark + a.label, pw, selected=(i == idx)))
+        panel.append(self._prow("", pw))
+        desc = acts[idx].description if acts else ""
         panel.append(self._prow(" " + desc, pw, style="grey62"))
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)
@@ -2253,6 +2489,8 @@ class PickerScreen(Widget):
             return self._key_prof_confirm(key)
         if self.submenu:
             return self._key_submenu(key)
+        if self.task_menu:
+            return self._key_task_menu(key)
         if self.maint_menu:
             return self._key_maint_menu(key)
         if self.cleanup:
@@ -2326,6 +2564,8 @@ class PickerScreen(Widget):
                 self._toggle_group(self.sel[1])
             elif zone == "PR":
                 self._toggle_cell()
+            elif zone == "T":
+                self._open_task_menu()
             elif zone == "BTN":
                 self._activate()
         elif key == "r":
@@ -2366,7 +2606,7 @@ class PickerScreen(Widget):
 
     def _switch_pivot(self, d):
         was_v = self.sel[0] == "V"
-        self.htab = (self.htab + d) % 3
+        self.htab = (self.htab + d) % len(self.pivots)
         self.btn_idx = 0
         self.top = 0
         # Stay in the View nav if that's where focus was; otherwise land on the
@@ -2654,7 +2894,7 @@ class PickerScreen(Widget):
                 # venv, so the launcher does it (action=refresh). #1430.
                 self._decide({"action": "refresh"})
                 return
-            self.sel = ("M", 0) if self.htab in (0, 1) else ("PR", 0)
+            self.sel = ("PR", 0) if self._kind() == "profiles" else ("M", 0)
         elif zone == "M":
             self.sel = ("BTN", 0)
         elif zone == "PR":
@@ -2693,6 +2933,9 @@ class PickerScreen(Widget):
             self._toggle_maint_all()
         elif zone == "GH":
             self._toggle_group(self.sel[1])
+        elif zone == "T":
+            # Registered pivot: Enter opens the task action sub-menu.
+            self._open_task_menu()
 
     def _local_model_hosts(self):
         """Machines that can host a local model (the agent runs on their GPU).
@@ -2746,6 +2989,64 @@ class PickerScreen(Widget):
         acts.append("Restart")
         self.submenu = {"rec": rec, "actions": acts, "no_mux": False}
         self.submenu_idx = 0
+
+    # ---- registered-pivot (Tasks) action sub-menu ----
+    def _open_task_menu(self):
+        """Open the Enter action sub-menu for the focused task, built from the
+        registered pivot's declared ``actions``."""
+        reg = self._reg_pivot()
+        rec = self._selected_task()
+        if reg is None or not rec or not reg.actions:
+            if reg is not None and not reg.actions:
+                self.debug = f"{reg.label}: no actions declared"
+            return
+        self.task_menu = {"rec": rec, "actions": list(reg.actions), "reg": reg}
+        self.task_menu_idx = 0
+
+    def _task_action_ctx(self, reg, rec):
+        """Placeholder context for an action's argv template: the entry's own
+        fields plus picker context ({machine}, {worktree}, {id}, {title})."""
+        ctx = {k: v for k, v in rec.items() if isinstance(k, str)}
+        ctx.setdefault("id", rec.get(reg.id_field))
+        ctx["task_id"] = rec.get(reg.id_field)
+        ctx["title"] = rec.get(reg.title_field)
+        wt = rec.get(reg.worktree_field) if reg.worktree_field else None
+        ctx["worktree"] = wt or ""
+        ctx["machine"] = self._pivot_machine() or ""
+        return ctx
+
+    def _key_task_menu(self, key):
+        menu = self.task_menu
+        acts = menu["actions"]
+        if key == "down":
+            self.task_menu_idx = (self.task_menu_idx + 1) % len(acts)
+        elif key == "up":
+            self.task_menu_idx = (self.task_menu_idx - 1) % len(acts)
+        elif key == "enter":
+            action = acts[self.task_menu_idx]
+            reg = menu["reg"]
+            rec = menu["rec"]
+            self.task_menu = None
+            self._run_task_action(reg, action, rec)
+        elif key in ("escape", "q", "tab"):
+            self.task_menu = None
+
+    def _run_task_action(self, reg, action, rec):
+        """Execute one task action via the pivot runtime, then invalidate the
+        cached list so the row reflects the new state on the next fetch."""
+        ctx = self._task_action_ctx(reg, rec)
+        rt = self._pivot_runtime(reg)
+        ok, msg = rt.run_action(action, ctx)
+        rt.invalidate()
+        # The focused row may vanish after the action; re-anchor selection.
+        if self.sel not in self.stops():
+            self.sel = self.default_sel()
+        short = (msg or "").splitlines()[0][:80] if msg else ""
+        title = rec.get(reg.title_field) or rec.get(reg.id_field) or "task"
+        if ok:
+            self.debug = f"{action.label} · {title}" + (f" — {short}" if short else "")
+        else:
+            self.debug = f"{action.label} failed · {short or 'see command output'}"
 
     def _scope_label(self):
         return "All machines" if self.is_all() else \
