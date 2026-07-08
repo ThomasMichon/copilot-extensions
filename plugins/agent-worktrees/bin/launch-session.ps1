@@ -392,6 +392,23 @@ if ($plan.action -eq 'remote') {
     exit $LASTEXITCODE
 }
 
+# ── Picker refresh: apply the staged update, then relaunch (#1430) ───────
+# The picker's refresh icon exits with action=refresh. The picker runs from
+# the runtime venv the update replaces, so it can't apply in place -- apply
+# here (venv now free), then re-exec the (now-updated) launcher to reopen the
+# picker on the new version.
+if ($plan.action -eq 'refresh') {
+    Write-SetupLog 'Picker refresh -- applying staged update and relaunching'
+    Invoke-UpdateApply -StageJob $script:StageJob -WithReconcile
+    $newLauncher = Join-Path $env:USERPROFILE '.agent-worktrees\bin\launch-session.ps1'
+    if (Test-Path $newLauncher) {
+        & pwsh.exe -NoProfile -File $newLauncher @CopilotArgs
+        exit $LASTEXITCODE
+    }
+    Write-SetupLog 'Relaunch launcher missing after refresh; exiting' 'WARN'
+    exit 1
+}
+
 if ($plan.action -ne 'exec') {
     Write-Error "Unknown action: $($plan.action)"
     exit 1

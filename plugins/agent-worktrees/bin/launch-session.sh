@@ -335,6 +335,21 @@ if [[ "$ACTION" == "remote" ]]; then
     exec ssh -t "$SSH_ALIAS" "$REMOTE_CMD"
 fi
 
+if [[ "$ACTION" == "refresh" ]]; then
+    # ── Picker refresh: apply the staged update, then relaunch (#1430) ───────
+    # The picker's refresh icon exits with action=refresh. It runs from the
+    # runtime venv the update replaces, so apply here (venv now free), then
+    # re-exec the (now-updated) launcher to reopen the picker on the new version.
+    setup_log INFO 'Picker refresh -- applying staged update and relaunching'
+    invoke_update_apply 1
+    _RELAUNCH="$HOME/.agent-worktrees/bin/launch-session.sh"
+    if [[ -x "$_RELAUNCH" ]]; then
+        exec "$_RELAUNCH" "$@"
+    fi
+    setup_log WARN 'Relaunch launcher missing after refresh; exiting'
+    exit 1
+fi
+
 if [[ "$ACTION" == "exec" ]]; then
     # ── Join the background update + apply, before the tmux handoff (#1430) ──
     # The Picker has closed, so it is now safe to swap the runtime venv. This

@@ -830,6 +830,47 @@ def test_screen_on_unmount_cancels_loader():
     assert cancelled["v"] is True
 
 
+def test_update_indicator_focus_glyph_and_refresh():
+    """The launcher-stage update state drives the version glyph, the focusable
+    refresh stop, and the refresh decision (#1430)."""
+    from agent_worktrees.picker_tui.engine import PickerScreen
+
+    src = _fixture_source()
+    s = PickerScreen(src, live=False)
+    s.setup()
+    s.htab = 0
+    s.frame = 0
+
+    # current: informational only -> no focus stop, checkmark glyph.
+    s.update_state = "current"
+    assert ("V", 1) not in s.stops()
+    assert not s._update_actionable()
+    assert "\u2713" in s._update_seg(False).plain          # ✓
+
+    # available: focusable refresh stop, refresh glyph.
+    s.update_state = "available"
+    assert ("V", 1) in s.stops()
+    assert s._update_actionable()
+    assert "\u21bb" in s._update_seg(False).plain          # ↻
+
+    # checking: a spinner segment, still not a focus target.
+    s.update_state = "checking"
+    assert ("V", 1) not in s.stops()
+    assert s._update_seg(False) is not None
+
+    # idle: no segment at all.
+    s.update_state = "idle"
+    assert s._update_seg(False) is None
+
+    # Enter on the refresh icon records an action=refresh decision.
+    captured = {}
+    s._decide = lambda d: captured.update(d)
+    s.update_state = "available"
+    s.sel = ("V", 1)
+    s._activate()
+    assert captured == {"action": "refresh"}
+
+
 def test_real_ops_default_on_and_opt_out(monkeypatch):
     """Real Maintenance ops are the default; =0 forces the mock walker (#1420)."""
     src = _fixture_source()

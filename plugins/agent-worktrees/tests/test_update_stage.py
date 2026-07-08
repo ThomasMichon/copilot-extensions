@@ -167,3 +167,37 @@ def test_stage_single_flight_second_call_skips(tmp_path: Path, monkeypatch):
     result = us.stage(status=status, lock=lock, home=home)
     assert result["skipped"] == "locked"
     assert called["n"] == 0  # never hit the network while locked
+
+
+# ---------------------------------------------------------------------------
+# indicator_state (picker-facing, #1430)
+# ---------------------------------------------------------------------------
+
+def test_indicator_idle_when_no_status(tmp_path: Path):
+    assert us.indicator_state(status=tmp_path / "none.json",
+                              lock=tmp_path / "none.lock") == "idle"
+
+
+def test_indicator_checking_on_live_lock(tmp_path: Path):
+    lock = tmp_path / "lock"
+    lock.write_text(json.dumps({"pid": os.getpid(), "started": us.time.time()}),
+                    encoding="utf-8")
+    assert us.indicator_state(status=tmp_path / "none.json", lock=lock) == "checking"
+
+
+def test_indicator_current_and_available(tmp_path: Path):
+    status = tmp_path / "status.json"
+    lock = tmp_path / "lock"  # absent
+    status.write_text(json.dumps({"stage_done": True, "plugin_changed": False}),
+                      encoding="utf-8")
+    assert us.indicator_state(status=status, lock=lock) == "current"
+    status.write_text(json.dumps({"stage_done": True, "plugin_changed": True}),
+                      encoding="utf-8")
+    assert us.indicator_state(status=status, lock=lock) == "available"
+
+
+def test_indicator_locked_skip_reads_as_checking(tmp_path: Path):
+    status = tmp_path / "status.json"
+    status.write_text(json.dumps({"stage_done": True, "skipped": "locked",
+                                  "plugin_changed": False}), encoding="utf-8")
+    assert us.indicator_state(status=status, lock=tmp_path / "none.lock") == "checking"
