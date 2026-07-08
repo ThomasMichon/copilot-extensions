@@ -151,14 +151,46 @@ def _push_via_session_sync(staging: Path, machine_label: str, *, verbose: bool) 
     return True, out
 
 
-def sync_codespace_sessions(name: str, *, timeout: float = 300.0, verbose: bool = False) -> dict:
+def sync_codespace_sessions(
+    name: str,
+    *,
+    timeout: float = 300.0,
+    verbose: bool = False,
+    skip_if_shutdown: bool = False,
+) -> dict:
     """Pull a CodeSpace's Copilot session-state and land it in the agent-logger
     hub under ``.codespaces/<name>``.
 
     Returns a result dict: ``{ok, session_count, detail, skipped?}``. Never
     raises for routine connect/pull failures -- callers (delete hook, finalize)
     treat a failed sync as non-fatal and decide whether to proceed.
+
+    ``skip_if_shutdown`` -- when True, if the CodeSpace is already ``Shutdown``,
+    return a no-op success **without booting it**. A Shutdown box's sessions were
+    already captured when it was stopped/finalized, so booting it just to re-pull
+    is wasteful and (on a busy account) trips the "too many codespaces running"
+    quota. The *preserving* callers (``finalize`` without ``--delete``, ``stop``)
+    pass this; the *destructive* callers (``delete``, ``finalize --delete``, the
+    final pre-prune pull) do NOT -- they must recover even a Shutdown box before
+    it is gone, booting if necessary.
     """
+    if skip_if_shutdown:
+        try:
+            from .lifecycle import _SHUTDOWN_STATE, list_codespaces
+
+            state = next(
+                (cs.state for cs in list_codespaces() if cs.name == name), None
+            )
+        except RuntimeError:
+            state = None  # can't list (auth/network) -> fall through, try normally
+        if state == _SHUTDOWN_STATE:
+            log.info(
+                "CodeSpace %s is Shutdown; skipping boot-to-recover "
+                "(sessions were captured when it was stopped/finalized)", name,
+            )
+            return {"ok": True, "skipped": True, "session_count": 0,
+                    "detail": "already Shutdown; skipped boot-to-recover"}
+
     from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
 
     lock = TargetLock(name, op="session-sync")

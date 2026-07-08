@@ -210,6 +210,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Seconds for the session pull (default: 300)",
     )
 
+    # --- prune ---
+    prune_parser = sub.add_parser(
+        "prune",
+        help="Delete prune-eligible (prunable) CodeSpaces to reclaim quota -- "
+             "the worktree-style reclaim pass (never touches active/recovered)",
+    )
+    prune_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would be pruned without deleting",
+    )
+    prune_parser.add_argument(
+        "--max", type=int, default=0, dest="max_count",
+        help="Prune at most N boxes, oldest-first (0 = all, default)",
+    )
+
     # --- create ---
     create_parser = sub.add_parser(
         "create", help="Create a CodeSpace and run post-create provisioning",
@@ -360,6 +375,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_stop(args)
         if args.command == "create":
             return _cmd_create(args)
+        if args.command == "prune":
+            return _cmd_prune(args)
         if args.command == "bridge":
             return _cmd_bridge(args)
         if args.command == "cleanup":
@@ -1563,16 +1580,32 @@ def _cmd_delete(args: argparse.Namespace) -> int:
 
 
 def _cmd_finalize(args: argparse.Namespace) -> int:
-    """Gracefully close out a CodeSpace: recover its Copilot sessions into the
-    agent-logger hub, then optionally delete it.
+    """Gracefully close out a CodeSpace (the worktree-style "done" transition).
 
-    Without --delete this is a pure recovery. With --delete, the CodeSpace is
-    removed only after a successful sync, unless --force overrides a failed one.
+    Default (no ``--delete``): **recover -> stop -> mark ``recovered``**. The box
+    is preserved (off the active-quota, boots on next connect) and reusable; the
+    ``recovered`` marker makes it a candidate the ``cleaning-codespaces`` skill can
+    later promote to ``prunable`` (once its PR merges) for ``prune`` to reclaim.
+    Recovery is idempotent -- an already-Shutdown box is NOT booted just to
+    re-pull (fixes the "too many codespaces running" quota error).
+
+    With ``--delete``: recover then delete (removed only after a successful sync,
+    unless ``--force`` overrides a failed one) -- the eager retire path.
     """
-    res = sync_codespace_sessions(args.name, timeout=args.timeout, verbose=args.verbose)
+    from .status import STATE_RECOVERED, set_status
+
+    # Preserving path may skip booting a Shutdown box; the destructive --delete
+    # path must recover first (booting if needed) before the box is gone.
+    res = sync_codespace_sessions(
+        args.name, timeout=args.timeout, verbose=args.verbose,
+        skip_if_shutdown=not args.delete,
+    )
     if res.get("ok"):
-        print(f"[OK] Recovered {res.get('session_count', 0)} session(s) from "
-              f"{args.name}: {res.get('detail', '')}")
+        if res.get("skipped"):
+            print(f"[OK] {args.name}: {res.get('detail', '')}")
+        else:
+            print(f"[OK] Recovered {res.get('session_count', 0)} session(s) from "
+                  f"{args.name}: {res.get('detail', '')}")
     else:
         print(f"[WARN] Session recovery for {args.name} failed: "
               f"{res.get('detail')}", file=sys.stderr)
@@ -1591,8 +1624,28 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
         delete_codespace(args.name, force=args.force)
         print(f"Deleted: {args.name}")
         _release_lease_quietly(args.name)
+        _clear_status_quietly(args.name)
+        return 0 if res.get("ok") else 1
 
-    return 0 if res.get("ok") else 1
+    # Default preserve path: stop (idempotent) then mark recovered.
+    try:
+        stopped = stop_codespace(args.name)
+        print(f"Stopped: {args.name} (preserved -- boots on next connect)"
+              if stopped else f"Already stopped: {args.name}")
+    except RuntimeError as exc:
+        print(f"[WARN] Could not stop {args.name} (continuing): {exc}",
+              file=sys.stderr)
+
+    if res.get("ok"):
+        set_status(args.name, STATE_RECOVERED, reason="finalized")
+        print(f"[OK] {args.name} marked 'recovered' -- preserved & reusable; "
+              f"eligible for prune once its PR merges (reuse clears the mark)")
+        _release_lease_quietly(args.name)
+        return 0
+
+    print(f"[WARN] Not marking {args.name} 'recovered' (recovery failed; the box "
+          f"is preserved, so retry `finalize {args.name}` later)", file=sys.stderr)
+    return 1
 
 
 def _cmd_stop(args: argparse.Namespace) -> int:
@@ -1604,14 +1657,23 @@ def _cmd_stop(args: argparse.Namespace) -> int:
     NOT block the stop -- stopping is non-destructive, so the sessions remain on
     the (preserved) CodeSpace and can be recovered on a later connect/finalize.
     Idempotent: a no-op if the CodeSpace is already Shutdown. Never deletes.
+
+    Unlike ``finalize``, ``stop`` does not set the ``recovered`` lifecycle marker
+    -- it is the plain pause primitive; ``finalize`` is the mark-eligible "done"
+    transition.
     """
     if not getattr(args, "no_sync", False):
         res = sync_codespace_sessions(
             args.name, timeout=args.timeout, verbose=args.verbose,
+            skip_if_shutdown=True,
         )
         if res.get("ok"):
-            print(f"[OK] Recovered {res.get('session_count', 0)} session(s) "
-                  f"before stop: {res.get('detail', '')}")
+            detail = res.get("detail", "")
+            if res.get("skipped"):
+                print(f"[OK] {args.name}: {detail}")
+            else:
+                print(f"[OK] Recovered {res.get('session_count', 0)} session(s) "
+                      f"before stop: {detail}")
         else:
             print(f"[WARN] Pre-stop session recovery failed (continuing -- the "
                   f"CodeSpace is preserved, so sessions can be recovered "
@@ -1634,6 +1696,88 @@ def _release_lease_quietly(codespace: str) -> None:
             print(f"[OK] Released lease on {codespace}")
     except Exception as exc:  # pragma: no cover - defensive
         log.debug("lease release for %s failed: %s", codespace, exc)
+
+
+def _clear_status_quietly(codespace: str) -> None:
+    """Drop any eligibility marker for a CodeSpace. Best-effort, never raises.
+
+    Called when a box is reused (borrow) or gone (delete/prune) so a stale
+    ``recovered``/``prunable`` marker never lingers.
+    """
+    try:
+        from .status import clear_status
+
+        clear_status(codespace)
+    except Exception as exc:  # pragma: no cover - defensive
+        log.debug("status clear for %s failed: %s", codespace, exc)
+
+
+def _cmd_prune(args: argparse.Namespace) -> int:
+    """Reclaim ``prunable`` CodeSpaces -- the worktree-style prune pass.
+
+    Deletes only boxes the ``cleaning-codespaces`` skill has promoted to
+    ``prunable`` (safe: PR merged + effort archived), oldest-first. A final
+    session recovery runs before each delete (booting if needed -- this IS the
+    destructive path). ``recovered`` and unmarked boxes are never touched.
+    """
+    from .status import STATE_PRUNABLE, clear_status, list_by_state
+
+    prunable = list_by_state(STATE_PRUNABLE)
+    if not prunable:
+        print("No prune-eligible (prunable) CodeSpaces. "
+              "(Finalize marks 'recovered'; the cleaning-codespaces skill "
+              "promotes to 'prunable' once a PR merges.)")
+        return 0
+
+    # Oldest-first: the box marked prunable longest ago is the safest to reclaim.
+    prunable.sort(key=lambda s: s.state_at)
+
+    try:
+        live_names: set[str] | None = {cs.name for cs in list_codespaces()}
+    except RuntimeError:
+        live_names = None  # can't list (auth/network) -> don't gate on existence
+
+    pruned = 0
+    for rec in prunable:
+        if args.max_count and pruned >= args.max_count:
+            break
+        name = rec.codespace
+
+        # A prunable marker for a box that no longer exists -> drop the marker.
+        # (``live_names is None`` means we couldn't list, so don't assume gone.)
+        if live_names is not None and name not in live_names:
+            print(f"[--] {name}: no longer exists; clearing stale marker")
+            if not args.dry_run:
+                clear_status(name)
+                _release_lease_quietly(name)
+            continue
+
+        if args.dry_run:
+            print(f"[dry-run] would prune {name} "
+                  f"(prunable; {rec.reason or 'no reason'})")
+            pruned += 1
+            continue
+
+        print(f"Pruning {name} ({rec.reason or 'prunable'})...")
+        # Destructive path: recover even a Shutdown box (boot if needed) first.
+        res = sync_codespace_sessions(name, skip_if_shutdown=False)
+        if not (res.get("ok") or res.get("skipped")):
+            print(f"[WARN] Final recovery failed for {name}; skipping delete "
+                  f"(diagnose): {res.get('detail')}", file=sys.stderr)
+            continue
+        try:
+            delete_codespace(name, force=False)
+        except RuntimeError as exc:
+            print(f"[WARN] Delete failed for {name}: {exc}", file=sys.stderr)
+            continue
+        clear_status(name)
+        _release_lease_quietly(name)
+        print(f"[OK] Pruned {name}")
+        pruned += 1
+
+    verb = "would prune" if args.dry_run else "Pruned"
+    print(f"{verb} {pruned} CodeSpace(s).")
+    return 0
 
 
 def _cmd_create(args: argparse.Namespace) -> int:
@@ -1747,10 +1891,15 @@ def _cmd_bridge(args: argparse.Namespace) -> int:
 
 
 def _cmd_borrow(args: argparse.Namespace) -> int:
-    """Advisory-lease a CodeSpace to an effort (check it out)."""
+    """Advisory-lease a CodeSpace to an effort (check it out).
+
+    Reusing a box clears any lingering ``recovered``/``prunable`` eligibility
+    marker (it is active work again, not a prune candidate).
+    """
     from .lease import borrow
 
     lease = borrow(args.effort, args.codespace, force=args.force)
+    _clear_status_quietly(args.codespace)
     print(lease.codespace)
     return 0
 
