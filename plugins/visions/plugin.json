@@ -1,7 +1,7 @@
 {
   "name": "visions",
   "description": "Visions system for Copilot CLI -- persistent, in-place-revised north-star documents that state what a system, service, tool, or product is ultimately meant to be (purpose + concepts + expected features + expected behaviors). A vision is intent-level (not a rigid specification); efforts are carved from the delta between a vision and reality. Ships the envisioning workflow skill and a visions-setup adoption skill.",
-  "version": "0.1.0-dev4",
+  "version": "0.1.0-dev5",
   "author": {
     "name": "Thomas Michon"
   },

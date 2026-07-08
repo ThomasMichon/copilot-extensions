@@ -60,7 +60,7 @@
     {
       "name": "visions",
       "description": "Visions system - persistent, in-place-revised north-star documents stating what a system/service/tool/product is ultimately meant to be (purpose + concepts + expected features + expected behaviors); intent-level, not a specification; efforts are carved from the vision-vs-reality delta. Ships the envisioning and visions-setup skills",
-      "version": "0.1.0-dev4",
+      "version": "0.1.0-dev5",
       "source": "plugins/visions"
     },
     {
