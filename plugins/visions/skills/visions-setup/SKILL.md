@@ -105,6 +105,20 @@ concrete leaf — so the shape is demonstrated, not just described.
 - At least one real vision exists and reads as **pure should-be** and
   **intent-level** (no gaps, no spec-level mechanics).
 
+### 6. Wire vision-first adherence (optional but recommended)
+
+Adopting the constructs makes visions *exist*; wiring **adherence** makes every
+change *reconcile* to them. Follow the
+[vision-adherence runbook](references/vision-adherence-runbook.md) to thread the
+"vision-first change" discipline down the repo's whole guidance chain
+(agent-instructions -> planning -> architecture -> implementation -> quality):
+install the always-on three-kinds reconcile principle (vision-closing /
+vision-extending / below-altitude, with a proportionality escape hatch), add the
+per-node flow-through, and provide a "carve an effort from the vision delta" entry
+point. The runbook works two ways — **bootstrap** a greenfield repo from just its
+`AGENTS.md`, or **audit/repair** an adopted one (report-and-propose). It stays
+**guide, not gate**; merge is the only gate, and enforcement teeth are optional.
+
 ## Migrating from scattered "vision"/"goal" prose
 
 If the repo already keeps north-star intent informally (a "Goals" section in a
