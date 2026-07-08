@@ -68,6 +68,7 @@ from . import installer as inst
 from . import services as svc
 from . import validate as val
 from .picker import ItemKind, MenuItem, pick
+from .update_stage import cmd_stage_update
 
 # ── Env var migration helpers ───────────────────────────────────────────
 # Phase 2 of copilot-worktrees extraction: APERTURE_* → WORKTREE_*
@@ -6715,27 +6716,27 @@ def cmd_related_dispatch(argv: list[str]) -> int:
 _BOOTSTRAP_SERVICES = ("agent-worktrees", "vault")
 
 
-def cmd_pre_launch(args: argparse.Namespace) -> int:
-    """Check bootstrap service staleness and return a JSON action plan.
+def plan_pre_launch() -> dict:
+    """Check bootstrap service staleness and return an action plan dict.
 
-    Returns JSON to stdout:
+    Returns:
       {"action": "continue"}  -- all bootstrap services are current
       {"action": "self-update", "updates": [...]}  -- services need updating
 
-    The shell wrapper interprets this JSON, runs the update commands,
-    and re-invokes pre-launch (max 1 retry).
+    Consumed both by ``cmd_pre_launch`` (which prints it as JSON for the shell
+    wrapper) and by the background ``stage-update`` worker (which folds the
+    ``updates`` into the staged pending-apply plan). The launcher executes the
+    ``argv`` vectors and re-invokes pre-launch (max 1 retry).
     """
     repo_dir = _find_repo_dir()
     if not repo_dir:
         # Can't determine staleness -- proceed anyway
-        print(json.dumps({"action": "continue", "reason": "no-repo"}))
-        return 0
+        return {"action": "continue", "reason": "no-repo"}
 
     try:
         config = cfg.load_config()
     except Exception:
-        print(json.dumps({"action": "continue", "reason": "no-config"}))
-        return 0
+        return {"action": "continue", "reason": "no-config"}
 
     env = _resolve_environment(config)
     all_services = svc.discover_services(
@@ -6786,18 +6787,20 @@ def cmd_pre_launch(args: argparse.Namespace) -> int:
                     # Check discovered bootstrap services too
                     for s in bootstrap.values():
                         _append_update_if_stale(s, repo_dir, updates)
-                    print(json.dumps({"action": "self-update", "updates": updates}))
-                    return 0
+                    return {"action": "self-update", "updates": updates}
 
     updates = []
     for s in bootstrap.values():
         _append_update_if_stale(s, repo_dir, updates)
 
     if updates:
-        print(json.dumps({"action": "self-update", "updates": updates}))
-    else:
-        print(json.dumps({"action": "continue"}))
+        return {"action": "self-update", "updates": updates}
+    return {"action": "continue"}
 
+
+def cmd_pre_launch(args: argparse.Namespace) -> int:
+    """Emit the pre-launch staleness plan as JSON (see ``plan_pre_launch``)."""
+    print(json.dumps(plan_pre_launch()))
     return 0
 
 
@@ -7389,6 +7392,14 @@ def build_parser() -> argparse.ArgumentParser:
     # pre-launch (two-pass self-update protocol)
     sub.add_parser("pre-launch", help="Check bootstrap staleness (JSON output)")
 
+    # stage-update (background marketplace download; #1430 stage-then-join)
+    sp = sub.add_parser(
+        "stage-update",
+        help="Background-stage the plugin marketplace update (JSON status)")
+    sp.add_argument("--status", default=None,
+                    help="Status file path (defaults to ~/.agent-worktrees/updater-status.json)")
+    sp.add_argument("--json", action="store_true", help="Echo the status dict to stdout")
+
     # reconcile-plugins (repo-configured plugin payload + runtime reconcile)
     sp = sub.add_parser(
         "reconcile-plugins",
@@ -7892,6 +7903,7 @@ COMMAND_MAP = {
     "deploy-instructions": cmd_deploy_instructions,
     "get": cmd_get,
     "pre-launch": cmd_pre_launch,
+    "stage-update": cmd_stage_update,
     "reconcile-plugins": cmd_reconcile_plugins,
     "dev": cmd_dev,
     "register-session": cmd_register_session,
