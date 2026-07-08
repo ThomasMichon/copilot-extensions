@@ -1,6 +1,6 @@
 # Rollout Readiness Plan — Team Onboarding for copilot-extensions
 
-**Goal:** make the three-plugin suite (agent-worktrees, agent-bridge,
+**Goal:** make the initial plugin set (agent-worktrees, agent-bridge,
 agent-codespaces) installable and usable by a teammate from a **fresh Windows
 dev box** plus **their own control-harness repo**, using only the published
 docs. End state: every module is installed **from the Copilot CLI marketplace**

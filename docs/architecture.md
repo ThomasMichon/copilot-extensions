@@ -1,12 +1,13 @@
 # Architecture Overview
 
-How the nine copilot-extensions plugins fit together — install topology,
-runtimes, ports, and the credential relay. **Six ship a runtime** (a `uv`-built
+How the twelve copilot-extensions plugins fit together — install topology,
+runtimes, ports, and the credential relay. **Seven ship a runtime** (a `uv`-built
 venv under `~/.agent-*` plus a `~/.local/bin` binstub, deployed by the plugin's
-own installer); **three are payload-only** — `efforts` (skills),
-`context-handoff` (a session extension), and `customizing-copilot` (skills) deploy
-entirely from the marketplace payload with no installer. For per-plugin
-internals, follow the links in each section.
+own installer); **five are payload-only** — `efforts` (skills), `visions`
+(skills), `context-handoff` (a session extension), `customizing-copilot`
+(skills), and `harness-copilot-extensions` (skills) deploy entirely from the
+marketplace payload with no installer. For per-plugin internals, follow the links
+in each section.
 
 ## The plugins
 
@@ -20,14 +21,17 @@ internals, follow the links in each section.
 | [agent-containers](../plugins/agent-containers/) | CLI + `container:` resolver | `~/.agent-containers/` | `~/.local/bin/agent-containers` | On-demand CLI; `container:` resolver runs inside the agent-bridge service process |
 | [agent-mcp](../plugins/agent-mcp/) | Standalone MCP bridge (stdio) | `~/.agent-mcp/` | `~/.local/bin/agent-mcp` | Spawned per-call by an agent's `mcp-servers` entry; no bridge integration |
 | [agent-logger](../plugins/agent-logger/) | Session-logging CLI + writer agent + sync task | `~/.agent-logger/` | `~/.local/bin/agent-logger` | On-demand CLI + a scheduled `session-sync` (Windows task / Linux systemd timer) |
+| [agent-dispatch](../plugins/agent-dispatch/) | Task-queue engine + per-host coordinator + CLI/MCP | `~/.agent-dispatch/` | `~/.local/bin/agent-dispatch` | On-demand CLI + optional always-on coordinator (Windows task / Linux systemd unit) |
 
 ### Payload-only plugins (no installer, no runtime)
 
 | Plugin | Kind | Deployed as | Lifecycle |
 |--------|------|-------------|-----------|
 | [efforts](../plugins/efforts/) | Planning skills (`planning-efforts`, `efforts-setup`) | Marketplace payload (skills + assets) | Loaded on demand when a skill matches; no runtime to install |
+| [visions](../plugins/visions/) | North-star skills (`envisioning`, `visions-setup`) | Marketplace payload (skills + assets) | Loaded on demand when a skill matches; no runtime to install |
 | [context-handoff](../plugins/context-handoff/) | Session **extension** + `/handoff` skill | Marketplace payload (`extensions/context-handoff/extension.mjs`) | Auto-discovered from the enabled plugin's `extensions/` dir; no copy to `~/.copilot/extensions/`, no deploy manifest |
-| [customizing-copilot](../plugins/customizing-copilot/) | Customization skills (`authoring-skills`, `defining-subagents`, `registering-mcp-servers`, `installing-plugins`) | Marketplace payload (skills) | Loaded on demand when a CLI-customization prompt matches; no runtime to install |
+| [customizing-copilot](../plugins/customizing-copilot/) | Customization skills (authoring skills, sub-agents, MCP servers, plugins, harnesses, review) | Marketplace payload (skills) | Loaded on demand when a CLI-customization prompt matches; no runtime to install |
+| [harness-copilot-extensions](../plugins/harness-copilot-extensions/) | Operator-harness skills (`contributing-to-copilot-extensions`, `diagnosing-copilot-extensions`) | Marketplace payload (skills) | Loaded on demand when a work-on-this-repo prompt matches; no runtime to install |
 
 Every runtime plugin is itself a **Python package** — its `src/` package plus
 any vendored `libs/` — installed by its own `scripts/install.*` / `scripts/init.*`

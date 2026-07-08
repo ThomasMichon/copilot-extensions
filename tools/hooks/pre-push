@@ -23,4 +23,7 @@ if [[ ${#PY[@]} -eq 0 ]]; then
 fi
 # No-op unless a private denylist is configured (env / ~/.agent-codespaces).
 "${PY[@]}" "$ROOT/tools/check-no-internal-identifiers.py"
-exec "${PY[@]}" "$ROOT/tools/check-install-contract.py"
+"${PY[@]}" "$ROOT/tools/check-install-contract.py"
+# Keep the docs honest: plugin counts/lists and runbook skill/plugin references.
+"${PY[@]}" "$ROOT/tools/check-docs-consistency.py"
+exec "${PY[@]}" "$ROOT/tools/check-runbook-references.py"

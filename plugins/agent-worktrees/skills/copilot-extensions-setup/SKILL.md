@@ -23,7 +23,11 @@ description: >
 
 # Copilot Extensions Setup
 
-Install and adopt flows for all **five** copilot-extensions plugins:
+Install and adopt flows for the **core runtime** copilot-extensions plugins
+(the bridge **mesh** plus standalone agent-mcp). The full suite is larger — see
+the [README](../../../../README.md) for the canonical plugin list; the other
+plugins (agent-logger, agent-dispatch, and the payload-only skill plugins) set up
+via their own skills:
 
 | Plugin | Type | What It Does |
 |--------|------|-------------|
@@ -33,7 +37,7 @@ Install and adopt flows for all **five** copilot-extensions plugins:
 | **agent-containers** | CLI + fleet | Local Docker dev-container fleet, lease broker, `container:` resolver |
 | **agent-mcp** | MCP bridge (standalone) | Wrap an upstream MCP server + inject host creds; invoked from an agent's `mcp-servers` config — **not** part of the bridge mesh |
 
-All five ship from the same `copilot-extensions` repo. Install order for the
+These ship from the same `copilot-extensions` repo. Install order for the
 **mesh**: agent-worktrees first (prerequisite), then agent-codespaces and
 agent-containers, then agent-bridge (the bridge installer imports
 agent-codespaces and agent-containers for their `codespace:` / `container:`

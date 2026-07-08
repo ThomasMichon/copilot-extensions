@@ -1,7 +1,7 @@
 # Plugin Consolidation — Proposal / Discussion
 
 **Status:** discussion. No change is proposed for immediate execution; this
-weighs whether (and how) to collapse the eleven-plugin marketplace into fewer
+weighs whether (and how) to collapse the multi-plugin marketplace into fewer
 plugins, and records the decision criteria so a future change can act on it.
 
 **Trigger:** authoring the [Control-Harness Runbook](../harness-runbook.md)
@@ -11,16 +11,18 @@ doc asks whether the *packaging* should follow that curation.
 
 ## The problem
 
-The suite is currently **eleven plugins**:
+The suite currently spans a dozen-plus plugins — see the canonical list in
+[the README](../../README.md) / `.github/plugin/marketplace.json`; roughly:
 
 `agent-worktrees`, `agent-bridge`, `agent-codespaces`, `agent-containers`,
-`agent-mcp`, `agent-logger`, `context-handoff`, `efforts`, `visions`,
-`customizing-copilot`, `agent-dispatch`.
+`agent-mcp`, `agent-logger`, `agent-dispatch`, `context-handoff`, `efforts`,
+`visions`, `customizing-copilot`, `harness-copilot-extensions`.
 
 Costs of the current granularity:
 
-- **Management overhead.** Eleven `enabledPlugins` entries, eleven version
-  lines in `marketplace.json`, eleven install/update lifecycles to reason about.
+- **Management overhead.** A dozen-plus `enabledPlugins` entries and version
+  lines in `marketplace.json`, and as many install/update lifecycles to reason
+  about.
 - **Onboarding friction.** A newcomer must understand the whole matrix before
   choosing a set, even though most harnesses want the same handful.
 - **Cross-plugin coupling is implicit.** The bridge imports codespaces +
@@ -30,9 +32,10 @@ Costs of the current granularity:
 Benefits the current granularity **does** buy (and that consolidation must not
 lose):
 
-- **Independent runtime lifecycles.** Six plugins ship a venv + binstub +
-  service/task; three are payload-only; two mix. Bundling plugins with different
-  runtime scopes into one plugin muddies the payload-vs-runtime contract.
+- **Independent runtime lifecycles.** The runtime plugins ship a venv + binstub +
+  service/task; the payload-only ones ship skills/an extension. Bundling plugins
+  with different runtime scopes into one plugin muddies the payload-vs-runtime
+  contract.
 - **Install only what you run.** A single-machine local harness never needs
   Codespaces, containers, or dispatch runtimes.
 - **Independent versioning.** A patch to `visions` (payload-only) should not

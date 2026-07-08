@@ -1,8 +1,10 @@
 # Copilot Extensions -- Development Guide
 
-Source of truth for the **agent-worktrees**, **agent-bridge**,
-**agent-codespaces**, **agent-containers**, and **agent-mcp** Copilot CLI
-plugins. All ship from this repo via the Copilot CLI marketplace.
+Source of truth for the copilot-extensions Copilot CLI plugins. The **canonical
+plugin roster** lives in [`.github/plugin/marketplace.json`](.github/plugin/marketplace.json)
+(mirrored, with descriptions, in the [README](README.md) and
+[`docs/architecture.md`](docs/architecture.md)). All ship from this repo via the
+Copilot CLI marketplace.
 
 ---
 
@@ -64,17 +66,15 @@ copilot-extensions/
 
 ---
 
-## Five Plugins, Five Lifecycles
+## Plugins and Lifecycles
 
-| Plugin | Type | Lifecycle | Runtime dir | Binstub | Tests |
-|--------|------|-----------|-------------|---------|-------|
-| agent-worktrees | Session plugin (hooks, skills) | Per-session via Copilot CLI | `~/.agent-worktrees/` | `agent-worktrees[.cmd]` | -- |
-| agent-bridge | Persistent HTTP service (9280 Win / 9281 WSL) | Per-machine daemon (systemd / scheduled task) | `~/.agent-bridge/` | `agent-bridge[.cmd]` | `plugins/agent-bridge/tests/` |
-| agent-codespaces | CLI + credential relay (9857) | On-demand CLI; relay runs in the bridge process | `~/.agent-codespaces/` | `agent-codespaces[.cmd]` | `plugins/agent-codespaces/tests/` |
-| agent-containers | CLI + `container:` resolver | On-demand CLI; resolver runs in the bridge process | `~/.agent-containers/` | `agent-containers[.cmd]` | `plugins/agent-containers/tests/` |
-| agent-mcp | Standalone MCP bridge (stdio) | Spawned per-call by an agent's `mcp-servers` entry | `~/.agent-mcp/` | `agent-mcp[.cmd]` | `plugins/agent-mcp/tests/` |
-
-All binstubs live in `~/.local/bin/`.
+The suite spans many plugins. The **canonical plugin list, the runtime-vs-
+payload split, and the per-plugin lifecycle tables** live in
+[`docs/architecture.md`](docs/architecture.md) (and the
+[README](README.md) plugin table) — derived from
+[`.github/plugin/marketplace.json`](.github/plugin/marketplace.json), which is
+the single source of truth. **Don't re-enumerate the plugin roster here** — that
+duplicate is exactly what drifts. All binstubs live in `~/.local/bin/`.
 
 > The agent-bridge installer also imports the `agent_codespaces` **and**
 > `agent_containers` packages into its venv (for the `codespace:` / `container:`
@@ -94,62 +94,30 @@ descriptive branch names.
 
 ### Version Bump -- Required Before Every Push
 
-**Every push to `main` must include a version bump.** The marketplace
-detects updates by comparing versions. If you don't bump, machines will
-report "already at latest" and silently skip the update.
+**Every push to `main` must include a version bump** for each plugin you
+changed. The marketplace detects updates by comparing versions; skip the bump
+and machines report "already at latest" and silently ignore your change.
 
-Bump these files **in the same commit**, immediately before pushing:
+For **each plugin `<p>` you touched**, bump these **in the same commit**:
 
-**agent-worktrees:**
+| File | Field | When |
+|------|-------|------|
+| `plugins/<p>/plugin.json` | `version` | always |
+| `plugins/<p>/pyproject.toml` | `version` under `[project]` | runtime plugins only (payload-only plugins have no `pyproject.toml`) |
+| `.github/plugin/marketplace.json` | the `version` on `<p>`'s entry in `plugins[]` (find it **by name**, not a hardcoded index) | always |
 
-| File | Field(s) |
-|------|----------|
-| `plugins/agent-worktrees/plugin.json` | `version` |
-| `plugins/agent-worktrees/pyproject.toml` | `version` under `[project]` |
-| `.github/plugin/marketplace.json` | `metadata.version` AND `plugins[0].version` |
+Two extra rules for the marketplace catalog:
 
-**agent-bridge:**
+- **agent-worktrees** additionally bumps `metadata.version` (the catalog's own
+  version).
+- **Adding a new plugin** appends a `plugins[]` entry **and** bumps
+  `metadata.version`.
 
-| File | Field(s) |
-|------|----------|
-| `plugins/agent-bridge/plugin.json` | `version` |
-| `plugins/agent-bridge/pyproject.toml` | `version` under `[project]` |
-| `.github/plugin/marketplace.json` | `plugins[1].version` |
-
-**agent-codespaces:**
-
-| File | Field(s) |
-|------|----------|
-| `plugins/agent-codespaces/plugin.json` | `version` |
-| `plugins/agent-codespaces/pyproject.toml` | `version` under `[project]` |
-| `.github/plugin/marketplace.json` | `plugins[2].version` |
-
-**agent-containers:**
-
-| File | Field(s) |
-|------|----------|
-| `plugins/agent-containers/plugin.json` | `version` |
-| `plugins/agent-containers/pyproject.toml` | `version` under `[project]` |
-| `.github/plugin/marketplace.json` | `plugins[3].version` |
-
-**agent-mcp:**
-
-| File | Field(s) |
-|------|----------|
-| `plugins/agent-mcp/plugin.json` | `version` |
-| `plugins/agent-mcp/pyproject.toml` | `version` under `[project]` |
-| `.github/plugin/marketplace.json` | `plugins[4].version` |
-
-**efforts:** (pure skill plugin -- no `pyproject.toml`/runtime)
-
-| File | Field(s) |
-|------|----------|
-| `plugins/efforts/plugin.json` | `version` |
-| `.github/plugin/marketplace.json` | `plugins[7].version` |
-
-Default bump: **patch with `-devN` suffix** (e.g., `1.3.1` -> `1.3.2-dev1`).
+Default bump: **patch with a `-devN` suffix** (e.g., `1.3.1` -> `1.3.2-dev1`).
 Do not bump minor or major unless the maintainer explicitly requests it.
-See `CONTRIBUTING.md` for the full versioning scheme.
+See `CONTRIBUTING.md` for the full versioning scheme. (The
+`tools/check-docs-consistency.py` guard keeps the plugin lists/counts in the
+docs honest; run it before pushing doc changes.)
 
 ### Test Before Push
 
