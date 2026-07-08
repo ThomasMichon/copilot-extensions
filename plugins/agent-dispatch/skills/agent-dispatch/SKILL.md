@@ -91,8 +91,8 @@ stick to its worktree while a portable task floats to anyone.
 ## Repo lanes -- tasks stay in their own repo
 
 Every task belongs to a **repo lane** -- the canonical remote of the *producing
-agent's harness repo*. **Repos stay in their own lanes:** a task made by an
-`aperture-labs` agent is for `aperture-labs` agents, and every subcommand is
+agent's harness repo*. **Repos stay in their own lanes:** a task made by a
+`webapp` agent is for `webapp` agents, and every subcommand is
 **scoped to the calling repo by default**. You never see or claim another repo's
 tasks. Like identity, the lane is **auto-resolved from your CWD** (via
 `agent-worktrees get repo-remote`, falling back to `git remote get-url origin`),
@@ -104,15 +104,15 @@ agent-dispatch sweep             # dedup corpus for THIS repo only
 agent-dispatch list --status queued
 ```
 
-- **Cross-repo *code* work stays in the producing lane.** If an `aperture-labs`
-  agent wants a change made in `copilot-extensions`, it files the task in the
-  **aperture-labs** lane (optionally tagging the code target with
-  `--target-repo copilot-extensions`). Another **aperture-labs** agent picks it
+- **Cross-repo *code* work stays in the producing lane.** If a `webapp`
+  agent wants a change made in a `shared-lib` repo, it files the task in the
+  **webapp** lane (optionally tagging the code target with
+  `--target-repo shared-lib`). Another **webapp** agent picks it
   up and does the cross-repo work via the **`working-cross-repo`** flow -- it
-  does **not** spawn a `copilot-extensions` harness. (We don't run agents out of
-  `copilot-extensions` as a harness at all.)
+  does **not** spawn a `shared-lib` harness. (Some repos are edited only as a
+  target, never run as a harness.)
 - **Targeting another lane is explicit.** `--repo <name|remote>` scopes a command
-  to a specific other lane (`--repo aperture-labs` or a full remote URL). There
+  to a specific other lane (`--repo webapp` or a full remote URL). There
   is **no** all-repos view -- the queue never exposes tasks globally.
 - **Hybrid keys.** The wire/DB stores a device-independent **canonical remote**
   (so one shared coordinator keys every machine the same); the CLI lets you
