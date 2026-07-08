@@ -351,6 +351,56 @@ def test_profiles_apply_progress_carries_restart_summary():
     asyncio.run(run())
 
 
+def test_profiles_active_row_label_highlighted():
+    """The focused target row label carries the same subtle 'on grey23' shading
+    the active host column header uses, so both cursor axes read -- not just the
+    cell inversion cursor (#1287)."""
+    src = _profiles_source()
+
+    def _label_shaded(vrow):
+        # The label occupies the first ~30 cells; look for an 'on grey23' span
+        # anchored there (distinct from the 'reverse' cell cursor and from a
+        # locked cell's later 'grey50 on grey23').
+        return any("on grey23" in str(sp.style) and sp.start <= 2
+                   for sp in vrow.text.spans)
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 2
+            await pilot.pause()
+            scr.sel = ("PR", 1)
+            scr.pcol = 0
+            rows = {getattr(v, "stop", None): v for v in scr.build_body(118)}
+            assert _label_shaded(rows[("PR", 1)])       # focused row shaded
+            assert not _label_shaded(rows[("PR", 0)])   # others are not
+
+    asyncio.run(run())
+
+
+def test_profiles_grid_cell_restored_on_tab():
+    """Tabbing out of the Profiles grid and back restores the last-focused
+    target row and host column, not the top-left default (#1288)."""
+    src = _profiles_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 2
+            await pilot.pause()
+            scr.sel = ("PR", 1)
+            scr.pcol = 1
+            scr.handle_key("shift+tab")     # grid -> View region
+            assert scr.sel[0] != "PR"
+            scr.handle_key("tab")           # back into the grid
+            assert scr.sel == ("PR", 1)     # target row restored
+            assert scr.pcol == 1            # host column persisted
+
+    asyncio.run(run())
+
+
 def test_run_tui_picker_redirects_stdout_when_captured(monkeypatch):
     """When stdout is captured (launcher) but stderr is a TTY, Textual must
     render to stderr while the real stdout stays reserved for the plan."""
@@ -924,6 +974,40 @@ def test_new_worktree_decision_exits():
             "anchor": False, "bare": False,
             "no_mux": False, "local_model": False,
         }
+
+    asyncio.run(run())
+
+
+def test_new_worktree_no_mux_option():
+    """The New-worktree options dialog exposes a No-Mux toggle; enabling it
+    carries no_mux=True into the launch decision -- on-demand no-mux for a
+    fresh worktree, not just Open/Resume (#1225)."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 0
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()                     # opens the options dialog
+            await pilot.pause()
+            assert scr.optmenu is not None
+            labels = [o["label"] for o in scr.optmenu["opts"]]
+            assert "No Mux" in labels
+            nm = labels.index("No Mux")
+            scr._key_scopedlg("up", om=True)    # Create button -> options
+            assert scr.optmenu["section"] == 0
+            while scr.optmenu["idx"] < nm:
+                scr._key_scopedlg("down", om=True)
+            scr._key_scopedlg("space", om=True)  # toggle No Mux on
+            assert scr.optmenu["opts"][nm]["on"] is True
+            scr._key_scopedlg("enter", om=True)  # options -> button row
+            scr._key_scopedlg("enter", om=True)  # confirm Create
+            await pilot.pause()
+        assert app.result["action"] == "new"
+        assert app.result["options"]["no_mux"] is True
 
     asyncio.run(run())
 

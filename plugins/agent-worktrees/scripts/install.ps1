@@ -1157,6 +1157,18 @@ function Build-TerminalFragment {
             $iconPath = "%USERPROFILE%\.agent-worktrees\aperture-science.ico"
         }
 
+        # WSL/Linux icon for bash-shell environments (local WSL + remote WSL /
+        # Linux SSH targets), so they read distinctly from Windows profiles
+        # (#479). Same project-then-default preference as $iconPath, ultimately
+        # falling back to the standard icon if no WSL variant is deployed.
+        $wslIconPath = "%USERPROFILE%\.${pName}\aperture-science-wsl.ico"
+        if (-not (Test-Path (Join-Path $env:USERPROFILE ".$pName\aperture-science-wsl.ico"))) {
+            $wslIconPath = "%USERPROFILE%\.agent-worktrees\aperture-science-wsl.ico"
+            if (-not (Test-Path (Join-Path $env:USERPROFILE ".agent-worktrees\aperture-science-wsl.ico"))) {
+                $wslIconPath = $iconPath
+            }
+        }
+
         # Local Windows profile (self·agent on a Windows host). Always selected
         # when present (the diagonal is locked), but still gated for symmetry.
         if (Test-ProfileSelected $pSel $localDisplay 'Win' 'agent') {
@@ -1176,10 +1188,6 @@ function Build-TerminalFragment {
         $wslDistro = if ($pWslInfo) { $pWslInfo['distro'] } else { $null }
         $wslState = if ($pWslInfo) { $pWslInfo['state'] } else { $null }
         if ($wslState -and $wslDistro -and (Test-ProfileSelected $pSel $localDisplay 'WSL' 'agent')) {
-            $wslIconPath = "%USERPROFILE%\.${pName}\aperture-science-wsl.ico"
-            if (-not (Test-Path (Join-Path $env:USERPROFILE ".$pName\aperture-science-wsl.ico"))) {
-                $wslIconPath = $iconPath
-            }
             # Distro is always known (required for WSL profile generation)
             $wslCmd = "wsl.exe -d $wslDistro -- bash -lc $pName"
             $wslLabel = "$pDisplay (WSL)"
@@ -1219,6 +1227,10 @@ function Build-TerminalFragment {
                             $remoteDisplay = $mEntry.display_name
                             $selEnv = Get-SelEnvLabel $sshEnv.name
 
+                            # WSL/Linux SSH targets get the WSL icon (#479);
+                            # remote Windows keeps the standard icon.
+                            $profileIcon = if ($sshEnv.name -eq 'wsl' -or $sshEnv.name -eq 'linux') { $wslIconPath } else { $iconPath }
+
                             # Plain SSH (shell) profile -- gated by a 'shell'
                             # selection; deduplicated across projects since
                             # multiple projects may reference the same machines.yaml.
@@ -1229,7 +1241,7 @@ function Build-TerminalFragment {
                                     guid              = "{$sshGuid}"
                                     name              = $profileName
                                     commandline       = "ssh $alias"
-                                    icon              = $iconPath
+                                    icon              = $profileIcon
                                     startingDirectory = "%USERPROFILE%"
                                     colorScheme       = 'Aperture Science'
                                     hidden            = $false
@@ -1250,7 +1262,7 @@ function Build-TerminalFragment {
                                     guid              = "{$launchGuid}"
                                     name              = $launchProfileName
                                     commandline       = $launchCmdline
-                                    icon              = $iconPath
+                                    icon              = $profileIcon
                                     startingDirectory = "%USERPROFILE%"
                                     colorScheme       = 'Aperture Science'
                                     hidden            = $false
