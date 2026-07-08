@@ -164,149 +164,152 @@ $env:PYTHONHOME = $null
 # and by the re-exec below to prevent infinite loops).
 
 $noUpdate = ($env:WORKTREE_NO_UPDATE -eq '1') -or ($env:APERTURE_NO_UPDATE -eq '1')
-if (-not $noUpdate) {
-    # Discover the active plugin directory (marketplace or _direct layout)
-    $pluginDir = $null
-    $pluginLayout = $null
-    $marketplaceDir = Join-Path $env:USERPROFILE '.copilot\installed-plugins\copilot-extensions\agent-worktrees'
-    $directPlugins = Join-Path $env:USERPROFILE '.copilot\installed-plugins\_direct'
+$script:UpdateApplied = $false
+$script:StageJob = $null
 
-    if (Test-Path $marketplaceDir) {
-        $pluginDir = $marketplaceDir
-        $pluginLayout = 'marketplace'
-    } elseif (Test-Path $directPlugins) {
-        # Scan _direct layout for agent-worktrees plugin
-        foreach ($dir in Get-ChildItem -Directory $directPlugins -ErrorAction SilentlyContinue) {
-            $manifest = Join-Path $dir.FullName 'plugin.json'
-            if (Test-Path $manifest) {
-                try {
-                    $pj = Get-Content $manifest -Raw | ConvertFrom-Json
-                    if ($pj.name -eq 'agent-worktrees') {
-                        $pluginDir = $dir.FullName
-                        $pluginLayout = 'direct'
-                        break
-                    }
-                } catch {}
-            }
-        }
+# ── Background update: stage-then-join (#1430) ───────────────────────────
+# The Picker runs from the installed runtime venv, so the slow marketplace
+# download is STAGED in the background while the Picker is open, then the
+# apply (installer -> runtime, pre-launch, reconcile) runs at the JOIN, after
+# the Picker closes and before the psmux/Copilot handoff. The launcher script
+# itself is applied via the installer but NOT re-exec'd mid-flight: a launcher
+# change takes effect on the NEXT launch (stage-next).
+
+function Start-UpdateStage {
+    # Spawn the background stage (marketplace download + fingerprint + plan).
+    # Runs headless in a job so it never writes to the Picker's console.
+    if ($noUpdate) { return $null }
+    try {
+        Write-SetupLog 'Starting background update stage (stage-update)'
+        return Start-Job -Name 'aw-stage-update' -ScriptBlock {
+            param($py)
+            & $py -m agent_worktrees stage-update *> $null
+        } -ArgumentList $VenvPython
+    } catch {
+        Write-SetupLog "Update stage spawn failed: $_ (will stage inline at join)" 'WARN'
+        return $null
     }
+}
 
-    if ($pluginDir) {
-        Write-SetupLog "Plugin auto-update: layout=$pluginLayout dir=$pluginDir"
+function Invoke-UpdateApply {
+    # Join the background stage and apply any pending update. Idempotent: runs
+    # its body at most once per launch.
+    param($StageJob, [switch]$WithReconcile)
+    if ($script:UpdateApplied) { return }
+    $script:UpdateApplied = $true
 
-        # Snapshot key plugin files to detect changes after update
-        $hashFiles = @('pyproject.toml', 'plugin.json',
-                       'bin\launch-session.ps1', 'bin\launch-session.sh',
-                       'scripts\install.ps1', 'scripts\install.sh')
-        $oldFingerprint = ''
-        foreach ($f in $hashFiles) {
-            $fp = Join-Path $pluginDir $f
-            if (Test-Path $fp) {
-                $oldFingerprint += (Get-FileHash $fp -Algorithm SHA256).Hash
+    if (-not $noUpdate) {
+        # Join the background stage (bounded wait).
+        if ($StageJob) {
+            try { Wait-Job $StageJob -Timeout 90 | Out-Null } catch {}
+            try { Receive-Job $StageJob -ErrorAction SilentlyContinue | Out-Null } catch {}
+            try { Remove-Job $StageJob -Force -ErrorAction SilentlyContinue } catch {}
+        }
+        $statusFile = Join-Path $env:USERPROFILE '.agent-worktrees\updater-status.json'
+        $status = $null
+        if (Test-Path $statusFile) {
+            try { $status = Get-Content $statusFile -Raw | ConvertFrom-Json } catch {}
+        }
+        # No usable staged result (stage failed, or a peer launch held the
+        # lock): run one inline so the marketplace pull still happens.
+        if (-not $status -or -not $status.stage_done -or $status.skipped -eq 'locked') {
+            Write-SetupLog 'No usable staged update result; staging inline'
+            & $VenvPython -m agent_worktrees stage-update *> $null
+            if (Test-Path $statusFile) {
+                try { $status = Get-Content $statusFile -Raw | ConvertFrom-Json } catch {}
             }
         }
 
-        # Try to update the plugin from the marketplace
-        if ($pluginLayout -eq 'marketplace') {
-            if (Get-Command copilot -ErrorAction SilentlyContinue) {
-                Write-SetupLog 'Running: copilot plugin update agent-worktrees@copilot-extensions'
-                $updateOutput = copilot plugin update agent-worktrees@copilot-extensions 2>&1
-                Write-SetupLog "Plugin update result: $updateOutput"
-            }
-        } else {
-            Write-SetupLog 'Direct-install layout — skipping marketplace update'
-        }
-
-        # Check if any tracked files changed
-        $newFingerprint = ''
-        foreach ($f in $hashFiles) {
-            $fp = Join-Path $pluginDir $f
-            if (Test-Path $fp) {
-                $newFingerprint += (Get-FileHash $fp -Algorithm SHA256).Hash
-            }
-        }
-
-        if ($newFingerprint -ne $oldFingerprint -and $newFingerprint -ne '') {
-            Write-SetupLog 'Plugin source changed — running full installer update'
-
-            $pluginInstaller = Join-Path $pluginDir 'scripts\install.ps1'
-            if (Test-Path $pluginInstaller) {
+        # (1) Marketplace installer, iff the download changed the payload.
+        #     NO re-exec: a launcher-script change applies on the next launch.
+        if ($status -and $status.plugin_changed) {
+            Write-SetupLog 'Staged update changed the plugin payload — running installer'
+            $pdir = $status.plugin_dir
+            $pluginInstaller = if ($pdir) { Join-Path $pdir 'scripts\install.ps1' } else { $null }
+            if ($pluginInstaller -and (Test-Path $pluginInstaller)) {
                 $installerArgs = @('update')
-                if ($env:WORKTREE_PROJECT) {
-                    $installerArgs += @('-ProjectName', $env:WORKTREE_PROJECT)
-                }
-
+                if ($env:WORKTREE_PROJECT) { $installerArgs += @('-ProjectName', $env:WORKTREE_PROJECT) }
                 & pwsh.exe -NoProfile -File $pluginInstaller @installerArgs 2>&1 |
                     ForEach-Object { Write-SetupLog "installer: $_" }
-
                 if ($LASTEXITCODE -eq 0) {
-                    Write-SetupLog 'Installer update succeeded — re-execing into new launch-session'
-
-                    # Re-exec into the newly deployed launch-session
-                    $newLauncher = Join-Path $env:USERPROFILE '.agent-worktrees\bin\launch-session.ps1'
-                    if (Test-Path $newLauncher) {
-                        $env:WORKTREE_NO_UPDATE = '1'
-                        $env:APERTURE_NO_UPDATE = '1'
-                        & pwsh.exe -NoProfile -File $newLauncher @CopilotArgs
-                        exit $LASTEXITCODE
-                    } else {
-                        Write-SetupLog 'Updated but deployed launcher missing; continuing current process' 'WARN'
-                    }
+                    Write-SetupLog 'Installer update succeeded (launcher change, if any, applies next launch)'
                 } else {
                     Write-SetupLog "Installer update failed (exit $LASTEXITCODE) — continuing with existing version" 'WARN'
                 }
             } else {
-                Write-SetupLog "Plugin installer not found at $pluginInstaller — skipping" 'WARN'
+                Write-SetupLog "Plugin installer not found ($pluginInstaller) — skipping" 'WARN'
             }
-        } else {
-            Write-SetupLog 'Plugin source unchanged — no update needed'
         }
-    }
-}
 
-# ── Pre-launch self-update (two-pass) ────────────────────────────────────
-# Checks bootstrap service staleness and runs updates if needed.
-# Mirrors the equivalent block in launch-session.sh.
-
-if (-not $noUpdate) {
-    Write-SetupLog 'Running pre-launch staleness check'
-    $preJson = & $VenvPython -m agent_worktrees pre-launch 2>$null
-    if ($LASTEXITCODE -eq 0 -and $preJson) {
-        $prePlan = ($preJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
-        if (-not $prePlan) {
-            Write-SetupLog 'pre-launch returned invalid JSON — proceeding' 'WARN'
-        } elseif ($prePlan.action -eq 'self-update') {
-            Write-SetupLog 'Self-update required — running update commands'
-            foreach ($update in $prePlan.updates) {
-                Write-SetupLog "Updating $($update.service): $($update.command)"
-                $argv = @($update.argv)
-                if ($argv.Count -gt 0) {
-                    $exe = $argv[0]
-                    $rest = if ($argv.Count -gt 1) { $argv[1..($argv.Count - 1)] } else { @() }
-                    & $exe @rest
-                    if ($LASTEXITCODE -ne 0) {
-                        Write-SetupLog "Update failed for $($update.service) (exit $LASTEXITCODE)" 'WARN'
-                    } else {
-                        Write-SetupLog "Updated $($update.service) successfully"
+        # (2) Pre-launch self-update (bootstrap-service staleness; two-pass).
+        Write-SetupLog 'Running pre-launch staleness check'
+        $preJson = & $VenvPython -m agent_worktrees pre-launch 2>$null
+        if ($LASTEXITCODE -eq 0 -and $preJson) {
+            $prePlan = ($preJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
+            if (-not $prePlan) {
+                Write-SetupLog 'pre-launch returned invalid JSON — proceeding' 'WARN'
+            } elseif ($prePlan.action -eq 'self-update') {
+                Write-SetupLog 'Self-update required — running update commands'
+                foreach ($update in $prePlan.updates) {
+                    Write-SetupLog "Updating $($update.service): $($update.command)"
+                    $argv = @($update.argv)
+                    if ($argv.Count -gt 0) {
+                        $exe = $argv[0]
+                        $rest = if ($argv.Count -gt 1) { $argv[1..($argv.Count - 1)] } else { @() }
+                        & $exe @rest
+                        if ($LASTEXITCODE -ne 0) {
+                            Write-SetupLog "Update failed for $($update.service) (exit $LASTEXITCODE)" 'WARN'
+                        } else {
+                            Write-SetupLog "Updated $($update.service) successfully"
+                        }
+                    }
+                }
+                Write-SetupLog 'Re-checking staleness after update'
+                $preJson = & $VenvPython -m agent_worktrees pre-launch 2>$null
+                if ($LASTEXITCODE -eq 0 -and $preJson) {
+                    $prePlan = ($preJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
+                    if ($prePlan -and $prePlan.action -eq 'self-update') {
+                        Write-SetupLog 'Still stale after update — proceeding anyway' 'WARN'
                     }
                 }
             }
-
-            # Re-check (one retry max)
-            Write-SetupLog 'Re-checking staleness after update'
-            $preJson = & $VenvPython -m agent_worktrees pre-launch 2>$null
-            if ($LASTEXITCODE -eq 0 -and $preJson) {
-                $prePlan = ($preJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
-                if ($prePlan -and $prePlan.action -eq 'self-update') {
-                    Write-SetupLog 'Still stale after update — proceeding anyway' 'WARN'
-                }
-            }
+        } else {
+            Write-SetupLog 'pre-launch check failed or produced no output — proceeding'
         }
     } else {
-        Write-SetupLog 'pre-launch check failed or produced no output — proceeding'
+        Write-SetupLog 'Update apply skipped (WORKTREE_NO_UPDATE=1)'
+        if ($StageJob) { try { Remove-Job $StageJob -Force -ErrorAction SilentlyContinue } catch {} }
     }
-} else {
-    Write-SetupLog 'Pre-launch update skipped (WORKTREE_NO_UPDATE=1)'
+
+    # (3) Plugin reconciliation (repo-configured payloads + gated runtimes).
+    #     Independent of WORKTREE_NO_UPDATE; opt out with WORKTREE_NO_RECONCILE=1.
+    #     Two passes: payload first, then runtime (readable only next pass).
+    if ($WithReconcile -and $env:WORKTREE_NO_RECONCILE -ne '1') {
+        foreach ($rpass in 1, 2) {
+            $recJson = & $VenvPython -m agent_worktrees reconcile-plugins 2>$null
+            if (-not $recJson) { break }
+            try { $recPlan = ($recJson | ConvertFrom-Json) } catch { break }
+            if ($recPlan.action -ne 'reconcile') {
+                if ($rpass -eq 1) { Write-SetupLog 'Plugin reconcile: nothing to do' }
+                break
+            }
+            $recUpdates = @($recPlan.updates)
+            Write-SetupLog "Plugin reconcile pass ${rpass}: $($recUpdates.Count) action(s)"
+            foreach ($u in $recUpdates) {
+                $rargv = @($u.argv)
+                if ($rargv.Count -eq 0) { continue }
+                if ($rargv[0] -eq 'copilot' -and -not (Get-Command copilot -ErrorAction SilentlyContinue)) {
+                    Write-SetupLog "Plugin reconcile: skipping $($u.service) (copilot not on PATH)" 'WARN'
+                    continue
+                }
+                $exe = $rargv[0]
+                $rest = @()
+                if ($rargv.Count -gt 1) { $rest = $rargv[1..($rargv.Count - 1)] }
+                Write-SetupLog "Plugin reconcile: $($u.service) -> $($rargv -join ' ')"
+                & $exe @rest 2>&1 | ForEach-Object { Write-SetupLog "reconcile: $_" }
+            }
+        }
+    }
 }
 
 # ── Direct-dispatch commands (bypass resolve/picker) ─────────────────────
@@ -318,52 +321,25 @@ $DirectCommands = @(
     'resolve', 'post-exit', 'finalize', 'push-changes', 'mark-complete',
     'status', 'list', 'create', 'cleanup', 'validate', 'install',
     'register', 'unregister', 'uninstall', 'update', 'install-status',
-    'deploy-instructions', 'get', 'pre-launch', 'reconcile-plugins', 'dev', 'handoff',
+    'deploy-instructions', 'get', 'pre-launch', 'stage-update', 'reconcile-plugins', 'dev', 'handoff',
     'register-session', 'deregister-session', 'backfill-sessions',
     'anchor-check'
 )
 if ($CopilotArgs.Count -gt 0 -and $CopilotArgs[0] -in $DirectCommands) {
     Write-SetupLog "Direct dispatch: $($CopilotArgs[0]) (bypassing resolve)"
+    # No Picker window to hide behind: stage + apply synchronously (no
+    # reconcile, matching the historical direct-command behavior) before
+    # dispatching.
+    Invoke-UpdateApply -StageJob (Start-UpdateStage)
     & $VenvPython -m agent_worktrees @CopilotArgs
     exit $LASTEXITCODE
 }
 
-# ── Plugin reconciliation (repo-configured payloads + gated runtimes) ─────
-# Reconcile the anchor repo's .github/copilot/settings.json enabledPlugins:
-# for each copilot-extensions plugin ensure its payload is installed and its
-# runtime deployed per the plugin's runtimeScope + facility machine gate.
-#
-# Placed AFTER direct-dispatch so plain `agent-worktrees <subcommand>` calls
-# never trigger it. Deliberately NOT guarded by WORKTREE_NO_UPDATE: the
-# self-update block above re-execs with that flag set and reconcile must still
-# run on that pass. Opt out with WORKTREE_NO_RECONCILE=1. Two passes: payload
-# first, then runtime (a freshly installed payload is only readable next pass).
-if ($env:WORKTREE_NO_RECONCILE -ne '1') {
-    foreach ($rpass in 1, 2) {
-        $recJson = & $VenvPython -m agent_worktrees reconcile-plugins 2>$null
-        if (-not $recJson) { break }
-        try { $recPlan = ($recJson | ConvertFrom-Json) } catch { break }
-        if ($recPlan.action -ne 'reconcile') {
-            if ($rpass -eq 1) { Write-SetupLog 'Plugin reconcile: nothing to do' }
-            break
-        }
-        $recUpdates = @($recPlan.updates)
-        Write-SetupLog "Plugin reconcile pass ${rpass}: $($recUpdates.Count) action(s)"
-        foreach ($u in $recUpdates) {
-            $rargv = @($u.argv)
-            if ($rargv.Count -eq 0) { continue }
-            if ($rargv[0] -eq 'copilot' -and -not (Get-Command copilot -ErrorAction SilentlyContinue)) {
-                Write-SetupLog "Plugin reconcile: skipping $($u.service) (copilot not on PATH)" 'WARN'
-                continue
-            }
-            $exe = $rargv[0]
-            $rest = @()
-            if ($rargv.Count -gt 1) { $rest = $rargv[1..($rargv.Count - 1)] }
-            Write-SetupLog "Plugin reconcile: $($u.service) -> $($rargv -join ' ')"
-            & $exe @rest 2>&1 | ForEach-Object { Write-SetupLog "reconcile: $_" }
-        }
-    }
-}
+# ── Background update stage (#1430) ──────────────────────────────────────
+# Spawn the marketplace download now so it runs WHILE the Picker is open. It is
+# joined and applied (installer + pre-launch + reconcile) after resolve returns
+# an exec plan, before the psmux handoff -- see Invoke-UpdateApply below.
+$script:StageJob = Start-UpdateStage
 
 # ── Resolve launch plan via Python ────────────────────────────────────────
 # Python resolve writes JSON to stdout and UI (picker) to stderr.
@@ -420,6 +396,14 @@ if ($plan.action -ne 'exec') {
     Write-Error "Unknown action: $($plan.action)"
     exit 1
 }
+
+# ── Join the background update + apply, before the psmux handoff (#1430) ──
+# The Picker has closed, so it is now safe to swap the runtime venv. This waits
+# for the staged marketplace download, runs the installer if it changed the
+# payload (no re-exec -- a launcher change applies next launch), then the
+# pre-launch self-update and plugin reconcile, so Copilot starts on the
+# finished update.
+Invoke-UpdateApply -StageJob $script:StageJob -WithReconcile
 
 # ── Execute the launch plan ──────────────────────────────────────────────
 

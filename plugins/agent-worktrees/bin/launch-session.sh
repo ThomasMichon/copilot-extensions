@@ -115,206 +115,186 @@ fi
 # and by the re-exec below to prevent infinite loops).
 
 _NO_UPDATE="${WORKTREE_NO_UPDATE:-${APERTURE_NO_UPDATE:-}}"
-if [[ "$_NO_UPDATE" != "1" ]]; then
-    # Discover the active plugin directory (marketplace or _direct layout)
-    _PLUGIN_DIR=""
-    _PLUGIN_LAYOUT=""
-    _MKT_DIR="$HOME/.copilot/installed-plugins/copilot-extensions/agent-worktrees"
-    _DIRECT_ROOT="$HOME/.copilot/installed-plugins/_direct"
+_STAGE_PID=""
+_UPDATE_APPLIED=""
 
-    if [[ -d "$_MKT_DIR" ]]; then
-        _PLUGIN_DIR="$_MKT_DIR"
-        _PLUGIN_LAYOUT="marketplace"
-    elif [[ -d "$_DIRECT_ROOT" ]]; then
-        for _dir in "$_DIRECT_ROOT"/*/; do
-            _manifest="${_dir}plugin.json"
-            if [[ -f "$_manifest" ]]; then
-                _name=$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$_manifest" 2>/dev/null \
-                       | head -1 | sed 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-                if [[ "$_name" == "agent-worktrees" ]]; then
-                    _PLUGIN_DIR="${_dir%/}"
-                    _PLUGIN_LAYOUT="direct"
-                    break
-                fi
-            fi
-        done
-    fi
+# ── Background update: stage-then-join (#1430) ─────────────────────────────
+# The Picker runs from the installed runtime venv, so the slow marketplace
+# download is STAGED in the background while the Picker is open, then the apply
+# (installer -> runtime, pre-launch, reconcile) runs at the JOIN, after the
+# Picker closes and before the tmux/Copilot handoff. The launcher script is
+# applied via the installer but NOT re-exec'd mid-flight: a launcher change
+# takes effect on the NEXT launch (stage-next).
 
-    if [[ -n "$_PLUGIN_DIR" ]]; then
-        setup_log INFO "Plugin auto-update: layout=$_PLUGIN_LAYOUT dir=$_PLUGIN_DIR"
+start_update_stage() {
+    # Spawn the background stage (marketplace download + fingerprint + plan).
+    # Output is discarded so it never writes to the Picker's terminal.
+    [[ "$_NO_UPDATE" == "1" ]] && return 0
+    setup_log INFO 'Starting background update stage (stage-update)'
+    ( "$PYTHON" -m agent_worktrees stage-update >/dev/null 2>&1 ) &
+    _STAGE_PID=$!
+}
 
-        # Snapshot key plugin files to detect changes after update
-        _HASH_FILES="pyproject.toml plugin.json bin/launch-session.ps1 bin/launch-session.sh bin/pane-wrapper.sh scripts/install.ps1 scripts/install.sh"
-        _OLD_FP=""
-        for _f in $_HASH_FILES; do
-            _fp="$_PLUGIN_DIR/$_f"
-            if [[ -f "$_fp" ]]; then
-                _OLD_FP+=$(sha256sum "$_fp" 2>/dev/null | cut -d' ' -f1)
-            fi
-        done
+invoke_update_apply() {
+    # $1 = "1" to also run plugin reconcile (Picker path); "0" otherwise.
+    # Idempotent: runs its body at most once per launch.
+    local with_reconcile="${1:-0}"
+    [[ -n "$_UPDATE_APPLIED" ]] && return 0
+    _UPDATE_APPLIED=1
 
-        # Try to update the plugin from the marketplace
-        if [[ "$_PLUGIN_LAYOUT" == "marketplace" ]]; then
-            if command -v copilot &>/dev/null; then
-                setup_log INFO 'Running: copilot plugin update agent-worktrees@copilot-extensions'
-                _UPDATE_OUT=$(copilot plugin update agent-worktrees@copilot-extensions 2>&1) || true
-                setup_log INFO "Plugin update result: $_UPDATE_OUT"
-            fi
-        else
-            setup_log INFO 'Direct-install layout -- skipping marketplace update'
+    local status_file="$HOME/.agent-worktrees/updater-status.json"
+    local stage_done="" plugin_changed="" skipped="" plugin_dir=""
+
+    _parse_stage_status() {
+        [[ -f "$status_file" ]] || return 0
+        IFS=$'\t' read -r stage_done plugin_changed skipped plugin_dir < <(
+            "$PYTHON" -c "
+import sys, json
+try:
+    d = json.load(open(sys.argv[1], encoding='utf-8'))
+except Exception:
+    d = {}
+print('\t'.join([
+    str(d.get('stage_done', False)),
+    str(d.get('plugin_changed', False)),
+    str(d.get('skipped', '')),
+    str(d.get('plugin_dir', '')),
+]))
+" "$status_file" 2>/dev/null
+        )
+    }
+
+    if [[ "$_NO_UPDATE" != "1" ]]; then
+        # Join the background stage.
+        if [[ -n "$_STAGE_PID" ]]; then
+            wait "$_STAGE_PID" 2>/dev/null || true
+        fi
+        _parse_stage_status
+        # No usable staged result (stage failed, or a peer launch held the
+        # lock): stage inline so the marketplace pull still happens.
+        if [[ "$stage_done" != "True" || "$skipped" == "locked" ]]; then
+            setup_log INFO 'No usable staged update result; staging inline'
+            "$PYTHON" -m agent_worktrees stage-update >/dev/null 2>&1 || true
+            _parse_stage_status
         fi
 
-        # Check if any tracked files changed
-        _NEW_FP=""
-        for _f in $_HASH_FILES; do
-            _fp="$_PLUGIN_DIR/$_f"
-            if [[ -f "$_fp" ]]; then
-                _NEW_FP+=$(sha256sum "$_fp" 2>/dev/null | cut -d' ' -f1)
-            fi
-        done
-
-        if [[ -n "$_NEW_FP" && "$_NEW_FP" != "$_OLD_FP" ]]; then
-            setup_log INFO 'Plugin source changed -- running full installer update'
-
-            _PLUGIN_INSTALLER="$_PLUGIN_DIR/scripts/install.sh"
-            if [[ -f "$_PLUGIN_INSTALLER" ]]; then
-                _INST_ARGS=(update)
+        # (1) Marketplace installer, iff the download changed the payload.
+        #     NO re-exec: a launcher-script change applies on the next launch.
+        if [[ "$plugin_changed" == "True" ]]; then
+            setup_log INFO 'Staged update changed the plugin payload -- running installer'
+            local _installer="$plugin_dir/scripts/install.sh"
+            if [[ -n "$plugin_dir" && -f "$_installer" ]]; then
+                local _inst_args=(update)
                 if [[ -n "${WORKTREE_PROJECT:-}" ]]; then
-                    _INST_ARGS+=(--project-name "$WORKTREE_PROJECT")
+                    _inst_args+=(--project-name "$WORKTREE_PROJECT")
                 fi
-
-                if bash "$_PLUGIN_INSTALLER" "${_INST_ARGS[@]}" 2>&1 | while IFS= read -r _line; do
+                if bash "$_installer" "${_inst_args[@]}" 2>&1 | while IFS= read -r _line; do
                     setup_log INFO "installer: $_line"
                 done; then
-                    setup_log INFO 'Installer update succeeded -- re-execing into new launch-session'
-
-                    _NEW_LAUNCHER="$HOME/.agent-worktrees/bin/launch-session.sh"
-                    if [[ -x "$_NEW_LAUNCHER" ]]; then
-                        export WORKTREE_NO_UPDATE=1
-                        export APERTURE_NO_UPDATE=1
-                        exec "$_NEW_LAUNCHER" "$@"
-                    else
-                        setup_log WARN 'Updated but deployed launcher missing; continuing current process'
-                    fi
+                    setup_log INFO 'Installer update succeeded (launcher change, if any, applies next launch)'
                 else
-                    setup_log WARN "Installer update failed (exit $?) -- continuing with existing version"
+                    setup_log WARN "Installer update failed -- continuing with existing version"
                 fi
             else
-                setup_log WARN "Plugin installer not found at $_PLUGIN_INSTALLER -- skipping"
+                setup_log WARN "Plugin installer not found ($_installer) -- skipping"
             fi
-        else
-            setup_log INFO 'Plugin source unchanged -- no update needed'
-        fi
-    fi
-fi
-
-# ── Pre-launch self-update (two-pass) ─────────────────────────────────────
-# Checks bootstrap service staleness and runs updates if needed.
-# Controlled by WORKTREE_NO_UPDATE env var (set by cmd_launch in Python).
-
-_NO_UPDATE="${WORKTREE_NO_UPDATE:-${APERTURE_NO_UPDATE:-}}"
-if [[ "$_NO_UPDATE" != "1" ]]; then
-    setup_log INFO 'Running pre-launch staleness check'
-    PRE_JSON=$("$PYTHON" -m agent_worktrees pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue","reason":"error"}'
-    PRE_ACTION=$(echo "$PRE_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) || PRE_ACTION="continue"
-
-    if [[ "$PRE_ACTION" == "self-update" ]]; then
-        setup_log INFO 'Self-update required — running update commands'
-        _VERBOSE="${WORKTREE_VERBOSE:-${APERTURE_PRE_FLIGHT_VERBOSE:-}}"
-        if [[ "$_VERBOSE" == "1" ]]; then
-            echo "Pre-flight: updating stale bootstrap services..."
         fi
 
-        # Extract and run each update command from argv arrays (safe, no eval)
-        UPDATE_COUNT=$("$PYTHON" -c "import sys,json; print(len(json.load(sys.stdin).get('updates',[])))" <<< "$PRE_JSON" 2>/dev/null) || UPDATE_COUNT=0
-        for (( i=0; i<UPDATE_COUNT; i++ )); do
-            # Read argv array as newline-delimited elements
-            SVC_NAME=$("$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['updates'][$i]['service'])" <<< "$PRE_JSON" 2>/dev/null) || SVC_NAME="unknown"
-            mapfile -t UPDATE_ARGV < <("$PYTHON" -c "
+        # (2) Pre-launch self-update (bootstrap-service staleness; two-pass).
+        setup_log INFO 'Running pre-launch staleness check'
+        PRE_JSON=$("$PYTHON" -m agent_worktrees pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue","reason":"error"}'
+        PRE_ACTION=$(echo "$PRE_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) || PRE_ACTION="continue"
+        if [[ "$PRE_ACTION" == "self-update" ]]; then
+            setup_log INFO 'Self-update required -- running update commands'
+            UPDATE_COUNT=$("$PYTHON" -c "import sys,json; print(len(json.load(sys.stdin).get('updates',[])))" <<< "$PRE_JSON" 2>/dev/null) || UPDATE_COUNT=0
+            for (( i=0; i<UPDATE_COUNT; i++ )); do
+                SVC_NAME=$("$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['updates'][$i]['service'])" <<< "$PRE_JSON" 2>/dev/null) || SVC_NAME="unknown"
+                mapfile -t UPDATE_ARGV < <("$PYTHON" -c "
 import sys, json
 for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
     print(a)
 " <<< "$PRE_JSON" 2>/dev/null)
-
-            if [[ ${#UPDATE_ARGV[@]} -gt 0 ]]; then
-                setup_log INFO "Updating $SVC_NAME: ${UPDATE_ARGV[*]}"
-                [[ "$_VERBOSE" == "1" ]] && echo "  Updating $SVC_NAME..."
-                "${UPDATE_ARGV[@]}" || setup_log WARN "Update failed for $SVC_NAME (exit $?)"
+                if [[ ${#UPDATE_ARGV[@]} -gt 0 ]]; then
+                    setup_log INFO "Updating $SVC_NAME: ${UPDATE_ARGV[*]}"
+                    "${UPDATE_ARGV[@]}" || setup_log WARN "Update failed for $SVC_NAME (exit $?)"
+                fi
+            done
+            setup_log INFO 'Re-checking staleness after update'
+            PRE_JSON=$("$PYTHON" -m agent_worktrees pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue"}'
+            PRE_ACTION=$(echo "$PRE_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) || PRE_ACTION="continue"
+            if [[ "$PRE_ACTION" == "self-update" ]]; then
+                setup_log WARN 'Still stale after update -- proceeding anyway'
             fi
-        done
-
-        # Re-check after update (one retry max)
-        setup_log INFO 'Re-checking staleness after update'
-        PRE_JSON=$("$PYTHON" -m agent_worktrees pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue"}'
-        PRE_ACTION=$(echo "$PRE_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) || PRE_ACTION="continue"
-
-        if [[ "$PRE_ACTION" == "self-update" ]]; then
-            setup_log WARN 'Still stale after update — proceeding anyway'
-            [[ "$_VERBOSE" == "1" ]] && echo "  Warning: bootstrap services still stale after update. Proceeding."
         fi
+    else
+        setup_log INFO 'Update apply skipped (WORKTREE_NO_UPDATE=1)'
     fi
-else
-    setup_log INFO 'Pre-launch update skipped (WORKTREE_NO_UPDATE=1)'
-fi
+
+    # (3) Plugin reconciliation (repo-configured payloads + gated runtimes).
+    #     Independent of WORKTREE_NO_UPDATE; opt out with WORKTREE_NO_RECONCILE=1.
+    #     Two passes: payload first, then runtime (readable only next pass).
+    if [[ "$with_reconcile" == "1" && "${WORKTREE_NO_RECONCILE:-}" != "1" ]]; then
+        for _rpass in 1 2; do
+            REC_JSON=$("$PYTHON" -m agent_worktrees reconcile-plugins 2>/dev/null) \
+                || REC_JSON='{"action":"continue"}'
+            REC_ACTION=$(printf '%s' "$REC_JSON" \
+                | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) \
+                || REC_ACTION="continue"
+            if [[ "$REC_ACTION" != "reconcile" ]]; then
+                [[ "$_rpass" == "1" ]] && setup_log INFO 'Plugin reconcile: nothing to do'
+                break
+            fi
+            REC_COUNT=$("$PYTHON" -c "import sys,json; print(len(json.load(sys.stdin).get('updates',[])))" <<< "$REC_JSON" 2>/dev/null) || REC_COUNT=0
+            setup_log INFO "Plugin reconcile pass $_rpass: $REC_COUNT action(s)"
+            for (( _ri=0; _ri<REC_COUNT; _ri++ )); do
+                _RSVC=$("$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['updates'][$_ri].get('service','?'))" <<< "$REC_JSON" 2>/dev/null) || _RSVC="?"
+                mapfile -t _RARGV < <("$PYTHON" -c "
+import sys, json
+for a in json.load(sys.stdin)['updates'][$_ri].get('argv', []):
+    print(a)
+" <<< "$REC_JSON" 2>/dev/null)
+                [[ ${#_RARGV[@]} -gt 0 ]] || continue
+                if [[ "${_RARGV[0]}" == "copilot" ]] && ! command -v copilot &>/dev/null; then
+                    setup_log WARN "Plugin reconcile: skipping $_RSVC (copilot not on PATH)"
+                    continue
+                fi
+                setup_log INFO "Plugin reconcile: $_RSVC -> ${_RARGV[*]}"
+                "${_RARGV[@]}" 2>&1 | while IFS= read -r _rl; do setup_log INFO "reconcile: $_rl"; done \
+                    || setup_log WARN "Plugin reconcile: step failed for $_RSVC"
+            done
+        done
+    fi
+}
+
+# ── Pre-launch self-update + reconcile now run via invoke_update_apply ────
+# (moved into the stage-then-join functions defined above, #1430).
+
 
 # ── Direct-dispatch commands (bypass resolve/picker) ─────────────────────
 # Subcommands that agent_worktrees's main() handles directly — these
 # must NOT fall through to the resolve→picker flow.  Keep in sync with
 # COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
-_DIRECT_COMMANDS="services repos worktree agent-worktrees resolve post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch reconcile-plugins dev handoff register-session deregister-session backfill-sessions anchor-check activity activity-log"
+_DIRECT_COMMANDS="services repos worktree agent-worktrees resolve post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch stage-update reconcile-plugins dev handoff register-session deregister-session backfill-sessions anchor-check activity activity-log"
+_IS_DIRECT=""
 if [[ $# -gt 0 ]]; then
     for _dc in $_DIRECT_COMMANDS; do
-        if [[ "$1" == "$_dc" ]]; then
-            setup_log INFO "Direct dispatch: $1 (bypassing resolve)"
-            exec "$PYTHON" -m agent_worktrees "$@"
-        fi
+        if [[ "$1" == "$_dc" ]]; then _IS_DIRECT=1; break; fi
     done
+fi
+if [[ -n "$_IS_DIRECT" ]]; then
+    setup_log INFO "Direct dispatch: $1 (bypassing resolve)"
+    # No Picker window to hide behind: stage + apply synchronously (no
+    # reconcile, matching historical direct-command behavior) before dispatch.
+    start_update_stage
+    invoke_update_apply 0
+    exec "$PYTHON" -m agent_worktrees "$@"
 fi
 
-# ── Plugin reconciliation (repo-configured payloads + gated runtimes) ──────
-# Reconcile the anchor repo's .github/copilot/settings.json enabledPlugins:
-# for each copilot-extensions plugin ensure its payload is installed, and its
-# runtime is deployed per the plugin's runtimeScope + facility machine gate.
-#
-# Placed AFTER direct-dispatch so plain `agent-worktrees <subcommand>` calls
-# never trigger it -- only the real launch path reaches here. Deliberately NOT
-# guarded by WORKTREE_NO_UPDATE: the agent-worktrees self-update above re-execs
-# with that flag set, and reconcile must still run on that pass. Opt out with
-# WORKTREE_NO_RECONCILE=1.
-#
-# Two passes: payload first, then runtime -- a freshly installed payload's
-# runtime manifest is only readable on the second pass.
-if [[ "${WORKTREE_NO_RECONCILE:-}" != "1" ]]; then
-    for _rpass in 1 2; do
-        REC_JSON=$("$PYTHON" -m agent_worktrees reconcile-plugins 2>/dev/null) \
-            || REC_JSON='{"action":"continue"}'
-        REC_ACTION=$(printf '%s' "$REC_JSON" \
-            | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) \
-            || REC_ACTION="continue"
-        if [[ "$REC_ACTION" != "reconcile" ]]; then
-            [[ "$_rpass" == "1" ]] && setup_log INFO 'Plugin reconcile: nothing to do'
-            break
-        fi
-        REC_COUNT=$("$PYTHON" -c "import sys,json; print(len(json.load(sys.stdin).get('updates',[])))" <<< "$REC_JSON" 2>/dev/null) || REC_COUNT=0
-        setup_log INFO "Plugin reconcile pass $_rpass: $REC_COUNT action(s)"
-        for (( _ri=0; _ri<REC_COUNT; _ri++ )); do
-            _RSVC=$("$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['updates'][$_ri].get('service','?'))" <<< "$REC_JSON" 2>/dev/null) || _RSVC="?"
-            mapfile -t _RARGV < <("$PYTHON" -c "
-import sys, json
-for a in json.load(sys.stdin)['updates'][$_ri].get('argv', []):
-    print(a)
-" <<< "$REC_JSON" 2>/dev/null)
-            [[ ${#_RARGV[@]} -gt 0 ]] || continue
-            if [[ "${_RARGV[0]}" == "copilot" ]] && ! command -v copilot &>/dev/null; then
-                setup_log WARN "Plugin reconcile: skipping $_RSVC (copilot not on PATH)"
-                continue
-            fi
-            setup_log INFO "Plugin reconcile: $_RSVC -> ${_RARGV[*]}"
-            "${_RARGV[@]}" 2>&1 | while IFS= read -r _rl; do setup_log INFO "reconcile: $_rl"; done \
-                || setup_log WARN "Plugin reconcile: step failed for $_RSVC"
-        done
-    done
-fi
+# ── Background update stage (#1430) ──────────────────────────────────────
+# Spawn the marketplace download now so it runs WHILE the Picker is open. It is
+# joined and applied (installer + pre-launch + reconcile) after resolve returns
+# an exec plan, before the tmux handoff -- see invoke_update_apply below.
+start_update_stage
 
 # ── Resolve launch plan via Python ────────────────────────────────────────
 
@@ -356,6 +336,13 @@ if [[ "$ACTION" == "remote" ]]; then
 fi
 
 if [[ "$ACTION" == "exec" ]]; then
+    # ── Join the background update + apply, before the tmux handoff (#1430) ──
+    # The Picker has closed, so it is now safe to swap the runtime venv. This
+    # waits for the staged marketplace download, runs the installer if it
+    # changed the payload (no re-exec -- a launcher change applies next launch),
+    # then the pre-launch self-update and plugin reconcile.
+    invoke_update_apply 1
+
     WORK_DIR=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('work_dir',''))")
     POST_EXIT=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('post_exit') else '0')")
     WORKTREE_ID=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('worktree_id') or '')")
