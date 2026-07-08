@@ -213,6 +213,24 @@ LIST_SPECS = [
     ("title", "title", 10, "l", 1),
 ]
 HTABS = ["Worktrees", "Maintenance", "Profiles"]
+
+
+def _poll_secs() -> float:
+    """Continuous background-poll interval in seconds (#1421).
+
+    Conservative default (45s) so an open picker stays fresh without hammering
+    SSH -- ``list --classify`` runs git classification across a machine's
+    worktrees, so it is not a free status ping. ``AGENT_WORKTREES_PICKER_POLL_SECS``
+    overrides it, and ``<= 0`` disables background polling entirely.
+    """
+    try:
+        return float(os.environ.get("AGENT_WORKTREES_PICKER_POLL_SECS", "45"))
+    except (TypeError, ValueError):
+        return 45.0
+
+
+POLL_SECS = _poll_secs()
+
 # Maintenance groups worktrees by state; this is the display order (#1345).
 # Any state not listed is appended after these, in first-seen order.
 MAINT_GROUP_ORDER = ["DIRTY", "WIP", "ACTIVE", "ORPHAN", "CONVO", "UNUSED",
@@ -370,6 +388,39 @@ class PickerScreen(Widget):
         except Exception:
             pass
 
+    def _maybe_repoll(self):
+        """Fire a bounded, in-place background refresh of machine state (#1421).
+
+        Keeps the open picker's lists live without a restart. Conservative
+        (``POLL_SECS``, default 45s; env-overridable, ``<=0`` disables) and
+        courteous: only on the Worktrees/Maintenance tabs (Profiles reads no
+        worktree data), skips while a maintenance/apply dialog is up (its own
+        reload owns the refresh), never flips a machine to its connect spinner
+        (rows update in place), and polls only the machines currently in view --
+        a specific-machine tab never fans out to the whole fleet. The loader's
+        per-source in-flight guard keeps a slow machine from being re-hit.
+        """
+        if POLL_SECS <= 0 or self.loader is None:
+            return
+        if self.htab == 2 or self.progress is not None:
+            return
+        now = time.monotonic()
+        if now - self._last_poll < POLL_SECS:
+            return
+        self._last_poll = now
+        try:
+            self.loader.repoll_silent(self._poll_keys())
+        except Exception:
+            pass
+
+    def _poll_keys(self):
+        """The ``(machine, env)`` keys to background-poll: every ready machine on
+        the 'All' tab, else just the machine of the current tab (#1421)."""
+        if self.is_all():
+            return self.ready_envs()
+        m, e = self.cur_machine()[:2]
+        return {(m, e)}
+
     def _tick(self):
         self.frame += 1
         self.pulse = (self.frame // 5) % 2
@@ -379,6 +430,7 @@ class PickerScreen(Widget):
             self.data = self.loader.records()
             _ready, loading, _failed = self.loader.counts()
             busy = busy or loading > 0
+            self._maybe_repoll()
         # Poll the launcher's update stage ~twice a second (#1430). While a
         # stage is in flight the spinner should animate, so keep the tick busy.
         if self.frame % 5 == 0:
@@ -434,6 +486,7 @@ class PickerScreen(Widget):
         self.machines = [("All", None, None, True)] + self.src.machines()
         self.machine_idx = self.local_index()
         self.maint_sel = set()        # drop any stale Maintenance selection
+        self._last_poll = time.monotonic()   # first background poll is POLL_SECS out
         if self.live:
             # Real background SSH loads: one daemon thread per machine,
             # spinner -> ✓/✗. Every source -- local included -- streams in on a

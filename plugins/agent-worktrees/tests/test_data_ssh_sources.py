@@ -172,3 +172,70 @@ def test_copilot_false_machine_is_skipped(monkeypatch):
 
     by = _by_key(data_ssh._build_sources())
     assert ("NAS", "Linux") not in by
+
+
+# ── #1421 continuous background poll: LiveLoader.repoll_silent ────────────────
+
+def _ready_loader(monkeypatch, records):
+    """A LiveLoader with one ready source seeded with ``records``."""
+    src = data_ssh.Source("M", "Win", ["ssh", "m", "list"], ready=True)
+    loader = data_ssh.LiveLoader([src])
+    with loader._lock:
+        loader._state[src.key] = "ready"
+        loader._records[src.key] = list(records)
+    return loader, src
+
+
+def _wait(pred, timeout=2.0):
+    import time
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and not pred():
+        time.sleep(0.01)
+    return pred()
+
+
+def test_repoll_silent_swaps_records_without_loading_flip(monkeypatch):
+    loader, src = _ready_loader(monkeypatch, ["old"])
+    calls = {"n": 0}
+
+    def fake_fetch(source, runner=None):
+        calls["n"] += 1
+        return ["new"]
+
+    monkeypatch.setattr(data_ssh, "_fetch", fake_fetch)
+    assert loader.repoll_silent() == 1
+    assert _wait(lambda: loader.records() == ["new"])
+    assert loader.state("M", "Win") == "ready"      # never flipped to loading
+    assert calls["n"] == 1
+    assert _wait(lambda: not loader._refreshing)     # guard cleared
+
+
+def test_repoll_silent_keeps_last_good_on_failure(monkeypatch):
+    loader, src = _ready_loader(monkeypatch, ["old"])
+
+    def boom(source, runner=None):
+        raise RuntimeError("ssh down")
+
+    monkeypatch.setattr(data_ssh, "_fetch", boom)
+    assert loader.repoll_silent() == 1
+    assert _wait(lambda: not loader._refreshing)
+    assert loader.records() == ["old"]              # last-good preserved
+    assert loader.state("M", "Win") == "ready"
+
+
+def test_repoll_silent_skips_non_ready_and_cancelled(monkeypatch):
+    loader, src = _ready_loader(monkeypatch, ["old"])
+    called = {"n": 0}
+    monkeypatch.setattr(
+        data_ssh, "_fetch",
+        lambda source, runner=None: called.__setitem__("n", called["n"] + 1) or ["x"])
+    # Not ready -> skipped.
+    with loader._lock:
+        loader._state[src.key] = "loading"
+    assert loader.repoll_silent() == 0
+    # Cancelled -> whole pass is a no-op.
+    with loader._lock:
+        loader._state[src.key] = "ready"
+    loader._cancelled.set()
+    assert loader.repoll_silent() == 0
+    assert called["n"] == 0
