@@ -75,7 +75,7 @@ def test_load_remote_column_parses_ssh_json(monkeypatch):
     assert TargetSel("Borealis", "Win", "agent") in col   # self diagonal forced
 
 
-def test_load_remote_failure_degrades_to_legacy(monkeypatch):
+def test_load_remote_failure_marks_unavailable(monkeypatch):
     monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
     monkeypatch.setattr(
         profiles_io.data_ssh, "profiles_argv",
@@ -84,8 +84,35 @@ def test_load_remote_failure_degrades_to_legacy(monkeypatch):
     def boom(argv, timeout):
         raise OSError("ssh down")
 
-    # A transient SSH failure degrades to legacy (None), never an empty grid.
-    assert profiles_io.load_column("Borealis", "Win", runner=boom) is None
+    # An SSH failure means we can't read the remote's real column, so the column
+    # is UNAVAILABLE (read-only) -- never a fabricated legacy all-on we'd try to
+    # write back and fail (#1370).
+    assert profiles_io.load_column("Borealis", "Win", runner=boom) \
+        is profiles_io.UNAVAILABLE
+
+
+def test_load_remote_nonzero_marks_unavailable(monkeypatch):
+    """An older remote without the ``profiles`` subcommand exits nonzero -> the
+    column is unavailable/read-only, not legacy all-on (#1370)."""
+    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
+    monkeypatch.setattr(
+        profiles_io.data_ssh, "profiles_argv",
+        lambda m, e, **k: ["ssh", "borealis", "..."])
+
+    def old_remote(argv, timeout):
+        return _Proc(2, stderr="error: unrecognized command 'profiles'")
+
+    assert profiles_io.load_column("Borealis", "Win", runner=old_remote) \
+        is profiles_io.UNAVAILABLE
+
+
+def test_load_remote_no_argv_marks_unavailable(monkeypatch):
+    """No SSH argv (unreachable / not-ready host) -> unavailable, read-only."""
+    monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
+    monkeypatch.setattr(
+        profiles_io.data_ssh, "profiles_argv", lambda m, e, **k: None)
+
+    assert profiles_io.load_column("Borealis", "Win") is profiles_io.UNAVAILABLE
 
 
 def test_apply_local_writes_config(monkeypatch, tmp_path):
