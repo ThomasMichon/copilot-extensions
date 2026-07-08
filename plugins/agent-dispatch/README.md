@@ -28,6 +28,18 @@ bash "$(copilot plugin path agent-dispatch)/scripts/init.sh"   # Linux/WSL/macOS
 
 The installer creates `~/.agent-dispatch/.venv`, an `agent-dispatch` binstub in
 `~/.local/bin`, and a schema-3 deploy manifest. Re-run with `--force` to repair.
+It also registers a **"Tasks" pivot** in the agent-worktrees picker (see below).
+
+### Worktree-picker "Tasks" pivot
+
+The installer drops a pivot manifest at
+`~/.agent-worktrees/pivots/agent-dispatch.json` so the agent-worktrees Textual
+picker grows a **Tasks** pivot (between Worktrees and Maintenance). It lists this
+machine's `proposed` tasks (via `agent-dispatch inbox`, grouped by target
+worktree, handoffs badged) and Enter opens a per-task action sub-menu (kick to a
+bridge agent / abandon). The seam is a filesystem manifest registry, not a Python
+import -- the plugins live in separate venvs -- so a stale or absent picker simply
+ignores it. Source: `pivots/agent-dispatch.json`.
 
 ### Running the coordinator as a service
 
