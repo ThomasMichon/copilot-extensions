@@ -3959,7 +3959,8 @@ def reap_one(
                     "state": info.state.value, "warnings": warnings})
 
 
-def reap_orphan_mux_sessions(*, dry_run: bool = False) -> dict:
+def reap_orphan_mux_sessions(*, dry_run: bool = False,
+                             only_id: str | None = None) -> dict:
     """Reap leaked tmux/psmux sessions whose worktree is gone or done.
 
     Enumerates live ``wt-<id>`` multiplexer sessions and kills those that no
@@ -3967,6 +3968,12 @@ def reap_orphan_mux_sessions(*, dry_run: bool = False) -> dict:
     orphans plus untracked / path-missing leaks (issue #713). Without this, a
     finalized worktree's tmux session + idle Copilot process linger forever and
     the picker presents the dead session as resumable.
+
+    ``only_id`` restricts the sweep to a **single** worktree's session (the
+    targeted tab-close/detach prevention path, #713): the exact same
+    spare-active/attached/system predicate is applied, so a targeted reap can
+    only kill what the full sweep would kill -- it never touches an attached or
+    active session even when asked by id.
 
     **Conservative by design** -- a session is never reaped when:
 
@@ -3999,6 +4006,8 @@ def reap_orphan_mux_sessions(*, dry_run: bool = False) -> dict:
         if not name.startswith("wt-"):
             continue
         wt_id = name[len("wt-"):]
+        if only_id is not None and wt_id != only_id:
+            continue
         if attached and attached > 0:
             skipped.append({"id": wt_id, "reason": "attached"})
             continue
@@ -4033,9 +4042,15 @@ def reap_orphan_mux_sessions(*, dry_run: bool = False) -> dict:
 
 
 def cmd_reap_sessions(args: argparse.Namespace) -> int:
-    """``reap-sessions`` -- sweep orphaned mux sessions (issue #713)."""
+    """``reap-sessions`` -- sweep orphaned mux sessions (issue #713).
+
+    With ``--id`` it targets a single worktree (the launcher's tab-close/detach
+    prevention hook), applying the identical spare-active/attached/system
+    predicate as the full sweep.
+    """
     dry = getattr(args, "dry_run", False)
-    payload = reap_orphan_mux_sessions(dry_run=dry)
+    only_id = getattr(args, "id", None)
+    payload = reap_orphan_mux_sessions(dry_run=dry, only_id=only_id)
     if getattr(args, "json", False):
         _json_output(payload)
         return 0
@@ -7260,6 +7275,9 @@ def build_parser() -> argparse.ArgumentParser:
              "gone, or untracked (never touches attached or active sessions)")
     p.add_argument("--dry-run", action="store_true",
                    help="Report what would be reaped without killing anything")
+    p.add_argument("--id", default=None,
+                   help="Target a single worktree id (the launcher's tab-close "
+                        "prevention path); same spare-active/attached predicate")
     p.add_argument("--json", action="store_true",
                    help="Emit a single JSON result object")
 

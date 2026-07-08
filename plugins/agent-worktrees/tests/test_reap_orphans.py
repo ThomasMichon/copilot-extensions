@@ -35,7 +35,7 @@ def _rec(wt_id, *, status="active", path="/tmp/wt", kind="session"):
     )
 
 
-def _run(sessions_map, records, *, dry_run=False):
+def _run(sessions_map, records, *, dry_run=False, only_id=None):
     """Invoke the reaper with patched mux + tracking, capturing killed ids."""
     killed: list[str] = []
 
@@ -48,7 +48,7 @@ def _run(sessions_map, records, *, dry_run=False):
          patch("agent_worktrees.sessions.kill_tmux_session", side_effect=_kill), \
          patch("agent_worktrees.tracking.list_records", return_value=records), \
          patch("agent_worktrees.config.tracking_dir", return_value=Path("/tmp")):
-        result = cli.reap_orphan_mux_sessions(dry_run=dry_run)
+        result = cli.reap_orphan_mux_sessions(dry_run=dry_run, only_id=only_id)
     return result, killed
 
 
@@ -128,3 +128,34 @@ class TestReapOrphans:
         result, killed = _run(sessions_map, recs)
         assert sorted(killed) == ["fin", "ghost"]
         assert sorted(result["reaped"]) == ["fin", "ghost"]
+
+    # ── #713 prevention: targeted single-worktree reap (only_id) ──────────────
+
+    def test_only_id_targets_one_orphan(self, tmp_path):
+        recs = [
+            _rec("fin", status="finalized", path=str(tmp_path)),
+            _rec("fin2", status="finalized", path=str(tmp_path)),
+        ]
+        result, killed = _run({"wt-fin": 0, "wt-fin2": 0}, recs, only_id="fin")
+        assert killed == ["fin"]                 # only the targeted id
+        assert result["reaped"] == ["fin"]
+
+    def test_only_id_still_spares_active(self, tmp_path):
+        """The targeted reap applies the SAME predicate: an active worktree is
+        spared even when named explicitly (the core #713 safety guarantee)."""
+        rec = _rec("live", status="active", path=str(tmp_path))
+        result, killed = _run({"wt-live": 0}, [rec], only_id="live")
+        assert killed == []
+        assert {"id": "live", "reason": "active"} in result["skipped"]
+
+    def test_only_id_still_spares_attached(self, tmp_path):
+        rec = _rec("held", status="finalized", path=str(tmp_path))
+        result, killed = _run({"wt-held": 1}, [rec], only_id="held")
+        assert killed == []
+        assert {"id": "held", "reason": "attached"} in result["skipped"]
+
+    def test_only_id_no_match_is_noop(self, tmp_path):
+        rec = _rec("fin", status="finalized", path=str(tmp_path))
+        result, killed = _run({"wt-fin": 0}, [rec], only_id="nope")
+        assert killed == []
+        assert result["reaped"] == [] and result["skipped"] == []
