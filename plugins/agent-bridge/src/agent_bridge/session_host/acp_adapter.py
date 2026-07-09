@@ -24,10 +24,14 @@ socket only adds the seq/ack envelope, which this adapter consumes.
 from __future__ import annotations
 
 import asyncio
+import logging
 import socket
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from .client import SessionHostClient
+
+log = logging.getLogger("agent-bridge.session-host")
 
 _RELAY_CHUNK = 64 * 1024
 
@@ -41,6 +45,12 @@ class AcpStreams:
     _pair_reader: asyncio.StreamReader
     _pair_writer: asyncio.StreamWriter
     _tasks: list[asyncio.Task]
+    # Fired at most once when the host->front relay ends while the child is
+    # still alive -- i.e. the loopback/forwarded transport dropped but the
+    # Session Host + its child survive. This is the in-session ``disconnected``
+    # signal the frontend's liveness-driven reattach driver keys on (P1). Set by
+    # the caller AFTER the AcpClient exists (typically ``client.mark_transport_lost``).
+    on_transport_lost: Callable[[], None] | None = field(default=None)
 
     async def aclose(self) -> None:
         for t in self._tasks:
@@ -75,6 +85,11 @@ async def open_acp_streams(
     # End B: our relay side.
     relay_reader, relay_writer = await asyncio.open_connection(sock=b)
 
+    streams = AcpStreams(
+        reader=acp_reader, writer=acp_writer,
+        _pair_reader=relay_reader, _pair_writer=relay_writer, _tasks=[],
+    )
+
     async def _host_to_acp() -> None:
         try:
             async for seq, data in client.frames():
@@ -89,6 +104,18 @@ async def open_acp_streams(
                 relay_writer.write_eof()
             except (OSError, RuntimeError):
                 pass
+            # ``frames()`` ended. If the child is still alive, the host->front
+            # transport dropped underneath us (loopback/forwarded socket
+            # EOF/reset) rather than the child exiting -- that is the in-session
+            # ``disconnected`` condition. Notify the frontend so its
+            # liveness-driven driver can reattach by cursor (P1). A genuine
+            # child exit (LIVENESS(dead), which clears ``child_alive``) is NOT a
+            # transport loss and must not trigger a reattach.
+            if client.child_alive and streams.on_transport_lost is not None:
+                try:
+                    streams.on_transport_lost()
+                except Exception:
+                    log.debug("on_transport_lost callback raised", exc_info=True)
 
     async def _acp_to_host() -> None:
         try:
@@ -100,11 +127,8 @@ async def open_acp_streams(
         except (OSError, ConnectionError):
             pass
 
-    tasks = [
+    streams._tasks = [
         asyncio.create_task(_host_to_acp(), name="session-host-to-acp"),
         asyncio.create_task(_acp_to_host(), name="acp-to-session-host"),
     ]
-    return AcpStreams(
-        reader=acp_reader, writer=acp_writer,
-        _pair_reader=relay_reader, _pair_writer=relay_writer, _tasks=tasks,
-    )
+    return streams

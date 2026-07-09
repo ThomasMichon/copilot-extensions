@@ -201,6 +201,16 @@ async def lifespan(app: FastAPI):
                 mgr.note_heartbeats()
             except Exception:
                 log.warning("Liveness heartbeat beat failed", exc_info=True)
+            # Liveness-driven reattach (P1): the beat above only *detects* a
+            # dropped transport (a host-backed session reading `disconnected`
+            # while its Session Host + child survive); this *acts* on it,
+            # redialing the host and resuming by cursor with no restart and no
+            # lost turn. No-op unless Session-Host mode is enabled.
+            if mgr.session_host_enabled:
+                try:
+                    await mgr.recover_disconnected_hosts()
+                except Exception:
+                    log.warning("Liveness-driven reattach failed", exc_info=True)
 
     heartbeat_task = asyncio.create_task(_heartbeat_loop())
 

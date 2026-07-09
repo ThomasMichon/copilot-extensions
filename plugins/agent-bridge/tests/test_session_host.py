@@ -583,6 +583,132 @@ async def test_reattach_session_hosts_on_restart(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_adapter_fires_transport_lost_on_socket_drop():
+    """A dropped host->front socket (child still alive) fires on_transport_lost.
+
+    This is the in-session ``disconnected`` signal the liveness-driven reattach
+    driver keys on (P1): the transport died underneath us, not the child.
+    """
+    child = _FakeChild()
+    host, port = await _serve(child)
+    client = await SessionHostClient.connect(port=port)
+    await client.attach(0)
+    fired = asyncio.Event()
+    streams = await open_acp_streams(client)
+    streams.on_transport_lost = fired.set
+    try:
+        # Deliver one frame so the relay is live, then drop the transport by
+        # closing the host's front-side connection -- child stays alive.
+        child.feed_frame(b'{"jsonrpc":"2.0"}')
+        await asyncio.sleep(0.05)
+        assert host._front is not None
+        host._front.writer.close()
+        await asyncio.wait_for(fired.wait(), timeout=5)
+        assert child.returncode is None  # child never exited -- transport-only loss
+    finally:
+        await streams.aclose()
+        await client.close()
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_adapter_no_transport_lost_on_child_exit():
+    """A clean child exit (LIVENESS(dead)) must NOT fire on_transport_lost.
+
+    Reattaching a genuinely-ended child would be wrong; the driver keys on
+    transport loss, not child death.
+    """
+    child = _FakeChild()
+    host, port = await _serve(child)
+    client = await SessionHostClient.connect(port=port)
+    await client.attach(0)
+    fired = asyncio.Event()
+    streams = await open_acp_streams(client)
+    streams.on_transport_lost = fired.set
+    try:
+        child.feed_frame(b'{"jsonrpc":"2.0"}')
+        await asyncio.sleep(0.05)
+        child.finish(0)  # child exits -> host emits LIVENESS(dead)
+        await asyncio.sleep(0.2)
+        assert not fired.is_set()
+    finally:
+        await streams.aclose()
+        await client.close()
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_recover_disconnected_hosts_reattaches_in_session(tmp_path, monkeypatch):
+    """In-session liveness-driven reattach: a RUNNING host-backed session whose
+    transport dropped (host + child alive) is redialed and resumed by cursor by
+    ``recover_disconnected_hosts`` -- no restart, same child, same ACP session.
+    """
+    import os
+    import sys
+
+    from agent_bridge.db import Database
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+    fake_argv = [sys.executable, str(agent_script)]
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return fake_argv, str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+
+    db = Database(tmp_path / "s.db")
+    mgr = SessionManager(
+        db, session_host_enabled=True,
+        session_host_state_dir=str(tmp_path / "hosts"),
+    )
+    host_pid = None
+    child_pid = None
+    try:
+        target = SpawnTarget(type="local", cwd=str(tmp_path))
+        session = await asyncio.wait_for(mgr.start_session(target), timeout=30)
+        sid = session.session_id
+        rec = mgr._host_index.all()[0]
+        host_pid, child_pid = rec.host_pid, rec.child_pid
+
+        # Simulate a mid-turn transport drop: mark the session RUNNING and flip
+        # the host-mode client's transport dead (host + child untouched).
+        session.status = SessionStatus.RUNNING
+        session.client.mark_transport_lost()
+        assert session.liveness_state() == "disconnected"
+
+        n = await asyncio.wait_for(mgr.recover_disconnected_hosts(), timeout=30)
+        assert n == 1
+        s = mgr.get_session(sid)
+        assert s.client is not None and s.client.is_running   # transport restored
+        assert s.acp_session_id == "host-mode-sess"           # adopted, not re-created
+        assert s.client.pid == child_pid                      # same surviving child
+        assert s.status == SessionStatus.RUNNING              # turn status preserved
+        assert osutil_pid_alive(host_pid)                     # host never respawned
+
+        # Idempotent: a healthy session needs no further reattach.
+        assert await asyncio.wait_for(mgr.recover_disconnected_hosts(), timeout=30) == 0
+
+        await s.client.shutdown()
+        db.close()
+    finally:
+        for pid in (host_pid, child_pid):
+            if pid:
+                with contextlib.suppress(Exception):
+                    if sys.platform == "win32":
+                        import subprocess
+                        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    else:
+                        import os as _os
+                        import signal
+                        _os.kill(pid, signal.SIGKILL)
+
+
+@pytest.mark.asyncio
 async def test_launch_session_host_process_owns_child(tmp_path):
     import signal
     import sys

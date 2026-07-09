@@ -435,6 +435,15 @@ class SessionManager:
         """True once drain() has begun -- new sessions/turns are refused."""
         return self._draining
 
+    @property
+    def session_host_enabled(self) -> bool:
+        """True when sessions run inside survivable Session Hosts (goal 1/3).
+
+        Gates the liveness-driven reattach driver (``recover_disconnected_hosts``)
+        that the app's heartbeat loop calls each beat.
+        """
+        return self._session_host_enabled
+
     def set_draining(
         self,
         value: bool,
@@ -970,6 +979,9 @@ class SessionManager:
                 on_event=on_acp_event,
                 on_permission=permission_callback,
             )
+            # Surface a mid-session transport drop (loopback socket down, host +
+            # child alive) as ``disconnected`` so the reattach driver fires (P1).
+            streams.on_transport_lost = client.mark_transport_lost
             if permission_callback:
                 client.auto_approve = False
             try:
@@ -1027,8 +1039,6 @@ class SessionManager:
         """
         if not self._session_host_enabled or self._host_index is None:
             return 0
-        from .session_host.acp_adapter import open_acp_streams
-        from .session_host.client import SessionHostClient
         from .session_host.osutil import pid_alive
         from .session_host.version_mux import HostDisposition, plan_host
 
@@ -1062,71 +1072,175 @@ class SessionManager:
                 self._reap_host_record(rec, "no adoptable session on reattach")
                 continue
 
-            def _on_acp_event(event_type: str, data: dict[str, Any],
-                              _session: Session = session) -> None:
-                if _session.event_log:
-                    _session.event_log.append(event_type, data)
-                self._capture_progress(_session, event_type, data)
-                if event_type == "usage_update":
-                    self._handle_usage_update(_session, data)
-
-            try:
-                sock = await SessionHostClient.connect(port=rec.port)
-                await sock.attach(0)
-                streams = await open_acp_streams(sock)
-
-                async def _closer(_streams: Any = streams, _sock: Any = sock) -> None:
-                    await _streams.aclose()
-                    await _sock.close()
-
-                client = AcpClient(on_event=_on_acp_event)
-                await asyncio.wait_for(
-                    client.start_streams(
-                        streams.reader, streams.writer,
-                        child_pid=rec.child_pid, closer=_closer,
-                    ),
-                    timeout=self._timeouts.session_start,
-                )
-                client.adopt_session(session.acp_session_id)
-                session.client = client
-                session.status = SessionStatus.IDLE
-                self._db.update_session_status(
-                    rec.session_id, SessionStatus.IDLE.value, time.time(),
-                    pid=session.pid,
-                )
+            if await self._reattach_one(
+                rec, session, new_status=SessionStatus.IDLE,
+                send_resume=getattr(rec, "resume_on_reattach", False),
+                prune_on_fail=True,
+            ):
                 reattached += 1
-                log.info(
-                    "Reattached session %s to live Session Host (pid=%s, port=%s)",
-                    rec.session_id, rec.host_pid, rec.port,
-                )
-                # If this session's in-flight turn was graceful-cancelled for the
-                # redeploy, nudge it back to work with a single "Resume" now that
-                # the frontend is reattached (operator: a bare "Resume" re-orients
-                # a Copilot session well without extra context).
-                if getattr(rec, "resume_on_reattach", False):
-                    self._host_index.set_resume_flag(rec.session_id, False)
-                    try:
-                        await self.submit_prompt(rec.session_id, "Resume")
-                        log.info(
-                            "Sent 'Resume' to reattached session %s "
-                            "(turn was graceful-cancelled for redeploy)",
-                            rec.session_id,
-                        )
-                    except Exception:
-                        log.warning(
-                            "Failed to send 'Resume' to reattached session %s",
-                            rec.session_id, exc_info=True,
-                        )
-            except Exception:
-                log.warning(
-                    "Failed to reattach session %s to host pid=%s; pruning",
-                    rec.session_id, rec.host_pid, exc_info=True,
-                )
-                with contextlib.suppress(Exception):
-                    self._host_index.remove(rec.session_id)
         if reattached:
             log.info("Reattached %d session(s) to surviving Session Hosts", reattached)
         return reattached
+
+    async def _reattach_one(
+        self,
+        rec: Any,
+        session: Session,
+        *,
+        new_status: SessionStatus,
+        send_resume: bool = False,
+        prune_on_fail: bool = False,
+    ) -> bool:
+        """(Re)connect to a live Session Host and adopt its session -- the shared
+        core of both startup reattach and in-session liveness-driven recovery.
+
+        Dials the host's endpoint, resumes by the host-retained seq cursor
+        (buffered frames past the durable ack replay with no gap and no
+        re-stream), re-initializes ACP over the fresh stream pair, and adopts the
+        existing ACP session id -- no child respawn. Wires transport-loss
+        detection so a *subsequent* drop re-arms the driver. Sets
+        ``session.client`` and ``session.status = new_status``; returns True on
+        success.
+
+        ``send_resume`` nudges a graceful-cancelled turn back to work with a
+        single "Resume". ``prune_on_fail`` drops the index record on failure
+        (startup path); the in-session driver leaves it for a later retry.
+        """
+        from .session_host.acp_adapter import open_acp_streams
+        from .session_host.client import SessionHostClient
+
+        def _on_acp_event(event_type: str, data: dict[str, Any]) -> None:
+            if session.event_log:
+                session.event_log.append(event_type, data)
+            self._capture_progress(session, event_type, data)
+            if event_type == "usage_update":
+                self._handle_usage_update(session, data)
+
+        # Release any stale (dead-transport) client first so its socketpair +
+        # relay tasks are freed; host-mode shutdown DETACHES (child survives).
+        old = session.client
+        if old is not None:
+            with contextlib.suppress(Exception):
+                await old.shutdown()
+
+        try:
+            sock = await SessionHostClient.connect(port=rec.port)
+            await sock.attach(0)
+            streams = await open_acp_streams(sock)
+
+            async def _closer(_streams: Any = streams, _sock: Any = sock) -> None:
+                await _streams.aclose()
+                await _sock.close()
+
+            client = AcpClient(on_event=_on_acp_event)
+            streams.on_transport_lost = client.mark_transport_lost
+            await asyncio.wait_for(
+                client.start_streams(
+                    streams.reader, streams.writer,
+                    child_pid=rec.child_pid, closer=_closer,
+                ),
+                timeout=self._timeouts.session_start,
+            )
+            client.adopt_session(session.acp_session_id)
+            session.client = client
+            session.status = new_status
+            self._db.update_session_status(
+                rec.session_id, new_status.value, time.time(), pid=session.pid,
+            )
+            log.info(
+                "Reattached session %s to live Session Host (pid=%s, port=%s)",
+                rec.session_id, rec.host_pid, rec.port,
+            )
+        except Exception:
+            log.warning(
+                "Failed to reattach session %s to host pid=%s%s",
+                rec.session_id, rec.host_pid,
+                "; pruning" if prune_on_fail else "",
+                exc_info=True,
+            )
+            if prune_on_fail and self._host_index is not None:
+                with contextlib.suppress(Exception):
+                    self._host_index.remove(rec.session_id)
+            return False
+
+        # If this session's in-flight turn was graceful-cancelled for a redeploy,
+        # nudge it back to work with a single "Resume" now that the frontend is
+        # reattached (a bare "Resume" re-orients a Copilot session well).
+        if send_resume and self._host_index is not None:
+            self._host_index.set_resume_flag(rec.session_id, False)
+            try:
+                await self.submit_prompt(rec.session_id, "Resume")
+                log.info(
+                    "Sent 'Resume' to reattached session %s "
+                    "(turn was graceful-cancelled for redeploy)",
+                    rec.session_id,
+                )
+            except Exception:
+                log.warning(
+                    "Failed to send 'Resume' to reattached session %s",
+                    rec.session_id, exc_info=True,
+                )
+        return True
+
+    async def recover_disconnected_hosts(self) -> int:
+        """In-session liveness-driven reattach for host-backed sessions (P1).
+
+        The P0 heartbeat only *stamps* liveness; this is the *actuator*. For each
+        host-backed session whose transport to its (still-alive) Session Host has
+        dropped -- ``liveness_state() == 'disconnected'`` on a RUNNING turn, or a
+        non-RUNNING session whose host-mode client is no longer running -- while
+        the host + child processes survive, redial the host and resume by cursor
+        (no restart, no lost turn). A merely ``stalled`` session (channel up,
+        agent silent) is surfaced but not reattached -- reconnecting cannot
+        un-wedge a silent agent. Returns the count reattached. No-op unless
+        ``session_host_enabled``.
+        """
+        if not self._session_host_enabled or self._host_index is None:
+            return 0
+        from .session_host.osutil import pid_alive
+        from .session_host.version_mux import HostDisposition, plan_host
+
+        recovered = 0
+        now = time.time()
+        for rec in list(self._host_index.live_records(pid_alive)):
+            session = self._sessions.get(rec.session_id)
+            if session is None or not session.acp_session_id:
+                continue
+            client = session.client
+            # A live, running client needs nothing; surface a stall and move on.
+            if client is not None and client.is_running:
+                if session.liveness_state(now) == "stalled":
+                    log.warning(
+                        "Session %s stalled (channel up, no output) -- "
+                        "surfaced, not reattached", rec.session_id,
+                    )
+                continue
+            # Transport is down. Only resume if the child is still there; a dead
+            # child is a real end, left to normal teardown/GC.
+            if not pid_alive(rec.child_pid):
+                continue
+            # Respect version-mux: never drive a host this build can't speak to.
+            plan = plan_host(
+                protocol_version=rec.protocol_version,
+                child_alive=True,
+                age_seconds=(now - rec.created_at) if rec.created_at else None,
+                stale_reap_seconds=self._session_host_stale_reap_seconds,
+            )
+            if plan.disposition is not HostDisposition.REATTACH:
+                continue
+            # Preserve a RUNNING turn's status so its replayed buffered frames
+            # keep flowing; otherwise land it IDLE and drivable.
+            keep = (SessionStatus.RUNNING
+                    if session.status == SessionStatus.RUNNING
+                    else SessionStatus.IDLE)
+            if await self._reattach_one(
+                rec, session, new_status=keep,
+                send_resume=getattr(rec, "resume_on_reattach", False),
+            ):
+                recovered += 1
+        if recovered:
+            log.info("Recovered %d disconnected host-backed session(s)", recovered)
+        return recovered
 
     def stranded_host_records(self) -> list[Any]:
         """Live Session Hosts this frontend can no longer speak to (version-mux).
