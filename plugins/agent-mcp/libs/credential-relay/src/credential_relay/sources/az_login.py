@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +27,61 @@ _SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 
 
 # Safety margin: expire cached tokens 5 minutes early
 _EXPIRY_SAFETY_MARGIN = 300
+
+# A bare AAD *resource* -- an app GUID (e.g. the Azure DevOps resource
+# ``499b84ac-1321-427f-aa17-267ca6975798``) -- must be turned into a v2 *scope*
+# by appending ``/.default`` before calling ``az ... --scope``. The
+# azure-auth-helper broker contract nominally sends a scope, but callers (e.g.
+# ado-auth-helper ``get-access-token "<resource>"``) routinely pass a bare
+# resource, and ``az account get-access-token --scope <bare-resource>`` fails
+# with "Please explicitly log in with: az login --scope <resource>".
+# Normalizing to ``<resource>/.default`` is what actually lets a logged-in host
+# mint the token (verified live). See #77.
+_GUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+# Substrings marking an ``az account get-access-token`` failure as a genuine
+# *host not logged in / needs consent* condition. az conflates a bad --scope and
+# a real sign-in gap into the same "please explicitly log in" message, so AFTER
+# scope normalization this reliably means the host must run ``az login``.
+_NEEDS_LOGIN_MARKERS = (
+    "please explicitly log in",
+    "az login",
+    "status_incorrectconfiguration",
+    "no subscription found",
+    "refresh token has expired",
+    "aadsts",
+    "please run 'az login'",
+)
+
+
+def _to_scope(target: str) -> str:
+    """Canonicalize an AAD resource/scope to a valid ``--scope`` value.
+
+    A bare *resource* (an app GUID like the Azure DevOps resource, or a resource
+    URI such as ``https://storage.azure.com`` / ``api://<guid>`` with no scope
+    path) is turned into its default scope ``<resource>/.default``. A value that
+    already carries a scope suffix (``.../.default`` or an explicit
+    ``.../user_impersonation``-style path) is returned unchanged.
+    """
+    t = (target or "").strip()
+    if not t or t.endswith("/.default"):
+        return t
+    core = t.rstrip("/")
+    if _GUID_RE.match(core):
+        return core + "/.default"
+    if "://" in core:
+        after = core.split("://", 1)[1]
+        # scheme://host with no path segment == a bare resource URI
+        if "/" not in after:
+            return core + "/.default"
+        return t
+    # bare token, no scheme and no scope suffix (e.g. an app-id URI host) --
+    # treat as a resource and request its default scope.
+    if "/" not in core:
+        return core + "/.default"
+    return t
 
 
 def _az_argv(rest: list[str]) -> list[str] | None:
@@ -214,7 +270,8 @@ class AzLoginSource:
         ``https://storage.azure.com/.default``); otherwise ``--resource``.
         """
         target = scope or resource
-        cred_args = ["--scope", scope] if scope else ["--resource", resource]
+        scope_arg = _to_scope(target)
+        cred_args = ["--scope", scope_arg] if scope_arg else ["--resource", resource]
         args = _az_argv([
             "account", "get-access-token",
             *cred_args,
@@ -255,12 +312,24 @@ class AzLoginSource:
 
         if proc.returncode != 0:
             err = stderr.decode(errors="replace").strip()
-            log.error(
-                "az account get-access-token failed (exit %d) for target=%s: %s",
-                proc.returncode,
-                target,
-                err,
-            )
+            if any(m in err.lower() for m in _NEEDS_LOGIN_MARKERS):
+                # Loud, actionable: the host az identity cannot mint this token.
+                # After scope normalization this means the host is not signed in
+                # (or lacks consent) for the resource -- the relay cannot serve
+                # an ADO/Azure REST bearer until a human signs in on the host.
+                log.error(
+                    "az account get-access-token: HOST NOT LOGGED IN for %s -- "
+                    "the relay cannot mint an ADO/Azure REST bearer until the "
+                    "host signs in. Run on the HOST:  az login --scope %s  "
+                    "(#77). az said: %s",
+                    target, scope_arg, err,
+                )
+            else:
+                log.error(
+                    "az account get-access-token failed (exit %d) for "
+                    "target=%s: %s",
+                    proc.returncode, target, err,
+                )
             return None
 
         raw = stdout.decode(errors="replace")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -48,6 +49,7 @@ async def _start_credential_relay(app: FastAPI):
     existing = getattr(app.state, "credential_relay", None)
     if existing is not None and getattr(existing, "running", False):
         return existing
+    relay_server = None
     try:
         from credential_relay import RelayBuilder
 
@@ -69,7 +71,24 @@ async def _start_credential_relay(app: FastAPI):
     except ImportError:
         log.debug("credential-relay lib not installed -- credential relay disabled")
     except OSError as exc:
-        log.warning("Credential relay failed to start: %s", exc)
+        # #123: a relay bind failure breaks ALL CodeSpace git/ADO auth over the
+        # SSH tunnel, so surface it LOUDLY (error, not a quiet warning) with a
+        # recovery hint. The single-instance guard now refuses duplicate daemons
+        # before they bind, so reaching here is a genuine, unexpected port
+        # conflict (a stray non-daemon occupant) worth an operator's attention.
+        port = getattr(relay_server, "port", None) or "9857"
+        log.error(
+            "Credential relay FAILED to bind (port %s): %s -- CodeSpace git/ADO "
+            "auth over the tunnel will NOT work until this is resolved. Check "
+            "for a stray process holding the relay port and restart the daemon "
+            "(agent-bridge service restart).",
+            port, exc,
+        )
+        print(
+            f"[agent-bridge] ERROR: credential relay failed to bind on port "
+            f"{port}: {exc} -- CodeSpace auth will be broken until resolved.",
+            file=sys.stderr,
+        )
     return None
 
 
