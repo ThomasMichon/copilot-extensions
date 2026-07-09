@@ -4134,9 +4134,10 @@ def cmd_reap_sessions(args: argparse.Namespace) -> int:
 def cmd_restart(args: argparse.Namespace) -> int:
     """``restart <id>`` -- stop a worktree's interactive Copilot, keep the worktree.
 
-    The shared primitive behind the Picker "Restart" action and NF "Take over":
+    The shared primitive behind the Picker "Stop" action and NF "Take over":
     graceful double-Ctrl-C quit (Copilot's native clean exit), falling back to a
-    hard mux kill-session. Relaunch / ACP-resume is the caller's job.
+    hard mux kill-session. Relaunch / ACP-resume is the caller's job. (The CLI
+    verb stays ``restart``; the picker labels it "Stop".)
     """
     payload = sessions.restart_worktree_copilot(
         args.worktree_id,
@@ -7367,7 +7368,7 @@ def build_parser() -> argparse.ArgumentParser:
         "restart",
         help="Stop a worktree's interactive Copilot (graceful double Ctrl-C, "
              "then mux kill-session) -- keeps the worktree on disk. The shared "
-             "primitive behind the Picker 'Restart' action and NF 'Take over'; "
+             "primitive behind the Picker 'Stop' action and NF 'Take over'; "
              "relaunch/ACP-resume is performed by the caller.")
     p.add_argument("worktree_id", help="Worktree id whose Copilot to stop")
     p.add_argument("--no-graceful", action="store_true",

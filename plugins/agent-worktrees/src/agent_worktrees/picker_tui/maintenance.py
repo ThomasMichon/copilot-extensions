@@ -3,10 +3,11 @@
 
 Runs the real per-worktree op on a daemon thread (sequentially, matching the
 ``working… N/M`` UX) so the Textual render loop never blocks. **Local** worktrees
-run in-process via the ``__main__`` pure helpers (``reap_one`` / ``sync_one``);
-**remote** worktrees run over SSH per item against the project binstub's JSON CLI
-(``cleanup --worktree-id`` / ``sync --worktree-id``). The engine polls each
-item's state from its render tick.
+run in-process via the ``__main__`` pure helpers (``reap_one`` / ``sync_one``) or
+the ``sessions`` primitive (``restart_worktree_copilot``); **remote** worktrees
+run over SSH per item against the project binstub's JSON CLI
+(``cleanup --worktree-id`` / ``sync --worktree-id`` / ``restart <id>``). The
+engine polls each item's state from its render tick.
 
 The executor is the *real* counterpart to the engine's mock progress walker
 (``_advance_progress``). Real ops are now the **default**, so Maintenance
@@ -59,6 +60,11 @@ def _result_ok(op, res):
     if op == "profiles":
         # Profiles Apply: the apply_column result's ``ok`` is authoritative.
         return bool(res.get("ok"))
+    if op == "restart":
+        # restart_worktree_copilot's ``ok`` is authoritative: True whether it
+        # stopped a live session (method graceful/hard) or found nothing running
+        # (method none) -- either way the worktree is now free to re-Open.
+        return bool(res.get("ok"))
     # sync: a no-op that was already current is success; a real skip is not.
     return bool(res.get("updated")) or res.get("reason") == "up-to-date"
 
@@ -100,6 +106,9 @@ def _make_task(op, wt_id, machine, env, is_local, *, include_unused,
                     wt_id, include_unused=include_unused,
                     include_conversations=include_conversations,
                 )
+            if op == "restart":
+                from .. import sessions
+                return sessions.restart_worktree_copilot(wt_id)
             return cli.sync_one(wt_id)
         from . import data_ssh
         argv = data_ssh.remote_op_argv(

@@ -251,6 +251,7 @@ def norm(w, machine, env):
         "cleanup_bucket": _bucket_from_raw(w),
         "ff_eligible": _ff_from_raw(w),
         "attached": bool(w.get("mux_attached")),
+        "mux_live": bool(w.get("mux_session") or w.get("mux_attached")),
         "active": w.get("status") == "active",
         "hidden": bool(kind in ("system", "bridge")),
         "raw": w,

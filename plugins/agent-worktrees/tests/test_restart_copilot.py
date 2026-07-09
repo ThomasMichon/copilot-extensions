@@ -1,6 +1,6 @@
 """Tests for the worktree interactive-Copilot restart primitive.
 
-``restart_worktree_copilot`` is the shared primitive behind the Picker "Restart"
+``restart_worktree_copilot`` is the shared primitive behind the Picker "Stop"
 maintenance action and Neuron-Forge "Take over": it stops a worktree's
 interactive Copilot (graceful double-Ctrl-C, then hard mux kill-session) while
 keeping the git worktree, so the caller can relaunch or ACP-resume.

@@ -132,6 +132,42 @@ def test_ready_remote_env_with_alias_is_connected(monkeypatch):
     assert "wheatley" in wheatley.argv
 
 
+def _remote_roster(monkeypatch):
+    """A local machine + one ready remote (Wheatley/Linux) for op-argv tests."""
+    entries = {
+        "lambda-core": _entry(
+            "lambda-core", "Lambda-Core",
+            [cfg.SSHEnvironment(name="windows", alias="lambda-core",
+                                shell="pwsh")]),
+        "wheatley": _entry(
+            "wheatley", "Wheatley",
+            [cfg.SSHEnvironment(name="linux", alias="wheatley", shell="bash")],
+            ssh_ready=True),
+    }
+    _install_roster(
+        monkeypatch, entries, machine="lambda-core",
+        local_id=("lambda-core", "windows"))
+
+
+def test_remote_op_argv_restart_uses_positional_id_and_json(monkeypatch):
+    """The remote 'restart' op runs ``<proj> restart <id> --json`` (the CLI
+    verb is ``restart`` even though the picker labels it 'Stop'); the id is
+    positional, not ``--worktree-id``."""
+    _remote_roster(monkeypatch)
+    argv = data_ssh.remote_op_argv("Wheatley", "Linux", "restart", "wt-xyz")
+    assert argv is not None and argv[0] == "ssh"
+    inner = argv[-1]
+    assert "proj restart wt-xyz --json" in inner
+    assert "--worktree-id" not in inner
+
+
+def test_remote_op_argv_restart_local_returns_none(monkeypatch):
+    """A local target yields no SSH argv (the caller runs it in-process)."""
+    _remote_roster(monkeypatch)
+    assert data_ssh.remote_op_argv(
+        "Lambda-Core", "Win", "restart", "wt-xyz") is None
+
+
 def test_ssh_not_ready_remote_env_is_disabled(monkeypatch):
     """A ssh.ready:false machine's remote env stays a disabled tab."""
     entries = {

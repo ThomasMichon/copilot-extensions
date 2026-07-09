@@ -1119,7 +1119,7 @@ def restart_worktree_copilot(
 ) -> dict:
     """Terminate the interactive Copilot holding a worktree, keeping the worktree.
 
-    The shared primitive behind the Picker **"Restart"** maintenance action and
+    The shared primitive behind the Picker **"Stop"** row action and
     Neuron-Forge **"Take over"**: it stops the running interactive Copilot (its
     ``wt-<id>`` tmux/psmux session) **without** removing the git worktree, so the
     caller can relaunch interactively (Picker) or ACP-resume (NF) afterwards.
