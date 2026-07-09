@@ -43,6 +43,104 @@ def _fixture_source():
     return src
 
 
+def test_maintenance_eliminated_from_nav():
+    """#1427: Maintenance is a hidden anchor -- off the left rail and not under
+    Configuration; the Worktrees pivot carries bulk Clean/Sync buttons instead."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            maint = next(i for i, p in enumerate(scr.pivots)
+                         if p["kind"] == "maintenance")
+            assert scr.pivots[maint]["placement"] == "hidden"
+            assert maint not in scr._left_pivots()
+            assert maint not in scr._config_pivots()
+            # Worktrees pivot now exposes the bulk Clean/Sync buttons.
+            assert scr._kind() == "worktrees"
+            bset = scr.button_set()
+            assert "K" in bset and "SY" in bset
+
+    asyncio.run(run())
+
+
+def test_worktrees_clean_button_opens_dialog():
+    """Activating the Clean button on the Worktrees row opens the cleanup
+    dialog (the state-quick-select mini-picker), not the old pivot (#1427)."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            scr.sel = ("BTN", 0)
+            scr.btn_idx = scr.button_set().index("K")
+            scr._activate()
+            assert scr.cleanup is not None            # cleanup mini-picker open
+            # Its options are the state buckets (select all merged, unused, …).
+            labels = [o["label"] for o in scr.cleanup["opts"]]
+            assert any("Merged" in x for x in labels)
+
+    asyncio.run(run())
+
+
+def test_clean_focus_preview_dims_non_cleanable():
+    """Focusing Clean dims worktree rows it would not touch (#1427)."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.sel = ("BTN", 0)
+            scr.btn_idx = scr.button_set().index("K")
+            await pilot.pause()
+            rows = {getattr(v, "stop", None): v for v in scr.build_body(118)
+                    if getattr(v, "stop", None) and v.stop[0] == "L"}
+            dimmed = {}
+            for stop, vr in rows.items():
+                rec = vr.data
+                is_dim = any("grey35" in str(sp.style) for sp in vr.text.spans)
+                dimmed[rec["id4"]] = (is_dim, scr._cleanable(rec))
+            # Every non-cleanable, non-selected row is dimmed; cleanable rows are not.
+            for _id, (is_dim, cleanable) in dimmed.items():
+                if not cleanable:
+                    assert is_dim, f"{_id} should be dimmed"
+
+    asyncio.run(run())
+
+
+def test_submenu_cleanup_opens_scoped_dialog():
+    """The per-worktree submenu Cleanup now runs the real op (scoped to that
+    worktree), not a mock (#1427)."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            # Find a cleanable row and open its submenu.
+            recs = scr.list_records()
+            ci = next(i for i, r in enumerate(recs) if scr._cleanable(r))
+            scr.sel = ("L", ci)
+            scr._open_submenu()
+            assert "Cleanup" in scr.submenu["actions"]
+            scr.submenu_idx = scr.submenu["actions"].index("Cleanup")
+            scr._key_submenu("enter")
+            assert scr.submenu is None
+            assert scr.cleanup is not None            # real scoped dialog opened
+
+    asyncio.run(run())
+
+
 def _bridge_source():
     """Two machines; a bridge-owned worktree lives on the non-local one, for
     the #1424 jump-to-host flow."""
@@ -1564,9 +1662,10 @@ def test_hidden_worktrees_filtered_and_toggle():
             assert "aaaa" in ids and "ssss" not in ids
             assert scr._hidden_count() == 1
             assert "TH" in scr.button_set()
-            # Activate the Toggle-hidden button (index 1) -> reveal.
+            # Activate the Toggle-hidden button (index resolved, not hardcoded --
+            # Clean/Sync now share the row, #1427) -> reveal.
             scr.sel = ("BTN", 0)
-            scr.btn_idx = 1
+            scr.btn_idx = scr.button_set().index("TH")
             scr._activate()
             assert scr.show_hidden is True
             ids = {r["id4"] for r in scr.list_records()}
@@ -2017,20 +2116,23 @@ def test_registered_pivot_switch_pivot_cycles_left_rail(tmp_path, monkeypatch):
         async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             await pilot.pause()
-            # Profiles is hosted under ⚙ Configuration, off the left rail (#1426).
+            # Profiles is under ⚙ Configuration and Maintenance is eliminated
+            # (a hidden anchor, #1427), so only Worktrees + the registered pivot
+            # ride the left rail.
             left = scr._left_pivots()
-            assert len(left) == 3
+            assert len(left) == 2
             kinds = []
             for _ in range(len(left)):
                 kinds.append(scr._kind())
                 scr._switch_pivot(1)
-            assert kinds == ["worktrees", "registered", "maintenance"]
+            assert kinds == ["worktrees", "registered"]
             assert scr.htab == 0                    # wrapped back to Worktrees
-            # The left cycle never lands on the config-hosted Profiles pivot.
+            # The left cycle never lands on the config-hosted or hidden pivots.
             seen = set()
             for _ in range(6):
                 seen.add(scr._kind())
                 scr._switch_pivot(1)
             assert "profiles" not in seen
+            assert "maintenance" not in seen
 
     asyncio.run(run())
