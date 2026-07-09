@@ -1605,6 +1605,19 @@ function Deploy-Shortcuts {
         }
     }
 
+    # One-time sweep: remove truncated, zero-length shortcut residue left by an
+    # earlier unquoted-path bug -- e.g. "Dotfiles (WSL" (no closing paren, no
+    # extension) sitting beside the real "Dotfiles (WSL).lnk". The stale-shortcut
+    # cleanup below only matches *.lnk, so these orphans were never swept. Scope
+    # strictly to EMPTY, extension-less files carrying the " (" label signature,
+    # so real binstubs (.cmd/.ps1), shortcuts (.lnk) and foreign files are safe.
+    Get-ChildItem -LiteralPath $LocalBin -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Length -eq 0 -and -not $_.Extension -and $_.Name -like '* (*' } |
+        ForEach-Object {
+            Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+            Write-ServiceChanged "Removed shortcut residue: $($_.Name)"
+        }
+
     foreach ($proj in $allProjects) {
         $displayName = ($proj -replace '-', ' ') -replace '(^| )(.)', { $_.Value.ToUpper() }
 
