@@ -1396,3 +1396,77 @@ class TestReachability:
         # cloud1 not ssh_ready -> related-remote agent skipped.
         agents = derive_topology_agents(ms, None, related, local, "windows")
         assert "odsp-web@cloud1" not in agents
+
+
+class TestSplitRepoVenue:
+    def test_no_at_is_bare(self):
+        from agent_bridge.agent_registry import _split_repo_venue
+        assert _split_repo_venue("dev6") == (None, "dev6")
+        assert _split_repo_venue("codespace:foo") == (None, "codespace:foo")
+
+    def test_repo_at_venue(self):
+        from agent_bridge.agent_registry import _split_repo_venue
+        assert _split_repo_venue("SPO.Core@dev6") == ("SPO.Core", "dev6")
+
+    def test_namespaced_venue(self):
+        from agent_bridge.agent_registry import _split_repo_venue
+        assert _split_repo_venue("odsp-web@codespace:foo") == ("odsp-web", "codespace:foo")
+
+    def test_empty_side_is_bare(self):
+        from agent_bridge.agent_registry import _split_repo_venue
+        assert _split_repo_venue("@dev6") == (None, "@dev6")
+        assert _split_repo_venue("repo@") == (None, "repo@")
+
+
+class TestVenueBoundResolve:
+    def setup_method(self):
+        self.machines = parse_machines_yaml(TOPO_MACHINES_DATA)
+        self.agents = {
+            "dev6": AgentConfig(
+                name="dev6", host="tmichon-dev6", ssh_environment="windows",
+                project="dotfiles", derived=True,
+            ),
+        }
+
+    @pytest.mark.asyncio
+    async def test_repo_at_machine_rebinds_project_loopback(self):
+        from unittest.mock import patch
+        local = self.machines["tmichon-dev6"]
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local, "windows"),
+        ):
+            resolver = AgentResolver(self.agents, self.machines)
+            target = await resolver.resolve_async("SPO.Core@dev6")
+        # Loopback (dev6 windows == local) -> local spawn running SPO.Core.
+        assert target.type == "local"
+        assert target.project == "SPO.Core"
+
+    @pytest.mark.asyncio
+    async def test_repo_at_machine_default_project_when_bare(self):
+        from unittest.mock import patch
+        local = self.machines["tmichon-dev6"]
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local, "windows"),
+        ):
+            resolver = AgentResolver(self.agents, self.machines)
+            target = await resolver.resolve_async("dev6")
+        # Bare venue keeps the control-plane default project.
+        assert target.project == "dotfiles"
+
+    @pytest.mark.asyncio
+    async def test_cross_repo_to_command_venue_unsupported(self):
+        # A namespace resolver whose resolve() has no `repo` kwarg -> a
+        # <repo>@<venue> request must raise, not silently launch the default.
+        class _NoRepoResolver:
+            prefix = "widget"
+            async def ensure_ready(self, name): ...
+            async def list_agents(self): return []
+            async def resolve(self, name, *, extra_plugins=()):
+                from agent_bridge.transport import SpawnTarget
+                return SpawnTarget(type="command", spawn_command=["x"])
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_NoRepoResolver())
+        with pytest.raises(ValueError, match="not supported"):
+            await resolver.resolve_async("dotfiles@widget:thing")
