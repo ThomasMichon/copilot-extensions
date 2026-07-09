@@ -142,3 +142,86 @@ async def verify_remote_auth(
         if not await host_has_auth(host, source=src, timeout=timeout):
             missing.append(host)
     return hosts, missing
+
+
+# The well-known Azure DevOps resource (app) ID. A REST bearer for Azure DevOps
+# is an AAD token for this resource's default scope; the relay mints it via the
+# host az identity (get-azure-token). See #77.
+ADO_REST_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798"
+
+
+def _ado_scope(resource: str = ADO_REST_RESOURCE) -> str:
+    """The v2 default scope for an ADO/AAD resource (``<resource>/.default``)."""
+    r = (resource or ADO_REST_RESOURCE).strip().rstrip("/")
+    return r if r.endswith("/.default") else r + "/.default"
+
+
+async def host_can_mint_ado_token(
+    resource: str = ADO_REST_RESOURCE, *, timeout: float = 30.0,
+) -> bool:
+    """Whether the *host* az identity can mint an ADO REST bearer for ``resource``.
+
+    Exercises the exact same path the relay uses (``AzLoginSource`` +
+    ``get-azure-token`` with scope normalization), so a True result here means a
+    dispatched agent's ``ado-auth-helper get-access-token`` will succeed. Never
+    raises; a probe failure returns False.
+    """
+    try:
+        from credential_relay.sources.az_login import AzLoginSource
+
+        src = AzLoginSource(allowed_resources=["*"], cache_ttl_override=0)
+        resp = await src.resolve(
+            "get-azure-token", {"scope": _ado_scope(resource)}, timeout=timeout,
+        )
+    except Exception:
+        log.debug("ADO REST token probe raised", exc_info=True)
+        return False
+    return bool(resp and "token=" in resp)
+
+
+async def enforce_host_ado_login(
+    resource: str = ADO_REST_RESOURCE, *, timeout: float = 300.0,
+) -> bool:
+    """Run ``az login --scope <resource>/.default`` on the host to enforce login.
+
+    Interactive: opens the host's browser for the human at the machine. Bounded
+    by ``timeout`` so a connect never blocks indefinitely. Returns True if login
+    completed AND the host can subsequently mint the ADO REST token. Never
+    raises.
+    """
+    import asyncio
+    import shutil
+
+    az = shutil.which("az")
+    if not az:
+        log.error("#77 enforce login: az CLI not found on PATH -- cannot sign in")
+        return False
+    scope = _ado_scope(resource)
+    argv = (["cmd", "/c", az] if az.lower().endswith((".cmd", ".bat")) else [az])
+    argv += ["login", "--scope", scope, "--only-show-errors"]
+    log.warning(
+        "#77: host cannot mint an ADO REST bearer -- launching `az login "
+        "--scope %s` on the host to enforce sign-in (complete it in the "
+        "browser).", scope,
+    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except (TimeoutError, asyncio.TimeoutError):
+        log.error("#77 enforce login: `az login` timed out after %.0fs", timeout)
+        return False
+    except Exception:
+        log.error("#77 enforce login: `az login` failed to run", exc_info=True)
+        return False
+    if proc.returncode != 0:
+        log.error(
+            "#77 enforce login: `az login --scope %s` failed (exit %d): %s",
+            scope, proc.returncode, stderr.decode(errors="replace").strip(),
+        )
+        return False
+    # Confirm the identity can now actually mint the token.
+    return await host_can_mint_ado_token(resource)

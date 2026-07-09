@@ -12,6 +12,7 @@ import pytest
 from credential_relay.sources.az_login import (
     AzLoginSource,
     _EXPIRY_SAFETY_MARGIN,
+    _to_scope,
 )
 
 
@@ -471,3 +472,79 @@ class TestAzLoginExpiryParsing:
         )
         expected = time.time() + 60.0
         assert abs(result - expected) < 2
+
+
+# ---------------------------------------------------------------------------
+# Scope Normalization (#77)
+# ---------------------------------------------------------------------------
+class TestToScope:
+    """A bare resource must become ``<resource>/.default`` for ``az --scope``."""
+
+    ADO = "499b84ac-1321-427f-aa17-267ca6975798"
+
+    def test_bare_guid_gets_default(self):
+        assert _to_scope(self.ADO) == f"{self.ADO}/.default"
+
+    def test_resource_uri_no_path_gets_default(self):
+        assert _to_scope("https://storage.azure.com") == (
+            "https://storage.azure.com/.default"
+        )
+
+    def test_resource_uri_trailing_slash_gets_default(self):
+        assert _to_scope("https://storage.azure.com/") == (
+            "https://storage.azure.com/.default"
+        )
+
+    def test_api_uri_resource_gets_default(self):
+        assert _to_scope(f"api://{self.ADO}") == f"api://{self.ADO}/.default"
+
+    def test_already_default_scope_unchanged(self):
+        s = "https://storage.azure.com/.default"
+        assert _to_scope(s) == s
+
+    def test_specific_scope_path_unchanged(self):
+        s = "https://storage.azure.com/user_impersonation"
+        assert _to_scope(s) == s
+
+    def test_guid_default_scope_unchanged(self):
+        s = f"{self.ADO}/.default"
+        assert _to_scope(s) == s
+
+    def test_empty_unchanged(self):
+        assert _to_scope("") == ""
+
+    @pytest.mark.asyncio
+    async def test_bare_guid_scope_calls_az_with_default(self):
+        """The #77 regression: a bare ADO GUID scope -> ``az --scope <guid>/.default``."""
+        source = AzLoginSource(allowed_resources=["*"])
+        proc = _mock_process(stdout=_make_az_response(token="ado-bearer"))
+        with patch(
+            "asyncio.create_subprocess_exec", return_value=proc
+        ) as mock_exec:
+            result = await source.resolve(
+                "get-azure-token", {"scope": self.ADO}
+            )
+        call_args = mock_exec.call_args
+        args = call_args[0] if call_args[0] else call_args.args
+        assert "--scope" in args
+        assert f"{self.ADO}/.default" in args
+        # the bare GUID must NOT be passed as-is (that is what az rejects)
+        assert self.ADO not in [a for a in args if a != f"{self.ADO}/.default"]
+        assert result is not None and "token=ado-bearer" in result
+
+    @pytest.mark.asyncio
+    async def test_not_logged_in_error_returns_none(self):
+        """The 'please explicitly log in' az failure resolves to None (loud log)."""
+        source = AzLoginSource(allowed_resources=["*"])
+        proc = _mock_process(
+            stderr=(
+                "ERROR: ... Status_IncorrectConfiguration ... Please explicitly "
+                f"log in with:\naz login --scope {self.ADO}"
+            ),
+            returncode=1,
+        )
+        with patch("asyncio.create_subprocess_exec", return_value=proc):
+            result = await source.resolve(
+                "get-azure-token", {"scope": f"{self.ADO}/.default"}
+            )
+        assert result is None

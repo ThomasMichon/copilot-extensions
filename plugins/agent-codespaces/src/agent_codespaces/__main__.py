@@ -952,6 +952,67 @@ async def _verify_remote_auth(manager, name: str, config) -> None:
             "Remote auth verified for %s: %s", name, ", ".join(hosts),
         )
 
+    # #77: ADO REST bearer preflight for ADO workspaces. Git-credential auth
+    # (above) covers git ops; PR/REST tooling additionally needs an AAD *bearer*
+    # the relay mints from the host az identity. Only runs when the session
+    # touches an ADO host, so non-ADO CodeSpaces pay no cost.
+    if any(_is_ado_host(h) for h in hosts):
+        await _preflight_ado_rest_token(name, config)
+
+
+def _is_ado_host(host: str) -> bool:
+    """Whether ``host`` is an Azure DevOps host (ADO REST bearer applies)."""
+    h = (host or "").lower()
+    return h.endswith(".visualstudio.com") or h == "dev.azure.com"
+
+
+async def _preflight_ado_rest_token(name: str, config) -> None:
+    """#77: ensure the host can mint an ADO REST bearer for dispatched agents.
+
+    A dispatched agent's ``ado-auth-helper get-access-token`` is served by the
+    relay from the host az identity (get-azure-token). Verify the host can mint
+    it; if not, enforce ``az login`` on the host. When
+    ``credentials.enforce_ado_rest_login`` is set, a login that can't complete
+    ABORTS the connect (raises); otherwise it is a loud warning and the connect
+    proceeds. The relay itself always logs a loud not-logged-in error too.
+    """
+    from .auth_preflight import (
+        ADO_REST_RESOURCE,
+        enforce_host_ado_login,
+        host_can_mint_ado_token,
+    )
+
+    try:
+        if await host_can_mint_ado_token():
+            log.info("ADO REST bearer available on host for %s", name)
+            return
+    except Exception as exc:
+        log.debug("ADO REST token preflight probe failed: %s", exc)
+        return
+
+    enforce = getattr(config.credentials, "enforce_ado_rest_login", False)
+    ok = False
+    try:
+        ok = await enforce_host_ado_login()
+    except Exception:
+        log.debug("ADO REST login enforcement raised", exc_info=True)
+
+    if ok:
+        log.info(
+            "ADO REST bearer now available on host after az login (%s)", name
+        )
+        return
+
+    msg = (
+        f"Host cannot mint an ADO REST bearer: `ado-auth-helper "
+        f"get-access-token` on CodeSpace '{name}' will fail. Sign in on the "
+        f"HOST:  az login --scope {ADO_REST_RESOURCE}/.default  (#77)."
+    )
+    if enforce:
+        raise RuntimeError(msg)
+    log.warning(msg)
+    print(f"[WARN] {msg}", file=sys.stderr)
+
 
 def _lookup_codespace_repo(name: str) -> str | None:
     """Best-effort lookup of a CodeSpace's repository (owner/name)."""

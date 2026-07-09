@@ -65,6 +65,14 @@ class CredentialsConfig:
     # ``dev.azure.com``). Left unset, such requests are rejected rather than
     # assuming an organization.
     ado_host: str | None = None
+    # #77: enforce host `az login` at connect time when the host cannot mint an
+    # ADO REST bearer (the relay's get-azure-token path needs a signed-in host
+    # az identity). When True, a connect runs `az login` on the host and ABORTS
+    # the connect if it can't complete; when False (default) the preflight only
+    # attempts login and surfaces a loud warning, never aborting an otherwise
+    # healthy SSH+relay session. The relay itself always logs a loud, actionable
+    # not-logged-in error regardless of this flag.
+    enforce_ado_rest_login: bool = False
 
 
 @dataclass
@@ -427,6 +435,10 @@ def load_merged_config() -> CodespacesConfig:
             merged.credentials.ado_host = creds_raw.get(
                 "ado_host", merged.credentials.ado_host
             )
+            merged.credentials.enforce_ado_rest_login = bool(creds_raw.get(
+                "enforce_ado_rest_login",
+                merged.credentials.enforce_ado_rest_login,
+            ))
             for source_name, source_raw in creds_raw.get("sources", {}).items():
                 if source_name not in merged.credentials.sources:
                     merged.credentials.sources[source_name] = _parse_credential_source(
