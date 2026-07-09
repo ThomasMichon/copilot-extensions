@@ -9,26 +9,39 @@ account per agent.
 > **Status: early but installable.** This ships the queue **engine**
 > (`agent_dispatch.queue`), the per-host **coordinator daemon**
 > (`agent-dispatch serve`), the **`agent-dispatch` CLI**, **local MCP tools**
-> (`agent-dispatch mcp`), an **installer** (marketplace-registered;
-> `scripts/init.sh` / `scripts/init.ps1` deploy a venv + binstub + deploy
-> manifest), an **SSE event stream** (`GET /events` / `agent-dispatch watch`),
-> and **agent-bridge spawn** (`create --spawn`). The coordinator can auto-start
-> as a service on both platforms: a **systemd user unit** (`init.sh --service`)
-> and a **Windows Scheduled Task** (`init.ps1 -Service`).
+> (`agent-dispatch mcp`), a **lifecycle installer** (marketplace-registered;
+> `scripts/install.sh` / `scripts/install.ps1` --
+> `install|update|status|start|stop|uninstall` -- deploy a venv + binstub +
+> deploy manifest), an **SSE event stream** (`GET /events` /
+> `agent-dispatch watch`), and **agent-bridge spawn** (`create --spawn`). On its
+> deploy machines the coordinator installs by default and auto-starts as a
+> service on both platforms: a **systemd user unit** (Linux) and a **Windows
+> Scheduled Task**.
 
 ## Install
+
+`agent-dispatch` is a `machine-gated` plugin: the agent-worktrees launch-time
+reconciler installs/updates its runtime automatically on the machines listed in
+the control repo's gate manifest (`external-repos.yaml` `deploy_machines`), and
+the facility path `aperture-labs services agent-dispatch <action>` drives it too
+-- the same model as agent-bridge. To install/manage it directly:
 
 ```bash
 # via the marketplace (once published):
 copilot plugin install agent-dispatch@copilot-extensions
-# then deploy the runtime (venv + binstub + manifest):
-bash "$(copilot plugin path agent-dispatch)/scripts/init.sh"   # Linux/WSL/macOS
-# Windows:  pwsh -File <plugin>\scripts\init.ps1
+# then deploy the runtime (venv + binstub + coordinator service + picker pivot):
+bash "$(copilot plugin path agent-dispatch)/scripts/install.sh" install    # Linux/WSL/macOS
+# Windows:  pwsh -File <plugin>\scripts\install.ps1 -Action install
 ```
 
-The installer creates `~/.agent-dispatch/.venv`, an `agent-dispatch` binstub in
-`~/.local/bin`, and a schema-3 deploy manifest. Re-run with `--force` to repair.
-It also registers a **"Tasks" pivot** in the agent-worktrees picker (see below).
+`scripts/install.{sh,ps1}` is a lifecycle manager --
+`install | update | status | start | stop | uninstall` (`init.{sh,ps1}` is a
+thin alias for `install`). `install`/`update` create `~/.agent-dispatch/.venv`,
+an `agent-dispatch` binstub in `~/.local/bin`, a schema-3 deploy manifest, the
+**"Tasks" picker pivot** (see below), and -- unless `--no-service` (`-NoService`)
+-- the coordinator service (a per-host local coordinator, matching agent-bridge).
+`update` is downgrade-guarded (a stale checkout won't silently roll back a newer
+deployed runtime; override with `--force`).
 
 ### Worktree-picker "Tasks" pivot
 
@@ -43,26 +56,27 @@ ignores it. Source: `pivots/agent-dispatch.json`.
 
 ### Running the coordinator as a service
 
-On the host that *is* the coordinator, install an auto-starting service that runs
-`agent-dispatch serve` and restarts on failure:
+On the host that *is* a coordinator, the service is installed by default
+(`install`/`update` above). To manage it explicitly, or install only the client
+on a machine that points at a remote coordinator:
 
 ```bash
-# Linux/WSL -- a systemd user unit:
-bash "$(copilot plugin path agent-dispatch)/scripts/init.sh" --service
-systemctl --user status agent-dispatch          # manage it
+# Linux/WSL -- a systemd user unit (installed by default; --no-service to skip):
+bash "$(copilot plugin path agent-dispatch)/scripts/install.sh" status   # or start | stop
+systemctl --user status agent-dispatch          # manage it directly
 # edit ~/.agent-dispatch/service.env (host/port/token), then: systemctl --user restart agent-dispatch
 ```
 
 ```powershell
-# Windows -- a Scheduled Task (starts at logon):
-pwsh -File <plugin>\scripts\init.ps1 -Service
+# Windows -- a Scheduled Task (starts at logon; installed by default):
+pwsh -File <plugin>\scripts\install.ps1 -Action status   # or start | stop
 Get-ScheduledTask -TaskName agent-dispatch | Get-ScheduledTaskInfo   # manage it
 # edit %USERPROFILE%\.agent-dispatch\service.env, then: Start-ScheduledTask -TaskName agent-dispatch
 ```
 
 Both read an editable `service.env` (host/port/db/token) beside the runtime. A
-machine that is only a *client* of a remote coordinator omits the service flag
-and just points `AGENT_DISPATCH_URL` at the coordinator host.
+client-only machine installs with `--no-service` (`-NoService`) and points
+`AGENT_DISPATCH_URL` at the coordinator host.
 
 ## Why
 
