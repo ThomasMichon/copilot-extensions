@@ -1482,11 +1482,16 @@ class PickerScreen(Widget):
             cols, sections = self.current_list()
             lcols = fit(cols, width - 1, "title", 14)
             add(header_text(lcols, width), kind="colhdr")
-            # Focus-preview: when Clean/Sync is the focused button, dim the rows
-            # that action would NOT touch, so its scope reads before you open the
-            # dialog (#1427).
+            # Preview which worktrees an action targets, directly on the list
+            # (#2179): while the Clean/Sync dialog is open, dim every row outside
+            # the currently-selected bucket union (updates live as buckets
+            # toggle); otherwise, when the Clean/Sync button is merely focused,
+            # dim the rows that action can't touch.
             preview = None
-            if btn_focus:
+            preview_ids = None
+            if self.cleanup is not None:
+                preview_ids = self._cleanup_union()
+            elif btn_focus:
                 ab = self.active_button()
                 preview = {"K": "clean", "SY": "sync"}.get(ab)
             li = 0
@@ -1504,6 +1509,8 @@ class PickerScreen(Widget):
                     if rec.get("hidden") and sel != ("L", li):
                         # Revealed bridge/system worktree -> dim it (#1422).
                         vr.text.stylize("grey42")
+                    elif preview_ids is not None and rec["id4"] not in preview_ids:
+                        vr.text.stylize("grey35")   # outside the selected set
                     elif preview and sel != ("L", li) and not (
                         self._cleanable(rec) if preview == "clean"
                         else rec.get("ff_eligible")
@@ -1951,10 +1958,16 @@ class PickerScreen(Widget):
         modal = (self.submenu or self.maint_menu or self.cleanup
                  or self.optmenu or self.prof_confirm or self.progress
                  or self.quit_confirm or self.task_menu or self.cfgmenu)
+        # The Clean/Sync dialog is a LIVE FILTER over the worktree list (#2179):
+        # keep the list visible (build_body dims rows outside the selected set)
+        # and dock the bucket toggles at the bottom, instead of graying the whole
+        # screen and centering a modal over the very list it filters.
+        live_filter = self.cleanup is not None and self._kind() == "worktrees"
         if modal:
-            # Gray out ALL background content behind the dialog.
-            lines = [Text((ln if isinstance(ln, Text) else Text(str(ln))).plain,
-                          style="grey35") for ln in lines]
+            if not live_filter:
+                # Gray out ALL background content behind the dialog.
+                lines = [Text((ln if isinstance(ln, Text) else Text(str(ln))).plain,
+                              style="grey35") for ln in lines]
             off, bh = len(top) + 2, body_h
             if self.quit_confirm:
                 self._overlay_quit_confirm(lines, W, off, bh)
@@ -1967,7 +1980,8 @@ class PickerScreen(Widget):
             elif self.maint_menu:
                 self._overlay_maint_menu(lines, W, off, bh)
             elif self.cleanup:
-                self._overlay_scopedlg(self.cleanup, lines, W, off, bh, om=False)
+                self._overlay_scopedlg(self.cleanup, lines, W, off, bh, om=False,
+                                       dock_bottom=live_filter)
             elif self.optmenu:
                 self._overlay_scopedlg(self.optmenu, lines, W, off, bh, om=True)
             elif self.prof_confirm:
@@ -2221,9 +2235,15 @@ class PickerScreen(Widget):
             n = self.maint_menu["count"]
             hints = f"↑↓ choose · Enter: {cur.lower()} {n} worktree(s) · Esc back"
         elif dlg:
+            live = self.cleanup is not None and self._kind() == "worktrees"
+            n = len(self._cleanup_union()) if self.cleanup is not None else 0
             if dlg.get("section", 0) == 0:
-                hints = ("↑↓ move · Space toggle option · Tab → buttons"
-                         " · Enter next · Esc cancel")
+                if live:
+                    hints = (f"↑↓ bucket · Space toggle (list previews {n} live)"
+                             f" · Tab → confirm · Esc cancel")
+                else:
+                    hints = ("↑↓ move · Space toggle option · Tab → buttons"
+                             " · Enter next · Esc cancel")
             else:
                 clabel = dlg.get("confirm", "Confirm")
                 hints = (f"◀▶ button · Enter: {clabel} · ↑ back to options"
@@ -2290,10 +2310,15 @@ class PickerScreen(Widget):
         row.append("│", style=C_DIM)
         return row
 
-    def _blit_panel(self, lines, W, panel, top_off, body_h):
+    def _blit_panel(self, lines, W, panel, top_off, body_h, dock_bottom=False):
         pw = panel[0].cell_len
         x = max(0, (W - pw) // 2)
-        y0 = top_off + max(0, (body_h - len(panel)) // 2)
+        if dock_bottom:
+            # Sit the panel at the bottom of the body so the (live-filtered)
+            # list above it stays fully visible (#2179).
+            y0 = top_off + max(0, body_h - len(panel))
+        else:
+            y0 = top_off + max(0, (body_h - len(panel)) // 2)
         for j, prow in enumerate(panel):
             yi = y0 + j
             if 0 <= yi < len(lines):
@@ -2460,7 +2485,8 @@ class PickerScreen(Widget):
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)
 
-    def _overlay_scopedlg(self, dlg, lines, W, top_off, body_h, om=False):
+    def _overlay_scopedlg(self, dlg, lines, W, top_off, body_h, om=False,
+                          dock_bottom=False):
         opts = dlg["opts"]
         idx = dlg["idx"]
         section = dlg.get("section", 0)
@@ -2514,7 +2540,7 @@ class PickerScreen(Widget):
         brow.append("│", style=C_DIM)
         panel.append(brow)
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
-        self._blit_panel(lines, W, panel, top_off, body_h)
+        self._blit_panel(lines, W, panel, top_off, body_h, dock_bottom=dock_bottom)
 
     def _overlay_progress(self, lines, W, top_off, body_h):
         """Per-worktree progress for a cleanup/sync run: each selected worktree

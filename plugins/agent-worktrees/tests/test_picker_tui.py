@@ -141,6 +141,51 @@ def test_submenu_cleanup_opens_scoped_dialog():
     asyncio.run(run())
 
 
+def test_clean_dialog_live_filter_preview():
+    """While the Clean dialog is open, the worktree list dims rows outside the
+    selected bucket union and keeps selected rows bright; toggling a bucket
+    updates the preview live (#2179)."""
+    src = _maint_source()
+
+    def dim_map(scr):
+        rows = {}
+        for v in scr.build_body(118):
+            stop = getattr(v, "stop", None)
+            if stop and stop[0] == "L":
+                dim = any("grey35" in str(sp.style) for sp in v.text.spans)
+                rows[v.data["id4"]] = dim
+        return rows
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            scr.sel = ("BTN", 0)
+            scr.btn_idx = scr.button_set().index("K")
+            scr._activate()                       # open the Clean dialog
+            assert scr.cleanup is not None
+            sel_ids = scr._cleanup_union()
+            assert sel_ids                        # default "Merged" bucket on
+            dm = dim_map(scr)
+            for id4, dim in dm.items():
+                assert dim == (id4 not in sel_ids)   # in-set bright, rest dimmed
+            # Toggling the "Unused" bucket widens the previewed set live.
+            before = set(scr._cleanup_union())
+            ui = next(i for i, o in enumerate(scr.cleanup["opts"])
+                      if o["label"] == "Unused")
+            scr.cleanup["idx"] = ui
+            scr._key_scopedlg("space")
+            after = set(scr._cleanup_union())
+            assert after > before
+            dm2 = dim_map(scr)
+            for id4, dim in dm2.items():
+                assert dim == (id4 not in after)
+
+    asyncio.run(run())
+
+
 def test_configuration_reachable_via_tab():
     """The ⚙ Configuration entry is in the Tab cycle (region_heads) and Tab from
     the View pivot lands on it (operator feedback: couldn't reach it)."""
