@@ -167,3 +167,91 @@ def test_mark_active_clears(store):
     rc = main(["mark", "cs-one", "active"])
     assert rc == 0
     assert status_mod.get_status("cs-one") is None
+
+
+# --- list surfaces the eligibility marker ----------------------------------
+
+def test_list_json_includes_eligibility(store, capsys):
+    import json
+
+    status_mod.set_status("cs-one", status_mod.STATE_PRUNABLE)
+    with patch(
+        "agent_codespaces.__main__.list_codespaces",
+        return_value=[_info("cs-one", "Shutdown"), _info("cs-two", "Available")],
+    ):
+        rc = main(["list", "--json"])
+    assert rc == 0
+    data = {d["name"]: d["eligibility"] for d in json.loads(capsys.readouterr().out)}
+    assert data == {"cs-one": "prunable", "cs-two": "active"}
+
+
+# --- create quota auto-retry (reclaim + retry once) ------------------------
+
+def test_reclaim_total_limit_prunes_prunable(store):
+    status_mod.set_status("cs-old", status_mod.STATE_PRUNABLE, "merged")
+    with patch(
+        "agent_codespaces.__main__.sync_codespace_sessions",
+        return_value={"ok": True, "session_count": 0, "detail": "x"},
+    ), patch("agent_codespaces.__main__.delete_codespace") as dele:
+        from agent_codespaces.__main__ import _reclaim_for_quota
+
+        note = _reclaim_for_quota("You have reached the maximum number of codespaces")
+    assert note is not None and "cs-old" in note
+    dele.assert_called_once_with("cs-old", force=False)
+    assert status_mod.get_status("cs-old") is None
+
+
+def test_reclaim_running_limit_stops_eligible_running(store):
+    status_mod.set_status("cs-run", status_mod.STATE_RECOVERED)
+    with patch(
+        "agent_codespaces.__main__.list_codespaces",
+        return_value=[_info("cs-run", "Available")],
+    ), patch("agent_codespaces.__main__.stop_codespace") as stop:
+        from agent_codespaces.__main__ import _reclaim_for_quota
+
+        note = _reclaim_for_quota("You have too many codespaces running. Please stop some")
+    assert note is not None and "cs-run" in note
+    stop.assert_called_once_with("cs-run")
+
+
+def test_reclaim_running_limit_ignores_unmarked_running(store):
+    # An unmarked (in-use) running box must never be auto-stopped.
+    with patch(
+        "agent_codespaces.__main__.list_codespaces",
+        return_value=[_info("busy", "Available")],
+    ), patch("agent_codespaces.__main__.stop_codespace") as stop:
+        from agent_codespaces.__main__ import _reclaim_for_quota
+
+        note = _reclaim_for_quota("too many codespaces running")
+    assert note is None
+    stop.assert_not_called()
+
+
+def test_reclaim_unknown_error_returns_none(store):
+    from agent_codespaces.__main__ import _reclaim_for_quota
+
+    assert _reclaim_for_quota("some unrelated failure") is None
+
+
+def test_create_retries_after_reclaim(store):
+    info = _info("new-cs", "Available")
+    with patch("agent_codespaces.__main__.load_merged_config", return_value=object()), \
+         patch("agent_codespaces.__main__._reclaim_for_quota", return_value="pruned x"), \
+         patch(
+             "agent_codespaces.__main__.create_codespace",
+             side_effect=[RuntimeError("maximum number of codespaces"), info],
+         ) as cc:
+        rc = main(["create", "owner/repo", "--no-wait"])
+    assert rc == 0
+    assert cc.call_count == 2
+
+
+def test_create_quota_no_reclaim_fails(store):
+    with patch("agent_codespaces.__main__.load_merged_config", return_value=object()), \
+         patch("agent_codespaces.__main__._reclaim_for_quota", return_value=None), \
+         patch(
+             "agent_codespaces.__main__.create_codespace",
+             side_effect=RuntimeError("maximum number of codespaces"),
+         ):
+        rc = main(["create", "owner/repo", "--no-wait"])
+    assert rc == 1
