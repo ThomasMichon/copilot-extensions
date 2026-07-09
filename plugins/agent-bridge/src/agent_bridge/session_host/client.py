@@ -45,14 +45,18 @@ class SessionHostClient:
     def child_exit_code(self) -> int:
         return self._child_exit
 
-    async def attach(self, last_acked: int = 0) -> Hello:
+    async def attach(self, last_acked: int = 0, *, nonce: bytes = b"") -> Hello:
         """Send the reattach handshake; return the host's HELLO.
 
         ``last_acked`` is the last frame ``seq`` this frontend durably recorded.
-        The host replays everything after it -- no gap, no re-stream.
+        The host replays everything after it -- no gap, no re-stream. ``nonce``
+        is the optional connect-auth token: a host launched with a nonce closes
+        the connection unless it matches (defense-in-depth so a stray same-user
+        process cannot drive the child by dialing the port); an unsecured host
+        ignores it.
         """
         await proto.write_message(self._writer, proto.MsgType.ATTACH,
-                                  proto.pack_u64(last_acked))
+                                  proto.pack_attach(last_acked, nonce))
         msg = await proto.read_message(self._reader)
         if msg is None or msg[0] != proto.MsgType.HELLO:
             raise ConnectionError("session host did not send HELLO")

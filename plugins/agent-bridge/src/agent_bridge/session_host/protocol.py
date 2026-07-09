@@ -62,6 +62,26 @@ def unpack_frame(payload: bytes) -> tuple[int, bytes]:
     return _U64.unpack(payload[:8])[0], payload[8:]
 
 
+def pack_attach(last_acked: int, nonce: bytes = b"") -> bytes:
+    """Encode an ATTACH payload: ``u64 last_acked`` + optional trailing nonce.
+
+    The nonce (if any) rides *after* the fixed 8-byte cursor. A legacy host that
+    only reads ``payload[:8]`` transparently ignores it, so adding connect-auth
+    is backward-compatible without a protocol-version bump. A host launched with
+    a nonce validates the trailing bytes (see :meth:`SessionHost` handling); an
+    unsecured host ignores them.
+    """
+    return _U64.pack(last_acked) + nonce
+
+
+def unpack_attach(payload: bytes) -> tuple[int, bytes]:
+    """Decode an ATTACH payload into ``(last_acked, nonce)``.
+
+    ``nonce`` is empty when the frontend sent none (legacy / unsecured).
+    """
+    return _U64.unpack(payload[:8])[0], payload[8:]
+
+
 def pack_liveness(alive: bool, exit_code: int = 0) -> bytes:
     return (b"\x01" if alive else b"\x00") + _U32.pack(exit_code & 0xFFFFFFFF)
 

@@ -63,8 +63,9 @@ class SessionHost:
     retained so a reattaching frontend resumes with no gap and no re-stream.
     """
 
-    def __init__(self, child: ChildProcess) -> None:
+    def __init__(self, child: ChildProcess, *, nonce: str = "") -> None:
         self._child = child
+        self._nonce = nonce or ""
         self._frames: dict[int, bytes] = {}
         self._max_seq = 0
         self._ack_cursor = 0
@@ -170,7 +171,15 @@ class SessionHost:
         if first is None or first[0] != proto.MsgType.ATTACH:
             writer.close()
             return
-        last_acked = proto.unpack_u64(first[1])
+        last_acked, nonce = proto.unpack_attach(first[1])
+        # Connect-auth: a host launched with a nonce refuses any front that does
+        # not present the matching token (defense-in-depth against a same-user
+        # process dialing the loopback/forwarded port). An unsecured host (no
+        # nonce configured) accepts all, preserving legacy behavior.
+        if self._nonce and nonce.decode("utf-8", "replace") != self._nonce:
+            log.warning("frontend presented an invalid connect nonce; rejecting")
+            writer.close()
+            return
         self._ack_cursor = max(self._ack_cursor, last_acked)
         front = _Front(reader, writer, next_seq=last_acked + 1)
         self._front = front
