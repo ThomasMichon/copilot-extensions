@@ -196,6 +196,13 @@ does.
 - **Dispatch is kind-keyed, not index-keyed.** Built-in pivot logic switches on
   the pivot *kind* (`worktrees`/`maintenance`/`profiles`/`registered`), so an
   inserted pivot never renumbers the built-ins.
+- **Placement** (`PIVOT_PLACEMENT`, keyed by kind) decides *where* a pivot is
+  reached from: `left` rides the left ◀▶/`[ ]` cycle (the default); `config` is
+  hosted under the right-aligned **⚙ Configuration** menu (Profiles lives here --
+  user-local settings only, never repo-managed, #1426); `hidden` is an ordering
+  anchor kept only so registered `after` hints still weave. Placement partitions
+  the tabs **without** touching the `order_pivots` weave, so a registered pivot's
+  `after: "Profiles"` keeps working even though Profiles left the left rail.
 
 ### Action kinds: external (CLI) vs internal (navigation)
 
