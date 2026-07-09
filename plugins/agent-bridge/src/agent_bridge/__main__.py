@@ -11,6 +11,8 @@ import argparse
 import json
 import logging
 import os
+import shutil
+import subprocess
 import sys
 import urllib.error
 from datetime import datetime
@@ -154,8 +156,9 @@ def _add_stream_args(p: argparse.ArgumentParser) -> None:
     """Add the streaming/collapse flags shared by send / wait / read."""
     p.add_argument(
         "--caller", metavar="ID",
-        help="Caller identity keying the delivery cursor (defaults to "
-             "$WORKTREE_ID, else a shared per-session cursor)",
+        help="Caller identity keying the delivery cursor (defaults to the "
+             "current worktree via `agent-worktrees get worktree-dir`, else a "
+             "shared per-session cursor)",
     )
     p.add_argument(
         "--expand", action="append", choices=["thoughts", "tools", "all"],
@@ -1363,23 +1366,54 @@ def _mark_resume_if_behind(
     return True
 
 
-def _get_caller_id() -> str | None:
-    """Read caller identity from the environment.
+def _worktrees_get(key: str) -> str | None:
+    """Query ``agent-worktrees get <key>`` in the current working directory.
 
-    Uses WORKTREE_ID (set by agent-worktrees) so that each worktree
-    gets its own session affinity with remote agents.  Falls back to
-    None if not running inside a worktree session.
+    This is the CWD-derived source of the caller's worktree identity -- it
+    replaces the ``WORKTREE_ID`` env var (which agent-worktrees deliberately does
+    *not* inject into bridge-dispatched sessions, so it was unreliable). Returns
+    the trimmed value, or None if unavailable / empty / not inside a worktree.
     """
-    return os.environ.get("WORKTREE_ID")
+    exe = shutil.which("agent-worktrees")
+    if not exe:
+        return None
+    try:
+        r = subprocess.run(
+            [exe, "get", key],
+            capture_output=True, text=True, timeout=8,
+        )
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    val = (r.stdout or "").strip()
+    return val or None
+
+
+def _get_caller_id() -> str | None:
+    """Read caller identity from the current worktree (CWD).
+
+    Uses ``agent-worktrees get worktree-dir`` so that each worktree gets its own
+    session affinity with remote agents -- derived from the CWD rather than the
+    ``WORKTREE_ID`` env (which is not injected into bridge-dispatched sessions).
+    Falls back to None when not inside a worktree.
+    """
+    return _worktrees_get("worktree-dir")
+
+
+def _sender_repo() -> str | None:
+    """The repo the caller is dispatching *from* (``agent-worktrees get project``
+    in the CWD). Supplies the bare-venue default for machine venues."""
+    return _worktrees_get("project")
 
 
 def _caller_id_for(args: argparse.Namespace) -> str | None:
     """Resolve the caller identity used to key the delivery cursor.
 
-    Precedence: explicit ``--caller`` > ``WORKTREE_ID`` env > None. A None
-    caller falls back to the session's shared default cursor server-side.
-    Because ``WORKTREE_ID`` is not always trustworthy across sessions,
-    ``--caller`` lets a host pin a stable cursor key.
+    Precedence: explicit ``--caller`` > the current worktree
+    (``agent-worktrees get worktree-dir``) > None. A None caller falls back to
+    the session's shared default cursor server-side; ``--caller`` lets a host
+    pin a stable cursor key.
     """
     explicit = getattr(args, "caller", None)
     if explicit:
@@ -1541,7 +1575,8 @@ def _start_agent_session(
     print(f"[>] Starting session for agent '{agent_name}'...")
     try:
         resp = client.start_session(
-            agent=agent_name, caller_id=caller_id, force_new=force_new,
+            agent=agent_name, caller_id=caller_id,
+            sender_repo=_sender_repo(), force_new=force_new,
         )
     except BridgeClientError as exc:
         # Server-side concurrency guard: this agent (e.g. a CodeSpace) already

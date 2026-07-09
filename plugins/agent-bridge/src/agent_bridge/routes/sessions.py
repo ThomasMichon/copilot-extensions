@@ -245,7 +245,9 @@ async def start_session(req: StartSessionRequest, request: Request):
                 detail="No agent resolver configured -- topology not loaded",
             )
         try:
-            target = await resolver.resolve_async(req.agent)
+            target = await resolver.resolve_async(
+                req.agent, sender_repo=req.sender_repo,
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:

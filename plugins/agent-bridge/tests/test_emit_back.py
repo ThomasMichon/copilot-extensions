@@ -81,3 +81,51 @@ class TestConnectionIdentity:
         assert "session=sess-6" in out
         assert "agent=" not in out
         assert "worktree=" not in out
+
+
+class TestWorktreesGet:
+    """CLI caller/sender identity from `agent-worktrees get` (replaces WORKTREE_ID)."""
+
+    def _fake_run(self, stdout="", rc=0):
+        import subprocess
+        class _R:
+            returncode = rc
+            def __init__(self, out): self.stdout = out; self.stderr = ""
+        def run(cmd, **kw):
+            return _R(stdout)
+        return run
+
+    def test_worktrees_get_returns_value(self, monkeypatch):
+        import agent_bridge.__main__ as m
+        monkeypatch.setattr(m.shutil, "which", lambda n: "agent-worktrees")
+        monkeypatch.setattr(m.subprocess, "run", self._fake_run("dotfiles\n"))
+        assert m._worktrees_get("project") == "dotfiles"
+
+    def test_sender_repo(self, monkeypatch):
+        import agent_bridge.__main__ as m
+        monkeypatch.setattr(m.shutil, "which", lambda n: "agent-worktrees")
+        monkeypatch.setattr(m.subprocess, "run", self._fake_run("SPO.Core\n"))
+        assert m._sender_repo() == "SPO.Core"
+
+    def test_caller_id_uses_worktree_dir(self, monkeypatch):
+        import agent_bridge.__main__ as m
+        monkeypatch.setattr(m.shutil, "which", lambda n: "agent-worktrees")
+        monkeypatch.setattr(m.subprocess, "run", self._fake_run("D:/wt/x\n"))
+        assert m._get_caller_id() == "D:/wt/x"
+
+    def test_empty_output_is_none(self, monkeypatch):
+        import agent_bridge.__main__ as m
+        monkeypatch.setattr(m.shutil, "which", lambda n: "agent-worktrees")
+        monkeypatch.setattr(m.subprocess, "run", self._fake_run("\n"))
+        assert m._worktrees_get("project") is None
+
+    def test_binary_missing_is_none(self, monkeypatch):
+        import agent_bridge.__main__ as m
+        monkeypatch.setattr(m.shutil, "which", lambda n: None)
+        assert m._worktrees_get("project") is None
+
+    def test_nonzero_rc_is_none(self, monkeypatch):
+        import agent_bridge.__main__ as m
+        monkeypatch.setattr(m.shutil, "which", lambda n: "agent-worktrees")
+        monkeypatch.setattr(m.subprocess, "run", self._fake_run("boom", rc=1))
+        assert m._worktrees_get("bogus") is None

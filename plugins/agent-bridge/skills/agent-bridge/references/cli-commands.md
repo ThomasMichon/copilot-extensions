@@ -55,7 +55,8 @@ agent-bridge send <agent-name> "do this" --no-wait
 `send` auto-detects whether the target is an agent name or a session ID.
 When given an **agent name**, it never starts a *fresh* session on top of an
 existing one: it reuses this caller's session for that agent — keyed by
-`(agent, caller)`, where the caller is `$WORKTREE_ID` (or `--caller`) — and
+`(agent, caller)`, where the caller is the current worktree
+(`agent-worktrees get worktree-dir`, or `--caller`) — and
 **resumes it if stopped**. Only when this caller has no session for the agent
 is a new one started. Output streams in real-time: response text, thought
 blocks, and tool call summaries.
