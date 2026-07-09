@@ -40,6 +40,12 @@ class HostRecord:
     state_file: str = ""
     created_at: float = 0.0
     resume_on_reattach: bool = False
+    # Connect-auth nonce to present on ATTACH (empty == unsecured legacy host).
+    nonce: str = ""
+    # Which boundary the host lives across -- decides how the endpoint is
+    # re-pointed on reattach (local: direct loopback, no-op; ssh/codespace:
+    # re-establish the forward). Local is the only P2a boundary.
+    boundary: str = "local"
     extra: dict = field(default_factory=dict)
 
     @classmethod

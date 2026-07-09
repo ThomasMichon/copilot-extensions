@@ -945,7 +945,7 @@ class SessionManager:
         from .session_host.acp_adapter import open_acp_streams
         from .session_host.client import SessionHostClient
         from .session_host.host_index import HostRecord
-        from .session_host.launcher import launch_session_host
+        from .session_host.spawner import LocalSpawner
         from .transport import resolve_local_launch
 
         args, work_dir, env = await resolve_local_launch(
@@ -962,13 +962,15 @@ class SessionManager:
             # (#1790). Any descendant process inherits it.
             child_env = dict(env or {})
             child_env["AGENT_BRIDGE_SESSION_ID"] = session_id
-            # launch_session_host blocks briefly on host readiness; keep it off
-            # the event loop.
-            handle = await asyncio.to_thread(
-                launch_session_host, args, cwd=work_dir, env=child_env,
+            # Bootstrap the Session Host through the boundary Spawner seam (P2a).
+            # Local for now; the same seam yields the elevated / SSH / CodeSpace
+            # hosts later, and the frontend below is boundary-agnostic. spawn()
+            # blocks briefly on host readiness, so it is already off-loop.
+            spawned = await LocalSpawner().spawn(
+                args, cwd=work_dir, env=child_env, session_id=session_id,
             )
-            sock = await SessionHostClient.connect(port=handle.port)
-            await sock.attach(0)
+            sock = await SessionHostClient.connect(port=spawned.local_port)
+            await sock.attach(0, nonce=spawned.nonce.encode())
             streams = await open_acp_streams(sock)
 
             async def _closer() -> None:
@@ -988,7 +990,7 @@ class SessionManager:
                 await asyncio.wait_for(
                     client.start_streams(
                         streams.reader, streams.writer,
-                        child_pid=handle.child_pid, closer=_closer,
+                        child_pid=spawned.child_pid, closer=_closer,
                     ),
                     timeout=self._timeouts.session_start,
                 )
@@ -1009,13 +1011,15 @@ class SessionManager:
         if self._host_index is not None:
             self._host_index.register(HostRecord(
                 session_id=session_id,
-                port=handle.port,
-                host_pid=handle.host_pid,
-                child_pid=handle.child_pid,
+                port=spawned.local_port,
+                host_pid=spawned.host_pid,
+                child_pid=spawned.child_pid,
                 host_version=__version__,
-                protocol_version=handle.protocol_version,
-                state_file=handle.state_file,
+                protocol_version=spawned.protocol_version,
+                state_file=spawned.state_file,
                 created_at=time.time(),
+                nonce=spawned.nonce,
+                boundary=spawned.boundary,
             ))
         return client, acp_sid
 
@@ -1125,7 +1129,7 @@ class SessionManager:
 
         try:
             sock = await SessionHostClient.connect(port=rec.port)
-            await sock.attach(0)
+            await sock.attach(0, nonce=getattr(rec, "nonce", "").encode())
             streams = await open_acp_streams(sock)
 
             async def _closer(_streams: Any = streams, _sock: Any = sock) -> None:

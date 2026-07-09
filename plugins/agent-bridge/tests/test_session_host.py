@@ -36,6 +36,16 @@ def test_pack_unpack_frame():
     assert data == b'{"x":1}\n'
 
 
+def test_pack_unpack_attach():
+    # No nonce (legacy): trailing bytes empty; last_acked round-trips.
+    assert proto.unpack_attach(proto.pack_attach(7)) == (7, b"")
+    # With nonce: cursor + token both survive.
+    last, nonce = proto.unpack_attach(proto.pack_attach(9, b"tok3n"))
+    assert last == 9 and nonce == b"tok3n"
+    # A legacy reader that only reads the first 8 bytes ignores the nonce.
+    assert proto.unpack_u64(proto.pack_attach(9, b"tok3n")[:8]) == 9
+
+
 def test_pack_unpack_liveness():
     assert proto.unpack_liveness(proto.pack_liveness(True)) == (True, 0)
     assert proto.unpack_liveness(proto.pack_liveness(False, 7)) == (False, 7)
@@ -744,6 +754,73 @@ async def test_launch_session_host_process_owns_child(tmp_path):
             import os as _os
             with contextlib.suppress(Exception):
                 _os.kill(handle.child_pid, signal.SIGKILL)
+
+
+@pytest.mark.asyncio
+async def test_host_rejects_wrong_nonce():
+    """A host launched with a nonce accepts the matching token and rejects
+    a wrong or absent one (connect-auth, P2a)."""
+    child = _FakeChild()
+    host = SessionHost(child, nonce="s3cret")
+    port = await host.serve(port=0)
+    try:
+        good = await SessionHostClient.connect(port=port)
+        hello = await good.attach(0, nonce=b"s3cret")
+        assert hello.child_pid == child.pid
+        await good.close()
+
+        bad = await SessionHostClient.connect(port=port)
+        with pytest.raises(ConnectionError):
+            await bad.attach(0, nonce=b"nope")
+        await bad.close()
+
+        missing = await SessionHostClient.connect(port=port)
+        with pytest.raises(ConnectionError):
+            await missing.attach(0)   # no nonce -> rejected
+        await missing.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_local_spawner_secures_with_nonce(tmp_path):
+    """LocalSpawner mints a connect nonce; only a client presenting it can drive
+    the spawned host (the P2a Spawner-seam + nonce, end to end)."""
+    import signal
+    import sys
+
+    from agent_bridge.session_host.spawner import LocalSpawner
+
+    spawned = await LocalSpawner().spawn([sys.executable, "-c", _STREAMER])
+    try:
+        assert spawned.boundary == "local"
+        assert spawned.nonce and spawned.local_port > 0
+        assert osutil_pid_alive(spawned.host_pid)
+
+        # Correct nonce connects and sees the surviving child.
+        good = await SessionHostClient.connect(port=spawned.local_port)
+        hello = await good.attach(0, nonce=spawned.nonce.encode())
+        assert hello.child_pid == spawned.child_pid
+        await good.close()
+
+        # Wrong nonce is refused.
+        bad = await SessionHostClient.connect(port=spawned.local_port)
+        with pytest.raises(ConnectionError):
+            await bad.attach(0, nonce=b"wrong")
+        await bad.close()
+
+        # refresh_endpoint is a no-op for a local host (port never moves).
+        await spawned.refresh_endpoint()
+        assert spawned.local_port > 0
+    finally:
+        with contextlib.suppress(Exception):
+            spawned.proc.terminate()
+        with contextlib.suppress(Exception):
+            spawned.proc.wait(timeout=5)
+        if sys.platform != "win32":
+            import os as _os
+            with contextlib.suppress(Exception):
+                _os.kill(spawned.child_pid, signal.SIGKILL)
 
 
 def osutil_pid_alive(pid: int) -> bool:

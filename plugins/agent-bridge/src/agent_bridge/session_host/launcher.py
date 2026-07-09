@@ -41,6 +41,11 @@ from . import protocol as proto
 
 _ACP_STDIO_LIMIT_BYTES = 64 * 1024 * 1024
 
+# Env var carrying the connect-auth nonce to the host process (kept off the
+# command line so it does not leak to ps/Task Manager). Stripped before the
+# copilot child is spawned so the child never inherits it.
+_NONCE_ENV = "AGENT_BRIDGE_SESSION_HOST_NONCE"
+
 
 def host_spawn_kwargs() -> dict[str, Any]:
     """``subprocess`` kwargs for the FRONTEND to spawn the host so it survives.
@@ -74,6 +79,7 @@ def launch_session_host(
     env: dict[str, str] | None = None,
     state_dir: str | os.PathLike[str] | None = None,
     ready_timeout: float = 30.0,
+    nonce: str = "",
 ) -> HostHandle:
     """Spawn a **survivable** Session Host process that owns ``child_argv``.
 
@@ -82,6 +88,11 @@ def launch_session_host(
     reattach endpoint and writes a ``pid``/``child_pid``/``port`` state file,
     which this call waits for. The child inherits ``env`` (so worktree/plan env
     vars reach copilot). Raises ``TimeoutError`` if the host never reports ready.
+
+    ``nonce`` (optional) is the connect-auth token: it is handed to the host
+    process **via its environment** (not the command line, so it does not leak
+    to ``ps``/Task Manager) and the host requires a matching nonce on ATTACH.
+    The copilot child never sees it -- ``run_host`` strips it before spawn.
     """
     sd = Path(state_dir) if state_dir else Path(tempfile.mkdtemp(prefix="agbridge-host-"))
     sd.mkdir(parents=True, exist_ok=True)
@@ -96,6 +107,8 @@ def launch_session_host(
     child_env = os.environ.copy()
     if env:
         child_env.update(env)
+    if nonce:
+        child_env[_NONCE_ENV] = nonce
 
     proc = subprocess.Popen(
         host_argv,
@@ -155,6 +168,9 @@ async def _spawn_child(
     argv: list[str], cwd: str | None, env: dict[str, str] | None,
 ) -> asyncio.subprocess.Process:
     child_env = os.environ.copy()
+    # The connect-auth nonce is for the host process only -- never leak it into
+    # the copilot child's environment.
+    child_env.pop(_NONCE_ENV, None)
     if env:
         child_env.update(env)
     return await asyncio.create_subprocess_exec(
@@ -176,11 +192,17 @@ async def run_host(
     cwd: str | None = None,
     env: dict[str, str] | None = None,
     ready: asyncio.Event | None = None,
+    nonce: str = "",
 ) -> None:
-    """Spawn the child, serve the reattachable endpoint, run until closed."""
+    """Spawn the child, serve the reattachable endpoint, run until closed.
+
+    ``nonce`` (or, if empty, the ``AGENT_BRIDGE_SESSION_HOST_NONCE`` env) arms
+    connect-auth: the host then refuses any front that does not present it.
+    """
     apply_host_survival()
+    nonce = nonce or os.environ.get(_NONCE_ENV, "")
     child = await _spawn_child(child_argv, cwd, env)
-    host = SessionHost(child)
+    host = SessionHost(child, nonce=nonce)
     bound_port = await host.serve(port=port)
     if state_file is not None:
         Path(state_file).write_text(json.dumps({
