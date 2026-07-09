@@ -514,6 +514,9 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     config = load_merged_config()
     relay_port = config.credentials.relay_port
 
+    # Reusing a box (an explicit ssh connect) clears any prune-lifecycle marker
+    # -- it is active work again, not a recovered/prunable reclaim candidate.
+    _clear_status_quietly(args.name)
     # Advisory check-out: record/refresh the borrow so a parallel same-machine
     # agent doesn't dispatch to this CodeSpace concurrently. Non-blocking -- a
     # conflicting live lease warns but still connects (use `borrow --force` to
@@ -1143,8 +1146,11 @@ def _interactive_ssh(
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
-    """List active CodeSpaces."""
+    """List active CodeSpaces (with any prune-lifecycle eligibility marker)."""
+    from .status import list_status
+
     codespaces = list_codespaces()
+    marks = {s.codespace: s.state for s in list_status()}
 
     if args.json_output:
         data = [
@@ -1155,6 +1161,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
                 "branch": cs.branch,
                 "state": cs.state,
                 "machine": cs.machine,
+                "eligibility": marks.get(cs.name, "active"),
             }
             for cs in codespaces
         ]
@@ -1166,10 +1173,12 @@ def _cmd_list(args: argparse.Namespace) -> int:
         return 0
 
     # Table output
-    print(f"{'Name':<40} {'Repo':<35} {'Branch':<20} {'State':<12}")
-    print("-" * 107)
+    print(f"{'Name':<40} {'Repo':<35} {'Branch':<20} {'State':<12} {'Elig':<10}")
+    print("-" * 118)
     for cs in codespaces:
-        print(f"{cs.name:<40} {cs.repository:<35} {cs.branch:<20} {cs.state:<12}")
+        elig = marks.get(cs.name, "")
+        print(f"{cs.name:<40} {cs.repository:<35} {cs.branch:<20} "
+              f"{cs.state:<12} {elig:<10}")
 
     return 0
 
@@ -1818,17 +1827,98 @@ def _cmd_prune(args: argparse.Namespace) -> int:
     return 0
 
 
+def _reclaim_for_quota(err: str) -> str | None:
+    """On a CodeSpace-create quota error, attempt ONE safe reclaim so a retry
+    can succeed. Returns a human note describing what it freed, or None.
+
+    GitHub has two distinct limits needing different reclaims:
+    - **TOTAL** ("maximum number of codespaces" / "reached ... limit"): every
+      box, even stopped, counts -> DELETE frees room. Prune one ``prunable`` box.
+    - **RUNNING** ("too many codespaces running"): only *stopping* a running box
+      frees room; deleting a stopped ``prunable`` box does NOT. So stop the oldest
+      *eligible* (recovered/prunable) box that is (unusually) still running --
+      never auto-stop an in-use/unmarked box.
+    """
+    from .status import (
+        STATE_PRUNABLE,
+        STATE_RECOVERED,
+        clear_status,
+        get_status,
+        list_by_state,
+    )
+
+    low = err.lower()
+    running_limit = "too many codespaces running" in low
+    total_limit = (not running_limit) and (
+        "maximum number of codespaces" in low
+        or "you have reached" in low
+        or ("reached" in low and "codespace" in low and "limit" in low)
+    )
+
+    if total_limit:
+        for rec in sorted(list_by_state(STATE_PRUNABLE), key=lambda s: s.state_at):
+            name = rec.codespace
+            res = sync_codespace_sessions(name, skip_if_shutdown=False)
+            if not (res.get("ok") or res.get("skipped")):
+                continue
+            try:
+                delete_codespace(name, force=False)
+            except RuntimeError:
+                continue
+            clear_status(name)
+            _release_lease_quietly(name)
+            return f"pruned '{name}' to free total-codespace quota"
+        return None
+
+    if running_limit:
+        try:
+            from .lifecycle import _SHUTDOWN_STATE
+
+            running = [c for c in list_codespaces() if c.state != _SHUTDOWN_STATE]
+        except RuntimeError:
+            return None
+        # Only stop a running box that is already finalized (eligible) -- never
+        # an in-use/unmarked one.
+        for cs in running:
+            st = get_status(cs.name)
+            if st and st.state in (STATE_RECOVERED, STATE_PRUNABLE):
+                try:
+                    stop_codespace(cs.name)
+                except RuntimeError:
+                    continue
+                return f"stopped eligible running box '{cs.name}' to free running quota"
+        return None
+
+    return None
+
+
 def _cmd_create(args: argparse.Namespace) -> int:
-    """Create a CodeSpace and run post-create provisioning hooks."""
+    """Create a CodeSpace and run post-create provisioning hooks.
+
+    On a quota error, attempt one safe reclaim (prune a ``prunable`` box for the
+    total-quota limit, or stop an eligible running box for the running-quota
+    limit) and retry once, so a busy account self-heals instead of hard-failing.
+    """
     from ssh_manager import ConnectionManager
 
     config = load_merged_config()
     print(f"Creating CodeSpace for {args.repo}...")
-    info = create_codespace(
-        args.repo, config, branch=args.branch,
-        display_name=getattr(args, "display_name", None),
-        devcontainer_path=getattr(args, "devcontainer_path", None),
-    )
+
+    def _create():
+        return create_codespace(
+            args.repo, config, branch=args.branch,
+            display_name=getattr(args, "display_name", None),
+            devcontainer_path=getattr(args, "devcontainer_path", None),
+        )
+
+    try:
+        info = _create()
+    except RuntimeError as exc:
+        note = _reclaim_for_quota(str(exc))
+        if not note:
+            raise
+        print(f"[..] Codespace quota hit; {note}. Retrying create...")
+        info = _create()
     print(f"Created: {info.name}")
 
     if args.no_wait:
