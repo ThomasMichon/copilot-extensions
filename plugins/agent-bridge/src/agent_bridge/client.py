@@ -345,6 +345,7 @@ class BridgeClient:
         agent: str | None = None,
         target_dir: str | None = None,
         caller_id: str | None = None,
+        sender_repo: str | None = None,
         force_new: bool = False,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions"""
@@ -355,6 +356,8 @@ class BridgeClient:
             body["target_dir"] = target_dir
         if caller_id:
             body["caller_id"] = caller_id
+        if sender_repo:
+            body["sender_repo"] = sender_repo
         if force_new:
             body["force_new"] = True
         return self._request("POST", "/api/v1/sessions", body) or {}

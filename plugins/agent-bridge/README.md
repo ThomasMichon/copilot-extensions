@@ -60,8 +60,8 @@ one contiguous, gap-free, duplicate-free stream:
 - Random-access reads (`read --range A:B`, `read --event N`) are the **only**
   way to re-read consumed content and never move the cursor.
 
-The caller identity keying the cursor comes from `--caller`, else `$WORKTREE_ID`,
-else a shared per-session default.
+The caller identity keying the cursor comes from `--caller`, else the current
+worktree (`agent-worktrees get worktree-dir`), else a shared per-session default.
 
 ### Phased timeouts
 

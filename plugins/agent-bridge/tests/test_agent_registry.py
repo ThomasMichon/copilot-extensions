@@ -1470,3 +1470,58 @@ class TestVenueBoundResolve:
         resolver.register_namespace_resolver(_NoRepoResolver())
         with pytest.raises(ValueError, match="not supported"):
             await resolver.resolve_async("dotfiles@widget:thing")
+
+
+class TestSenderRepoFallback:
+    """Bare machine venue -> sender's repo (venue-default-else-sender, #173)."""
+
+    def setup_method(self):
+        self.machines = parse_machines_yaml(TOPO_MACHINES_DATA)
+        self.agents = {
+            "dev6": AgentConfig(
+                name="dev6", host="tmichon-dev6", ssh_environment="windows",
+                project="dotfiles", derived=True,
+            ),
+            "SPO.Core": AgentConfig(
+                name="SPO.Core", project="SPO.Core", auto_discovered=True,
+            ),
+        }
+
+    def _resolver(self):
+        from unittest.mock import patch
+        local = self.machines["tmichon-dev6"]
+        return patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local, "windows"),
+        )
+
+    @pytest.mark.asyncio
+    async def test_bare_machine_uses_sender_repo(self):
+        with self._resolver():
+            r = AgentResolver(self.agents, self.machines)
+            target = await r.resolve_async("dev6", sender_repo="SPO.Core")
+        assert target.type == "local"
+        assert target.project == "SPO.Core"  # sender repo, not the dotfiles default
+
+    @pytest.mark.asyncio
+    async def test_bare_machine_no_sender_keeps_default(self):
+        with self._resolver():
+            r = AgentResolver(self.agents, self.machines)
+            target = await r.resolve_async("dev6")
+        assert target.project == "dotfiles"
+
+    @pytest.mark.asyncio
+    async def test_sender_equal_default_is_noop(self):
+        with self._resolver():
+            r = AgentResolver(self.agents, self.machines)
+            target = await r.resolve_async("dev6", sender_repo="dotfiles")
+        assert target.project == "dotfiles"
+
+    @pytest.mark.asyncio
+    async def test_sender_repo_does_not_override_project_agent(self):
+        # A bare project agent (auto-discovered, not a machine venue) is NOT
+        # a venue -- the sender repo must not rebind it.
+        with self._resolver():
+            r = AgentResolver(self.agents, self.machines)
+            target = await r.resolve_async("SPO.Core", sender_repo="whatever")
+        assert target.project == "SPO.Core"

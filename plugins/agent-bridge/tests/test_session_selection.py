@@ -72,9 +72,10 @@ class FakeClient:
                 }
         raise BridgeClientError(404, "not found")
 
-    def start_session(self, *, agent=None, caller_id=None, force_new=False):
+    def start_session(self, *, agent=None, caller_id=None, sender_repo=None, force_new=False):
         self.started.append(
-            {"agent": agent, "caller_id": caller_id, "force_new": force_new}
+            {"agent": agent, "caller_id": caller_id,
+             "sender_repo": sender_repo, "force_new": force_new}
         )
         if self._conflict_sid is not None:
             raise BridgeClientError(

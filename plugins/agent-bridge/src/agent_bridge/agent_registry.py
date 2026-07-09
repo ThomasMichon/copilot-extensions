@@ -1023,12 +1023,21 @@ class AgentResolver:
 
         return self._resolve_static(agent_name)
 
-    async def resolve_async(self, agent_name: str) -> SpawnTarget:
+    async def resolve_async(
+        self, agent_name: str, sender_repo: str | None = None,
+    ) -> SpawnTarget:
         """Resolve an agent name to a SpawnTarget (async path).
 
         Supports both regular agents and namespaced agents
         (``prefix:name``). For namespaced agents, calls
         ``ensure_ready()`` then ``resolve()`` on the namespace resolver.
+
+        ``sender_repo`` (optional) is the repo the *caller* is dispatching from
+        (derived by the CLI via ``agent-worktrees get project`` in its CWD). It
+        supplies the **bare-venue default** for a machine venue, which carries no
+        venue-default of its own: a bare ``dev6`` from an SPO.Core session runs
+        ``SPO.Core@dev6`` rather than the control-plane fallback. Venues that
+        *do* declare a default (a CodeSpace's own repo) ignore it.
 
         Raises:
             KeyError: Agent not found.
@@ -1064,6 +1073,23 @@ class AgentResolver:
         if len(candidates) == 1:
             _, resolver, resolve_name = candidates[0]
             if resolver is None:
+                # Bare **machine venue** with a known sender repo: machines carry
+                # no venue-default, so run the sender's repo there instead of the
+                # derived control-plane fallback (venue-default-else-sender).
+                cfg = self._agents.get(resolve_name)
+                if (
+                    sender_repo
+                    and cfg is not None
+                    and cfg.derived
+                    and cfg.host
+                    and sender_repo != cfg.project
+                ):
+                    log.info(
+                        "Bare machine venue '%s' -> sender repo '%s' "
+                        "(venue-default-else-sender)",
+                        resolve_name, sender_repo,
+                    )
+                    return await self._resolve_venue_bound(sender_repo, resolve_name)
                 return await self._resolve_bare(agent_name)
             await resolver.ensure_ready(resolve_name)
             return await self._resolve_with_plugins(resolver, resolve_name)
