@@ -152,6 +152,48 @@ def test_jump_to_worktree_unknown_id_is_safe(tmp_path):
     asyncio.run(run())
 
 
+def test_profiles_hosted_under_configuration():
+    """Profiles is placed under ⚙ Configuration: off the left cycle, in the
+    config set, and the ('CFG', 0) stop exists (#1426)."""
+    src = _profiles_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            prof = next(i for i, p in enumerate(scr.pivots)
+                        if p["kind"] == "profiles")
+            assert scr.pivots[prof]["placement"] == "config"
+            assert prof in scr._config_pivots()
+            assert prof not in scr._left_pivots()
+            assert ("CFG", 0) in scr._v_stops()
+
+    asyncio.run(run())
+
+
+def test_configuration_menu_opens_profiles():
+    """Enter on the Configuration entry opens its menu; choosing Profiles
+    switches to that pivot and focuses its body (#1426)."""
+    src = _profiles_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            assert scr._kind() == "worktrees"
+            scr.sel = ("CFG", 0)
+            scr._activate()                 # opens the Configuration menu
+            assert scr.cfgmenu is not None
+            scr._key_cfgmenu("enter")       # selects Profiles (only item)
+            assert scr.cfgmenu is None
+            assert scr._kind() == "profiles"
+            assert scr.sel[0] in ("PR", "BTN")   # focused the profiles body
+
+    asyncio.run(run())
+
+
 def _maint_source():
     """Fixture with one worktree per cleanup bucket + one FF-eligible."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
@@ -1960,7 +2002,7 @@ def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch
     asyncio.run(run())
 
 
-def test_registered_pivot_switch_pivot_wraps_all_four(tmp_path, monkeypatch):
+def test_registered_pivot_switch_pivot_cycles_left_rail(tmp_path, monkeypatch):
     from agent_worktrees.picker_tui import pivots as pivots_mod
 
     d = tmp_path / "pivots"
@@ -1975,12 +2017,20 @@ def test_registered_pivot_switch_pivot_wraps_all_four(tmp_path, monkeypatch):
         async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             await pilot.pause()
+            # Profiles is hosted under ⚙ Configuration, off the left rail (#1426).
+            left = scr._left_pivots()
+            assert len(left) == 3
             kinds = []
-            for _ in range(len(scr.pivots)):
+            for _ in range(len(left)):
                 kinds.append(scr._kind())
                 scr._switch_pivot(1)
-            assert kinds == ["worktrees", "registered", "maintenance", "profiles"]
-            # Wrapped back to the start.
-            assert scr.htab == 0
+            assert kinds == ["worktrees", "registered", "maintenance"]
+            assert scr.htab == 0                    # wrapped back to Worktrees
+            # The left cycle never lands on the config-hosted Profiles pivot.
+            seen = set()
+            for _ in range(6):
+                seen.add(scr._kind())
+                scr._switch_pivot(1)
+            assert "profiles" not in seen
 
     asyncio.run(run())

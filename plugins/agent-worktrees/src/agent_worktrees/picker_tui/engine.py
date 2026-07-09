@@ -220,6 +220,13 @@ HTABS = ["Worktrees", "Maintenance", "Profiles"]
 #: index, so an inserted pivot never renumbers the built-ins.
 BUILTIN_PIVOTS = list(HTABS)
 
+#: Pivot *placement* -- where a pivot is reached from, keyed by pivot kind:
+#: ``"left"`` (the default) rides the left pivot cycle (◀▶ / [ ]); ``"config"``
+#: is hosted under the right-aligned ⚙ Configuration menu (#1426); ``"hidden"``
+#: is an ordering anchor only (kept so registered ``after`` hints still weave,
+#: but never shown as a tab). Anything unlisted defaults to ``"left"``.
+PIVOT_PLACEMENT = {"profiles": "config"}
+
 
 def _poll_secs() -> float:
     """Continuous background-poll interval in seconds (#1421).
@@ -320,6 +327,8 @@ class PickerScreen(Widget):
         self.htabs = list(BUILTIN_PIVOTS)   # display labels (rebuilt in _load_pivots)
         self.registered_pivots = []   # RegisteredPivot list from the manifest scan
         self.task_menu = None         # registered-pivot Enter action sub-menu
+        self.cfgmenu = None           # ⚙ Configuration menu (hosts Profiles) (#1426)
+        self.cfgmenu_idx = 0
         self.task_menu_idx = 0
         self._pivot_runtimes = {}     # pivot name -> RegisteredPivotRuntime (lazy)
         self._load_pivots()
@@ -390,9 +399,24 @@ class PickerScreen(Widget):
             ]
         self.registered_pivots = registered
         self.pivots = descriptors
+        # Tag each pivot with its placement (left cycle / config menu / hidden
+        # anchor) so nav machinery can partition them without disturbing the
+        # ``order_pivots`` weave that registered ``after`` hints rely on (#1426).
+        for d in self.pivots:
+            d["placement"] = PIVOT_PLACEMENT.get(d["kind"], "left")
         self.htabs = [d["label"] for d in descriptors]
         if self.htab >= len(self.pivots):
             self.htab = 0
+
+    def _left_pivots(self):
+        """Indices of pivots on the left cycle (◀▶ / [ ])."""
+        return [i for i, d in enumerate(self.pivots)
+                if d.get("placement", "left") == "left"]
+
+    def _config_pivots(self):
+        """Indices of pivots hosted under the ⚙ Configuration menu (#1426)."""
+        return [i for i, d in enumerate(self.pivots)
+                if d.get("placement") == "config"]
 
     def _kind(self, idx=None):
         """The current pivot's kind: 'worktrees' | 'maintenance' | 'profiles' |
@@ -832,9 +856,15 @@ class PickerScreen(Widget):
         return getattr(self, "update_state", "idle") == "available"
 
     def _v_stops(self):
-        """Top (View) region stops: the view pivot, plus the refresh icon
-        ("V", 1) when an update is staged so Up/Tab can reach it."""
-        return [("V", 0), ("V", 1)] if self._update_actionable() else [("V", 0)]
+        """Top (View) region stops: the view pivot, the refresh icon ("V", 1)
+        when an update is staged, then the ⚙ Configuration entry ("CFG", 0) when
+        any pivot is hosted there (#1426)."""
+        out = [("V", 0)]
+        if self._update_actionable():
+            out.append(("V", 1))
+        if self._config_pivots():
+            out.append(("CFG", 0))
+        return out
 
     def stops(self):
         """Vertical Up/Down flow. ("V",0)=View nav, ("V",1)=update refresh icon
@@ -1850,7 +1880,7 @@ class PickerScreen(Widget):
         # body offset = title+htabs+header_border+stats = len(top)+2
         modal = (self.submenu or self.maint_menu or self.cleanup
                  or self.optmenu or self.prof_confirm or self.progress
-                 or self.quit_confirm or self.task_menu)
+                 or self.quit_confirm or self.task_menu or self.cfgmenu)
         if modal:
             # Gray out ALL background content behind the dialog.
             lines = [Text((ln if isinstance(ln, Text) else Text(str(ln))).plain,
@@ -1862,6 +1892,8 @@ class PickerScreen(Widget):
                 self._overlay_submenu(lines, W, off, bh)
             elif self.task_menu:
                 self._overlay_task_menu(lines, W, off, bh)
+            elif self.cfgmenu:
+                self._overlay_cfgmenu(lines, W, off, bh)
             elif self.maint_menu:
                 self._overlay_maint_menu(lines, W, off, bh)
             elif self.cleanup:
@@ -1995,19 +2027,34 @@ class PickerScreen(Widget):
         l1.append(" " * max(0, W - l1.cell_len))
         l2 = Text("  ")
         v_focus = self.sel[0] == "V"
-        for i, label in enumerate(self.htabs):
-            if i:
+        for n, i in enumerate(self._left_pivots()):
+            label = self.htabs[i]
+            if n:
                 l2.append("     ")
             if i == self.htab:
                 l2.append(label.upper(),
                           style="reverse bold orange1" if v_focus else C_BAND)
             else:
                 l2.append(label, style="white" if v_focus else C_TABOFF)
-        # Tab never switches the view -- it moves focus between regions. The
-        # view pivot moves with ◀▶ (while focused here) or [ ]/^⇧◀▶ (#1344).
-        hint = ("◀▶ switch view · ↓ body · Tab region "
-                if v_focus else "[ ] switch view ")
-        l2.append(hint.rjust(max(1, W - l2.cell_len)), style=C_DIM)
+        # Right-aligned ⚙ Configuration entry hosting Profiles etc. (#1426). It
+        # is active when the current pivot lives under it, focused when the
+        # ("CFG", 0) stop holds the cursor.
+        cfg = self._config_pivots()
+        if cfg:
+            cfg_focus = self.sel[0] == "CFG"
+            cfg_active = self.htab in cfg
+            cstyle = ("reverse bold orange1" if cfg_focus
+                      else C_TAB_ACTIVE if cfg_active else C_TABOFF)
+            chip = Text("⚙ Configuration", style=cstyle)
+            l2.append(" " * max(2, W - l2.cell_len - chip.cell_len - 1))
+            l2.append_text(chip)
+            l2.append(" ")
+        else:
+            # Tab never switches the view -- it moves focus between regions. The
+            # view pivot moves with ◀▶ (while focused here) or [ ]/^⇧◀▶ (#1344).
+            hint = ("◀▶ switch view · ↓ body · Tab region "
+                    if v_focus else "[ ] switch view ")
+            l2.append(hint.rjust(max(1, W - l2.cell_len)), style=C_DIM)
         return [l1, l2]
 
     def _focus_hint(self):
@@ -2020,6 +2067,8 @@ class PickerScreen(Widget):
                         " · ↑↓ move · Tab region")
             return (f"◀▶ switch view (on {self.htabs[self.htab]}) · Enter: focus body"
                     f" · Tab region · [ ] view")
+        if zone == "CFG":
+            return "Enter: open Configuration (Profiles) · ↑↓ move · Tab region"
         if zone == "M":
             m, e, _ = self.cur_machine()
             scope = "All machines" if self.is_all() else f"{m} {e}"
@@ -2092,6 +2141,11 @@ class PickerScreen(Widget):
                          f" · Esc back")
             else:
                 hints = f"↑↓ choose · Enter: {cur.lower()} {wid} · Esc back"
+        elif self.task_menu:
+            cur = self.task_menu["actions"][self.task_menu_idx]
+            hints = f"↑↓ choose · Enter: {cur.label} · Esc back"
+        elif self.cfgmenu:
+            hints = "↑↓ choose · Enter: open · Esc back"
         elif self.maint_menu:
             cur = self.maint_menu["actions"][self.maint_menu_idx]
             n = self.maint_menu["count"]
@@ -2493,6 +2547,8 @@ class PickerScreen(Widget):
             return self._key_submenu(key)
         if self.task_menu:
             return self._key_task_menu(key)
+        if self.cfgmenu:
+            return self._key_cfgmenu(key)
         if self.maint_menu:
             return self._key_maint_menu(key)
         if self.cleanup:
@@ -2608,7 +2664,17 @@ class PickerScreen(Widget):
 
     def _switch_pivot(self, d):
         was_v = self.sel[0] == "V"
-        self.htab = (self.htab + d) % len(self.pivots)
+        # Cycle only pivots on the left rail; Configuration-hosted pivots (e.g.
+        # Profiles) are reached via the ⚙ menu, not this cycle (#1426).
+        left = self._left_pivots()
+        if not left:
+            return
+        if self.htab in left:
+            cur = left.index(self.htab)
+            self.htab = left[(cur + d) % len(left)]
+        else:
+            # Currently on a Configuration-hosted pivot: step onto the left rail.
+            self.htab = left[0] if d > 0 else left[-1]
         self.btn_idx = 0
         self.top = 0
         # Stay in the View nav if that's where focus was; otherwise land on the
@@ -2892,6 +2958,9 @@ class PickerScreen(Widget):
 
     def _activate(self):
         zone = self.sel[0]
+        if zone == "CFG":
+            self._open_cfgmenu()
+            return
         if zone == "V":
             if self.sel == ("V", 1):
                 # Refresh icon: apply the staged update and restart the picker
@@ -3066,6 +3135,51 @@ class PickerScreen(Widget):
         if verb == "jump-host":
             return self._jump_to_worktree(ctx.get("worktree") or ctx.get("id"))
         return False, f"unknown internal action: {verb}"
+
+    # ---- ⚙ Configuration menu (hosts Profiles etc.) (#1426) ----
+    def _open_cfgmenu(self):
+        """Open the Configuration menu: the pivots placed under ⚙ Configuration
+        (currently Profiles). Selecting one switches to it and focuses its body.
+        User-local config only -- never repo-managed settings."""
+        items = self._config_pivots()
+        if not items:
+            return
+        # If the current pivot is already config-hosted, pre-select it.
+        cur = items.index(self.htab) if self.htab in items else 0
+        self.cfgmenu = {"items": items}
+        self.cfgmenu_idx = cur
+
+    def _key_cfgmenu(self, key):
+        items = self.cfgmenu["items"]
+        if key == "down":
+            self.cfgmenu_idx = (self.cfgmenu_idx + 1) % len(items)
+        elif key == "up":
+            self.cfgmenu_idx = (self.cfgmenu_idx - 1) % len(items)
+        elif key == "enter":
+            target = items[self.cfgmenu_idx]
+            self.cfgmenu = None
+            self.htab = target
+            self.btn_idx = 0
+            self.top = 0
+            self.sel = self.default_sel()      # focus the hosted pivot's body
+        elif key in ("escape", "q", "tab"):
+            self.cfgmenu = None
+
+    def _overlay_cfgmenu(self, lines, W, top_off, body_h):
+        items = self.cfgmenu["items"]
+        idx = self.cfgmenu_idx
+        pw = min(W - 8, 56)
+        header = "─ ⚙ Configuration "
+        panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
+                      style=C_BAND)]
+        panel.append(self._prow(" user-local settings", pw, style=C_DIM))
+        panel.append(self._prow("", pw))
+        for n, i in enumerate(items):
+            mark = " ▸ " if n == idx else "   "
+            panel.append(self._prow(mark + self.htabs[i], pw, selected=(n == idx)))
+        panel.append(self._prow("", pw))
+        panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
+        self._blit_panel(lines, W, panel, top_off, body_h)
 
     # ---- registered-pivot (Tasks) action sub-menu ----
     def _open_task_menu(self):
