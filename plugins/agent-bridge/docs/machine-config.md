@@ -10,13 +10,14 @@ agent-bridge uses it for agent subprocess spawning and SSH transport.
 ## Overview
 
 Agent-bridge topology is configured via **profiles** in
-`~/.agent-bridge/config.yaml`. Each profile points to two files in your
-project repo:
+`~/.agent-bridge/config.yaml`. Each profile points to a `machines.yaml` in
+your project repo, from which agent-bridge **derives** its agent roster
+(machines × repos × environments):
 
 | File | Purpose |
 |------|---------|
-| `machines.yaml` | Machine inventory -- SSH environments, readiness, roles |
-| `acp-agents.json` | Agent definitions -- which agents run on which machines |
+| `machines.yaml` | Machine inventory (SSH environments, readiness, roles) **plus** `control_plane.project`. agent-bridge derives one control-plane agent per (machine, SSH environment), and `<repo>@<machine>` agents from each repo's `.agent-worktrees/related.yaml`. |
+| `acp-agents.json` | **Deprecated.** Hand-authored agent list. Still honored if a profile sets `agents_config` (explicit entries win over derived ones), but no longer required — the roster is derived from topology. |
 
 ## Quick Setup
 
@@ -26,8 +27,10 @@ project repo:
 agent-bridge config adopt --repo /path/to/repo --profile my-project
 ```
 
-This searches for `machines.yaml` and `acp-agents.json` at conventional
-paths and creates a topology profile.
+This searches for `machines.yaml` at conventional paths and creates a
+topology profile. The agent roster is derived from it (plus any
+`.agent-worktrees/related.yaml`); a legacy `acp-agents.json`, if present, is
+adopted as a deprecated explicit override.
 
 ### Verify
 
@@ -173,7 +176,43 @@ remote agent process.
 
 ---
 
-## acp-agents.json Format
+## Derived Roster (machines × repos × environments)
+
+By default agent-bridge **derives** its agent roster from committed topology —
+no hand-authored agent list. Two sources:
+
+1. **`machines.yaml` `control_plane.project`** → one **control-plane agent per
+   (machine, SSH environment)**, named by the machine's short `display_name`
+   (windows → `dev6`, wsl → `dev6-wsl`, a second box → `cloud1`), all backed by
+   the control-plane project's binstub. Local envs resolve to loopback; remote
+   to SSH.
+
+   ```yaml
+   # machines.yaml
+   control_plane:
+     project: dotfiles
+   machines:
+     tmichon-dev6:
+       display_name: dev6
+       ssh:
+         environments:
+           - { name: windows, alias: tmichon-dev6, shell: pwsh }
+           - { name: wsl, alias: tmichon-dev6-wsl, shell: bash }
+   ```
+
+2. **Each repo's `.agent-worktrees/related.yaml`** → a `<repo>@<machine>` agent
+   for every **remote** machine in a related entry's `locus.machines` whose
+   `delegate.via == agent-bridge`. (Local related repos are already covered by
+   projects.yaml auto-discovery.)
+
+Precedence: explicit `acp-agents.json` (deprecated) > derived > projects.yaml
+auto-discovered. Names collide-safely; explicit/derived win over auto-discovered.
+
+## acp-agents.json Format (deprecated)
+
+> **Deprecated.** Prefer the derived roster above. `acp-agents.json` is still
+> honored if a profile's `agents_config` points at one (explicit entries win),
+> but it is no longer required or auto-created.
 
 `acp-agents.json` defines the agents available across your machines as a
 **dict keyed by agent name**. Each agent maps to a machine from
