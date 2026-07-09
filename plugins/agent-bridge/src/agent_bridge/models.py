@@ -81,6 +81,12 @@ class SessionInfo(BaseModel):
     last_usage_at: str | None = None
     created_at: datetime
     updated_at: datetime
+    # Liveness (#145): last_output_at advances on every ACP frame (the true
+    # progress signal); last_heartbeat_at is a periodic transport-liveness beat;
+    # liveness derives active/stalled/disconnected for a RUNNING session.
+    last_output_at: str | None = None
+    last_heartbeat_at: str | None = None
+    liveness: str | None = None
 
 
 class TurnInfo(BaseModel):

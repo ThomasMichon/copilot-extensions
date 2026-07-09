@@ -168,6 +168,15 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         ),
         created_at=datetime.fromtimestamp(s.created_at, tz=timezone.utc),
         updated_at=datetime.fromtimestamp(s.updated_at, tz=timezone.utc),
+        last_output_at=(
+            datetime.fromtimestamp(s.last_output_at, tz=timezone.utc).isoformat()
+            if s.last_output_at else None
+        ),
+        last_heartbeat_at=(
+            datetime.fromtimestamp(s.last_heartbeat_at, tz=timezone.utc).isoformat()
+            if s.last_heartbeat_at else None
+        ),
+        liveness=s.liveness_state(),
     )
 
 

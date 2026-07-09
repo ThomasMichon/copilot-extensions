@@ -188,6 +188,22 @@ async def lifespan(app: FastAPI):
         gc_task = asyncio.create_task(_gc_loop())
         log.info("Periodic GC sweep every %.1fh", sweep_hours)
 
+    # Liveness heartbeat (#145) -- periodically confirm each RUNNING session's
+    # transport is alive (stamps last_heartbeat_at). A frozen heartbeat then
+    # means the channel died (tunnel drop / host sleep); a fresh heartbeat with a
+    # stale last_output_at means the agent stalled while the channel is up. This
+    # is what lets `sessions`/`status` report a real liveness signal instead of
+    # the misleading turn-boundary `updated_at`. Cheap; always on.
+    async def _heartbeat_loop() -> None:
+        while True:
+            await asyncio.sleep(15.0)
+            try:
+                mgr.note_heartbeats()
+            except Exception:
+                log.warning("Liveness heartbeat beat failed", exc_info=True)
+
+    heartbeat_task = asyncio.create_task(_heartbeat_loop())
+
     # Idle auto-shutdown -- the elevated sub-daemon (and any caller that passes
     # idle_shutdown_seconds) exits once no host needs it, so it does not linger.
     # The primary daemon leaves this at 0 and stays up indefinitely.
@@ -333,6 +349,11 @@ async def lifespan(app: FastAPI):
         idle_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await idle_task
+
+    # Shutdown: stop the liveness heartbeat (#145)
+    heartbeat_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await heartbeat_task
 
     # Shutdown: stop the periodic GC sweep
     if gc_task is not None:

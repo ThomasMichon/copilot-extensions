@@ -70,6 +70,44 @@ def _short_dt(iso: str | None) -> str:
         return str(iso)[:19]
 
 
+def _age_str(iso: str | None) -> str:
+    """Compact age of an ISO timestamp relative to now (e.g. ``12m``, ``45s``)."""
+    if not iso:
+        return "?"
+    try:
+        from datetime import timezone as _tz
+        dt = datetime.fromisoformat(iso)
+        secs = (datetime.now(_tz.utc) - dt.astimezone(_tz.utc)).total_seconds()
+    except Exception:
+        return "?"
+    secs = max(0, int(secs))
+    if secs < 90:
+        return f"{secs}s"
+    if secs < 5400:
+        return f"{secs // 60}m"
+    return f"{secs // 3600}h{(secs % 3600) // 60}m"
+
+
+def _liveness_line(s: dict) -> str | None:
+    """One-line liveness summary for a RUNNING session, or None.
+
+    Surfaces the real event-stream liveness (#145) so a silent mid-turn stall is
+    visible -- the turn-boundary ``Updated`` cannot show it (a hard-working long
+    turn and a wedge both leave ``Updated`` frozen).
+    """
+    liveness = s.get("liveness")
+    if not liveness:
+        return None
+    out_age = _age_str(s.get("last_output_at"))
+    if liveness == "active":
+        return f"active - last output {out_age} ago"
+    if liveness == "stalled":
+        return f"STALLED - no output for {out_age} (channel alive)"
+    if liveness == "disconnected":
+        return "DISCONNECTED - transport down"
+    return liveness
+
+
 def _get_client():
     """Build a BridgeClient from config. Exits on failure."""
     from .client import BridgeClient
@@ -297,6 +335,9 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
         f"    Turns:   {st.get('turn_count', 0)}"
         f"    Updated: {_short_dt(st.get('updated_at'))}"
     )
+    live = _liveness_line(st)
+    if live:
+        print(f"    Liveness: {live}")
     pct = st.get("context_pct")
     if pct is not None:
         print(f"    Context: {round(pct)}%")
@@ -871,6 +912,9 @@ def _cmd_sessions(args: argparse.Namespace) -> None:
         if context:
             print(f"    Context: {context}")
         print(f"    Turns:   {turns}    Updated: {updated}")
+        live = _liveness_line(s)
+        if live:
+            print(f"    Liveness: {live}")
 
 
 def _cmd_send(args: argparse.Namespace) -> None:
