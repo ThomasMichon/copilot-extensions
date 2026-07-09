@@ -52,6 +52,11 @@ class PivotAction:
     run: tuple[str, ...]
     confirm: bool = False
     description: str = ""
+    #: When set, this is an *internal* (picker-navigation) action handled by the
+    #: picker itself (e.g. ``"jump-host"``) rather than an external CLI. ``run``
+    #: then carries the verb's argument template instead of a command. See
+    #: ``engine.PickerScreen._internal_pivot_action`` for the handler table.
+    internal: str | None = None
 
 
 @dataclass(frozen=True)
@@ -148,15 +153,35 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
         a_label = a.get("label")
         if not isinstance(a_label, str) or not a_label.strip():
             raise ManifestError(f"`actions[{i}].label` is required")
-        run = _as_argv(a.get("run"), where=f"`actions[{i}].run`")
         a_key = a.get("key")
+        key = str(a_key) if isinstance(a_key, str) and a_key else f"action{i}"
+        # Two action shapes: an EXTERNAL CLI (`run` argv template, the default)
+        # or an INTERNAL picker-navigation verb (`{"kind":"internal","verb":…}`).
+        # An internal action's optional `args` become the ``run`` template the
+        # picker's handler substitutes; no subprocess is ever spawned for it.
+        if a.get("kind") == "internal":
+            verb = a.get("verb")
+            if not isinstance(verb, str) or not verb.strip():
+                raise ManifestError(
+                    f"`actions[{i}].verb` is required for an internal action"
+                )
+            args = a.get("args", [])
+            if isinstance(args, Sequence) and not isinstance(args, (str, bytes)):
+                run = tuple(str(x) for x in args)
+            else:
+                run = ()
+            internal: str | None = verb.strip()
+        else:
+            run = _as_argv(a.get("run"), where=f"`actions[{i}].run`")
+            internal = None
         actions.append(
             PivotAction(
-                key=str(a_key) if isinstance(a_key, str) and a_key else f"action{i}",
+                key=key,
                 label=a_label,
                 run=run,
                 confirm=bool(a.get("confirm", False)),
                 description=str(a.get("description", "")),
+                internal=internal,
             )
         )
 
