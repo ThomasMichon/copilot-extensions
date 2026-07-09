@@ -89,6 +89,24 @@ class TestSaveLoadRoundTrip:
         loaded = load_record(path)
         assert loaded.handoff_prompt == "/tmp/handoff.md"
 
+    def test_parent_session_round_trip(self, tmp_path: Path):
+        # #1029: the originating-session pointer survives a save/load cycle.
+        rec = self._make_record(parent_session="63903896")
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        assert "parent_session: 63903896" in path.read_text()
+        loaded = load_record(path)
+        assert loaded.parent_session == "63903896"
+
+    def test_parent_session_absent_omitted(self, tmp_path: Path):
+        # No pointer -> the key is omitted so common-case YAML stays lean.
+        rec = self._make_record()
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        assert "parent_session" not in path.read_text()
+        loaded = load_record(path)
+        assert loaded.parent_session is None
+
     def test_pr_absent_round_trips_as_none(self, tmp_path: Path):
         rec = self._make_record()
         path = tmp_path / "wt.yaml"
@@ -676,6 +694,22 @@ class TestCreateNewRecord:
         # Verify it was persisted
         loaded = load_record(tmp_tracking_dir / "new-001.yaml")
         assert loaded.sessions == []
+
+    def test_seeds_parent_session(self, tmp_tracking_dir: Path):
+        # #1029: an explicit parent-session pointer is recorded at creation.
+        rec = create_new_record(
+            worktree_id="new-002",
+            branch="worktree/new-002",
+            worktree_path="/tmp/new2",
+            repo="test-repo",
+            machine="test",
+            platform_name="wsl",
+            tracking_path=tmp_tracking_dir,
+            parent_session="deadbeef",
+        )
+        assert rec.parent_session == "deadbeef"
+        loaded = load_record(tmp_tracking_dir / "new-002.yaml")
+        assert loaded.parent_session == "deadbeef"
 
 
 # ---------------------------------------------------------------------------

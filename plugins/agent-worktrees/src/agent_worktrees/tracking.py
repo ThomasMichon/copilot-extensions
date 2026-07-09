@@ -102,6 +102,11 @@ class WorktreeRecord:
     prs: list[PRRecord] = field(default_factory=list)
     kind: WorktreeKind = "session"
     owner: str | None = None  # owning service name, for system worktrees
+    # #1029: the Copilot session that originated this worktree's work. Seeded at
+    # creation (the spawning session) and backfilled at PR-create, so a
+    # PR/feedback worktree whose own ``sessions`` list is empty can still resume
+    # with the source session's context instead of cold-starting.
+    parent_session: str | None = None
 
     def active_pr(self) -> PRRecord | None:
         """Return the PR a no-selector command should target.
@@ -314,6 +319,8 @@ def load_record(path: Path) -> WorktreeRecord:
         prs=prs_list,
         kind=kind_val,
         owner=str(owner_raw) if owner_raw else None,
+        parent_session=(str(data["parent_session"])
+                        if data.get("parent_session") else None),
     )
 
 
@@ -350,6 +357,11 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         content += f"kind: {record.kind}\n"
         if record.owner:
             content += f"owner: {record.owner}\n"
+
+    # #1029: originating-session pointer. Emitted only when set, so the
+    # common-case session-record YAML stays byte-identical (no churn).
+    if record.parent_session:
+        content += f"parent_session: {record.parent_session}\n"
 
     # Serialize PR records.  Emit the multi-PR ``prs:`` list and mirror the
     # active PR to a legacy ``pr:`` block for one release, so a same-machine
@@ -481,6 +493,7 @@ def create_new_record(
     *,
     kind: WorktreeKind = "session",
     owner: str | None = None,
+    parent_session: str | None = None,
 ) -> WorktreeRecord:
     """Create and save a new worktree tracking record."""
     now = _now_iso()
@@ -501,6 +514,7 @@ def create_new_record(
         sessions=[],
         kind=kind,
         owner=owner,
+        parent_session=parent_session or None,
     )
     path = tracking_path / f"{worktree_id}.yaml"
     save_record(record, path)

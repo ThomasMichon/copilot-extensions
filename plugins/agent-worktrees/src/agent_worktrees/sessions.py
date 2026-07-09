@@ -502,6 +502,24 @@ def scan_sessions_fast(
     return ctx
 
 
+def validate_session_id(session_id: str | None) -> str | None:
+    """Return *session_id* iff its state dir exists and carries conversation
+    data (``session.db`` or ``events.jsonl``), else ``None``.
+
+    Used by the resume path to validate a ``parent_session`` fallback (#1029)
+    before handing it to ``copilot --resume`` -- a stale/pruned pointer must not
+    produce an "unknown session" launch.
+    """
+    if not session_id:
+        return None
+    sdir = _session_state_dir() / session_id
+    if not sdir.is_dir():
+        return None
+    if not (sdir / "session.db").exists() and not (sdir / "events.jsonl").exists():
+        return None
+    return session_id
+
+
 def find_latest_session_id_fast(
     worktree_path: str,
     sessions: list | None,
