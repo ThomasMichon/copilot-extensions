@@ -1154,3 +1154,164 @@ class TestPluginInjectionContract:
         await r.resolve_async("norepo:agent")
         assert pr.seen_extra == []
         assert called["n"] == 0  # sourcing not even attempted without a repo
+
+
+# -- Topology-derived roster (machines x repos x envs) -------------------------
+
+import textwrap
+
+from agent_bridge.agent_registry import (
+    derive_topology_agents,
+    _short_machine_agent_name,
+    _match_machine_shortname,
+    _load_related_entries,
+)
+from agent_bridge.topology import load_control_plane_project
+
+
+TOPO_MACHINES_DATA = {
+    "control_plane": {"project": "dotfiles"},
+    "machines": {
+        "tmichon-dev6": {
+            "display_name": "dev6",
+            "ssh": {
+                "ready": False,
+                "environments": [
+                    {"name": "windows", "alias": "tmichon-dev6", "shell": "pwsh"},
+                    {"name": "wsl", "alias": "tmichon-dev6-wsl", "shell": "bash"},
+                ],
+            },
+        },
+        "tmichon-cloud1": {
+            "display_name": "cloud1",
+            "ssh": {
+                "ready": False,
+                "environments": [
+                    {"name": "windows", "alias": "tmichon-cloud1", "shell": "pwsh"},
+                ],
+            },
+        },
+        "tmichon-book2": {
+            "display_name": "book2",
+            "ssh": {"ready": False},
+        },
+    },
+}
+
+
+def _topo_machines():
+    return parse_machines_yaml(TOPO_MACHINES_DATA)
+
+
+class TestShortMachineAgentName:
+
+    def test_windows_is_bare(self):
+        m = _topo_machines()["tmichon-dev6"]
+        win = next(e for e in m.ssh_environments if e.name == "windows")
+        assert _short_machine_agent_name(m, win) == "dev6"
+
+    def test_wsl_suffix(self):
+        m = _topo_machines()["tmichon-dev6"]
+        wsl = next(e for e in m.ssh_environments if e.name == "wsl")
+        assert _short_machine_agent_name(m, wsl) == "dev6-wsl"
+
+
+class TestMatchMachineShortname:
+
+    def test_by_display_name(self):
+        ms = _topo_machines()
+        assert _match_machine_shortname(ms, "dev6").key == "tmichon-dev6"
+        assert _match_machine_shortname(ms, "cloud1").key == "tmichon-cloud1"
+
+    def test_by_full_key_and_prefix_strip(self):
+        ms = _topo_machines()
+        assert _match_machine_shortname(ms, "tmichon-dev6").key == "tmichon-dev6"
+
+    def test_unknown_returns_none(self):
+        assert _match_machine_shortname(_topo_machines(), "nope") is None
+
+
+class TestControlPlaneMachineAgents:
+
+    def test_names_and_envs(self):
+        ms = _topo_machines()
+        agents = derive_topology_agents(ms, "dotfiles", [], None)
+        assert set(agents) == {"dev6", "dev6-wsl", "cloud1"}
+        assert agents["dev6"].project == "dotfiles"
+        assert agents["dev6"].host == "tmichon-dev6"
+        assert agents["dev6"].ssh_environment == "windows"
+        assert agents["dev6"].derived is True
+        assert agents["dev6-wsl"].ssh_environment == "wsl"
+        assert agents["cloud1"].host == "tmichon-cloud1"
+
+    def test_book2_has_no_agent(self):
+        # No ssh environments -> no control-plane agent.
+        agents = derive_topology_agents(_topo_machines(), "dotfiles", [], None)
+        assert not any(a.host == "tmichon-book2" for a in agents.values())
+
+    def test_no_project_no_control_plane_agents(self):
+        agents = derive_topology_agents(_topo_machines(), None, [], None)
+        assert agents == {}
+
+
+class TestRelatedRemoteAgents:
+
+    def test_remote_related_synthesized(self):
+        ms = _topo_machines()
+        related = [
+            ("odsp-web", ["cloud1"], "agent-bridge"),
+            ("SPO.Core", ["dev6"], "agent-bridge"),
+            ("skip-me", ["cloud1"], "none"),
+        ]
+        local = ms["tmichon-dev6"]  # we are "on" dev6
+        agents = derive_topology_agents(ms, None, related, local)
+        # Remote related repo -> <repo>@<machine>.
+        assert "odsp-web@cloud1" in agents
+        assert agents["odsp-web@cloud1"].project == "odsp-web"
+        assert agents["odsp-web@cloud1"].host == "tmichon-cloud1"
+        assert agents["odsp-web@cloud1"].derived is True
+        # Local related repo -> skipped (covered by projects.yaml discovery).
+        assert "SPO.Core@dev6" not in agents
+        # Non-agent-bridge delegate -> skipped.
+        assert not any(n.startswith("skip-me") for n in agents)
+
+
+class TestLoadControlPlaneProject:
+
+    def test_dict_form(self, tmp_path):
+        p = tmp_path / "machines.yaml"
+        p.write_text("control_plane:\n  project: dotfiles\nmachines: {}\n", encoding="utf-8")
+        assert load_control_plane_project(p) == "dotfiles"
+
+    def test_bare_string_form(self, tmp_path):
+        p = tmp_path / "machines.yaml"
+        p.write_text("control_plane: dotfiles\nmachines: {}\n", encoding="utf-8")
+        assert load_control_plane_project(p) == "dotfiles"
+
+    def test_absent(self, tmp_path):
+        p = tmp_path / "machines.yaml"
+        p.write_text("machines: {}\n", encoding="utf-8")
+        assert load_control_plane_project(p) is None
+
+
+class TestLoadRelatedEntries:
+
+    def test_parses_locus_and_delegate(self, tmp_path):
+        d = tmp_path / ".agent-worktrees"
+        d.mkdir()
+        (d / "related.yaml").write_text(textwrap.dedent("""
+            primary: odsp-web
+            related:
+              SPO.Core:
+                locus: { machines: [dev6, cloud1] }
+                delegate: { via: agent-bridge }
+              PushChannel:
+                locus: { machines: [dev6] }
+                delegate: { via: none }
+        """), encoding="utf-8")
+        entries = dict((n, (m, d_)) for n, m, d_ in _load_related_entries(tmp_path))
+        assert entries["SPO.Core"] == (["dev6", "cloud1"], "agent-bridge")
+        assert entries["PushChannel"] == (["dev6"], "none")
+
+    def test_missing_file(self, tmp_path):
+        assert _load_related_entries(tmp_path) == []

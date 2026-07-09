@@ -1,7 +1,10 @@
 """Agent registry -- parse agent configs and resolve to spawn targets.
 
-Loads agent profiles from acp-agents.json (or similar), cross-references
-with machine topology, and resolves named agents to SpawnTargets.
+Derives the agent roster from committed topology (machines.yaml + each repo's
+related.yaml) via :func:`derive_topology_agents` -- machines × repos ×
+environments -- and cross-references machine topology to resolve named agents to
+SpawnTargets. A hand-authored ``acp-agents.json`` is still honored if a profile
+sets ``agents_config`` (deprecated, explicit-wins back-compat).
 
 Also auto-discovers local agents from agent-worktrees projects.yaml so
 that loopback (same-machine) communication works without explicit config.
@@ -54,6 +57,7 @@ class AgentConfig:
     project: str | None = None  # agent-worktrees project (binstub name)
     setup_script: str | None = None
     auto_discovered: bool = False  # True for agents from projects.yaml
+    derived: bool = False  # True for agents synthesized from topology (machines × repos)
     requires_admin: bool = False  # opt-in: expose an admin:<name> elevated twin
     provider: str | None = None  # provider name (e.g. "codespaces")
     spawn_command: list[str] | None = None  # raw command for provider agents
@@ -425,12 +429,159 @@ def _find_covering_agent(
     return None
 
 
+def _short_machine_agent_name(machine: MachineConfig, env: SshEnvironment) -> str:
+    """Friendly agent name for a control-plane (machine, env) pair.
+
+    Derives from the machine's short ``display_name`` (e.g. ``dev6``) plus an
+    environment suffix: the primary env (windows/linux) keeps the bare name,
+    ``wsl`` appends ``-wsl``, any other env appends ``-<name>``. Reproduces the
+    historic ``dev6`` / ``dev6-wsl`` / ``cloud1`` names once the machine
+    ``display_name`` is the short colloquial form.
+    """
+    base = (machine.display_name or machine.key).strip()
+    name = (env.name or "").lower()
+    if name in ("", "windows", "win", "linux"):
+        return base
+    if name == "wsl":
+        return f"{base}-wsl"
+    return f"{base}-{name}"
+
+
+def _match_machine_shortname(
+    machines: dict[str, MachineConfig], short: str,
+) -> MachineConfig | None:
+    """Resolve a related.yaml ``locus.machines`` short name to a MachineConfig.
+
+    ``related.yaml`` uses short names (``dev6``, ``cloud1``); machine keys are
+    the full hostnames (``tmichon-dev6``). Match by display_name, key, or the
+    key with a leading ``<prefix>-`` stripped.
+    """
+    sl = short.strip().lower()
+    if not sl:
+        return None
+    for m in machines.values():
+        if (m.display_name or "").strip().lower() == sl:
+            return m
+        kl = m.key.lower()
+        if kl == sl or kl.rsplit("-", 1)[-1] == sl or kl.endswith("-" + sl):
+            return m
+    return None
+
+
+def _load_related_entries(repo_root: Path) -> list[tuple[str, list[str], str]]:
+    """Parse ``<repo>/.agent-worktrees/related.yaml`` minimally.
+
+    Returns ``(name, locus_machines, delegate_via)`` tuples. Avoids importing
+    agent_worktrees (a separate venv); reads only the fields synthesis needs.
+    """
+    p = repo_root / ".agent-worktrees" / "related.yaml"
+    if not p.exists():
+        return []
+    try:
+        import yaml
+        data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        log.warning("Failed to parse related.yaml at %s: %s", p, exc)
+        return []
+    out: list[tuple[str, list[str], str]] = []
+    related = data.get("related") or {}
+    if not isinstance(related, dict):
+        return out
+    for name, entry in related.items():
+        if not isinstance(entry, dict):
+            continue
+        locus = entry.get("locus") or {}
+        raw_machines = locus.get("machines") if isinstance(locus, dict) else None
+        machines = (
+            [str(m).strip() for m in raw_machines if str(m).strip()]
+            if isinstance(raw_machines, list) else []
+        )
+        delegate = entry.get("delegate")
+        if isinstance(delegate, dict):
+            delegate = delegate.get("via", "")
+        delegate = str(delegate or "").strip().lower()
+        out.append((str(name), machines, delegate))
+    return out
+
+
+def derive_topology_agents(
+    machines: dict[str, MachineConfig],
+    control_plane_project: str | None,
+    related: list[tuple[str, list[str], str]],
+    local_machine: MachineConfig | None,
+) -> dict[str, AgentConfig]:
+    """Synthesize the agent roster from topology (machines × repos × envs).
+
+    Replaces the hand-authored ``acp-agents.json`` static registry. Produces:
+
+    1. **Control-plane machine agents** -- for the ``control_plane.project`` repo,
+       one agent per (machine, SSH environment): ``dev6`` / ``dev6-wsl`` /
+       ``cloud1``. Local env resolves to loopback; remote to SSH.
+    2. **Related-repo remote agents** -- for each ``related.yaml`` entry that
+       delegates via ``agent-bridge``, one ``<repo>@<machine>`` agent per
+       **remote** machine in its ``locus.machines`` (local ones are already
+       covered by projects.yaml auto-discovery).
+    """
+    out: dict[str, AgentConfig] = {}
+
+    if control_plane_project:
+        for machine in machines.values():
+            for env in machine.ssh_environments:
+                name = _short_machine_agent_name(machine, env)
+                if name in out:
+                    name = f"{name}-{(env.name or '').lower()}"
+                out[name] = AgentConfig(
+                    name=name,
+                    host=machine.key,
+                    ssh_environment=env.name or None,
+                    project=control_plane_project,
+                    derived=True,
+                    display_name=f"{machine.display_name} [{env.name}]",
+                    description=(
+                        f"Control-plane '{control_plane_project}' on "
+                        f"{machine.display_name} ({env.name}) [derived from topology]"
+                    ),
+                )
+
+    for repo, r_machines, delegate in related:
+        if delegate != "agent-bridge":
+            continue
+        for short in r_machines:
+            machine = _match_machine_shortname(machines, short)
+            if not machine:
+                continue
+            if local_machine and machine.key == local_machine.key:
+                continue  # local related repo -> covered by projects.yaml discovery
+            name = f"{repo}@{machine.display_name}"
+            if name in out:
+                continue
+            env = machine.get_spawnable_ssh_env() or (
+                machine.ssh_environments[0] if machine.ssh_environments else None
+            )
+            out[name] = AgentConfig(
+                name=name,
+                host=machine.key,
+                ssh_environment=(env.name if env else None),
+                project=repo,
+                derived=True,
+                display_name=name,
+                description=(
+                    f"'{repo}' on {machine.display_name} [derived from related.yaml]"
+                ),
+            )
+
+    return out
+
+
 def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     """Build an AgentResolver from config profiles + local discovery.
 
-    Loads topology profiles from config, then merges auto-discovered
-    local agents. Explicit registry entries always take precedence over
-    auto-discovered ones.
+    For each topology profile, loads its machines.yaml and **derives** the agent
+    roster from topology (machines × repos × environments) -- see
+    :func:`derive_topology_agents`. This replaces the hand-authored
+    ``acp-agents.json``; a profile's ``agents_config`` is still honored if set
+    (deprecated, explicit-wins back-compat). Auto-discovered local agents
+    (projects.yaml) are merged last; explicit/derived entries win.
 
     Args:
         cfg: Loaded BridgeConfig with topologies dict.
@@ -438,18 +589,33 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     Returns:
         AgentResolver if any agents or machines were found, else None.
     """
-    from .topology import load_machines_yaml
+    from .topology import load_control_plane_project, load_machines_yaml
 
     all_machines: dict[str, MachineConfig] = {}
     all_agents: dict[str, AgentConfig] = {}
 
     for _profile_name, profile in cfg.topologies.items():
-        if profile.machines_yaml:
-            machines = load_machines_yaml(profile.machines_yaml)
-            all_machines.update(machines)
+        if not profile.machines_yaml:
+            # No machines.yaml -- only an explicit (deprecated) agents_config.
+            if profile.agents_config:
+                all_agents.update(load_agent_registry(profile.agents_config))
+            continue
+        machines = load_machines_yaml(profile.machines_yaml)
+        all_machines.update(machines)
+        # Deprecated back-compat: honor an explicit acp-agents.json if still set;
+        # explicit entries win over derived ones below.
         if profile.agents_config:
-            agents_cfg = load_agent_registry(profile.agents_config)
-            all_agents.update(agents_cfg)
+            all_agents.update(load_agent_registry(profile.agents_config))
+        # Derive the roster from topology (replaces acp-agents.json).
+        cp_project = load_control_plane_project(profile.machines_yaml)
+        repo_root = Path(profile.machines_yaml).expanduser().resolve().parent
+        related = _load_related_entries(repo_root)
+        local_machine, _ = _detect_local_machine(machines)
+        derived = derive_topology_agents(
+            machines, cp_project, related, local_machine,
+        )
+        for name, agent in derived.items():
+            all_agents.setdefault(name, agent)  # explicit agents_config wins
 
     # Auto-discover local agents from adopted projects; explicit wins.
     # Also suppress auto-discovered agents when a registry agent already
@@ -478,8 +644,10 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     if all_machines or all_agents:
         resolver = AgentResolver(all_agents, all_machines)
         log.info(
-            "Resolver built: %d machines, %d agents (%d auto-discovered)",
+            "Resolver built: %d machines, %d agents "
+            "(%d derived, %d auto-discovered)",
             len(all_machines), len(all_agents),
+            sum(1 for a in all_agents.values() if a.derived),
             sum(1 for a in all_agents.values() if a.auto_discovered),
         )
         _register_namespace_resolvers(resolver)
@@ -1151,6 +1319,7 @@ class AgentResolver:
             "env": config.env or {},
             "project": config.project,
             "auto_discovered": config.auto_discovered,
+            "derived": config.derived,
             "provider": config.provider,
         }
 
