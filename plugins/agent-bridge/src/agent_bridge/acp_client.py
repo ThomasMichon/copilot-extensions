@@ -387,6 +387,12 @@ class AcpClient:
         self._host_mode = False
         self._host_child_pid: int | None = None
         self._host_closer: Any = None  # async () -> None, called on shutdown
+        # In host mode, tracks whether the relayed transport to the Session Host
+        # is still up. A loopback/forwarded socket drop (host + child survive)
+        # flips this False via :meth:`mark_transport_lost`, which is what makes
+        # ``is_running`` report the child as unreachable so the session's
+        # liveness derives ``disconnected`` and the reattach driver fires (P1).
+        self._host_transport_alive = True
 
     @property
     def pid(self) -> int | None:
@@ -401,8 +407,20 @@ class AcpClient:
     @property
     def is_running(self) -> bool:
         if self._host_mode:
-            return self._connection is not None
+            return self._connection is not None and self._host_transport_alive
         return self._process is not None and self._process.returncode is None
+
+    def mark_transport_lost(self) -> None:
+        """Record that the host-mode relayed transport dropped (P1).
+
+        Called by the ACP stream adapter when the host->front relay ends while
+        the Session Host's child is still alive -- the transport died, not the
+        child. Makes ``is_running`` False so the session reads ``disconnected``
+        and the frontend's ``recover_disconnected_hosts`` driver reattaches by
+        cursor. Idempotent; a no-op outside host mode.
+        """
+        if self._host_mode:
+            self._host_transport_alive = False
 
     @property
     def active_background_tasks(self) -> list[str]:
@@ -459,6 +477,7 @@ class AcpClient:
         self._host_mode = True
         self._host_child_pid = child_pid
         self._host_closer = closer
+        self._host_transport_alive = True
         await self._init_connection(writer, reader)
 
     async def _init_connection(
