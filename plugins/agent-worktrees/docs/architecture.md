@@ -196,3 +196,34 @@ does.
 - **Dispatch is kind-keyed, not index-keyed.** Built-in pivot logic switches on
   the pivot *kind* (`worktrees`/`maintenance`/`profiles`/`registered`), so an
   inserted pivot never renumbers the built-ins.
+
+### Action kinds: external (CLI) vs internal (navigation)
+
+An `actions` entry is one of two shapes:
+
+- **External (default)** -- `{"label": …, "run": [argv…], "confirm": false}`.
+  The `run` template is spawned as a subprocess (as above). This is the right
+  choice for anything that *does work* (open, abandon, retry, …).
+- **Internal (picker navigation)** --
+  `{"label": …, "kind": "internal", "verb": "jump-host", "args": ["{worktree}"]}`.
+  No subprocess is spawned; the picker handles the `verb` itself against its own
+  state. `args` (optional) become the template the handler substitutes. This
+  exists because a subprocess **cannot** move the picker's cursor, switch a
+  machine tab, or reveal hidden rows -- state a CLI has no handle on.
+
+  Handlers live in `engine.PickerScreen._internal_pivot_action`; the registry is
+  intentionally tiny and defensive (an unknown `verb` is a reported failure,
+  never a raise). The first verb is:
+
+  - **`jump-host`** -- navigate to the Worktrees view, switch to the host machine
+    tab of the worktree named by `args`/`worktree`, reveal hidden if it is a
+    bridge/system row, and highlight it (matched by **stable worktree id**, never
+    a live list index). The same primitive backs the built-in *Jump to host*
+    per-worktree action for bridge/system worktrees (#1424).
+
+**Boundary (deliberate).** Modules contribute a *generic task-list* pivot plus
+external/internal actions -- **not** arbitrary custom render surfaces or
+in-process Python. The CLI-over-manifest seam is the cross-venv-correct answer to
+"each plugin installs in its own venv"; richer per-module rendering is explicitly
+out of scope (#1425).
+

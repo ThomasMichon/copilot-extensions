@@ -68,6 +68,47 @@ def test_parse_full_manifest(tmp_path):
     assert [a.key for a in p.actions] == ["open", "action1"]
     assert p.actions[0].label == "Open"
     assert p.actions[1].confirm is True
+    # External actions carry no internal verb.
+    assert p.actions[0].internal is None
+
+
+def test_parse_internal_action(tmp_path):
+    # #1425: an internal (picker-navigation) action carries a verb, not a CLI.
+    _write(
+        tmp_path,
+        "bridges",
+        {
+            "label": "Bridges",
+            "list": ["agent-bridge", "list", "--json"],
+            "entry": {"id": "id", "title": "title", "worktree": "worktree"},
+            "actions": [
+                {"key": "jump", "label": "Jump to host", "kind": "internal",
+                 "verb": "jump-host", "args": ["{worktree}"]},
+                {"key": "open", "label": "Open", "run": ["do", "{id}"]},
+            ],
+        },
+    )
+    [p] = pivots.discover_pivots(tmp_path)
+    jump, ext = p.actions
+    assert jump.internal == "jump-host"
+    assert jump.run == ("{worktree}",)      # args become the template
+    assert ext.internal is None             # external unchanged
+    assert ext.run == ("do", "{id}")
+
+
+def test_internal_action_without_verb_is_skipped(tmp_path):
+    # A malformed internal action sinks only its manifest, never the picker.
+    _write(tmp_path, "ok", {"label": "Ok", "list": ["x"]})
+    _write(
+        tmp_path,
+        "bad",
+        {
+            "label": "Bad",
+            "list": ["x"],
+            "actions": [{"label": "Nav", "kind": "internal"}],  # no `verb`
+        },
+    )
+    assert [p.name for p in pivots.discover_pivots(tmp_path)] == ["ok"]
 
 
 def test_malformed_manifest_is_skipped_not_fatal(tmp_path):

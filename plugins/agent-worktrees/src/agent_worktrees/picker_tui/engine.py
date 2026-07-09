@@ -282,6 +282,8 @@ ACTION_DESC = {
     "Cleanup": "Remove this worktree (safe once merged/idle).",
     "Restart": "Kill the worktree's active processes, start a fresh "
                "TMux/PSMux, and resume the last session in a NEW Copilot instance.",
+    "Jump to host": "Switch to this worktree's host machine tab and highlight "
+                    "it (reveals hidden bridge/system worktrees).",
 }
 
 # Per-action descriptions for the Maintenance actions menu (#1345).
@@ -2663,6 +2665,9 @@ class PickerScreen(Widget):
                 self._decide(self._resume_decision(rec, no_mux=no_mux))
             elif cur == "Resume":
                 self._decide(self._resume_decision(rec))
+            elif cur == "Jump to host":
+                # Internal navigation -- stay in the picker (#1424).
+                self._jump_to_worktree((rec.get("raw") or {}).get("id"))
             else:
                 # Sync / Cleanup / Restart are deferred ops (full wiring
                 # pending) -- keep the mock note for now.
@@ -2987,8 +2992,80 @@ class PickerScreen(Widget):
         if self._cleanable(rec):
             acts.append("Cleanup")
         acts.append("Restart")
+        # #1424: a bridge/system worktree is host-owned. Offer a jump to its host
+        # machine's view (switch tab, reveal hidden, highlight the row) -- but
+        # only when that host tab actually resolves, so we never show a dead
+        # action.
+        if (rec.get("kind") in ("bridge", "system")
+                and self._machine_index_for(rec.get("machine"), rec.get("env"))
+                is not None):
+            acts.append("Jump to host")
         self.submenu = {"rec": rec, "actions": acts, "no_mux": False}
         self.submenu_idx = 0
+
+    def _machine_index_for(self, machine, env):
+        """Index of the (machine, env) tab in ``self.machines``, or None."""
+        for i, (label, m, e, _ok) in enumerate(self.machines):
+            if label != "All" and m == machine and e == env:
+                return i
+        return None
+
+    def _jump_to_worktree(self, wid):
+        """#1424/#1425: navigate to the Worktrees view, the host machine tab of
+        the worktree with id ``wid``, and highlight that row.
+
+        Resolves the row by **stable worktree id** (never a live list index,
+        which shifts under machine-switch / reveal-hidden / background refresh),
+        reveals hidden so a bridge/system row is focusable, and switches off any
+        registered pivot. Internal navigation only -- never exits the picker.
+        Returns ``(ok, message)``.
+        """
+        if not wid:
+            return False, "no worktree id"
+        row = next(
+            (w for w in self.data if (w.get("raw") or {}).get("id") == wid),
+            None,
+        )
+        if row is None:
+            return False, "worktree not found on any loaded machine"
+        machine, env = row.get("machine"), row.get("env")
+        idx = self._machine_index_for(machine, env)
+        if idx is None:
+            self.debug = f"jump: host {machine} {env} not available"
+            return False, f"host {machine} {env} not available"
+        # Land on the Worktrees pivot (the jump can originate from a registered
+        # pivot's internal action).
+        for i, p in enumerate(self.pivots):
+            if p["kind"] == "worktrees":
+                self.htab = i
+                break
+        self.machine_idx = idx
+        if (row.get("kind") or "session") in ("system", "bridge"):
+            self.show_hidden = True
+        records = self.list_records()
+        target_i = next(
+            (i for i, r in enumerate(records)
+             if (r.get("raw") or {}).get("id") == wid),
+            None,
+        )
+        if target_i is None:
+            # The tab may still be loading, or the row is filtered out; land on a
+            # safe default so focus is never left on a phantom stop.
+            self.sel = self.default_sel()
+            self.debug = f"jumped to {machine} {env} (row not yet loaded)"
+            return True, f"switched to {machine} {env}"
+        self.sel = ("L", target_i)
+        self.btn_idx = 0
+        self.debug = f"jumped to {machine} {env} · …{str(wid)[-4:]}"
+        return True, f"jumped to {machine} {env}"
+
+    def _internal_pivot_action(self, verb, ctx):
+        """Dispatch a registered pivot's INTERNAL (picker-navigation) action
+        (#1425). Tiny and defensive: an unknown verb is a reported failure, never
+        an exception. ``jump-host`` navigates to the entry's worktree by id."""
+        if verb == "jump-host":
+            return self._jump_to_worktree(ctx.get("worktree") or ctx.get("id"))
+        return False, f"unknown internal action: {verb}"
 
     # ---- registered-pivot (Tasks) action sub-menu ----
     def _open_task_menu(self):
@@ -3032,9 +3109,20 @@ class PickerScreen(Widget):
             self.task_menu = None
 
     def _run_task_action(self, reg, action, rec):
-        """Execute one task action via the pivot runtime, then invalidate the
-        cached list so the row reflects the new state on the next fetch."""
+        """Execute one task action, then invalidate the cached list so the row
+        reflects the new state on the next fetch. An INTERNAL (navigation) action
+        is dispatched in-process and does NOT invalidate the cache (#1425)."""
         ctx = self._task_action_ctx(reg, rec)
+        title = rec.get(reg.title_field) or rec.get(reg.id_field) or "task"
+        if action.internal:
+            ok, msg = self._internal_pivot_action(action.internal, ctx)
+            # A navigation action re-anchors selection itself; only guard against
+            # a now-invalid stop.
+            if self.sel not in self.stops():
+                self.sel = self.default_sel()
+            if not ok:
+                self.debug = f"{action.label} failed · {msg or 'see logs'}"
+            return
         rt = self._pivot_runtime(reg)
         ok, msg = rt.run_action(action, ctx)
         rt.invalidate()
@@ -3042,7 +3130,6 @@ class PickerScreen(Widget):
         if self.sel not in self.stops():
             self.sel = self.default_sel()
         short = (msg or "").splitlines()[0][:80] if msg else ""
-        title = rec.get(reg.title_field) or rec.get(reg.id_field) or "task"
         if ok:
             self.debug = f"{action.label} · {title}" + (f" — {short}" if short else "")
         else:

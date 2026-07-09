@@ -43,6 +43,115 @@ def _fixture_source():
     return src
 
 
+def _bridge_source():
+    """Two machines; a bridge-owned worktree lives on the non-local one, for
+    the #1424 jump-to-host flow."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    raws_local = [
+        {"id": "lambda-core-win-1111", "title": "Local wt", "status": "active",
+         "started_at": "2026-06-27T17:00:00", "turn_count": 3},
+    ]
+    raws_bor = [
+        {"id": "borealis-win-bridge-2222", "title": "Bridge wt",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "kind": "bridge", "turn_count": 1},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = ("lambda-core", "Win")
+    src.LOCAL_LABEL = "lambda-core · win"
+    src.machines = lambda: [
+        ("lambda-core Win", "lambda-core", "Win", True),
+        ("borealis Win", "borealis", "Win", True),
+    ]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: (
+        [derive.norm(w, "lambda-core", "Win") for w in raws_local]
+        + [derive.norm(w, "borealis", "Win") for w in raws_bor]
+    )
+    return src
+
+
+def test_jump_to_host_offered_only_for_managed(tmp_path):
+    """The submenu offers 'Jump to host' for a bridge/system worktree, not a
+    plain session worktree (#1424)."""
+    src = _bridge_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.t0 = 0                     # force all machine tabs ready
+            scr.show_hidden = True
+            scr.machine_idx = 0            # All
+            await pilot.pause()
+            recs = scr.list_records()
+            bi = next(i for i, r in enumerate(recs) if r.get("kind") == "bridge")
+            si = next(i for i, r in enumerate(recs) if r.get("kind") == "session")
+            scr.sel = ("L", bi)
+            scr._open_submenu()
+            assert "Jump to host" in scr.submenu["actions"]
+            scr.submenu = None
+            scr.sel = ("L", si)
+            scr._open_submenu()
+            assert "Jump to host" not in scr.submenu["actions"]
+
+    asyncio.run(run())
+
+
+def test_jump_to_host_switches_machine_and_highlights(tmp_path):
+    """Invoking 'Jump to host' switches to the host machine tab, reveals hidden,
+    lands selection on the row by stable id, and never exits the picker
+    (#1424)."""
+    src = _bridge_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.t0 = 0
+            scr.show_hidden = True
+            scr.machine_idx = 0            # start on All
+            await pilot.pause()
+            recs = scr.list_records()
+            bi = next(i for i, r in enumerate(recs) if r.get("kind") == "bridge")
+            scr.sel = ("L", bi)
+            scr._open_submenu()
+            scr.submenu_idx = scr.submenu["actions"].index("Jump to host")
+            scr._key_submenu("enter")
+            await pilot.pause()
+        assert scr.submenu is None
+        assert scr.machine_idx == scr._machine_index_for("borealis", "Win")
+        assert scr.show_hidden is True
+        assert scr.sel[0] == "L"
+        landed = scr.list_records()[scr.sel[1]]
+        assert (landed.get("raw") or {}).get("id") == "borealis-win-bridge-2222"
+        assert app.result is None          # internal nav -- never exited
+
+    asyncio.run(run())
+
+
+def test_jump_to_worktree_unknown_id_is_safe(tmp_path):
+    """A jump to a worktree not in the loaded set is a reported no-op, not a
+    crash (guards the #1425 registered-pivot internal action)."""
+    src = _bridge_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            ok, msg = scr._jump_to_worktree("does-not-exist")
+            assert ok is False
+            assert "not found" in msg
+            # And the internal-action dispatcher reports unknown verbs.
+            ok2, msg2 = scr._internal_pivot_action("no-such-verb", {})
+            assert ok2 is False
+            assert "unknown internal action" in msg2
+
+    asyncio.run(run())
+
+
 def _maint_source():
     """Fixture with one worktree per cleanup bucket + one FF-eligible."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
