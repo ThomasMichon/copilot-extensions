@@ -50,19 +50,32 @@ def _isolate_pivots(tmp_path_factory):
     ``~/.agent-worktrees/pivots/`` (e.g. the agent-dispatch manifest). Tests
     that exercise discovery override this env var explicitly.
 
+    Also isolates the marketplace plugin-install root that ``ensure_pivots``
+    restores from (#2180): without it, the picker's self-heal would scan the
+    real ``~/.copilot/installed-plugins`` and copy a contributed manifest back
+    into the (otherwise empty) tmp pivots dir, re-introducing the very ambient
+    pivot this fixture exists to suppress.
+
     Uses ``os.environ`` directly (not ``monkeypatch``) so this autouse fixture
     introduces no dependency that could reorder fixture teardown.
     """
     import os
 
     empty = tmp_path_factory.mktemp("empty-pivots")
+    empty_plugins = tmp_path_factory.mktemp("empty-plugins")
     saved = os.environ.get("AGENT_WORKTREES_PIVOTS_DIR")
+    saved_plugins = os.environ.get("AGENT_WORKTREES_PLUGINS_DIR")
     os.environ["AGENT_WORKTREES_PIVOTS_DIR"] = str(empty)
+    os.environ["AGENT_WORKTREES_PLUGINS_DIR"] = str(empty_plugins)
     yield
     if saved is None:
         os.environ.pop("AGENT_WORKTREES_PIVOTS_DIR", None)
     else:
         os.environ["AGENT_WORKTREES_PIVOTS_DIR"] = saved
+    if saved_plugins is None:
+        os.environ.pop("AGENT_WORKTREES_PLUGINS_DIR", None)
+    else:
+        os.environ["AGENT_WORKTREES_PLUGINS_DIR"] = saved_plugins
 
 
 @pytest.fixture

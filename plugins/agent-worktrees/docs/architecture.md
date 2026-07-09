@@ -189,6 +189,16 @@ does.
   startup (and on `r`-refresh), weaving each manifest into the built-in order by
   its `after` hint. `AGENT_WORKTREES_PIVOTS_DIR` overrides the location (tests,
   escape hatch). A missing dir or a malformed manifest is skipped -- never fatal.
+- **Self-heal** (`ensure_pivots`, #2180): a contributor copies its manifest into
+  `~/.agent-worktrees/pivots/` only on *its own* install, so resetting the
+  agent-worktrees runtime root silently drops every contributed pivot (the
+  `Tasks` pivot vanishes) until each plugin is reinstalled. Before each scan the
+  picker restores them from the **durable** copilot marketplace install tree --
+  `~/.copilot/installed-plugins/<marketplace>/<plugin>/pivots/*.json`
+  (`AGENT_WORKTREES_PLUGINS_DIR` overrides) -- copying any *missing* manifest
+  back. Restore-only (never clobbers a locally-present manifest) and best-effort
+  (any error is swallowed), so registration is idempotently ensured with no
+  contributor involvement.
 - **Data + actions** (`picker_tui/tasks.py`): the `list` command is run as a
   **subprocess** (argv[0] resolved on `PATH`) on a background thread, cached per
   machine, and expected to print a JSON array. `actions` argv templates are run

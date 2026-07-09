@@ -393,6 +393,9 @@ class PickerScreen(Widget):
         try:
             from . import pivots as pivots_mod
 
+            # Self-heal contributed pivots the runtime root may have lost (#2180)
+            # before scanning, so e.g. the Tasks pivot survives a reset.
+            pivots_mod.ensure_pivots()
             registered = pivots_mod.discover_pivots()
             descriptors = pivots_mod.order_pivots(BUILTIN_PIVOTS, registered)
         except Exception:

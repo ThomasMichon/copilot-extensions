@@ -182,3 +182,92 @@ def test_format_template_none_becomes_empty():
 def test_list_must_be_nonempty_argv(tmp_path, bad_list):
     _write(tmp_path, "b", {"label": "B", "list": bad_list})
     assert pivots.discover_pivots(tmp_path) == []
+
+
+# -- ensure_pivots: self-heal the runtime dir from the marketplace tree (#2180) --
+
+
+def _plugin_manifest(root, marketplace, plugin, name, data):
+    """Write ``<root>/<marketplace>/<plugin>/pivots/<name>.json`` and return it."""
+    directory = root / marketplace / plugin / "pivots"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{name}.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def test_ensure_pivots_restores_missing_manifest(tmp_path):
+    src_root = tmp_path / "installed-plugins"
+    dest = tmp_path / "pivots"
+    manifest = {"label": "Tasks", "list": ["agent-dispatch", "inbox"]}
+    _plugin_manifest(src_root, "copilot-extensions", "agent-dispatch", "agent-dispatch", manifest)
+
+    restored = pivots.ensure_pivots(base=dest, plugins_root=src_root)
+
+    assert restored == ["agent-dispatch.json"]
+    assert (dest / "agent-dispatch.json").is_file()
+    # And the restored manifest is now discoverable as a real pivot.
+    [p] = pivots.discover_pivots(dest)
+    assert p.label == "Tasks"
+
+
+def test_ensure_pivots_does_not_clobber_existing(tmp_path):
+    src_root = tmp_path / "installed-plugins"
+    dest = tmp_path / "pivots"
+    dest.mkdir()
+    # A locally-present manifest (e.g. one a newer contributor install wrote).
+    (dest / "agent-dispatch.json").write_text(
+        json.dumps({"label": "Local", "list": ["x"]}), encoding="utf-8"
+    )
+    _plugin_manifest(
+        src_root, "copilot-extensions", "agent-dispatch", "agent-dispatch",
+        {"label": "Source", "list": ["y"]},
+    )
+
+    restored = pivots.ensure_pivots(base=dest, plugins_root=src_root)
+
+    assert restored == []
+    [p] = pivots.discover_pivots(dest)
+    assert p.label == "Local"  # untouched
+
+
+def test_ensure_pivots_missing_source_root_is_noop(tmp_path):
+    dest = tmp_path / "pivots"
+    assert pivots.ensure_pivots(base=dest, plugins_root=tmp_path / "nope") == []
+    assert not dest.exists()  # nothing to restore -> dest not even created
+
+
+def test_ensure_pivots_is_idempotent(tmp_path):
+    src_root = tmp_path / "installed-plugins"
+    dest = tmp_path / "pivots"
+    _plugin_manifest(
+        src_root, "copilot-extensions", "agent-dispatch", "agent-dispatch",
+        {"label": "Tasks", "list": ["agent-dispatch", "inbox"]},
+    )
+
+    assert pivots.ensure_pivots(base=dest, plugins_root=src_root) == ["agent-dispatch.json"]
+    # Second pass: already present, nothing restored.
+    assert pivots.ensure_pivots(base=dest, plugins_root=src_root) == []
+
+
+def test_ensure_pivots_restores_multiple_plugins(tmp_path):
+    src_root = tmp_path / "installed-plugins"
+    dest = tmp_path / "pivots"
+    _plugin_manifest(
+        src_root, "copilot-extensions", "agent-dispatch", "agent-dispatch",
+        {"label": "Tasks", "list": ["agent-dispatch", "inbox"]},
+    )
+    _plugin_manifest(
+        src_root, "copilot-extensions", "agent-bridge", "bridges",
+        {"label": "Bridges", "list": ["agent-bridge", "list"]},
+    )
+
+    restored = pivots.ensure_pivots(base=dest, plugins_root=src_root)
+
+    assert set(restored) == {"agent-dispatch.json", "bridges.json"}
+    assert {p.label for p in pivots.discover_pivots(dest)} == {"Tasks", "Bridges"}
+
+
+def test_installed_plugins_dir_env_override(tmp_path, monkeypatch):
+    monkeypatch.setenv(pivots.PLUGINS_ROOT_ENV, str(tmp_path / "custom"))
+    assert pivots.installed_plugins_dir() == tmp_path / "custom"

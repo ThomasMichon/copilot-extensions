@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,11 @@ from pathlib import Path
 #: Environment override for the manifest directory (used by tests for hermetic
 #: isolation, and available as an operator escape hatch).
 PIVOTS_DIR_ENV = "AGENT_WORKTREES_PIVOTS_DIR"
+
+#: Environment override for the copilot marketplace plugin-install root. Its
+#: ``<marketplace>/<plugin>/pivots/*.json`` files are the *durable source* used
+#: by :func:`ensure_pivots` to restore the runtime pivots dir after a reset.
+PLUGINS_ROOT_ENV = "AGENT_WORKTREES_PLUGINS_DIR"
 
 
 @dataclass(frozen=True)
@@ -214,6 +220,74 @@ def pivots_dir(base: str | os.PathLike[str] | None = None) -> Path:
     return config.install_dir() / "pivots"
 
 
+def installed_plugins_dir(base: str | os.PathLike[str] | None = None) -> Path:
+    """The copilot marketplace plugin-install root.
+
+    An explicit ``base``, else the :data:`PLUGINS_ROOT_ENV` override, else
+    ``~/.copilot/installed-plugins``. The copilot CLI writes this tree when a
+    plugin installs, and -- unlike ``~/.agent-worktrees/`` -- it *survives* an
+    agent-worktrees runtime-root reset, so it is the durable source from which
+    :func:`ensure_pivots` restores lost pivot manifests.
+    """
+    if base is not None:
+        return Path(base)
+    env = os.environ.get(PLUGINS_ROOT_ENV)
+    if env:
+        return Path(env)
+    from .. import config
+
+    return config._home() / ".copilot" / "installed-plugins"
+
+
+def ensure_pivots(
+    base: str | os.PathLike[str] | None = None,
+    plugins_root: str | os.PathLike[str] | None = None,
+) -> list[str]:
+    """Self-heal the runtime pivots dir from the marketplace install tree.
+
+    Contributor plugins ship their pivot manifest inside their own package
+    (``<plugin>/pivots/<name>.json``) and copy it into ``~/.agent-worktrees/
+    pivots/`` only on *their own* install/update. Resetting the agent-worktrees
+    runtime root therefore silently drops every contributed pivot (e.g. the
+    ``Tasks`` pivot) until each plugin happens to be reinstalled (#2180).
+
+    This restores them with no contributor involvement: it scans the copilot
+    marketplace plugin-install root (:func:`installed_plugins_dir`) for
+    ``<marketplace>/<plugin>/pivots/*.json`` and copies any manifest that is
+    **missing** from the runtime pivots dir. It is idempotent (restore-only: an
+    existing manifest -- including one a newer contributor install force-wrote --
+    is never clobbered) and fully best-effort: every error is swallowed so the
+    picker always opens.
+
+    Returns the manifest filenames restored (for logging/tests); ``[]`` when
+    nothing was missing or the source tree is absent.
+    """
+    dest = pivots_dir(base)
+    source_root = installed_plugins_dir(plugins_root)
+    restored: list[str] = []
+    try:
+        if not source_root.is_dir():
+            return []
+        # Layout: <marketplace>/<plugin>/pivots/<name>.json
+        sources = sorted(source_root.glob("*/*/pivots/*.json"))
+    except OSError:
+        return []
+    for src in sources:
+        try:
+            if not src.is_file():
+                continue
+            target = dest / src.name
+            if target.exists():
+                continue
+            dest.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, target)
+            restored.append(src.name)
+        except OSError:
+            # A single unreadable/unwritable manifest must not sink the rest.
+            continue
+    return restored
+
+
 def discover_pivots(base: str | os.PathLike[str] | None = None) -> list[RegisteredPivot]:
     """Scan the manifest directory and return the valid registered pivots.
 
@@ -295,7 +369,9 @@ __all__ = [
     "PivotAction",
     "RegisteredPivot",
     "discover_pivots",
+    "ensure_pivots",
     "format_template",
+    "installed_plugins_dir",
     "order_pivots",
     "parse_manifest",
     "pivots_dir",
