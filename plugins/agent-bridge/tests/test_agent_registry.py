@@ -374,6 +374,33 @@ class TestAgentResolver:
         assert target.type == "ssh"
         assert target.host == "workstation"
 
+    def test_resolve_loopback_on_not_ready_machine(self):
+        """Loopback dispatch works even when the machine is ssh_ready=false.
+
+        The inter-machine SSH mesh being retired (ssh_ready=false everywhere,
+        issue #168) must not disable *local* loopback -- a same-platform agent
+        on the local box needs no SSH and should still spawn locally.
+        """
+        agents = parse_agent_registry({
+            "local-cp": {
+                "host": "laptop",  # ssh_ready=false in SAMPLE_MACHINES_DATA
+                "ssh_environment": "windows",
+                "project": "my-project",
+            },
+        })
+        from unittest.mock import patch
+        local_machine = self.machines["laptop"]
+        assert local_machine.ssh_ready is False
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local_machine, "windows"),
+        ):
+            resolver = AgentResolver(agents, self.machines)
+            target = resolver.resolve("local-cp")
+        assert target.type == "local"
+        assert target.host is None
+        assert target.project == "my-project"
+
 
 class TestLoadAgentRegistry:
 
@@ -1175,7 +1202,7 @@ TOPO_MACHINES_DATA = {
         "tmichon-dev6": {
             "display_name": "dev6",
             "ssh": {
-                "ready": False,
+                "ready": True,
                 "environments": [
                     {"name": "windows", "alias": "tmichon-dev6", "shell": "pwsh"},
                     {"name": "wsl", "alias": "tmichon-dev6-wsl", "shell": "bash"},
@@ -1185,7 +1212,7 @@ TOPO_MACHINES_DATA = {
         "tmichon-cloud1": {
             "display_name": "cloud1",
             "ssh": {
-                "ready": False,
+                "ready": True,
                 "environments": [
                     {"name": "windows", "alias": "tmichon-cloud1", "shell": "pwsh"},
                 ],
@@ -1315,3 +1342,57 @@ class TestLoadRelatedEntries:
 
     def test_missing_file(self, tmp_path):
         assert _load_related_entries(tmp_path) == []
+
+
+class TestReachability:
+    """Only loopback or ssh_ready (machine,env) pairs are emitted (#168)."""
+
+    UNREADY = {
+        "control_plane": {"project": "dotfiles"},
+        "machines": {
+            "tmichon-dev6": {
+                "display_name": "dev6",
+                "ssh": {
+                    "ready": False,
+                    "environments": [
+                        {"name": "windows", "alias": "tmichon-dev6", "shell": "pwsh"},
+                        {"name": "wsl", "alias": "tmichon-dev6-wsl", "shell": "bash"},
+                    ],
+                },
+            },
+            "tmichon-cloud1": {
+                "display_name": "cloud1",
+                "ssh": {
+                    "ready": False,
+                    "environments": [
+                        {"name": "windows", "alias": "tmichon-cloud1", "shell": "pwsh"},
+                    ],
+                },
+            },
+        },
+    }
+
+    def test_unreachable_remote_skipped_but_loopback_kept(self):
+        ms = parse_machines_yaml(self.UNREADY)
+        local = ms["tmichon-dev6"]
+        # We are on dev6 (windows). Nothing is ssh_ready.
+        agents = derive_topology_agents(ms, "dotfiles", [], local, "windows")
+        # Local same-platform env -> loopback -> kept.
+        assert "dev6" in agents
+        # Cross-env (wsl) on the local box needs SSH -> unreachable -> skipped.
+        assert "dev6-wsl" not in agents
+        # Remote, not ssh_ready -> unreachable -> skipped.
+        assert "cloud1" not in agents
+
+    def test_all_skipped_without_local_machine_when_unready(self):
+        ms = parse_machines_yaml(self.UNREADY)
+        # No local machine + nothing ssh_ready -> nothing reachable.
+        assert derive_topology_agents(ms, "dotfiles", [], None, "") == {}
+
+    def test_related_remote_requires_ssh_ready(self):
+        ms = parse_machines_yaml(self.UNREADY)
+        local = ms["tmichon-dev6"]
+        related = [("odsp-web", ["cloud1"], "agent-bridge")]
+        # cloud1 not ssh_ready -> related-remote agent skipped.
+        agents = derive_topology_agents(ms, None, related, local, "windows")
+        assert "odsp-web@cloud1" not in agents

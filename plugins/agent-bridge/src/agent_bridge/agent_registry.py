@@ -406,7 +406,7 @@ def _find_covering_agent(
     env_name = platform  # 'windows', 'wsl', 'linux'
 
     for name, agent in registry.items():
-        if agent.auto_discovered or agent.project != local_agent.project:
+        if agent.auto_discovered or agent.derived or agent.project != local_agent.project:
             continue
         # Agent must target this machine (host matches machine key)
         if not agent.host:
@@ -509,6 +509,7 @@ def derive_topology_agents(
     control_plane_project: str | None,
     related: list[tuple[str, list[str], str]],
     local_machine: MachineConfig | None,
+    local_platform: str = "",
 ) -> dict[str, AgentConfig]:
     """Synthesize the agent roster from topology (machines × repos × envs).
 
@@ -516,17 +517,32 @@ def derive_topology_agents(
 
     1. **Control-plane machine agents** -- for the ``control_plane.project`` repo,
        one agent per (machine, SSH environment): ``dev6`` / ``dev6-wsl`` /
-       ``cloud1``. Local env resolves to loopback; remote to SSH.
+       ``cloud1``. Local same-platform env resolves to loopback; others to SSH.
     2. **Related-repo remote agents** -- for each ``related.yaml`` entry that
        delegates via ``agent-bridge``, one ``<repo>@<machine>`` agent per
        **remote** machine in its ``locus.machines`` (local ones are already
        covered by projects.yaml auto-discovery).
+
+    Only **reachable** agents are emitted: an (machine, env) pair is reachable
+    if it is local loopback (this machine + this platform) *or* the machine is
+    ``ssh.ready``. With the inter-machine SSH mesh retired (issue #168) that
+    leaves only the local loopback agents; remote agents reappear automatically
+    once a machine's ``ssh.ready`` flips back to true.
     """
     out: dict[str, AgentConfig] = {}
+
+    def _is_loopback(machine: MachineConfig, env: SshEnvironment) -> bool:
+        return bool(
+            local_machine
+            and machine.key == local_machine.key
+            and env.name == local_platform
+        )
 
     if control_plane_project:
         for machine in machines.values():
             for env in machine.ssh_environments:
+                if not (_is_loopback(machine, env) or machine.ssh_ready):
+                    continue  # unreachable (SSH mesh retired) -- skip
                 name = _short_machine_agent_name(machine, env)
                 if name in out:
                     name = f"{name}-{(env.name or '').lower()}"
@@ -552,6 +568,8 @@ def derive_topology_agents(
                 continue
             if local_machine and machine.key == local_machine.key:
                 continue  # local related repo -> covered by projects.yaml discovery
+            if not machine.ssh_ready:
+                continue  # remote + not SSH-ready -> unreachable (skip)
             name = f"{repo}@{machine.display_name}"
             if name in out:
                 continue
@@ -610,9 +628,9 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
         cp_project = load_control_plane_project(profile.machines_yaml)
         repo_root = Path(profile.machines_yaml).expanduser().resolve().parent
         related = _load_related_entries(repo_root)
-        local_machine, _ = _detect_local_machine(machines)
+        local_machine, local_platform = _detect_local_machine(machines)
         derived = derive_topology_agents(
-            machines, cp_project, related, local_machine,
+            machines, cp_project, related, local_machine, local_platform,
         )
         for name, agent in derived.items():
             all_agents.setdefault(name, agent)  # explicit agents_config wins
@@ -1200,12 +1218,6 @@ class AgentResolver:
             config.host, config.ssh_environment,
         )
 
-        if not machine.ssh_ready:
-            raise ValueError(
-                f"Machine '{machine.key}' is not marked as SSH-ready "
-                "in the topology"
-            )
-
         # When resolved via alias, use the matched environment directly.
         # Otherwise, select environment via the standard logic.
         if alias_env:
@@ -1225,6 +1237,43 @@ class AgentResolver:
         else:
             ssh_env = machine.get_spawnable_ssh_env(config.ssh_environment)
 
+        # Loopback detection: if the resolved machine is the local machine
+        # and the SSH environment matches our platform, spawn locally instead
+        # of SSH-ing to ourselves. SSH loopback causes binstub stdout
+        # pollution that breaks ACP JSON-RPC parsing. This runs *before* the
+        # ssh_ready gate so local dispatch works with the SSH mesh retired.
+        if (
+            ssh_env
+            and self._local_machine
+            and machine.key == self._local_machine.key
+            and ssh_env.name == self._local_platform
+        ):
+            log.info(
+                "Loopback detected for agent '%s' (machine '%s', env '%s') "
+                "-- spawning locally instead of SSH",
+                agent_name, machine.key, ssh_env.name,
+            )
+            return SpawnTarget(
+                type="local",
+                cwd=config.cwd,
+                copilot_path=config.copilot_path,
+                copilot_args=config.copilot_args,
+                env=config.env,
+                project=config.project,
+            )
+
+        # Real SSH is required (remote machine, or cross-environment on the
+        # local box). Enforce SSH-readiness here -- *after* loopback detection,
+        # so a local same-platform agent still dispatches even when the machine
+        # is marked ssh_ready=false (the inter-machine SSH mesh being retired
+        # must not disable local loopback dispatch). See issue #168.
+        if not machine.ssh_ready:
+            raise ValueError(
+                f"Machine '{machine.key}' is not marked as SSH-ready "
+                "in the topology (inter-machine SSH is unavailable; only "
+                "local loopback dispatch works)"
+            )
+
         if not ssh_env:
             available = [e.name for e in machine.ssh_environments]
             if config.project:
@@ -1243,29 +1292,6 @@ class AgentResolver:
                 f"'{machine.key}'. Available: {available}, "
                 f"POSIX-compatible: {posix}. "
                 "Non-binstub SSH targets require a POSIX-compatible shell."
-            )
-
-        # Loopback detection: if the resolved machine is the local machine
-        # and the SSH environment matches our platform, spawn locally instead
-        # of SSH-ing to ourselves. SSH loopback causes binstub stdout
-        # pollution that breaks ACP JSON-RPC parsing.
-        if (
-            self._local_machine
-            and machine.key == self._local_machine.key
-            and ssh_env.name == self._local_platform
-        ):
-            log.info(
-                "Loopback detected for agent '%s' (machine '%s', env '%s') "
-                "-- spawning locally instead of SSH",
-                agent_name, machine.key, ssh_env.name,
-            )
-            return SpawnTarget(
-                type="local",
-                cwd=config.cwd,
-                copilot_path=config.copilot_path,
-                copilot_args=config.copilot_args,
-                env=config.env,
-                project=config.project,
             )
 
         # Serialize auth hooks for the SpawnTarget (must be JSON-safe dicts)

@@ -78,7 +78,7 @@ plugin. Source code lives in the installed plugin directory at
 `~/.copilot/installed-plugins/copilot-extensions/agent-bridge/`.
 
 **Config lives at:** `~/.agent-bridge/config.yaml` (topology profiles
-pointing to this repo's `machines.yaml` and `acp-agents.json`)
+pointing to this repo's `machines.yaml`; the roster is derived from it)
 
 
 ## CLI Commands
@@ -358,7 +358,12 @@ this only when the pieces are truly independent; otherwise use topology A.
 
 ## Agent Names
 
-Agent names come from `acp-agents.json` in your project repo. Use
+The agent roster is **derived from topology** — `machines.yaml`'s
+`control_plane.project` (one control-plane agent per machine × SSH environment,
+e.g. `dev6` / `dev6-wsl` / `cloud1`) plus `<repo>@<machine>` agents from each
+repo's `.agent-worktrees/related.yaml`, and the local project agents
+auto-discovered from `projects.yaml`. (`acp-agents.json` is retired; an explicit
+`agents_config` is still honored as a deprecated override.) Use
 `agent-bridge agents` to list available agents.
 
 Run `agent-bridge agents` to see the full list for your deployment.

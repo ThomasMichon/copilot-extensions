@@ -107,15 +107,16 @@ is done via **topology profiles** in `config.yaml`.
 
 ### Option A: Auto-adopt from a repo (recommended)
 
-If your repo has a `machines.yaml` and/or `acp-agents.json`:
+If your repo has a `machines.yaml`:
 
 ```bash
 agent-bridge config adopt --repo /path/to/repo --profile my-project
 ```
 
-This auto-discovers config files and creates a topology profile. See
-[Machine Configuration](machine-config.md) for the full guide on
-`machines.yaml` and `acp-agents.json` formats.
+This auto-discovers `machines.yaml` and creates a topology profile; the agent
+roster is **derived** from it (+ `.agent-worktrees/related.yaml`). See
+[Machine Configuration](machine-config.md) for the full guide on the
+`machines.yaml` format and the derived roster.
 
 ### Option B: Manual config
 
@@ -129,7 +130,7 @@ log_level: info
 topologies:
   my-project:
     machines_yaml: /path/to/machines.yaml
-    agents_config: /path/to/acp-agents.json
+    # agents_config: /path/to/acp-agents.json   # deprecated override (optional)
 ```
 
 ### Verify topology
