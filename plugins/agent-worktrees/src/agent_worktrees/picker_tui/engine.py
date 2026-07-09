@@ -912,26 +912,32 @@ class PickerScreen(Widget):
     def region_head(self, zone):
         if zone == "PR":
             return self._pr_head()
-        return {"V": ("V", 0), "M": ("M", 0), "BTN": ("BTN", 0),
-                "L": ("L", 0), "SA": ("SA", 0), "GH": ("GH", 0),
-                "C": ("C", 0), "PR": ("PR", 0)}.get(zone, ("V", 0))
+        return {"V": ("V", 0), "CFG": ("CFG", 0), "M": ("M", 0),
+                "BTN": ("BTN", 0), "L": ("L", 0), "SA": ("SA", 0),
+                "GH": ("GH", 0), "C": ("C", 0), "PR": ("PR", 0)}.get(
+                    zone, ("V", 0))
 
     def region_heads(self):
-        """Tab/Shift+Tab jump targets — the entry point of each major region."""
+        """Tab/Shift+Tab jump targets — the entry point of each major region.
+        The ⚙ Configuration entry joins the cycle (right after the View pivot)
+        whenever a pivot is hosted there, so Tab reaches it (#1426)."""
+        v = [("V", 0)]
+        if self._config_pivots():
+            v.append(("CFG", 0))
         if self._kind() == "worktrees":
-            heads = [("V", 0), ("M", 0), ("BTN", 0)]
+            heads = [*v, ("M", 0), ("BTN", 0)]
             if self.list_records():
                 heads.append(("L", 0))
         elif self._kind() == "maintenance":
-            heads = [("V", 0), ("M", 0), ("BTN", 0)]
+            heads = [*v, ("M", 0), ("BTN", 0)]
             if self.maint_records():
                 heads.append(("SA", 0))   # Tab into the selection/list region
         elif self._kind() == "registered":
-            heads = [("V", 0), ("M", 0)]
+            heads = [*v, ("M", 0)]
             if self._task_rows():
                 heads.append(("T", 0))
         else:
-            heads = [("V", 0), self._pr_head(), ("BTN", 0)]
+            heads = [*v, self._pr_head(), ("BTN", 0)]
         return heads
 
     def default_sel(self):
@@ -1262,6 +1268,42 @@ class PickerScreen(Widget):
         t.append(" " * max(0, width - t.cell_len))
         return t
 
+    def _action_row_caption(self, focus, active_idx, bset, tm, te, host_tag):
+        """The dim caption trailing the Worktrees action buttons -- specific to
+        the *focused* button (operator feedback on #1427): New shows where it
+        creates; Clean/Sync show the live count of worktrees the op would touch;
+        Toggle shows the reveal/hide count. Defaults to the New caption when the
+        row isn't focused."""
+        code = bset[active_idx] if (focus and 0 <= active_idx < len(bset)) else "N"
+        ctx = Text()
+        if code == "K":
+            n = sum(1 for r in self.list_records() if self._cleanable(r))
+            ctx.append("    cleans ", style=C_DIM)
+            ctx.append(f"{n}", style="grey78")
+            ctx.append(f" merged / idle worktree{'' if n == 1 else 's'} in ",
+                       style=C_DIM)
+            ctx.append(self._scope_label(), style="grey70")
+        elif code == "SY":
+            n = sum(1 for r in self.list_records() if r.get("ff_eligible"))
+            ctx.append("    fast-forwards ", style=C_DIM)
+            ctx.append(f"{n}", style="grey78")
+            ctx.append(f" eligible worktree{'' if n == 1 else 's'} in ",
+                       style=C_DIM)
+            ctx.append(self._scope_label(), style="grey70")
+        elif code == "TH":
+            nh = self._hidden_count()
+            ctx.append(f"    {'hides' if self.show_hidden else 'reveals'} ",
+                       style=C_DIM)
+            ctx.append(f"{nh}", style="grey78")
+            ctx.append(" bridge / system worktree(s)", style=C_DIM)
+        else:                                   # New worktree (default)
+            ctx.append("    creates on ", style=C_DIM)
+            ctx.append(f"{tm} ", style="grey70")
+            ctx.append(te, style=C_ENV.get(te, "grey70"))
+            if host_tag:
+                ctx.append(host_tag, style=C_DIM)
+        return ctx
+
     def new_worktree_row(self, width, focus, active_idx):
         """The Worktrees action row. New worktree opens the options dialog
         (#1346); the bulk Clean / Sync buttons opened here replaced the standalone
@@ -1291,12 +1333,7 @@ class PickerScreen(Widget):
             tlabel = " Hide hidden " if self.show_hidden else f" Show hidden ({nh}) "
             toggle = Text(tlabel, style=self._btn_style(focus, active_idx == th_i))
 
-        ctx = Text()
-        ctx.append("    creates on ", style=C_DIM)
-        ctx.append(f"{tm} ", style="grey70")
-        ctx.append(te, style=C_ENV.get(te, "grey70"))
-        if host_tag:
-            ctx.append(host_tag, style=C_DIM)
+        ctx = self._action_row_caption(focus, active_idx, bset, tm, te, host_tag)
 
         right_w = (toggle.cell_len + 2) if toggle is not None else 0
         if t.cell_len + ctx.cell_len + 3 + right_w <= width:

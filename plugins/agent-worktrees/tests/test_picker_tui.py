@@ -141,6 +141,54 @@ def test_submenu_cleanup_opens_scoped_dialog():
     asyncio.run(run())
 
 
+def test_configuration_reachable_via_tab():
+    """The ⚙ Configuration entry is in the Tab cycle (region_heads) and Tab from
+    the View pivot lands on it (operator feedback: couldn't reach it)."""
+    src = _profiles_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            assert ("CFG", 0) in scr.region_heads()
+            scr.sel = ("V", 0)
+            scr.handle_key("tab")
+            assert scr.sel == ("CFG", 0)
+            # And it is also reachable by arrowing down from the View pivot.
+            scr.sel = ("V", 0)
+            scr.handle_key("down")
+            assert scr.sel == ("CFG", 0)
+
+    asyncio.run(run())
+
+
+def test_action_row_caption_tracks_focused_button():
+    """The Worktrees action-row caption reflects the focused button, not always
+    'creates on' (operator feedback on #1427)."""
+    src = _maint_source()
+
+    def caption_for(scr, code):
+        bset = scr.button_set()
+        idx = bset.index(code)
+        row = scr.new_worktree_row(118, True, idx)
+        return row.plain
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert "creates on" in caption_for(scr, "N")
+            assert "cleans" in caption_for(scr, "K")
+            assert "fast-forwards" in caption_for(scr, "SY")
+            # Unfocused row falls back to the New caption.
+            assert "creates on" in scr.new_worktree_row(118, False, 0).plain
+
+    asyncio.run(run())
+
+
 def _bridge_source():
     """Two machines; a bridge-owned worktree lives on the non-local one, for
     the #1424 jump-to-host flow."""
