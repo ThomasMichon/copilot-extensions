@@ -154,6 +154,7 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         target_dir=s.target.cwd,
         target_type=s.target.type,
         target_host=s.target.host,
+        project=getattr(s.target, "project", None),
         worktree_id=s.target.worktree_id,
         status=s.status,
         pid=s.pid,

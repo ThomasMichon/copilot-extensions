@@ -53,6 +53,7 @@ def _connection_identity(client, session_id: str) -> dict[str, Any]:
     venue_type = s.get("target_type") or "local"
     host = s.get("target_host") or ""
     ident["agent"] = s.get("agent_name")
+    ident["repo"] = s.get("project")
     ident["venue"] = f"{venue_type}:{host}" if host else venue_type
     ident["worktree_id"] = s.get("worktree_id")
     return ident
@@ -63,6 +64,8 @@ def _print_connection_identity(ident: dict[str, Any]) -> None:
     parts = [f"session={ident.get('session_id')}"]
     if ident.get("agent"):
         parts.append(f"agent={ident['agent']}")
+    if ident.get("repo"):
+        parts.append(f"repo={ident['repo']}")
     if ident.get("venue"):
         parts.append(f"venue={ident['venue']}")
     if ident.get("worktree_id"):

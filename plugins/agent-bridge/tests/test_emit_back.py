@@ -25,11 +25,13 @@ class TestConnectionIdentity:
             "agent_name": "SPO.Core@cloud1",
             "target_type": "ssh",
             "target_host": "tmichon-cloud1",
+            "project": "SPO.Core",
             "worktree_id": "wt-abc123",
         })
         ident = _connection_identity(client, "sess-1")
         assert ident["session_id"] == "sess-1"
         assert ident["agent"] == "SPO.Core@cloud1"
+        assert ident["repo"] == "SPO.Core"
         assert ident["venue"] == "ssh:tmichon-cloud1"
         assert ident["worktree_id"] == "wt-abc123"
 

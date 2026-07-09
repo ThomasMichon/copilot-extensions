@@ -70,6 +70,7 @@ class SessionInfo(BaseModel):
     target_dir: str | None = None
     target_type: Literal["local", "ssh", "command"] = "local"
     target_host: str | None = None
+    project: str | None = None  # resolved repo/binstub (agent-worktrees project)
     worktree_id: str | None = None  # agent-worktrees worktree ID
     status: SessionStatus
     pid: int | None = None
