@@ -107,6 +107,20 @@ class TestSaveLoadRoundTrip:
         loaded = load_record(path)
         assert loaded.parent_session is None
 
+    def test_caller_worktree_round_trip(self, tmp_path: Path):
+        # #2178: the bridge caller-worktree pointer survives save/load and is
+        # omitted when unset.
+        rec = self._make_record(caller_worktree="lambda-core-win-20260101-abcd")
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        assert "caller_worktree: lambda-core-win-20260101-abcd" in path.read_text()
+        assert load_record(path).caller_worktree == "lambda-core-win-20260101-abcd"
+        rec2 = self._make_record()
+        path2 = tmp_path / "wt2.yaml"
+        save_record(rec2, path2)
+        assert "caller_worktree" not in path2.read_text()
+        assert load_record(path2).caller_worktree is None
+
     def test_pr_absent_round_trips_as_none(self, tmp_path: Path):
         rec = self._make_record()
         path = tmp_path / "wt.yaml"

@@ -1279,6 +1279,12 @@ class SessionManager:
             target = replace(
                 target, copilot_args=[*target.copilot_args, *copilot_args]
             )
+        # #2178: bind the caller worktree onto the target so the worktree-resolve
+        # step records it on the spawned (bridge) worktree, enabling the Picker's
+        # "Jump to caller". caller_id is the caller's WORKTREE_ID (agent-bridge
+        # convention); a non-worktree caller simply won't resolve in the Picker.
+        if caller_id and not target.caller_worktree:
+            target = replace(target, caller_worktree=caller_id)
         session_id = str(uuid.uuid4())[:12]
         name = _generate_name()
         now = time.time()
