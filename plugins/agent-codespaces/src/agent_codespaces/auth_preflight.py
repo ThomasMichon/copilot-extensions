@@ -150,6 +150,15 @@ async def verify_remote_auth(
 ADO_REST_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798"
 
 
+class AdoRestAuthError(RuntimeError):
+    """The host cannot mint an ADO REST bearer and enforcement is enabled (#77).
+
+    Raised by the connect-time preflight so the caller can abort the connect
+    cleanly (a clear message + non-zero exit) instead of proceeding into a
+    silent, later ADO-REST failure mid-dispatch.
+    """
+
+
 def _ado_scope(resource: str = ADO_REST_RESOURCE) -> str:
     """The v2 default scope for an ADO/AAD resource (``<resource>/.default``)."""
     r = (resource or ADO_REST_RESOURCE).strip().rstrip("/")

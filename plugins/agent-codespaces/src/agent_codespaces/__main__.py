@@ -65,6 +65,11 @@ _SSH_BOOT_TIMEOUT = float(os.environ.get("AGENT_CODESPACES_BOOT_TIMEOUT", "180")
 # generic failures (1) and the --remote-cmd timeout (124) so callers can react.
 _BUSY_EXIT = 75
 
+# Exit code when the host cannot mint an ADO REST bearer and enforcement is on
+# (credentials.enforce_ado_rest_login) -- the connect aborts cleanly rather than
+# proceeding into a silent mid-dispatch ADO-REST failure (#77).
+_ADO_AUTH_EXIT = 77
+
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
@@ -675,9 +680,17 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         # Verify the host has local auth for every domain the session's git
         # remotes use -- the workspace (ADO) AND the dotfiles repo (GitHub).
         # Surfaces missing auth up front rather than letting it fail mid-fetch.
-        # Best-effort, warning-only.
+        # The ADO REST bearer preflight inside may abort the connect (#77) when
+        # enforcement is on and the host cannot mint the bearer.
         if not args.no_relay:
-            await _verify_remote_auth(manager, args.name, config)
+            from .auth_preflight import AdoRestAuthError
+
+            try:
+                await _verify_remote_auth(manager, args.name, config)
+            except AdoRestAuthError as exc:
+                print(f"[ERROR] {exc}", file=sys.stderr)
+                await manager.disconnect(args.name)
+                return _ADO_AUTH_EXIT
 
         # Stage related-repo plugins (repo-targeted lane) onto the CodeSpace and
         # fold their --plugin-dir paths into the launch. Best-effort: a staging
@@ -910,7 +923,12 @@ async def _verify_remote_auth(manager, name: str, config) -> None:
     configured, its host (e.g. github.com) is verified explicitly too -- even
     on a first connect before the dotfiles clone exists. Missing domains are
     reported as a warning so the user can fix auth (``az login`` / GCM sign-in)
-    before work begins. Best-effort: never raises.
+    before work begins. Best-effort for the git-credential probe: it never
+    raises. It DOES, however, run the ADO REST bearer preflight
+    (:func:`_preflight_ado_rest_token`) for ADO workspaces, which raises
+    :class:`~agent_codespaces.auth_preflight.AdoRestAuthError` when the host
+    cannot mint the bearer and ``enforce_ado_rest_login`` is on -- the caller
+    catches it to abort the connect cleanly.
     """
     from .auth_preflight import host_from_url, verify_remote_auth
 
@@ -978,6 +996,7 @@ async def _preflight_ado_rest_token(name: str, config) -> None:
     """
     from .auth_preflight import (
         ADO_REST_RESOURCE,
+        AdoRestAuthError,
         enforce_host_ado_login,
         host_can_mint_ado_token,
     )
@@ -990,7 +1009,7 @@ async def _preflight_ado_rest_token(name: str, config) -> None:
         log.debug("ADO REST token preflight probe failed: %s", exc)
         return
 
-    enforce = getattr(config.credentials, "enforce_ado_rest_login", False)
+    enforce = getattr(config.credentials, "enforce_ado_rest_login", True)
     ok = False
     try:
         ok = await enforce_host_ado_login()
@@ -1009,7 +1028,7 @@ async def _preflight_ado_rest_token(name: str, config) -> None:
         f"HOST:  az login --scope {ADO_REST_RESOURCE}/.default  (#77)."
     )
     if enforce:
-        raise RuntimeError(msg)
+        raise AdoRestAuthError(msg)
     log.warning(msg)
     print(f"[WARN] {msg}", file=sys.stderr)
 

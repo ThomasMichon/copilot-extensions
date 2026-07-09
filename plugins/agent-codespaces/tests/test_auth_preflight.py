@@ -206,3 +206,54 @@ class TestVerifyRemoteAuthExtraHosts:
 
         assert DOTFILES_DIR in REMOTE_LIST_COMMAND
         assert "${VM_REPO_PATH:-$PWD}" in REMOTE_LIST_COMMAND
+
+
+class TestAdoRestPreflight:
+    """#77: host ADO REST bearer preflight + enforcement."""
+
+    def test_ado_scope_appends_default(self):
+        from agent_codespaces.auth_preflight import ADO_REST_RESOURCE, _ado_scope
+
+        assert _ado_scope(ADO_REST_RESOURCE) == f"{ADO_REST_RESOURCE}/.default"
+        # already a scope -> unchanged
+        assert _ado_scope(f"{ADO_REST_RESOURCE}/.default") == (
+            f"{ADO_REST_RESOURCE}/.default"
+        )
+
+    def test_enforce_default_is_true(self):
+        """A silent ADO-REST failure is worse than a clear abort -> default on."""
+        from agent_codespaces.config import CredentialsConfig
+
+        assert CredentialsConfig().enforce_ado_rest_login is True
+
+    @pytest.mark.asyncio
+    async def test_host_can_mint_true_when_token_resolves(self):
+        import agent_codespaces.auth_preflight as ap
+
+        with pytest.MonkeyPatch.context() as mp:
+            class _FakeAz:
+                def __init__(self, *a, **k):
+                    pass
+
+                async def resolve(self, action, fields, *, timeout=30.0):
+                    return "protocol=https\ntoken=abc123\n\n"
+
+            import credential_relay.sources.az_login as azmod
+            mp.setattr(azmod, "AzLoginSource", _FakeAz)
+            assert await ap.host_can_mint_ado_token() is True
+
+    @pytest.mark.asyncio
+    async def test_host_can_mint_false_when_no_token(self):
+        import agent_codespaces.auth_preflight as ap
+
+        with pytest.MonkeyPatch.context() as mp:
+            class _FakeAz:
+                def __init__(self, *a, **k):
+                    pass
+
+                async def resolve(self, action, fields, *, timeout=30.0):
+                    return None
+
+            import credential_relay.sources.az_login as azmod
+            mp.setattr(azmod, "AzLoginSource", _FakeAz)
+            assert await ap.host_can_mint_ado_token() is False

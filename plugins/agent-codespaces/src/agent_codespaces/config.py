@@ -67,12 +67,13 @@ class CredentialsConfig:
     ado_host: str | None = None
     # #77: enforce host `az login` at connect time when the host cannot mint an
     # ADO REST bearer (the relay's get-azure-token path needs a signed-in host
-    # az identity). When True, a connect runs `az login` on the host and ABORTS
-    # the connect if it can't complete; when False (default) the preflight only
-    # attempts login and surfaces a loud warning, never aborting an otherwise
-    # healthy SSH+relay session. The relay itself always logs a loud, actionable
-    # not-logged-in error regardless of this flag.
-    enforce_ado_rest_login: bool = False
+    # az identity). Default True: a connect to an ADO workspace runs `az login`
+    # on the host when needed and ABORTS the connect (with a clear message) if it
+    # can't complete -- failing fast is better than a silent ADO-REST failure
+    # that only surfaces later mid-dispatch. Set False to downgrade to a loud
+    # warning that never aborts an otherwise-healthy SSH+relay session. The relay
+    # itself always logs a loud, actionable not-logged-in error regardless.
+    enforce_ado_rest_login: bool = True
 
 
 @dataclass
