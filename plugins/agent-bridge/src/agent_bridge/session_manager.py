@@ -236,6 +236,13 @@ def _default_cwd(target: SpawnTarget) -> str:
     return f"/home/{user}"
 
 
+# Liveness (#145): a RUNNING session whose ACP event stream has produced no
+# frame for this long -- while its transport is still alive -- is treated as a
+# silent mid-turn *stall* (distinct from a healthy long reasoning step). Chosen
+# conservatively so a normal multi-second "thinking" step never trips it.
+_STALL_AFTER_S = 180.0
+
+
 class Session:
     """In-memory state for a single agent-bridge session."""
 
@@ -262,6 +269,14 @@ class Session:
         self._crossed_thresholds: set[str] = set()
         self.created_at = time.time()
         self.updated_at = self.created_at
+        # Liveness tracking (#145). ``last_output_at`` advances on EVERY ACP
+        # frame -- unlike ``updated_at``, which only moves at turn boundaries, so
+        # a healthy long turn is otherwise indistinguishable from a wedge.
+        # ``last_heartbeat_at`` is a periodic transport-liveness beat. Together
+        # they separate a *stalled* agent (output stale, channel alive) from a
+        # *dead* channel (heartbeat stale). In-memory only; live sessions only.
+        self.last_output_at: float | None = None
+        self.last_heartbeat_at: float | None = None
         # Count of active event subscribers (SSE streams / attached fronts).
         # Drives the idle reaper (#1826): a session with zero subscribers is
         # "unwatched" and eligible for idle reclamation. In-memory only.
@@ -305,6 +320,37 @@ class Session:
 
     def touch(self) -> None:
         self.updated_at = time.time()
+
+    def note_heartbeat(self, now: float | None = None) -> None:
+        """Record that the transport was confirmed alive (periodic beat)."""
+        self.last_heartbeat_at = now if now is not None else time.time()
+
+    def liveness_state(
+        self, now: float | None = None, stall_after_s: float = _STALL_AFTER_S,
+    ) -> str | None:
+        """Derive a liveness signal for a RUNNING session, else ``None``.
+
+        Uses output-flow vs transport-liveness -- which the turn-boundary
+        ``updated_at`` cannot (#145):
+
+        - ``active``       -- an ACP frame flowed within ``stall_after_s``.
+        - ``stalled``      -- transport alive (client running) but no ACP frame
+                              for ``stall_after_s`` (silent mid-turn stall).
+        - ``disconnected`` -- transport is gone (client not running).
+
+        Returns ``None`` for non-RUNNING sessions (liveness is about an
+        in-flight turn; idle/stopped/ended have nothing to stall).
+        """
+        if self.status != SessionStatus.RUNNING:
+            return None
+        now = now if now is not None else time.time()
+        if not (self.client and self.client.is_running):
+            return "disconnected"
+        if self.last_output_at is None:
+            return "active"
+        if now - self.last_output_at > stall_after_s:
+            return "stalled"
+        return "active"
 
 
 class SessionManager:
@@ -681,6 +727,9 @@ class SessionManager:
     @staticmethod
     def _capture_progress(session: Session, event_type: str, data: dict) -> None:
         """Update a session's structured progress from a captured event (#46.3)."""
+        # Every ACP frame is fresh output -- stamp it so liveness reflects the
+        # real event stream, not just turn boundaries (#145).
+        session.last_output_at = time.time()
         if event_type == "agent_message":
             markers = _parse_progress_markers(data.get("text", ""))
             if markers:
@@ -1237,6 +1286,25 @@ class SessionManager:
                 sid, s.name, idle_for, ttl,
             )
         return reaped
+
+    def note_heartbeats(self, now: float | None = None) -> int:
+        """Periodic transport-liveness beat for RUNNING sessions (#145).
+
+        Stamps ``last_heartbeat_at`` on every RUNNING session whose ACP client
+        subprocess is still alive. A frozen heartbeat then means the transport
+        died (tunnel drop / host sleep); a fresh heartbeat with a stale
+        ``last_output_at`` means the agent stalled while the channel is up. In
+        memory only; cheap (a process poll per session). Returns the count beat.
+        """
+        now = now if now is not None else time.time()
+        beat = 0
+        for s in list(self._sessions.values()):
+            if s.status != SessionStatus.RUNNING:
+                continue
+            if s.client and s.client.is_running:
+                s.note_heartbeat(now)
+                beat += 1
+        return beat
 
     async def start_session(
         self,
