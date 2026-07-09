@@ -291,6 +291,8 @@ ACTION_DESC = {
                "TMux/PSMux, and resume the last session in a NEW Copilot instance.",
     "Jump to host": "Switch to this worktree's host machine tab and highlight "
                     "it (reveals hidden bridge/system worktrees).",
+    "Jump to caller": "Jump to the worktree that requested this bridge worktree "
+                      "(its caller) and highlight it.",
 }
 
 # Per-action descriptions for the Maintenance actions menu (#1345).
@@ -2802,6 +2804,10 @@ class PickerScreen(Widget):
             elif cur == "Jump to host":
                 # Internal navigation -- stay in the picker (#1424).
                 self._jump_to_worktree((rec.get("raw") or {}).get("id"))
+            elif cur == "Jump to caller":
+                # Navigate to the worktree that requested this bridge (#2178).
+                self._jump_to_worktree(
+                    (rec.get("raw") or {}).get("caller_worktree"))
             elif cur == "Sync":
                 # Real per-worktree FF-sync via the shared dialog (#1427).
                 self._open_sync(ids={rec.get("id4")})
@@ -3133,14 +3139,18 @@ class PickerScreen(Widget):
         if self._cleanable(rec):
             acts.append("Cleanup")
         acts.append("Restart")
-        # #1424: a bridge/system worktree is host-owned. Offer a jump to its host
-        # machine's view (switch tab, reveal hidden, highlight the row) -- but
-        # only when that host tab actually resolves, so we never show a dead
-        # action.
-        if (rec.get("kind") in ("bridge", "system")
-                and self._machine_index_for(rec.get("machine"), rec.get("env"))
-                is not None):
-            acts.append("Jump to host")
+        # #1424/#2178: a bridge/system worktree is host-owned. Prefer jumping to
+        # the *caller* worktree that requested it (the "caller-id"), when that
+        # worktree is loaded; otherwise fall back to jumping to its own host tab.
+        # Only offer an action that actually resolves, so it's never dead.
+        if rec.get("kind") in ("bridge", "system"):
+            caller = (rec.get("raw") or {}).get("caller_worktree")
+            if caller and any(
+                    (w.get("raw") or {}).get("id") == caller for w in self.data):
+                acts.append("Jump to caller")
+            elif self._machine_index_for(
+                    rec.get("machine"), rec.get("env")) is not None:
+                acts.append("Jump to host")
         self.submenu = {"rec": rec, "actions": acts, "no_mux": False}
         self.submenu_idx = 0
 

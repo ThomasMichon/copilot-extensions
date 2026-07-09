@@ -96,6 +96,8 @@ class SpawnTarget:
     project: str | None = None  # agent-worktrees project (binstub name)
     ssh_shell: str | None = None  # remote shell (e.g. "pwsh", "bash")
     worktree_id: str | None = None  # resume a specific worktree
+    caller_worktree: str | None = None  # #2178: caller worktree that requested a
+    #                                     bridge spawn (recorded on the new worktree)
     spawn_command: list[str] | None = None  # raw command for provider agents
     auth_hooks: list[dict] = field(default_factory=list)  # serializable auth hook dicts
 
@@ -258,6 +260,16 @@ async def _resolve_worktree(
     else:
         base_args.append("--new")
 
+    # New-worktree extras that a stale runtime may not recognize (argparse exits
+    # non-zero on an unknown flag). Kept OUT of base_args so the fallback below
+    # can drop them wholesale and still resolve. --bridge marks the worktree
+    # agent-owned; --caller-worktree records the caller for the Picker (#2178).
+    new_extra: list[str] = []
+    if creating_new:
+        new_extra.append("--bridge")
+        if target.caller_worktree:
+            new_extra.extend(["--caller-worktree", target.caller_worktree])
+
     async def _run(extra: list[str]):
         argv = base_args + extra
         log.info("Resolving worktree: %s", " ".join(argv))
@@ -274,13 +286,14 @@ async def _resolve_worktree(
 
     # A bridge-spawned new worktree is agent-owned -> mark it kind=bridge so the
     # Picker hides it by default and routine cleanup leaves it alone. A stale
-    # local agent-worktrees runtime won't recognize --bridge (argparse exits
-    # non-zero); detect that and retry without it so the spawn still resolves
-    # (the worktree just isn't bridge-marked). Mirrors the remote-resolve guard.
-    returncode, stdout, stderr = await _run(["--bridge"] if creating_new else [])
-    if (creating_new and returncode != 0
-            and "--bridge" in stderr.decode(errors="replace")):
-        log.info("local agent-worktrees lacks --bridge; retrying unmarked")
+    # local agent-worktrees runtime won't recognize --bridge / --caller-worktree
+    # (argparse exits non-zero); detect that and retry without the extras so the
+    # spawn still resolves (the worktree just isn't bridge-marked / caller-linked).
+    returncode, stdout, stderr = await _run(new_extra)
+    if (creating_new and returncode != 0 and new_extra
+            and any(f in stderr.decode(errors="replace")
+                    for f in ("--bridge", "--caller-worktree"))):
+        log.info("local agent-worktrees lacks new resolve flags; retrying bare")
         returncode, stdout, stderr = await _run([])
 
     if stderr:
@@ -358,6 +371,14 @@ async def _resolve_worktree_remote(
     else:
         base_args.append("--new")
 
+    # New-worktree extras a version-skewed remote may not recognize; kept out of
+    # base_args so the fallback can drop them wholesale (#2178).
+    new_extra: list[str] = []
+    if creating_new:
+        new_extra.append("--bridge")
+        if target.caller_worktree:
+            new_extra.extend(["--caller-worktree", target.caller_worktree])
+
     async def _run(extra: list[str]):
         cmd = " ".join(shlex.quote(a) for a in base_args + extra)
         log.info("Resolving remote worktree on %s: %s", target.host, cmd)
@@ -365,14 +386,15 @@ async def _resolve_worktree_remote(
 
     # A bridge-spawned new worktree is agent-owned -> mark it kind=bridge so the
     # remote Picker hides it by default and routine cleanup leaves it alone.
-    # An older remote agent-worktrees won't recognize --bridge (argparse exits
-    # non-zero); detect that and retry without it so a version-skewed remote
-    # still spawns (the worktree just isn't bridge-marked there). Mirrors the
-    # data_ssh --classify fallback.
-    result = await _run(["--bridge"] if creating_new else [])
+    # An older remote agent-worktrees won't recognize --bridge / --caller-worktree
+    # (argparse exits non-zero); detect that and retry without the extras so a
+    # version-skewed remote still spawns. Mirrors the data_ssh --classify fallback.
+    result = await _run(new_extra)
     if (creating_new and not result.timed_out and result.exit_code != 0
-            and "--bridge" in (result.stderr or "")):
-        log.info("remote %s lacks --bridge; retrying unmarked", target.host)
+            and new_extra
+            and any(f in (result.stderr or "")
+                    for f in ("--bridge", "--caller-worktree"))):
+        log.info("remote %s lacks new resolve flags; retrying bare", target.host)
         result = await _run([])
 
     if result.timed_out:

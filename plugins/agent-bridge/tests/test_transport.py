@@ -968,3 +968,49 @@ class TestLocalResolveBridgeFallback:
         assert len(calls) == 2
         assert "--bridge" in calls[0]
         assert "--bridge" not in calls[1]
+
+    @pytest.mark.asyncio
+    async def test_local_new_sends_caller_worktree(self):
+        # #2178: a caller worktree on the target is recorded on the new worktree.
+        plan = {"launch": {"worktree_id": "wt-1", "work_dir": "/d"}}
+        target = SpawnTarget(type="local", cwd="/c", project="proj",
+                             caller_worktree="lc-win-caller-1")
+        calls = []
+
+        async def fake_exec(*argv, **kw):
+            calls.append(argv)
+            return self._proc(0, json.dumps(plan).encode())
+
+        with patch("os.path.exists", return_value=True), \
+             patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+            out = await _resolve_worktree(target, {})
+
+        assert out == plan
+        assert "--caller-worktree" in calls[0]
+        assert "lc-win-caller-1" in calls[0]
+
+    @pytest.mark.asyncio
+    async def test_local_retries_bare_when_caller_flag_unknown(self):
+        # An old runtime rejects --caller-worktree -> retry drops all new extras.
+        plan = {"launch": {"worktree_id": "wt-1", "work_dir": "/d"}}
+        target = SpawnTarget(type="local", cwd="/c", project="proj",
+                             caller_worktree="lc-win-caller-1")
+        results = [
+            self._proc(2, b"", b"unrecognized arguments: --caller-worktree"),
+            self._proc(0, json.dumps(plan).encode()),
+        ]
+        calls = []
+
+        async def fake_exec(*argv, **kw):
+            calls.append(argv)
+            return results[len(calls) - 1]
+
+        with patch("os.path.exists", return_value=True), \
+             patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+            out = await _resolve_worktree(target, {})
+
+        assert out == plan
+        assert len(calls) == 2
+        assert "--caller-worktree" in calls[0] and "--bridge" in calls[0]
+        assert "--caller-worktree" not in calls[1]
+        assert "--bridge" not in calls[1]

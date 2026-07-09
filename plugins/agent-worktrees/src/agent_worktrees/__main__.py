@@ -442,6 +442,10 @@ def _worktree_to_dict(
         d["kind"] = rec.kind
         if rec.owner:
             d["owner"] = rec.owner
+    # #2178: expose the bridge caller-worktree pointer so the Picker can offer
+    # "Jump to caller" from a bridge worktree.
+    if rec.caller_worktree:
+        d["caller_worktree"] = rec.caller_worktree
     if state_info is not None:
         d["state"] = state_info.state.value
         d["ahead"] = state_info.ahead
@@ -500,6 +504,7 @@ def _create_worktree_core(
     owner: str | None = None,
     name: str | None = None,
     parent_session: str | None = None,
+    caller_worktree: str | None = None,
 ) -> dict:
     """Create a new worktree and return a dict with worktree info + launch plan.
 
@@ -568,6 +573,9 @@ def _create_worktree_core(
         # restores context instead of cold-starting.
         parent_session=(parent_session
                         or os.environ.get("COPILOT_AGENT_SESSION_ID") or None),
+        # #2178: for a bridge spawn, record the caller worktree so the Picker can
+        # jump back to it.
+        caller_worktree=caller_worktree or None,
     )
 
     # Clone permissions
@@ -927,6 +935,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                         kind="bridge" if getattr(args, "bridge", False)
                         else "session",
                         parent_session=getattr(args, "parent_session", None),
+                        caller_worktree=getattr(args, "caller_worktree", None),
                     )
                 except RuntimeError as e:
                     return _json_error(str(e))
@@ -2412,6 +2421,7 @@ def _resolve_new(
     result = _create_worktree_core(
         config, profile=profile, no_mux=getattr(args, "no_mux", False),
         parent_session=getattr(args, "parent_session", None),
+        caller_worktree=getattr(args, "caller_worktree", None),
     )
     _emit_plan({
         "action": "exec",
@@ -7114,6 +7124,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="With --new: session id that originated this worktree's "
                         "work, recorded so a later resume restores context (#1029). "
                         "Defaults to $COPILOT_AGENT_SESSION_ID.")
+    p.add_argument("--caller-worktree", default=None, dest="caller_worktree",
+                   help="With --new: the caller worktree id that requested this "
+                        "(bridge) worktree, recorded so the Picker can jump back "
+                        "to it (#2178).")
     p.add_argument("copilot_args", nargs="*", default=[])
 
     # post-exit (run post-exit checks after Copilot exits)

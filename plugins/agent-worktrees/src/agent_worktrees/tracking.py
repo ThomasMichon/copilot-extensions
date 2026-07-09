@@ -107,6 +107,10 @@ class WorktreeRecord:
     # PR/feedback worktree whose own ``sessions`` list is empty can still resume
     # with the source session's context instead of cold-starting.
     parent_session: str | None = None
+    # #2178: for a bridge-spawned worktree, the *caller* worktree that requested
+    # it (agent-bridge's caller_id == the caller's WORKTREE_ID). Lets the Picker
+    # "Jump to caller" from a bridge worktree back to the worktree that kicked it.
+    caller_worktree: str | None = None
 
     def active_pr(self) -> PRRecord | None:
         """Return the PR a no-selector command should target.
@@ -321,6 +325,8 @@ def load_record(path: Path) -> WorktreeRecord:
         owner=str(owner_raw) if owner_raw else None,
         parent_session=(str(data["parent_session"])
                         if data.get("parent_session") else None),
+        caller_worktree=(str(data["caller_worktree"])
+                         if data.get("caller_worktree") else None),
     )
 
 
@@ -362,6 +368,9 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
     # common-case session-record YAML stays byte-identical (no churn).
     if record.parent_session:
         content += f"parent_session: {record.parent_session}\n"
+    # #2178: bridge caller-worktree pointer. Emitted only when set.
+    if record.caller_worktree:
+        content += f"caller_worktree: {record.caller_worktree}\n"
 
     # Serialize PR records.  Emit the multi-PR ``prs:`` list and mirror the
     # active PR to a legacy ``pr:`` block for one release, so a same-machine
@@ -494,6 +503,7 @@ def create_new_record(
     kind: WorktreeKind = "session",
     owner: str | None = None,
     parent_session: str | None = None,
+    caller_worktree: str | None = None,
 ) -> WorktreeRecord:
     """Create and save a new worktree tracking record."""
     now = _now_iso()
@@ -515,6 +525,7 @@ def create_new_record(
         kind=kind,
         owner=owner,
         parent_session=parent_session or None,
+        caller_worktree=caller_worktree or None,
     )
     path = tracking_path / f"{worktree_id}.yaml"
     save_record(record, path)

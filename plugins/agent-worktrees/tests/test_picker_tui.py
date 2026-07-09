@@ -298,6 +298,58 @@ def test_jump_to_worktree_unknown_id_is_safe(tmp_path):
     asyncio.run(run())
 
 
+def test_jump_to_caller_targets_caller_worktree():
+    """A bridge worktree with a recorded caller offers 'Jump to caller', which
+    navigates to the CALLER worktree (not the bridge itself) (#2178)."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    caller_raw = {"id": "lambda-core-win-caller-9999", "title": "Caller wt",
+                  "status": "active", "started_at": "2026-06-27T17:00:00",
+                  "turn_count": 2}
+    bridge_raw = {"id": "borealis-win-bridge-8888", "title": "Bridge wt",
+                  "status": "active", "started_at": "2026-06-27T17:00:00",
+                  "kind": "bridge", "turn_count": 1,
+                  "caller_worktree": "lambda-core-win-caller-9999"}
+    src = types.SimpleNamespace()
+    src.LOCAL = ("lambda-core", "Win")
+    src.LOCAL_LABEL = "lambda-core · win"
+    src.machines = lambda: [
+        ("lambda-core Win", "lambda-core", "Win", True),
+        ("borealis Win", "borealis", "Win", True),
+    ]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: (
+        [derive.norm(caller_raw, "lambda-core", "Win")]
+        + [derive.norm(bridge_raw, "borealis", "Win")]
+    )
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.t0 = 0
+            scr.show_hidden = True
+            scr.machine_idx = 0
+            await pilot.pause()
+            recs = scr.list_records()
+            bi = next(i for i, r in enumerate(recs) if r.get("kind") == "bridge")
+            scr.sel = ("L", bi)
+            scr._open_submenu()
+            # A resolvable caller wins over the own-host fallback.
+            assert "Jump to caller" in scr.submenu["actions"]
+            assert "Jump to host" not in scr.submenu["actions"]
+            scr.submenu_idx = scr.submenu["actions"].index("Jump to caller")
+            scr._key_submenu("enter")
+            await pilot.pause()
+        # Landed on the CALLER worktree (lambda-core tab), not the bridge.
+        assert scr.machine_idx == scr._machine_index_for("lambda-core", "Win")
+        landed = scr.list_records()[scr.sel[1]]
+        assert (landed.get("raw") or {}).get("id") == "lambda-core-win-caller-9999"
+        assert app.result is None
+
+    asyncio.run(run())
+
+
 def test_profiles_hosted_under_configuration():
     """Profiles is placed under ⚙ Configuration: off the left cycle, in the
     config set, and the ('CFG', 0) stop exists (#1426)."""
