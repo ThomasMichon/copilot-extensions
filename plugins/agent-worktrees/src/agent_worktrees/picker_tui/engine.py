@@ -225,7 +225,7 @@ BUILTIN_PIVOTS = list(HTABS)
 #: is hosted under the right-aligned ⚙ Configuration menu (#1426); ``"hidden"``
 #: is an ordering anchor only (kept so registered ``after`` hints still weave,
 #: but never shown as a tab). Anything unlisted defaults to ``"left"``.
-PIVOT_PLACEMENT = {"profiles": "config"}
+PIVOT_PLACEMENT = {"profiles": "config", "maintenance": "hidden"}
 
 
 def _poll_secs() -> float:
@@ -688,11 +688,17 @@ class PickerScreen(Widget):
         if kind == "profiles":
             return ["PA", "PReset"] if self.grid_dirty() else ["PA"]
         if kind == "worktrees":
-            # Toggle-hidden joins the button row only when there's something to
-            # reveal (or it's already revealing), so it never clutters (#1422).
+            # New worktree always; the bulk Clean / Sync buttons (which replaced
+            # the standalone Maintenance view, #1427) whenever there are
+            # worktrees in scope to act on; Toggle-hidden only when there's
+            # something to reveal (or it's already revealing) so it never
+            # clutters (#1422).
+            bset = ["N"]
+            if self._scope_data():
+                bset += ["K", "SY"]
             if self.show_hidden or self._hidden_count() > 0:
-                return ["N", "TH"]
-            return ["N"]
+                bset.append("TH")
+            return bset
         return BUTTON_SETS.get(kind, [])
 
     def active_button(self):
@@ -1257,20 +1263,33 @@ class PickerScreen(Widget):
         return t
 
     def new_worktree_row(self, width, focus, active_idx):
-        # Single "New worktree…" entry -- opens the options dialog directly,
-        # which confirms the target machine (aperture-labs #1346). When there are
-        # bridge/system worktrees in scope, a right-aligned Toggle-hidden chip
-        # joins the row (#1422).
+        """The Worktrees action row. New worktree opens the options dialog
+        (#1346); the bulk Clean / Sync buttons opened here replaced the standalone
+        Maintenance view (#1427); a right-aligned Toggle-hidden chip joins when
+        something is hidden (#1422). Chips render generically from ``button_set``
+        so adding a button never needs a hardcoded index."""
+        bset = self.button_set()
         tm, te = self.create_target()
-        t = Text("  ")
-        t.append(" + New worktree… ", style=self._btn_style(focus, active_idx == 0))
         host_tag = "  (this host)" if (tm, te) == self.src.LOCAL else ""
+        labels = {"N": " + New worktree… ", "K": " ✕ Clean ", "SY": " ⟳ Sync "}
+
+        t = Text("  ")
+        first = True
+        for i, code in enumerate(bset):
+            if code == "TH":
+                continue                       # right-aligned, handled below
+            if not first:
+                t.append("   ")
+            first = False
+            t.append(labels.get(code, f" {code} "),
+                     style=self._btn_style(focus, active_idx == i))
 
         toggle = None
-        if "TH" in self.button_set():
+        if "TH" in bset:
+            th_i = bset.index("TH")
             nh = self._hidden_count()
             tlabel = " Hide hidden " if self.show_hidden else f" Show hidden ({nh}) "
-            toggle = Text(tlabel, style=self._btn_style(focus, active_idx == 1))
+            toggle = Text(tlabel, style=self._btn_style(focus, active_idx == th_i))
 
         ctx = Text()
         ctx.append("    creates on ", style=C_DIM)
@@ -1424,6 +1443,13 @@ class PickerScreen(Widget):
             cols, sections = self.current_list()
             lcols = fit(cols, width - 1, "title", 14)
             add(header_text(lcols, width), kind="colhdr")
+            # Focus-preview: when Clean/Sync is the focused button, dim the rows
+            # that action would NOT touch, so its scope reads before you open the
+            # dialog (#1427).
+            preview = None
+            if btn_focus:
+                ab = self.active_button()
+                preview = {"K": "clean", "SY": "sync"}.get(ab)
             li = 0
             for label, rows in sections:
                 sec = Text(f"  ── {label} ", style=C_SECTION)
@@ -1439,6 +1465,11 @@ class PickerScreen(Widget):
                     if rec.get("hidden") and sel != ("L", li):
                         # Revealed bridge/system worktree -> dim it (#1422).
                         vr.text.stylize("grey42")
+                    elif preview and sel != ("L", li) and not (
+                        self._cleanable(rec) if preview == "clean"
+                        else rec.get("ff_eligible")
+                    ):
+                        vr.text.stylize("grey35")   # out of this action's scope
                     li += 1
         elif self._kind() == "maintenance":
             add(self.tab_bar(width, sel == ("M", 0)))
@@ -2734,9 +2765,13 @@ class PickerScreen(Widget):
             elif cur == "Jump to host":
                 # Internal navigation -- stay in the picker (#1424).
                 self._jump_to_worktree((rec.get("raw") or {}).get("id"))
+            elif cur == "Sync":
+                # Real per-worktree FF-sync via the shared dialog (#1427).
+                self._open_sync(ids={rec.get("id4")})
+            elif cur == "Cleanup":
+                self._open_cleanup(ids={rec.get("id4")})
             else:
-                # Sync / Cleanup / Restart are deferred ops (full wiring
-                # pending) -- keep the mock note for now.
+                # Restart remains a deferred op (full wiring pending).
                 self.debug = f"{cur} -> {rec.get('id4')} (mock)"
         elif key in ("escape", "q", "tab"):
             self.submenu = None

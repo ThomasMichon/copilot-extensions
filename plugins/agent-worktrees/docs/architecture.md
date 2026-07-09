@@ -166,7 +166,10 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md) for versioning details.
 ## Picker Pivot Registry (Cross-Plugin)
 
 The interactive Textual picker (`picker_tui/engine.py`) shows top-level
-**pivots** -- Worktrees, Maintenance, Profiles. Another plugin, installed in
+**pivots**. **Worktrees** is the home view; **Profiles** is hosted under the
+right-aligned ⚙ Configuration menu (#1426); the old standalone **Maintenance**
+view is eliminated -- its bulk Clean/Sync live as buttons on the Worktrees row
+(#1427). Another plugin, installed in
 its **own separate venv**, can contribute an additional pivot without
 agent-worktrees importing its Python. Because each plugin installs standalone,
 setuptools entry-points do not cross venvs; a **filesystem manifest registry**
