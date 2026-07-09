@@ -586,6 +586,11 @@ def _open_via_provider(
     if pull.state:
         target_pr.state = pull.state
     if record is not None:
+        # #1029 backfill: if the worktree never recorded an originating session
+        # (e.g. created before this field existed), stamp the session that
+        # produced this PR -- but never clobber an explicit one.
+        if not record.parent_session and session:
+            record.parent_session = session
         tracking.save_record(record)
     result["pr_opened"] = True
     result["url"] = pull.url

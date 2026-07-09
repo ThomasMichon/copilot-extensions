@@ -499,6 +499,7 @@ def _create_worktree_core(
     kind: tracking.WorktreeKind = "session",
     owner: str | None = None,
     name: str | None = None,
+    parent_session: str | None = None,
 ) -> dict:
     """Create a new worktree and return a dict with worktree info + launch plan.
 
@@ -562,6 +563,11 @@ def _create_worktree_core(
         tracking_path=tracking_path,
         kind=kind,
         owner=owner,
+        # #1029: link the new worktree back to the session that spawned it, so a
+        # later resume (esp. a PR/feedback worktree with no sessions of its own)
+        # restores context instead of cold-starting.
+        parent_session=(parent_session
+                        or os.environ.get("COPILOT_AGENT_SESSION_ID") or None),
     )
 
     # Clone permissions
@@ -920,6 +926,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                         config, profile=profile, no_mux=True,
                         kind="bridge" if getattr(args, "bridge", False)
                         else "session",
+                        parent_session=getattr(args, "parent_session", None),
                     )
                 except RuntimeError as e:
                     return _json_error(str(e))
@@ -949,6 +956,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 last_session = sessions.find_latest_session_id_fast(
                     record.worktree_path, record.sessions,
                 )
+                if not last_session:
+                    # #1029: no session of its own -- fall back to the originating
+                    # session so a PR/feedback worktree resumes with context.
+                    last_session = sessions.validate_session_id(record.parent_session)
                 if last_session:
                     # copilot's --resume[=value] is an optional-value option;
                     # the id MUST be attached with '=' or it is treated as a
@@ -2326,6 +2337,10 @@ def _resolve_resume(
         last_session = sessions.find_latest_session_id_fast(
             record.worktree_path, record.sessions,
         )
+        if not last_session:
+            # #1029: no session of its own -- fall back to the originating
+            # session so a PR/feedback worktree resumes with context.
+            last_session = sessions.validate_session_id(record.parent_session)
         if last_session:
             # copilot's --resume[=value] is an optional-value option; the id
             # MUST be attached with '=' or it is treated as a stray operand
@@ -2396,6 +2411,7 @@ def _resolve_new(
 
     result = _create_worktree_core(
         config, profile=profile, no_mux=getattr(args, "no_mux", False),
+        parent_session=getattr(args, "parent_session", None),
     )
     _emit_plan({
         "action": "exec",
@@ -7094,6 +7110,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--profile", help="Copilot backend profile name (skips Tab toggle)")
     p.add_argument("--machine", default=None,
                    help="Target machine name (bypasses machine picker)")
+    p.add_argument("--parent-session", default=None, dest="parent_session",
+                   help="With --new: session id that originated this worktree's "
+                        "work, recorded so a later resume restores context (#1029). "
+                        "Defaults to $COPILOT_AGENT_SESSION_ID.")
     p.add_argument("copilot_args", nargs="*", default=[])
 
     # post-exit (run post-exit checks after Copilot exits)

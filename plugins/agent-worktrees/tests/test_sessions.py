@@ -15,6 +15,7 @@ from agent_worktrees.sessions import (
     find_latest_session_id_fast,
     scan_sessions,
     scan_sessions_fast,
+    validate_session_id,
 )
 from agent_worktrees.tracking import (
     SessionEntry,
@@ -756,3 +757,38 @@ class TestContextEnrichment:
         assert ctx.context_pct[norm] == 55
         assert "2026-06-02" in ctx.last_activity[norm]
         assert "09:00:00" in ctx.last_activity[norm]
+
+
+# ---------------------------------------------------------------------------
+# validate_session_id (parent-session resume fallback, #1029)
+# ---------------------------------------------------------------------------
+
+class TestValidateSessionId:
+    def test_returns_id_for_valid_session(self, tmp_session_state_dir: Path):
+        make_session_dir(tmp_session_state_dir, "good-sess", "/tmp/wt",
+                         summary="work")
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            assert validate_session_id("good-sess") == "good-sess"
+
+    def test_none_for_missing_dir(self, tmp_session_state_dir: Path):
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            assert validate_session_id("nope") is None
+
+    def test_none_for_stub_without_conversation(self, tmp_session_state_dir: Path):
+        # A dir with no session.db / events.jsonl is a stale stub, not resumable.
+        (tmp_session_state_dir / "stub").mkdir()
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            assert validate_session_id("stub") is None
+
+    def test_none_for_empty_input(self):
+        assert validate_session_id(None) is None
+        assert validate_session_id("") is None
