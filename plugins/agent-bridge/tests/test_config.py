@@ -55,14 +55,16 @@ class TestSaveConfig:
 
 
 class TestAdoptTopology:
-    def test_auto_discovers_files(self, config_home, fake_repo):
+    def test_auto_discovers_machines_not_agents(self, config_home, fake_repo):
+        # machines.yaml is auto-discovered; acp-agents.json is NOT (retired --
+        # the roster is derived from topology). An acp-agents.json present in the
+        # repo is ignored unless passed explicitly as agents_config.
         cfg = adopt_topology("test-profile", str(fake_repo))
         assert "test-profile" in cfg.topologies
         profile = cfg.topologies["test-profile"]
         assert profile.machines_yaml is not None
         assert "machines.yaml" in profile.machines_yaml
-        assert profile.agents_config is not None
-        assert "acp-agents.json" in profile.agents_config
+        assert profile.agents_config is None
 
     def test_persists_to_disk(self, config_home, fake_repo):
         adopt_topology("saved", str(fake_repo))

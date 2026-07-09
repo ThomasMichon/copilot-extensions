@@ -32,6 +32,42 @@ def _json_out(data: Any) -> None:
     print(json.dumps(data, indent=2, default=str))
 
 
+def _connection_identity(client, session_id: str) -> dict[str, Any]:
+    """The (repo × venue) identity a session connected to, for emit-back.
+
+    On an initial connection the host that dispatched work needs to know
+    *exactly* where it landed -- which agent/repo, on which venue (machine /
+    codespace / container), plus the remote worktree and session ids. This is
+    especially important once a bare venue can default its repo (venue default
+    or the sender's repo): the resolved ``agent`` confirms the choice. Returns a
+    best-effort dict; ``worktree_id`` may be null until the first turn's remote
+    launch has created the worktree.
+    """
+    ident: dict[str, Any] = {"session_id": session_id}
+    try:
+        s = client.get_session(session_id)
+    except Exception:
+        return ident
+    venue_type = s.get("target_type") or "local"
+    host = s.get("target_host") or ""
+    ident["agent"] = s.get("agent_name")
+    ident["venue"] = f"{venue_type}:{host}" if host else venue_type
+    ident["worktree_id"] = s.get("worktree_id")
+    return ident
+
+
+def _print_connection_identity(ident: dict[str, Any]) -> None:
+    """Print a concise one-line emit-back of :func:`_connection_identity`."""
+    parts = [f"session={ident.get('session_id')}"]
+    if ident.get("agent"):
+        parts.append(f"agent={ident['agent']}")
+    if ident.get("venue"):
+        parts.append(f"venue={ident['venue']}")
+    if ident.get("worktree_id"):
+        parts.append(f"worktree={ident['worktree_id']}")
+    print(f"[i] Connected: {'  '.join(parts)}")
+
+
 def _table(rows: list[dict[str, Any]], columns: list[tuple[str, str, int]]) -> None:
     """Print a simple text table.
 
@@ -972,11 +1008,14 @@ def _submit_and_stream(
     result = client.submit_prompt(session_id, prompt)
     turn_index = result.get("turn_index", 0)
 
+    ident = _connection_identity(client, session_id)
+
     if args.json:
-        _json_out({"session_id": session_id, **result})
+        _json_out({"session_id": session_id, "connection": ident, **result})
         return
 
     print(f"[>] Session {session_id} -- turn {turn_index}")
+    _print_connection_identity(ident)
 
     if args.no_wait:
         print("[>] Prompt submitted (--no-wait)")
@@ -1263,9 +1302,11 @@ def _cmd_create(args: argparse.Namespace) -> None:
 
     prompt = getattr(args, "prompt", None)
     if not prompt:
+        ident = _connection_identity(client, session_id)
         if args.json:
-            _json_out({"session_id": session_id})
+            _json_out({"session_id": session_id, "connection": ident})
         else:
+            _print_connection_identity(ident)
             print(
                 f"[OK] Session {session_id} created -- send work with: "
                 f"agent-bridge send {session_id} \"<prompt>\""
@@ -2392,7 +2433,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     config_adopt_p.add_argument(
         "--agents-config",
-        help="Explicit path to acp-agents.json (auto-discovered if omitted)",
+        help="(Deprecated) Explicit path to an acp-agents.json override. The "
+             "roster is derived from machines.yaml; this is no longer auto-discovered.",
     )
     config_adopt_p.set_defaults(func=_cmd_config_adopt)
 

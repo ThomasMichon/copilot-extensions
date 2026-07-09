@@ -89,8 +89,10 @@ def adopt_topology(
 ) -> ServiceConfig:
     """Add or update a topology profile pointing to a repo's config files.
 
-    Auto-discovers machines.yaml and acp-agents.json at conventional
-    locations if explicit paths are not provided.
+    Auto-discovers machines.yaml at conventional locations. The agent roster is
+    **derived** from topology (machines.yaml + related.yaml), so ``acp-agents.json``
+    is no longer auto-discovered; an explicit ``agents_config`` is still honored
+    as a deprecated override.
 
     Returns the updated ServiceConfig (already saved to disk).
     """
@@ -111,21 +113,14 @@ def adopt_topology(
                 machines_yaml = str(candidate)
                 break
 
-    # Auto-discover agents config
-    if not agents_config:
-        for candidate in [
-            repo / "tools" / "mcp" / "acp-agents.json",
-            repo / "acp-agents.json",
-            repo / "config" / "acp-agents.json",
-        ]:
-            if candidate.is_file():
-                agents_config = str(candidate)
-                break
+    # acp-agents.json auto-discovery is retired -- the roster is derived from
+    # machines.yaml (+ related.yaml). An explicit agents_config is still honored
+    # (deprecated back-compat) but never auto-discovered.
 
-    if not machines_yaml and not agents_config:
+    if not machines_yaml:
         raise FileNotFoundError(
-            f"No machines.yaml or acp-agents.json found in {repo}. "
-            "Specify paths explicitly with --machines-yaml / --agents-config."
+            f"No machines.yaml found in {repo}. "
+            "Specify it explicitly with --machines-yaml."
         )
 
     # Validate discovered paths
