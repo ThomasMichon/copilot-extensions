@@ -281,14 +281,16 @@ def target_rows(target_envs):
 
 # Clarify each worktree action in the sub-menu (aperture-labs #1343).
 ACTION_DESC = {
-    "Open": "Attach the worktree's terminal (PSMux/TMux); launch one if none. "
-            "Space toggles No-mux (launch without the wrapper, for troubleshooting).",
-    "Resume": "Resume the last Copilot session for this worktree, re-attaching "
-              "to the existing TMux/PSMux.",
+    "Open": "Attach the worktree's live terminal (PSMux/TMux); launch one if "
+            "none. Space toggles No-mux (launch without the wrapper, for "
+            "troubleshooting).",
+    "Resume": "Relaunch this stopped worktree's Copilot, resuming its last "
+              "session in a fresh TMux/PSMux.",
     "Sync": "Fast-forward this worktree onto the default branch (FF-only).",
     "Cleanup": "Remove this worktree (safe once merged/idle).",
-    "Restart": "Kill the worktree's active processes, start a fresh "
-               "TMux/PSMux, and resume the last session in a NEW Copilot instance.",
+    "Stop": "Stop this worktree's Mux/Copilot wrapper now (graceful "
+            "double-Ctrl-C, then a hard mux kill) so a following Open "
+            "starts a fresh TMux/PSMux + Copilot.",
     "Jump to host": "Switch to this worktree's host machine tab and highlight "
                     "it (reveals hidden bridge/system worktrees).",
     "Jump to caller": "Jump to the worktree that requested this bridge worktree "
@@ -2842,8 +2844,11 @@ class PickerScreen(Widget):
                 self._open_sync(ids={rec.get("id4")})
             elif cur == "Cleanup":
                 self._open_cleanup(ids={rec.get("id4")})
+            elif cur == "Stop":
+                # Stop the worktree's Mux/Copilot wrapper on demand (#1343),
+                # freeing it to be re-Opened/Resumed with a fresh Mux + Copilot.
+                self._start_stop(rec)
             else:
-                # Restart remains a deferred op (full wiring pending).
                 self.debug = f"{cur} -> {rec.get('id4')} (mock)"
         elif key in ("escape", "q", "tab"):
             self.submenu = None
@@ -2992,6 +2997,29 @@ class PickerScreen(Widget):
             }
             if self.progress["armed"]:
                 self._start_progress()
+
+    def _start_stop(self, rec):
+        """Stop one worktree's Mux/Copilot wrapper (the row submenu 'Stop').
+
+        Drives the same maintenance progress + executor path as Cleanup/Sync,
+        but as a single-item run so the up-to-6 s graceful double-Ctrl-C quit
+        never blocks the render loop and a remote worktree's kill goes over SSH
+        (``restart <id>`` on the project binstub -- the CLI verb stays
+        ``restart``; only the picker label is "Stop"). When it finishes the
+        touched machine reloads (``_refresh_after_maint``), so the row
+        re-renders as a stopped session -- ready to Resume with a fresh Mux +
+        Copilot.
+        """
+        item = {"id4": rec.get("id4"), "title": rec.get("title", ""),
+                "machine_env": rec.get("machine_env", ""), "state": "pending"}
+        self.progress = {
+            "verb": "Stop", "op": "restart",
+            "scope": rec.get("id4", ""),
+            "items": [item], "recs": [rec], "picked": [],
+            "ticks": 0, "steps": 3, "done": False, "armed": True,
+            "include_unused": False, "include_conversations": False,
+        }
+        self._start_progress()
 
     def _start_progress(self):
         """Begin executing the armed progress run (real executor or mock walk)."""
@@ -3158,16 +3186,23 @@ class PickerScreen(Widget):
         rec = self._selected_record()
         if not rec:
             return
-        # Open + Resume always; Sync only when FF-eligible; Cleanup only when
-        # the bucket is cleanable; Restart always (#1343). A sessionless worktree
-        # has nothing to resume -- offering Resume would cold-start a blank
-        # conversation and read as a silent failure -- so drop it (#1026).
-        acts = ["Open"] if rec.get("sessionless") else ["Open", "Resume"]
+        # Primary verb tracks the session's liveness (#1343): a **live** mux ->
+        # "Open" (attach to the running session); a **stopped** session (history
+        # but no live mux) -> "Resume" (relaunch, resuming the last
+        # conversation); a **sessionless** worktree -> "Open" (cold start --
+        # nothing to resume would silently blank-start, #1026). Sync only when
+        # FF-eligible; Cleanup only when the bucket is cleanable; Stop only when
+        # there is a live mux to stop.
+        if rec.get("sessionless") or rec.get("mux_live"):
+            acts = ["Open"]
+        else:
+            acts = ["Resume"]
         if rec.get("ff_eligible"):
             acts.append("Sync")
         if self._cleanable(rec):
             acts.append("Cleanup")
-        acts.append("Restart")
+        if rec.get("mux_live"):
+            acts.append("Stop")
         # #1424/#2178: a bridge/system worktree is host-owned. Prefer jumping to
         # the *caller* worktree that requested it (the "caller-id"), when that
         # worktree is loaded; otherwise fall back to jumping to its own host tab.

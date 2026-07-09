@@ -1342,6 +1342,135 @@ def test_open_submenu_no_mux_toggle():
     asyncio.run(run())
 
 
+def _verb_fixture_source():
+    """Local source with an ACTIVE (live-mux), a STOPPED (history, no mux), and
+    a SESSIONLESS worktree -- for the state-driven submenu verb tests."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("lambda-core", "Win")
+    raws = [
+        # Live mux -> Open (+ Stop).
+        {"id": "lambda-core-win-20260627-live", "title": "Live session",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 4, "state": "wip", "session_count": 1,
+         "mux_session": True, "mux_attached": True, "mux_clients": 1},
+        # Prior session, no live mux -> Resume (no Stop).
+        {"id": "lambda-core-win-20260627-stop", "title": "Stopped session",
+         "status": "active", "started_at": "2026-06-27T16:00:00",
+         "turn_count": 3, "state": "wip", "session_count": 1},
+        # No session ever -> Open only (cold), no Resume/Stop.
+        {"id": "lambda-core-win-20260627-none", "title": "Never opened",
+         "status": "active", "started_at": "2026-06-27T15:00:00",
+         "turn_count": 0, "state": "unused", "session_count": 0},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "lambda-core · win"
+    src.machines = lambda: [("lambda-core Win", "lambda-core", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+    return src
+
+
+def test_submenu_verbs_track_session_liveness():
+    """Active (live mux) -> Open + Stop; stopped -> Resume, no Stop; sessionless
+    -> Open only. The primary verb and the presence of Stop follow ``mux_live``
+    (#1343)."""
+    src = _verb_fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            by_id4 = {w["id4"]: i for i, w in enumerate(recs)}
+
+            scr.sel = ("L", by_id4["live"])
+            scr._open_submenu()
+            acts = scr.submenu["actions"]
+            assert acts[0] == "Open"
+            assert "Resume" not in acts
+            assert "Stop" in acts
+            scr.submenu = None
+
+            scr.sel = ("L", by_id4["stop"])
+            scr._open_submenu()
+            acts = scr.submenu["actions"]
+            assert acts[0] == "Resume"
+            assert "Open" not in acts
+            assert "Stop" not in acts     # nothing live to stop
+            scr.submenu = None
+
+            scr.sel = ("L", by_id4["none"])
+            scr._open_submenu()
+            acts = scr.submenu["actions"]
+            assert acts[0] == "Open"      # cold start
+            assert "Resume" not in acts
+            assert "Stop" not in acts
+
+    asyncio.run(run())
+
+
+def test_submenu_stop_starts_single_item_restart_run(monkeypatch):
+    """Enter on 'Stop' launches a one-item op=restart progress run through the
+    real maintenance executor path (not a mock note)."""
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_REAL_OPS", "1")
+    from agent_worktrees.picker_tui import maintenance as mnt
+
+    started = {}
+
+    class _FakeExec:
+        def __init__(self, op, tasks):
+            started["op"] = op
+            started["n"] = len(tasks)
+
+        def start(self):
+            started["started"] = True
+
+        def state(self, key):
+            return "done"
+
+        def is_done(self):
+            return True
+
+        def counts(self):
+            return (started.get("n", 0), 0, 0)
+
+    monkeypatch.setattr(mnt, "MaintenanceExecutor", _FakeExec)
+    monkeypatch.setattr(
+        mnt, "build_tasks",
+        lambda op, recs, src, **kw: [(w["id4"], None) for w in recs])
+
+    src = _verb_fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            i = next(j for j, w in enumerate(recs) if w["id4"] == "live")
+            scr.sel = ("L", i)
+            scr._open_submenu()
+            si = scr.submenu["actions"].index("Stop")
+            scr.submenu_idx = si
+            scr._key_submenu("enter")
+            assert scr.progress is not None
+            assert scr.progress["op"] == "restart"
+            assert scr.progress["verb"] == "Stop"
+            assert len(scr.progress["items"]) == 1
+            assert started.get("op") == "restart"
+            assert started.get("started") is True
+            scr._poll_executor()
+            assert scr.progress["done"] is True
+            await pilot.pause()
+
+    asyncio.run(run())
+
+
 def test_new_worktree_decision_exits():
     """New worktree… opens the options dialog; Create exits with a decision."""
     src = _fixture_source()
@@ -1450,6 +1579,50 @@ def test_maintenance_executor_sync_uptodate_is_success():
     assert ex.state("a") == "done"   # fast-forwarded
     assert ex.state("b") == "done"   # already current
     assert ex.state("c") == "failed"  # skipped (ahead)
+
+
+def test_maintenance_executor_restart_states():
+    """restart maps on the primitive's ``ok``: a graceful/hard/none stop is
+    success; a failed hard-kill is a failed item."""
+    from agent_worktrees.picker_tui import maintenance as mnt
+
+    tasks = [
+        ("a", lambda: {"had_session": True, "method": "graceful", "ok": True}),
+        ("b", lambda: {"had_session": True, "method": "hard", "ok": True}),
+        ("c", lambda: {"had_session": False, "method": "none", "ok": True}),
+        ("d", lambda: {"had_session": True, "method": "failed", "ok": False}),
+    ]
+    ex = mnt.MaintenanceExecutor("restart", tasks)
+    ex.start()
+    _drain(ex)
+    assert ex.state("a") == "done"   # graceful quit
+    assert ex.state("b") == "done"   # hard mux kill
+    assert ex.state("c") == "done"   # nothing was running
+    assert ex.state("d") == "failed"  # kill failed
+
+
+def test_make_task_local_restart_calls_primitive(monkeypatch):
+    """A local restart task routes to sessions.restart_worktree_copilot with
+    the worktree id -- not the cleanup/sync helpers."""
+    from agent_worktrees.picker_tui import maintenance as mnt
+    from agent_worktrees import sessions
+
+    seen = {}
+
+    def _fake_restart(wt_id):
+        seen["id"] = wt_id
+        return {"had_session": True, "method": "graceful", "ok": True}
+
+    monkeypatch.setattr(sessions, "restart_worktree_copilot", _fake_restart)
+    src = types.SimpleNamespace(LOCAL=("M", "Win"))
+    tasks = mnt.build_tasks(
+        "restart",
+        [{"id4": "wxyz", "raw": {"id": "wt-wxyz"}, "machine": "M", "env": "Win"}],
+        src)
+    (_key, fn) = tasks[0]
+    res = fn()
+    assert seen["id"] == "wt-wxyz"
+    assert res["ok"] is True
 
 
 def test_cleanup_extra_confirm_gate_and_real_executor(monkeypatch):

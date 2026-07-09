@@ -190,9 +190,10 @@ def remote_op_argv(machine, env, op, worktree_id, *, include_unused=False,
                    include_conversations=False, force=False):
     """Build the SSH argv to run one maintenance op on a remote machine/env.
 
-    ``op`` is ``"cleanup"`` or ``"sync"``. Returns the ssh argv, or ``None`` for
-    the local host or an unknown / not-ready target (the caller runs local ops
-    in-process). The remote runs the project binstub's JSON per-worktree CLI.
+    ``op`` is ``"cleanup"``, ``"sync"``, or ``"restart"``. Returns the ssh argv,
+    or ``None`` for the local host or an unknown / not-ready target (the caller
+    runs local ops in-process). The remote runs the project binstub's JSON
+    per-worktree CLI.
     """
     project = _project()
     for s in _build_sources():
@@ -208,6 +209,11 @@ def remote_op_argv(machine, env, op, worktree_id, *, include_unused=False,
                 if include_conversations:
                     flags += " --include-conversations"
                 inner = f"{project} cleanup --worktree-id {worktree_id}{flags}"
+            elif op == "restart":
+                # ``restart`` takes the worktree id positionally (not
+                # --worktree-id); the remote graceful double-Ctrl-C / mux
+                # kill-session runs there and reports a single JSON object.
+                inner = f"{project} restart {worktree_id} --json"
             else:  # sync
                 inner = f"{project} sync --worktree-id {worktree_id} --json"
             return _wrap_remote(s.shell, s.alias, inner)
