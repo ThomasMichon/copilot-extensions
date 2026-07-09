@@ -131,12 +131,21 @@ class NamespaceResolver(ABC):
         ...
 
     @abstractmethod
-    async def resolve(self, name: str, *, extra_plugins: "list[PluginRef]" = ()) -> SpawnTarget:
+    async def resolve(
+        self, name: str, *, extra_plugins: "list[PluginRef]" = (),
+        repo: str | None = None,
+    ) -> SpawnTarget:
         """Resolve a bare name (without prefix) to a SpawnTarget.
 
         Called at dispatch time when a session targets ``prefix:name``.
         The resolver should verify the target is reachable and return
         a SpawnTarget ready for ``transport.spawn()``.
+
+        ``repo`` (optional) is the caller-requested workspace repo for a
+        ``<repo>@<venue>`` address -- the venue should launch that repo's
+        checkout instead of its default, or raise if it cannot host it. A
+        resolver that does not accept ``repo`` signals (to agent-bridge) that
+        cross-repo dispatch to its venues is unsupported.
 
         ``extra_plugins`` (optional) is a set of **related-repo** plugins that
         agent-bridge has decided to inject for this dispatch (sourced from the
@@ -466,6 +475,25 @@ def _match_machine_shortname(
         if kl == sl or kl.rsplit("-", 1)[-1] == sl or kl.endswith("-" + sl):
             return m
     return None
+
+
+def _split_repo_venue(agent_name: str) -> tuple[str | None, str]:
+    """Split a ``<repo>@<venue>`` address into ``(repo, venue)``.
+
+    The repo dimension is orthogonal to the venue (machine / codespace /
+    container): ``SPO.Core@dev6`` runs the SPO.Core binstub on the dev6 venue,
+    ``odsp-web@<codespace>`` targets odsp-web's workspace on that codespace. A
+    name with no ``@`` (or a leading/trailing empty side) is a bare venue and
+    yields ``(None, agent_name)`` -- unchanged behavior. The venue half may
+    itself be namespaced (e.g. ``odsp-web@codespace:foo``); only the first
+    ``@`` is the separator.
+    """
+    if "@" in agent_name:
+        repo, _, venue = agent_name.partition("@")
+        repo, venue = repo.strip(), venue.strip()
+        if repo and venue:
+            return repo, venue
+    return None, agent_name
 
 
 def _load_related_entries(repo_root: Path) -> list[tuple[str, list[str], str]]:
@@ -1018,6 +1046,12 @@ class AgentResolver:
             await resolver.ensure_ready(name)
             return await self._resolve_with_plugins(resolver, name)
 
+        # ``<repo>@<venue>`` -- an explicit repo bound to a venue. Resolve the
+        # venue and run <repo> there instead of the venue's default repo.
+        repo, venue = _split_repo_venue(agent_name)
+        if repo is not None:
+            return await self._resolve_venue_bound(repo, venue)
+
         # Bare name (no prefix): search static/provider agents AND every
         # namespace (codespaces, containers, ...) for a match by name or alias.
         # A single match resolves; multiple matches across namespaces are a
@@ -1038,20 +1072,98 @@ class AgentResolver:
         # "not found in registry" error.
         return self._resolve_static(agent_name)
 
+    async def _resolve_venue_bound(
+        self, repo: str, venue: str,
+    ) -> SpawnTarget:
+        """Resolve ``<repo>@<venue>``: the venue, bound to run ``<repo>``.
+
+        - **machine / local** venues (loopback or SSH): the venue supplies the
+          machine + environment; the target is rebound to run ``<repo>``'s
+          binstub instead of the venue's default project. ``SPO.Core@dev6`` ->
+          the SPO.Core binstub on dev6 (loopback).
+        - **codespace / container** venues: ``repo`` is handed to the namespace
+          resolver, which validates it against the venue's hosted checkout and
+          launches that repo's workspace (or errors if it can't host it).
+        """
+        ns = self._parse_namespaced_agent(venue)
+        if ns:
+            prefix, name = ns
+            resolver = self._namespace_resolvers[prefix]
+            await resolver.ensure_ready(name)
+            return await self._resolve_with_plugins(resolver, name, repo=repo)
+
+        candidates = await self._gather_bare_candidates(venue)
+        if len(candidates) > 1:
+            raise AmbiguousAgentError(
+                venue, [qualified for qualified, _, _ in candidates]
+            )
+        if len(candidates) == 1:
+            _, resolver, resolve_name = candidates[0]
+            if resolver is None:
+                target = await self._resolve_bare(venue)
+                return self._bind_repo(target, repo, venue)
+            await resolver.ensure_ready(resolve_name)
+            return await self._resolve_with_plugins(resolver, resolve_name, repo=repo)
+
+        # No venue match -- resolve statically for a precise not-found error.
+        target = self._resolve_static(venue)
+        return self._bind_repo(target, repo, venue)
+
+    def _bind_repo(self, target: SpawnTarget, repo: str, venue: str) -> SpawnTarget:
+        """Rebind a machine/local venue target to run ``<repo>``'s binstub.
+
+        A ``command`` (provider) target owns its own checkout layout and cannot
+        be rebound here -- reaching this with one means the resolver did not
+        accept a ``repo`` kwarg, so cross-repo dispatch to that venue is
+        unsupported.
+        """
+        if target.type in ("local", "ssh"):
+            import dataclasses
+            return dataclasses.replace(target, project=repo)
+        raise ValueError(
+            f"Cross-repo dispatch '{repo}@{venue}' is not supported for this "
+            "venue (it hosts its own repo/checkout)."
+        )
+
     async def _resolve_with_plugins(
-        self, resolver: "NamespaceResolver", name: str
+        self, resolver: "NamespaceResolver", name: str, repo: str | None = None,
     ) -> SpawnTarget:
         """Resolve via a namespace resolver, injecting related-repo plugins.
 
         agent-bridge *owns* the related-repo plugin set (sourced from the
         related-repos registry, ``related.yaml``); the resolver *folds + stages*
-        it. We only pass ``extra_plugins`` when non-empty so resolvers that have
-        not yet adopted the kwarg keep working unchanged.
+        it. We only pass ``extra_plugins`` / ``repo`` when applicable so
+        resolvers that have not adopted those kwargs keep working unchanged.
         """
         extra = await self._related_plugins_for(resolver, name)
-        if extra:
-            return await resolver.resolve(name, extra_plugins=extra)
-        return await resolver.resolve(name)
+        return await self._call_resolver(
+            resolver, name, extra_plugins=extra, repo=repo,
+        )
+
+    async def _call_resolver(
+        self, resolver: "NamespaceResolver", name: str, *,
+        extra_plugins: list[PluginRef], repo: str | None,
+    ) -> SpawnTarget:
+        """Invoke ``resolver.resolve`` passing only the kwargs it accepts.
+
+        ``extra_plugins`` is optional (back-compat). ``repo`` is required to be
+        honored when requested: if the resolver's ``resolve`` does not accept a
+        ``repo`` kwarg, cross-repo dispatch to that venue is unsupported and we
+        raise rather than silently launching the venue's default repo.
+        """
+        import inspect
+        sig = inspect.signature(resolver.resolve)
+        kwargs: dict[str, Any] = {}
+        if extra_plugins and "extra_plugins" in sig.parameters:
+            kwargs["extra_plugins"] = extra_plugins
+        if repo is not None:
+            if "repo" not in sig.parameters:
+                raise ValueError(
+                    f"Cross-repo dispatch (repo='{repo}') is not supported by "
+                    f"the '{getattr(resolver, 'prefix', '?')}:' resolver."
+                )
+            kwargs["repo"] = repo
+        return await resolver.resolve(name, **kwargs)
 
     async def _related_plugins_for(
         self, resolver: "NamespaceResolver", name: str

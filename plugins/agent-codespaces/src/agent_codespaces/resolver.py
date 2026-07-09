@@ -89,6 +89,25 @@ def _friendly_aliases(cs) -> list[str]:
     return aliases
 
 
+def _norm_repo(value: str) -> str:
+    """Normalize a repo name for cross-repo matching.
+
+    Strips any ``owner/`` prefix, lower-cases, and drops a trailing
+    ``-codespaces`` so a logical repo (``odsp-web``) matches its CodeSpaces
+    host repo (``odsp-microsoft/odsp-web-codespaces``).
+    """
+    s = value.strip().lower().split("/")[-1]
+    suffix = "-codespaces"
+    return s[: -len(suffix)] if s.endswith(suffix) else s
+
+
+def _repo_matches_codespace(repo: str, cs_repository: str | None) -> bool:
+    """Whether ``repo`` addresses the CodeSpace's own hosted repository."""
+    if not cs_repository:
+        return False
+    return _norm_repo(repo) == _norm_repo(cs_repository)
+
+
 def _build_spawn_command(
     codespace_name: str, acp_command: str, stage_plugins: list[str] | None = None,
 ) -> list[str]:
@@ -136,7 +155,8 @@ class CodespaceResolver:
         return "codespace"
 
     async def resolve(
-        self, name: str, *, extra_plugins: "list | None" = None
+        self, name: str, *, extra_plugins: "list | None" = None,
+        repo: str | None = None,
     ) -> "SpawnTarget":
         """Resolve a codespace name to a SpawnTarget.
 
@@ -144,6 +164,14 @@ class CodespaceResolver:
         Accepts CodeSpaces in Available or Shutdown state.  Shutdown
         CodeSpaces will be started automatically by ``gh`` during the
         SSH connection (``gh codespace ssh --config`` triggers startup).
+
+        ``repo`` (optional) is the caller-requested workspace repo for a
+        ``<repo>@<codespace>`` address. A CodeSpace hosts a single repository's
+        workspace, so a request for a *different* repo is rejected -- launching
+        an unrelated repo's checkout on a CodeSpace is not yet supported. A
+        request matching the CodeSpace's own repo (e.g. ``odsp-web`` on an
+        ``odsp-web-codespaces`` CodeSpace) is accepted and behaves as the bare
+        default.
 
         ``extra_plugins`` are **related-repo** plugins agent-bridge decided for
         this dispatch (a list of objects with ``.source``). They are passed to
@@ -164,6 +192,14 @@ class CodespaceResolver:
             raise KeyError(
                 f"Codespace '{name}' not found. Available: {connectable}"
             ) from None
+
+        if repo is not None and not _repo_matches_codespace(repo, cs.repository):
+            raise ValueError(
+                f"Codespace '{cs.name}' hosts '{cs.repository}'; cross-repo "
+                f"dispatch '{repo}@{name}' to a different repo's workspace on a "
+                "CodeSpace is not yet supported. Address the CodeSpace's own "
+                "repo (or the bare CodeSpace name)."
+            )
 
         _CONNECTABLE_STATES = {"Available", "Shutdown"}
         if cs.state not in _CONNECTABLE_STATES:
