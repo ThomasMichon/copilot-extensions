@@ -63,6 +63,10 @@ const state = {
   toolDefinitionsTokens: 0,
   messagesLength: 0,
   lastUtilization: 0,             // currentTokens / tokenLimit
+  // Live-cutover handoff (issue #2251). Armed by save_handoff_prompt when the
+  // operator opts into a live cutover; the old session retires its own pane on
+  // the next session.idle (agent-stop of the handoff turn).
+  cutover: null,                  // null | { oldPane, retired: false }
 };
 
 // --- Helpers ---
@@ -175,6 +179,52 @@ function agentWorktreesGet(key, cwd) {
     return out || null;
   } catch {
     return null;
+  }
+}
+
+// --- Live-cutover handoff (issue #2251) ---
+// A live cutover spawns a *seeded successor* Copilot in a new window of this
+// worktree's mux session, cuts the operator over to it, and later retires this
+// (old) session's pane -- so a handoff continues automatically, in place, with
+// interactive CLI state preserved. The mux choreography lives in
+// `agent-worktrees handoff-cutover`; this extension is a thin trigger. All
+// best-effort: any failure returns null / a safe default so the caller falls
+// back to the normal store-task-and-reply flow.
+
+// Spawn the successor + cut over. `seed` is the successor's first interactive
+// prompt (copilot -i). Returns { ok, old_pane, new_pane } or null on any error
+// (not under mux, mux verb failed, agent-worktrees missing, ...).
+function runHandoffCutover(cwd, seed) {
+  const argv = ["handoff-cutover", "--seed", seed];
+  // The extension runs inside the OLD pane; $TMUX_PANE pins it precisely so the
+  // retire step targets the right pane even after the cutover moves the active
+  // pane to the successor. Falls back to the session's active pane in the CLI.
+  const ownPane = process.env.TMUX_PANE || process.env.PSMUX_PANE || "";
+  if (ownPane) argv.push("--old-pane", ownPane);
+  try {
+    const out = execFileSync("agent-worktrees", argv, {
+      cwd,
+      timeout: 20000,
+      encoding: "utf-8",
+    });
+    const result = JSON.parse(out);
+    return result?.ok ? result : null;
+  } catch {
+    return null;
+  }
+}
+
+// Retire a specific pane (double-Ctrl-C -> Copilot's clean quit). Best-effort.
+function retireCutoverPane(cwd, pane) {
+  try {
+    execFileSync("agent-worktrees", ["handoff-cutover", "--retire-pane", pane], {
+      cwd,
+      timeout: 20000,
+      encoding: "utf-8",
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -495,7 +545,12 @@ const session = await joinSession({
         "session's state folder. Call this after composing the handoff from " +
         "generate_handoff_prompt data. Pass the markdown as `prompt_text` (the " +
         "`prompt` alias is also accepted); an optional short `title` labels the " +
-        "task. The handoff is NEVER loaded automatically by a future session.",
+        "task. Set `continue_live: true` (the opt-in live-cutover handoff, e.g. " +
+        "from /handoff-continue) to ALSO spawn a seeded successor Copilot in a " +
+        "new window of this worktree's mux session, cut the operator over to it, " +
+        "and quit THIS session when the turn ends -- an automatic hands-free " +
+        "continuation. The handoff is NEVER loaded automatically by a future " +
+        "session unless continue_live seeds it.",
       skipPermission: true,
       parameters: {
         type: "object",
@@ -514,6 +569,14 @@ const session = await joinSession({
           prompt: {
             type: "string",
             description: "Alias for prompt_text (accepted for convenience).",
+          },
+          continue_live: {
+            type: "boolean",
+            description:
+              "Opt-in live cutover: after storing the handoff, spawn a seeded " +
+              "successor Copilot in a new mux window, cut the operator over, and " +
+              "quit this session when the turn ends. Requires running under a " +
+              "mux session; degrades to the normal reply-prompt flow otherwise.",
           },
         },
         // Intentionally no `required`: the handler validates so a missing or
@@ -537,18 +600,27 @@ const session = await joinSession({
 
         const cwd = state.cwd || process.cwd();
         const title = (args?.title ?? "").toString().trim();
+        const continueLive =
+          args?.continue_live === true || args?.continue_live === "true";
+        const topic = title || "continue this session";
 
-        // Prefer agent-dispatch: store the handoff as a claimable task (no file).
+        // Store the handoff (agent-dispatch task preferred, else session file)
+        // and derive both the successor's seed prompt and the normal reply msg.
+        let seed = null;       // the successor's -i first-turn prompt
+        let storedMsg = null;  // the normal (non-cutover) instruction to reply
+
         if (agentDispatchAvailable()) {
           const taskId = dispatchHandoff(text, sid, cwd, title);
           if (taskId) {
-            return (
+            seed =
+              `Claim and act on the handoff ${taskId} from agent-dispatch: ${topic}.`;
+            storedMsg = (
               `Handoff stored as agent-dispatch task ${taskId} (proposed, label ` +
               `'handoff', pinned to this worktree). No session file was written.\n\n` +
               `Reply to the user with ONLY this short prompt. They resume by ` +
               `running /resume-handoff in a fresh session in this worktree, or by ` +
               `pasting it into '/clear' (or '/new'):\n` +
-              `  Claim and act on the handoff ${taskId} from agent-dispatch: <one-line topic>.\n` +
+              `  ${seed}\n` +
               `Do NOT paste the handoff contents -- the payload lives in the task, ` +
               `and it is never loaded automatically.`
             );
@@ -556,25 +628,75 @@ const session = await joinSession({
           // Task creation failed -- fall through to the file flow.
         }
 
-        const promptPath = saveHandoffPrompt(text, sid);
+        if (!seed) {
+          const promptPath = saveHandoffPrompt(text, sid);
+          seed = `Read the handoff at ${promptPath} and continue: ${topic}.`;
+          storedMsg = (
+            `Handoff saved to ${promptPath}\n\n` +
+            `(Stored as a session file — no reachable agent-dispatch coordinator, ` +
+            `or the worktree couldn't be resolved.) Reply to the user with ONLY a ` +
+            `short wrapper prompt they copy verbatim into '/clear' (or '/new'). ` +
+            `The wrapper is addressed to the NEXT session's agent and must (1) name ` +
+            `this absolute path (a ~/ form is fine) and (2) instruct that agent to ` +
+            `READ the handoff file and continue. For example:\n` +
+            `  ${seed}\n` +
+            `Do NOT paste the file's contents, and do NOT claim it loads ` +
+            `automatically on restart -- it does not.`
+          );
+        }
 
+        if (!continueLive) return storedMsg;
+
+        // --- Live cutover: spawn the seeded successor + cut the operator over ---
+        const result = runHandoffCutover(cwd, seed);
+        if (!result) {
+          return (
+            `Live cutover was requested but is unavailable (this session is not ` +
+            `running under a mux session, or the cutover verb failed). The handoff ` +
+            `is safely stored and can be resumed the normal way:\n\n${storedMsg}`
+          );
+        }
+        // Arm self-retire: this old session quits on the next session.idle
+        // (agent-stop of this handoff turn); the successor already holds the seed.
+        state.cutover = { oldPane: result.old_pane || null, retired: false };
         return (
-          `Handoff saved to ${promptPath}\n\n` +
-          `(Stored as a session file — no reachable agent-dispatch coordinator, ` +
-          `or the worktree couldn't be resolved.) Reply to the user with ONLY a ` +
-          `short wrapper prompt they copy verbatim into '/clear' (or '/new'). ` +
-          `The wrapper is addressed to the NEXT session's agent and must (1) name ` +
-          `this absolute path (a ~/ form is fine) and (2) instruct that agent to ` +
-          `READ the handoff file and continue. For example:\n` +
-          `  Read the handoff at ${promptPath} and continue: <one-line topic>.\n` +
-          `Do NOT paste the file's contents, and do NOT claim it loads ` +
-          `automatically on restart -- it does not.`
+          `Live cutover initiated. A successor Copilot was spawned in a new window ` +
+          `of this worktree's mux session (pane ${result.new_pane || "?"}) and ` +
+          `seeded to resume the handoff; the operator has been cut over to it. ` +
+          `THIS session will quit automatically when the current turn ends -- do ` +
+          `NOT start new work; simply end your turn. If asked, the fallback resume ` +
+          `prompt is:\n  ${seed}`
         );
       },
     },
   ],
 
   commands: [
+    {
+      name: "handoff-continue",
+      description:
+        "Live-cutover handoff: generate a handoff for THIS session, spawn a " +
+        "seeded successor Copilot in a new mux window, cut the operator over to " +
+        "it, and quit this session -- an automatic hands-free continuation.",
+      handler: async (ctx) => {
+        void ctx;
+        await session.send({
+          prompt:
+            "Perform a LIVE-CUTOVER handoff now (the operator invoked " +
+            "/handoff-continue). Steps: (1) call generate_handoff_prompt to " +
+            "collect session facts; (2) compose the full continuation markdown " +
+            "per the context-handoff skill (original request, direction & " +
+            "motivation, progress with file paths, next action items, target " +
+            "goals, gotchas); (3) call save_handoff_prompt with that markdown as " +
+            "`prompt_text`, a short specific `title`, AND `continue_live: true`. " +
+            "That stores the handoff, spawns a seeded successor Copilot in a new " +
+            "window of this worktree's mux session, and cuts the operator over to " +
+            "it. After the tool returns its live-cutover confirmation, DO NOT " +
+            "start new work -- just end your turn; this session quits itself.",
+          displayPrompt: "Live-cutover handoff (/handoff-continue)",
+        });
+      },
+    },
     {
       name: "resume-handoff",
       description:
@@ -729,6 +851,25 @@ session.on("tool.execution_complete", (event) => {
 let pendingNudge = null;  // null | "soft" | "hard"
 
 session.on("session.idle", () => {
+  // Live-cutover self-retire: once the handoff turn ends (agent-stop), quit this
+  // (old) session by double-Ctrl-C'ing its own pane. The successor was already
+  // spawned + seeded, so nothing is lost. Only retires a KNOWN pane -- never the
+  // session's current active pane, which post-cutover is the successor.
+  if (state.cutover && !state.cutover.retired) {
+    state.cutover.retired = true;
+    if (state.cutover.oldPane) {
+      const cwd = state.cwd || process.cwd();
+      retireCutoverPane(cwd, state.cutover.oldPane);
+    } else {
+      session.log(
+        "[Context Handoff] live cutover armed but no old pane id was captured; " +
+          "leaving this session running (retire manually with a double Ctrl-C).",
+        { level: "warning" },
+      ).catch(() => {});
+    }
+    return;
+  }
+
   if (!pendingNudge) return;
   const level = pendingNudge;
   pendingNudge = null;

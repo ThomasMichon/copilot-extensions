@@ -8,10 +8,14 @@ description: >
   Trigger phrases include:
   - 'handoff'
   - '/handoff'
+  - '/handoff-continue'
   - '/resume-handoff'
   - 'resume handoff'
   - 'consume handoff'
   - 'continuation prompt'
+  - 'hand off and continue'
+  - 'live cutover'
+  - 'continue automatically'
   - 'next session'
   - 'context is getting large'
   - 'pick up where we left off'
@@ -142,6 +146,47 @@ The mechanics, for when you must do it by hand (extension not loaded):
 - **No coordinator:** write the file to
   `~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md` and reply
   with `Read the handoff at <path> and continue: <topic>.`
+
+---
+
+## Live-Cutover Handoff — hand off *and continue*, automatically
+
+By default a handoff is a **relay baton the operator carries**: you store it and
+hand back a short reply prompt they paste into a new session. **Live cutover**
+removes the human relay for the common case — the session **spins up its own
+successor in place** and keeps going, hands-free, preserving interactive CLI
+state.
+
+**Opt-in only.** It is triggered by the **`/handoff-continue`** slash command
+(or the operator explicitly asking to "hand off and continue" / "live cutover"),
+**never** by a plain `/handoff`. It kills the live session once the successor is
+up, so it must be deliberate.
+
+**What happens** (all orchestrated by the extension + `agent-worktrees
+handoff-cutover`; you just make the tool call):
+
+1. You compose the handoff markdown as usual, then call **`save_handoff_prompt`
+   with `continue_live: true`** (plus `prompt_text` and a short `title`).
+2. The handoff is stored (agent-dispatch task, else file) exactly as normal, and
+   the tool derives the successor's **seed** = the same short reply prompt
+   (`Claim and act on the handoff <id> …` / `Read the handoff at <path> …`).
+3. A **successor Copilot** is spawned in a **new window of this worktree's
+   `wt-<id>` mux session**, booted the same way the picker boots one but seeded
+   with `-i "<seed>"` (interactive — never `-p`), and the operator is **cut over**
+   to it.
+4. This (old) session **retires itself on the next `session.idle`** (agent-stop
+   of the handoff turn) via a double-Ctrl-C to its own pane — Copilot's native
+   clean quit. Only the successor remains.
+
+**Your job when `continue_live` is set:** make the one `save_handoff_prompt`
+call, read back its live-cutover confirmation, then **end your turn** — do not
+start new work; this session quits itself. The successor picks up the handoff on
+its seeded first turn.
+
+**Graceful fallback.** If the session is **not running under a mux session** (or
+the cutover verb fails), `save_handoff_prompt` degrades to the normal
+store-task-and-reply flow and tells you so — the handoff is still safely stored
+and resumable the ordinary way.
 
 ---
 
