@@ -911,6 +911,62 @@ async def test_far_side_runner_resolves_and_hosts(tmp_path, monkeypatch):
                     _os.kill(child_pid, signal.SIGKILL)
 
 
+@pytest.mark.asyncio
+async def test_session_host_bundle_runs_and_secures(tmp_path):
+    """The content-hashed zipapp bundle builds with a stable hash, runs as a host
+    owning a child, and is nonce-gated -- the version-alignment mechanism for the
+    CodeSpace/mesh far side (it runs the host's exact bytes)."""
+    import json
+    import os
+    import signal
+    import subprocess
+    import sys
+
+    from agent_bridge.session_host.bundle import (
+        build_session_host_bundle,
+        bundle_source_hash,
+    )
+
+    path, sha = build_session_host_bundle(dest_dir=str(tmp_path / "bundles"))
+    assert path.exists() and sha == bundle_source_hash()
+    # Stable + reused (the cache-by-hash property the CS relies on).
+    assert build_session_host_bundle(dest_dir=str(tmp_path / "bundles")) == (path, sha)
+
+    sf = tmp_path / "state.json"
+    env = dict(os.environ, AGENT_BRIDGE_SESSION_HOST_NONCE="bundlenonce")
+    proc = subprocess.Popen(
+        [sys.executable, str(path), "--port", "0", "--state-file", str(sf),
+         "--", sys.executable, "-c", _STREAMER], env=env)
+    child_pid = None
+    try:
+        port = None
+        for _ in range(200):
+            if sf.exists():
+                d = json.loads(sf.read_text() or "{}")
+                if d.get("port") and d.get("child_pid"):
+                    port, child_pid = d["port"], d["child_pid"]
+                    break
+            await asyncio.sleep(0.05)
+        assert port and child_pid, "bundle host never became ready"
+
+        bad = await SessionHostClient.connect(port=port)
+        with pytest.raises(ConnectionError):
+            await bad.attach(0, nonce=b"wrong")
+        await bad.close()
+
+        good = await SessionHostClient.connect(port=port)
+        hello = await good.attach(0, nonce=b"bundlenonce")
+        assert hello.child_pid == child_pid
+        await good.close()
+    finally:
+        with contextlib.suppress(Exception):
+            proc.terminate()
+            proc.wait(timeout=5)
+        if child_pid and sys.platform != "win32":
+            with contextlib.suppress(Exception):
+                os.kill(child_pid, signal.SIGKILL)
+
+
 def osutil_pid_alive(pid: int) -> bool:
     import sys
     if sys.platform == "win32":
