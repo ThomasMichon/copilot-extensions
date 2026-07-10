@@ -6539,6 +6539,34 @@ def _related_anchor(rest: list[str]) -> str | None:
         return None
 
 
+def _related_lookup_anchor(
+    rest: list[str], anchor: str, name: str,
+) -> tuple[str, bool]:
+    """Anchor to read ``name`` from for a read-only lookup, with a fallback.
+
+    ``related`` is **cwd-directional**: it reads the ``related.yaml`` of the repo
+    containing the current directory. Running a lookup from *inside* a
+    coordinated repo's own checkout therefore reads that repo's (usually empty)
+    POV and dead-ends. When the cwd anchor doesn't list ``name`` -- and the
+    caller didn't pin an explicit ``--repo`` -- fall back to the **control-plane
+    project's** index (the repo whose ``machines.yaml`` declares
+    ``control_plane.project``), which is the canonical directional index.
+
+    Returns ``(effective_anchor, via_control_plane)``. Fail-safe: any inability
+    to resolve the control plane leaves the original anchor unchanged.
+    """
+    from . import related
+    if _related_opt(rest, "--repo"):
+        return anchor, False
+    if related.get_related(anchor, name) is not None:
+        return anchor, False
+    cp = related.find_control_plane_anchor()
+    if (cp and os.path.abspath(cp) != os.path.abspath(anchor)
+            and related.get_related(cp, name) is not None):
+        return cp, True
+    return anchor, False
+
+
 def cmd_related_dispatch(argv: list[str]) -> int:
     """Route related subcommands (per-project related-repos index)."""
     from . import related, repos
@@ -6600,6 +6628,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             output.err("Usage: related show <name>")
             return 1
         name = rest[0]
+        anchor, _via_cp = _related_lookup_anchor(rest, anchor, name)
         e = related.get_related(anchor, name)
         if e is None:
             output.err(f"'{name}' is not a related repo.")
@@ -6711,6 +6740,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             output.err("Usage: related doc <name>")
             return 1
         name = rest[0]
+        anchor, _via_cp = _related_lookup_anchor(rest, anchor, name)
         e = related.get_related(anchor, name)
         if e is None:
             output.err(f"'{name}' is not a related repo. Link it first: "
@@ -6736,11 +6766,22 @@ def cmd_related_dispatch(argv: list[str]) -> int:
 
     if sub == "resolve":
         from . import doctor
-        name = (rest[0] if rest and not rest[0].startswith("-")
-                else related.get_primary(anchor))
+        explicit_name = rest[0] if rest and not rest[0].startswith("-") else None
+        name = explicit_name or related.get_primary(anchor)
+        via_cp = False
+        if not name and not _related_opt(rest, "--repo"):
+            # Bare `resolve` from a repo with no primary of its own: fall back to
+            # the control-plane index's primary so it still resolves something.
+            cp = related.find_control_plane_anchor()
+            if cp and os.path.abspath(cp) != os.path.abspath(anchor):
+                cp_primary = related.get_primary(cp)
+                if cp_primary:
+                    anchor, name, via_cp = cp, cp_primary, True
         if not name:
             output.err("Usage: related resolve <name>  (or set a primary first)")
             return 1
+        if explicit_name:
+            anchor, via_cp = _related_lookup_anchor(rest, anchor, name)
         entry = related.get_related(anchor, name)
         if entry is None:
             output.err(f"'{name}' is not a related repo.")
@@ -6776,9 +6817,14 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 "current_machine": current_machine,
                 "steps": resn.steps,
                 "notes": resn.notes,
+                "via_control_plane": via_cp,
             })
             return 0
         output.header(f"Resolve: {resn.name}")
+        if via_cp:
+            output.info(
+                "(resolved via the control-plane index -- this repo's own "
+                "related.yaml does not list it)")
         if entry.summary:
             print(f"  {entry.summary}")
         avail = "" if resn.available_here else "  (not available here)"

@@ -616,3 +616,91 @@ def test_no_plugins_emits_nothing(tmp_path: Path):
     related.write_related(tmp_path, cfg)
     text = related.related_path(tmp_path).read_text(encoding="utf-8")
     assert "plugins" not in text
+
+
+# ── control-plane fallback (resolve/show/doc from a non-control-plane cwd) ────
+
+def _cp_paths(p):
+    s = str(p)
+    return {"windows": s, "linux": s, "wsl": s}
+
+
+def test_control_plane_project_mapping_form(tmp_path: Path):
+    (tmp_path / "machines.yaml").write_text(
+        "control_plane:\n  project: dotfiles\nmachines: {}\n", encoding="utf-8")
+    assert related._control_plane_project(tmp_path) == "dotfiles"
+
+
+def test_control_plane_project_bare_form(tmp_path: Path):
+    (tmp_path / "machines.yaml").write_text(
+        "control_plane: dotfiles\nmachines: {}\n", encoding="utf-8")
+    assert related._control_plane_project(tmp_path) == "dotfiles"
+
+
+def test_control_plane_project_absent_or_undeclared(tmp_path: Path):
+    assert related._control_plane_project(tmp_path) is None  # no machines.yaml
+    (tmp_path / "machines.yaml").write_text("machines: {}\n", encoding="utf-8")
+    assert related._control_plane_project(tmp_path) is None  # no control_plane
+
+
+def test_find_control_plane_anchor(tmp_path: Path, monkeypatch):
+    from agent_worktrees import repos
+    cp = tmp_path / "dotfiles"; cp.mkdir()
+    other = tmp_path / "other"; other.mkdir()
+    (cp / "machines.yaml").write_text(
+        "control_plane:\n  project: dotfiles\nmachines: {}\n", encoding="utf-8")
+    entries = [
+        repos.RepoEntry(name="other", paths=_cp_paths(other)),
+        repos.RepoEntry(name="dotfiles", repo_class="worktree",
+                        paths=_cp_paths(cp)),
+    ]
+    monkeypatch.setattr(repos, "list_repos", lambda class_filter=None: entries)
+    assert related.find_control_plane_anchor() == str(cp)
+
+
+def test_find_control_plane_anchor_none_when_undeclared(tmp_path: Path, monkeypatch):
+    from agent_worktrees import repos
+    other = tmp_path / "other"; other.mkdir()
+    monkeypatch.setattr(
+        repos, "list_repos",
+        lambda class_filter=None: [
+            repos.RepoEntry(name="other", paths=_cp_paths(other))])
+    assert related.find_control_plane_anchor() is None
+
+
+def test_related_lookup_anchor_falls_back_to_control_plane(monkeypatch):
+    from agent_worktrees import __main__ as cli
+    monkeypatch.setattr(
+        related, "get_related",
+        lambda anchor, name: object() if str(anchor).endswith("cp") else None)
+    monkeypatch.setattr(related, "find_control_plane_anchor",
+                        lambda: "/tmp/cp")
+    eff, via = cli._related_lookup_anchor([], "/tmp/cwd", "copilot-extensions")
+    assert via is True
+    assert str(eff).endswith("cp")
+
+
+def test_related_lookup_anchor_local_hit_skips_fallback(monkeypatch):
+    from agent_worktrees import __main__ as cli
+    monkeypatch.setattr(related, "get_related", lambda anchor, name: object())
+
+    def _boom():
+        raise AssertionError("control-plane lookup must not run on a local hit")
+
+    monkeypatch.setattr(related, "find_control_plane_anchor", _boom)
+    eff, via = cli._related_lookup_anchor([], "/tmp/cwd", "x")
+    assert eff == "/tmp/cwd" and via is False
+
+
+def test_related_lookup_anchor_respects_explicit_repo(monkeypatch):
+    from agent_worktrees import __main__ as cli
+    calls = {"cp": 0}
+
+    def _fcp():
+        calls["cp"] += 1
+        return "/tmp/cp"
+
+    monkeypatch.setattr(related, "find_control_plane_anchor", _fcp)
+    eff, via = cli._related_lookup_anchor(["--repo", "/tmp/cwd"], "/tmp/cwd", "x")
+    assert eff == "/tmp/cwd" and via is False
+    assert calls["cp"] == 0  # explicit --repo pins the anchor, no fallback
