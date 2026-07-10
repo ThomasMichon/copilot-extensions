@@ -275,3 +275,74 @@ def test_repoll_silent_skips_non_ready_and_cancelled(monkeypatch):
     loader._cancelled.set()
     assert loader.repoll_silent() == 0
     assert called["n"] == 0
+
+
+# ── #2102 remote-tab PR reconcile: argv flag + LiveLoader.reconcile_remote_prs ─
+
+def test_argv_for_reconcile_includes_flag():
+    argv = data_ssh._argv_for("bash", "wheatley", "proj",
+                              classify=True, reconcile=True)
+    inner = argv[-1]
+    assert "--reconcile-prs" in inner
+    assert "list --json" in inner
+
+
+def test_argv_for_without_reconcile_omits_flag():
+    argv = data_ssh._argv_for("bash", "wheatley", "proj", classify=True)
+    assert "--reconcile-prs" not in argv[-1]
+
+
+def test_reconcile_remote_prs_runs_reconcile_argv_and_swaps(monkeypatch):
+    loader, src = _ready_loader(monkeypatch, ["old"])
+    seen = {"argv": None, "n": 0}
+
+    def fake_fetch(source, runner=None, *, argv=None):
+        seen["n"] += 1
+        seen["argv"] = argv
+        return ["reconciled"]
+
+    monkeypatch.setattr(data_ssh, "_fetch", fake_fetch)
+    assert loader.reconcile_remote_prs() == 1
+    assert _wait(lambda: loader.records() == ["reconciled"])
+    assert loader.state("M", "Win") == "ready"              # never flips to loading
+    assert seen["argv"] is not None
+    assert "--reconcile-prs" in seen["argv"][-1]            # ran the reconcile argv
+    assert _wait(lambda: not loader._refreshing)            # guard cleared
+    # One-shot per source: a second pass is a no-op.
+    assert loader.reconcile_remote_prs() == 0
+    assert seen["n"] == 1
+
+
+def test_reconcile_remote_prs_skips_local(monkeypatch):
+    local = data_ssh.Source("M", "Win", None, local=True, ready=True)
+    loader = data_ssh.LiveLoader([local])
+    with loader._lock:
+        loader._state[local.key] = "ready"
+    called = {"n": 0}
+    monkeypatch.setattr(
+        data_ssh, "_fetch",
+        lambda *a, **k: called.__setitem__("n", called["n"] + 1) or ["x"])
+    assert loader.reconcile_remote_prs() == 0
+    assert called["n"] == 0
+
+
+def test_reconcile_remote_prs_keeps_last_good_on_failure(monkeypatch):
+    loader, src = _ready_loader(monkeypatch, ["old"])
+
+    def boom(source, runner=None, *, argv=None):
+        raise RuntimeError("ssh down")
+
+    monkeypatch.setattr(data_ssh, "_fetch", boom)
+    assert loader.reconcile_remote_prs() == 1
+    assert _wait(lambda: not loader._refreshing)
+    assert loader.records() == ["old"]                     # last-good preserved
+    assert loader.state("M", "Win") == "ready"
+
+
+def test_reconcile_remote_prs_noop_when_cancelled(monkeypatch):
+    loader, src = _ready_loader(monkeypatch, ["old"])
+    monkeypatch.setattr(
+        data_ssh, "_fetch",
+        lambda *a, **k: ["x"])
+    loader._cancelled.set()
+    assert loader.reconcile_remote_prs() == 0
