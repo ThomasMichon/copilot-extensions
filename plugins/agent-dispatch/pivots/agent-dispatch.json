@@ -12,6 +12,13 @@
   "empty_hint": "No proposed tasks for this machine.",
   "actions": [
     {
+      "key": "open-cli",
+      "label": "Open into a CLI session",
+      "kind": "internal",
+      "verb": "open-cli",
+      "description": "Open this task's target worktree into a Copilot CLI session (resume /resume-handoff there to consume a handoff)."
+    },
+    {
       "key": "kick",
       "label": "Kick to a headless bridge agent",
       "run": ["agent-bridge", "create", "{machine}", "{title}", "--no-wait"],

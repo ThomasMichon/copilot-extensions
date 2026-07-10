@@ -3704,10 +3704,38 @@ class PickerScreen(Widget):
     def _internal_pivot_action(self, verb, ctx):
         """Dispatch a registered pivot's INTERNAL (picker-navigation) action
         (#1425). Tiny and defensive: an unknown verb is a reported failure, never
-        an exception. ``jump-host`` navigates to the entry's worktree by id."""
+        an exception. ``jump-host`` navigates to the entry's worktree by id;
+        ``open-cli`` opens that worktree into a CLI session (exits the picker with
+        a resume decision -- the shared launch-plumbing, #2253)."""
         if verb == "jump-host":
             return self._jump_to_worktree(ctx.get("worktree") or ctx.get("id"))
+        if verb == "open-cli":
+            return self._open_worktree_cli(ctx.get("worktree") or ctx.get("id"))
         return False, f"unknown internal action: {verb}"
+
+    def _open_worktree_cli(self, wid):
+        """#2253: open the worktree ``wid`` into a CLI session, the same way
+        selecting its Worktrees row + Open does.
+
+        Resolves the row by **stable worktree id** across loaded machines, builds
+        the standard resume decision, and exits the picker so ``__main__`` maps it
+        onto the resume/launch path (which, for a task pinned to that worktree,
+        surfaces the handoff via ``/resume-handoff`` in the opened session). The
+        launch-decision plumbing -- not a subprocess -- so a remote worktree still
+        routes through the normal SSH handoff. Returns ``(ok, message)``; on
+        success the caller's post-action re-anchor is a harmless no-op since the
+        app is already exiting."""
+        if not wid:
+            return False, "no worktree id"
+        row = next(
+            (w for w in self.data if (w.get("raw") or {}).get("id") == wid),
+            None,
+        )
+        if row is None:
+            return False, "worktree not found on any loaded machine"
+        decision = self._resume_decision(row)
+        self._decide(decision)
+        return True, f"opening …{str(wid)[-4:]} into a CLI session"
 
     # ---- ⚙ Configuration menu (hosts Profiles etc.) (#1426) ----
     def _open_cfgmenu(self):
