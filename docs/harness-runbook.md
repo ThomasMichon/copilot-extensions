@@ -364,6 +364,17 @@ states, concisely:
 - **Pointers, not prose** — reference the skills below and the plugin skills
   rather than restating them. `AGENTS.md` is a table of contents with rules,
   not a manual.
+- **Standing / ambient rules live here, not in on-demand skills.** Guidance meant
+  to hold for the *rest of the session* — persona/voice, style bars, safety and
+  error-response disciplines, cross-repo sequencing — must be **materialized into
+  this always-on file** (or a small rule file it references), because a skill's
+  guidance applies most strongly the turn it is invoked and **fades after** (the
+  *ambient-guidance* principle — `authoring-skills` § Action-sequence vs
+  ambient-guidance skills). A plugin that ships such a rule installs it here via
+  its `-setup` skill (the "install a persistent rule into `AGENTS.md`" seam —
+  `installing-plugins`); the on-demand skill then **loads and enforces** the rule
+  for the session rather than embedding a decaying one-shot copy. Phase 8's review
+  (`reviewing-customizations`) flags any skill that violates this.
 
 Keep it **voice-neutral** unless the operator explicitly wants personality
 (unopinionated seam #7).

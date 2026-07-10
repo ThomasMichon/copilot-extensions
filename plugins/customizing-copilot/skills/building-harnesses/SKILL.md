@@ -71,7 +71,11 @@ opinionated one, apply the opinion and move on.
 3. Adopt the harness + register/link related target repos (skills:
    `agent-worktrees-repos`, `agent-worktrees-related`, `working-cross-repo`).
 4. `AGENTS.md` + connective-tissue skills (skills: `authoring-skills`,
-   `defining-subagents`).
+   `defining-subagents`). **Standing/ambient rules** (persona, style, safety,
+   cross-repo sequencing) are materialized into the always-on `AGENTS.md` and the
+   skill load+enforces them — never embedded as a decaying one-shot copy (the
+   ambient-guidance principle; the "install a persistent rule into `AGENTS.md`"
+   seam lives in `installing-plugins`).
 5. SSH mesh + agent-bridge topology (skills: `agent-ssh`, `agent-bridge`).
 6. Validate end-to-end through the **Picker**.
 7. Enable efforts + visions (skills: `efforts-setup`, `visions-setup`).
