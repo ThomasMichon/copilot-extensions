@@ -215,3 +215,60 @@ class TestReapOrphans:
         rec = _rec("fin", status="finalized", path=str(tmp_path))  # 2026-06-01
         result, killed = _run({"wt-fin": 0}, [rec], activity={})
         assert killed == ["fin"]
+
+
+# ── #2149/#713 session-end sweep: post-exit reaps idle orphans, no daemon ─────
+
+def test_sweep_orphans_on_exit_is_best_effort(monkeypatch):
+    """A reap hiccup at session end never propagates out of post-exit."""
+    def boom():
+        raise RuntimeError("mux enumeration failed")
+
+    monkeypatch.setattr(cli, "reap_orphan_mux_sessions", boom)
+    assert cli._sweep_orphans_on_exit() is None      # swallowed, no raise
+
+
+def test_sweep_orphans_on_exit_runs_the_reaper(monkeypatch):
+    seen = {"n": 0}
+    monkeypatch.setattr(
+        cli, "reap_orphan_mux_sessions",
+        lambda: (seen.__setitem__("n", seen["n"] + 1)
+                 or {"available": True, "reaped": [], "skipped": [], "errors": []}))
+    cli._sweep_orphans_on_exit()
+    assert seen["n"] == 1
+
+
+def _post_exit_args(wt_id="wt-x"):
+    import types
+    return types.SimpleNamespace(worktree_id=wt_id)
+
+
+def test_post_exit_sweeps_orphans_when_finalized(tmp_path, monkeypatch):
+    """The 'already finalized' path still triggers the session-end sweep."""
+    calls = {"sweep": 0}
+    monkeypatch.setattr(cli, "_sweep_orphans_on_exit",
+                        lambda: calls.__setitem__("sweep", calls["sweep"] + 1))
+    monkeypatch.setattr(cli.cfg, "load_config", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "_infer_worktree_id", lambda wid, config: "wt-x")
+    monkeypatch.setattr(cli, "_resolve_worktree_id", lambda wid: "wt-x")
+    monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: tmp_path)
+    (tmp_path / "wt-x.yaml").write_text("")   # record exists
+    monkeypatch.setattr(cli.tracking, "load_record",
+                        lambda p: _rec("wt-x", status="finalized"))
+
+    assert cli.cmd_post_exit(_post_exit_args()) == 0
+    assert calls["sweep"] == 1
+
+
+def test_post_exit_sweeps_orphans_when_no_record(tmp_path, monkeypatch):
+    """A session end for an untracked worktree still sweeps other orphans."""
+    calls = {"sweep": 0}
+    monkeypatch.setattr(cli, "_sweep_orphans_on_exit",
+                        lambda: calls.__setitem__("sweep", calls["sweep"] + 1))
+    monkeypatch.setattr(cli.cfg, "load_config", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "_infer_worktree_id", lambda wid, config: "wt-x")
+    monkeypatch.setattr(cli, "_resolve_worktree_id", lambda wid: "wt-x")
+    monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: tmp_path)   # no yaml -> missing
+
+    assert cli.cmd_post_exit(_post_exit_args()) == 0
+    assert calls["sweep"] == 1
