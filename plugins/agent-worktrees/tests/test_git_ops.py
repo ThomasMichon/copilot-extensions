@@ -273,3 +273,67 @@ class TestRefineStateWithSession:
             WorktreeState.GONE,
         ):
             assert refine_state_with_session(st, 12) == st
+
+
+# --- classification git timeout -> honest UNKNOWN (perf hang fix) -----------
+
+
+class TestClassifyGitTimeout:
+    """A stalled git spawn during classification must degrade to UNKNOWN for
+    that one worktree -- never a fabricated concrete state, never a raised
+    timeout that hangs the picker's per-worktree loop."""
+
+    def test_git_passes_timeout_through(self, monkeypatch):
+        import subprocess
+
+        from agent_worktrees import git_ops as go
+
+        captured = {}
+
+        def fake_run(cmd, **kw):
+            captured.update(kw)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(go.subprocess, "run", fake_run)
+        go.git("status", "--porcelain", timeout=7)
+        assert captured["timeout"] == 7
+
+    def test_git_default_timeout_is_none(self, monkeypatch):
+        """Callers that don't opt in keep the historical unbounded behavior."""
+        import subprocess
+
+        from agent_worktrees import git_ops as go
+
+        captured = {}
+
+        def fake_run(cmd, **kw):
+            captured.update(kw)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(go.subprocess, "run", fake_run)
+        go.git("status")
+        assert captured["timeout"] is None
+
+    def test_classify_worktree_timeout_reports_unknown(self, tmp_path, monkeypatch):
+        import subprocess
+
+        from agent_worktrees import git_ops as go
+
+        (tmp_path / ".git").mkdir()
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+            # Branch detection succeeds so classification reaches the git ops.
+            if args[:2] == ("rev-parse", "--abbrev-ref"):
+                return subprocess.CompletedProcess(
+                    ["git", *args], 0, "worktree/x\n", "")
+            # The first classification probe stalls past the bound.
+            raise subprocess.TimeoutExpired(
+                cmd=["git", *args], timeout=timeout or go._CLASSIFY_GIT_TIMEOUT)
+
+        monkeypatch.setattr(go, "git", fake_git)
+
+        info = go.classify_worktree(str(tmp_path), "worktree/x")
+        # Honest "couldn't determine", not a confidently-wrong concrete state.
+        assert info.state == go.WorktreeState.UNKNOWN
+        # Branch metadata from the successful pre-git read is still reported.
+        assert info.current_branch == "worktree/x"

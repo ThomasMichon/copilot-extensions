@@ -1858,7 +1858,7 @@ def test_live_loader_local_streams_without_blocking_start(monkeypatch):
     sentinel = [{"id4": "abcd", "machine": "lambda-core", "env": "Win"}]
     gate = threading.Event()
 
-    def _slow_local(m=None, e=None):
+    def _slow_local(m=None, e=None, *, classify=True):
         gate.wait(5)
         return sentinel
 
@@ -1891,13 +1891,14 @@ def test_live_loader_reload_local_refetches(monkeypatch):
     refresh streams back in without blocking the UI (#1421 live re-render)."""
     from agent_worktrees.picker_tui import data_ssh
 
-    seq = [[{"id4": "a"}], [{"id4": "b"}]]   # initial load, then reload
-    calls = {"n": 0}
+    # The local loader is two-phase (fast classify=False, then full
+    # classify=True), so a single load event calls data_local.load more than
+    # once. Return the currently-staged rows regardless of call count / phase,
+    # and let the test swap what "current" means between start and reload.
+    state = {"rows": [{"id4": "a"}]}
 
-    def _load(m=None, e=None):
-        i = min(calls["n"], len(seq) - 1)
-        calls["n"] += 1
-        return seq[i]
+    def _load(m=None, e=None, *, classify=True):
+        return list(state["rows"])
 
     monkeypatch.setattr(data_ssh.data_local, "load", _load)
     local = data_ssh.Source("lambda-core", "Win", None, local=True)
@@ -1905,10 +1906,58 @@ def test_live_loader_reload_local_refetches(monkeypatch):
     loader.start()
     assert _wait_state(loader, "lambda-core", "Win", "ready") == "ready"
     assert loader.records() == [{"id4": "a"}]
+    state["rows"] = [{"id4": "b"}]
     assert loader.reload("lambda-core", "Win") is True
     assert _wait_state(loader, "lambda-core", "Win", "ready") == "ready"
+    # Give the reload's two-phase fill a beat to swap the authoritative rows in.
+    for _ in range(200):
+        if loader.records() == [{"id4": "b"}]:
+            break
+        time.sleep(0.01)
     assert loader.records() == [{"id4": "b"}]
     assert loader.reload("nope", "X") is False
+
+
+def test_live_loader_local_two_phase_fast_then_fill(monkeypatch):
+    """Local tab shows fast provisional rows first (classify=False), then swaps
+    in the authoritative git-classified rows (classify=True) -- the perf fix so
+    a slow/stalled git classification never blocks the whole tab."""
+    from agent_worktrees.picker_tui import data_ssh
+
+    fast_gate = threading.Event()
+    full_gate = threading.Event()
+    calls = []
+
+    def _load(m=None, e=None, *, classify=True):
+        calls.append(classify)
+        if classify:
+            full_gate.wait(5)
+            return [{"id4": "full", "state": "WIP"}]
+        fast_gate.wait(5)
+        return [{"id4": "fast", "state": "?"}]
+
+    monkeypatch.setattr(data_ssh.data_local, "load", _load)
+    local = data_ssh.Source("lambda-core", "Win", None, local=True)
+    loader = data_ssh.LiveLoader(sources=[local])
+    loader.start()
+    try:
+        # Phase 1 (fast) resolves first -> provisional rows visible, ready.
+        fast_gate.set()
+        assert _wait_state(loader, "lambda-core", "Win", "ready") == "ready"
+        assert loader.records() == [{"id4": "fast", "state": "?"}]
+        # Phase 2 (full git classification) then swaps authoritative rows in.
+        full_gate.set()
+        for _ in range(200):
+            if loader.records() == [{"id4": "full", "state": "WIP"}]:
+                break
+            time.sleep(0.01)
+        assert loader.records() == [{"id4": "full", "state": "WIP"}]
+        # Fast pass ran without classification; full pass ran with it.
+        assert calls[0] is False and True in calls
+    finally:
+        fast_gate.set()
+        full_gate.set()
+        loader.cancel()
 
 
 def test_escape_on_main_view_confirms_before_quit(monkeypatch):

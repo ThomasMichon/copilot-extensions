@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import functools
+import logging
 import os
 import platform
 import re
@@ -16,6 +17,8 @@ import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+
+log = logging.getLogger("agent-worktrees")
 
 # --- Path helpers -----------------------------------------------------------
 
@@ -92,6 +95,7 @@ def git(
     cwd: str | Path | None = None,
     check: bool = True,
     capture: bool = True,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a git command with consistent error handling.
 
@@ -100,6 +104,12 @@ def git(
         cwd: Working directory for the command.
         check: If True, raise GitError on non-zero exit.
         capture: If True, capture stdout and stderr.
+        timeout: If set, seconds to wait before ``subprocess.run`` raises
+            ``subprocess.TimeoutExpired``. Default ``None`` keeps the historical
+            unbounded behavior for every caller that does not opt in (e.g.
+            network ops like ``fetch``/``push``). Read-only inspection callers
+            (worktree classification) pass a bound so a single stalled ``git``
+            spawn cannot hang them indefinitely.
 
     Returns:
         CompletedProcess with stdout/stderr as strings.
@@ -114,6 +124,7 @@ def git(
         encoding="utf-8",
         errors="replace",
         env=env,
+        timeout=timeout,
     )
     if check and result.returncode != 0:
         raise GitError(cmd, result.returncode, result.stderr.strip())
@@ -297,16 +308,68 @@ def classify_worktree(
 
     upstream = f"{remote}/{default_branch}"
 
+    # Bound each classification git spawn so one stalled `git` (a Defender
+    # scan, an index/ref .lock, a slow pack read) cannot hang the caller. The
+    # picker loops this over every worktree, so an unbounded stall froze the
+    # whole tab for minutes. On timeout report an honest UNKNOWN for *this*
+    # worktree rather than fabricating a concrete state from a half-finished
+    # probe (an empty `status` looks clean; a failed `merge-base` looks ORPHAN).
+    # The picker's silent repoll re-resolves UNKNOWN rows on a later tick.
+    try:
+        return _classify_git_state(
+            path, effective_branch, upstream,
+            fetch=fetch, remote=remote, default_branch=default_branch,
+            actual_branch=actual_branch, drift=drift,
+        )
+    except subprocess.TimeoutExpired:
+        log.warning(
+            "classify_worktree: git timed out for %s -- reporting UNKNOWN", path,
+        )
+        return WorktreeStateInfo(
+            state=WorktreeState.UNKNOWN,
+            current_branch=actual_branch, branch_drift=drift,
+        )
+
+
+# Per-call bound for classification git spawns. Generous: a normal status /
+# rev-list / cherry is well under a second, so this only trips on a genuine
+# stall (Defender scan, an index/ref .lock, a slow pack read), never on
+# legitimately-slow-but-progressing git.
+_CLASSIFY_GIT_TIMEOUT = 15.0
+
+
+def _classify_git_state(
+    path: Path,
+    effective_branch: str,
+    upstream: str,
+    *,
+    fetch: bool,
+    remote: str,
+    default_branch: str,
+    actual_branch: str | None,
+    drift: bool,
+) -> WorktreeStateInfo:
+    """Git-driven half of :func:`classify_worktree` (dirty/ahead/behind/merge).
+
+    Every git call is bounded by ``_CLASSIFY_GIT_TIMEOUT`` via the ``_g`` helper;
+    a stalled spawn raises ``subprocess.TimeoutExpired``, which the caller turns
+    into an honest ``UNKNOWN`` state. Split out from ``classify_worktree`` so the
+    timeout guard wraps one cohesive block while the pure/session short-circuits
+    stay above it.
+    """
+    def _g(*args):
+        return git(*args, cwd=path, check=False, timeout=_CLASSIFY_GIT_TIMEOUT)
+
     if fetch:
-        git("fetch", remote, default_branch, "--quiet", cwd=path, check=False)
+        _g("fetch", remote, default_branch, "--quiet")
 
     # Dirty check
-    result = git("status", "--porcelain", cwd=path, check=False)
+    result = _g("status", "--porcelain")
     dirty_lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
     dirty_count = len(dirty_lines)
 
     # Merge base -- use effective_branch (actual HEAD when drifted)
-    mb = git("merge-base", upstream, effective_branch, cwd=path, check=False)
+    mb = _g("merge-base", upstream, effective_branch)
     if mb.returncode != 0:
         return WorktreeStateInfo(
             state=WorktreeState.ORPHAN, dirty=dirty_count,
@@ -315,23 +378,16 @@ def classify_worktree(
     merge_base = mb.stdout.strip()
 
     # Ahead / behind
-    ahead_r = git(
-        "rev-list", "--count", f"{merge_base}..{effective_branch}",
-        cwd=path, check=False,
-    )
-    behind_r = git(
-        "rev-list", "--count", f"{effective_branch}..{upstream}",
-        cwd=path, check=False,
-    )
+    ahead_r = _g("rev-list", "--count", f"{merge_base}..{effective_branch}")
+    behind_r = _g("rev-list", "--count", f"{effective_branch}..{upstream}")
     ahead = int(ahead_r.stdout.strip()) if ahead_r.returncode == 0 else 0
     behind = int(behind_r.stdout.strip()) if behind_r.returncode == 0 else 0
 
     # Last commit subject as fallback title
     title = ""
     if ahead > 0:
-        title_r = git(
+        title_r = _g(
             "--no-pager", "log", "-1", "--format=%s", effective_branch,
-            cwd=path, check=False,
         )
         if title_r.returncode == 0:
             title = title_r.stdout.strip()
@@ -349,9 +405,8 @@ def classify_worktree(
 
     if ahead == 0:
         # Check reflog for past commits (squash-merged back)
-        reflog = git(
+        reflog = _g(
             "--no-pager", "reflog", "show", effective_branch, "--format=%gs",
-            cwd=path, check=False,
         )
         has_commits = any(
             ln.startswith("commit")
@@ -369,10 +424,7 @@ def classify_worktree(
     # patches even when commit SHAs differ (squash-merge) and even when
     # upstream later modified the same files.  Lines starting with "-"
     # are already on upstream; "+" means unmerged.
-    cherry_r = git(
-        "cherry", upstream, effective_branch,
-        cwd=path, check=False,
-    )
+    cherry_r = _g("cherry", upstream, effective_branch)
     if cherry_r.returncode == 0 and cherry_r.stdout.strip():
         unmerged = [ln for ln in cherry_r.stdout.splitlines()
                     if ln.startswith("+")]
@@ -385,10 +437,7 @@ def classify_worktree(
 
     # Fallback: direct blob comparison for cases git-cherry can't match
     # (e.g. content arrived on upstream via a different patch shape).
-    diff_r = git(
-        "diff", "--name-only", merge_base, effective_branch,
-        cwd=path, check=False,
-    )
+    diff_r = _g("diff", "--name-only", merge_base, effective_branch)
     changed_files = [f for f in diff_r.stdout.splitlines() if f.strip()]
 
     if not changed_files:
@@ -400,12 +449,8 @@ def classify_worktree(
 
     # Compare file blobs between branch and master
     for file in changed_files:
-        b_blob = git(
-            "rev-parse", f"{effective_branch}:{file}", cwd=path, check=False
-        )
-        m_blob = git(
-            "rev-parse", f"{upstream}:{file}", cwd=path, check=False
-        )
+        b_blob = _g("rev-parse", f"{effective_branch}:{file}")
+        m_blob = _g("rev-parse", f"{upstream}:{file}")
         if b_blob.stdout.strip() != m_blob.stdout.strip():
             return WorktreeStateInfo(
                 state=WorktreeState.WIP,
