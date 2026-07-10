@@ -46,6 +46,21 @@ def test_pack_unpack_attach():
     assert proto.unpack_u64(proto.pack_attach(9, b"tok3n")[:8]) == 9
 
 
+def test_child_preexec_and_pdeathsig_platform():
+    import sys
+
+    from agent_bridge.session_host.osutil import child_preexec, set_pdeathsig
+
+    fn = child_preexec()
+    if sys.platform == "win32":
+        assert fn is None  # preexec_fn unsupported on Windows
+    else:
+        assert callable(fn)
+    # set_pdeathsig is a best-effort no-op (no raise, returns None) off-Linux.
+    if not sys.platform.startswith("linux"):
+        assert set_pdeathsig() is None
+
+
 def test_pack_unpack_liveness():
     assert proto.unpack_liveness(proto.pack_liveness(True)) == (True, 0)
     assert proto.unpack_liveness(proto.pack_liveness(False, 7)) == (False, 7)

@@ -36,8 +36,9 @@ from pathlib import Path
 from typing import Any
 
 from .. import winjob
-from .host import SessionHost
 from . import protocol as proto
+from .host import SessionHost
+from .osutil import child_preexec
 
 _ACP_STDIO_LIMIT_BYTES = 64 * 1024 * 1024
 
@@ -173,6 +174,11 @@ async def _spawn_child(
     child_env.pop(_NONCE_ENV, None)
     if env:
         child_env.update(env)
+    # POSIX/Linux: arm PR_SET_PDEATHSIG so copilot dies with the host even on a
+    # hard host kill -- the Linux counterpart to the Windows kill-on-close job,
+    # so a remote (mesh/CodeSpace) far side never orphans copilot. None (default)
+    # on Windows, where preexec_fn is unsupported.
+    preexec = child_preexec()
     return await asyncio.create_subprocess_exec(
         *argv,
         stdin=asyncio.subprocess.PIPE,
@@ -181,6 +187,7 @@ async def _spawn_child(
         cwd=cwd or None,
         env=child_env,
         limit=_ACP_STDIO_LIMIT_BYTES,
+        preexec_fn=preexec,
     )
 
 
