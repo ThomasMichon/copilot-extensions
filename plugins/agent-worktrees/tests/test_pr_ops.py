@@ -887,7 +887,7 @@ class TestWorktreeToDictPRs:
             worktree_path="/tmp/wt", repo="ext", machine="m", platform="wsl",
             started_at="2026-06-01T10:00:00", last_resumed_at="2026-06-01T10:00:00",
             resume_count=0, title=None, status="active", completed_at=None,
-            handoff_prompt=None, sessions=None, prs=prs,
+            sessions=None, prs=prs,
         )
 
     def test_no_prs_omits_pr_keys(self):
@@ -919,7 +919,7 @@ class TestWorktreeToDictState:
             worktree_path="/tmp/wt2", repo="ext", machine="m", platform="wsl",
             started_at="2026-06-01T10:00:00", last_resumed_at="2026-06-01T10:00:00",
             resume_count=0, title=None, status="active", completed_at=None,
-            handoff_prompt=None, sessions=None, prs=[],
+            sessions=None, prs=[],
         )
 
     def test_no_state_info_omits_state_keys(self):
@@ -974,7 +974,7 @@ class TestClassifyRecordsConvo:
             worktree_path=str(path), repo="ext", machine="m", platform="wsl",
             started_at="2026-06-01T10:00:00", last_resumed_at="2026-06-01T10:00:00",
             resume_count=0, title=None, status="active", completed_at=None,
-            handoff_prompt=None, sessions=None, prs=[],
+            sessions=None, prs=[],
         )
 
     def test_unused_with_turns_classifies_convo(self, monkeypatch, tmp_path):

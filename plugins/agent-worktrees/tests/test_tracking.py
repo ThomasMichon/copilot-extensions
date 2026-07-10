@@ -40,7 +40,6 @@ class TestSaveLoadRoundTrip:
             title=None,
             status="active",
             completed_at=None,
-            handoff_prompt=None,
             sessions=None,
         )
         defaults.update(overrides)
@@ -81,13 +80,6 @@ class TestSaveLoadRoundTrip:
         save_record(rec, path)
         loaded = load_record(path)
         assert loaded.completed_at == "2026-06-01T12:00:00"
-
-    def test_handoff_prompt(self, tmp_path: Path):
-        rec = self._make_record(handoff_prompt="/tmp/handoff.md")
-        path = tmp_path / "wt.yaml"
-        save_record(rec, path)
-        loaded = load_record(path)
-        assert loaded.handoff_prompt == "/tmp/handoff.md"
 
     def test_parent_session_round_trip(self, tmp_path: Path):
         # #1029: the originating-session pointer survives a save/load cycle.
@@ -317,7 +309,6 @@ class TestSessionsField:
             title=None,
             status="active",
             completed_at=None,
-            handoff_prompt=None,
             sessions=None,
         )
         defaults.update(overrides)
@@ -431,7 +422,6 @@ class TestSessionRegistration:
             title=None,
             status="active",
             completed_at=None,
-            handoff_prompt=None,
             sessions=[],
         )
         save_record(rec, tmp_tracking_dir / "reg-wt.yaml")
@@ -457,7 +447,6 @@ class TestSessionRegistration:
             title=None,
             status="active",
             completed_at=None,
-            handoff_prompt=None,
             sessions=[SessionEntry("existing", "2026-06-01T09:00:00", pid=100)],
         )
         save_record(rec, tmp_tracking_dir / "dup-wt.yaml")
@@ -483,7 +472,6 @@ class TestSessionRegistration:
             title=None,
             status="active",
             completed_at=None,
-            handoff_prompt=None,
             sessions=None,
         )
         save_record(rec, tmp_tracking_dir / "pre-reg.yaml")
@@ -508,7 +496,6 @@ class TestSessionRegistration:
             title=None,
             status="active",
             completed_at=None,
-            handoff_prompt=None,
             sessions=[SessionEntry("sess-end", "2026-06-01T10:00:00")],
         )
         save_record(rec, tmp_tracking_dir / "end-wt.yaml")
@@ -543,7 +530,6 @@ class TestSessionRegistration:
             title=None,
             status="active",
             completed_at=None,
-            handoff_prompt=None,
             sessions=[SessionEntry("other-sess", "2026-06-01T10:00:00")],
         )
         save_record(rec, tmp_tracking_dir / "noop-wt.yaml")
@@ -580,7 +566,6 @@ class TestListRecords:
             title=None,
             status="active",
             completed_at=None,
-            handoff_prompt=None,
             sessions=[],
         )
         defaults.update(overrides)
@@ -645,7 +630,6 @@ class TestStatusTransitions:
             title=None,
             status="active",
             completed_at=None,
-            handoff_prompt=None,
             sessions=[],
         )
         defaults.update(overrides)
@@ -762,7 +746,6 @@ class TestFindWorktreeIdByCwd:
             title=None,
             status="active",
             completed_at=None,
-            handoff_prompt=None,
             sessions=[],
         )
         save_record(rec, tracking_dir / f"{wt_id}.yaml")
@@ -809,7 +792,6 @@ class TestSystemWorktreeKind:
             title=None,
             status="active",
             completed_at=None,
-            handoff_prompt=None,
             sessions=None,
         )
         defaults.update(overrides)

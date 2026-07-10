@@ -43,7 +43,6 @@ def _record(wt_id: str, wt_path: str, *, title=None, sessions=None, status="acti
         title=title,
         status=status,
         completed_at=None,
-        handoff_prompt=None,
         sessions=sessions,
     )
 

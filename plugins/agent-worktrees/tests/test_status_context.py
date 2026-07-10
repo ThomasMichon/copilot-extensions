@@ -28,7 +28,6 @@ def _record(**kw):
         title=None,
         status="active",
         completed_at=None,
-        handoff_prompt=None,
     )
     base.update(kw)
     return tracking.WorktreeRecord(**base)

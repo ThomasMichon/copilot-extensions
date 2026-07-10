@@ -121,7 +121,6 @@ def sample_record(tmp_tracking_dir: Path) -> tracking.WorktreeRecord:
         title=None,
         status="active",
         completed_at=None,
-        handoff_prompt=None,
         sessions=[],
     )
     tracking.save_record(rec, tmp_tracking_dir / f"{rec.worktree_id}.yaml")

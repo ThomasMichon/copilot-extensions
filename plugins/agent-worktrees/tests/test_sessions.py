@@ -195,7 +195,6 @@ class TestScanSessionsFast:
             title=None,
             status="active",
             completed_at=None,
-            handoff_prompt=None,
             sessions=sessions,
         )
 
@@ -488,7 +487,6 @@ def _make_record(wt_id: str, wt_path: str, sessions=None) -> WorktreeRecord:
         title=None,
         status="active",
         completed_at=None,
-        handoff_prompt=None,
         sessions=sessions,
     )
 
