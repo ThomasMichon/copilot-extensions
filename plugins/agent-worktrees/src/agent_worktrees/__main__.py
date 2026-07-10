@@ -2549,6 +2549,32 @@ def _resolve_worktree_id(raw_id: str) -> str:
 # post-exit -- finalization after Copilot exits
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _sweep_orphans_on_exit() -> None:
+    """Best-effort idle-gated orphan-mux sweep at the *session-end* boundary
+    (#713/#2149).
+
+    agent-worktrees runs **no persistent monitor process**. Orphaned mux+Copilot
+    sessions of finalized/gone worktrees are reaped on a cadence at the two
+    natural lifecycle boundaries instead: on picker *launch* (the sweep in
+    :func:`_run_new_picker`) and here, when a session *ends*. Both reuse the same
+    idle-gated predicate in :func:`reap_orphan_mux_sessions` -- an attached,
+    system-owned, still-active, or recently-busy session is always spared, so a
+    worktree finalized-from-inside while its Copilot is still working is never
+    killed. This closes the "reaped only when you next open the picker" gap
+    without a daemon or scheduled task. Never raises.
+    """
+    try:
+        payload = reap_orphan_mux_sessions()
+        reaped = payload.get("reaped") or []
+        if reaped:
+            output.ok(
+                f"Reaped {len(reaped)} idle orphan mux session(s): "
+                f"{', '.join(reaped)}"
+            )
+    except Exception:
+        pass
+
+
 def cmd_post_exit(args: argparse.Namespace) -> int:
     """Run post-exit checks on a worktree after Copilot exits. Idempotent."""
     config = cfg.load_config()
@@ -2564,6 +2590,7 @@ def cmd_post_exit(args: argparse.Namespace) -> int:
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         output.warn(f"No tracking record for {worktree_id} -- skipping post-exit.")
+        _sweep_orphans_on_exit()
         return 0
 
     try:
@@ -2572,12 +2599,16 @@ def cmd_post_exit(args: argparse.Namespace) -> int:
         output.err(f"Failed to load record {worktree_id}: {e}")
         return 1
 
-    # Already finalized -- nothing to do
+    # Already finalized -- nothing to finalize, but still sweep idle orphans at
+    # this session-end boundary (#713/#2149).
     if record.status == "finalized":
         output.ok(f"Worktree {worktree_id} already finalized.")
-        return 0
+        rc = 0
+    else:
+        rc = _post_exit_gate(record, config)
 
-    return _post_exit_gate(record, config)
+    _sweep_orphans_on_exit()
+    return rc
 
 
 def _post_exit_gate(record: tracking.WorktreeRecord, config: cfg.Config) -> int:
@@ -4015,8 +4046,10 @@ def reap_orphan_mux_sessions(*, dry_run: bool = False,
     finalized-from-inside session whose Copilot is still working (you finalized
     the PR but the agent is mid-task, or a scheduled prompt is pending) would be
     killed the moment it's unattended; closing a tab is meant to *preserve* a
-    live session, not end it. The sweep is the safety net; the proactive
-    inactivity monitor reuses this same predicate on a timer.
+    live session, not end it. The same predicate runs at both worktree lifecycle
+    boundaries -- picker launch (:func:`_run_new_picker`) and session end
+    (:func:`_sweep_orphans_on_exit`, #2149) -- so idle orphans are reaped on a
+    natural cadence with **no persistent timer or daemon**.
 
     ``only_id`` restricts the sweep to a **single** worktree's session; the exact
     same spare-attached/system/active/**busy** predicate is applied.
