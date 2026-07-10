@@ -395,6 +395,13 @@ class SessionManager:
         # 0 disables. Only acts in Session-Host mode.
         self._idle_reap_ttl_seconds = idle_reap_ttl_seconds
         self._host_index: Any = None
+        # Live remote-boundary forwards (session_id -> LocalForward). Held so a
+        # CodeSpace/mesh Session Host's -L/-R forward can be refreshed on
+        # reattach and torn down on teardown. Empty for local hosts.
+        self._forwards: dict[str, Any] = {}
+        # Strong refs to in-flight best-effort remote-reap tasks (so they are not
+        # GC'd mid-flight); each removes itself on completion.
+        self._remote_reap_tasks: set[Any] = set()
         if session_host_enabled:
             from pathlib import Path as _Path
 
@@ -933,13 +940,19 @@ class SessionManager:
         on_acp_event: Any,
         permission_callback: Any | None,
         mcp_servers: list[dict[str, Any]] | None = None,
+        spawner: Any | None = None,
+        remote_child_argv: list[str] | None = None,
+        remote_cwd: str | None = None,
     ) -> tuple[AcpClient, str]:
-        """Spawn a local child inside a survivable Session Host and drive ACP
-        over the reattachable loopback endpoint (Session-Host mode).
+        """Spawn a child inside a survivable Session Host and drive ACP over the
+        reattachable loopback endpoint (Session-Host mode).
 
-        Registers the durable host index so a restarted frontend can reattach.
-        Teardown DETACHES (host-mode ``AcpClient.shutdown``), never reaping the
-        child inadvertently -- goal 1.
+        ``spawner`` selects the boundary seam (default :class:`LocalSpawner`; a
+        :class:`CodeSpaceSpawner` bootstraps the Host inside a CodeSpace and
+        stands up the ``-L`` forward). Registers the durable host index -- with
+        the remote-boundary ``endpoint`` descriptor -- so a restarted frontend
+        can re-forward and reattach. Teardown DETACHES (host-mode
+        ``AcpClient.shutdown``), never reaping the child inadvertently -- goal 1.
         """
         from . import __version__
         from .session_host.acp_adapter import open_acp_streams
@@ -948,11 +961,21 @@ class SessionManager:
         from .session_host.spawner import LocalSpawner
         from .transport import resolve_local_launch
 
-        args, work_dir, env = await resolve_local_launch(
-            target, tracker=tracker, session_id=session_id,
-        )
-        if work_dir and not target.cwd:
-            target.cwd = work_dir
+        if spawner is None:
+            spawner = LocalSpawner()
+
+        if remote_child_argv is not None:
+            # Remote boundary (CodeSpace/mesh): the child runs on the FAR side,
+            # so there is no local worktree to resolve -- the Spawner is handed
+            # the remote copilot argv + remote cwd directly, and the far-side
+            # Session Host owns copilot's stdio as a clean local pipe there.
+            args, work_dir, env = remote_child_argv, remote_cwd, {}
+        else:
+            args, work_dir, env = await resolve_local_launch(
+                target, tracker=tracker, session_id=session_id,
+            )
+            if work_dir and not target.cwd:
+                target.cwd = work_dir
 
         with tracker.stage(ConnectStage.LAUNCH_ACP):
             # Tag the child's environment with its own bridge session id so a
@@ -963,12 +986,18 @@ class SessionManager:
             child_env = dict(env or {})
             child_env["AGENT_BRIDGE_SESSION_ID"] = session_id
             # Bootstrap the Session Host through the boundary Spawner seam (P2a).
-            # Local for now; the same seam yields the elevated / SSH / CodeSpace
-            # hosts later, and the frontend below is boundary-agnostic. spawn()
-            # blocks briefly on host readiness, so it is already off-loop.
-            spawned = await LocalSpawner().spawn(
+            # The seam is boundary-agnostic: LocalSpawner binds a loopback port
+            # directly; CodeSpaceSpawner ships+launches the Host on the CS and
+            # stands up an -L forward so the frontend below still dials
+            # 127.0.0.1:<local_port>. spawn() blocks briefly on host readiness,
+            # so it is already off-loop.
+            spawned = await spawner.spawn(
                 args, cwd=work_dir, env=child_env, session_id=session_id,
             )
+            # Retain a remote-boundary forward so reattach can refresh it and
+            # teardown can cancel it.
+            if getattr(spawned, "forward", None) is not None:
+                self._forwards[session_id] = spawned.forward
             sock = await SessionHostClient.connect(port=spawned.local_port)
             await sock.attach(0, nonce=spawned.nonce.encode())
             streams = await open_acp_streams(sock)
@@ -1020,8 +1049,49 @@ class SessionManager:
                 created_at=time.time(),
                 nonce=spawned.nonce,
                 boundary=spawned.boundary,
+                endpoint=getattr(spawned, "endpoint", {}) or {},
             ))
         return client, acp_sid
+
+    # -- boundary-aware Session Host liveness ---------------------------------
+    def _rec_host_alive(self, rec: Any) -> bool:
+        """Is a Session Host still alive? Boundary-aware.
+
+        A **local** host is a local process, so ``pid_alive`` is authoritative.
+        A **remote** host's ``host_pid`` is a *far-side* pid -- checking it
+        against local processes is meaningless (and would randomly match an
+        unrelated local pid). A remote host is instead treated as *presumed
+        alive* here and **verified** by the actual forward + ATTACH probe in
+        ``_reattach_one`` (which prunes on failure), so a truly-dead remote host
+        is dropped when the reattach fails rather than by a bogus local pid check.
+        """
+        from .session_host.osutil import pid_alive
+        if getattr(rec, "boundary", "local") == "local":
+            return pid_alive(rec.host_pid)
+        return True
+
+    def _rec_child_alive(self, rec: Any) -> bool:
+        """Is the copilot child alive? Local: ``pid_alive``; remote: presumed
+        (a dead remote child surfaces as the host closing on ATTACH)."""
+        from .session_host.osutil import pid_alive
+        if getattr(rec, "boundary", "local") == "local":
+            return pid_alive(rec.child_pid)
+        return True
+
+    def _live_host_records(self) -> list[Any]:
+        """Records whose host is (boundary-appropriately) alive."""
+        if self._host_index is None:
+            return []
+        return [r for r in self._host_index.all() if self._rec_host_alive(r)]
+
+    def _prune_dead_hosts(self) -> None:
+        """Drop records whose host is dead (local only -- remote is verified by
+        the reattach probe, never by a local pid check)."""
+        if self._host_index is None:
+            return
+        for r in [r for r in self._host_index.all() if not self._rec_host_alive(r)]:
+            with contextlib.suppress(Exception):
+                self._host_index.remove(r.session_id)
 
     async def reattach_session_hosts(self) -> int:
         """Reconnect to every surviving Session Host on startup (goal 3).
@@ -1043,16 +1113,15 @@ class SessionManager:
         """
         if not self._session_host_enabled or self._host_index is None:
             return 0
-        from .session_host.osutil import pid_alive
         from .session_host.version_mux import HostDisposition, plan_host
 
-        self._host_index.prune_dead(pid_alive)
+        self._prune_dead_hosts()
         reattached = 0
         now = time.time()
-        for rec in self._host_index.live_records(pid_alive):
+        for rec in self._live_host_records():
             plan = plan_host(
                 protocol_version=rec.protocol_version,
-                child_alive=pid_alive(rec.child_pid),
+                child_alive=self._rec_child_alive(rec),
                 age_seconds=(now - rec.created_at) if rec.created_at else None,
                 stale_reap_seconds=self._session_host_stale_reap_seconds,
             )
@@ -1085,6 +1154,44 @@ class SessionManager:
         if reattached:
             log.info("Reattached %d session(s) to surviving Session Hosts", reattached)
         return reattached
+
+    async def _ensure_forward(self, rec: Any) -> None:
+        """Ensure a remote-boundary Host's ``-L`` (+ ``-R`` relay) forward is up.
+
+        No-op for a local Host (direct loopback, no forward). For a CodeSpace /
+        mesh Host, (re-)establishes the forward so ``rec.port`` resolves before we
+        dial it -- the ``refresh_endpoint()`` step of the reattach driver, driven
+        from the durable ``rec.endpoint`` descriptor so it works even after a
+        frontend restart with no live Spawner. Refreshes an existing forward
+        (cancel + re-establish) or rebuilds one from the endpoint.
+        """
+        boundary = getattr(rec, "boundary", "local")
+        endpoint = getattr(rec, "endpoint", None) or {}
+        if boundary == "local" or not endpoint:
+            return
+        from .session_host.endpoints import forward_from_endpoint
+
+        existing = self._forwards.get(rec.session_id)
+        try:
+            if existing is not None:
+                await existing.refresh()
+            else:
+                fwd = forward_from_endpoint(endpoint)
+                await fwd.establish()
+                self._forwards[rec.session_id] = fwd
+        except Exception:
+            log.warning(
+                "Failed to (re-)establish forward for session %s (boundary=%s)",
+                rec.session_id, boundary, exc_info=True,
+            )
+            raise
+
+    async def _drop_forward(self, session_id: str) -> None:
+        """Cancel and forget a session's remote-boundary forward (if any)."""
+        fwd = self._forwards.pop(session_id, None)
+        if fwd is not None:
+            with contextlib.suppress(Exception):
+                await fwd.cancel()
 
     async def _reattach_one(
         self,
@@ -1128,6 +1235,7 @@ class SessionManager:
                 await old.shutdown()
 
         try:
+            await self._ensure_forward(rec)
             sock = await SessionHostClient.connect(port=rec.port)
             await sock.attach(0, nonce=getattr(rec, "nonce", "").encode())
             streams = await open_acp_streams(sock)
@@ -1201,12 +1309,11 @@ class SessionManager:
         """
         if not self._session_host_enabled or self._host_index is None:
             return 0
-        from .session_host.osutil import pid_alive
         from .session_host.version_mux import HostDisposition, plan_host
 
         recovered = 0
         now = time.time()
-        for rec in list(self._host_index.live_records(pid_alive)):
+        for rec in list(self._live_host_records()):
             session = self._sessions.get(rec.session_id)
             if session is None or not session.acp_session_id:
                 continue
@@ -1221,7 +1328,7 @@ class SessionManager:
                 continue
             # Transport is down. Only resume if the child is still there; a dead
             # child is a real end, left to normal teardown/GC.
-            if not pid_alive(rec.child_pid):
+            if not self._rec_child_alive(rec):
                 continue
             # Respect version-mux: never drive a host this build can't speak to.
             plan = plan_host(
@@ -1258,11 +1365,10 @@ class SessionManager:
         """
         if not self._session_host_enabled or self._host_index is None:
             return []
-        from .session_host.osutil import pid_alive
         from .session_host.version_mux import is_compatible
 
         return [
-            rec for rec in self._host_index.live_records(pid_alive)
+            rec for rec in self._live_host_records()
             if not is_compatible(rec.protocol_version)
         ]
 
@@ -1282,14 +1388,86 @@ class SessionManager:
             "Reaping Session Host for session %s (host pid=%s, child pid=%s): %s",
             rec.session_id, rec.host_pid, rec.child_pid, reason,
         )
-        kill_pid(rec.child_pid, force=True)
-        kill_pid(rec.host_pid, force=True)
-        # Clear the zombie a host we parented leaves behind (no-op for a
-        # reattached host that init reaps, or on Windows).
-        reap_zombie(rec.child_pid)
-        reap_zombie(rec.host_pid)
+        boundary = getattr(rec, "boundary", "local")
+        if boundary == "local":
+            kill_pid(rec.child_pid, force=True)
+            kill_pid(rec.host_pid, force=True)
+            # Clear the zombie a host we parented leaves behind (no-op for a
+            # reattached host that init reaps, or on Windows).
+            reap_zombie(rec.child_pid)
+            reap_zombie(rec.host_pid)
+        else:
+            # Remote (CodeSpace / mesh) boundary: host_pid/child_pid live on the
+            # FAR side -- killing those pid numbers locally would hit unrelated
+            # local processes. Tear down the local forward and best-effort kill
+            # the remote host (its PR_SET_PDEATHSIG takes the child with it).
+            self._kill_forward_sync(rec.session_id)
+            self._schedule_remote_reap(rec, reason)
         with contextlib.suppress(Exception):
             self._host_index.remove(rec.session_id)
+
+    def _kill_forward_sync(self, session_id: str) -> None:
+        """Best-effort synchronous teardown of a session's forward process."""
+        fwd = self._forwards.pop(session_id, None)
+        if fwd is None:
+            return
+        proc = getattr(fwd, "_proc", None)
+        if proc is not None and getattr(proc, "returncode", 0) is None:
+            with contextlib.suppress(Exception):
+                proc.kill()
+
+    def _schedule_remote_reap(self, rec: Any, reason: str) -> None:
+        """Fire-and-forget a remote ``kill`` of a detached far-side Host.
+
+        Uses the durable endpoint's SSH config (no live Spawner needed) to run a
+        one-shot ``kill`` over the tunnel. Best-effort: if there is no running
+        loop or the exec fails, the detached Host lingers until the CodeSpace
+        stops -- never fatal, and never touches a local process.
+        """
+        endpoint = getattr(rec, "endpoint", None) or {}
+        if not endpoint:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(self._remote_reap(rec, endpoint))
+        self._remote_reap_tasks.add(task)
+        task.add_done_callback(self._remote_reap_tasks.discard)
+
+    async def _remote_reap(self, rec: Any, endpoint: dict) -> None:
+        from ssh_manager import ConnectionManager
+
+        from .session_host.endpoints import ssh_config_from_endpoint
+
+        class _StaticSource:
+            def __init__(self, cfg):
+                self._cfg = cfg
+
+            def get_ssh_config(self):
+                return self._cfg
+
+            def refresh(self):
+                return self._cfg
+
+        cfg = ssh_config_from_endpoint(endpoint)
+        host = cfg.host_alias
+        try:
+            mgr = ConnectionManager()
+            await mgr.ensure_connected(host, _StaticSource(cfg), [])
+            # Kill the host process; its PR_SET_PDEATHSIG reaps the copilot child.
+            await mgr.exec_command(
+                host, f"kill {int(rec.host_pid)} 2>/dev/null || true", timeout=20.0,
+            )
+            await mgr.disconnect(host)
+            log.info("Remote-reaped Session Host for session %s (far pid=%s)",
+                     rec.session_id, rec.host_pid)
+        except Exception:
+            log.warning(
+                "Best-effort remote reap failed for session %s (far pid=%s); "
+                "the detached Host will exit when the CodeSpace stops",
+                rec.session_id, rec.host_pid, exc_info=True,
+            )
 
     def sweep_stranded_hosts(self) -> int:
         """Reap stranded incompatible Session Hosts that are now reapable.
@@ -1305,16 +1483,15 @@ class SessionManager:
         """
         if not self._session_host_enabled or self._host_index is None:
             return 0
-        from .session_host.osutil import pid_alive
         from .session_host.version_mux import HostDisposition, plan_host
 
-        self._host_index.prune_dead(pid_alive)
+        self._prune_dead_hosts()
         now = time.time()
         reaped = 0
-        for rec in self._host_index.live_records(pid_alive):
+        for rec in self._live_host_records():
             plan = plan_host(
                 protocol_version=rec.protocol_version,
-                child_alive=pid_alive(rec.child_pid),
+                child_alive=self._rec_child_alive(rec),
                 age_seconds=(now - rec.created_at) if rec.created_at else None,
                 stale_reap_seconds=self._session_host_stale_reap_seconds,
             )
@@ -1526,6 +1703,11 @@ class SessionManager:
         )
 
         try:
+            cs_target = None
+            if (self._session_host_enabled and target.spawn_command):
+                from .session_host.codespace_transport import parse_codespace_target
+                cs_target = parse_codespace_target(target.spawn_command)
+
             if self._session_host_enabled and target.type == "local":
                 # Session-Host mode: the child lives in a survivable host that
                 # outlives this frontend (goal 1/3). resolve->launch host->
@@ -1537,6 +1719,41 @@ class SessionManager:
                     on_acp_event=on_acp_event,
                     permission_callback=permission_callback,
                     mcp_servers=mcp_servers,
+                )
+            elif cs_target is not None:
+                # CodeSpace Session-Host mode (#177): bootstrap the Host inside
+                # the CodeSpace, forward its loopback endpoint, and drive ACP over
+                # it -- so a host sleep/tunnel flap disconnects the front while
+                # copilot keeps running on the CS and the front reattaches by
+                # cursor. The relay port rides the persistent forward's -R for
+                # ADO/git during a build.
+                from .session_host.codespace_transport import build_codespace_spawner
+
+                # NOTE: the credential-relay port (for ADO/git during a build) is
+                # not yet threaded into SessionManager -- carrying it on the
+                # persistent forward's -R is the documented #177 follow-up. Until
+                # then the CodeSpace Host runs auth-light (fine for ACP + non-ADO
+                # turns).
+                relay_port = getattr(self, "_credential_relay_port", None)
+                cs_spawner = build_codespace_spawner(
+                    cs_target["name"], cs_target["repo"], relay_port=relay_port,
+                )
+                # The acp_command is a far-side SHELL string (e.g.
+                # ``cd /workspaces/repo && copilot --acp --stdio``), not an argv,
+                # so the Session Host execs it through a login shell; copilot
+                # inherits the host's stdio pipe as fd 0/1 and its exit ends the
+                # shell (so child-liveness tracks copilot).
+                remote_argv = ["bash", "-lc", cs_target["acp_command"]]
+                client, acp_sid = await self._connect_via_session_host(
+                    target,
+                    tracker=tracker,
+                    session_id=session_id,
+                    on_acp_event=on_acp_event,
+                    permission_callback=permission_callback,
+                    mcp_servers=mcp_servers,
+                    spawner=cs_spawner,
+                    remote_child_argv=remote_argv,
+                    remote_cwd=None,
                 )
             else:
                 # Spawn the subprocess (local/SSH/command). Emits per-stage
