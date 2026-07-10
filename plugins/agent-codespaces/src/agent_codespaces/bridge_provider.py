@@ -114,6 +114,16 @@ def build_agent_configs(
             "description": description,
             "icon": "codespace",
             "spawn_command": spawn_cmd,
+            # Structured metadata for agent-bridge's Session-Host dispatch path
+            # (#177): lets the daemon build the CodeSpaceSpawner directly instead
+            # of parsing spawn_command. spawn_command stays for the legacy
+            # front-owns-stdio path + back-compat.
+            "codespace": {
+                "name": cs.name,
+                "repo": cs.repository,
+                "acp_command": acp_command,
+                "workspace_folder": config.workspace_folder_for(cs.repository),
+            },
         })
 
     return agents

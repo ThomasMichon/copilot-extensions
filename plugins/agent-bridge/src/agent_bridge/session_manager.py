@@ -1455,12 +1455,24 @@ class SessionManager:
         try:
             mgr = ConnectionManager()
             await mgr.ensure_connected(host, _StaticSource(cfg), [])
-            # Kill the host process; its PR_SET_PDEATHSIG reaps the copilot child.
+            # Kill the host's whole PROCESS GROUP, not just the host pid. The
+            # host was launched via ``setsid`` (so it leads its own group,
+            # pgid == host_pid) and the ``bash -lc`` wrapper + the copilot
+            # grandchild inherit that group -- so ``kill -- -<pgid>`` takes the
+            # host AND copilot in one shot, with nothing orphaned (killing only
+            # host_pid would leave copilot reparented to init). Fall back to the
+            # bare pid if the group send is rejected. SIGTERM first (lets copilot
+            # flush), then SIGKILL as a backstop.
+            pid = int(rec.host_pid)
             await mgr.exec_command(
-                host, f"kill {int(rec.host_pid)} 2>/dev/null || true", timeout=20.0,
+                host,
+                f"kill -TERM -{pid} 2>/dev/null || kill -TERM {pid} 2>/dev/null; "
+                f"sleep 1; kill -KILL -{pid} 2>/dev/null || kill -KILL {pid} "
+                f"2>/dev/null || true",
+                timeout=20.0,
             )
             await mgr.disconnect(host)
-            log.info("Remote-reaped Session Host for session %s (far pid=%s)",
+            log.info("Remote-reaped Session Host group for session %s (far pid=%s)",
                      rec.session_id, rec.host_pid)
         except Exception:
             log.warning(
@@ -1704,9 +1716,15 @@ class SessionManager:
 
         try:
             cs_target = None
-            if (self._session_host_enabled and target.spawn_command):
-                from .session_host.codespace_transport import parse_codespace_target
-                cs_target = parse_codespace_target(target.spawn_command)
+            if self._session_host_enabled:
+                # Prefer the structured provider metadata (#177); fall back to
+                # shape-detecting the spawn_command for agents registered before
+                # the metadata seam existed (back-compat).
+                if isinstance(target.codespace, dict) and target.codespace.get("name"):
+                    cs_target = target.codespace
+                elif target.spawn_command:
+                    from .session_host.codespace_transport import parse_codespace_target
+                    cs_target = parse_codespace_target(target.spawn_command)
 
             if self._session_host_enabled and target.type == "local":
                 # Session-Host mode: the child lives in a survivable host that

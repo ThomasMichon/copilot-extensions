@@ -99,6 +99,10 @@ class SpawnTarget:
     caller_worktree: str | None = None  # #2178: caller worktree that requested a
     #                                     bridge spawn (recorded on the new worktree)
     spawn_command: list[str] | None = None  # raw command for provider agents
+    codespace: dict | None = None  # structured CodeSpace metadata (#177): {name,
+    #                                repo, acp_command, workspace_folder} -- lets
+    #                                the daemon route a CS agent through the
+    #                                CodeSpaceSpawner without parsing spawn_command
     auth_hooks: list[dict] = field(default_factory=list)  # serializable auth hook dicts
 
     def to_json(self) -> str:

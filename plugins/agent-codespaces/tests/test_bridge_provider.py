@@ -78,6 +78,20 @@ class TestBuildAgentConfigs:
         assert "copilot --acp --stdio" in joined
         assert "CODESPACE_VSCODE_FOLDER" in joined and "VM_REPO_PATH" in joined
 
+    def test_codespace_metadata_block(self):
+        """Each agent carries structured codespace metadata (#177) for the
+        Session-Host dispatch path, matching its spawn_command's acp_command."""
+        agents = build_agent_configs(SAMPLE_CODESPACES)
+        first = agents[0]
+        meta = first["codespace"]
+        assert meta["name"] == "fuzzy-adventure-abc123"
+        assert meta["repo"] == "user/my-repo"
+        # acp_command in the metadata equals the --remote-cmd in spawn_command
+        cmd = first["spawn_command"]
+        rc = cmd[cmd.index("--remote-cmd") + 1]
+        assert meta["acp_command"] == rc
+        assert "workspace_folder" in meta
+
     def test_spawn_command_with_workspace_folder(self):
         """workspace_folder produces a 'cd <path> && copilot' command."""
         from agent_codespaces.config import CodespacesConfig

@@ -38,6 +38,11 @@ class ProviderAgent(BaseModel):
     spawn_command: list[str] = Field(
         ..., description="Raw command to spawn this agent (ACP on stdio)",
     )
+    codespace: dict | None = Field(
+        None,
+        description="Structured CodeSpace metadata (#177): {name, repo, "
+        "acp_command, workspace_folder} for the Session-Host dispatch path",
+    )
 
     @field_validator("name")
     @classmethod
@@ -100,6 +105,7 @@ async def register_provider(
             description=agent.description,
             icon=agent.icon,
             spawn_command=agent.spawn_command,
+            codespace=agent.codespace,
             provider=provider_name,
         )
 
