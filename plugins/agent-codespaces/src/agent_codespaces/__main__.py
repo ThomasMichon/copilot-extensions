@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .codespace_config import CodespaceSource
+from . import relay_launch
 from .config import (
     ADOPTED_REPOS_FILE,
     RUNTIME_DIR,
@@ -426,40 +427,11 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-_SCRUB_ENV_VARS: tuple[str, ...] = ("MS_ADO_PAT",)
-"""Static PAT / injected-credential env vars neutralized on every
-agent-codespaces connect so a dispatched agent authenticates via the credential
-relay, never a stale/expired token baked into the CodeSpace env.
-
-``MS_ADO_PAT`` is the odsp-web CodeSpaces' static Azure DevOps PAT: it expires,
-and once lapsed, agents/tools that reach for it first fail ADO REST / PR creation
-(#160/#77). Nothing on the CodeSpace legitimately needs it (npm/nuget feed auth
-derives ``ODSP_NPM_AUTH_TOKEN`` from the relay, not this PAT). Extend as other
-injected static PATs are found.
-"""
-
-
-def _build_relay_env(
-    relay_port: int, relay_token: str | None, *, use_relay: bool
-) -> str:
-    """Build the CodeSpace launch-prelude env string.
-
-    ALWAYS neutralizes injected static PATs (``_SCRUB_ENV_VARS``, #160/#77) so a
-    dispatched agent can't rely on an expired token instead of the credential
-    relay; when the relay is in use, ALSO exports the relay vars. The PAT scrub
-    is prepended and the relay exports are appended -- so the scrub can never be
-    clobbered by the exports (a dev46 regression was a ``relay_env = ...``
-    reassignment that dropped the scrub). ``GIT_TERMINAL_PROMPT=0`` keeps git
-    from blocking on an interactive prompt when a credential can't be resolved.
-    """
-    env = "".join(f"unset {v}; " for v in _SCRUB_ENV_VARS)
-    if use_relay:
-        env += (
-            f"export LC_GIT_CREDENTIAL_RELAY={relay_port}; "
-            f"export LC_GIT_CREDENTIAL_RELAY_TOKEN={relay_token}; "
-            "export GIT_TERMINAL_PROMPT=0; "
-        )
-    return env
+# The relay launch prelude now lives in ``relay_launch`` (the public seam the
+# agent-bridge Session-Host path also imports, so both stay in lockstep). Kept as
+# module aliases here for back-compat with existing references.
+_SCRUB_ENV_VARS = relay_launch.SCRUB_ENV_VARS
+_build_relay_env = relay_launch.build_relay_env
 
 
 def _relay_listening(port: int, timeout: float = 0.5) -> bool:

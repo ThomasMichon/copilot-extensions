@@ -54,6 +54,9 @@ class TestBuildForwardArgs:
         assert args[ri + 1] == "51234:127.0.0.1:51234"
         # -R comes before the target
         assert args.index("-R") < args.index("box")
+        # ExitOnForwardFailure is dropped when a -R relay is present so a relay
+        # bind collision cannot tear down the -L endpoint.
+        assert "ExitOnForwardFailure=yes" not in " ".join(args)
 
 
 class TestPickFreePort:
