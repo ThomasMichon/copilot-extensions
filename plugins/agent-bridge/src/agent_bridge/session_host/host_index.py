@@ -46,6 +46,11 @@ class HostRecord:
     # re-pointed on reattach (local: direct loopback, no-op; ssh/codespace:
     # re-establish the forward). Local is the only P2a boundary.
     boundary: str = "local"
+    # For a remote (ssh/codespace) boundary, how to rebuild the -L (+ -R relay)
+    # forward from ssh-manager ALONE after a frontend restart -- no live Spawner,
+    # no agent-codespaces import. Empty for a local host. See
+    # ``session_host.endpoints``.
+    endpoint: dict = field(default_factory=dict)
     extra: dict = field(default_factory=dict)
 
     @classmethod
