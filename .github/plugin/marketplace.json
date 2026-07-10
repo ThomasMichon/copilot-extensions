@@ -36,7 +36,7 @@
     {
       "name": "agent-mcp",
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform)",
-      "version": "0.2.0-dev6",
+      "version": "0.2.0-dev7",
       "source": "plugins/agent-mcp"
     },
     {

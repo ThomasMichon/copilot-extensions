@@ -20,6 +20,15 @@ from .base import Transport
 
 log = logging.getLogger("agent-mcp.stdio")
 
+# asyncio's StreamReader defaults to a 64 KiB line buffer (``_DEFAULT_LIMIT``).
+# A single JSON-RPC line from an upstream MCP can be far larger than that -- e.g.
+# a ``tools/list`` catalog with dozens of fully-schema'd tools is easily 70-100+
+# KiB on one line. At the default limit ``readline()`` raises ``LimitOverrunError``
+# and the response is silently lost. Give the child streams a generous limit so
+# realistic MCP payloads round-trip; ``storage``/``transform`` decorators exist
+# for anything genuinely huge.
+_STREAM_LIMIT = 32 * 1024 * 1024  # 32 MiB
+
 
 class StdioTransport(Transport):
     """Wrap a child-process MCP server over its stdio."""
@@ -47,6 +56,7 @@ class StdioTransport(Transport):
             stdout=asyncio.subprocess.PIPE,
             stderr=None,  # inherit -- child diagnostics go to our stderr
             env=env,
+            limit=_STREAM_LIMIT,  # raise the 64 KiB default so large lines survive
         )
         self._reader_task = asyncio.create_task(self._pump_stdout())
 
@@ -54,7 +64,26 @@ class StdioTransport(Transport):
         if self._proc is None or self._proc.stdout is None:
             return
         while True:
-            line = await self._proc.stdout.readline()
+            try:
+                line = await self._proc.stdout.readline()
+            except asyncio.LimitOverrunError as exc:
+                # A single line exceeded _STREAM_LIMIT. Don't die silently -- log
+                # loudly so the dropped response is diagnosable, and skip past the
+                # oversized frame rather than spinning on it.
+                log.error(
+                    "upstream line exceeded stream limit (%d bytes); dropping frame: %s",
+                    _STREAM_LIMIT,
+                    exc,
+                )
+                try:
+                    await self._proc.stdout.readexactly(exc.consumed)
+                except Exception:
+                    break
+                continue
+            except ValueError as exc:
+                # e.g. "Separator is not found, and chunk exceed the limit"
+                log.error("upstream stdout read failed: %s", exc)
+                break
             if not line:
                 break
             text = line.decode("utf-8", errors="replace").strip()

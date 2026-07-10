@@ -41,3 +41,37 @@ async def test_stdio_roundtrip_and_env_injection():
 
     assert received == [{"jsonrpc": "2.0", "id": 1,
                          "result": {"name": "echo", "key": "injected"}}]
+
+
+# A stdio MCP child that echoes back a result whose single JSON line is far
+# larger than asyncio's default 64 KiB StreamReader limit -- reproduces the
+# dropped-`tools/list` bug where big upstream frames were silently lost.
+_BIG_CHILD = (
+    "import sys,json\n"
+    "for line in sys.stdin:\n"
+    "    line=line.strip()\n"
+    "    if not line: continue\n"
+    "    m=json.loads(line)\n"
+    "    payload='x'*(200*1024)\n"  # ~200 KiB, well over the 64 KiB default
+    "    out={'jsonrpc':'2.0','id':m.get('id'),'result':{'blob':payload}}\n"
+    "    sys.stdout.write(json.dumps(out)+'\\n'); sys.stdout.flush()\n"
+)
+
+
+async def test_stdio_forwards_line_over_default_64k_limit():
+    cfg = parse_config({
+        "server": {"type": "stdio", "command": [sys.executable, "-c", _BIG_CHILD]},
+        "auth": {"kind": "none"},
+    })
+    transport = StdioTransport(cfg, NoneInjector())
+    received: list[dict] = []
+    transport.on_message(lambda m: received.append(m))
+
+    await transport.start()
+    await transport.send({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    await transport.end_input()
+    await transport.aclose()
+
+    assert len(received) == 1
+    assert received[0]["id"] == 1
+    assert len(received[0]["result"]["blob"]) == 200 * 1024
