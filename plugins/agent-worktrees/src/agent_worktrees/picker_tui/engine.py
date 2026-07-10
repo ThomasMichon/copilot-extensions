@@ -153,8 +153,16 @@ def _clip(s, w, align):
     return s.rjust(w) if align == "r" else s.ljust(w)
 
 
-def row_text(rec, cols, width, selected, indent=1, pulse=0):
-    t = Text(" " * indent)
+def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
+    if mark is not None:
+        # A left-side selection gutter (#2228): a checkbox glyph + one margin
+        # space, so multi-select reads as an always-visible affordance. The
+        # caller fits the columns two cells narrower to make room.
+        glyph, gstyle = mark
+        t = Text(glyph, style=gstyle)
+        t.append(" ")
+    else:
+        t = Text(" " * indent)
     for i, (k, _h, w, a) in enumerate(cols):
         if i:
             t.append(PAD)
@@ -1526,8 +1534,10 @@ class PickerScreen(Widget):
                 stop=("BTN", 0))
             add(Text(""))  # breathing room below the buttons
             cols, sections = self.current_list()
-            lcols = fit(cols, width - 1, "title", 14)
-            add(header_text(lcols, width), kind="colhdr")
+            # Reserve two cells on the left for the selection checkbox gutter
+            # (#2228): the box + a margin space. Header indents to match.
+            lcols = fit(cols, width - 2, "title", 14)
+            add(header_text(lcols, width, indent=2), kind="colhdr")
             # Preview which worktrees an action targets, directly on the list
             # (#2179): while the Clean/Sync dialog is open, dim every row outside
             # the currently-selected bucket union (updates live as buckets
@@ -1549,8 +1559,12 @@ class PickerScreen(Widget):
                 if not rows:
                     add(Text("    (none)", style=C_DIM))
                 for rec in rows:
+                    # Always-visible selection checkbox (#2228 2b): ☑ selected,
+                    # ☐ not -- so multi-select is discoverable even before the
+                    # first Space.
+                    box = self._checkbox(rec["id4"] in self.wt_sel)
                     vr = add(row_text(rec, lcols, width, sel == ("L", li),
-                                      pulse=self.pulse),
+                                      pulse=self.pulse, mark=box),
                              stop=("L", li), data=rec)
                     if rec.get("hidden") and sel != ("L", li):
                         # Revealed bridge/system worktree -> dim it (#1422).
@@ -1563,13 +1577,6 @@ class PickerScreen(Widget):
                         else rec.get("ff_eligible")
                     ):
                         vr.text.stylize("grey35")   # out of this action's scope
-                    # Multi-select marker (#2228 2b): a selected row (not the
-                    # focus cursor, and not while a Clean/Sync preview owns the
-                    # dimming) carries the same subtle shading the active tab
-                    # uses, so the chosen set reads at a glance.
-                    if (rec["id4"] in self.wt_sel and sel != ("L", li)
-                            and preview_ids is None and not preview):
-                        vr.text.stylize("on grey23")
                     li += 1
         elif self._kind() == "maintenance":
             add(self.tab_bar(width, sel == ("M", 0)))
