@@ -91,11 +91,17 @@ def build_forward_ssh_args(
         "-o", "ConnectTimeout=15",
         "-o", "ServerAliveInterval=30",
         "-o", "ServerAliveCountMax=3",
-        "-o", "ExitOnForwardFailure=yes",
         "-o", "BatchMode=yes",
         "-T",  # no PTY
         "-N",  # no remote command -- forward only
     ]
+    # ExitOnForwardFailure makes ssh exit fast if a forward can't bind so the
+    # caller can retry on a fresh local port. Enable it only for a pure ``-L``
+    # forward: with a ``-R`` relay present, a remote bind collision (relay port
+    # already forwarded by another connection) must NOT tear down the ``-L``
+    # endpoint too -- the endpoint's own TCP-accept probe is the readiness gate.
+    if not reverse_forwards:
+        args += ["-o", "ExitOnForwardFailure=yes"]
     for key, val in config.extra_options.items():
         # ControlMaster machinery must not leak in: a dedicated forward is not
         # multiplexed over the shared master (that master may not exist on

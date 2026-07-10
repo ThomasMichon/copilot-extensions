@@ -1729,21 +1729,31 @@ class SessionManager:
                 # ADO/git during a build.
                 from .session_host.codespace_transport import build_codespace_spawner
 
-                # NOTE: the credential-relay port (for ADO/git during a build) is
-                # not yet threaded into SessionManager -- carrying it on the
-                # persistent forward's -R is the documented #177 follow-up. Until
-                # then the CodeSpace Host runs auth-light (fine for ACP + non-ADO
-                # turns).
-                relay_port = getattr(self, "_credential_relay_port", None)
+                # Reproduce the relay env prelude the ``agent-codespaces ssh``
+                # path injects, so a detached copilot on the CS has working
+                # ADO/git auth over the credential relay (the daemon owns the
+                # relay; the per-codespace token is minted by agent-codespaces).
+                # Guarded: if agent-codespaces isn't importable, the Host runs
+                # auth-light (fine for ACP + non-ADO turns).
+                relay_prelude = ""
+                relay_port = None
+                try:
+                    from agent_codespaces.relay_launch import build_relay_launch_env
+                    relay_prelude, relay_port = build_relay_launch_env(cs_target["name"])
+                except Exception:
+                    log.info(
+                        "CodeSpace relay env unavailable for %s -- launching "
+                        "Session Host auth-light", cs_target["name"],
+                    )
                 cs_spawner = build_codespace_spawner(
                     cs_target["name"], cs_target["repo"], relay_port=relay_port,
                 )
                 # The acp_command is a far-side SHELL string (e.g.
                 # ``cd /workspaces/repo && copilot --acp --stdio``), not an argv,
-                # so the Session Host execs it through a login shell; copilot
-                # inherits the host's stdio pipe as fd 0/1 and its exit ends the
-                # shell (so child-liveness tracks copilot).
-                remote_argv = ["bash", "-lc", cs_target["acp_command"]]
+                # so the Session Host execs it through a login shell (with the
+                # relay prelude prepended); copilot inherits the host's stdio pipe
+                # as fd 0/1 and its exit ends the shell (child-liveness tracks it).
+                remote_argv = ["bash", "-lc", relay_prelude + cs_target["acp_command"]]
                 client, acp_sid = await self._connect_via_session_host(
                     target,
                     tracker=tracker,
