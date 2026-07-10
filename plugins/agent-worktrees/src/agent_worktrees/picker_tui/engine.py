@@ -71,6 +71,13 @@ C_TAB_ACTIVE = "bold white on grey23"   # selected pivot, zone not focused
 C_TAB_FOCUS = "reverse bold"            # selected pivot, zone focused (cursor)
 C_TABOFF = "grey58"
 C_SEL = "reverse"         # focused row -> invert (the cursor)
+# Worktrees multi-select highlight states (#2258 follow-up): the focus cursor
+# inverts (reverse); a green invert means the cursor is ALSO in the selection,
+# a plain (white) invert means the cursor sits on an UNselected row, and a grey
+# background marks a selected row the cursor has moved off. Layered on top of the
+# per-cell styles, so the whole row reads as one state.
+C_SEL_ON = "reverse green3"     # focused AND selected -> green invert
+C_SEL_BG = "on grey30"          # selected but not focused -> grey background
 C_SPIN = "yellow"
 C_WARN = "red"
 C_PR_MERGED = "green"
@@ -1138,6 +1145,28 @@ class PickerScreen(Widget):
         """The id4 of every Worktrees row, in display order."""
         return [r["id4"] for r in self.list_records()]
 
+    def _wt_focused_id(self):
+        """The id4 of the currently focused Worktrees row, or None when focus is
+        outside the list."""
+        if self.sel[0] != "L":
+            return None
+        ids = self._l_ids()
+        i = self.sel[1]
+        return ids[i] if 0 <= i < len(ids) else None
+
+    def _wt_multiselect_active(self):
+        """True when the Worktrees list is in a discoverable *multi-select* state
+        (#2258 follow-up): more than one row selected, or the (single) selection
+        has diverged from the focused row (e.g. after Ctrl+Arrow moved focus off
+        it). In the common single-select-tracks-focus case the selection is just
+        the focused row, so the checkbox gutter stays hidden -- it is only shown
+        once the operator is actually building/holding a set."""
+        if not self.wt_sel:
+            return False
+        if len(self.wt_sel) > 1:
+            return True
+        return self._wt_focused_id() not in self.wt_sel
+
     def _l_head(self):
         """Worktrees list entry point for Tab, restoring the last-focused row
         (#2258 P3-6, mirrors the Profiles-grid cell memory #1288)."""
@@ -1737,10 +1766,15 @@ class PickerScreen(Widget):
                 stop=("BTN", 0))
             add(Text(""))  # breathing room below the buttons
             cols, sections = self.current_list()
-            # Reserve two cells on the left for the selection checkbox gutter
-            # (#2228): the box + a margin space. Header indents to match.
-            lcols = fit(cols, width - 2, "title", 14)
-            add(header_text(lcols, width, indent=2), kind="colhdr")
+            # The selection checkbox is only a discoverable affordance once the
+            # operator is actually in a multi-select state (#2258 follow-up):
+            # otherwise the always-on gutter is visual pollution. Reserve two
+            # left cells (box + margin) only then; a single leading space
+            # otherwise. Header + rows indent to match.
+            ms = self._wt_multiselect_active()
+            gutter = 2 if ms else 1
+            lcols = fit(cols, width - gutter, "title", 14)
+            add(header_text(lcols, width, indent=gutter), kind="colhdr")
             # Preview which worktrees an action targets, directly on the list
             # (#2179): while the Clean/Sync dialog is open, dim every row outside
             # the currently-selected bucket union (updates live as buckets
@@ -1762,24 +1796,35 @@ class PickerScreen(Widget):
                 if not rows:
                     add(Text("    (none)", style=C_DIM))
                 for rec in rows:
-                    # Always-visible selection checkbox (#2228 2b): ☑ selected,
-                    # ☐ not -- so multi-select is discoverable even before the
-                    # first Space.
-                    box = self._checkbox(rec["id4"] in self.wt_sel)
-                    vr = add(row_text(rec, lcols, width, sel == ("L", li),
+                    focused = sel == ("L", li)
+                    is_sel = rec["id4"] in self.wt_sel
+                    # The checkbox gutter only renders in multi-select mode
+                    # (#2258 follow-up); mark=None falls back to a plain indent.
+                    box = self._checkbox(is_sel) if ms else None
+                    vr = add(row_text(rec, lcols, width, False,
                                       pulse=self.pulse, mark=box),
                              stop=("L", li), data=rec)
-                    if rec.get("hidden") and sel != ("L", li):
+                    if rec.get("hidden") and not focused:
                         # Revealed bridge/system worktree -> dim it (#1422).
                         vr.text.stylize("grey42")
                     elif (preview_ids is not None and rec["id4"] not in preview_ids
-                          and sel != ("L", li)):
+                          and not focused):
                         vr.text.stylize("grey35")   # outside the net set
-                    elif preview and sel != ("L", li) and not (
+                    elif preview and not focused and not (
                         self._cleanable(rec) if preview == "clean"
                         else rec.get("ff_eligible")
                     ):
                         vr.text.stylize("grey35")   # out of this action's scope
+                    # Focus / selection highlight, layered last so it reads as
+                    # one state (#2258 follow-up): green invert = focused AND
+                    # selected, plain invert = focused only, grey background =
+                    # selected but the cursor has moved off it.
+                    if focused and is_sel:
+                        vr.text.stylize(C_SEL_ON)
+                    elif focused:
+                        vr.text.stylize(C_SEL)
+                    elif is_sel:
+                        vr.text.stylize(C_SEL_BG)
                     li += 1
         elif self._kind() == "maintenance":
             add(self.tab_bar(width, sel == ("M", 0)))
@@ -2990,7 +3035,11 @@ class PickerScreen(Widget):
             self._wt_track_focus()
         elif key == "enter":
             self._activate()
-        elif key == "space":
+        elif key in ("space", "ctrl+space", "ctrl+at"):
+            # Ctrl+Space toggles too (operator request): Textual delivers it as
+            # "ctrl+at" (Ctrl+Space == NUL). It behaves identically to Space so
+            # the toggle works even while the operator is holding Ctrl to move
+            # focus (#2258 follow-up).
             if zone == "L":
                 self._toggle_wt(self.sel[1])
             elif zone == "C":

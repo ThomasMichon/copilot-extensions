@@ -429,9 +429,11 @@ def test_worktrees_bulk_menu_routes_to_scoped_cleanup():
     asyncio.run(run())
 
 
-def test_worktrees_rows_show_selection_checkbox():
-    """Every Worktrees row carries a left-side checkbox (☑ selected / ☐ not) so
-    multi-select is discoverable; the column is always present (#2228 2b)."""
+def test_worktrees_checkbox_only_in_multiselect_mode():
+    """The selection checkbox gutter is hidden during ordinary single-select
+    navigation (visual pollution) and only appears once the operator is in a
+    multi-select state: a diverged single selection, or multiple selected
+    (#2258 follow-up)."""
     src = _maint_source()
 
     async def run():
@@ -444,7 +446,7 @@ def test_worktrees_rows_show_selection_checkbox():
             if len(recs) < 2:
                 return
 
-            def boxes():
+            def firstchars():
                 out = {}
                 for v in scr.build_body(118):
                     stop = getattr(v, "stop", None)
@@ -452,18 +454,33 @@ def test_worktrees_rows_show_selection_checkbox():
                         out[v.data["id4"]] = v.text.plain[0]
                 return out
 
-            # With nothing selected, every row shows the empty box.
-            scr.sel = ("L", 0)
-            assert all(g == "☐" for g in boxes().values())
+            def boxes():
+                return {k: c for k, c in firstchars().items() if c in "☐☑"}
 
-            # Selecting a row flips just its box; focusing a different row keeps
-            # the selected row's ☑ visible.
+            # Nothing selected -> no checkbox gutter (leading char is not a box).
+            scr.sel = ("L", 0)
+            scr.wt_sel.clear()
+            assert not boxes()
+
+            # Single selection tracking focus -> still no gutter.
+            scr.wt_sel.replace({recs[0]["id4"]})
+            scr.sel = ("L", 0)
+            assert not boxes()
+
+            # Focus diverges from the single selection (e.g. after Ctrl+Arrow)
+            # -> the gutter appears; the selected row shows ☑, others ☐.
             target = recs[0]["id4"]
-            scr.wt_sel.replace({target})
             scr.sel = ("L", 1)
             b = boxes()
             assert b.get(target) == "☑"
             assert all(b[k] == "☐" for k in b if k != target)
+
+            # Multiple selected -> gutter shown even with focus on a selected row.
+            scr.wt_sel.replace({recs[0]["id4"], recs[1]["id4"]})
+            scr.sel = ("L", 0)
+            b = boxes()
+            assert b.get(recs[0]["id4"]) == "☑"
+            assert b.get(recs[1]["id4"]) == "☑"
 
     asyncio.run(run())
 
@@ -776,6 +793,78 @@ def test_machine_rotate_scopes_selection_to_visible_tab():
             assert len(visible) == 1
             assert scr.wt_sel == visible
             assert scr.wt_anchor is None   # anchor reset on scope change
+
+    asyncio.run(run())
+
+
+def test_ctrl_space_toggles_selection():
+    """#2258 follow-up: Ctrl+Space toggles the focused row just like Space, so
+    the toggle works while the operator holds Ctrl to move focus. Textual
+    delivers Ctrl+Space as 'ctrl+at'."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            wid = recs[0]["id4"]
+            scr.sel = ("L", 0)
+            scr.wt_sel.clear()
+            scr.handle_key("ctrl+at")            # canonical Textual key
+            assert wid in scr.wt_sel
+            scr.handle_key("ctrl+at")
+            assert wid not in scr.wt_sel
+            scr.handle_key("ctrl+space")         # alias also accepted
+            assert wid in scr.wt_sel
+
+    asyncio.run(run())
+
+
+def test_worktrees_row_highlight_states():
+    """#2258 follow-up: the three visual states — green invert (focused AND
+    selected), plain invert (focused only), grey background (selected but not
+    focused)."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            ids = [r["id4"] for r in recs]
+
+            def styles(id4_target):
+                for v in scr.build_body(118):
+                    stop = getattr(v, "stop", None)
+                    if stop and stop[0] == "L" and v.data["id4"] == id4_target:
+                        return [s.style for s in v.text.spans]
+                return []
+
+            # Focused AND selected -> green invert.
+            scr.sel = ("L", 0)
+            scr.wt_sel.replace({ids[0]})
+            assert "reverse green3" in styles(ids[0])
+
+            # Focused, not selected -> plain (white) invert, not green.
+            scr.wt_sel.clear()
+            scr.sel = ("L", 0)
+            s0 = styles(ids[0])
+            assert "reverse" in s0
+            assert "reverse green3" not in s0
+
+            # Selected but focus moved off it -> grey background, no invert.
+            scr.wt_sel.replace({ids[0]})
+            scr.sel = ("L", 1)
+            s0 = styles(ids[0])
+            assert "on grey30" in s0
+            assert "reverse" not in s0
+            # ...and the now-focused unselected row is a plain invert.
+            assert "reverse" in styles(ids[1])
 
     asyncio.run(run())
 
@@ -2494,7 +2583,7 @@ def test_profiles_apply_real_mode_missing_hook_is_honest(monkeypatch):
 
     async def run():
         app = PickerApp(src, live=False)   # real mode
-        async with app.run_test(size=(118, 40)) as pilot:
+        async with app.run_test(size=(118, 40)):
             scr = app.query_one(PickerScreen)
             assert scr.mock_mode is False
             scr._prof_apply = None
@@ -2516,7 +2605,7 @@ def test_profiles_apply_mock_mode_is_noop(monkeypatch):
 
     async def run():
         app = PickerApp(src, live=False, mock_mode=True)
-        async with app.run_test(size=(118, 40)) as pilot:
+        async with app.run_test(size=(118, 40)):
             scr = app.query_one(PickerScreen)
             assert scr.mock_mode is True
             scr.grid = {(0, 0): True}
