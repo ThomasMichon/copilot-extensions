@@ -823,6 +823,79 @@ async def test_local_spawner_secures_with_nonce(tmp_path):
                 _os.kill(spawned.child_pid, signal.SIGKILL)
 
 
+@pytest.mark.asyncio
+async def test_far_side_runner_resolves_and_hosts(tmp_path, monkeypatch):
+    """The far-side runner resolves an agent locally, hosts it in a Session Host,
+    and secures the endpoint with the nonce -- the program every boundary Spawner
+    launches (elevation / ssh / CodeSpace), validated in-process."""
+    import json
+    import os
+    import signal
+    import sys
+
+    from agent_bridge.session_host import launcher
+    from agent_bridge.session_host.agent_runner import run_agent_session_host
+    from agent_bridge.transport import SpawnTarget
+
+    agent_script = tmp_path / "fake_agent.py"
+    agent_script.write_text(_FAKE_AGENT_SRC)
+
+    # Injected resolver: name -> a local target. resolve_local_launch is faked to
+    # yield the ACP fake-agent argv (so we exercise orchestration, not copilot).
+    class _Resolver:
+        async def resolve_async(self, name, sender_repo=None):
+            return SpawnTarget(type="local", cwd=str(tmp_path))
+
+    async def _fake_resolve(target, *, tracker=None, session_id=""):
+        return [sys.executable, str(agent_script)], str(tmp_path), dict(os.environ)
+
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
+    # Don't arm a kill-on-close job on the pytest process for an in-process host.
+    monkeypatch.setattr(launcher, "apply_host_survival", lambda: None)
+
+    state_file = tmp_path / "state.json"
+    task = asyncio.create_task(run_agent_session_host(
+        "fake-agent", port=0, state_file=str(state_file),
+        nonce="n0nce", resolver=_Resolver(),
+    ))
+    child_pid = None
+    try:
+        port = None
+        for _ in range(200):
+            if state_file.exists():
+                data = json.loads(state_file.read_text() or "{}")
+                if data.get("port") and data.get("child_pid"):
+                    port, child_pid = data["port"], data["child_pid"]
+                    break
+            await asyncio.sleep(0.05)
+        assert port and child_pid, "far-side host never became ready"
+
+        # Wrong nonce refused.
+        bad = await SessionHostClient.connect(port=port)
+        with pytest.raises(ConnectionError):
+            await bad.attach(0, nonce=b"wrong")
+        await bad.close()
+
+        # Correct nonce drives the resolved+hosted child.
+        good = await SessionHostClient.connect(port=port)
+        hello = await good.attach(0, nonce=b"n0nce")
+        assert hello.child_pid == child_pid
+        await good.close()
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+        if child_pid:
+            with contextlib.suppress(Exception):
+                if sys.platform == "win32":
+                    import subprocess
+                    subprocess.run(["taskkill", "/PID", str(child_pid), "/T", "/F"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    import os as _os
+                    _os.kill(child_pid, signal.SIGKILL)
+
+
 def osutil_pid_alive(pid: int) -> bool:
     import sys
     if sys.platform == "win32":

@@ -211,6 +211,32 @@ def _cmd_elevated(args: argparse.Namespace) -> None:
         print(json.dumps(elevated.status(), indent=2))
 
 
+def _cmd_session_host_agent(args: argparse.Namespace) -> None:
+    """Resolve an agent locally and run it inside a Session Host (far-side runner).
+
+    The program every boundary Spawner launches on the far side of its boundary
+    (elevated scheduled task / ssh / CodeSpace bootstrap). Resolution runs here
+    so elevation/worktree/enlistment context is native. The connect nonce is read
+    from ``AGENT_BRIDGE_SESSION_HOST_NONCE`` by ``run_host``.
+    """
+    import asyncio
+
+    from .session_host.agent_runner import run_agent_session_host
+
+    try:
+        asyncio.run(run_agent_session_host(
+            args.agent,
+            port=args.port,
+            state_file=args.state_file,
+            cwd=args.cwd,
+        ))
+    except KeyboardInterrupt:
+        pass
+    except Exception as exc:
+        print(f"Far-side runner failed for agent '{args.agent}': {exc}")
+        sys.exit(1)
+
+
 def _cmd_start(args: argparse.Namespace) -> None:
     """Start the agent-bridge server."""
     import os
@@ -2192,6 +2218,24 @@ def main(argv: list[str] | None = None) -> None:
              "'copilot --acp --stdio')",
     )
     acp_connect_p.set_defaults(func=_cmd_acp_connect)
+
+    # Far-side runner: resolve an agent locally and host it in a Session Host.
+    # The program every boundary Spawner launches on the far side (elevated
+    # scheduled task / ssh / CodeSpace). Writes a pid/child_pid/port state file
+    # the Spawner reads; the connect nonce arrives via env.
+    sha_p = sub.add_parser(
+        "session-host-agent",
+        help="Resolve an agent locally and run it inside a Session Host "
+             "(far-side runner for elevation / ssh / CodeSpace)",
+    )
+    sha_p.add_argument("agent", help="Agent name to resolve and host")
+    sha_p.add_argument("--port", type=int, default=0,
+                       help="Loopback port to serve on (0 = auto)")
+    sha_p.add_argument("--state-file", default=None,
+                       help="Path to write the pid/child_pid/port state JSON")
+    sha_p.add_argument("--cwd", default=None,
+                       help="Override the resolved working directory")
+    sha_p.set_defaults(func=_cmd_session_host_agent)
 
     # Elevated sub-daemon management (Windows): a second, admin-token bridge on a
     # loopback port that the primary relays elevated agents to (Capability 2).
