@@ -25,10 +25,34 @@ SOCKET_DIR = RUNTIME_DIR / "sockets"
 LOG_FILE = RUNTIME_DIR / "agent-codespaces.log"
 CONFIG_FILENAME = "codespaces.yaml"
 
+# Standard location GitHub Codespaces clones the account dotfiles repo into.
+# Canonical here (config is the layer both provision.py and the request-folder
+# resolver share); ``provision`` re-exports it for back-compat.
+DOTFILES_DIR = "/workspaces/.codespaces/.persistedshare/dotfiles"
+
 
 def ensure_runtime_dir() -> None:
     """Create the runtime directory (~/.agent-codespaces) if it is absent."""
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _norm_repo(value: str) -> str:
+    """Normalize a repo name for cross-repo matching.
+
+    Strips any ``owner/`` prefix, lower-cases, and drops a trailing
+    ``-codespaces`` so a logical repo (``odsp-web``) matches its CodeSpaces
+    host repo (``odsp-microsoft/odsp-web-codespaces``).
+    """
+    s = value.strip().lower().split("/")[-1]
+    suffix = "-codespaces"
+    return s[: -len(suffix)] if s.endswith(suffix) else s
+
+
+def _repo_matches_codespace(repo: str, cs_repository: str | None) -> bool:
+    """Whether ``repo`` addresses the CodeSpace's own hosted repository."""
+    if not cs_repository:
+        return False
+    return _norm_repo(repo) == _norm_repo(cs_repository)
 
 # Remote-resolved `cd` for a CodeSpace session when no explicit
 # ``workspace_folder`` is configured (#33). Expanded by the remote
@@ -237,30 +261,98 @@ class CodespacesConfig:
                     return f"/workspaces/{basename}"
         return self.workspace_folder
 
-    def effective_acp_command_for(self, repo: str | None) -> str:
+    def workspace_folder_for_request(
+        self, cs_repository: str | None, requested_repo: str,
+    ) -> tuple[str | None, bool]:
+        """Resolve the workspace folder for a ``<requested_repo>@<codespace>``.
+
+        Implements the CodeSpace repo-layout **convention** (#174): a repo
+        ``<r>`` lives at ``/workspaces/<basename(r)>`` on the CodeSpace, with two
+        pre-populated special cases the CodeSpace bootstrap already owns.
+
+        Returns ``(folder, prepopulated)``:
+
+        - ``requested_repo`` is the **account dotfiles repo** -> ``DOTFILES_DIR``
+          (``/workspaces/.codespaces/.persistedshare/dotfiles``), ``prepopulated``
+          True -- the universal bootstrap clones/keeps it current.
+        - ``requested_repo`` is the **CodeSpace's own product** (e.g. ``odsp-web``
+          on an ``odsp-web-codespaces`` CodeSpace) -> the bare default folder
+          (``workspace_folder_for(cs_repository)``), ``prepopulated`` True -- the
+          devcontainer already checked it out.
+        - **any other repo** -> ``/workspaces/<basename(requested_repo)>``,
+          ``prepopulated`` False -- caller clones-if-missing.
+
+        ``prepopulated`` tells the command builder whether a clone-if-missing is
+        appropriate (never for a folder the bootstrap owns).
+        """
+        if self.dotfiles_repo and _norm_repo(requested_repo) == _norm_repo(
+            self.dotfiles_repo
+        ):
+            return DOTFILES_DIR, True
+        is_own = _repo_matches_codespace(requested_repo, cs_repository)
+        if is_own:
+            # Honor an explicit bare-default override (per-repo workspace_folder
+            # or workspace_repo) for the CodeSpace's own product; otherwise the
+            # convention basename below yields the same /workspaces/<basename>.
+            configured = self.workspace_folder_for(cs_repository)
+            if configured:
+                return configured, True
+        basename = requested_repo.rstrip("/").split("/")[-1]
+        folder = f"/workspaces/{basename}" if basename else None
+        return folder, is_own
+
+    def effective_acp_command_for(
+        self, repo: str | None, *,
+        requested_repo: str | None = None,
+        repo_remote: str | None = None,
+    ) -> str:
         """Return the resolved remote agent command for a CodeSpace repo.
 
-        Priority:
+        ``repo`` is the CodeSpace's own hosted repository (used for per-repo
+        config + the bare-default workspace folder). ``requested_repo`` (with an
+        optional ``repo_remote`` URL) is the ``<repo>`` half of a
+        ``<repo>@<codespace>`` cross-repo address (#174).
+
+        **Bare** (``requested_repo`` is ``None``) -- unchanged:
         1. Explicit ``acp_command`` if set (a complete custom override).
-        2. ``cd <workspace_folder> && copilot --acp --stdio --allow-all-tools``
-           when a workspace folder resolves for ``repo`` (see
-           ``workspace_folder_for`` -- per-repo override, then the
-           ``workspace_repo`` related-repo link, then the global default).
+        2. ``cd <workspace_folder> && copilot ...`` when a workspace folder
+           resolves for ``repo`` (see ``workspace_folder_for``).
         3. ``cd "<remote-resolved workspace>" && copilot ...`` otherwise -- the
-           directory is resolved *on the CodeSpace* at launch from a fallback
-           chain of env vars (see ``_WORKSPACE_CD``) so a session lands in the
-           repo checkout rather than ``/home/vscode`` without any pre-config
-           (#33). The final ``.`` keeps the SSH default cwd (which Codespaces
-           sets to the workspace) -- it never forces ``$HOME``.
+           directory is resolved *on the CodeSpace* at launch (see
+           ``_WORKSPACE_CD``) so a session lands in the repo checkout rather
+           than ``/home/vscode`` (#33).
+
+        **Cross-repo** (``requested_repo`` set) -- apply the repo-layout
+        convention (``workspace_folder_for_request``):
+        - a **pre-populated** folder (own product / dotfiles) -> plain
+          ``cd <folder> && copilot ...`` (no clone; the bootstrap owns it).
+        - **any other** folder with a known ``repo_remote`` ->
+          ``[ -d <folder>/.git ] || git clone <remote> <folder>; cd <folder> &&
+          copilot ...`` (clone-if-missing over the credential relay the
+          ``--stdio`` login shell already set up).
+        - any other folder with **no** remote -> plain ``cd <folder> && ...``;
+          the ``cd`` fails loudly if the checkout is absent, surfacing the
+          missing-remote misconfiguration rather than silently launching in the
+          wrong place.
 
         ``--allow-all-tools`` is required for headless dispatch: there is no
-        human to answer interactive tool-permission prompts, so without it
-        the remote agent blocks the first time it runs a non-allowlisted
-        command (e.g. a test runner).
+        human to answer interactive tool-permission prompts.
         """
+        copilot = "copilot --acp --stdio --allow-all-tools"
+
+        if requested_repo is not None:
+            folder, prepopulated = self.workspace_folder_for_request(
+                repo, requested_repo
+            )
+            if folder is None:
+                return f"{_WORKSPACE_CD} && {copilot}"
+            if prepopulated or not repo_remote:
+                return f"cd {folder} && {copilot}"
+            clone = f"[ -d {folder}/.git ] || git clone {repo_remote} {folder}"
+            return f"{clone}; cd {folder} && {copilot}"
+
         if self.acp_command:
             return self.acp_command
-        copilot = "copilot --acp --stdio --allow-all-tools"
         workspace_folder = self.workspace_folder_for(repo)
         if workspace_folder:
             return f"cd {workspace_folder} && {copilot}"

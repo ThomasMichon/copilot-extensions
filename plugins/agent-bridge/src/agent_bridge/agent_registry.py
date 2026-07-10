@@ -35,6 +35,62 @@ from .transport import PluginRef, SpawnTarget
 log = logging.getLogger("agent-bridge")
 
 _PROJECTS_YAML_DEFAULT = "~/.agent-worktrees/projects.yaml"
+_REPOS_YAML_DEFAULT = "~/.agent-worktrees/repos.yaml"
+
+
+def resolve_repo_remote(repo: str) -> str | None:
+    """Resolve a logical repo name to its git remote URL.
+
+    Reads the agent-worktrees global repos registry
+    (``~/.agent-worktrees/repos.yaml``, override via ``AGENT_WORKTREES_REPOS_YAML``)
+    and returns ``repos.<repo>.remote``. Used to thread a ``repo_remote`` into a
+    ``<repo>@<venue>`` dispatch so a venue that hosts by convention (a CodeSpace's
+    ``/workspaces/<basename>`` layout, #174) can clone the repo if it is missing.
+
+    Matching is exact on the registry key first, then a case-insensitive fallback
+    on the key's basename (so ``odsp-web`` matches an ``odsp-web`` entry regardless
+    of case). Returns ``None`` when the registry is absent/unparseable or the repo
+    (or its ``remote``) is unknown -- the caller decides whether that is fatal
+    (for a pre-populated venue folder it is not; for a clone-if-missing it is).
+    """
+    try:
+        import yaml
+    except ImportError:
+        log.debug("pyyaml not available -- cannot resolve repo remote")
+        return None
+
+    repos_path = Path(
+        os.environ.get("AGENT_WORKTREES_REPOS_YAML", _REPOS_YAML_DEFAULT)
+    ).expanduser()
+    if not repos_path.exists():
+        log.debug("repos.yaml not found at %s -- no repo remote", repos_path)
+        return None
+
+    try:
+        data = yaml.safe_load(repos_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        log.warning("Failed to parse repos.yaml at %s: %s", repos_path, exc)
+        return None
+
+    repos = data.get("repos")
+    if not isinstance(repos, dict):
+        return None
+
+    entry = repos.get(repo)
+    if not isinstance(entry, dict):
+        want = repo.strip().lower().split("/")[-1]
+        for key, val in repos.items():
+            if not isinstance(val, dict):
+                continue
+            if str(key).strip().lower().split("/")[-1] == want:
+                entry = val
+                break
+    if not isinstance(entry, dict):
+        log.debug("repo '%s' not in repos registry %s", repo, repos_path)
+        return None
+
+    remote = entry.get("remote")
+    return str(remote) if isinstance(remote, str) and remote.strip() else None
 
 
 @dataclass
@@ -133,7 +189,7 @@ class NamespaceResolver(ABC):
     @abstractmethod
     async def resolve(
         self, name: str, *, extra_plugins: "list[PluginRef]" = (),
-        repo: str | None = None,
+        repo: str | None = None, repo_remote: str | None = None,
     ) -> SpawnTarget:
         """Resolve a bare name (without prefix) to a SpawnTarget.
 
@@ -146,6 +202,12 @@ class NamespaceResolver(ABC):
         checkout instead of its default, or raise if it cannot host it. A
         resolver that does not accept ``repo`` signals (to agent-bridge) that
         cross-repo dispatch to its venues is unsupported.
+
+        ``repo_remote`` (optional) is that repo's git remote URL (resolved
+        host-side from the repos registry). A venue that hosts repos by
+        convention (a CodeSpace's ``/workspaces/<basename>`` layout) uses it to
+        clone-if-missing. Resolvers that do not accept it simply do not receive
+        it (agent-bridge only passes kwargs the resolver's signature declares).
 
         ``extra_plugins`` (optional) is a set of **related-repo** plugins that
         agent-bridge has decided to inject for this dispatch (sourced from the
@@ -1108,15 +1170,23 @@ class AgentResolver:
           binstub instead of the venue's default project. ``SPO.Core@dev6`` ->
           the SPO.Core binstub on dev6 (loopback).
         - **codespace / container** venues: ``repo`` is handed to the namespace
-          resolver, which validates it against the venue's hosted checkout and
-          launches that repo's workspace (or errors if it can't host it).
+          resolver, which launches that repo's workspace on the venue -- landing
+          in ``/workspaces/<basename(repo)>`` by convention and cloning it from
+          ``repo_remote`` if the checkout is missing (#174).
+
+        ``repo_remote`` is resolved once here from the repos registry (best
+        effort -- ``None`` for a repo not in the registry, which is fine for a
+        venue folder the bootstrap already owns).
         """
+        repo_remote = resolve_repo_remote(repo)
         ns = self._parse_namespaced_agent(venue)
         if ns:
             prefix, name = ns
             resolver = self._namespace_resolvers[prefix]
             await resolver.ensure_ready(name)
-            return await self._resolve_with_plugins(resolver, name, repo=repo)
+            return await self._resolve_with_plugins(
+                resolver, name, repo=repo, repo_remote=repo_remote,
+            )
 
         candidates = await self._gather_bare_candidates(venue)
         if len(candidates) > 1:
@@ -1129,7 +1199,9 @@ class AgentResolver:
                 target = await self._resolve_bare(venue)
                 return self._bind_repo(target, repo, venue)
             await resolver.ensure_ready(resolve_name)
-            return await self._resolve_with_plugins(resolver, resolve_name, repo=repo)
+            return await self._resolve_with_plugins(
+                resolver, resolve_name, repo=repo, repo_remote=repo_remote,
+            )
 
         # No venue match -- resolve statically for a precise not-found error.
         target = self._resolve_static(venue)
@@ -1152,30 +1224,35 @@ class AgentResolver:
         )
 
     async def _resolve_with_plugins(
-        self, resolver: "NamespaceResolver", name: str, repo: str | None = None,
+        self, resolver: "NamespaceResolver", name: str,
+        repo: str | None = None, repo_remote: str | None = None,
     ) -> SpawnTarget:
         """Resolve via a namespace resolver, injecting related-repo plugins.
 
         agent-bridge *owns* the related-repo plugin set (sourced from the
         related-repos registry, ``related.yaml``); the resolver *folds + stages*
-        it. We only pass ``extra_plugins`` / ``repo`` when applicable so
-        resolvers that have not adopted those kwargs keep working unchanged.
+        it. We only pass ``extra_plugins`` / ``repo`` / ``repo_remote`` when
+        applicable so resolvers that have not adopted those kwargs keep working
+        unchanged.
         """
         extra = await self._related_plugins_for(resolver, name)
         return await self._call_resolver(
             resolver, name, extra_plugins=extra, repo=repo,
+            repo_remote=repo_remote,
         )
 
     async def _call_resolver(
         self, resolver: "NamespaceResolver", name: str, *,
         extra_plugins: list[PluginRef], repo: str | None,
+        repo_remote: str | None = None,
     ) -> SpawnTarget:
         """Invoke ``resolver.resolve`` passing only the kwargs it accepts.
 
-        ``extra_plugins`` is optional (back-compat). ``repo`` is required to be
-        honored when requested: if the resolver's ``resolve`` does not accept a
-        ``repo`` kwarg, cross-repo dispatch to that venue is unsupported and we
-        raise rather than silently launching the venue's default repo.
+        ``extra_plugins`` and ``repo_remote`` are optional (back-compat -- passed
+        only when the resolver's signature declares them). ``repo`` is required
+        to be honored when requested: if the resolver's ``resolve`` does not
+        accept a ``repo`` kwarg, cross-repo dispatch to that venue is unsupported
+        and we raise rather than silently launching the venue's default repo.
         """
         import inspect
         sig = inspect.signature(resolver.resolve)
@@ -1189,6 +1266,8 @@ class AgentResolver:
                     f"the '{getattr(resolver, 'prefix', '?')}:' resolver."
                 )
             kwargs["repo"] = repo
+        if repo_remote is not None and "repo_remote" in sig.parameters:
+            kwargs["repo_remote"] = repo_remote
         return await resolver.resolve(name, **kwargs)
 
     async def _related_plugins_for(

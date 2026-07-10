@@ -17,12 +17,13 @@ import logging
 import shlex
 from pathlib import Path
 
-from .config import ProvisionConfig, ProvisionFile
+from .config import DOTFILES_DIR, ProvisionConfig, ProvisionFile
 
 log = logging.getLogger("agent-codespaces")
 
-# Standard location GitHub Codespaces clones the account dotfiles repo into.
-DOTFILES_DIR = "/workspaces/.codespaces/.persistedshare/dotfiles"
+# ``DOTFILES_DIR`` is defined canonically in :mod:`agent_codespaces.config` (the
+# layer the request-folder resolver shares) and re-exported here for back-compat
+# with existing ``from .provision import DOTFILES_DIR`` importers.
 
 
 def build_dotfiles_command(dotfiles_repo: str, relay_port: int) -> str:
