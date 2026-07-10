@@ -541,11 +541,18 @@ def test_maintenance_multiselect_and_actions_menu():
             assert not scr.maint_sel
 
             # Enter with nothing selected selects the focused row, opens menu.
-            scr.sel = crow
+            # Focus a row that actually has a maintenance action (cleanable) --
+            # a non-actionable selection no longer opens an (empty) menu.
+            recs = scr.maint_records()
+            ci = next(i for i, r in enumerate(recs) if scr._cleanable(r))
+            scr.sel = ("C", ci)
             scr._activate()
             assert scr.maint_menu is not None
             assert scr.maint_menu["count"] == 1
-            assert "Diagnostics" in scr.maint_menu["actions"]
+            # Only real actions are offered (the Diagnostics mock was removed).
+            assert "Diagnostics" not in scr.maint_menu["actions"]
+            assert set(scr.maint_menu["actions"]) <= {"Sync", "Cleanup"}
+            assert "Cleanup" in scr.maint_menu["actions"]
             # Enter must NOT have produced a launch/resume decision.
             assert app.result is None
 
@@ -556,6 +563,29 @@ def test_maintenance_multiselect_and_actions_menu():
                 scr._key_maint_menu("enter")
                 assert scr.cleanup is not None
                 assert "selected" in scr.cleanup["scope"]
+
+    asyncio.run(run())
+
+
+def test_maint_menu_no_actionable_selection_does_not_open():
+    """A selection with no FF-eligible or cleanable worktree no longer opens an
+    (empty) actions menu -- it reports a no-op instead (Diagnostics mock gone)."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            fake = [{"id4": "x1", "ff_eligible": False},
+                    {"id4": "x2", "ff_eligible": False}]
+            scr.maint_records = lambda: fake
+            scr._cleanable = lambda rec: False   # nothing cleanable
+            scr.maint_sel = {"x1", "x2"}
+            scr._open_maint_menu()
+            assert scr.maint_menu is None
+            assert "no maintenance action" in scr.debug
 
     asyncio.run(run())
 
