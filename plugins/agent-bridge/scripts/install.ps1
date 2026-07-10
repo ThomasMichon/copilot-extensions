@@ -763,7 +763,10 @@ function Invoke-Install {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     if ($SshManagerDir) {
-        $sshOut = & uv pip install --python $VenvPython "$SshManagerDir" --quiet 2>&1
+        # --reinstall-package: a vendored lib's version rarely bumps but its
+        # source changes; without forcing, uv keeps the cached build and the
+        # daemon venv goes stale (e.g. new ssh_manager modules never land). #177
+        $sshOut = & uv pip install --python $VenvPython "$SshManagerDir" --reinstall-package agent-ssh-manager --quiet 2>&1
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "ssh-manager install failed (exit $LASTEXITCODE)"
@@ -778,7 +781,7 @@ function Invoke-Install {
     # credential-relay (the relay framework agent-bridge runs in its daemon).
     $CredRelayDir = Resolve-CredentialRelay
     if ($CredRelayDir) {
-        $crOut = & uv pip install --python $VenvPython "$CredRelayDir" --quiet 2>&1
+        $crOut = & uv pip install --python $VenvPython "$CredRelayDir" --reinstall-package agent-credential-relay --quiet 2>&1
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "credential-relay install failed (exit $LASTEXITCODE)"
@@ -793,7 +796,7 @@ function Invoke-Install {
     # zdd (zero-downtime cutover primitives: routing table + orchestrator).
     $ZddDir = Resolve-Zdd
     if ($ZddDir) {
-        $zddOut = & uv pip install --python $VenvPython "$ZddDir" --quiet 2>&1
+        $zddOut = & uv pip install --python $VenvPython "$ZddDir" --reinstall-package agent-zdd --quiet 2>&1
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "zdd install failed (exit $LASTEXITCODE)"
