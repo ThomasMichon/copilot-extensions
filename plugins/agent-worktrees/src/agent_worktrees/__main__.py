@@ -810,6 +810,101 @@ def _build_launch_cmd(
     return cmd
 
 
+def cmd_handoff_cutover(args: argparse.Namespace) -> int:
+    """Live-cutover handoff: spawn a seeded successor Copilot or retire a pane.
+
+    Two modes (JSON out on stdout either way):
+
+    * **spawn** (default; needs ``--seed``): reconstruct this worktree's launch
+      command (the same ``_build_launch_cmd`` the picker uses) **plus** a
+      trailing ``-i <seed>`` -- an *interactive* seeded first turn, never ``-p``
+      (which would run headless and exit) -- then open + select a NEW window in
+      the worktree's ``wt-<id>`` mux session so the operator is cut over to the
+      successor. Deliberately omits ``--resume``: a handoff wants a FRESH context
+      window seeded by the prompt, not the old transcript replayed. Returns the
+      OLD (pre-cutover) pane id so the caller can retire it once the old session
+      reaches agent-stop.
+    * **retire** (``--retire-pane <id>``): double-Ctrl-C that specific pane
+      (Copilot's native clean quit), hard-killing it only if it will not exit.
+
+    The mux choreography lives here (agent-worktrees owns launch + mux); the
+    context-handoff extension is a thin trigger that shells out to this command.
+    """
+    # ── Retire mode ──────────────────────────────────────────────────────
+    retire_pane = getattr(args, "retire_pane", None)
+    if retire_pane:
+        result = sessions.mux_retire_pane(retire_pane)
+        _json_output(result)
+        return 0 if result.get("ok") else 1
+
+    # ── Spawn / cutover mode ─────────────────────────────────────────────
+    seed = getattr(args, "seed", None)
+    if not seed:
+        return _json_error("handoff-cutover requires --seed (or --retire-pane)")
+
+    raw_id = getattr(args, "worktree_id", None)
+    if raw_id:
+        wt_id = _resolve_worktree_id(raw_id)
+    else:
+        wt_id = _infer_worktree_id_from_cwd()
+        if not wt_id:
+            return _json_error(
+                "could not resolve a worktree id from cwd; pass --worktree-id",
+                exit_code=2,
+            )
+
+    # A live cutover needs a mux session to cut into. Without one, the caller
+    # (extension) must fall back to the store-task-and-reply flow.
+    if not sessions.has_mux_session(wt_id):
+        return _json_error(f"no mux session wt-{wt_id}; not under mux", exit_code=3)
+
+    try:
+        config = cfg.load_config()
+    except Exception as e:
+        return _json_error(str(e))
+
+    yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+    if not yaml_path.exists():
+        return _json_error(f"Worktree not found: {wt_id}")
+    record = tracking.load_record(yaml_path)
+
+    launch_cmd = _build_launch_cmd(config, args, record.worktree_path)
+    env = _build_env(None, _repo_session_env(config, record.worktree_path))
+    # Seed the successor's first interactive turn (never --resume: fresh context).
+    launch_cmd = list(launch_cmd) + ["-i", seed]
+
+    # Capture the pane to retire (the operator's current Copilot) BEFORE adding
+    # the new window, which would become the active pane. ``--old-pane`` lets the
+    # extension pin its own $TMUX_PANE explicitly.
+    old_pane = getattr(args, "old_pane", None) or sessions.mux_active_pane(wt_id)
+
+    if getattr(args, "dry_run", False):
+        _json_output({
+            "ok": True, "dry_run": True, "session": f"wt-{wt_id}",
+            "old_pane": old_pane, "work_dir": record.worktree_path,
+            "cmd": launch_cmd,
+        })
+        return 0
+
+    result = sessions.mux_new_window(
+        wt_id, record.worktree_path, launch_cmd, env,
+    )
+    if not result.get("ok"):
+        return _json_error(
+            f"failed to open successor window: {result.get('error')}",
+            exit_code=4,
+        )
+
+    _json_output({
+        "ok": True,
+        "session": f"wt-{wt_id}",
+        "old_pane": old_pane,
+        "new_pane": result.get("new_pane"),
+        "seed_len": len(seed),
+    })
+    return 0
+
+
 def cmd_resolve(args: argparse.Namespace) -> int:
     """Resolve a launch plan and emit it as JSON.
 
@@ -7363,6 +7458,27 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Worktree path to classify (default: current directory)")
     p.add_argument("--interval", type=int, default=15,
                    help="Disposition refresh cadence in seconds (min 2)")
+    # handoff-cutover (live-cutover handoff: seeded successor window + pane retire)
+    p = sub.add_parser(
+        "handoff-cutover",
+        help="Live handoff: spawn a seeded successor Copilot in a new mux "
+             "window (cut over to it), or retire an old pane",
+    )
+    p.add_argument("--seed", default=None,
+                   help="Seed prompt for the successor's first interactive "
+                        "turn (copilot -i). Required in spawn mode.")
+    p.add_argument("--worktree-id", dest="worktree_id", default=None,
+                   help="Target worktree (default: infer from cwd)")
+    p.add_argument("--old-pane", dest="old_pane", default=None,
+                   help="Explicit pane id to report as the old pane "
+                        "(default: the session's active pane)")
+    p.add_argument("--retire-pane", dest="retire_pane", default=None,
+                   help="Retire mode: double-Ctrl-C this pane id (Copilot's "
+                        "clean quit) and report whether it exited")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Print the resolved plan without opening a window")
+    p.add_argument("--json", action="store_true",
+                   help="JSON output mode (stdout is JSON only; always on)")
     p = sub.add_parser("list", help="List worktrees from tracking records")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
@@ -8083,6 +8199,7 @@ COMMAND_MAP = {
     "status-segment": cmd_status_segment,
     "status-context": cmd_status_context,
     "status-updater": cmd_status_updater,
+    "handoff-cutover": cmd_handoff_cutover,
     "list": cmd_list,
     "create": cmd_create,
     "remove-system": cmd_remove_system,

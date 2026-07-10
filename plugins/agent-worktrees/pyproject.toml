@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-worktrees"
-version = "1.5.3-dev160"
+version = "1.5.3-dev161"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -36,7 +36,7 @@ line-length = 99
 select = ["E", "F", "W", "I", "UP", "B", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-# Ported TUI rendering engine: intentional box/arrow glyphs (‹ › ◀ ▶ etc.) trip
+# Ported TUI rendering engine: intentional box/arrow glyphs (â€¹ â€º â—€ â–¶ etc.) trip
 # the ambiguous-unicode checks (RUF001-003), and the dense render loops use
 # tuple-unpacking where not every field is read (B007/RUF005/RUF059). These are
 # faithful to the design prototype and harmless in a self-contained UI module.
