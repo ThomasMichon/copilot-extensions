@@ -1034,6 +1034,50 @@ def test_jump_to_worktree_unknown_id_is_safe(tmp_path):
     asyncio.run(run())
 
 
+def test_open_worktree_cli_exits_with_resume_decision():
+    """#2253: the ``open-cli`` internal action opens the entry's target worktree
+    into a CLI session -- it exits the picker with a standard resume decision for
+    that worktree id, so __main__ maps it onto the launch/resume path."""
+    src = _bridge_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            ok, msg = scr._internal_pivot_action(
+                "open-cli", {"worktree": "borealis-win-bridge-2222"})
+            assert ok is True
+            assert "CLI session" in msg
+            # The picker recorded a resume decision for that worktree and exited.
+            assert app.result is not None
+            assert app.result["action"] == "resume"
+            assert app.result["worktree_id"] == "borealis-win-bridge-2222"
+            assert app.result["machine"] == "borealis"
+            assert app.result["env"] == "Win"
+            assert app.result["is_local"] is False
+
+    asyncio.run(run())
+
+
+def test_open_worktree_cli_unknown_id_is_safe():
+    """``open-cli`` on a worktree not in the loaded set is a reported no-op
+    (never exits the picker, never crashes)."""
+    src = _bridge_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            ok, msg = scr._open_worktree_cli("does-not-exist")
+            assert ok is False
+            assert "not found" in msg
+            assert app.result is None      # never exited
+
+    asyncio.run(run())
+
+
 def test_jump_to_caller_targets_caller_worktree():
     """A bridge worktree with a recorded caller offers 'Jump to caller', which
     navigates to the CALLER worktree (not the bridge itself) (#2178)."""
