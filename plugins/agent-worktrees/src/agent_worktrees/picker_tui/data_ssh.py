@@ -96,17 +96,23 @@ def _project() -> str:
         return "agent-worktrees"
 
 
-def _list_args(shell: str, *, classify: bool) -> str:
+def _list_args(shell: str, *, classify: bool, reconcile: bool = False) -> str:
     win = shell == "pwsh"
     args = _LIST_ARGS_WIN if win else _LIST_ARGS
     if not classify:
         args = args.replace(" --classify", "")
+    if reconcile:
+        # Reconcile this machine's own PR states against the provider during the
+        # list (and persist the correction), so a remote tab stops showing a
+        # merged-elsewhere worktree as having an open PR (#2102).
+        args = args + " --reconcile-prs"
     return args
 
 
-def _argv_for(shell: str, alias: str, project: str, *, classify: bool):
+def _argv_for(shell: str, alias: str, project: str, *, classify: bool,
+              reconcile: bool = False):
     """Remote list argv for a machine/env: pwsh on Windows, bash elsewhere."""
-    cmd = f"{project} {_list_args(shell, classify=classify)}"
+    cmd = f"{project} {_list_args(shell, classify=classify, reconcile=reconcile)}"
     if shell == "pwsh":
         return ["ssh", alias, f"pwsh -NoProfile -Command '{cmd}'"]
     return ["ssh", alias, f"bash -lc '{cmd}'"]
@@ -273,10 +279,23 @@ def apply_profile_column(machine, env, sels, *, mirror=True):
 def reconcile_prs() -> int:
     """Reconcile the LOCAL machine's stale PR states against the provider (#1423).
 
-    Delegates to :func:`data_local.reconcile_prs`; remote worktrees reconcile on
-    their own owning machine (a remote-over-SSH reconcile is a follow-up).
+    Delegates to :func:`data_local.reconcile_prs`. Each *remote* machine's PRs are
+    reconciled on their own owning machine by :meth:`LiveLoader.reconcile_remote_prs`
+    (a bounded, after-first-paint ``list --reconcile-prs`` over SSH, #2102).
     """
     return data_local.reconcile_prs()
+
+
+def _reconcile_argv(source: "Source"):
+    """The remote list argv for *source* with PR reconcile enabled (#2102).
+
+    Mirrors ``source.argv`` but adds ``--reconcile-prs`` so the remote reconciles
+    (and persists) its own PR states while listing. Honors the source's current
+    ``use_classify`` so a remote that already fell back off ``--classify`` isn't
+    handed it again.
+    """
+    return _argv_for(source.shell, source.alias, _project(),
+                     classify=source.use_classify, reconcile=True)
 
 
 def _resolve_local() -> tuple[str, str]:
@@ -395,7 +414,7 @@ def _kill_proc_tree(proc):
             pass
 
 
-def _fetch(source: Source, runner=None):
+def _fetch(source: Source, runner=None, *, argv=None):
     """Run one source's list command and return normalized worktree records.
 
     Local sources load in-process. Remotes run over SSH, retrying without
@@ -403,19 +422,25 @@ def _fetch(source: Source, runner=None):
 
     ``runner`` runs the subprocess (default :func:`_run`); :class:`LiveLoader`
     passes its own tracked-and-killable runner so a picker exit can cancel any
-    in-flight prefetch.
+    in-flight prefetch. ``argv`` overrides the source's default list argv (used
+    by the PR-reconcile pass, #2102) without persisting to ``source.argv``.
     """
     runner = runner or _run
     if source.local:
         return data_local.load(source.machine, source.env)
 
-    proc = runner(source.argv, source.timeout)
+    use_argv = argv if argv is not None else source.argv
+    proc = runner(use_argv, source.timeout)
     if proc.returncode != 0 and _is_classify_unsupported(proc.stderr):
         # Older remote: drop --classify and retry (rows will lack canonical
         # state but still load).
-        retry = [a.replace(" --classify", "") for a in source.argv]
-        source.argv = retry
-        source.use_classify = False
+        retry = [a.replace(" --classify", "") for a in use_argv]
+        use_argv = retry
+        # Persist the fallback only for the source's own default argv, not for a
+        # transient override (e.g. the reconcile pass).
+        if argv is None:
+            source.argv = retry
+            source.use_classify = False
         proc = runner(retry, source.timeout)
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip().splitlines()
@@ -452,6 +477,10 @@ class LiveLoader:
         # Keys with a silent background refresh in flight (#1421) -- a per-source
         # guard so a slow machine isn't re-hit every poll interval.
         self._refreshing: set = set()
+        # Remote sources whose PRs have already been reconciled this session
+        # (#2102) -- the remote-over-SSH reconcile runs once per source, as each
+        # becomes ready, not on every poll.
+        self._pr_reconciled_keys: set = set()
         # Per-source generation: bumped by reload() so an in-flight silent
         # repoll that started earlier never commits stale rows over a newer
         # intentional reload (#1421, ordering fix).
@@ -552,6 +581,68 @@ class LiveLoader:
             with self._lock:
                 # Commit only when still ready, not cancelled, and not
                 # superseded by a newer reload() (generation unchanged).
+                if (not self._cancelled.is_set()
+                        and self._state.get(source.key) == "ready"
+                        and self._gen.get(source.key, 0) == gen):
+                    self._records[source.key] = recs
+        finally:
+            with self._lock:
+                self._refreshing.discard(source.key)
+
+    def reconcile_remote_prs(self, keys=None):
+        """Reconcile each ready REMOTE machine's own PR state, on that machine (#2102).
+
+        For every ready remote source (local PRs reconcile via the engine's
+        #1423 path), run ``list --reconcile-prs`` over SSH once -- the remote
+        corrects and persists its stale PR states -- and swap the corrected rows
+        in place, exactly like :meth:`repoll_silent` (no spinner, generation-
+        checked, best-effort). Runs at most once per source per session, as each
+        becomes ready, so a remote tab stops showing a merged-elsewhere worktree
+        as having an open PR without ever blocking the first paint. ``keys``
+        bounds the pass to the machines currently in view. No-op once cancelled.
+
+        Returns the number of sources a reconcile was actually started for.
+        """
+        if self._cancelled.is_set():
+            return 0
+        started = 0
+        with self._lock:
+            for s in self._sources:
+                if s.local:
+                    continue
+                if keys is not None and s.key not in keys:
+                    continue
+                if self._state.get(s.key) != "ready":
+                    continue
+                if s.key in self._pr_reconciled_keys or s.key in self._refreshing:
+                    continue
+                self._pr_reconciled_keys.add(s.key)
+                self._refreshing.add(s.key)
+                gen = self._gen.get(s.key, 0)
+                started += 1
+                threading.Thread(
+                    target=self._reconcile_one, args=(s, gen),
+                    name=f"reconcile-{s.machine}-{s.env}", daemon=True,
+                ).start()
+        return started
+
+    def _reconcile_one(self, source: Source, gen: int):
+        """Silent remote PR-reconcile for :meth:`reconcile_remote_prs`: fetch with
+        ``--reconcile-prs`` and swap records on success, keep last-good on
+        failure, and always clear the in-flight guard.
+
+        ``gen`` guards against committing over a newer :meth:`reload` (#1421).
+        A failed reconcile leaves ``_pr_reconciled_keys`` set (best-effort, one
+        attempt) so a persistently-unreachable remote isn't re-hit every poll.
+        """
+        try:
+            if self._cancelled.is_set():
+                return
+            recs = _fetch(source, runner=self._spawn, argv=_reconcile_argv(source))
+        except Exception:
+            return  # keep last-good records; no state flip
+        else:
+            with self._lock:
                 if (not self._cancelled.is_set()
                         and self._state.get(source.key) == "ready"
                         and self._gen.get(source.key, 0) == gen):

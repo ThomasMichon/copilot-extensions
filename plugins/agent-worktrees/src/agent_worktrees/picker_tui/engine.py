@@ -522,6 +522,15 @@ class PickerScreen(Widget):
             self.loader.repoll_silent(self._poll_keys())
         except Exception:
             pass
+        # Reconcile remote tabs' PR state on their own owning machine, once per
+        # source, in the background after first paint (#2102). The local tab's
+        # PRs are reconciled separately via the #1423 path in setup().
+        recon = getattr(self.loader, "reconcile_remote_prs", None)
+        if callable(recon):
+            try:
+                recon(self._poll_keys())
+            except Exception:
+                pass
 
     def _poll_keys(self):
         """The ``(machine, env)`` keys to background-poll: every ready machine on
