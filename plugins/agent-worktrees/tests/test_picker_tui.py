@@ -429,8 +429,9 @@ def test_worktrees_bulk_menu_routes_to_scoped_cleanup():
     asyncio.run(run())
 
 
-def test_worktrees_selected_row_is_marked():
-    """A selected, non-focused Worktrees row carries the selection shading."""
+def test_worktrees_rows_show_selection_checkbox():
+    """Every Worktrees row carries a left-side checkbox (☑ selected / ☐ not) so
+    multi-select is discoverable; the column is always present (#2228 2b)."""
     src = _maint_source()
 
     async def run():
@@ -442,16 +443,27 @@ def test_worktrees_selected_row_is_marked():
             recs = scr.list_records()
             if len(recs) < 2:
                 return
+
+            def boxes():
+                out = {}
+                for v in scr.build_body(118):
+                    stop = getattr(v, "stop", None)
+                    if stop and stop[0] == "L":
+                        out[v.data["id4"]] = v.text.plain[0]
+                return out
+
+            # With nothing selected, every row shows the empty box.
+            scr.sel = ("L", 0)
+            assert all(g == "☐" for g in boxes().values())
+
+            # Selecting a row flips just its box; focusing a different row keeps
+            # the selected row's ☑ visible.
             target = recs[0]["id4"]
             scr.wt_sel.replace({target})
-            scr.sel = ("L", 1)                    # focus a DIFFERENT row
-            marked = {}
-            for v in scr.build_body(118):
-                stop = getattr(v, "stop", None)
-                if stop and stop[0] == "L":
-                    marked[v.data["id4"]] = any(
-                        "grey23" in str(sp.style) for sp in v.text.spans)
-            assert marked.get(target) is True
+            scr.sel = ("L", 1)
+            b = boxes()
+            assert b.get(target) == "☑"
+            assert all(b[k] == "☐" for k in b if k != target)
 
     asyncio.run(run())
 
