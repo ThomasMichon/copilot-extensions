@@ -106,6 +106,16 @@ class FilesystemTarget(Target):
             if _needs_copy(src_file, dst_file):
                 dst_file.parent.mkdir(parents=True, exist_ok=True)
                 try:
+                    # Replace by unlink-then-copy, never truncate-in-place. A
+                    # destination written read-only by another syncer (e.g. the
+                    # legacy session-sync's ``.session-origin.json`` provenance
+                    # markers, chmod'd 0444 and surfaced as the DOS read-only
+                    # attribute over CIFS) cannot be truncate-opened, so a plain
+                    # ``copy2`` would raise EPERM and abort the entire push --
+                    # and with it the post-push notify. Unlinking needs only
+                    # write permission on the parent directory, which we have,
+                    # so it succeeds regardless of the file's own mode.
+                    dst_file.unlink(missing_ok=True)
                     shutil.copy2(src_file, dst_file)
                 except OSError as exc:
                     return PushResult(ok=False, detail=f"copy failed: {exc}")

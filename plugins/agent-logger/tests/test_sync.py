@@ -67,6 +67,38 @@ def test_local_target_push_is_incremental(tmp_path: Path) -> None:
     assert second.file_count == 0
 
 
+def test_local_target_overwrites_readonly_dest(tmp_path: Path) -> None:
+    """A read-only destination file must be overwritten, not abort the push.
+
+    Regression for a graceful-overlap blocker: the legacy session-sync writes
+    provenance markers read-only (0444, surfaced as the DOS read-only attribute
+    over CIFS). ``shutil.copy2`` truncate-opens the destination, which raises
+    EPERM on such a file and aborts the whole push (and its post-push notify).
+    The engine now unlinks the destination before copying, so the overwrite
+    succeeds regardless of the existing file's mode.
+    """
+    import os
+    import stat
+
+    src = _make_source(tmp_path)
+    dest_root = tmp_path / "dest"
+    target = LocalTarget({"path": str(dest_root)})
+    target.push(src, "m1")
+
+    # Make a destination file read-only, then change the source so a re-copy is
+    # required (larger content -> _needs_copy is True).
+    dst_file = dest_root / "m1" / "session-state" / "abc-123" / "events.jsonl"
+    os.chmod(dst_file, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+    (src / "session-state" / "abc-123" / "events.jsonl").write_text(
+        '{"ts": 1}\n{"ts": 2}\n', encoding="utf-8"
+    )
+
+    result = target.push(src, "m1")
+    assert result.ok
+    assert result.file_count == 1
+    assert dst_file.read_text(encoding="utf-8") == '{"ts": 1}\n{"ts": 2}\n'
+
+
 def test_local_target_prune_removes_old(tmp_path: Path) -> None:
     import os
     import time
