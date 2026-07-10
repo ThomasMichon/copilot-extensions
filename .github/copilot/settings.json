@@ -1,0 +1,11 @@
+{
+  "extraKnownMarketplaces": {
+    "copilot-extensions": {
+      "source": { "source": "github", "repo": "ThomasMichon/copilot-extensions" }
+    }
+  },
+  "enabledPlugins": {
+    "harness-copilot-extensions@copilot-extensions": true,
+    "customizing-copilot@copilot-extensions": true
+  }
+}
