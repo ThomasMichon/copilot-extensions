@@ -93,6 +93,41 @@ into `~/.copilot/installed-plugins/`.
 > to the **payload** only; a runtime plugin can read "updated" while its actual
 > runtime (venv/binstub/service) is unchanged until its installer runs.
 
+## Installing a plugin's standing rule into `AGENTS.md`
+
+Enabling a plugin makes its **skills** available, but skills are **on-demand**:
+a skill's guidance applies most strongly the turn it is invoked and fades after
+(see `authoring-skills` § Action-sequence vs ambient-guidance skills). So a
+plugin that wants a rule to hold for the *rest of the session* — a standing or
+ambient convention (planning discipline, a cross-repo sequencing rule, a
+knowledge-routing entry, a safety guard) — cannot rely on enablement alone. The
+rule must be **materialized into the adopting repo's always-on instructions**
+(`AGENTS.md` / `.github/copilot-instructions.md`, or a small dedicated rule file
+those reference).
+
+Treat this as the **guidance analogue of payload-vs-runtime**: enabling the
+plugin deploys the *payload* (skills); writing its standing rule into `AGENTS.md`
+deploys the *always-on guidance*. A plugin whose value depends on a persistent
+rule is only half-installed until both are done.
+
+**The seam (generalized from `efforts-setup` / `visions-setup`):** when a
+plugin's setup ships a standing rule, its setup skill should **add a short,
+declarative entry to the repo's always-on instructions** that:
+
+1. **States the rule in the adopting repo's own voice** — not a copy of the
+   plugin's internal docs, just the durable "always do X" the repo must enforce.
+2. **Points at the on-demand skill for the mechanics** — `AGENTS.md` carries the
+   rule + a skill pointer, not the full procedure (keep it a table-of-contents
+   entry, per the harness runbook's Phase 4).
+3. **Is idempotent** — reconcile on re-run (audit mode) rather than appending a
+   duplicate; if the rule already exists, leave it.
+
+This is the declarative way a bootstrapped harness installs ambient guidance so
+it actually persists. When authoring a `-setup` skill for a plugin that carries
+standing guidance, include this AGENTS.md-materialization step; when auditing a
+harness, verify each such rule is present in the always-on layer, not stranded in
+an on-demand skill.
+
 ## Keeping a repo's plugins fresh automatically
 
 Some control harnesses reconcile a repo's `enabledPlugins` on each interactive

@@ -42,7 +42,31 @@ Gather the harness's customization surfaces:
 - **MCP configs** — per-agent `mcp-servers`, project `.copilot/mcp.json` /
   `mcp-config.json`, and any `agent-mcp` bridge configs.
 
-## Two-part method
+## Method: mechanical scan, then design critique
+
+Run the fast **mechanical scan** first to clear the machine-checkable violations,
+then the **design critique** for the judgment calls the scan can't make, and a
+**conformance cross-check** against the authoring skills.
+
+### 0. Mechanical scan (repeatable)
+
+Before any hand review, run the bundled scanner over the repo root — it catches
+the checkable violations consistently so the human/sub-agent pass can focus on
+design:
+
+```bash
+python3 <skill-dir>/scripts/scan-customizations.py <repo-root> [--json] [--strict]
+```
+
+It reports (BLOCKING vs WARNING) on: **skill frontmatter** (`name` +
+`description`), **name/folder match**, **trigger collisions** across skills,
+**anti-recursion** (an agent that declares `mcp-servers` but lacks an MCP-readiness
+section or an anti-self-delegation line — the hard rule from `defining-subagents`),
+**inline secrets** in config files, and **raw IPs** in ssh/scp/rsync commands.
+`--strict` exits non-zero on any BLOCKING finding, so it drops into a hook or CI
+gate. It is a **heuristic aid, not a proof** — it deliberately under-flags rather
+than cry wolf; feed its findings into the design critique, don't treat a clean
+scan as a full review.
 
 ### 1. Design critique (rubber-duck)
 

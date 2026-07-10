@@ -114,3 +114,29 @@ config, or run commands. Instead, prevent self-delegation via
    copy of itself, which also fails, ad infinitum.
 
 Both guards belong in the agent's `## MCP Readiness` section.
+
+### Hard-rule validation checklist
+
+These are **not** suggestions — they are conformance gates. Run this checklist
+against every `.agent.md` you author or review (it is the machine-checkable core
+the **`reviewing-customizations`** scan enforces). An agent **fails** review if
+any applicable box is unchecked:
+
+- [ ] **Tools are not narrowed for anti-recursion.** `tools` is omitted or
+      `["*"]` (or lists only *additive* MCP grants); it is **never** trimmed to
+      "prevent recursion" — that cripples the agent, it doesn't protect it.
+- [ ] **Every MCP-owning agent has a `## MCP Readiness` section.** If the
+      frontmatter declares `mcp-servers`, the body must carry the section that
+      houses both guards below.
+- [ ] **Readiness probe present.** The section instructs the agent to probe one
+      MCP tool on startup and, on failure, **report and stop** — no bash/curl/
+      HTTP fallback, no silent degradation.
+- [ ] **Anti-self-delegation line present, verbatim intent.** The section
+      contains "Do NOT use the task tool to spawn another `<agent-name>` agent"
+      (with the agent's own name substituted).
+- [ ] **No MCP agent silently omits the guard.** An agent with `mcp-servers` but
+      no readiness/anti-recursion text is a **blocking** finding, not a nit — a
+      single missing guard is the exact failure this rule exists to prevent.
+
+An agent with **no** `mcp-servers` still owes the tools rule (row 1) but is
+exempt from the MCP-readiness rows.
