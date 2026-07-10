@@ -89,6 +89,21 @@ So visions are actually used, add to the repo's agent instructions
   specifications).
 - Add visions to the repo's **sources of new efforts** — the vision→reality delta
   is a backlog generator.
+- **A persistent cross-repo sequencing rule — install it as an *always-on*
+  rule, not an on-demand skill.** This plugin ships only on-demand skills, so a
+  standing rule it wants enforced must be **materialized** in the adopting repo's
+  own always-on instructions (`AGENTS.md` / `.github/copilot-instructions.md`, or
+  a small dedicated rule file the guidance references). Add this rule: *When a
+  vision revision in this **review-gated** repo also drives a change in a related
+  repo you push **directly** — no PR, no pre-merge review — land the
+  **vision-update PR first**, before the direct push that realizes it; the
+  reviewed intent must clear review **ahead of** the unreviewed push. Only
+  **completion markers** (journal "done" entries, `Status:` flips, "shipped in
+  `<commit>`") are recorded **after** the cross-repo work — everything stating
+  intent belongs in the earlier PR.* A repo that already carries equivalent
+  standing guidance need only confirm it covers this ordering (the
+  **equivalent-guidance** path). A repo that is *not* review-gated, or that never
+  pushes directly to a related repo, can skip it.
 
 ### 4. Seed at least one real vision
 
@@ -102,6 +117,10 @@ concrete leaf — so the shape is demonstrated, not just described.
 - `visions/TEMPLATE.md` matches the addendum's section set.
 - The repo's agent instructions route standing intent to visions and name the
   vision→effort delta.
+- The repo's **always-on** instructions carry the cross-repo sequencing rule
+  (vision-update PR before an unreviewed direct push; only completion markers
+  after) — or equivalent standing guidance already covers it. (Skip only when the
+  repo is not review-gated or never pushes directly to a related repo.)
 - At least one real vision exists and reads as **pure should-be** and
   **intent-level** (no gaps, no spec-level mechanics).
 
