@@ -186,9 +186,17 @@ def test_clean_dialog_live_filter_preview():
     asyncio.run(run())
 
 
-def test_configuration_reachable_via_tab():
+def test_configuration_reachable_via_tab(monkeypatch):
     """The ⚙ Configuration entry is in the Tab cycle (region_heads) and Tab from
     the View pivot lands on it (operator feedback: couldn't reach it)."""
+    from agent_worktrees.picker_tui import engine
+
+    # Pin the update indicator to a non-actionable state. When a plugin update
+    # is staged on the host, an optional refresh icon ("V", 1) legitimately sits
+    # between the View pivot and Configuration in the Up/Down flow -- so without
+    # this, Down from ("V", 0) lands on ("V", 1) and the assertion below depends
+    # on the machine's update state (flaky on a box with an update staged).
+    monkeypatch.setattr(engine, "indicator_state", lambda: "current")
     src = _profiles_source()
 
     async def run():
