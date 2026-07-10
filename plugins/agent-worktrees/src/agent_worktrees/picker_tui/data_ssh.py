@@ -414,7 +414,7 @@ def _kill_proc_tree(proc):
             pass
 
 
-def _fetch(source: Source, runner=None, *, argv=None):
+def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None):
     """Run one source's list command and return normalized worktree records.
 
     Local sources load in-process. Remotes run over SSH, retrying without
@@ -424,10 +424,15 @@ def _fetch(source: Source, runner=None, *, argv=None):
     passes its own tracked-and-killable runner so a picker exit can cancel any
     in-flight prefetch. ``argv`` overrides the source's default list argv (used
     by the PR-reconcile pass, #2102) without persisting to ``source.argv``.
+
+    ``classify`` only affects the **local** source: ``False`` skips the expensive
+    per-worktree git classification for a fast provisional listing (the loader's
+    phase-1 fast pass). Remote sources always classify via their argv (the
+    ``--classify`` flag), so this flag is a no-op for them.
     """
     runner = runner or _run
     if source.local:
-        return data_local.load(source.machine, source.env)
+        return data_local.load(source.machine, source.env, classify=classify)
 
     use_argv = argv if argv is not None else source.argv
     proc = runner(use_argv, source.timeout)
@@ -712,6 +717,10 @@ class LiveLoader:
         return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
     def _load_one(self, source: Source):
+        if source.local:
+            # Local tab: fast-then-fill so rows paint immediately (see below).
+            self._load_local_two_phase(source)
+            return
         try:
             recs = _fetch(source, runner=self._spawn)
         except Exception as exc:  # any failure -> failed state
@@ -722,6 +731,40 @@ class LiveLoader:
         with self._lock:
             self._records[source.key] = recs
             self._state[source.key] = "ready"
+
+    def _load_local_two_phase(self, source: Source):
+        """Fast-then-fill for the local tab.
+
+        Phase 1 (``classify=False``) is cheap -- tracking + sessions + mux, no
+        per-worktree git -- so the local rows paint at once (via ``derive``'s
+        classification-absent heuristic: status + turns + PR) instead of blocking
+        on git classification of every worktree, which can take seconds or stall.
+        Phase 2 (``classify=True``) runs the full git classification and swaps
+        the authoritative ``state`` in. A generation guard keeps a concurrent
+        :meth:`reload` from being clobbered by this pass's phase 2 (#1421)."""
+        gen = self._gen.get(source.key, 0)
+        try:
+            fast = _fetch(source, classify=False)
+        except Exception as exc:
+            with self._lock:
+                self._state[source.key] = "failed"
+                self._error[source.key] = str(exc).strip() or type(exc).__name__
+            return
+        with self._lock:
+            if self._cancelled.is_set():
+                return
+            self._records[source.key] = fast
+            self._state[source.key] = "ready"
+        # Phase 2: authoritative git classification, swapped in on success.
+        try:
+            full = _fetch(source, classify=True)
+        except Exception:
+            return  # keep the honest phase-1 heuristic rows
+        with self._lock:
+            if (not self._cancelled.is_set()
+                    and self._state.get(source.key) == "ready"
+                    and self._gen.get(source.key, 0) == gen):
+                self._records[source.key] = full
 
     def state(self, machine, env):
         with self._lock:

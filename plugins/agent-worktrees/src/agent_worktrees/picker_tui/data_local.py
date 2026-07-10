@@ -111,12 +111,21 @@ def reconcile_prs() -> int:
     return changed
 
 
-def load(machine: str | None = None, env: str | None = None):
+def load(machine: str | None = None, env: str | None = None,
+         *, classify: bool = True):
     """Normalized records for this machine's worktrees (tracking + classify).
 
     *machine*/*env* default to this host's identity (``LOCAL``). The SSH source
     overrides them so the local machine's rows carry its ``machines.yaml``
     display name and env label, matching the multi-machine tab descriptors.
+
+    ``classify`` gates the expensive per-worktree git classification
+    (``_classify_records`` -- ~5 git spawns each). When ``False`` this returns a
+    **fast** provisional listing (tracking + sessions + mux only, no git), whose
+    rows the picker renders immediately via ``derive``'s classification-absent
+    heuristic (status + turns + PR); the loader then fills authoritative git
+    states in with a second ``classify=True`` pass. When ``True`` (default) rows
+    carry the canonical git-derived ``state``.
     """
     # Lazy import to avoid a picker_tui <-> __main__ import cycle.
     from ..__main__ import _classify_records, _worktree_to_dict
@@ -135,7 +144,7 @@ def load(machine: str | None = None, env: str | None = None):
         return []
     session_ctx = sessions.scan_sessions_fast(records)
     mux_map = sessions.mux_status_many([r.worktree_id for r in records])
-    state_map = _classify_records(records, session_ctx)
+    state_map = _classify_records(records, session_ctx) if classify else {}
     machine = machine if machine is not None else LOCAL[0]
     env = env if env is not None else LOCAL[1]
     out = []
