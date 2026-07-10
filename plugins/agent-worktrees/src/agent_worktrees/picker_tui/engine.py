@@ -353,6 +353,10 @@ class PickerScreen(Widget):
         self.optmenu = None           # "More options…" create modal
         self.maint_sel = ListSelection()   # Maintenance multi-select (#1345)
         self.wt_sel = ListSelection()      # Worktrees list multi-select (#2228 2b)
+        self.wt_anchor = None         # Worktrees range-select anchor index (#2258 P3)
+        self.last_l = 0               # remembered Worktrees list focus (Tab memory, #2258 P3)
+        self._wt_reconcile_after = None  # live: (m,e) targets whose reload must
+                                         # settle before reconciling wt_sel (#2258 P3-7)
         self.maint_menu = None        # Maintenance actions menu modal (#1345)
         self.maint_menu_idx = 0
         self.prof_confirm = None      # Profiles Apply confirm dialog (add/remove diff)
@@ -559,6 +563,8 @@ class PickerScreen(Widget):
             _ready, loading, _failed = self.loader.counts()
             busy = busy or loading > 0
             self._maybe_repoll()
+            if self._wt_reconcile_after is not None:
+                self._process_pending_wt_reconcile()
         # Poll the launcher's update stage ~twice a second (#1430). While a
         # stage is in flight the spinner should animate, so keep the tick busy.
         if self.frame % 5 == 0:
@@ -617,7 +623,10 @@ class PickerScreen(Widget):
         self.machines = [("All", None, None, True)] + self.src.machines()
         self.machine_idx = self.local_index()
         self.maint_sel = ListSelection()  # drop any stale Maintenance selection
-        self.wt_sel = ListSelection()     # drop any stale Worktrees selection
+        # Worktrees selection persists across reload (#2258 P3-7): it is NOT
+        # hard-cleared here. Survivors are kept and vanished rows dropped by
+        # _reconcile_wt_sel() at the end of setup, once the reloaded records are
+        # available.
         self._last_poll = time.monotonic()   # first background poll is POLL_SECS out
         if self.live:
             # Real background SSH loads: one daemon thread per machine,
@@ -674,6 +683,10 @@ class PickerScreen(Widget):
         rec_fn = getattr(self.src, "reconcile_prs", None)
         if callable(rec_fn):
             self._start_pr_reconcile(rec_fn)
+        # Reconcile the persisted Worktrees selection against the freshly loaded
+        # records (#2258 P3-7): keep survivors, drop rows that vanished, re-seat
+        # a now-invalid range anchor. A no-op while records are still streaming.
+        self._reconcile_wt_sel()
 
     def _start_pr_reconcile(self, rec_fn):
         """Reconcile stale local PR states off the UI thread, then reload (#1423).
@@ -938,6 +951,8 @@ class PickerScreen(Widget):
     def region_head(self, zone):
         if zone == "PR":
             return self._pr_head()
+        if zone == "L":
+            return self._l_head()
         return {"V": ("V", 0), "CFG": ("CFG", 0), "M": ("M", 0),
                 "BTN": ("BTN", 0), "L": ("L", 0), "SA": ("SA", 0),
                 "GH": ("GH", 0), "C": ("C", 0), "PR": ("PR", 0)}.get(
@@ -953,7 +968,7 @@ class PickerScreen(Widget):
         if self._kind() == "worktrees":
             heads = [*v, ("M", 0), ("BTN", 0)]
             if self.list_records():
-                heads.append(("L", 0))
+                heads.append(self._l_head())
         elif self._kind() == "maintenance":
             heads = [*v, ("M", 0), ("BTN", 0)]
             if self.maint_records():
@@ -1089,13 +1104,166 @@ class PickerScreen(Widget):
         elif key in ("escape", "q", "tab"):
             self.maint_menu = None
 
-    # ---- Worktrees list multi-select (#2228 Phase 2b) ----
+    # ---- Worktrees list multi-select (#2228 Phase 2b, #2258 Phase 3) ----
+    def _l_ids(self):
+        """The id4 of every Worktrees row, in display order."""
+        return [r["id4"] for r in self.list_records()]
+
+    def _l_head(self):
+        """Worktrees list entry point for Tab, restoring the last-focused row
+        (#2258 P3-6, mirrors the Profiles-grid cell memory #1288)."""
+        n = len(self.list_records())
+        if n == 0:
+            return ("L", 0)
+        return ("L", min(self.last_l, n - 1))
+
+    def _reconcile_wt_sel(self):
+        """Keep the Worktrees selection honest across a reload (#2258 P3-7).
+
+        Intersect the selection with the ids still present and reset the range
+        anchor (row indices may have shifted, so a stale index would extend the
+        wrong range -- the next Shift gesture re-seeds it from the live focus).
+        Guarded against the live empty-load race: while the reloaded records are
+        still streaming in (``list_records`` momentarily empty) this is a no-op,
+        so a transient empty frame never clobbers a built-up selection.
+        """
+        try:
+            recs = self.list_records()
+        except Exception:
+            return
+        if not recs:
+            return
+        present = {r["id4"] for r in recs}
+        if self.wt_sel:
+            self.wt_sel.replace(self.wt_sel.ids & present)
+        self.wt_anchor = None
+
+    def _rehome_l_focus(self):
+        """Keep list focus at the equivalent index after a reload removed rows
+        (#2258 P3-7): clamp ``self.sel`` into the current list, or fall back to a
+        safe default when the list emptied."""
+        if self.sel[0] != "L":
+            return
+        n = len(self.list_records())
+        if n == 0:
+            self.sel = self.default_sel()
+        elif self.sel[1] >= n:
+            self.sel = ("L", n - 1)
+
+    def _process_pending_wt_reconcile(self):
+        """Live mode: defer the post-operation selection reconcile until the
+        reloaded machine(s) actually settle (#2258 P3-7).
+
+        ``_refresh_after_maint`` kicks off asynchronous per-machine reloads, so
+        reconciling immediately would race the streaming load and could drop
+        survivors that simply haven't re-arrived yet. Instead we hold the touched
+        targets and reconcile from ``_tick`` once every one reports ``ready``
+        (or failed -- a machine that can't reload should not wedge the pending
+        reconcile forever)."""
+        targets = self._wt_reconcile_after
+        if not targets or self.loader is None:
+            self._wt_reconcile_after = None
+            return
+        try:
+            settled = all(self.loader.state(m, e) in ("ready", "failed", "error")
+                          for m, e in targets)
+        except Exception:
+            settled = True
+        if settled:
+            self._wt_reconcile_after = None
+            self._reconcile_wt_sel()
+            self._rehome_l_focus()
+
+    def _wt_track_focus(self):
+        """Plain-arrow rule (#2258 P3-1): the selection follows focus.
+
+        When focus lands on a Worktrees row, collapse the multi-select to just
+        that row and re-seat the range anchor there (single-select tracks
+        focus); when focus leaves the list, the selection follows it to nothing.
+        """
+        if self.sel[0] == "L":
+            ids = self._l_ids()
+            i = self.sel[1]
+            if 0 <= i < len(ids):
+                self.wt_sel.replace({ids[i]})
+                self.wt_anchor = i
+                return
+        if self.wt_sel:
+            self.wt_sel.clear()
+        self.wt_anchor = None
+
+    def _wt_shift_move(self, stops, idx, forward):
+        """Shift+arrow (#2258 P3-2): range-extend from the anchor.
+
+        On the Worktrees list, move focus one row (clamped inside the list) and
+        set the selection to the contiguous range from the anchor (seeded on the
+        first shift move) to the newly focused row. Off the list it degrades to
+        a plain focus move.
+        """
+        if self.sel[0] != "L":
+            self.sel = (stops[min(idx + 1, len(stops) - 1)] if forward
+                        else stops[max(idx - 1, 0)])
+            self._wt_track_focus()
+            return
+        ids = self._l_ids()
+        if not ids:
+            return
+        if self.wt_anchor is None or not (0 <= self.wt_anchor < len(ids)):
+            self.wt_anchor = self.sel[1]
+        new_i = max(0, min(self.sel[1] + (1 if forward else -1), len(ids) - 1))
+        self.sel = ("L", new_i)
+        lo, hi = sorted((self.wt_anchor, new_i))
+        self.wt_sel.replace(ids[lo:hi + 1])
+
+    def _wt_ctrl_move(self, stops, idx, forward):
+        """Ctrl+arrow (#2258 P3-4): move focus only.
+
+        Move the focus cursor one Worktrees row (clamped inside the list)
+        without touching the selection or the range anchor, so the operator can
+        navigate a built-up set without disturbing it. Off the list it degrades
+        to a plain focus move (selection untouched)."""
+        if self.sel[0] != "L":
+            self.sel = (stops[min(idx + 1, len(stops) - 1)] if forward
+                        else stops[max(idx - 1, 0)])
+            return
+        ids = self._l_ids()
+        if not ids:
+            return
+        new_i = max(0, min(self.sel[1] + (1 if forward else -1), len(ids) - 1))
+        self.sel = ("L", new_i)
+
+    def _wt_collapse_selection(self):
+        """Esc-collapse (#2258 P3-5): reduce a multi-selection, don't quit.
+
+        With more than one row selected, reduce to just the focused row (or to
+        nothing when focus is outside the list) and return True so Esc does NOT
+        also open the quit-confirm (#1429). Returns False when there is nothing
+        to collapse, letting Esc fall through to the quit prompt.
+        """
+        if len(self.wt_sel) <= 1:
+            return False
+        if self.sel[0] == "L":
+            ids = self._l_ids()
+            i = self.sel[1]
+            if 0 <= i < len(ids):
+                self.wt_sel.replace({ids[i]})
+                self.wt_anchor = i
+                self.debug = "collapsed selection to focused row"
+                return True
+        self.wt_sel.clear()
+        self.wt_anchor = None
+        self.debug = "collapsed selection"
+        return True
+
     def _toggle_wt(self, i):
-        """Space on a Worktrees row toggles it in the list selection."""
+        """Space on a Worktrees row toggles it in the list selection (#2258
+        P3-3: additive, independent of the rest) and re-seats the range anchor
+        there so a following Shift+arrow extends from this row."""
         recs = self.list_records()
         if 0 <= i < len(recs):
             wid = recs[i]["id4"]
             now_on = self.wt_sel.toggle(wid)
+            self.wt_anchor = i
             self.debug = (f"{'selected' if now_on else 'deselected'} {wid}"
                           f" · {len(self.wt_sel)} selected")
 
@@ -2702,6 +2870,10 @@ class PickerScreen(Widget):
         # Remember the grid row before any navigation, so Tab out/in restores it.
         if self.sel and self.sel[0] == "PR":
             self.last_pr = self.sel[1]
+        # Same for the Worktrees list: remember focus so Tab out/in restores it
+        # (#2258 P3-6).
+        if self.sel and self.sel[0] == "L":
+            self.last_l = self.sel[1]
         if self.quit_confirm:
             return self._key_quit_confirm(key)
         if self.progress:
@@ -2768,12 +2940,19 @@ class PickerScreen(Widget):
         idx = stops.index(self.sel)
         zone = self.sel[0]
 
-        if key == "down":
+        if key in ("shift+up", "shift+down"):
+            self._wt_shift_move(stops, idx, key == "shift+down")
+        elif key in ("ctrl+up", "ctrl+down"):
+            self._wt_ctrl_move(stops, idx, key == "ctrl+down")
+        elif key == "down":
             self.sel = stops[min(idx + 1, len(stops) - 1)]
+            self._wt_track_focus()
         elif key == "up":
             self.sel = stops[max(idx - 1, 0)]
+            self._wt_track_focus()
         elif key in ("pagedown", "pageup"):
             self._page(stops, idx, forward=(key == "pagedown"))
+            self._wt_track_focus()
         elif key == "enter":
             self._activate()
         elif key == "space":
@@ -2798,6 +2977,11 @@ class PickerScreen(Widget):
             self.sel = self.default_sel()
             self.debug = "refreshed · reloaded worktrees"
         elif key in ("q", "escape"):
+            # Esc composes with selection collapse (#2258 P3-5) before the
+            # quit-confirm (#1429): a multi-selection collapses first; only a
+            # second Esc (nothing left to collapse) reaches the quit prompt.
+            if key == "escape" and self._wt_collapse_selection():
+                return
             self._open_quit_confirm()
 
     def _open_quit_confirm(self):
@@ -2828,6 +3012,13 @@ class PickerScreen(Widget):
         self.machine_idx = (self.machine_idx + d) % len(self.machines)
         if self.sel not in self.stops():
             self.sel = self.default_sel()
+        # Scope the Worktrees selection to the newly visible machine tab (#2258
+        # P3): rows not on this tab drop out (so the checkbox column and the
+        # Enter bulk-action menu never act on rows the operator can't see). Only
+        # when the Worktrees list is the active surface -- a machine sub-nav on
+        # another pivot must not disturb a dormant worktrees selection.
+        if self._kind() == "worktrees":
+            self._reconcile_wt_sel()
 
     def _switch_pivot(self, d):
         was_v = self.sel[0] == "V"
@@ -3068,8 +3259,18 @@ class PickerScreen(Widget):
             for m, e in targets:
                 self.loader.reload(m, e)
             self.data = self.loader.records()
+            # The reloads are asynchronous, so the touched machine's fresh
+            # records haven't arrived yet -- defer the selection reconcile until
+            # they settle (processed in _tick) so we don't drop survivors that
+            # are still streaming back in (#2258 P3-7).
+            self._wt_reconcile_after = targets or None
         elif not self.live:
             self.data = self.src.load()
+            # Fixture reload is synchronous: reconcile now. Survivors stay
+            # selected, cleaned rows drop out, and focus stays at the equivalent
+            # list index (clamped) so it never lands on a phantom stop.
+            self._reconcile_wt_sel()
+            self._rehome_l_focus()
 
     def _dlg_confirm(self, om):
         if om:

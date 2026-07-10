@@ -468,6 +468,318 @@ def test_worktrees_rows_show_selection_checkbox():
     asyncio.run(run())
 
 
+# ---- Phase 3: keyboard-accessible multi-selection (#2258) ----
+
+def _wt_scr(pilot_body):
+    """Boilerplate: build a fixture-backed Worktrees screen on the local tab and
+    hand it to ``pilot_body(scr)`` with focus seeded on the first list row."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert scr.list_records()
+            await pilot_body(scr)
+
+    asyncio.run(run())
+
+
+def test_arrow_moves_focus_and_selection_follows():
+    """P3-1: plain Up/Down move focus AND collapse selection to just the focused
+    row (single-select tracks focus)."""
+    async def body(scr):
+        ids = [r["id4"] for r in scr.list_records()]
+        scr.sel = ("L", 0)
+        scr._wt_track_focus()             # seed: focus follows to row 0
+        assert scr.wt_sel == {ids[0]}
+        scr.handle_key("down")
+        assert scr.sel == ("L", 1)
+        assert scr.wt_sel == {ids[1]}     # collapsed to the new focus
+        scr.handle_key("down")
+        assert scr.wt_sel == {ids[2]}
+        scr.handle_key("up")
+        assert scr.wt_sel == {ids[1]}
+
+    _wt_scr(body)
+
+
+def test_arrow_out_of_list_clears_selection():
+    """P3-1: when a plain arrow moves focus off the list, the selection follows
+    it to nothing."""
+    async def body(scr):
+        scr.sel = ("L", 0)
+        scr._wt_track_focus()
+        assert scr.wt_sel
+        scr.handle_key("up")              # ("L",0) -> ("BTN",0), leaves the list
+        assert scr.sel[0] != "L"
+        assert not scr.wt_sel
+
+    _wt_scr(body)
+
+
+def test_shift_arrow_extends_range_from_anchor():
+    """P3-2: Shift+Down/Up extend a contiguous range from the anchor row set when
+    the gesture began."""
+    async def body(scr):
+        ids = [r["id4"] for r in scr.list_records()]
+        assert len(ids) >= 4
+        scr.sel = ("L", 1)                # anchor seeds here on first shift move
+        scr.handle_key("shift+down")
+        assert scr.sel == ("L", 2)
+        assert scr.wt_sel == {ids[1], ids[2]}
+        scr.handle_key("shift+down")
+        assert scr.wt_sel == {ids[1], ids[2], ids[3]}
+        scr.handle_key("shift+up")        # shrink back toward the anchor
+        assert scr.sel == ("L", 2)
+        assert scr.wt_sel == {ids[1], ids[2]}
+
+    _wt_scr(body)
+
+
+def test_shift_arrow_clamps_inside_list():
+    """P3-2: a range gesture never steps focus out of the list."""
+    async def body(scr):
+        n = len(scr.list_records())
+        scr.sel = ("L", n - 1)
+        scr.handle_key("shift+down")      # already at the bottom
+        assert scr.sel == ("L", n - 1)
+
+    _wt_scr(body)
+
+
+def test_space_is_additive_and_reseats_anchor():
+    """P3-3: Space toggles the focused row independently (does not collapse the
+    rest) and re-seats the range anchor there, so a following Shift+arrow
+    extends the contiguous range from *that* row (range-replace, dropping the
+    earlier non-contiguous add -- the native list model)."""
+    async def body(scr):
+        ids = [r["id4"] for r in scr.list_records()]
+        scr.sel = ("L", 0)
+        scr.handle_key("space")           # additive select row 0
+        scr.sel = ("L", 2)
+        scr.handle_key("space")           # additive select row 2 (row 0 kept)
+        assert scr.wt_sel == {ids[0], ids[2]}
+        assert scr.wt_anchor == 2         # Space re-seated the anchor
+        scr.handle_key("shift+down")      # extend the range from row 2
+        assert scr.sel == ("L", 3)
+        assert scr.wt_sel == {ids[2], ids[3]}
+
+    _wt_scr(body)
+
+
+def test_ctrl_arrow_moves_focus_only():
+    """P3-4: Ctrl+Up/Down move focus without disturbing the selection or the
+    range anchor."""
+    async def body(scr):
+        ids = [r["id4"] for r in scr.list_records()]
+        scr.sel = ("L", 0)
+        scr.handle_key("space")           # build a selection at row 0
+        scr.handle_key("ctrl+down")       # move focus only
+        assert scr.sel == ("L", 1)
+        assert scr.wt_sel == {ids[0]}     # selection untouched
+        scr.handle_key("ctrl+down")
+        assert scr.sel == ("L", 2)
+        assert scr.wt_sel == {ids[0]}
+
+    _wt_scr(body)
+
+
+def test_escape_collapses_selection_before_quit():
+    """P3-5: Esc with >1 selected collapses to the focused row and does NOT open
+    the quit-confirm; a second Esc (nothing to collapse) reaches it (#1429)."""
+    async def body(scr):
+        ids = [r["id4"] for r in scr.list_records()]
+        scr.sel = ("L", 1)
+        scr.handle_key("shift+down")
+        scr.handle_key("shift+down")      # rows 1..3 selected
+        assert len(scr.wt_sel) == 3
+        scr.handle_key("escape")          # collapse, not quit
+        assert scr.quit_confirm is None
+        assert scr.wt_sel == {ids[scr.sel[1]]}
+        scr.handle_key("escape")          # nothing left to collapse -> quit prompt
+        assert scr.quit_confirm is not None
+
+    _wt_scr(body)
+
+
+def test_escape_outside_list_clears_to_nothing():
+    """P3-5: with focus outside the list, Esc collapses a built-up selection to
+    nothing (still not a quit)."""
+    async def body(scr):
+        scr.sel = ("L", 1)
+        scr.handle_key("shift+down")
+        scr.handle_key("shift+down")
+        assert len(scr.wt_sel) == 3
+        scr.sel = ("BTN", 0)              # tabbed away; selection persists
+        scr.handle_key("escape")
+        assert scr.quit_confirm is None
+        assert not scr.wt_sel
+
+    _wt_scr(body)
+
+
+def test_tab_preserves_selection_and_remembers_focus():
+    """P3-6: Tab out of and back into the list keeps the selection and restores
+    the last-focused row."""
+    async def body(scr):
+        ids = [r["id4"] for r in scr.list_records()]
+        scr.sel = ("L", 2)
+        scr.handle_key("space")           # select row 2, focus row 2
+        # Tab out to another region, then keep tabbing back around to the list.
+        seen = set()
+        scr.handle_key("tab")
+        while scr.sel[0] != "L":
+            key = tuple(scr.sel)
+            assert key not in seen, "Tab cycle did not return to the list"
+            seen.add(key)
+            scr.handle_key("tab")
+        assert scr.sel == ("L", 2)        # focus restored
+        assert scr.wt_sel == {ids[2]}     # selection preserved
+
+    _wt_scr(body)
+
+
+def test_selection_survives_reload_and_focus_rehomes_by_index():
+    """P3-7: after an operation reloads the list, surviving rows stay selected, a
+    deleted row drops from the selection, and focus stays at the equivalent
+    index (clamped)."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            ids = [r["id4"] for r in recs]
+            assert len(ids) >= 3
+            # Select the first three rows; focus the last of them.
+            scr.wt_sel.replace(set(ids[:3]))
+            scr.sel = ("L", 2)
+            # Simulate the operation deleting rows[0] (e.g. a Clean removed it):
+            # the reloaded source no longer emits that worktree.
+            gone = recs[0]["raw"]["id"]
+            base = src.load
+            src.load = lambda: [r for r in base() if r["raw"]["id"] != gone]
+            scr._refresh_after_maint({"recs": [{"machine": "lambda-core",
+                                                "env": "Win"}]})
+            survivors = {r["id4"] for r in scr.list_records()}
+            assert ids[0] not in survivors               # deleted row is gone
+            assert scr.wt_sel == {ids[1], ids[2]}         # survivors stay selected
+            assert ids[0] not in scr.wt_sel               # dropped from selection
+            assert scr.sel[0] == "L"                      # focus stayed in the list
+            assert scr.sel[1] < len(scr.list_records())   # and at a valid index
+
+    asyncio.run(run())
+
+
+def test_reconcile_wt_sel_noop_on_empty_reload():
+    """P3-7: while a live reload is momentarily empty, reconcile is a no-op so a
+    transient empty frame never clobbers a built-up selection."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            ids = [r["id4"] for r in scr.list_records()]
+            scr.wt_sel.replace(set(ids[:2]))
+            scr.data = []                     # nothing loaded yet
+            scr._reconcile_wt_sel()
+            assert scr.wt_sel == set(ids[:2])  # preserved, not cleared
+
+    asyncio.run(run())
+
+
+def test_live_reconcile_deferred_until_reload_settles():
+    """P3-7: in live mode the post-op reconcile waits for the touched machine to
+    finish reloading -- a 'loading' state leaves the selection untouched, and it
+    only drops the deleted row once the machine reports 'ready'."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            ids = [r["id4"] for r in recs]
+            scr.wt_sel.replace(set(ids[:3]))
+            # Fake a live loader whose reload is still in flight.
+            state_holder = {"s": "loading"}
+            scr.loader = types.SimpleNamespace(
+                state=lambda m, e: state_holder["s"])
+            scr._wt_reconcile_after = {("lambda-core", "Win")}
+
+            # Still loading -> reconcile is deferred, selection intact.
+            scr._process_pending_wt_reconcile()
+            assert scr._wt_reconcile_after is not None
+            assert scr.wt_sel == set(ids[:3])
+
+            # The reload lands with recs[0] removed and the machine ready.
+            gone = recs[0]["raw"]["id"]
+            scr.data = [r for r in scr.data if (r.get("raw") or {}).get("id") != gone]
+            state_holder["s"] = "ready"
+            scr._process_pending_wt_reconcile()
+            assert scr._wt_reconcile_after is None
+            assert ids[0] not in scr.wt_sel               # deleted row dropped
+            assert scr.wt_sel == {ids[1], ids[2]}         # survivors kept
+
+    asyncio.run(run())
+
+
+def test_machine_rotate_scopes_selection_to_visible_tab():
+    """#2258 P3 (rubber-duck): rotating the machine tab drops selections for
+    rows not visible on the new tab, so the checkbox column and the Enter bulk
+    menu never act on rows the operator can't see."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+
+    def raw(mid, code):
+        return {"id": f"{mid}-{code}", "title": code, "status": "active",
+                "started_at": "2026-06-27T17:00:00", "cleanup_bucket": "clean"}
+
+    src = types.SimpleNamespace()
+    src.LOCAL = ("lambda-core", "Win")
+    src.LOCAL_LABEL = "lambda-core · win"
+    src.machines = lambda: [
+        ("lambda-core Win", "lambda-core", "Win", True),
+        ("borealis Win", "borealis", "Win", True),
+    ]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: (
+        [derive.norm(raw("lambda-core-win", "aa00"), "lambda-core", "Win")]
+        + [derive.norm(raw("borealis-win", "bb00"), "borealis", "Win")]
+    )
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.t0 = 0                     # all machine tabs ready
+            scr.machine_idx = 0            # start on All -> both machines visible
+            await pilot.pause()
+            ids = {r["id4"] for r in scr.list_records()}
+            assert len(ids) == 2
+            scr.wt_sel.replace(ids)        # select rows from both machines
+            # Rotate All -> lambda-core Win (index 1); the borealis row is no
+            # longer visible, so its selection drops.
+            scr._rotate_machine(1)
+            visible = {r["id4"] for r in scr.list_records()}
+            assert len(visible) == 1
+            assert scr.wt_sel == visible
+            assert scr.wt_anchor is None   # anchor reset on scope change
+
+    asyncio.run(run())
+
+
 def test_configuration_reachable_via_tab(monkeypatch):
     """The ⚙ Configuration entry is in the Tab cycle (region_heads) and Tab from
     the View pivot lands on it (operator feedback: couldn't reach it)."""
