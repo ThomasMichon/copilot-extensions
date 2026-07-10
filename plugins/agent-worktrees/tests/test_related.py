@@ -333,7 +333,9 @@ def test_resolve_local_worktree_adopted(tmp_path: Path):
     assert r.locus_kind == "local"
     assert r.available_here is True
     assert r.editing_model == "worktree"
-    assert any("ce --new" in s for s in r.steps)
+    # Agents must be pointed at the programmatic create, never interactive --new.
+    assert any("ce create --json" in s for s in r.steps)
+    assert any("Never `ce --new`" in s for s in r.steps)
 
 
 def test_resolve_worktree_base_repo_edits_anchor(tmp_path: Path):

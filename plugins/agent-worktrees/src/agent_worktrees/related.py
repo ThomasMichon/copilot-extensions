@@ -713,10 +713,16 @@ def build_resolution(
                     f"({kindword}: one flow at a time; no `--new` worktree)."]
         if cls == "worktree":
             if adopted:
-                return [f"Create an isolated worktree: `{name} --new`, then "
-                        f"`{name} push-changes` / `{name} finalize`."]
+                return [f"Create an isolated worktree **programmatically** "
+                        f"(no mux, no session): `{name} create --json` -- start "
+                        f"Copilot in the returned path (or `cd` in and edit in "
+                        f"your current session), then `{name} push-changes` / "
+                        f"`{name} finalize`. **Never `{name} --new`** from a tool "
+                        f"call: it launches an interactive tmux/psmux session for "
+                        f"a human at a terminal."]
             return [f"Adopt first: `agent-worktrees register {name}`, then "
-                    f"`{name} --new`."]
+                    f"`{name} create --json` (never `{name} --new` -- that is the "
+                    f"interactive, human-only launch)."]
         return [f"Resolve the checkout with `agent-worktrees repos find {name}`."]
 
     if kind == "codespace":
