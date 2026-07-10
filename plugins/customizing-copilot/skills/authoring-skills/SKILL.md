@@ -133,6 +133,28 @@ Use **custom instructions** for simple, always-on guidance (coding standards,
 repo conventions). Use **skills** for detailed, task-specific instructions
 Copilot should load only when relevant.
 
+### Action-sequence skills vs ambient-guidance skills
+
+A skill's guidance applies **most strongly during the turn it is invoked**, and
+fades on later turns. Author with that grain, not against it:
+
+- **Action-sequence skills** — a procedure the agent runs *now* (setup steps, a
+  deploy flow, a review pass). These fit the model perfectly: the sequence is
+  consumed in-turn. Write them as concrete, ordered steps.
+- **Ambient-guidance skills** — standing rules meant to hold for the *rest of
+  the session* (a voice/persona, a style bar, a safety discipline). A one-shot
+  skill body decays after its turn, so the guidance quietly stops applying.
+  Instead, keep the durable guidance in an **always-on home** (root `AGENTS.md` /
+  custom instructions, or a linked doc) and have the skill **point at it and
+  activate it** — e.g. *"Load and enforce the guidance at `<link>` for the
+  remainder of the session; if it is already in context, keep applying it."* The
+  skill's job becomes *loading + activating* ambient guidance, not *being* a
+  transient copy of it.
+
+This mirrors "Skills vs custom instructions" above: always-on guidance belongs in
+custom instructions; a skill that must reach ambient guidance should **install or
+enforce** it (point at the durable home) rather than restate it one-shot.
+
 ## Custom Instructions
 
 Always-on context injected into every prompt.

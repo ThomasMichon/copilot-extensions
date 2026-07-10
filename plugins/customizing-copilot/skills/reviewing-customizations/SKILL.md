@@ -52,6 +52,12 @@ harness provides. Ask it for **bugs and design flaws, not style**:
 
 - ambiguous, overlapping, or colliding **trigger phrases** across skills;
 - **duplicate or redundant** skills that should merge (context-budget waste);
+- **ambient-guidance skills that restate standing rules one-shot** instead of
+  pointing at an always-on home — a skill whose body *is* a persona/style/safety
+  rule meant to hold for the rest of the session decays after its turn; it should
+  **load and enforce** the durable guidance (`AGENTS.md` / a linked doc) rather
+  than embed a transient copy (see `authoring-skills` § Action-sequence vs
+  ambient-guidance skills);
 - **contradictory rules** between `AGENTS.md`, skills, and hooks;
 - sub-agents missing the **anti-recursion / MCP-readiness** guard;
 - **footguns** — destructive commands without confirmation, hardcoded paths,
