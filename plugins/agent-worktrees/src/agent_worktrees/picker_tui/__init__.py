@@ -33,13 +33,18 @@ def new_picker_enabled(config=None) -> bool:
     return bool(getattr(config, "new_picker", False))
 
 
-def run_tui_picker(source=None, live=False):
+def run_tui_picker(source=None, live=False, mock_mode=None):
     """Run the TUI picker and return its result (a launch decision or None).
 
     With no source: ``live=True`` selects the multi-machine SSH source
     (``data_ssh``, async per-machine loader); otherwise the local-only source
     (``data_local``). Returns ``app.result``, which the caller maps onto a
     resume/create action.
+
+    ``mock_mode`` (default ``None`` -> resolved from the environment) is the
+    explicit dev sandbox: real data is shown but mutating actions are simulated
+    (no side effects). It never turns on implicitly -- see
+    ``engine._resolve_mock_mode``.
 
     Launch-channel handling: this runs inside ``resolve``, whose **stdout
     (fd 1) is captured by the launcher for the JSON plan**. Textual's driver
@@ -71,7 +76,7 @@ def run_tui_picker(source=None, live=False):
     try:
         if redirect:
             sys.__stdout__ = sys.stderr
-        app = PickerApp(source, live=live)
+        app = PickerApp(source, live=live, mock_mode=mock_mode)
         app.run()
     finally:
         if redirect:
