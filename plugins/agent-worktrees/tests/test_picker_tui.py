@@ -1675,6 +1675,59 @@ def test_run_tui_picker_no_redirect_in_real_terminal(monkeypatch):
     assert seen["during"] is tty_out   # unchanged -- Textual uses stdout
 
 
+def test_run_tui_picker_writes_crash_log(monkeypatch, tmp_path):
+    """An unhandled exception in the picker is persisted to a crash log (the
+    launcher never captures the picker's stderr, so it would otherwise be lost)
+    and re-raised so the terminal + exit code are unchanged."""
+    import pytest
+
+    from agent_worktrees import config as cfg
+    import agent_worktrees.picker_tui as pkg
+    from agent_worktrees.picker_tui import engine as eng
+
+    monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path)
+
+    class Boom(RuntimeError):
+        pass
+
+    class _FakeApp:
+        result = None
+
+        def __init__(self, source, live=False, mock_mode=None):
+            pass
+
+        def run(self):
+            raise Boom("kaboom during shift+select")
+
+    monkeypatch.setattr(eng, "PickerApp", _FakeApp)
+
+    with pytest.raises(Boom):
+        pkg.run_tui_picker(source=object(), live=True)
+
+    logs = list((tmp_path / "logs").glob("picker-crash-*.log"))
+    assert len(logs) == 1
+    text = logs[0].read_text(encoding="utf-8")
+    assert "kaboom during shift+select" in text
+    assert "Traceback (most recent call last)" in text
+    assert "live=True" in text
+
+
+def test_picker_crash_log_prunes_to_newest(monkeypatch, tmp_path):
+    """The crash-log writer keeps only the newest 25 logs so they never grow
+    unbounded."""
+    import agent_worktrees.picker_tui as pkg
+
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    # Seed 30 stale crash logs with sortable names.
+    for i in range(30):
+        (logs_dir / f"picker-crash-2026010{i // 10}-0000{i % 10}0-1.log").write_text(
+            "old", encoding="utf-8")
+    pkg._prune_crash_logs(logs_dir, keep=25)
+    remaining = list(logs_dir.glob("picker-crash-*.log"))
+    assert len(remaining) == 25
+
+
 def test_bucket_sections_key_off_state():
     """Active = in-session (ACTIVE); Completed = FINAL (any age); Recent = rest."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
