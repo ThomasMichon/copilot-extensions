@@ -19,6 +19,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from agent_logger._build_info import __version__
+
 
 def post_notify(
     url: str,
@@ -41,13 +43,19 @@ def post_notify(
             target,
             data=body,
             method="POST",
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                # An explicit UA is required: a default ``Python-urllib/*`` UA is
+                # 403'd by common bot/WAF filters (e.g. Cloudflare Browser
+                # Integrity Check), which silently breaks the notify.
+                "User-Agent": f"agent-logger/{__version__}",
+            },
         )
         if bearer_token_file and Path(bearer_token_file).is_file():
             token = Path(bearer_token_file).read_text(encoding="utf-8").strip()
             if token:
                 req.add_header("Authorization", f"Bearer {token}")
-        urllib.request.urlopen(req, timeout=timeout)  # noqa: S310 (configured URL)
+        urllib.request.urlopen(req, timeout=timeout)
         return True
     except (urllib.error.URLError, OSError, ValueError):
         return False
