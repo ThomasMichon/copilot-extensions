@@ -92,6 +92,23 @@ duplicate is exactly what drifts. All binstubs live in `~/.local/bin/`.
 We own this repo -- branch directly, no fork or PR required. Use
 descriptive branch names.
 
+### Coordinating Across Control Repos
+
+This repo is public and may be driven from **multiple downstream/control repos**
+at once. Two rules keep them from colliding and keep private context off the
+public face:
+
+- **Claim work with a GitHub issue** before starting a stretch -- search open
+  issues first, then take or comment on one. It's the shared token other drivers
+  and outside contributors can see.
+- **Keep every public artifact generic.** Commits, issues, and docs are
+  world-readable -- write them self-contained, with no downstream-private names,
+  systems, or context. The proprietary "why" stays in the driver's own private
+  planning, which links to the public issue.
+
+Pushes to `main` are single-writer: rebase before pushing and re-check your
+version bump in case a concurrent push already consumed it.
+
 ### Version Bump -- Required Before Every Push
 
 **Every push to `main` must include a version bump** for each plugin you

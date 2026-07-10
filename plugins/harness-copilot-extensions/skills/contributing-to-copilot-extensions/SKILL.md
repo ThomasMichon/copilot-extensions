@@ -102,6 +102,57 @@ installer. Know which kind you are changing.
 - **Don't copy source into a runtime dir** — it bypasses versioning and leaves
   other machines stale.
 
+## Coordinating concurrent drivers (public repo)
+
+`copilot-extensions` is **public** and may be driven from **more than one
+private control repo at once** (for example a personal control repo and a work
+control repo). Both push to the same `main`. Two disciplines keep them from
+colliding — and keep private context off the public face.
+
+### Claim work with a public GitHub issue
+
+Before starting a stretch of work, **file (or find) a GitHub issue on
+`ThomasMichon/copilot-extensions`** and note that you're taking it. The issue is
+the shared, neutral coordination token every driver — and any outside
+contributor — can see; it's how you avoid two agents building the same thing or
+racing the same files.
+
+- Search open issues first; if one already covers it, comment/assign rather than
+  open a duplicate.
+- Write it in **generic-tool language** (see Sanitization below).
+- Link the issue from your *private* effort/plan — the public issue coordinates,
+  the private effort carries the "why".
+
+### Serial, single-writer pushes
+
+Owners push directly to `main`, so treat `main` as a single-writer lane:
+
+- Land one coherent change, then the next — avoid parallel in-flight pushes from
+  different worktrees or drivers.
+- **Rebase before push and re-check the version bump.** A concurrent push may
+  have already consumed your `-devN`; if the marketplace version moved under you,
+  bump again on top of theirs (never reuse a version another push took).
+- If you pull and find the other driver touched the same plugin, reconcile
+  before pushing rather than force-landing.
+
+### Sanitization — keep private context off the public face
+
+Everything that lands here is **world-readable**: commits, issues, code
+comments, docs, `AGENTS.md`. Never put downstream-private material in them.
+
+- **No** employer/facility names, internal service or host names, topology
+  details, persona/role-play machinery, private URLs, or the specific downstream
+  reason a change is wanted.
+- **Do** describe changes in self-contained, general-purpose terms — as if for a
+  stranger who has only this repo ("add a `--json` flag to `list`", *not* "so the
+  internal dashboard can parse it").
+- The proprietary "why" lives in the **driver's private effort/plan**, which
+  *links to* the public issue. The public artifact stays generic; the private
+  artifact stays private.
+
+When in doubt, write the issue/commit as if you were an unaffiliated open-source
+contributor — because to a reader, you are.
+
 ## Reference
 
 `CONTRIBUTING.md` (versioning + release), `AGENTS.md` (dev guide),
