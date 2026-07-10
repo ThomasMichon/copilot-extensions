@@ -168,13 +168,33 @@ function agentDispatchAvailable() {
   }
 }
 
+// Run a facility CLI binary cross-platform, returning stdout (throws on error).
+// On Windows the `agent-worktrees` / `agent-dispatch` binstubs are `.cmd` files,
+// which Node's `execFileSync` CANNOT spawn directly (CreateProcess won't execute
+// a batch file without a shell -- it fails ENOENT). So on win32 we go through the
+// shell (`execSync`) with each arg quoted for cmd.exe; elsewhere `execFileSync`
+// is exact and injection-safe. This is why every agent-worktrees/agent-dispatch
+// call here MUST use runCli, not execFileSync (issue: live cutover + task-mode
+// silently fell back to file on Windows because execFileSync could not run .cmd).
+function quoteWinArg(s) {
+  s = String(s);
+  return /[\s"&|<>^()%!]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function runCli(bin, args, opts = {}) {
+  const { cwd, timeout = 15000 } = opts;
+  if (process.platform === "win32") {
+    const line = [bin, ...args].map(quoteWinArg).join(" ");
+    return execSync(line, { cwd, timeout, encoding: "utf-8" });
+  }
+  return execFileSync(bin, args, { cwd, timeout, encoding: "utf-8" });
+}
+
 // Resolve an agent-worktrees identity value for the current CWD (null on miss).
 function agentWorktreesGet(key, cwd) {
   try {
-    const out = execFileSync("agent-worktrees", ["get", key], {
+    const out = runCli("agent-worktrees", ["get", key], {
       cwd,
       timeout: 5000,
-      encoding: "utf-8",
     }).trim();
     return out || null;
   } catch {
@@ -202,10 +222,9 @@ function runHandoffCutover(cwd, seed) {
   const ownPane = process.env.TMUX_PANE || process.env.PSMUX_PANE || "";
   if (ownPane) argv.push("--old-pane", ownPane);
   try {
-    const out = execFileSync("agent-worktrees", argv, {
+    const out = runCli("agent-worktrees", argv, {
       cwd,
       timeout: 20000,
-      encoding: "utf-8",
     });
     const result = JSON.parse(out);
     return result?.ok ? result : null;
@@ -217,10 +236,9 @@ function runHandoffCutover(cwd, seed) {
 // Retire a specific pane (double-Ctrl-C -> Copilot's clean quit). Best-effort.
 function retireCutoverPane(cwd, pane) {
   try {
-    execFileSync("agent-worktrees", ["handoff-cutover", "--retire-pane", pane], {
+    runCli("agent-worktrees", ["handoff-cutover", "--retire-pane", pane], {
       cwd,
       timeout: 20000,
-      encoding: "utf-8",
     });
     return true;
   } catch {
@@ -253,10 +271,9 @@ function dispatchHandoff(promptText, sid, cwd, title) {
       "--affinity", `worktree=${worktree}`,
     ];
     if (machine) argv.push("--target-machine", machine);
-    const out = execFileSync("agent-dispatch", argv, {
+    const out = runCli("agent-dispatch", argv, {
       cwd,
       timeout: 15000,
-      encoding: "utf-8",
     });
     const task = JSON.parse(out);
     return task?.id || null;
@@ -270,10 +287,9 @@ function dispatchHandoff(promptText, sid, cwd, title) {
 // Run an `agent-dispatch` subcommand, returning parsed JSON (or null on error).
 function agentDispatchJson(argv, cwd) {
   try {
-    const out = execFileSync("agent-dispatch", argv, {
+    const out = runCli("agent-dispatch", argv, {
       cwd,
       timeout: 15000,
-      encoding: "utf-8",
     });
     return JSON.parse(out);
   } catch {
@@ -311,10 +327,9 @@ function consumeHandoffTask(cwd, task, sid) {
   );
   let payload = "";
   try {
-    payload = execFileSync("agent-dispatch", ["payload", id, "--raw"], {
+    payload = runCli("agent-dispatch", ["payload", id, "--raw"], {
       cwd,
       timeout: 15000,
-      encoding: "utf-8",
     });
   } catch {
     payload = "";
