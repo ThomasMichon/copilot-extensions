@@ -98,7 +98,8 @@ So visions are actually used, add to the repo's agent instructions
   repo you push **directly** — no PR, no pre-merge review — land the
   **vision-update PR first**, before the direct push that realizes it; the
   reviewed intent must clear review **ahead of** the unreviewed push. Only
-  **completion markers** (journal "done" entries, `Status:` flips, "shipped in
+  **completion markers** (journal "done" entries, `Status:` flips, checklist
+  ticks, "shipped in
   `<commit>`") are recorded **after** the cross-repo work — everything stating
   intent belongs in the earlier PR.* A repo that already carries equivalent
   standing guidance need only confirm it covers this ordering (the
