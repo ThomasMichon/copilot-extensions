@@ -247,10 +247,12 @@ def _cmd_start(args: argparse.Namespace) -> None:
         config_dir,
         load_config,
         load_or_create_auth_token,
+        migrate_config,
         write_default_config,
     )
 
     cfg = load_config()
+    cfg = migrate_config(cfg)  # one-time: adopt Session-Host-on default (#177)
     write_default_config(cfg)
     token = load_or_create_auth_token()
 
