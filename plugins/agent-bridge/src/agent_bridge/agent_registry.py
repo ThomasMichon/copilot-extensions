@@ -117,6 +117,9 @@ class AgentConfig:
     requires_admin: bool = False  # opt-in: expose an admin:<name> elevated twin
     provider: str | None = None  # provider name (e.g. "codespaces")
     spawn_command: list[str] | None = None  # raw command for provider agents
+    codespace: dict | None = None  # structured CS metadata (#177) for the
+    #                                CodeSpaceSpawner path (name/repo/acp_command/
+    #                                workspace_folder); avoids parsing spawn_command
 
 
 @dataclass
@@ -1416,6 +1419,7 @@ class AgentResolver:
             return SpawnTarget(
                 type="command",
                 spawn_command=config.spawn_command,
+                codespace=config.codespace,
                 env=config.env,
             )
 

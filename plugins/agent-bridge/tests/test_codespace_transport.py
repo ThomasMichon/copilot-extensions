@@ -142,3 +142,18 @@ def test_parse_codespace_target_rejects_non_codespace():
     assert parse_codespace_target(
         ["python", "-m", "agent_codespaces", "ssh", "cs-x", "--remote-cmd", "ls"]
     ) is None
+
+
+def test_spawn_target_codespace_metadata_roundtrips():
+    """SpawnTarget carries the structured codespace block through DB JSON (#177)."""
+    from agent_bridge.transport import SpawnTarget
+
+    meta = {"name": "cs-foo", "repo": "org/repo",
+            "acp_command": "cd /workspaces/x && copilot --acp --stdio",
+            "workspace_folder": "/workspaces/x"}
+    t = SpawnTarget(type="command", spawn_command=["x"], codespace=meta)
+    restored = SpawnTarget.from_json(t.to_json())
+    assert restored.codespace == meta
+    # legacy JSON without the field deserializes to None (back-compat)
+    legacy = SpawnTarget.from_json('{"type": "command", "spawn_command": ["x"]}')
+    assert legacy.codespace is None
