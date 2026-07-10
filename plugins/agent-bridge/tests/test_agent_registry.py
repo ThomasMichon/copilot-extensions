@@ -1525,3 +1525,109 @@ class TestSenderRepoFallback:
             r = AgentResolver(self.agents, self.machines)
             target = await r.resolve_async("SPO.Core", sender_repo="whatever")
         assert target.project == "SPO.Core"
+
+
+class TestResolveRepoRemote:
+    """#174: resolve a logical repo name -> git remote from the repos registry."""
+
+    def _write(self, tmp_path, monkeypatch, body):
+        p = tmp_path / "repos.yaml"
+        p.write_text(body, encoding="utf-8")
+        monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(p))
+
+    def test_reads_remote_from_registry(self, tmp_path, monkeypatch):
+        from agent_bridge.agent_registry import resolve_repo_remote
+        self._write(
+            tmp_path, monkeypatch,
+            "repos:\n  dev.tmichon:\n    remote: https://x/dev.tmichon\n",
+        )
+        assert resolve_repo_remote("dev.tmichon") == "https://x/dev.tmichon"
+
+    def test_basename_fallback_is_case_insensitive(self, tmp_path, monkeypatch):
+        from agent_bridge.agent_registry import resolve_repo_remote
+        self._write(
+            tmp_path, monkeypatch,
+            "repos:\n  onedrive/Dev.Tmichon:\n    remote: https://x/d\n",
+        )
+        assert resolve_repo_remote("dev.tmichon") == "https://x/d"
+
+    def test_unknown_repo_is_none(self, tmp_path, monkeypatch):
+        from agent_bridge.agent_registry import resolve_repo_remote
+        self._write(tmp_path, monkeypatch, "repos:\n  other:\n    remote: https://x\n")
+        assert resolve_repo_remote("nope") is None
+
+    def test_missing_remote_field_is_none(self, tmp_path, monkeypatch):
+        from agent_bridge.agent_registry import resolve_repo_remote
+        self._write(tmp_path, monkeypatch, "repos:\n  x:\n    class: worktree\n")
+        assert resolve_repo_remote("x") is None
+
+    def test_missing_registry_is_none(self, tmp_path, monkeypatch):
+        from agent_bridge.agent_registry import resolve_repo_remote
+        monkeypatch.setenv(
+            "AGENT_WORKTREES_REPOS_YAML", str(tmp_path / "absent.yaml")
+        )
+        assert resolve_repo_remote("x") is None
+
+
+class _RepoRemoteAwareResolver:
+    """Codespace-like resolver that records repo + repo_remote it receives."""
+
+    def __init__(self, prefix_val="cs"):
+        self._prefix = prefix_val
+        self.seen: dict = {}
+
+    @property
+    def prefix(self) -> str:
+        return self._prefix
+
+    async def resolve(self, name, *, extra_plugins=(), repo=None, repo_remote=None):
+        self.seen = {"name": name, "repo": repo, "repo_remote": repo_remote}
+        return SpawnTarget(type="command", spawn_command=["echo", name])
+
+    async def list(self):
+        return []
+
+    async def ensure_ready(self, name):
+        return None
+
+
+class _RepoOnlyResolver(_RepoRemoteAwareResolver):
+    """Older provider: accepts repo but NOT repo_remote."""
+
+    async def resolve(self, name, *, extra_plugins=(), repo=None):
+        self.seen = {"name": name, "repo": repo}
+        return SpawnTarget(type="command", spawn_command=["echo", name])
+
+
+class TestRepoRemoteThreading:
+    """#174: agent-bridge threads repo_remote into <repo>@<venue> dispatch."""
+
+    @pytest.mark.asyncio
+    async def test_repo_remote_forwarded_to_resolver(self, monkeypatch):
+        monkeypatch.setattr(
+            "agent_bridge.agent_registry.resolve_repo_remote",
+            lambda repo: (
+                "https://x/dev.tmichon" if repo == "dev.tmichon" else None
+            ),
+        )
+        r = AgentResolver({}, {})
+        pr = _RepoRemoteAwareResolver("cs")
+        r.register_namespace_resolver(pr)
+        await r.resolve_async("dev.tmichon@cs:mycs")
+        assert pr.seen["repo"] == "dev.tmichon"
+        assert pr.seen["repo_remote"] == "https://x/dev.tmichon"
+        assert pr.seen["name"] == "mycs"
+
+    @pytest.mark.asyncio
+    async def test_repo_only_resolver_still_works(self, monkeypatch):
+        # repo_remote absent from the resolver signature -> silently dropped
+        # (back-compat), while repo is still honored (no raise).
+        monkeypatch.setattr(
+            "agent_bridge.agent_registry.resolve_repo_remote",
+            lambda repo: "https://x/dev.tmichon",
+        )
+        r = AgentResolver({}, {})
+        pr = _RepoOnlyResolver("cs2")
+        r.register_namespace_resolver(pr)
+        await r.resolve_async("dev.tmichon@cs2:mycs")
+        assert pr.seen == {"name": "mycs", "repo": "dev.tmichon"}

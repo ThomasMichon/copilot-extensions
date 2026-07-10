@@ -305,3 +305,95 @@ class TestPerRepoWorkspaceFolder:
         assert config.effective_acp_command_for("org/odsp-web-codespaces") == (
             "cd /workspaces/odsp-web && copilot --acp --stdio --allow-all-tools"
         )
+
+
+class TestCrossRepoRequestFolder:
+    """#174: <repo>@<codespace> repo-layout convention.
+
+    A requested repo lands at ``/workspaces/<basename>`` (clone-if-missing),
+    except the CodeSpace's own product (already checked out) and the account
+    dotfiles repo (owned by the universal bootstrap).
+    """
+
+    _COPILOT = "copilot --acp --stdio --allow-all-tools"
+    _CS = "odsp-microsoft/odsp-web-codespaces"
+
+    def test_own_product_is_prepopulated_no_clone(self):
+        config = CodespacesConfig()
+        folder, prepopulated = config.workspace_folder_for_request(
+            self._CS, "odsp-web"
+        )
+        assert folder == "/workspaces/odsp-web"
+        assert prepopulated is True
+
+    def test_own_product_command_has_no_clone(self):
+        config = CodespacesConfig()
+        cmd = config.effective_acp_command_for(
+            self._CS, requested_repo="odsp-web",
+            repo_remote="https://github.com/odsp-microsoft/odsp-web",
+        )
+        assert cmd == f"cd /workspaces/odsp-web && {self._COPILOT}"
+        assert "git clone" not in cmd
+
+    def test_dotfiles_maps_to_persisted_dir(self):
+        config = CodespacesConfig(dotfiles_repo="tmichon_microsoft/dotfiles")
+        folder, prepopulated = config.workspace_folder_for_request(
+            self._CS, "dotfiles"
+        )
+        assert folder == "/workspaces/.codespaces/.persistedshare/dotfiles"
+        assert prepopulated is True
+
+    def test_dotfiles_command_has_no_clone(self):
+        config = CodespacesConfig(dotfiles_repo="tmichon_microsoft/dotfiles")
+        cmd = config.effective_acp_command_for(
+            self._CS, requested_repo="tmichon_microsoft/dotfiles",
+            repo_remote="https://github.com/tmichon_microsoft/dotfiles",
+        )
+        assert cmd == (
+            "cd /workspaces/.codespaces/.persistedshare/dotfiles "
+            f"&& {self._COPILOT}"
+        )
+        assert "git clone" not in cmd
+
+    def test_other_repo_clone_if_missing(self):
+        config = CodespacesConfig()
+        remote = "https://onedrive.visualstudio.com/onedrive/_git/dev.tmichon"
+        folder, prepopulated = config.workspace_folder_for_request(
+            self._CS, "dev.tmichon"
+        )
+        assert folder == "/workspaces/dev.tmichon"
+        assert prepopulated is False
+        cmd = config.effective_acp_command_for(
+            self._CS, requested_repo="dev.tmichon", repo_remote=remote,
+        )
+        assert cmd == (
+            f"[ -d /workspaces/dev.tmichon/.git ] || "
+            f"git clone {remote} /workspaces/dev.tmichon; "
+            f"cd /workspaces/dev.tmichon && {self._COPILOT}"
+        )
+
+    def test_other_repo_owner_prefix_basenamed(self):
+        config = CodespacesConfig()
+        folder, prepopulated = config.workspace_folder_for_request(
+            self._CS, "onedrive/dev.tmichon"
+        )
+        assert folder == "/workspaces/dev.tmichon"
+        assert prepopulated is False
+
+    def test_other_repo_no_remote_falls_to_plain_cd(self):
+        """No known remote: cd only (fails loudly on the CodeSpace if absent)."""
+        config = CodespacesConfig()
+        cmd = config.effective_acp_command_for(
+            self._CS, requested_repo="dev.tmichon", repo_remote=None,
+        )
+        assert cmd == f"cd /workspaces/dev.tmichon && {self._COPILOT}"
+        assert "git clone" not in cmd
+
+    def test_bare_request_unchanged(self):
+        """requested_repo=None behaves exactly as the legacy bare path."""
+        config = CodespacesConfig()
+        from agent_codespaces.config import RepoConfig
+        config.repos[self._CS] = RepoConfig(workspace_repo="odsp-web")
+        assert config.effective_acp_command_for(self._CS) == (
+            f"cd /workspaces/odsp-web && {self._COPILOT}"
+        )

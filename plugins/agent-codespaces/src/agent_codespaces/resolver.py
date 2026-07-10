@@ -21,7 +21,11 @@ import logging
 from typing import TYPE_CHECKING
 
 from ._invoke import module_argv
-from .config import load_merged_config
+from .config import (
+    _norm_repo as _config_norm_repo,
+    _repo_matches_codespace as _config_repo_matches_codespace,
+    load_merged_config,
+)
 from .lifecycle import list_codespaces
 
 if TYPE_CHECKING:
@@ -90,22 +94,17 @@ def _friendly_aliases(cs) -> list[str]:
 
 
 def _norm_repo(value: str) -> str:
-    """Normalize a repo name for cross-repo matching.
+    """Deprecated alias -- see :func:`agent_codespaces.config._norm_repo`.
 
-    Strips any ``owner/`` prefix, lower-cases, and drops a trailing
-    ``-codespaces`` so a logical repo (``odsp-web``) matches its CodeSpaces
-    host repo (``odsp-microsoft/odsp-web-codespaces``).
+    Retained so ``agent_codespaces.resolver._norm_repo`` keeps resolving for
+    existing importers; delegates to the canonical implementation.
     """
-    s = value.strip().lower().split("/")[-1]
-    suffix = "-codespaces"
-    return s[: -len(suffix)] if s.endswith(suffix) else s
+    return _config_norm_repo(value)
 
 
 def _repo_matches_codespace(repo: str, cs_repository: str | None) -> bool:
-    """Whether ``repo`` addresses the CodeSpace's own hosted repository."""
-    if not cs_repository:
-        return False
-    return _norm_repo(repo) == _norm_repo(cs_repository)
+    """Deprecated alias -- see :func:`agent_codespaces.config._repo_matches_codespace`."""
+    return _config_repo_matches_codespace(repo, cs_repository)
 
 
 def _build_spawn_command(
@@ -156,7 +155,7 @@ class CodespaceResolver:
 
     async def resolve(
         self, name: str, *, extra_plugins: "list | None" = None,
-        repo: str | None = None,
+        repo: str | None = None, repo_remote: str | None = None,
     ) -> "SpawnTarget":
         """Resolve a codespace name to a SpawnTarget.
 
@@ -166,12 +165,18 @@ class CodespaceResolver:
         SSH connection (``gh codespace ssh --config`` triggers startup).
 
         ``repo`` (optional) is the caller-requested workspace repo for a
-        ``<repo>@<codespace>`` address. A CodeSpace hosts a single repository's
-        workspace, so a request for a *different* repo is rejected -- launching
-        an unrelated repo's checkout on a CodeSpace is not yet supported. A
-        request matching the CodeSpace's own repo (e.g. ``odsp-web`` on an
-        ``odsp-web-codespaces`` CodeSpace) is accepted and behaves as the bare
-        default.
+        ``<repo>@<codespace>`` address, with ``repo_remote`` its git remote URL
+        (resolved host-side from the repos registry). A CodeSpace hosts a single
+        product checkout plus the account dotfiles repo, but any repo ``<r>`` can
+        live at ``/workspaces/<basename(r)>`` by convention (#174):
+
+        - ``<repo>`` == the CodeSpace's own product (e.g. ``odsp-web`` on an
+          ``odsp-web-codespaces`` CodeSpace) -> its existing checkout, no clone.
+        - ``<repo>`` == the account dotfiles repo -> the persisted dotfiles dir,
+          no clone (the universal bootstrap owns it).
+        - any other ``<repo>`` -> ``/workspaces/<basename>``, **clone-if-missing**
+          via ``repo_remote`` over the credential relay the ``--stdio`` login
+          shell already set up (handles GitHub *and* ADO).
 
         ``extra_plugins`` are **related-repo** plugins agent-bridge decided for
         this dispatch (a list of objects with ``.source``). They are passed to
@@ -193,14 +198,6 @@ class CodespaceResolver:
                 f"Codespace '{name}' not found. Available: {connectable}"
             ) from None
 
-        if repo is not None and not _repo_matches_codespace(repo, cs.repository):
-            raise ValueError(
-                f"Codespace '{cs.name}' hosts '{cs.repository}'; cross-repo "
-                f"dispatch '{repo}@{name}' to a different repo's workspace on a "
-                "CodeSpace is not yet supported. Address the CodeSpace's own "
-                "repo (or the bare CodeSpace name)."
-            )
-
         _CONNECTABLE_STATES = {"Available", "Shutdown"}
         if cs.state not in _CONNECTABLE_STATES:
             raise ValueError(
@@ -218,18 +215,28 @@ class CodespaceResolver:
         config = load_merged_config()
         # Always spawn against the RAW codespace name (gh requires it), even if
         # the caller addressed it by friendly name. Resolve the launch command
-        # per CodeSpace *repository* so the agent lands in the right checkout
+        # per CodeSpace *repository* so a bare address lands in the right checkout
         # (e.g. odsp-web-codespaces -> /workspaces/odsp-web), not the global
-        # default workspace folder.
+        # default workspace folder. A ``<repo>@<codespace>`` request additionally
+        # threads ``requested_repo``/``repo_remote`` so a non-host repo lands at
+        # ``/workspaces/<basename>`` (clone-if-missing) by convention (#174).
         stage = [
             p.source for p in (extra_plugins or [])
             if getattr(p, "source", None)
         ]
+        acp_command = config.effective_acp_command_for(
+            cs.repository, requested_repo=repo, repo_remote=repo_remote,
+        )
         spawn_cmd = _build_spawn_command(
             cs.name,
-            config.effective_acp_command_for(cs.repository),
+            acp_command,
             stage_plugins=stage,
         )
+        if repo is not None:
+            log.info(
+                "codespace:%s -- cross-repo request repo=%s (remote=%s)",
+                cs.name, repo, repo_remote or "<none>",
+            )
         if stage:
             log.info(
                 "codespace:%s -- staging %d related-repo plugin(s): %s",
