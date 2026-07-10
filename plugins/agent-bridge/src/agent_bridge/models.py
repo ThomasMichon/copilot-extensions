@@ -336,12 +336,15 @@ class ServiceConfig(BaseModel):
         "primary's relay on the same host.",
     )
     session_host_enabled: bool = Field(
-        default=False,
-        description="EXPERIMENTAL (default off). When True, a LOCAL copilot child "
-        "is spawned inside a survivable Session Host process that outlives an "
-        "agent-bridge restart, so a frontend update does not kill or corrupt an "
-        "active session; the frontend reattaches over a loopback endpoint. See "
-        "the session_host package / effort agent-bridge-version-mux (#1759).",
+        default=True,
+        description="Default ON. A dispatched copilot child is spawned inside a "
+        "survivable Session Host process that outlives an agent-bridge restart, so "
+        "a frontend update/redeploy does not kill or corrupt an active session; the "
+        "frontend reattaches over a loopback endpoint (local) or a re-established "
+        "SSH -L forward (machine-mesh / CodeSpace). This is the durable-dispatch "
+        "default for the whole mesh (see the session_host package + the "
+        "codespace-dispatch-reliability effort, #145/#177). Set False to opt a "
+        "machine back onto the legacy front-owns-stdio path.",
     )
     session_host_stale_reap_seconds: int = Field(
         default=0,

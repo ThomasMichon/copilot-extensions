@@ -81,6 +81,41 @@ def save_config(cfg: ServiceConfig) -> Path:
     return cfg_path
 
 
+# One-time config migrations, each guarded by a marker file under
+# ``<config dir>/.migrations`` so it applies exactly once per machine even though
+# ``load_config`` runs on every daemon start. Keyed by a stable name; add new
+# migrations as new markers.
+_MIGRATION_DIR = ".migrations"
+
+
+def migrate_config(cfg: ServiceConfig) -> ServiceConfig:
+    """Apply one-time config migrations; persist + return the updated config.
+
+    **session_host_default_on:** Session Hosts are now the durable-dispatch
+    default (see #145/#177). A machine still on the OLD default (``session_host_
+    enabled: false``, written explicitly by the full-serialization config writer)
+    adopts the new default **once**. A deliberate opt-out set *after* this
+    migration sticks -- the marker prevents re-flipping -- so the migration
+    enables-for-everyone-now without permanently pinning the value on.
+    """
+    marker = config_dir() / _MIGRATION_DIR / "session_host_default_on"
+    if marker.exists():
+        return cfg
+    changed = False
+    if not cfg.session_host_enabled:
+        cfg = cfg.model_copy(update={"session_host_enabled": True})
+        changed = True
+        log.info(
+            "Config migration: session_host_enabled -> True "
+            "(Session Hosts are now default-on)"
+        )
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("applied\n", encoding="utf-8")
+    if changed:
+        save_config(cfg)
+    return cfg
+
+
 def adopt_topology(
     profile_name: str,
     repo_path: str,

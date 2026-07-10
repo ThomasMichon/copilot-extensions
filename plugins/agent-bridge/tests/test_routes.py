@@ -29,6 +29,9 @@ def app(tmp_path):
         port=0,
         bind="127.0.0.1",
         db_path=str(tmp_path / "test.db"),
+        # These route tests exercise the legacy front-owns-stdio spawn path
+        # (mocked). Session Hosts are default-on now, so pin it off here.
+        session_host_enabled=False,
     )
     return create_app(config=cfg, token="test-token")
 
