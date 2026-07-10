@@ -326,10 +326,36 @@ class VRow:
         self.data = data
 
 
+def _resolve_mock_mode(explicit=None):
+    """Whether the picker runs in explicit **mock mode** (a safe dev sandbox).
+
+    Mock mode is the ONLY thing that enables the picker's simulated behaviors:
+    the in-TUI progress *walker* (instead of the real Cleanup/Sync executor, so
+    no worktree is mutated) and the no-op profiles *apply*. It never turns on
+    implicitly -- a normal launch always runs real ops, and a real launch that
+    is somehow missing an IO hook fails honestly rather than silently mocking.
+
+    Precedence:
+      1. an explicit ``mock_mode`` argument (tests / ``picker mock``),
+      2. the canonical env ``AGENT_WORKTREES_PICKER_MOCK`` (truthy),
+      3. the deprecated env ``AGENT_WORKTREES_PICKER_REAL_OPS=0`` (back-compat).
+    Default: ``False`` (real).
+    """
+    if explicit is not None:
+        return bool(explicit)
+    val = os.environ.get("AGENT_WORKTREES_PICKER_MOCK")
+    if val and val.strip().lower() not in ("0", "false", "no", "off"):
+        return True
+    # Deprecated alias: REAL_OPS=0 used to force the mock walker.
+    if os.environ.get("AGENT_WORKTREES_PICKER_REAL_OPS", "1") == "0":
+        return True
+    return False
+
+
 class PickerScreen(Widget):
     can_focus = True
 
-    def __init__(self, source, live=False):
+    def __init__(self, source, live=False, mock_mode=None):
         super().__init__()
         self.htab = 0                 # index into self.pivots (built-ins + registered)
         # Cross-plugin pivot registry (Worktrees/Maintenance/Profiles + any
@@ -366,10 +392,13 @@ class PickerScreen(Widget):
         # Real cleanup/sync ops are the DEFAULT: the Maintenance actions
         # actually mutate worktrees (local in-process + remote over SSH), so a
         # Sync/Cleanup the operator runs takes effect (issue #1420). The mock
-        # walker (safe in-TUI simulation, no side effects) is now opt-in via
-        # AGENT_WORKTREES_PICKER_REAL_OPS=0 -- an escape hatch for demos and
-        # headless smoketests.
-        self.real_ops = os.environ.get("AGENT_WORKTREES_PICKER_REAL_OPS", "1") != "0"
+        # progress walker (safe in-TUI simulation, no side effects) runs ONLY in
+        # explicit mock mode -- the dev sandbox for building UX/flows. It is
+        # never triggered implicitly. See _resolve_mock_mode: entered via
+        # `picker mock`, AGENT_WORKTREES_PICKER_MOCK=1, or the deprecated
+        # AGENT_WORKTREES_PICKER_REAL_OPS=0.
+        self.mock_mode = _resolve_mock_mode(mock_mode)
+        self.real_ops = not self.mock_mode
         self.pcol = 0                 # Profiles matrix column cursor
         self.last_pr = 0              # remembered Profiles grid row (Tab in/out)
         self.grid = {}                # (target_idx, host_idx) -> bool present
@@ -1393,10 +1422,16 @@ class PickerScreen(Widget):
         the terminal app's profile list, so the confirm step (and its explicit
         add/remove diff) is mandatory -- the regeneration is not silent.
         """
-        if not callable(self._prof_apply):
-            # Mock source (fixtures/tests without the IO hook): instant.
+        if self.mock_mode:
+            # Mock mode (explicit dev sandbox): simulate the apply, no writes.
             self.applied = dict(self.grid)
             self.debug = f"Applied · {self.profiles_present()} profiles (mock)"
+            return
+        if not callable(self._prof_apply):
+            # Real launch but the source exposes no apply hook -- surface it
+            # honestly instead of silently pretending success. The real data
+            # sources always provide it; this guards a misconfigured source.
+            self.debug = "Apply unavailable · source has no profiles IO hook"
             return
         changed = []
         diffs = {}
@@ -3224,7 +3259,7 @@ class PickerScreen(Widget):
             n = len(p["items"])
             failed = sum(1 for it in p["items"] if it["state"] == "failed")
             state = "complete" if p["done"] else "cancelled"
-            sim = "" if self.executor is not None else " (sim)"
+            sim = " (sim)" if self.mock_mode else ""
             # Profiles Apply: bank the succeeded host columns before clearing.
             if p.get("op") == "profiles":
                 self._commit_applied_profiles()
@@ -3828,11 +3863,12 @@ class PickerApp(App):
     PickerScreen { width: 100%; height: 100%; }
     """
 
-    def __init__(self, source, live=False):
+    def __init__(self, source, live=False, mock_mode=None):
         super().__init__()
         self._source = source
         self._live = live
+        self._mock_mode = mock_mode
         self.result = None            # set by the screen on a launch decision
 
     def compose(self) -> ComposeResult:
-        yield PickerScreen(self._source, self._live)
+        yield PickerScreen(self._source, self._live, mock_mode=self._mock_mode)

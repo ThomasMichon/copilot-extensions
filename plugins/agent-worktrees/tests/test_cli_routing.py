@@ -189,6 +189,28 @@ def test_picker_enable_disable_persists(monkeypatch, tmp_path):
     assert yaml.safe_load(gpath.read_text(encoding="utf-8"))["new_picker"] is False
 
 
+def test_picker_mock_launches_in_mock_mode(monkeypatch):
+    """`picker mock` launches the TUI in explicit mock mode (mock_mode=True) and
+    reports the decision without acting on it."""
+    import argparse
+
+    from agent_worktrees import picker_tui
+
+    seen = {}
+
+    def _fake_run(live=False, mock_mode=None):
+        seen["live"] = live
+        seen["mock_mode"] = mock_mode
+        return {"action": "cancel"}
+
+    monkeypatch.setattr(picker_tui, "run_tui_picker", _fake_run)
+    monkeypatch.setattr(m, "_in_ssh_session", lambda: False)
+
+    rc = m.cmd_picker(argparse.Namespace(picker_action="mock", json=True))
+    assert rc == 0
+    assert seen["mock_mode"] is True
+
+
 def test_new_picker_enabled_precedence(monkeypatch):
     import types
 

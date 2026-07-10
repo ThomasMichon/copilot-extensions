@@ -10,10 +10,11 @@ run over SSH per item against the project binstub's JSON CLI
 engine polls each item's state from its render tick.
 
 The executor is the *real* counterpart to the engine's mock progress walker
-(``_advance_progress``). Real ops are now the **default**, so Maintenance
-Sync/Cleanup actually mutate worktrees; the mock simulation is opt-in via
-``AGENT_WORKTREES_PICKER_REAL_OPS=0`` (demos / headless smoketests), in which
-case the engine runs the walker instead of this executor.
+(``_advance_progress``). Real ops are the **default**, so Maintenance
+Sync/Cleanup actually mutate worktrees; the mock simulation runs only in the
+picker's explicit **mock mode** (``picker mock`` / ``AGENT_WORKTREES_PICKER_MOCK``
+-- the dev sandbox), in which case the engine runs the walker instead of this
+executor.
 """
 from __future__ import annotations
 

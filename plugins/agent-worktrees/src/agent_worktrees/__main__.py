@@ -2286,8 +2286,10 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
     """Run the Textual worktree picker and resolve its launch decision.
 
     Maps the picker's decision dict onto the existing resume/create/remote
-    code paths. Cleanup/sync/profiles actions are still mock in the TUI
-    (pending full design) and never reach here.
+    code paths. Cleanup/Sync/Stop/profiles actions run **for real** in-TUI
+    (they mutate worktrees / terminal profiles) and never emit a launch
+    decision, so they never reach here. (Their simulated no-op counterparts run
+    only in the explicit ``picker mock`` dev sandbox.)
     """
     from . import picker_tui
 
@@ -4803,6 +4805,20 @@ def cmd_picker(args: argparse.Namespace) -> int:
             _json_output({"new_picker": val, "path": str(gpath)})
         else:
             output.ok(f"new_picker = {str(val).lower()} ({gpath})")
+        return 0
+
+    if action == "mock":
+        # Explicit dev sandbox: launch the picker in mock mode -- real data is
+        # shown but every mutating action (Cleanup / Sync / Stop / profiles
+        # Apply) is simulated with no side effects. This is the ONLY sanctioned
+        # way to run the picker's mock behaviors; a normal launch is always
+        # real. Prints the resulting launch decision instead of acting on it.
+        live = not _in_ssh_session()
+        decision = picker_tui.run_tui_picker(live=live, mock_mode=True)
+        if as_json:
+            _json_output({"mock": True, "decision": decision})
+        else:
+            output.info(f"mock picker exited · decision: {decision!r}")
         return 0
 
     # status
@@ -7608,10 +7624,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("picker",
                        help="Enable/disable/inspect the persistent new-picker "
                             "opt-in for this machine")
-    p.add_argument("picker_action", choices=["enable", "disable", "status"],
+    p.add_argument("picker_action", choices=["enable", "disable", "status", "mock"],
                    nargs="?", default="status",
                    help="enable/disable writes ~/.agent-worktrees/config.yaml "
-                        "new_picker; status (default) reports the effective value")
+                        "new_picker; status (default) reports the effective "
+                        "value; mock launches the picker in the mock dev "
+                        "sandbox (real data, simulated actions, no side effects)")
     p.add_argument("--json", action="store_true", help="Emit a JSON result")
 
     # validate

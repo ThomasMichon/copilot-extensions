@@ -1439,7 +1439,7 @@ def test_run_tui_picker_redirects_stdout_when_captured(monkeypatch):
     seen = {}
 
     class _FakeApp:
-        def __init__(self, source, live=False):
+        def __init__(self, source, live=False, mock_mode=None):
             self.result = {"action": "cancel"}
 
         def run(self):
@@ -1475,7 +1475,7 @@ def test_run_tui_picker_no_redirect_in_real_terminal(monkeypatch):
     seen = {}
 
     class _FakeApp:
-        def __init__(self, source, live=False):
+        def __init__(self, source, live=False, mock_mode=None):
             self.result = None
 
         def run(self):
@@ -2445,27 +2445,89 @@ def test_update_indicator_focus_glyph_and_refresh():
     assert captured == {"action": "refresh"}
 
 
-def test_real_ops_default_on_and_opt_out(monkeypatch):
-    """Real Maintenance ops are the default; =0 forces the mock walker (#1420)."""
+def test_mock_mode_default_off_explicit_and_env(monkeypatch):
+    """Mock mode is off by default and never turns on implicitly. It is enabled
+    only explicitly: the ``mock_mode`` arg, the canonical env
+    ``AGENT_WORKTREES_PICKER_MOCK``, or the deprecated ``..._REAL_OPS=0``.
+    ``real_ops`` is exactly ``not mock_mode``."""
     src = _fixture_source()
 
-    def _real_ops_for_env(value):
-        if value is None:
-            monkeypatch.delenv("AGENT_WORKTREES_PICKER_REAL_OPS", raising=False)
-        else:
-            monkeypatch.setenv("AGENT_WORKTREES_PICKER_REAL_OPS", value)
+    def _flags(*, arg=None, mock_env=None, realops_env=None):
+        monkeypatch.delenv("AGENT_WORKTREES_PICKER_MOCK", raising=False)
+        monkeypatch.delenv("AGENT_WORKTREES_PICKER_REAL_OPS", raising=False)
+        if mock_env is not None:
+            monkeypatch.setenv("AGENT_WORKTREES_PICKER_MOCK", mock_env)
+        if realops_env is not None:
+            monkeypatch.setenv("AGENT_WORKTREES_PICKER_REAL_OPS", realops_env)
 
         async def _run():
-            app = PickerApp(src, live=False)
+            app = PickerApp(src, live=False, mock_mode=arg)
             async with app.run_test(size=(118, 36)):
-                return app.query_one(PickerScreen).real_ops
+                scr = app.query_one(PickerScreen)
+                return scr.mock_mode, scr.real_ops
 
         return asyncio.run(_run())
 
-    # Default (unset) -> real ops on; explicit "0" -> mock walker; "1" -> on.
-    assert _real_ops_for_env(None) is True
-    assert _real_ops_for_env("0") is False
-    assert _real_ops_for_env("1") is True
+    # Default: real (mock off).
+    assert _flags() == (False, True)
+    # Explicit arg wins over everything.
+    assert _flags(arg=True) == (True, False)
+    assert _flags(arg=False, mock_env="1") == (False, True)
+    # Canonical env.
+    assert _flags(mock_env="1") == (True, False)
+    assert _flags(mock_env="0") == (False, True)      # falsey -> off
+    assert _flags(mock_env="false") == (False, True)
+    # Deprecated alias: REAL_OPS=0 forces mock; =1/unset stays real.
+    assert _flags(realops_env="0") == (True, False)
+    assert _flags(realops_env="1") == (False, True)
+
+
+def test_profiles_apply_real_mode_missing_hook_is_honest(monkeypatch):
+    """In real mode a source with no apply hook does NOT fake success -- it
+    reports the gap. (The no-op 'Applied (mock)' only happens in mock mode.)"""
+    monkeypatch.delenv("AGENT_WORKTREES_PICKER_MOCK", raising=False)
+    monkeypatch.delenv("AGENT_WORKTREES_PICKER_REAL_OPS", raising=False)
+    src = _profiles_source()
+    # Strip the apply hook to simulate a misconfigured real source.
+    if hasattr(src, "apply_profile_column"):
+        del src.apply_profile_column
+
+    async def run():
+        app = PickerApp(src, live=False)   # real mode
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            assert scr.mock_mode is False
+            scr._prof_apply = None
+            scr.grid = {(0, 0): True}
+            scr.applied = {}
+            scr._apply_profiles()
+            assert "unavailable" in scr.debug.lower()
+            assert "(mock)" not in scr.debug
+            assert scr.applied == {}       # nothing was banked
+
+    asyncio.run(run())
+
+
+def test_profiles_apply_mock_mode_is_noop(monkeypatch):
+    """In mock mode profiles Apply is a labelled no-op (no writes)."""
+    monkeypatch.delenv("AGENT_WORKTREES_PICKER_MOCK", raising=False)
+    monkeypatch.delenv("AGENT_WORKTREES_PICKER_REAL_OPS", raising=False)
+    src = _profiles_source()
+
+    async def run():
+        app = PickerApp(src, live=False, mock_mode=True)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            assert scr.mock_mode is True
+            scr.grid = {(0, 0): True}
+            scr.applied = {}
+            scr._apply_profiles()
+            assert "(mock)" in scr.debug
+            assert scr.applied == scr.grid           # banked, but no IO
+            assert src._applied_calls == []          # apply hook never called
+
+    asyncio.run(run())
+
 
 
 def _wait_state(loader, machine, env, want, timeout=5.0):
