@@ -1766,15 +1766,13 @@ class PickerScreen(Widget):
                 stop=("BTN", 0))
             add(Text(""))  # breathing room below the buttons
             cols, sections = self.current_list()
-            # The selection checkbox is only a discoverable affordance once the
-            # operator is actually in a multi-select state (#2258 follow-up):
-            # otherwise the always-on gutter is visual pollution. Reserve two
-            # left cells (box + margin) only then; a single leading space
-            # otherwise. Header + rows indent to match.
+            # The checkbox gutter's two left cells (box + margin) are ALWAYS
+            # reserved so the table never shifts when multi-select mode toggles
+            # (#2258 follow-up); only the box GLYPH is withheld until a
+            # multi-select state is active -- until then the gutter renders blank.
             ms = self._wt_multiselect_active()
-            gutter = 2 if ms else 1
-            lcols = fit(cols, width - gutter, "title", 14)
-            add(header_text(lcols, width, indent=gutter), kind="colhdr")
+            lcols = fit(cols, width - 2, "title", 14)
+            add(header_text(lcols, width, indent=2), kind="colhdr")
             # Preview which worktrees an action targets, directly on the list
             # (#2179): while the Clean/Sync dialog is open, dim every row outside
             # the currently-selected bucket union (updates live as buckets
@@ -1798,9 +1796,10 @@ class PickerScreen(Widget):
                 for rec in rows:
                     focused = sel == ("L", li)
                     is_sel = rec["id4"] in self.wt_sel
-                    # The checkbox gutter only renders in multi-select mode
-                    # (#2258 follow-up); mark=None falls back to a plain indent.
-                    box = self._checkbox(is_sel) if ms else None
+                    # The box glyph renders only in multi-select mode; otherwise
+                    # a blank 2-cell gutter holds the column alignment steady
+                    # (#2258 follow-up).
+                    box = self._checkbox(is_sel) if ms else (" ", "")
                     vr = add(row_text(rec, lcols, width, False,
                                       pulse=self.pulse, mark=box),
                              stop=("L", li), data=rec)
@@ -3093,16 +3092,20 @@ class PickerScreen(Widget):
                 self.quit_confirm = None
 
     def _rotate_machine(self, d):
+        was_in_table = self.sel[0] == "L"
         self.machine_idx = (self.machine_idx + d) % len(self.machines)
         if self.sel not in self.stops():
             self.sel = self.default_sel()
-        # Scope the Worktrees selection to the newly visible machine tab (#2258
-        # P3): rows not on this tab drop out (so the checkbox column and the
-        # Enter bulk-action menu never act on rows the operator can't see). Only
-        # when the Worktrees list is the active surface -- a machine sub-nav on
-        # another pivot must not disturb a dormant worktrees selection.
-        if self._kind() == "worktrees":
-            self._reconcile_wt_sel()
+        # A machine switch lands on a different list, so drop the whole
+        # selection state (operator request) -- keeping ids from the old tab
+        # would leak invisible selections. If focus was in the table, reset to a
+        # clean single-row selection on the top row (single-select tracks focus);
+        # otherwise just clear.
+        self.wt_sel.clear()
+        self.wt_anchor = None
+        if was_in_table and self._kind() == "worktrees" and self.list_records():
+            self.sel = ("L", 0)
+            self._wt_track_focus()   # wt_sel = {top row}, anchor = 0
 
     def _switch_pivot(self, d):
         was_v = self.sel[0] == "V"

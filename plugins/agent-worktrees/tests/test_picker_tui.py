@@ -752,10 +752,10 @@ def test_live_reconcile_deferred_until_reload_settles():
     asyncio.run(run())
 
 
-def test_machine_rotate_scopes_selection_to_visible_tab():
-    """#2258 P3 (rubber-duck): rotating the machine tab drops selections for
-    rows not visible on the new tab, so the checkbox column and the Enter bulk
-    menu never act on rows the operator can't see."""
+def test_machine_rotate_clears_and_resets_selection():
+    """#2258 follow-up: a machine-tab switch clears the whole selection state;
+    if focus was in the table it resets to a single-row selection on the top row
+    of the new tab, otherwise it just clears."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
 
     def raw(mid, code):
@@ -783,16 +783,64 @@ def test_machine_rotate_scopes_selection_to_visible_tab():
             scr.t0 = 0                     # all machine tabs ready
             scr.machine_idx = 0            # start on All -> both machines visible
             await pilot.pause()
-            ids = {r["id4"] for r in scr.list_records()}
-            assert len(ids) == 2
-            scr.wt_sel.replace(ids)        # select rows from both machines
-            # Rotate All -> lambda-core Win (index 1); the borealis row is no
-            # longer visible, so its selection drops.
-            scr._rotate_machine(1)
-            visible = {r["id4"] for r in scr.list_records()}
-            assert len(visible) == 1
-            assert scr.wt_sel == visible
-            assert scr.wt_anchor is None   # anchor reset on scope change
+            both = {r["id4"] for r in scr.list_records()}
+            assert len(both) == 2
+
+            # Focus in the table -> rotate resets to a top-row single-select.
+            scr.wt_sel.replace(both)
+            scr.wt_anchor = 1
+            scr.sel = ("L", 1)
+            scr._rotate_machine(1)         # All -> lambda-core Win
+            recs = scr.list_records()
+            assert scr.sel == ("L", 0)
+            assert scr.wt_sel == {recs[0]["id4"]}
+            assert scr.wt_anchor == 0
+
+            # Focus outside the table -> rotate just clears the selection.
+            scr.wt_sel.replace({recs[0]["id4"]})
+            scr.sel = ("BTN", 0)
+            scr._rotate_machine(1)         # lambda-core Win -> borealis Win
+            assert not scr.wt_sel
+            assert scr.wt_anchor is None
+
+    asyncio.run(run())
+
+
+def test_worktrees_gutter_reserved_when_checkbox_hidden():
+    """#2258 follow-up: the 2-cell checkbox gutter stays reserved even when the
+    box glyph is hidden, so the table columns never shift when multi-select mode
+    toggles."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            if len(recs) < 2:
+                return
+
+            def first_l_row():
+                for v in scr.build_body(118):
+                    stop = getattr(v, "stop", None)
+                    if stop and stop[0] == "L":
+                        return v.text.plain
+                return ""
+
+            # Single-select (box hidden): the gutter is blank but reserved.
+            scr.sel = ("L", 0)
+            scr.wt_sel.replace({recs[0]["id4"]})
+            hidden = first_l_row()
+            assert hidden[:2] == "  "        # two-cell blank gutter
+
+            # Multi-select (box shown): glyph in the gutter, columns unshifted.
+            scr.wt_sel.replace({recs[0]["id4"], recs[1]["id4"]})
+            shown = first_l_row()
+            assert shown[0] in "☐☑"
+            assert shown[1] == " "
+            assert shown[2:] == hidden[2:]   # identical columns -> no shift
 
     asyncio.run(run())
 
