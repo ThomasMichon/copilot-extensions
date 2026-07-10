@@ -302,7 +302,6 @@ MAINT_ACTION_DESC = {
     "Sync": "Fast-forward the FF-eligible selected worktrees onto the default "
             "branch.",
     "Cleanup": "Remove the cleanable selected worktrees (re-checked per worktree).",
-    "Diagnostics": "Inspect the selected worktrees (status / disk / git).",
 }
 
 
@@ -1056,7 +1055,12 @@ class PickerScreen(Widget):
             acts.append("Sync")
         if any(self._cleanable(r) for r in chosen):
             acts.append("Cleanup")
-        acts.append("Diagnostics")
+        if not acts:
+            # Nothing actionable for this selection (no FF-eligible or cleanable
+            # worktree) -- don't open an empty menu.
+            self.debug = (f"no maintenance action for {len(chosen)} "
+                          f"selected worktree(s)")
+            return
         self.maint_menu = {"ids": ids, "actions": acts, "count": len(chosen)}
         self.maint_menu_idx = 0
 
@@ -1075,8 +1079,6 @@ class PickerScreen(Widget):
                 self._open_sync(ids=ids)
             elif act == "Cleanup":
                 self._open_cleanup(ids=ids)
-            else:
-                self.debug = f"diagnostics -> {len(ids)} worktree(s) (mock)"
         elif key in ("escape", "q", "tab"):
             self.maint_menu = None
 
@@ -2737,9 +2739,11 @@ class PickerScreen(Widget):
             elif zone == "BTN":
                 self._activate()
         elif key == "r":
-            self.debug = "refresh (mock: re-loaded snapshots)"
+            # Real reload: rebuild the data source (live mode re-fetches every
+            # machine on its loader threads; fixture mode re-reads src.load()).
             self.setup()
             self.sel = self.default_sel()
+            self.debug = "refreshed · reloaded worktrees"
         elif key in ("q", "escape"):
             self._open_quit_confirm()
 
@@ -2857,8 +2861,6 @@ class PickerScreen(Widget):
                 # Stop the worktree's Mux/Copilot wrapper on demand (#1343),
                 # freeing it to be re-Opened/Resumed with a fresh Mux + Copilot.
                 self._start_stop(rec)
-            else:
-                self.debug = f"{cur} -> {rec.get('id4')} (mock)"
         elif key in ("escape", "q", "tab"):
             self.submenu = None
 
