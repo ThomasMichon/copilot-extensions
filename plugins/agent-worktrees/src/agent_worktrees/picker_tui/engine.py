@@ -25,6 +25,7 @@ from textual.widget import Widget
 from .. import profiles as profiles_mod
 from ..update_stage import indicator_state
 from . import derive
+from .selection import ListSelection
 
 
 def _resolve_version() -> str:
@@ -342,7 +343,7 @@ class PickerScreen(Widget):
         self.submenu_idx = 0
         self.cleanup = None           # cleanup-scope modal (Maintenance)
         self.optmenu = None           # "More options…" create modal
-        self.maint_sel = set()        # Maintenance multi-select (id4 set, #1345)
+        self.maint_sel = ListSelection()   # Maintenance multi-select (#1345)
         self.maint_menu = None        # Maintenance actions menu modal (#1345)
         self.maint_menu_idx = 0
         self.prof_confirm = None      # Profiles Apply confirm dialog (add/remove diff)
@@ -606,7 +607,7 @@ class PickerScreen(Widget):
         # Machine tabs gain a leading "All" entry that interleaves every machine.
         self.machines = [("All", None, None, True)] + self.src.machines()
         self.machine_idx = self.local_index()
-        self.maint_sel = set()        # drop any stale Maintenance selection
+        self.maint_sel = ListSelection()  # drop any stale Maintenance selection
         self._last_poll = time.monotonic()   # first background poll is POLL_SECS out
         if self.live:
             # Real background SSH loads: one daemon thread per machine,
@@ -1015,30 +1016,26 @@ class PickerScreen(Widget):
         recs = self.maint_records()
         if 0 <= i < len(recs):
             wid = recs[i]["id4"]
-            self.maint_sel.symmetric_difference_update({wid})
-            self.debug = (f"{'selected' if wid in self.maint_sel else 'deselected'}"
+            now_on = self.maint_sel.toggle(wid)
+            self.debug = (f"{'selected' if now_on else 'deselected'}"
                           f" {wid} · {len(self.maint_sel)} selected")
 
     def _toggle_maint_all(self):
         ids = self._maint_ids()
-        if ids and ids <= self.maint_sel:
-            self.maint_sel -= ids
-            self.debug = "cleared selection"
-        else:
-            self.maint_sel |= ids
+        if self.maint_sel.toggle_all(ids):
             self.debug = f"selected all · {len(ids)}"
+        else:
+            self.debug = "cleared selection"
 
     def _toggle_group(self, gi):
         groups = self.maint_groups()
         if 0 <= gi < len(groups):
             st, rows = groups[gi]
             ids = {r["id4"] for r in rows}
-            if ids and ids <= self.maint_sel:
-                self.maint_sel -= ids
-                self.debug = f"deselected {st} · {len(ids)}"
-            else:
-                self.maint_sel |= ids
+            if self.maint_sel.toggle_all(ids):
                 self.debug = f"selected {st} · {len(ids)}"
+            else:
+                self.debug = f"deselected {st} · {len(ids)}"
 
     def _open_maint_menu(self):
         """Open the Maintenance actions menu for the selected set; if nothing
@@ -1047,8 +1044,8 @@ class PickerScreen(Widget):
             rec = self._selected_record()
             if not rec:
                 return
-            self.maint_sel = {rec["id4"]}
-        ids = set(self.maint_sel)
+            self.maint_sel.replace({rec["id4"]})
+        ids = self.maint_sel.ids
         chosen = [r for r in self.maint_records() if r["id4"] in ids]
         acts = []
         if any(r.get("ff_eligible") for r in chosen):
@@ -1423,9 +1420,9 @@ class PickerScreen(Widget):
 
     def _maint_selectall_row(self, width, focus):
         ids = self._maint_ids()
-        all_on = bool(ids) and ids <= self.maint_sel
+        all_on = self.maint_sel.all_selected(ids)
         glyph, gc = self._checkbox(all_on)
-        nsel = len(self.maint_sel & ids)
+        nsel = self.maint_sel.count(ids)
         t = Text("  ")
         t.append(glyph, style=gc)
         t.append("  ")
@@ -1447,7 +1444,7 @@ class PickerScreen(Widget):
 
     def _maint_group_row(self, state, rows, width, focus):
         ids = {r["id4"] for r in rows}
-        all_on = bool(ids) and ids <= self.maint_sel
+        all_on = self.maint_sel.all_selected(ids)
         glyph, gc = self._checkbox(all_on)
         t = Text("  ")
         t.append(glyph, style=gc)
@@ -1539,7 +1536,7 @@ class PickerScreen(Widget):
             groups = self.maint_groups()
             recs = self.maint_records()
             total = sum(_size_mb(w) for w in recs)
-            nsel = len(self.maint_sel & self._maint_ids())
+            nsel = self.maint_sel.count(self._maint_ids())
             reclaim = sum(_size_mb(w) for w in recs if w["id4"] in self.maint_sel)
             suffix = f"{len(recs)} candidates · ~{total} MiB"
             if nsel:
@@ -2201,13 +2198,13 @@ class PickerScreen(Widget):
         if zone == "C":
             rec = self._selected_record()
             wid = rec.get("id4") if rec else "?"
-            nsel = len(self.maint_sel & self._maint_ids())
+            nsel = self.maint_sel.count(self._maint_ids())
             tgt = f"{nsel} selected" if nsel else f"row {wid}"
             return (f"Space: select {wid} · Enter: actions for {tgt}"
                     f" · Tab region · ^◀▶ machine")
         if zone == "SA":
             ids = self._maint_ids()
-            all_on = bool(ids) and ids <= self.maint_sel
+            all_on = self.maint_sel.all_selected(ids)
             verb = "clear all" if all_on else "select all"
             return f"Space / Enter: {verb} ({len(ids)}) · ↓ rows · Tab region"
         if zone == "GH":
@@ -2959,7 +2956,7 @@ class PickerScreen(Widget):
         wid = rec.get("id4")
         if wid is None or wid not in self._cleanup_raw_union():
             return
-        self.cleanup.setdefault("excluded", set()).symmetric_difference_update({wid})
+        self.cleanup.setdefault("excluded", ListSelection()).toggle(wid)
 
     def _close_dlg(self, om):
         if om:
@@ -3130,7 +3127,7 @@ class PickerScreen(Widget):
         for o in self.cleanup["opts"]:
             if o["on"]:
                 s |= o["ids"]
-        return s - self.cleanup.get("excluded", set())
+        return s - set(self.cleanup.get("excluded", ()))
 
     def _cleanup_raw_union(self):
         """The bucket union *before* per-row exclusions -- the set a row must be
@@ -3502,7 +3499,7 @@ class PickerScreen(Widget):
         self.cleanup = {
             "verb": "Clean up", "prompt": "Select what to prune:",
             "confirm": "Confirm", "scope": scope, "idx": 0, "section": 0, "bidx": 0,
-            "excluded": set(),
+            "excluded": ListSelection(),
             "opts": [
                 {"label": "Merged & finalized", "on": True, "ids": clean,
                  "hint": f"work is on the default branch · {len(clean)}"},
@@ -3531,7 +3528,7 @@ class PickerScreen(Widget):
             "verb": "Sync", "prompt": "Fast-forward worktrees onto the default "
             "branch (FF-only):",
             "confirm": "Confirm", "scope": scope, "idx": 0, "section": 0, "bidx": 0,
-            "excluded": set(),
+            "excluded": ListSelection(),
             "opts": [
                 {"label": "Eligible", "on": True, "ids": eligible,
                  "hint": f"clean · behind · no local commits · {len(eligible)}"

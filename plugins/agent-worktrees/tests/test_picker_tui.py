@@ -14,6 +14,7 @@ import types
 
 from agent_worktrees.picker_tui import derive, new_picker_enabled
 from agent_worktrees.picker_tui.engine import PickerApp, PickerScreen
+from agent_worktrees.picker_tui.selection import ListSelection
 
 
 def _fixture_source():
@@ -724,7 +725,7 @@ def test_maint_menu_no_actionable_selection_does_not_open():
                     {"id4": "x2", "ff_eligible": False}]
             scr.maint_records = lambda: fake
             scr._cleanable = lambda rec: False   # nothing cleanable
-            scr.maint_sel = {"x1", "x2"}
+            scr.maint_sel = ListSelection({"x1", "x2"})
             scr._open_maint_menu()
             assert scr.maint_menu is None
             assert "no maintenance action" in scr.debug
