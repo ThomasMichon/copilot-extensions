@@ -329,6 +329,133 @@ def test_clean_confirm_acts_on_net_after_unselect():
     asyncio.run(run())
 
 
+# ── #2228 Phase 2b: unified Worktrees Space-select / Enter-action-menu ────────
+
+def test_worktrees_space_toggles_selection():
+    """Space on a Worktrees row toggles it in the list multi-select (not the
+    old open-submenu behavior)."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            assert recs
+            wid = recs[0]["id4"]
+            scr.sel = ("L", 0)
+            scr.handle_key("space")
+            assert wid in scr.wt_sel
+            assert scr.submenu is None            # Space no longer opens submenu
+            scr.handle_key("space")
+            assert wid not in scr.wt_sel
+
+    asyncio.run(run())
+
+
+def test_worktrees_enter_without_selection_opens_submenu():
+    """Enter on a row with no multi-selection opens that row's sub-menu (which
+    carries Open/Resume) -- the primary flow is preserved."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert scr.list_records()
+            scr.sel = ("L", 0)
+            assert not scr.wt_sel
+            scr.handle_key("enter")
+            assert scr.submenu is not None
+            assert scr.submenu["actions"][0] in ("Open", "Resume")
+
+    asyncio.run(run())
+
+
+def test_worktrees_enter_with_selection_opens_bulk_menu():
+    """Enter with a multi-selection opens the bulk action menu (Sync/Cleanup)
+    for the selected set, not a per-row submenu."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            cleanable = [i for i, r in enumerate(recs) if scr._cleanable(r)]
+            if not cleanable:
+                return
+            scr.sel = ("L", cleanable[0])
+            scr.handle_key("space")               # select a cleanable row
+            assert scr.wt_sel
+            scr.handle_key("enter")               # -> bulk action menu
+            assert scr.submenu is None
+            assert scr.maint_menu is not None
+            assert "Cleanup" in scr.maint_menu["actions"]
+
+    asyncio.run(run())
+
+
+def test_worktrees_bulk_menu_routes_to_scoped_cleanup():
+    """Choosing Cleanup in the bulk menu opens the Clean dialog scoped to the
+    selected set."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            cleanable = [i for i, r in enumerate(recs) if scr._cleanable(r)]
+            if not cleanable:
+                return
+            scr.sel = ("L", cleanable[0])
+            scr.handle_key("space")
+            scr._open_wt_action_menu()
+            scr.maint_menu_idx = scr.maint_menu["actions"].index("Cleanup")
+            scr._key_maint_menu("enter")          # route to scoped cleanup
+            assert scr.maint_menu is None
+            assert scr.cleanup is not None
+            assert "selected" in scr.cleanup["scope"]
+
+    asyncio.run(run())
+
+
+def test_worktrees_selected_row_is_marked():
+    """A selected, non-focused Worktrees row carries the selection shading."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            if len(recs) < 2:
+                return
+            target = recs[0]["id4"]
+            scr.wt_sel.replace({target})
+            scr.sel = ("L", 1)                    # focus a DIFFERENT row
+            marked = {}
+            for v in scr.build_body(118):
+                stop = getattr(v, "stop", None)
+                if stop and stop[0] == "L":
+                    marked[v.data["id4"]] = any(
+                        "grey23" in str(sp.style) for sp in v.text.spans)
+            assert marked.get(target) is True
+
+    asyncio.run(run())
+
+
 def test_configuration_reachable_via_tab(monkeypatch):
     """The ⚙ Configuration entry is in the Tab cycle (region_heads) and Tab from
     the View pivot lands on it (operator feedback: couldn't reach it)."""
