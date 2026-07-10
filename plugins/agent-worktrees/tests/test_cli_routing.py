@@ -218,9 +218,14 @@ def test_new_picker_enabled_precedence(monkeypatch):
 
     monkeypatch.delenv("AGENT_WORKTREES_NEW_PICKER", raising=False)
     monkeypatch.delenv("AGENT_WORKTREES_LEGACY_PICKER", raising=False)
+    # Default is on: opt-out (new_picker=False) -> legacy; unset/None -> on.
     assert picker_tui.new_picker_enabled(types.SimpleNamespace(new_picker=True))
     assert not picker_tui.new_picker_enabled(types.SimpleNamespace(new_picker=False))
-    assert not picker_tui.new_picker_enabled(None)
+    assert picker_tui.new_picker_enabled(None)          # default everywhere
+    # A machine opted out still gets the new picker for one invocation via env.
+    monkeypatch.setenv("AGENT_WORKTREES_NEW_PICKER", "1")
+    assert picker_tui.new_picker_enabled(types.SimpleNamespace(new_picker=False))
+    monkeypatch.delenv("AGENT_WORKTREES_NEW_PICKER", raising=False)
     # Legacy env always wins (rollback switch).
     monkeypatch.setenv("AGENT_WORKTREES_LEGACY_PICKER", "1")
     assert not picker_tui.new_picker_enabled(types.SimpleNamespace(new_picker=True))

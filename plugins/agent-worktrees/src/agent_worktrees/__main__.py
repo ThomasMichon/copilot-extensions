@@ -1134,9 +1134,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         tracking_path.mkdir(parents=True, exist_ok=True)
         current_platform = cfg.detect_platform()
 
-        # New Textual picker -- opt-in via AGENT_WORKTREES_NEW_PICKER while the
-        # multi-machine flow is fleshed out. The legacy ANSI picker below stays
-        # the default and the rollback path (AGENT_WORKTREES_LEGACY_PICKER).
+        # Textual picker -- the DEFAULT everywhere (no opt-in). A machine can
+        # opt out to the legacy ANSI picker below via `picker disable`
+        # (new_picker: false) or the AGENT_WORKTREES_LEGACY_PICKER rollback env;
+        # Windows-over-SSH auto-falls-back (_new_picker_blocked_by_ssh).
         from . import picker_tui
         if picker_tui.new_picker_enabled(config) and not _new_picker_blocked_by_ssh():
             return _run_new_picker(config, args)
@@ -4786,12 +4787,14 @@ def _set_global_config_key(key: str, value) -> Path:
 
 
 def cmd_picker(args: argparse.Namespace) -> int:
-    """Enable/disable/inspect the persistent new-picker opt-in for this machine.
+    """Inspect / opt out of the Textual picker for this machine.
 
-    ``enable``/``disable`` write ``new_picker`` into the machine-wide global
-    config (``~/.agent-worktrees/config.yaml``); ``status`` reports the
-    effective value and where it comes from. SSH-able so a fleet migration can
-    flip it per machine.
+    The Textual picker is the **default everywhere**. ``disable`` writes
+    ``new_picker: false`` into the machine-wide global config
+    (``~/.agent-worktrees/config.yaml``) to opt this machine *out* to the legacy
+    ANSI picker; ``enable`` restores the default. ``status`` reports the
+    effective value and where it comes from; ``mock`` launches the picker in the
+    mock dev sandbox. SSH-able so a fleet migration can flip it per machine.
     """
     from . import picker_tui
 
@@ -4826,7 +4829,8 @@ def cmd_picker(args: argparse.Namespace) -> int:
     try:
         persisted = bool(cfg.load_config().new_picker)
     except Exception:
-        # No project context -- read the global config directly.
+        # No project context -- read the global config directly (default True:
+        # the picker is on unless a machine explicitly opted out).
         import yaml as _yaml
         gpath = cfg.global_config_path()
         if gpath.exists():
@@ -4834,7 +4838,7 @@ def cmd_picker(args: argparse.Namespace) -> int:
                 with open(gpath, encoding="utf-8") as f:
                     raw = _yaml.safe_load(f)
                 if isinstance(raw, dict):
-                    persisted = bool(raw.get("new_picker", False))
+                    persisted = bool(raw.get("new_picker", True))
             except (OSError, _yaml.YAMLError):
                 persisted = None
     effective = picker_tui.new_picker_enabled(
@@ -7620,16 +7624,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true",
                    help="Emit a JSON result object")
 
-    # picker (persistent new-picker opt-in -- machine-wide)
+    # picker (Textual picker is default everywhere; disable = machine opt-out)
     p = sub.add_parser("picker",
-                       help="Enable/disable/inspect the persistent new-picker "
-                            "opt-in for this machine")
+                       help="Inspect / opt out of the Textual worktree picker "
+                            "(the default) for this machine")
     p.add_argument("picker_action", choices=["enable", "disable", "status", "mock"],
                    nargs="?", default="status",
-                   help="enable/disable writes ~/.agent-worktrees/config.yaml "
-                        "new_picker; status (default) reports the effective "
-                        "value; mock launches the picker in the mock dev "
-                        "sandbox (real data, simulated actions, no side effects)")
+                   help="the Textual picker is the default everywhere; "
+                        "disable writes new_picker:false to opt this machine out "
+                        "to the legacy picker, enable restores the default "
+                        "(~/.agent-worktrees/config.yaml); status (default) "
+                        "reports the effective value; mock launches the picker "
+                        "in the mock dev sandbox (real data, simulated actions, "
+                        "no side effects)")
     p.add_argument("--json", action="store_true", help="Emit a JSON result")
 
     # validate

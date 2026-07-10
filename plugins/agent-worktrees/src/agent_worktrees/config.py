@@ -201,12 +201,15 @@ class Config:
     the session and setup script see an up-to-date tree.  Only ever a
     fast-forward (clean + no local commits ahead); dirty/ahead/diverged
     worktrees are left untouched.  Set false to opt out of auto-update."""
-    new_picker: bool = False
-    """When true, the bare binstub launches the overhauled Textual worktree
-    picker instead of the legacy ANSI one.  Machine-wide opt-in during rollout
-    (resolved machine-local > global).  The env vars still override:
-    ``AGENT_WORKTREES_LEGACY_PICKER`` forces the legacy picker (rollback) and
-    ``AGENT_WORKTREES_NEW_PICKER`` forces the new one."""
+    new_picker: bool = True
+    """Whether the bare binstub launches the overhauled Textual worktree picker.
+    **True by default** -- the Textual picker is the default everywhere; no
+    opt-in is needed.  ``picker disable`` writes ``new_picker: false`` to opt a
+    machine *out* to the legacy ANSI picker (persistent, machine-local > global);
+    ``picker enable`` restores the default.  The env vars still override for a
+    single invocation: ``AGENT_WORKTREES_LEGACY_PICKER`` forces the legacy picker
+    (rollback) and ``AGENT_WORKTREES_NEW_PICKER`` forces the new one.  (Windows
+    over SSH always auto-falls-back to legacy -- see _new_picker_blocked_by_ssh.)"""
 
     @property
     def default_repo(self) -> RepoConfig:
@@ -622,7 +625,7 @@ def load_config(path: Path | None = None) -> Config:
             )
         ),
         new_picker=bool(
-            machine_raw.get("new_picker", global_raw.get("new_picker", False))
+            machine_raw.get("new_picker", global_raw.get("new_picker", True))
         ),
     )
 

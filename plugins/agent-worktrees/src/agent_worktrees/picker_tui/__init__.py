@@ -5,12 +5,16 @@ Ported from the aperture-labs ``worktree-picker-tty-overhaul`` prototype. The
 ``machines()`` / ``load()`` / ``bucket`` / ``for_machine`` (and ``make_loader``
 for live multi-machine). ``data_local`` is the real local source.
 
-Rollout is gated by config + env:
-- ``new_picker: true`` in ``~/.<project>/config.yaml`` or the global
-  ``~/.agent-worktrees/config.yaml`` opts a machine into the TUI persistently.
-- ``AGENT_WORKTREES_NEW_PICKER=1`` forces the TUI for one invocation.
-- ``AGENT_WORKTREES_LEGACY_PICKER=1`` forces the legacy ANSI picker (rollback;
-  always wins).
+Rollout: the Textual picker is the **default everywhere** -- no opt-in needed.
+- ``picker disable`` writes ``new_picker: false`` (machine-local or global) to
+  opt a machine *out* to the legacy ANSI picker; ``picker enable`` restores the
+  default.
+- ``AGENT_WORKTREES_LEGACY_PICKER=1`` forces the legacy picker for one
+  invocation (manual rollback; always wins).
+- ``AGENT_WORKTREES_NEW_PICKER=1`` forces the new picker for one invocation
+  (e.g. on a machine that opted out).
+- Windows over SSH always auto-falls-back to legacy (Textual can't read the
+  keyboard over Windows OpenSSH ConPTY -- see ``_new_picker_blocked_by_ssh``).
 """
 from __future__ import annotations
 
@@ -20,17 +24,19 @@ import os
 def new_picker_enabled(config=None) -> bool:
     """True when the TUI picker should be used instead of the legacy ANSI one.
 
-    Precedence (first match wins):
+    The Textual picker is the **default** (True); a machine opts *out* to legacy
+    via ``picker disable`` (persisted ``new_picker: false``). Precedence
+    (first match wins):
       1. ``AGENT_WORKTREES_LEGACY_PICKER`` env -> legacy (the rollback switch).
       2. ``AGENT_WORKTREES_NEW_PICKER`` env -> TUI.
-      3. ``config.new_picker`` (persistent, machine-local > global).
-      4. default: legacy.
+      3. ``config.new_picker`` (persistent, machine-local > global; default True).
+      4. default: TUI.
     """
     if os.environ.get("AGENT_WORKTREES_LEGACY_PICKER"):
         return False
     if os.environ.get("AGENT_WORKTREES_NEW_PICKER"):
         return True
-    return bool(getattr(config, "new_picker", False))
+    return bool(getattr(config, "new_picker", True))
 
 
 def run_tui_picker(source=None, live=False, mock_mode=None):

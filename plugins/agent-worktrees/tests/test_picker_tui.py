@@ -1927,7 +1927,8 @@ def test_bucket_fallback_no_classify_finalized_is_clean_not_wip():
 def test_new_picker_flag_gating(monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_NEW_PICKER", raising=False)
     monkeypatch.delenv("AGENT_WORKTREES_LEGACY_PICKER", raising=False)
-    assert new_picker_enabled() is False
+    # Default everywhere: the Textual picker is on with no config/env.
+    assert new_picker_enabled() is True
     monkeypatch.setenv("AGENT_WORKTREES_NEW_PICKER", "1")
     assert new_picker_enabled() is True
     # Legacy override always wins (the rollback switch).
