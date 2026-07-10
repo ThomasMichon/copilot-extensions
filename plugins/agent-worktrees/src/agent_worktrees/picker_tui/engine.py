@@ -1525,8 +1525,9 @@ class PickerScreen(Widget):
                     if rec.get("hidden") and sel != ("L", li):
                         # Revealed bridge/system worktree -> dim it (#1422).
                         vr.text.stylize("grey42")
-                    elif preview_ids is not None and rec["id4"] not in preview_ids:
-                        vr.text.stylize("grey35")   # outside the selected set
+                    elif (preview_ids is not None and rec["id4"] not in preview_ids
+                          and sel != ("L", li)):
+                        vr.text.stylize("grey35")   # outside the net set
                     elif preview and sel != ("L", li) and not (
                         self._cleanable(rec) if preview == "clean"
                         else rec.get("ff_eligible")
@@ -2253,13 +2254,17 @@ class PickerScreen(Widget):
         elif dlg:
             live = self.cleanup is not None and self._kind() == "worktrees"
             n = len(self._cleanup_union()) if self.cleanup is not None else 0
-            if dlg.get("section", 0) == 0:
+            sec = dlg.get("section", 0)
+            if sec == 0:
                 if live:
-                    hints = (f"↑↓ bucket · Space toggle (list previews {n} live)"
-                             f" · Tab → confirm · Esc cancel")
+                    hints = (f"↑↓ bucket · Space toggle (previews {n} live)"
+                             f" · Tab → rows · Esc cancel")
                 else:
                     hints = ("↑↓ move · Space toggle option · Tab → buttons"
                              " · Enter next · Esc cancel")
+            elif live and sec == 2:
+                hints = (f"↑↓ row · Space keep/drop this worktree "
+                         f"(previews {n} live) · Enter → confirm · Esc cancel")
             else:
                 clabel = dlg.get("confirm", "Confirm")
                 hints = (f"◀▶ button · Enter: {clabel} · ↑ back to options"
@@ -2868,14 +2873,27 @@ class PickerScreen(Widget):
         dlg = self.optmenu if om else self.cleanup
         opts = dlg["opts"]
         n = len(opts)
+        # The Clean/Sync live filter (worktrees) adds a third focus section --
+        # the worktree list itself -- where Space keeps/drops an individual row
+        # from the bucket set (#2179 second increment). The optmenu (new-worktree
+        # options) has no list, so it keeps the two-section buckets<->confirm flow.
+        live = (not om) and self._kind() == "worktrees"
         if key in ("escape", "q"):
             self._close_dlg(om)
             return
         if key in ("tab", "shift+tab"):
-            dlg["section"] = 1 - dlg["section"]
+            if live:
+                order = [0, 2, 1]        # buckets -> rows -> confirm
+                d = 1 if key == "tab" else -1
+                cur = order.index(dlg["section"]) if dlg["section"] in order else 0
+                dlg["section"] = order[(cur + d) % len(order)]
+            else:
+                dlg["section"] = 1 - dlg["section"]
             dlg["bidx"] = 0
+            if dlg["section"] == 2:
+                self._enter_cleanup_list()
             return
-        if dlg["section"] == 0:           # the multi-choice menu
+        if dlg["section"] == 0:           # the bucket multi-choice menu
             if key == "down":
                 dlg["idx"] = min(dlg["idx"] + 1, n - 1)
             elif key == "up":
@@ -2885,6 +2903,8 @@ class PickerScreen(Widget):
             elif key == "enter":
                 dlg["section"] = 1        # progress to the button row
                 dlg["bidx"] = 0
+        elif live and dlg["section"] == 2:   # the worktree list: per-row unselect
+            self._key_cleanup_list(key)
         else:                              # the [Confirm] [Cancel] button row
             if key in ("left", "right"):
                 dlg["bidx"] = 1 - dlg["bidx"]
@@ -2895,6 +2915,51 @@ class PickerScreen(Widget):
                     self._dlg_confirm(om)
                 else:
                     self._close_dlg(om)
+
+    def _enter_cleanup_list(self):
+        """Focus the first worktree row when entering the cleanup list section;
+        bounce back to the buckets if the list is empty (nothing to drop)."""
+        ls = [s for s in self.stops() if s[0] == "L"]
+        if not ls:
+            self.cleanup["section"] = 0
+            return
+        if self.sel not in ls:
+            self.sel = ls[0]
+
+    def _key_cleanup_list(self, key):
+        """Row focus inside the Clean/Sync live filter: Up/Down move the row
+        cursor, Space keeps/drops the focused worktree, Enter advances to the
+        Confirm row. Scroll follows ``self.sel`` via the normal render path."""
+        ls = [s for s in self.stops() if s[0] == "L"]
+        if not ls:
+            self.cleanup["section"] = 0
+            return
+        if self.sel not in ls:
+            self.sel = ls[0]
+        i = ls.index(self.sel)
+        if key == "down":
+            self.sel = ls[min(i + 1, len(ls) - 1)]
+        elif key == "up":
+            self.sel = ls[max(i - 1, 0)]
+        elif key == "space":
+            self._toggle_cleanup_exclude()
+        elif key == "enter":
+            self.cleanup["section"] = 1
+            self.cleanup["bidx"] = 0
+
+    def _toggle_cleanup_exclude(self):
+        """Keep/drop the focused worktree from the Clean/Sync net set (#2179).
+
+        Only a row currently in the enabled-bucket union can be dropped (you
+        can't exclude what isn't selected); toggling a row back in removes it
+        from the exclusion set. Idempotent per keypress."""
+        rec = self._selected_record()
+        if rec is None:
+            return
+        wid = rec.get("id4")
+        if wid is None or wid not in self._cleanup_raw_union():
+            return
+        self.cleanup.setdefault("excluded", set()).symmetric_difference_update({wid})
 
     def _close_dlg(self, om):
         if om:
@@ -3056,6 +3121,20 @@ class PickerScreen(Widget):
             p["done"] = True
 
     def _cleanup_union(self):
+        """The net acted-on set for the Clean/Sync live filter: the union of the
+        enabled buckets, minus any worktrees the operator individually dropped
+        via per-row unselect (#2179 second increment). The preview dim, the
+        footer count, and the executor all read this one method, so the "N
+        selected" the operator sees is exactly what Confirm acts on."""
+        s = set()
+        for o in self.cleanup["opts"]:
+            if o["on"]:
+                s |= o["ids"]
+        return s - self.cleanup.get("excluded", set())
+
+    def _cleanup_raw_union(self):
+        """The bucket union *before* per-row exclusions -- the set a row must be
+        in for a per-row drop to mean anything."""
         s = set()
         for o in self.cleanup["opts"]:
             if o["on"]:
@@ -3423,6 +3502,7 @@ class PickerScreen(Widget):
         self.cleanup = {
             "verb": "Clean up", "prompt": "Select what to prune:",
             "confirm": "Confirm", "scope": scope, "idx": 0, "section": 0, "bidx": 0,
+            "excluded": set(),
             "opts": [
                 {"label": "Merged & finalized", "on": True, "ids": clean,
                  "hint": f"work is on the default branch · {len(clean)}"},
@@ -3451,6 +3531,7 @@ class PickerScreen(Widget):
             "verb": "Sync", "prompt": "Fast-forward worktrees onto the default "
             "branch (FF-only):",
             "confirm": "Confirm", "scope": scope, "idx": 0, "section": 0, "bidx": 0,
+            "excluded": set(),
             "opts": [
                 {"label": "Eligible", "on": True, "ids": eligible,
                  "hint": f"clean · behind · no local commits · {len(eligible)}"

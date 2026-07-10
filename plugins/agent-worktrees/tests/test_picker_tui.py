@@ -186,6 +186,148 @@ def test_clean_dialog_live_filter_preview():
     asyncio.run(run())
 
 
+def _dim_map(scr):
+    """id4 -> is the row dimmed (grey35) in the current build_body render."""
+    rows = {}
+    for v in scr.build_body(118):
+        stop = getattr(v, "stop", None)
+        if stop and stop[0] == "L":
+            rows[v.data["id4"]] = any("grey35" in str(sp.style) for sp in v.text.spans)
+    return rows
+
+
+def _open_clean_live(scr):
+    """Open the Clean live filter on the local machine tab; return the screen."""
+    scr.machine_idx = scr.local_index()
+    scr.sel = ("BTN", 0)
+    scr.btn_idx = scr.button_set().index("K")
+    scr._activate()
+    assert scr.cleanup is not None
+    return scr
+
+
+def _focus_worktree_row(scr, id4):
+    """Point self.sel at the ("L", i) stop whose record is id4."""
+    recs = scr.list_records()
+    li = next(i for i, r in enumerate(recs) if r["id4"] == id4)
+    scr.sel = ("L", li)
+    return li
+
+
+def test_clean_per_row_unselect_drops_from_net_set():
+    """Space on a focused worktree row inside the Clean live filter drops just
+    that worktree from the net set (bucket stays on); the row then previews as
+    dimmed, and toggling again puts it back (#2179 second increment)."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            _open_clean_live(scr)
+            union = set(scr._cleanup_union())
+            assert len(union) >= 1
+            victim = next(iter(union))
+
+            scr._key_scopedlg("tab")                 # buckets -> rows
+            assert scr.cleanup["section"] == 2
+            assert scr.sel[0] == "L"                 # focus landed on a row
+
+            _focus_worktree_row(scr, victim)
+            scr._key_scopedlg("space")               # drop the focused worktree
+            net = set(scr._cleanup_union())
+            assert victim not in net
+            assert net == union - {victim}
+
+            # It previews dimmed once focus moves off it.
+            recs = scr.list_records()
+            other_li = next((i for i, r in enumerate(recs)
+                             if r["id4"] != victim), None)
+            if other_li is not None:
+                scr.sel = ("L", other_li)
+                assert _dim_map(scr).get(victim) is True
+
+            # Toggle back in -> restored.
+            _focus_worktree_row(scr, victim)
+            scr._key_scopedlg("space")
+            assert victim in set(scr._cleanup_union())
+
+    asyncio.run(run())
+
+
+def test_clean_per_row_unselect_ignores_rows_outside_union():
+    """Dropping a worktree that isn't in the enabled-bucket union is a no-op --
+    you can't exclude what isn't selected."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            _open_clean_live(scr)
+            union = set(scr._cleanup_union())
+            outside = next((r["id4"] for r in scr.list_records()
+                            if r["id4"] not in union), None)
+            if outside is None:
+                return  # every row is in the union here; nothing to assert
+            _focus_worktree_row(scr, outside)
+            scr._key_scopedlg("tab")                 # into the rows section
+            _focus_worktree_row(scr, outside)
+            scr._key_scopedlg("space")               # no-op
+            assert not scr.cleanup["excluded"]
+            assert set(scr._cleanup_union()) == union
+
+    asyncio.run(run())
+
+
+def test_clean_dialog_tab_cycles_buckets_rows_confirm():
+    """Tab in the Clean live filter cycles buckets(0) -> rows(2) -> confirm(1)."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            _open_clean_live(scr)
+            assert scr.cleanup["section"] == 0
+            scr._key_scopedlg("tab")
+            assert scr.cleanup["section"] == 2       # rows
+            scr._key_scopedlg("tab")
+            assert scr.cleanup["section"] == 1       # confirm
+            scr._key_scopedlg("tab")
+            assert scr.cleanup["section"] == 0       # back to buckets
+
+    asyncio.run(run())
+
+
+def test_clean_confirm_acts_on_net_after_unselect():
+    """The set Confirm acts on (`_cleanup_union`) reflects a per-row drop."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            _open_clean_live(scr)
+            union = set(scr._cleanup_union())
+            if not union:
+                return
+            victim = next(iter(union))
+            scr._key_scopedlg("tab")
+            _focus_worktree_row(scr, victim)
+            scr._key_scopedlg("space")
+            # Enter -> confirm row; the net set the executor will use excludes it.
+            scr._key_scopedlg("enter")
+            assert scr.cleanup["section"] == 1
+            assert victim not in set(scr._cleanup_union())
+
+    asyncio.run(run())
+
+
 def test_configuration_reachable_via_tab(monkeypatch):
     """The ⚙ Configuration entry is in the Tab cycle (region_heads) and Tab from
     the View pivot lands on it (operator feedback: couldn't reach it)."""
