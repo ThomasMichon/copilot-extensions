@@ -1150,3 +1150,209 @@ def restart_worktree_copilot(
         "worktree_id": worktree_id, "had_session": True,
         "method": "hard" if killed else "failed", "ok": killed,
     }
+
+
+# ── Live-cutover handoff mux primitives (issue #2250) ─────────────────────
+# A live handoff spawns a *seeded successor* Copilot in a NEW window of the
+# same ``wt-<id>`` session (preserving session identity + status bar), cuts the
+# operator over to it, and later retires the OLD pane. These helpers are the
+# platform-aware mux verbs behind ``agent-worktrees handoff-cutover``.
+
+# Identity env vars stripped from a child Copilot so the session carries no
+# ambient project/worktree identity (in-session tools resolve from CWD). Mirror
+# of the ``env -u`` prefix in launch-session.sh.
+_IDENTITY_ENV_VARS = ("WORKTREE_PROJECT", "WORKTREE_ID", "APERTURE_WORKTREE_ID")
+
+
+def _mux_bin(mux: str | None = None) -> str:
+    """Resolve the multiplexer binary name (psmux on Windows, tmux elsewhere)."""
+    if mux:
+        return mux
+    return "psmux" if platform.system() == "Windows" else "tmux"
+
+
+def _mux_session_target(worktree_id: str, mux_bin: str) -> str:
+    """Session target string. tmux uses the ``=`` exact-match prefix; psmux
+    does not support it (rejected as an unknown session)."""
+    sess = f"wt-{worktree_id}"
+    return sess if mux_bin == "psmux" else f"={sess}"
+
+
+def build_mux_new_window_argv(
+    worktree_id: str,
+    work_dir: str,
+    cmd: list[str],
+    env: dict[str, str] | None = None,
+    *,
+    mux: str | None = None,
+    pane_wrapper: str | None = None,
+) -> list[str]:
+    """Build the argv to open a new window in ``wt-<id>`` running ``cmd``.
+
+    Mirrors the launcher's pane construction: on Linux/WSL the command is
+    prefixed with ``env -u <identity vars>`` and wrapped by the pane-wrapper
+    (when present); on Windows the psmux server env is already identity-clean so
+    the command runs directly. Profile env is re-propagated with ``-e`` for
+    parity regardless of session-env inheritance. ``-P -F '#{pane_id}'`` makes
+    the mux print the new pane id.
+    """
+    mux_bin = _mux_bin(mux)
+    is_tmux = mux_bin != "psmux"
+    target = _mux_session_target(worktree_id, mux_bin)
+
+    argv = [mux_bin, "new-window", "-P", "-F", "#{pane_id}", "-t", target]
+    if work_dir:
+        argv += ["-c", work_dir]
+    for key, val in (env or {}).items():
+        argv += ["-e", f"{key}={val}"]
+
+    if is_tmux:
+        clean: list[str] = ["env"]
+        for var in _IDENTITY_ENV_VARS:
+            clean += ["-u", var]
+        wrapper = pane_wrapper
+        if wrapper is None:
+            wrapper = os.path.expanduser("~/.agent-worktrees/bin/pane-wrapper.sh")
+        if wrapper and os.path.isfile(wrapper) and os.access(wrapper, os.R_OK):
+            pane_cmd = clean + ["bash", wrapper] + list(cmd)
+        else:
+            pane_cmd = clean + list(cmd)
+    else:
+        pane_cmd = list(cmd)
+
+    # No ``--`` separator: mux option parsing stops at the first non-option
+    # token (``env`` / the launcher binary), so the rest is taken as the
+    # command verbatim -- matching launch-session.{sh,ps1}'s new-session call.
+    argv += pane_cmd
+    return argv
+
+
+def mux_active_pane(worktree_id: str, *, mux: str | None = None) -> str | None:
+    """Return the active pane id (e.g. ``%3``) of ``wt-<id>``'s current window.
+
+    This is the pane the operator is looking at -- the OLD Copilot, captured
+    before a cutover so it can be retired afterward. Returns None if the session
+    or mux is unavailable.
+    """
+    import subprocess
+
+    mux_bin = _mux_bin(mux)
+    target = _mux_session_target(worktree_id, mux_bin)
+    try:
+        r = subprocess.run(
+            [mux_bin, "display-message", "-p", "-t", target, "#{pane_id}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            return None
+        pane = r.stdout.strip()
+        return pane or None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def mux_new_window(
+    worktree_id: str,
+    work_dir: str,
+    cmd: list[str],
+    env: dict[str, str] | None = None,
+    *,
+    mux: str | None = None,
+) -> dict:
+    """Open + select a new window in ``wt-<id>`` running ``cmd``.
+
+    ``new-window`` selects the new window by default (no ``-d``), so the
+    operator is cut over to the successor immediately. Returns
+    ``{ok, new_pane, error}``.
+    """
+    import subprocess
+
+    argv = build_mux_new_window_argv(worktree_id, work_dir, cmd, env, mux=mux)
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"ok": False, "new_pane": None, "error": str(e)}
+    if r.returncode != 0:
+        return {
+            "ok": False, "new_pane": None,
+            "error": r.stderr.strip() or f"exit {r.returncode}",
+        }
+    return {"ok": True, "new_pane": r.stdout.strip() or None, "error": None}
+
+
+def _mux_pane_alive(pane_id: str, mux_bin: str) -> bool:
+    """Whether ``pane_id`` still exists in any session/window."""
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            [mux_bin, "list-panes", "-a", "-F", "#{pane_id}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            return False
+        return pane_id in r.stdout.split()
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def mux_retire_pane(
+    pane_id: str,
+    *,
+    mux: str | None = None,
+    settle_timeout: float = 6.0,
+    poll_interval: float = 0.3,
+    ctrl_c_gap: float = 0.5,
+) -> dict:
+    """Retire a specific pane by asking its Copilot to quit cleanly.
+
+    Copilot CLI exits on a **double Ctrl-C** (~300-800 ms apart) -- its native
+    clean-quit path (see :func:`graceful_quit_mux_session`). Unlike that
+    session-scoped helper, this targets one ``pane_id`` so it retires the OLD
+    Copilot after a cutover without touching the successor (the session's new
+    active pane). Falls back to ``kill-pane`` if it does not exit in time.
+
+    Returns ``{ok, pane, gone, method}`` where ``method`` is ``already-gone``,
+    ``graceful``, ``hard``, or ``failed``.
+    """
+    import subprocess
+    import time
+
+    mux_bin = _mux_bin(mux)
+
+    def _send(keys: str) -> bool:
+        try:
+            r = subprocess.run(
+                [mux_bin, "send-keys", "-t", pane_id, keys],
+                capture_output=True, timeout=5,
+            )
+            return r.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+    if not _mux_pane_alive(pane_id, mux_bin):
+        return {"ok": True, "pane": pane_id, "gone": True, "method": "already-gone"}
+
+    _send("C-c")
+    time.sleep(ctrl_c_gap)
+    _send("C-c")
+
+    deadline = time.monotonic() + settle_timeout
+    while time.monotonic() < deadline:
+        if not _mux_pane_alive(pane_id, mux_bin):
+            return {"ok": True, "pane": pane_id, "gone": True, "method": "graceful"}
+        time.sleep(poll_interval)
+
+    # Graceful quit did not land -- hard-kill the pane.
+    try:
+        subprocess.run(
+            [mux_bin, "kill-pane", "-t", pane_id],
+            capture_output=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    gone = not _mux_pane_alive(pane_id, mux_bin)
+    return {
+        "ok": gone, "pane": pane_id, "gone": gone,
+        "method": "hard" if gone else "failed",
+    }
