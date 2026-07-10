@@ -274,7 +274,7 @@ for a in json.load(sys.stdin)['updates'][$_ri].get('argv', []):
 # Subcommands that agent_worktrees's main() handles directly — these
 # must NOT fall through to the resolve→picker flow.  Keep in sync with
 # COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
-_DIRECT_COMMANDS="services repos worktree agent-worktrees resolve post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch stage-update reconcile-plugins dev handoff register-session deregister-session backfill-sessions anchor-check activity activity-log"
+_DIRECT_COMMANDS="services repos worktree agent-worktrees resolve post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch stage-update reconcile-plugins dev register-session deregister-session backfill-sessions anchor-check activity activity-log"
 _IS_DIRECT=""
 if [[ $# -gt 0 ]]; then
     for _dc in $_DIRECT_COMMANDS; do
@@ -536,40 +536,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             activity_log mux_detached "$WORKTREE_ID"
             if ! tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
                 activity_log copilot_exited "$WORKTREE_ID" mux=tmux
-                # Check for handoff-driven relaunch before post-exit
-                if [[ -n "$WORKTREE_ID" ]]; then
-                    HANDOFF_JSON=$("$PYTHON" -m agent_worktrees handoff consume "$WORKTREE_ID" 2>/dev/null) || true
-                    if [[ -n "$HANDOFF_JSON" ]]; then
-                        HANDOFF_PATH=$(echo "$HANDOFF_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('prompt_path',''))" 2>/dev/null) || HANDOFF_PATH=""
-                        if [[ -n "$HANDOFF_PATH" && -f "$HANDOFF_PATH" ]]; then
-                            setup_log INFO "Handoff relaunch (tmux): consuming $HANDOFF_PATH"
-                            echo ""
-                            echo "Handoff detected — relaunching with continuation prompt..."
-                            echo ""
-                            HANDOFF_PROMPT="Continuing from a previous session in this worktree. A handoff was prepared - read it for full context: cat \"$HANDOFF_PATH\""
-                            HANDOFF_CMD=("${CMD_ARRAY[@]}" -i "$HANDOFF_PROMPT")
-                            if [[ -r "$PANE_WRAPPER" ]]; then
-                                HANDOFF_PANE_CMD=("${CLEAN_ENV[@]}" bash "$PANE_WRAPPER" "${HANDOFF_CMD[@]}")
-                            else
-                                HANDOFF_PANE_CMD=("${CLEAN_ENV[@]}" "${HANDOFF_CMD[@]}")
-                            fi
-                            set +e
-                            tmux new-session -d -s "$TMUX_SESS" -c "$WORK_DIR" "${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}" "${HANDOFF_PANE_CMD[@]}"
-                            if [[ $? -eq 0 ]]; then
-                                _aw_apply_session_opts "$TMUX_SESS"
-                                _aw_spawn_status_updater "$TMUX_SESS"
-                                if [[ -n "${TMUX:-}" ]]; then
-                                    tmux switch-client -t "=$TMUX_SESS"
-                                else
-                                    tmux attach-session -t "=$TMUX_SESS"
-                                fi
-                            fi
-                            set -e
-                        fi
-                    fi
-                fi
-
-                # Post-exit finalization (after both original and relaunched sessions)
+                # Post-exit finalization
                 if ! tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
                     if [[ "$POST_EXIT" == "1" && -n "$WORKTREE_ID" ]]; then
                         "$PYTHON" -m agent_worktrees post-exit "$WORKTREE_ID" || \
@@ -594,25 +561,6 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
     COPILOT_EXIT=$?
     set -e
     activity_log copilot_exited "$WORKTREE_ID" mux=none "exit_code=$COPILOT_EXIT"
-
-    # Check for handoff-driven relaunch (max once per launcher invocation)
-    if [[ -n "$WORKTREE_ID" ]]; then
-        HANDOFF_JSON=$("$PYTHON" -m agent_worktrees handoff consume "$WORKTREE_ID" 2>/dev/null) || true
-        if [[ -n "$HANDOFF_JSON" ]]; then
-            HANDOFF_PATH=$(echo "$HANDOFF_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('prompt_path',''))" 2>/dev/null) || HANDOFF_PATH=""
-            if [[ -n "$HANDOFF_PATH" && -f "$HANDOFF_PATH" ]]; then
-                setup_log INFO "Handoff relaunch: consuming $HANDOFF_PATH"
-                echo ""
-                echo "Handoff detected — relaunching with continuation prompt..."
-                echo ""
-                HANDOFF_PROMPT="Continuing from a previous session in this worktree. A handoff was prepared - read it for full context: cat \"$HANDOFF_PATH\""
-                set +e
-                "${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}" -i "$HANDOFF_PROMPT"
-                COPILOT_EXIT=$?
-                set -e
-            fi
-        fi
-    fi
 
     # Post-exit finalization
     if [[ "$POST_EXIT" == "1" && -n "$WORKTREE_ID" ]]; then

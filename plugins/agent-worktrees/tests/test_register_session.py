@@ -30,7 +30,6 @@ def _save_record(tracking_dir: Path, wt_id: str, wt_path: str) -> None:
         title=None,
         status="active",
         completed_at=None,
-        handoff_prompt=None,
         sessions=[],
     )
     save_record(rec, tracking_dir / f"{wt_id}.yaml")

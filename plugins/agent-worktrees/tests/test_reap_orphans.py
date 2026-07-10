@@ -28,7 +28,6 @@ def _rec(wt_id, *, status="active", path="/tmp/wt", kind="session"):
         title=None,
         status=status,
         completed_at=None,
-        handoff_prompt=None,
         sessions=[],
         prs=[],
         kind=kind,

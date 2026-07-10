@@ -321,7 +321,7 @@ $DirectCommands = @(
     'resolve', 'post-exit', 'finalize', 'push-changes', 'mark-complete',
     'status', 'list', 'create', 'cleanup', 'validate', 'install',
     'register', 'unregister', 'uninstall', 'update', 'install-status',
-    'deploy-instructions', 'get', 'pre-launch', 'stage-update', 'reconcile-plugins', 'dev', 'handoff',
+    'deploy-instructions', 'get', 'pre-launch', 'stage-update', 'reconcile-plugins', 'dev',
     'register-session', 'deregister-session', 'backfill-sessions',
     'anchor-check'
 )

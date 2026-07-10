@@ -92,7 +92,6 @@ class WorktreeRecord:
     title: str | None
     status: WorktreeStatus
     completed_at: str | None
-    handoff_prompt: str | None  # deprecated, kept for YAML compat
     sessions: list[SessionEntry] | None = field(default=None)
     # PR records (PR mode).  A worktree can track multiple PRs -- serially
     # (re-PR after a merge) or in parallel -- each self-describing (including
@@ -318,7 +317,6 @@ def load_record(path: Path) -> WorktreeRecord:
         title=title,
         status=data.get("status", "active"),
         completed_at=str(completed_raw) if completed_raw else None,
-        handoff_prompt=data.get("handoff_prompt") or None,
         sessions=sessions_list,
         prs=prs_list,
         kind=kind_val,
@@ -354,7 +352,6 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         f"title: {title_val}\n"
         f"status: {record.status}\n"
         f"completed_at: {record.completed_at or 'null'}\n"
-        f"handoff_prompt: {record.handoff_prompt or 'null'}\n"
     )
 
     # Owner class -- only emit for managed (system/bridge) worktrees so existing
@@ -520,7 +517,6 @@ def create_new_record(
         title=None,
         status="active",
         completed_at=None,
-        handoff_prompt=None,
         sessions=[],
         kind=kind,
         owner=owner,

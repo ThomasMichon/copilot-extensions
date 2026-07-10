@@ -23,7 +23,6 @@ def _rec(status="finalized", prs=None) -> tracking.WorktreeRecord:
         title=None,
         status=status,
         completed_at=None,
-        handoff_prompt=None,
         sessions=[],
         prs=prs or [],
     )
