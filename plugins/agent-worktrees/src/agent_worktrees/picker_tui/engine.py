@@ -344,6 +344,7 @@ class PickerScreen(Widget):
         self.cleanup = None           # cleanup-scope modal (Maintenance)
         self.optmenu = None           # "More options…" create modal
         self.maint_sel = ListSelection()   # Maintenance multi-select (#1345)
+        self.wt_sel = ListSelection()      # Worktrees list multi-select (#2228 2b)
         self.maint_menu = None        # Maintenance actions menu modal (#1345)
         self.maint_menu_idx = 0
         self.prof_confirm = None      # Profiles Apply confirm dialog (add/remove diff)
@@ -608,6 +609,7 @@ class PickerScreen(Widget):
         self.machines = [("All", None, None, True)] + self.src.machines()
         self.machine_idx = self.local_index()
         self.maint_sel = ListSelection()  # drop any stale Maintenance selection
+        self.wt_sel = ListSelection()     # drop any stale Worktrees selection
         self._last_poll = time.monotonic()   # first background poll is POLL_SECS out
         if self.live:
             # Real background SSH loads: one daemon thread per machine,
@@ -1079,6 +1081,37 @@ class PickerScreen(Widget):
         elif key in ("escape", "q", "tab"):
             self.maint_menu = None
 
+    # ---- Worktrees list multi-select (#2228 Phase 2b) ----
+    def _toggle_wt(self, i):
+        """Space on a Worktrees row toggles it in the list selection."""
+        recs = self.list_records()
+        if 0 <= i < len(recs):
+            wid = recs[i]["id4"]
+            now_on = self.wt_sel.toggle(wid)
+            self.debug = (f"{'selected' if now_on else 'deselected'} {wid}"
+                          f" · {len(self.wt_sel)} selected")
+
+    def _open_wt_action_menu(self):
+        """Enter on the Worktrees list with a multi-selection opens the bulk
+        action menu (Sync / Cleanup) for the selected set -- the same
+        ``maint_menu`` the eliminated Maintenance view used, so Sync/Cleanup run
+        through the identical scoped executor (#2228 2b). A single focused row
+        with no selection keeps opening its per-row sub-menu (which carries
+        Open/Resume) -- see ``_activate``."""
+        ids = self.wt_sel.ids
+        chosen = [r for r in self.list_records() if r["id4"] in ids]
+        acts = []
+        if any(r.get("ff_eligible") for r in chosen):
+            acts.append("Sync")
+        if any(self._cleanable(r) for r in chosen):
+            acts.append("Cleanup")
+        if not acts:
+            self.debug = (f"no bulk action for {len(chosen)} "
+                          f"selected worktree(s)")
+            return
+        self.maint_menu = {"ids": ids, "actions": acts, "count": len(chosen)}
+        self.maint_menu_idx = 0
+
     # ---- Profiles matrix helpers ----
     def profile_col_widths(self):
         return [max(len(f"{m} {e}"), 3) + 2 for _lbl, m, e in self.host_cols]
@@ -1530,6 +1563,13 @@ class PickerScreen(Widget):
                         else rec.get("ff_eligible")
                     ):
                         vr.text.stylize("grey35")   # out of this action's scope
+                    # Multi-select marker (#2228 2b): a selected row (not the
+                    # focus cursor, and not while a Clean/Sync preview owns the
+                    # dimming) carries the same subtle shading the active tab
+                    # uses, so the chosen set reads at a glance.
+                    if (rec["id4"] in self.wt_sel and sel != ("L", li)
+                            and preview_ids is None and not preview):
+                        vr.text.stylize("on grey23")
                     li += 1
         elif self._kind() == "maintenance":
             add(self.tab_bar(width, sel == ("M", 0)))
@@ -2193,7 +2233,11 @@ class PickerScreen(Widget):
         if zone == "L":
             rec = self._selected_record()
             wid = rec.get("id4") if rec else "?"
-            return (f"Enter / Space: sub-menu for worktree {wid}"
+            nsel = len(self.wt_sel)
+            if nsel:
+                return (f"Space: select/deselect · Enter: actions for "
+                        f"{nsel} selected · Tab region · ^◀▶ machine")
+            return (f"Space: select · Enter: sub-menu for worktree {wid}"
                     f" · Tab region · ^◀▶ machine")
         if zone == "C":
             rec = self._selected_record()
@@ -2727,7 +2771,7 @@ class PickerScreen(Widget):
             self._activate()
         elif key == "space":
             if zone == "L":
-                self._open_submenu()
+                self._toggle_wt(self.sel[1])
             elif zone == "C":
                 self._toggle_maint(self.sel[1])
             elif zone == "SA":
@@ -3218,9 +3262,13 @@ class PickerScreen(Widget):
             elif btn == "PA":
                 self._apply_profiles()
         elif zone == "L":
-            # Enter on a worktree row opens its sub-menu (#1343), not a
-            # straight Open.
-            self._open_submenu()
+            # Enter on the Worktrees list opens the bulk action menu when a
+            # multi-selection is active, else the focused row's sub-menu (which
+            # carries Open/Resume, #1343). Unified list model -- #2228 2b.
+            if self.wt_sel:
+                self._open_wt_action_menu()
+            else:
+                self._open_submenu()
         elif zone == "C":
             # Maintenance: Enter opens the maintenance actions menu for the
             # selected set (#1345) -- it never opens/resumes a worktree.
