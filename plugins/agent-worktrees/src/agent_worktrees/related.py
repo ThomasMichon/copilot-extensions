@@ -424,6 +424,61 @@ def get_related(anchor: str | Path, name: str) -> RelatedEntry | None:
     return read_related(anchor).related.get(name)
 
 
+def _control_plane_project(anchor: str | Path) -> str | None:
+    """The ``control_plane.project`` declared in ``<anchor>/machines.yaml``.
+
+    Accepts both the mapping form (``control_plane: {project: <name>}``) and the
+    bare form (``control_plane: <name>``). Returns ``None`` when the file is
+    absent/malformed or declares no control plane. Fail-safe (never raises).
+    """
+    path = Path(anchor) / "machines.yaml"
+    try:
+        if not path.is_file():
+            return None
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    cp = data.get("control_plane")
+    val = cp.get("project") if isinstance(cp, dict) else cp
+    return val.strip() if isinstance(val, str) and val.strip() else None
+
+
+def find_control_plane_anchor() -> str | None:
+    """Locate the control-plane project's anchor via the global repos registry.
+
+    The control plane is the repo whose ``machines.yaml`` declares
+    ``control_plane.project``; its ``related.yaml`` is the canonical, directional
+    index this whole control plane coordinates from. Scans registered repo
+    anchors for that declaration and returns the named project's anchor (falling
+    back to the declaring anchor when the named project isn't separately
+    registered). Fail-safe -> ``None``.
+
+    This lets read-only ``related`` lookups (``resolve`` / ``show`` / ``doc``)
+    fall back to the control-plane index when run from *inside* a coordinated
+    repo's own checkout -- where the cwd-directional index is empty and the
+    guidance would otherwise dead-end ("not a related repo").
+    """
+    from . import repos
+    try:
+        entries = repos.list_repos()
+    except Exception:
+        return None
+    by_name = {e.name: e for e in entries}
+    for e in entries:
+        anchor = e.local_path()
+        if not anchor:
+            continue
+        cp = _control_plane_project(anchor)
+        if not cp:
+            continue
+        target = by_name.get(cp)
+        tgt_path = target.local_path() if target else None
+        return tgt_path or anchor
+    return None
+
+
 def list_related(
     anchor: str | Path, *, role: str | None = None
 ) -> list[RelatedEntry]:
