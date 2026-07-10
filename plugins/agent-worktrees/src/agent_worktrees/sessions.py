@@ -1302,15 +1302,15 @@ def mux_retire_pane(
     mux: str | None = None,
     settle_timeout: float = 6.0,
     poll_interval: float = 0.3,
-    ctrl_c_gap: float = 0.5,
+    ctrl_c_gap: float = 0.6,
 ) -> dict:
     """Retire a specific pane by asking its Copilot to quit cleanly.
 
-    Copilot CLI exits on a **double Ctrl-C** (~300-800 ms apart) -- its native
-    clean-quit path (see :func:`graceful_quit_mux_session`). Unlike that
-    session-scoped helper, this targets one ``pane_id`` so it retires the OLD
-    Copilot after a cutover without touching the successor (the session's new
-    active pane). Falls back to ``kill-pane`` if it does not exit in time.
+    Copilot CLI exits on a **double Ctrl-C** ~600 ms apart (a single one does
+    little) -- its native clean-quit path (cf. :func:`graceful_quit_mux_session`).
+    Unlike that session-scoped helper, this targets one ``pane_id`` so it retires
+    the OLD Copilot after a cutover without touching the successor (the session's
+    new active pane). Falls back to ``kill-pane`` if it does not exit in time.
 
     Returns ``{ok, pane, gone, method}`` where ``method`` is ``already-gone``,
     ``graceful``, ``hard``, or ``failed``.

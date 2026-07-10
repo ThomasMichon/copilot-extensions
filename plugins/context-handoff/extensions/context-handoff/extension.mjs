@@ -545,12 +545,10 @@ const session = await joinSession({
         "session's state folder. Call this after composing the handoff from " +
         "generate_handoff_prompt data. Pass the markdown as `prompt_text` (the " +
         "`prompt` alias is also accepted); an optional short `title` labels the " +
-        "task. Set `continue_live: true` (the opt-in live-cutover handoff, e.g. " +
-        "from /handoff-continue) to ALSO spawn a seeded successor Copilot in a " +
-        "new window of this worktree's mux session, cut the operator over to it, " +
-        "and quit THIS session when the turn ends -- an automatic hands-free " +
-        "continuation. The handoff is NEVER loaded automatically by a future " +
-        "session unless continue_live seeds it.",
+        "task. Returns the short reply prompt AND, on a `HANDOFF_SEED:` line, the " +
+        "exact seed string to pass to `continue_handoff` if you are performing a " +
+        "LIVE cutover (e.g. from /handoff-continue). The handoff is NEVER loaded " +
+        "automatically by a future session.",
       skipPermission: true,
       parameters: {
         type: "object",
@@ -569,14 +567,6 @@ const session = await joinSession({
           prompt: {
             type: "string",
             description: "Alias for prompt_text (accepted for convenience).",
-          },
-          continue_live: {
-            type: "boolean",
-            description:
-              "Opt-in live cutover: after storing the handoff, spawn a seeded " +
-              "successor Copilot in a new mux window, cut the operator over, and " +
-              "quit this session when the turn ends. Requires running under a " +
-              "mux session; degrades to the normal reply-prompt flow otherwise.",
           },
         },
         // Intentionally no `required`: the handler validates so a missing or
@@ -600,14 +590,15 @@ const session = await joinSession({
 
         const cwd = state.cwd || process.cwd();
         const title = (args?.title ?? "").toString().trim();
-        const continueLive =
-          args?.continue_live === true || args?.continue_live === "true";
         const topic = title || "continue this session";
 
         // Store the handoff (agent-dispatch task preferred, else session file)
-        // and derive both the successor's seed prompt and the normal reply msg.
-        let seed = null;       // the successor's -i first-turn prompt
-        let storedMsg = null;  // the normal (non-cutover) instruction to reply
+        // and derive both the short reply prompt (== the successor seed) and the
+        // normal instruction message. Storage is single-responsibility here; a
+        // live cutover is a SEPARATE, explicit continue_handoff call the agent
+        // makes afterward, passing the HANDOFF_SEED below.
+        let seed = null;       // the reply prompt == the successor's -i seed
+        let storedMsg = null;  // the instruction to reply with
 
         if (agentDispatchAvailable()) {
           const taskId = dispatchHandoff(text, sid, cwd, title);
@@ -645,27 +636,73 @@ const session = await joinSession({
           );
         }
 
-        if (!continueLive) return storedMsg;
-
-        // --- Live cutover: spawn the seeded successor + cut the operator over ---
+        // The HANDOFF_SEED line is the machine-readable seed for a LIVE cutover:
+        // if performing one (e.g. /handoff-continue), call continue_handoff with
+        // `seed` set to exactly this string. Ignore it for a normal handoff.
+        return (
+          `${storedMsg}\n\n` +
+          `HANDOFF_SEED: ${seed}\n` +
+          `(For a LIVE cutover only: call continue_handoff with \`seed\` set to ` +
+          `exactly the HANDOFF_SEED string above. For a normal handoff, ignore ` +
+          `this line and just reply with the short prompt.)`
+        );
+      },
+    },
+    {
+      name: "continue_handoff",
+      description:
+        "Live-cutover the CURRENT session to a seeded successor. Call this AFTER " +
+        "save_handoff_prompt (the explicit 'kick the flow' step of a live " +
+        "handoff): pass `seed` = the exact HANDOFF_SEED string save_handoff_prompt " +
+        "returned. It spawns a successor Copilot in a new window of this " +
+        "worktree's mux session, seeds it with that prompt (copilot -i), cuts the " +
+        "operator over to it, and arms THIS session to quit when the current turn " +
+        "ends (double-Ctrl-C to its own pane on agent-stop). Requires running " +
+        "under a mux session; if not (or the cutover fails) it does nothing " +
+        "destructive and says so -- the handoff is still safely stored.",
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          seed: {
+            type: "string",
+            description:
+              "The successor's first interactive prompt -- pass the exact " +
+              "HANDOFF_SEED string returned by save_handoff_prompt (e.g. 'Claim " +
+              "and act on the handoff <id> …' or 'Read the handoff at <path> …').",
+          },
+        },
+      },
+      handler: async (args, invocation) => {
+        ensureState(invocation);
+        const seed = (args?.seed ?? "").toString().trim();
+        if (!seed) {
+          return (
+            "Cannot continue handoff: pass the HANDOFF_SEED string returned by " +
+            "save_handoff_prompt as `seed`. Nothing was done. (Call " +
+            "save_handoff_prompt first to store the handoff and get the seed.)"
+          );
+        }
+        const cwd = state.cwd || process.cwd();
         const result = runHandoffCutover(cwd, seed);
         if (!result) {
           return (
-            `Live cutover was requested but is unavailable (this session is not ` +
-            `running under a mux session, or the cutover verb failed). The handoff ` +
-            `is safely stored and can be resumed the normal way:\n\n${storedMsg}`
+            "Live cutover is unavailable: this session is not running under a mux " +
+            "session, or the cutover verb failed. Nothing destructive was done. " +
+            "The handoff is safely stored -- resume it the normal way (paste the " +
+            "reply prompt into '/clear', or run /resume-handoff in a fresh session " +
+            "in this worktree)."
           );
         }
         // Arm self-retire: this old session quits on the next session.idle
-        // (agent-stop of this handoff turn); the successor already holds the seed.
+        // (agent-stop of this turn); the successor already holds the seed.
         state.cutover = { oldPane: result.old_pane || null, retired: false };
         return (
           `Live cutover initiated. A successor Copilot was spawned in a new window ` +
           `of this worktree's mux session (pane ${result.new_pane || "?"}) and ` +
           `seeded to resume the handoff; the operator has been cut over to it. ` +
           `THIS session will quit automatically when the current turn ends -- do ` +
-          `NOT start new work; simply end your turn. If asked, the fallback resume ` +
-          `prompt is:\n  ${seed}`
+          `NOT start new work; simply end your turn.`
         );
       },
     },
@@ -688,11 +725,13 @@ const session = await joinSession({
             "per the context-handoff skill (original request, direction & " +
             "motivation, progress with file paths, next action items, target " +
             "goals, gotchas); (3) call save_handoff_prompt with that markdown as " +
-            "`prompt_text`, a short specific `title`, AND `continue_live: true`. " +
-            "That stores the handoff, spawns a seeded successor Copilot in a new " +
-            "window of this worktree's mux session, and cuts the operator over to " +
-            "it. After the tool returns its live-cutover confirmation, DO NOT " +
-            "start new work -- just end your turn; this session quits itself.",
+            "`prompt_text` and a short specific `title` -- it stores the handoff " +
+            "and returns a HANDOFF_SEED line; (4) call continue_handoff with " +
+            "`seed` set to EXACTLY that HANDOFF_SEED string -- it spawns the " +
+            "seeded successor Copilot in a new window of this worktree's mux " +
+            "session and cuts the operator over. After continue_handoff returns " +
+            "its confirmation, DO NOT start new work -- just end your turn; this " +
+            "session quits itself.",
           displayPrompt: "Live-cutover handoff (/handoff-continue)",
         });
       },
