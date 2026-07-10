@@ -94,6 +94,21 @@ So efforts are actually used, add to the repo's agent instructions
   the effort under `efforts/active/<slug>/`.*
 - If the repo had a legacy `plans/` (or similar), mark it superseded and treat
   existing plans as a backlog of efforts-in-waiting.
+- **A persistent cross-repo sequencing rule — install it as an *always-on*
+  rule, not an on-demand skill.** This plugin ships only on-demand skills, so a
+  standing rule it wants enforced must be **materialized** in the adopting repo's
+  own always-on instructions (`AGENTS.md` / `.github/copilot-instructions.md`, or
+  a small dedicated rule file the guidance references). Add this rule: *When an
+  effort in this **review-gated** repo also drives a change in a related repo you
+  push **directly** — no PR, no pre-merge review — land the **effort-update PR
+  first**, before the direct push that realizes it; the reviewed plan/intent must
+  clear review **ahead of** the unreviewed push. Only **completion markers**
+  (journal "done" entries, `Status:` flips, checklist ticks, "shipped in
+  `<commit>`") are recorded **after** the cross-repo work — everything stating
+  intent or plan belongs in the earlier PR.* A repo that already carries
+  equivalent standing guidance need only confirm it covers this ordering
+  (the **equivalent-guidance** path). A repo that is *not* review-gated, or that
+  never pushes directly to a related repo, can skip it.
 
 ### 5. Validate
 
@@ -101,6 +116,10 @@ So efforts are actually used, add to the repo's agent instructions
 - `efforts/TEMPLATE.md` matches the addendum's section set.
 - `efforts/active/` exists and is tracked.
 - The repo's agent instructions route planning to efforts.
+- The repo's **always-on** instructions carry the cross-repo sequencing rule
+  (effort-update PR before an unreviewed direct push; only completion markers
+  after) — or equivalent standing guidance already covers it. (Skip only when the
+  repo is not review-gated or never pushes directly to a related repo.)
 
 ## Migrating from a legacy plans directory
 
