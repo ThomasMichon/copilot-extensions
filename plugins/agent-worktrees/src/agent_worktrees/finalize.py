@@ -849,6 +849,27 @@ def _push_changes_pr_refspec(
         lock.release()
 
 
+def _resolve_content_ref(
+    feature: str,
+    worktree_id: str,
+    *,
+    cwd: str,
+) -> str | None:
+    """Resolve a local ref whose content represents the worktree's work.
+
+    Prefer the local feature branch (the legacy ``feature/`` snapshot scheme
+    creates it locally). When it is absent -- the refspec head scheme (#1815)
+    keeps the worktree on ``worktree/<id>`` and only ever pushes ``pr/<slug>``
+    to the *remote*, so no local feature branch exists -- fall back to the
+    durable worktree branch ``worktree/<id>``, then the current ``HEAD``.
+    Returns ``None`` if none resolve.
+    """
+    for ref in (feature, f"worktree/{worktree_id}", "HEAD"):
+        if ref and git_ops.ref_exists(ref, cwd=cwd):
+            return ref
+    return None
+
+
 def _pr_finalize_precondition(
     record: tracking.WorktreeRecord,
     repo,
@@ -866,14 +887,27 @@ def _pr_finalize_precondition(
     cwd = worktree_path if Path(worktree_path).exists() else anchor
     upstream = f"{remote}/{repo.default_branch}"
 
-    # #1045: If the feature branch's content is already on origin/<default>
-    # (the PR was merged), the work is safely upstream -- regardless of a
-    # stale origin/<feature> ref (which lags at the pre-merge head after a
-    # squash-merge) or whether the remote feature branch was deleted on merge.
-    # Treat as safe so finalize does not false-block a merged PR and send the
-    # user to push-changes (which would re-push an already-merged branch).
-    if git_ops.ref_exists(upstream, cwd=cwd) and _is_content_on_upstream(
-        feature, upstream, cwd=cwd
+    # #1045 / #21: If the work's content is already on origin/<default> (the PR
+    # merged), it is safely upstream -- regardless of a stale origin/<feature>
+    # ref (which lags at the pre-merge head after a squash-merge) or a remote
+    # feature branch that was auto-deleted on merge. Check this FIRST so
+    # finalize does not false-block a merged PR and send the user to
+    # push-changes (which would re-push an already-merged branch).
+    #
+    # The content check must run against a ref that actually resolves locally.
+    # In the refspec head scheme (#1815) the local ``pr/<slug>`` branch never
+    # exists (it is only a remote push target), so probing ``feature`` directly
+    # would miss by construction -- and, combined with a remote branch deleted
+    # on merge, false-block. Resolve a durable content ref (feature ->
+    # worktree/<id> -> HEAD) first. Pointing the check at the real worktree
+    # commit also fixes the squash-merge variant: the ancestor strategy no
+    # longer applies, but ``_is_content_on_upstream``'s cherry/blob strategies
+    # then catch the patch-id match.
+    content_ref = _resolve_content_ref(feature, record.worktree_id, cwd=cwd)
+    if (
+        content_ref is not None
+        and git_ops.ref_exists(upstream, cwd=cwd)
+        and _is_content_on_upstream(content_ref, upstream, cwd=cwd)
     ):
         return True, None
 
