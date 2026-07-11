@@ -393,6 +393,10 @@ class AcpClient:
         # ``is_running`` report the child as unreachable so the session's
         # liveness derives ``disconnected`` and the reattach driver fires (P1).
         self._host_transport_alive = True
+        # Set when the transport is marked lost, so an in-flight ``send_prompt``
+        # can be woken instead of hanging forever awaiting a reply from a dead
+        # reader -- the wedged-``running`` root cause (issue #22).
+        self._transport_lost_event = asyncio.Event()
 
     @property
     def pid(self) -> int | None:
@@ -421,6 +425,9 @@ class AcpClient:
         """
         if self._host_mode:
             self._host_transport_alive = False
+            # Wake any in-flight prompt so the turn terminates instead of
+            # hanging on a reply that will never arrive (issue #22).
+            self._transport_lost_event.set()
 
     @property
     def active_background_tasks(self) -> list[str]:
@@ -586,10 +593,7 @@ class AcpClient:
             self._prompt_in_flight = True
 
             try:
-                result = await self._connection.prompt(
-                    session_id=self._acp_session_id,
-                    prompt=[text_block(text)],
-                )
+                result = await self._prompt_or_transport_lost(text)
                 self._stop_reason = result.stop_reason
                 self._prompt_complete = True
                 self._emit("turn_complete", {
@@ -604,6 +608,39 @@ class AcpClient:
                 self._prompt_in_flight = False
 
             return self._build_turn_result()
+
+    async def _prompt_or_transport_lost(self, text: str) -> Any:
+        """Await the ACP prompt, but fail fast if the transport drops mid-turn.
+
+        A dead reader (child exit, relayed-stream/loopback drop) would otherwise
+        leave ``connection.prompt()`` awaiting a reply that never comes, wedging
+        the turn in ``running`` forever with no terminal event. Racing the prompt
+        against the transport-lost signal converts that silent hang into a
+        ``ConnectionResetError`` the turn can terminate on (issue #22). Outside
+        host mode the event never fires, so behavior is unchanged.
+        """
+        prompt_fut = asyncio.ensure_future(
+            self._connection.prompt(
+                session_id=self._acp_session_id,
+                prompt=[text_block(text)],
+            )
+        )
+        lost_fut = asyncio.ensure_future(self._transport_lost_event.wait())
+        try:
+            await asyncio.wait(
+                {prompt_fut, lost_fut}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if prompt_fut.done():
+                return prompt_fut.result()
+            raise ConnectionResetError(
+                "ACP transport lost while a prompt was in flight"
+            )
+        finally:
+            for fut in (prompt_fut, lost_fut):
+                if not fut.done():
+                    fut.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await fut
 
     async def cancel_prompt(self) -> None:
         """Cancel the current prompt via ACP session/cancel."""

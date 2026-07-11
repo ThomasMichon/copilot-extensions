@@ -235,6 +235,44 @@ class TestSubmitPrompt:
         with pytest.raises(KeyError):
             await session_manager.submit_prompt("nonexistent", "Hello")
 
+    @pytest.mark.asyncio
+    async def test_run_prompt_emits_terminal_idle_on_success(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """A completed turn drives the event log to a terminal idle so no
+        consumer is left mirroring a turn that never ends (issue #22)."""
+        session = await session_manager.start_session(spawn_target)
+        await session_manager.submit_prompt(session.session_id, "Hello")
+        await session._prompt_task
+
+        events = session.event_log.get_events()
+        state_changes = [
+            e for e in events if e.event == "session_state_changed"
+        ]
+        assert state_changes[-1].data.get("status") == "idle"
+        assert session.status == SessionStatus.IDLE
+
+    @pytest.mark.asyncio
+    async def test_run_prompt_emits_terminal_idle_on_failure(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """A turn whose ACP prompt fails (e.g. transport lost mid-turn) still
+        reaches a terminal idle in the event log instead of wedging the session
+        in 'running' forever (issue #22)."""
+        session = await session_manager.start_session(spawn_target)
+        session.client.send_prompt = AsyncMock(
+            side_effect=ConnectionResetError("transport lost")
+        )
+        await session_manager.submit_prompt(session.session_id, "Hello")
+        await session._prompt_task
+
+        events = session.event_log.get_events()
+        state_changes = [
+            e for e in events if e.event == "session_state_changed"
+        ]
+        assert state_changes[-1].data.get("status") == "idle"
+        assert session.status == SessionStatus.IDLE
+
 
 class TestStopSession:
     """Session stop."""
