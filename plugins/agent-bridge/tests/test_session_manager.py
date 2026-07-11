@@ -702,6 +702,65 @@ class TestReconcileWedged:
         assert session.status == SessionStatus.RUNNING
 
 
+class TestInterruptTurn:
+    """Per-turn interrupt -- cancel the turn, keep the session alive (#899)."""
+
+    @pytest.mark.asyncio
+    async def test_interrupt_cancels_and_settles_to_idle(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """Interrupt sends an ACP cancel and the session settles to IDLE with
+        the client and session intact (not stopped/ended)."""
+        session = await session_manager.start_session(spawn_target)
+
+        cancelled = asyncio.Event()
+
+        async def _blocking_prompt(_text):
+            await cancelled.wait()
+            return {
+                "response_text": "", "thought_text": "", "tool_calls": [],
+                "stop_reason": "cancelled", "error": None,
+            }
+
+        async def _cancel():
+            cancelled.set()
+
+        session.client.send_prompt = AsyncMock(side_effect=_blocking_prompt)
+        session.client.cancel_prompt = AsyncMock(side_effect=_cancel)
+
+        await session_manager.submit_prompt(session.session_id, "Hello")
+        assert session.status == SessionStatus.RUNNING
+
+        result = await session_manager.interrupt_turn(session.session_id)
+
+        session.client.cancel_prompt.assert_awaited()
+        assert result is session
+        assert session.status == SessionStatus.IDLE
+        assert session.client is not None  # session survives -- not torn down
+        state_changes = [
+            e for e in session.event_log.get_events()
+            if e.event == "session_state_changed"
+        ]
+        assert state_changes[-1].data.get("status") == "idle"
+
+    @pytest.mark.asyncio
+    async def test_interrupt_is_noop_when_idle(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """Interrupting a session with no live turn does nothing (no cancel)."""
+        session = await session_manager.start_session(spawn_target)
+        # Idle session, no prompt task.
+        result = await session_manager.interrupt_turn(session.session_id)
+        assert result is session
+        session.client.cancel_prompt.assert_not_awaited()
+        assert session.status == SessionStatus.IDLE
+
+    @pytest.mark.asyncio
+    async def test_interrupt_unknown_session(self, session_manager) -> None:
+        with pytest.raises(KeyError):
+            await session_manager.interrupt_turn("nonexistent")
+
+
 class TestRehydrate:
     """Session rehydration on restart."""
 

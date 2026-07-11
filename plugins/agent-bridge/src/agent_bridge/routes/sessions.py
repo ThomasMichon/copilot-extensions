@@ -566,6 +566,22 @@ async def stop_session(session_id: str, request: Request, force: bool = False):
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
 
+@router.post("/{session_id}/interrupt", response_model=SessionInfo)
+async def interrupt_turn(session_id: str, request: Request):
+    """Interrupt the in-flight turn, leaving the session alive and idle.
+
+    Cancels the *current turn* (ACP session/cancel) and returns the agent to
+    idle -- distinct from ``/stop`` and ``DELETE`` (which tear the session down).
+    A no-op if nothing is in flight. Returns the session's resulting state.
+    """
+    mgr: SessionManager = request.app.state.session_manager
+    try:
+        session = await mgr.interrupt_turn(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    return _session_info(session)
+
+
 @router.post("/{session_id}/resume", response_model=SessionInfo)
 async def resume_session(session_id: str, request: Request):
     """Resume a stopped session by spawning a new agent process."""

@@ -127,6 +127,45 @@ class TestSessionRoutes:
         resp = client.post("/api/v1/sessions/nonexistent/stop")
         assert resp.status_code == 404
 
+    def test_interrupt_nonexistent(self, client) -> None:
+        resp = client.post("/api/v1/sessions/nonexistent/interrupt")
+        assert resp.status_code == 404
+
+    @patch("agent_bridge.session_manager.spawn")
+    @patch("agent_bridge.session_manager.AcpClient")
+    def test_interrupt_idle_session_returns_state(
+        self, mock_acp_cls, mock_spawn, client
+    ) -> None:
+        """Interrupting a session with no live turn is a no-op that returns the
+        (idle) session state -- never a 404/500, never a teardown."""
+        mock_proc = MagicMock()
+        mock_proc.proc = MagicMock()
+        mock_proc.proc.pid = 42
+        mock_proc.proc.returncode = None
+        mock_proc.proc.stdin = MagicMock()
+        mock_proc.proc.stdout = MagicMock()
+        mock_proc.proc.stderr = MagicMock()
+        mock_proc.proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_spawn.return_value = mock_proc
+
+        mock_client = MagicMock()
+        mock_client.is_running = True
+        mock_client.pid = 42
+        mock_client.start = AsyncMock()
+        mock_client.new_session = AsyncMock(return_value="acp-123")
+        mock_client.shutdown = AsyncMock()
+        mock_client.cancel_prompt = AsyncMock()
+        mock_acp_cls.return_value = mock_client
+
+        sid = client.post(
+            "/api/v1/sessions", json={"target_dir": "/tmp/test"},
+        ).json()["session_id"]
+
+        resp = client.post(f"/api/v1/sessions/{sid}/interrupt")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "idle"
+        mock_client.cancel_prompt.assert_not_called()
+
     def test_delete_nonexistent(self, client) -> None:
         resp = client.delete("/api/v1/sessions/nonexistent")
         assert resp.status_code == 404
