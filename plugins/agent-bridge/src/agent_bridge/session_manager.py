@@ -2330,6 +2330,47 @@ class SessionManager:
                 session.session_id, exc_info=True,
             )
 
+    async def interrupt_turn(self, session_id: str) -> "Session":
+        """Interrupt the in-flight turn, leaving the session alive and idle.
+
+        Sends an ACP cancel to the active prompt so the current turn stops and
+        the session returns to IDLE, ready for the next turn. Unlike
+        ``stop_session``/``end_session`` this preserves the ACP client and the
+        session itself -- it cancels the *turn*, not the session. A no-op that
+        returns the session unchanged if nothing is in flight.
+
+        The in-flight ``_run_prompt`` observes the cancel (``send_prompt``
+        returns with a ``cancelled`` stop reason, or raises) and lands the
+        session IDLE with a terminal ``session_state_changed`` (the Phase-1
+        guarantee), which flows to every consumer over the event stream.
+        """
+        session_id = self._resolve_ref(session_id) or session_id
+        session = self._sessions.get(session_id)
+        if not session:
+            raise KeyError(f"Session {session_id} not found")
+
+        task = session._prompt_task
+        if (session.status != SessionStatus.RUNNING
+                or task is None or task.done()):
+            # Nothing live to interrupt -- return the session as-is.
+            return session
+
+        # Ask the agent to cancel the active turn (ACP session/cancel).
+        if session.client is not None:
+            with contextlib.suppress(Exception):
+                await session.client.cancel_prompt()
+
+        # Give the runner a bounded moment to settle to a terminal state so the
+        # caller sees idle promptly. `shield` so this wait never cancels the
+        # runner itself; if it does not settle in time the terminal still flows
+        # over the event stream (and the wedged-session watchdog is the backstop).
+        # Never force-kill the task here -- that would end the session.
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(asyncio.shield(task), timeout=10.0)
+
+        log.info("Interrupted in-flight turn for session %s", session_id)
+        return session
+
     async def stop_session(
         self, session_id: str, *, force: bool = False, reap_host: bool = False
     ) -> None:
