@@ -221,6 +221,14 @@ async def lifespan(app: FastAPI):
                     await mgr.recover_disconnected_hosts()
                 except Exception:
                     log.warning("Liveness-driven reattach failed", exc_info=True)
+            # Eventual-terminal reconciliation (#2384): heal any session wedged
+            # in RUNNING with no live turn (output stopped, no prompt task) so it
+            # cannot mirror "Responding..." forever. Runs regardless of host mode;
+            # it never touches a progressing or locally-driven turn.
+            try:
+                await mgr.reconcile_wedged_running()
+            except Exception:
+                log.warning("Wedged-session reconciliation failed", exc_info=True)
 
     heartbeat_task = asyncio.create_task(_heartbeat_loop())
 

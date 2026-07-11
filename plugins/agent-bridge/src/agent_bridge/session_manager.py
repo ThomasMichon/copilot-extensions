@@ -1353,6 +1353,49 @@ class SessionManager:
             log.info("Recovered %d disconnected host-backed session(s)", recovered)
         return recovered
 
+    async def reconcile_wedged_running(self, now: float | None = None) -> int:
+        """Heal sessions wedged in RUNNING with no live turn (issue #22 / #2384).
+
+        Eventual-terminal reconciliation: a session persisted as RUNNING whose
+        turn can no longer reach a terminal event -- output has stopped
+        (``liveness_state`` ``stalled`` or ``disconnected``) and there is **no
+        live prompt task** driving it in this daemon -- would otherwise mirror
+        "Responding..." forever. Resync it (rebuild from the agent's
+        authoritative replay, respawning the child if the transport is gone) so
+        it lands IDLE with a terminal ``session_state_changed``.
+
+        Two guards keep a real turn untouched: a genuinely in-progress turn
+        either still has a live ``_prompt_task`` (awaited here) or is still
+        producing output (liveness ``active``) -- both are skipped. Best-effort
+        and per-session isolated; a single failure never stalls the sweep.
+        Returns the count healed.
+        """
+        now = now if now is not None else time.time()
+        healed = 0
+        for sid, session in list(self._sessions.items()):
+            if session.status != SessionStatus.RUNNING:
+                continue
+            if session.liveness_state(now) not in ("stalled", "disconnected"):
+                continue
+            task = session._prompt_task
+            if task is not None and not task.done():
+                # A live turn is being driven here -- never abandon it.
+                continue
+            try:
+                await self.resync_session(sid)
+                healed += 1
+                log.warning(
+                    "Reconciled wedged RUNNING session %s to idle "
+                    "(no live turn, output stopped)", sid,
+                )
+            except Exception:
+                log.warning(
+                    "Failed to reconcile wedged session %s", sid, exc_info=True,
+                )
+        if healed:
+            log.info("Reconciled %d wedged RUNNING session(s)", healed)
+        return healed
+
     def stranded_host_records(self) -> list[Any]:
         """Live Session Hosts this frontend can no longer speak to (version-mux).
 
