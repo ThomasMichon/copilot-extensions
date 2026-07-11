@@ -103,7 +103,16 @@ def send_command(request: dict, timeout: float | None = 5.0) -> dict | None:
     result = _send_tcp(request, host, port, timeout)
     if result is not None:
         return _tag(result, "tcp")
-    return None
+
+    from .extensions import TransportContext, get_registry
+
+    ext_ctx = TransportContext(
+        kpdb=context.kpdb,
+        group=context.group,
+        vault_name=context.vault_name,
+        port=port,
+    )
+    return get_registry().try_transports(request, timeout, ext_ctx)
 
 
 # ---------------------------------------------------------------------------
