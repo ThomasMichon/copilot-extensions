@@ -140,12 +140,15 @@ def _pick_vault_name(
     registry: dict[str, dict[str, Any]],
     repo_data: dict[str, Any],
     global_data: dict[str, Any],
+    ext_data: dict[str, Any] | None = None,
 ) -> tuple[str | None, str]:
     env_vault = os.environ.get("AGENT_VAULT")
     if _nonempty(env_vault):
         return str(env_vault), "env"
     if _nonempty(repo_data.get("vault")):
         return str(repo_data["vault"]), "repo"
+    if ext_data and _nonempty(ext_data.get("vault")):
+        return str(ext_data["vault"]), "ext"
     if _nonempty(global_data.get("default_vault")):
         return str(global_data["default_vault"]), "global"
     if len(registry) == 1:
@@ -154,15 +157,28 @@ def _pick_vault_name(
     return None, "default"
 
 
+def _ext_config(cwd: str | None) -> dict[str, Any]:
+    """Collect config contributed by registered extension config sources."""
+    try:
+        from .extensions import get_registry
+    except Exception:
+        return {}
+    try:
+        return get_registry().collect_config(cwd)
+    except Exception:
+        return {}
+
+
 def resolve_context(cwd: str | None = None) -> ResolvedVault:
-    """Resolve the active vault using env, repo, global, and default settings."""
+    """Resolve the active vault using env, repo, extension, global, and defaults."""
     global_data = load_global_config()
     registry = _vault_registry(global_data)
     legacy = _legacy_flat_config(global_data)
     repo_path, repo_data = _discover_repo_config(cwd)
     repo_base_dir = repo_path.parent if repo_path else None
+    ext_data = _ext_config(cwd)
 
-    vault_name, vault_source = _pick_vault_name(registry, repo_data, global_data)
+    vault_name, vault_source = _pick_vault_name(registry, repo_data, global_data, ext_data)
     named_base = registry.get(vault_name or "")
     base = named_base or {}
     base_source = f"vault:{vault_name}" if named_base and vault_name else "global"
@@ -176,6 +192,9 @@ def resolve_context(cwd: str | None = None) -> ResolvedVault:
     elif _nonempty(repo_data.get("kpdb")):
         kpdb = _expand_kpdb(repo_data["kpdb"], base_dir=repo_base_dir)
         sources["kpdb"] = "repo"
+    elif _nonempty(ext_data.get("kpdb")):
+        kpdb = _expand_kpdb(ext_data["kpdb"])
+        sources["kpdb"] = "ext"
     elif _nonempty(base.get("kpdb")):
         kpdb = _expand_kpdb(base["kpdb"])
         sources["kpdb"] = base_source
@@ -193,6 +212,9 @@ def resolve_context(cwd: str | None = None) -> ResolvedVault:
     elif _nonempty(repo_data.get("group")):
         group = _clean_group(repo_data["group"])
         sources["group"] = "repo"
+    elif _nonempty(ext_data.get("group")):
+        group = _clean_group(ext_data["group"])
+        sources["group"] = "ext"
     elif _nonempty(base.get("group")):
         group = _clean_group(base["group"])
         sources["group"] = base_source
@@ -210,6 +232,9 @@ def resolve_context(cwd: str | None = None) -> ResolvedVault:
     elif _nonempty(repo_data.get("port")):
         port = _as_int(repo_data["port"], DEFAULT_TCP_PORT)
         sources["port"] = "repo"
+    elif _nonempty(ext_data.get("port")):
+        port = _as_int(ext_data["port"], DEFAULT_TCP_PORT)
+        sources["port"] = "ext"
     elif _nonempty(base.get("port")):
         port = _as_int(base["port"], DEFAULT_TCP_PORT)
         sources["port"] = base_source

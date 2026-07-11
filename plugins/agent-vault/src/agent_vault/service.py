@@ -22,8 +22,11 @@ from .config import (
     SOCKET_PATH,
     normalize_entry,
     resolve_kpdb,
+)
+from .config import (
     tcp_port as configured_tcp_port,
 )
+from .extensions import ActionContext, UnlockContext, get_registry
 from .keepassxc import KeePassXCBackend
 from .prompt import prompt_password
 
@@ -172,6 +175,21 @@ class VaultService:
                 if vault_name
                 else f"Master password for {os.path.basename(kpdb)}:"
             )
+
+            provided = get_registry().provide_unlock(
+                UnlockContext(kpdb=kpdb, vault_name=vault_name, reason=reason),
+                lambda candidate: self.cli.verify_password(kpdb, candidate),
+            )
+            if provided is not None:
+                pw, provider_name = provided
+                self.cli.set_password(kpdb, pw)
+                self._password_set_at[kpdb] = time.time()
+                self._unlock_failed_at.pop(kpdb, None)
+                self._record_unlock_error(kpdb, None)
+                self._last_dismiss[kpdb] = False
+                log.info("CLI backend unlocked via provider %r (TTL %ds)%s",
+                         provider_name, PASSWORD_TTL, f" [{reason}]" if reason else "")
+                return True
 
             while cancel_streak < MAX_UNLOCK_ATTEMPTS and wrong_streak < MAX_UNLOCK_ATTEMPTS:
                 if wrong_streak > 0:
@@ -460,6 +478,17 @@ class VaultService:
         if action == "stop":
             self._shutdown = True
             return {"ok": True}
+
+        handler = get_registry().action(action)
+        if handler is not None:
+            ext_ctx = ActionContext(
+                kpdb=kpdb, group=group, vault_name=vault_name, reason=reason
+            )
+            try:
+                return handler(self, request, ext_ctx)
+            except Exception as exc:
+                log.warning("Extension action %r raised: %s", action, exc)
+                return {"ok": False, "error": f"Extension action failed: {action}"}
 
         return {"ok": False, "error": f"Unknown action: {action}"}
 

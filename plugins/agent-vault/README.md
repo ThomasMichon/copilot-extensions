@@ -122,11 +122,35 @@ export VAULT_SUDO_ENTRY="Personal/sudo"    # your KeePass entry -- no default
 sudo -A apt update
 ```
 
+## Extensions
+
+The core daemon and CLI ship a fixed feature set. A downstream harness that needs
+extra behavior can register **extensions** against a small seam instead of forking
+the core. Four generic hook categories are exposed (all in `agent_vault.extensions`):
+
+| Hook | Signature | Consulted |
+|------|-----------|-----------|
+| **Unlock-source provider** | `provider(ctx) -> str \| None` | in the daemon *before* the interactive prompt — return a candidate master password (verified before use), or `None` to fall through |
+| **Protocol action** | `handler(service, request, ctx) -> dict` | in the daemon *before* the `Unknown action` fallback — add a request action keyed by name |
+| **Client transport** | `transport(request, timeout, ctx) -> dict \| None` | in the CLI *after* the built-in unix-socket + TCP transports both fail — reach a daemon they can't (e.g. over a tunnel) |
+| **Config source** | `source(cwd) -> dict` | in the resolver, at a tier below per-repo config and above the named-vault base — contribute `kpdb`/`group`/`port`/`vault` |
+
+An extension is a module exposing `register(registry)` that calls
+`registry.register_unlock_provider(...)`, `register_action(...)`,
+`register_transport(...)`, or `register_config_source(...)`. Extensions are
+discovered via the `agent_vault.extensions` **entry-point group** or the
+`AGENT_VAULT_EXTENSIONS` env var (comma-separated `module` / `module:callable`
+paths). Loading is idempotent and **fail-open**: a broken extension is logged and
+skipped, never crashing the daemon or CLI.
+
 ## Not in scope (v1)
 
 A pluggable multi-backend driver interface, a native OS keychain / Secret
 Service bridge, a Git credential-helper bridge, offline cache priming, and a
-PowerShell module are intentionally out of scope for the first release.
+PowerShell module are intentionally out of scope for the core's first release.
+Several of these (keychain bridge, git-credential helper, cache priming, an
+alternate transport) can now be layered as **extensions** (see above) without
+modifying the core.
 
 ## License
 
