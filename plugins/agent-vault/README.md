@@ -39,6 +39,15 @@ Optional: set `VAULT_GROUP` to prefix bare entry names. For example, with `VAULT
 
 Optional: set `AGENT_VAULT_PORT` to override the localhost TCP port. The default is `19999`.
 
+> **Config is read by the service at startup.** `KPDB`, `VAULT_GROUP`, and the
+> port are resolved by the vault **service** when it starts (from the environment
+> or the JSON config file at `$AGENT_VAULT_CONFIG` / the platform config dir), not
+> by each CLI call. Set them **before** the service starts (or in the config
+> file), and restart the service (`agent-vault stop` then a call re-starts it, or
+> restart the systemd unit / scheduled task) after changing them. Setting
+> `VAULT_GROUP` only in a client shell after the daemon is already running has no
+> effect.
+
 ## Quickstart
 
 ```bash

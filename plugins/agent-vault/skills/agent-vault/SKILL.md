@@ -46,9 +46,16 @@ $env:KPDB = "C:\Users\you\Secrets\vault.kdbx"   # Windows
 
 Optional knobs:
 - `VAULT_GROUP` -- prefix bare entry names with a group (e.g. `VAULT_GROUP=Personal`
-  makes `get example` read `Personal/example`; full paths are left as-is).
+  makes `get example` read `Personal/example`; full paths are left as-is). Missing
+  groups are created automatically on `add`.
 - `VAULT_PASSWORD_TTL` -- seconds the master password stays cached (default 3600).
 - `AGENT_VAULT_PORT` -- localhost TCP port (default 19999).
+
+> **Config is service-scoped.** `KPDB`, `VAULT_GROUP`, and the port are read by
+> the vault **service** when it starts (environment or the JSON config file at
+> `$AGENT_VAULT_CONFIG`), not per CLI call. Set them **before** starting the
+> service and restart it after changes — setting `VAULT_GROUP` in a client shell
+> after the daemon is running has no effect.
 
 Prerequisite: **KeePassXC** with `keepassxc-cli` on PATH (or the standard
 Windows install path).
