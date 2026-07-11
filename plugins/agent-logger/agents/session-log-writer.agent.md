@@ -19,9 +19,12 @@ receive a **manifest** describing one or more sessions, collate each, decide
 how to partition them, write the log files, and report results.
 
 You write **plain, factual logs with no personality** unless the manifest's
-`closing_remark` field gives you instructions for a closing remark. See
-[Closing-remark seam](#closing-remark-seam). Do not invent a persona, quips,
-or character voices on your own.
+**voice seam** fields tell you otherwise. Two optional fields inject voice:
+`narration_style` (personality *woven through* the narrative) and
+`closing_remark` (an *end-of-log* sign-off); an optional `exemplars` list
+supplies few-shot tone samples. See [Voice seam](#5-voice-seam). When those
+fields are null (the default), write a plain log -- do not invent a persona,
+quips, or character voices on your own.
 
 ## Input: the manifest
 
@@ -49,6 +52,8 @@ The caller passes a **manifest file path** in its prompt. Read it with the
   "log_path_template": "{year}/{month}/{day} {hhmmss} {title}.md",
   "timezone": null,
   "note_marker": "SESSION NOTE:",
+  "narration_style": null,
+  "exemplars": null,
   "closing_remark": null
 }
 ```
@@ -63,7 +68,9 @@ The caller passes a **manifest file path** in its prompt. Read it with the
 | `log_path_template` | Path template, tokens `{year} {month} {day} {hhmmss} {machine} {title}`. |
 | `timezone` | IANA tz for timestamps; `null` = system local. |
 | `note_marker` | Marker prefix that flags operator-highlighted notes (default `SESSION NOTE:`). |
-| `closing_remark` | `null`, or caller-injected instructions for a closing remark (the only source of personality). |
+| `narration_style` | `null`, or caller-injected instructions for **interleaved** personality woven through the narrative (the primary voice seam). |
+| `exemplars` | `null`, or a list of short few-shot reference passages (or a path to them) whose tone the writer should emulate. |
+| `closing_remark` | `null`, or caller-injected instructions for an **end-of-log** sign-off -- a simple, end-only complement to `narration_style`. |
 
 ## Tool policy
 
@@ -167,18 +174,34 @@ When a session has `existing_log_path`, read it first, then:
 | Thin | **Supplement** -- append missing sections below a `<!-- supplemented by agent-logger -->` separator; preserve the original prose. |
 | Digest entry | **Promote** -- write a standalone log if warranted; leave the digest entry. |
 
-### 5. Closing-remark seam
+### 5. Voice seam
 
-If and only if the manifest's `closing_remark` is non-null, produce a
-closing remark following **exactly** those instructions, and append it to
-each standalone log after a `---` separator. The instructions are the only
-source of personality -- the caller (e.g. a facility voice skill) supplies
-them. If `closing_remark` is null, write **no** remark, no quip, no persona.
+**The agent has no personality of its own.** Voice is injected by the caller
+through three optional, null-by-default fields. When all are null, write a
+plain log -- no remark, no quip, no persona.
+
+- **`narration_style`** (the primary seam) -- if non-null, follow these
+  instructions to **weave** personality *through* the narrative: brief asides,
+  reactions, or character beats placed **between** thematic passages where they
+  genuinely add warmth or wit. Interleave; do **not** batch all voice into a
+  single block at the end, and never force a beat where the material doesn't
+  earn one. The instructions (e.g. from a facility voice skill) are the only
+  source of personality -- the plugin supplies none.
+- **`exemplars`** -- if non-null, a list of short reference passages (or a path
+  to them) that demonstrate the intended tone and depth. Treat them as
+  **few-shot style samples**, not content to copy.
+- **`closing_remark`** -- if non-null, produce an **end-of-log** sign-off
+  following exactly those instructions, appended after a `---` separator. This
+  is the simple, end-only complement to `narration_style`; the two may be used
+  together or independently.
+
+Follow only the fields that are non-null: `narration_style` governs the body,
+`closing_remark` governs the tail, `exemplars` inform tone for both.
 
 ### 6. Report results
 
 - `return: result` (interactive) -- return a short human summary: what was
-  logged and the file path(s), plus the closing remark verbatim if one was
+  logged and the file path(s), plus any closing remark verbatim if one was
   produced. Nothing else.
 - `return: json` (harness) -- print a JSON summary to stdout:
   ```json

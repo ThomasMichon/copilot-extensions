@@ -15,10 +15,11 @@ Write a structured Markdown log for the **current** session, now. This skill
 is the interactive, single-session entry point to the
 `session-log-writer` agent. It produces a **plain, persona-free** log.
 
-> Personality is never added here. A host repo that wants a styled closing
-> remark wraps this flow and injects `closing_remark` instructions into the
-> agent prompt (see `docs/manifest-contract.md` -> closing-remark seam).
-> This skill leaves `closing_remark` null.
+> Personality is never added here. A host repo that wants styled output wraps
+> this flow and injects `narration_style` (interleaved voice) and/or
+> `closing_remark` (an end sign-off) instructions into the agent prompt (see
+> `docs/manifest-contract.md` -> the voice seam). This skill leaves all voice
+> fields null.
 
 ## Procedure
 
@@ -61,13 +62,16 @@ example: [`references/manifest.json`](references/manifest.json)):
     { "session_id": "<session_id>", "machine": "<machine>", "session_path": "<session_dir>" }
   ],
   "output_root": "<repo logs root, e.g. logs>",
+  "narration_style": null,
+  "exemplars": null,
   "closing_remark": null
 }
 ```
 
 Set `output_root` to where logs should land (the host's convention; default
-to the project's `logs/` directory). Leave `closing_remark` null unless a
-wrapping host skill instructs otherwise.
+to the project's `logs/` directory). Leave the voice fields
+(`narration_style`, `exemplars`, `closing_remark`) null unless a wrapping
+host skill instructs otherwise.
 
 ### 3. Delegate
 
@@ -78,9 +82,9 @@ collates, reads the digest, writes the log, and returns a short result.
 ### 4. Present
 
 Relay the agent's result to the user (the log path and a one-line summary).
-If a `closing_remark` was injected by a host wrapper and the agent produced
-one, present it verbatim. Then commit the log per the host repo's git
-policy.
+If a `narration_style` or `closing_remark` was injected by a host wrapper and
+the agent produced styled output, present it verbatim. Then commit the log per
+the host repo's git policy.
 
 ## Why sync
 

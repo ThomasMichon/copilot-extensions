@@ -9,5 +9,7 @@
     }
   ],
   "output_root": "<repo logs root, e.g. logs>",
+  "narration_style": null,
+  "exemplars": null,
   "closing_remark": null
 }
