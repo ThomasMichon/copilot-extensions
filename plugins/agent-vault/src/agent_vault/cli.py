@@ -9,7 +9,8 @@ import sys
 import time
 from pathlib import Path
 
-from .config import IS_WINDOWS, SOCKET_PATH, tcp_port as configured_tcp_port
+from . import config
+from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
 from .prompt import prompt_password as gui_prompt_password
 
 
@@ -81,19 +82,24 @@ def _send_tcp(request: dict, host: str, port: int, timeout: float | None) -> dic
 
 def send_command(request: dict, timeout: float | None = 5.0) -> dict | None:
     """Send a JSON command to the vault service."""
+    context = config.resolve_context()
+    request = dict(request)
+    request.setdefault("kpdb", context.kpdb)
+    request.setdefault("group", context.group)
+    request.setdefault("vault", context.vault_name)
 
     def _tag(result: dict | None, transport: str) -> dict | None:
         if result is not None:
             result["_transport"] = transport
         return result
 
-    if not IS_WINDOWS:
+    if not IS_WINDOWS and context.sources.get("port") == "default":
         result = _send_socket(request, timeout)
         if result is not None:
             return _tag(result, "unix-socket")
 
     host = os.environ.get("AGENT_VAULT_HOST", "127.0.0.1")
-    port = int(os.environ.get("AGENT_VAULT_PORT", str(configured_tcp_port())))
+    port = context.port
     result = _send_tcp(request, host, port, timeout)
     if result is not None:
         return _tag(result, "tcp")
@@ -130,9 +136,11 @@ def _start_service_systemd() -> bool:
 
 def start_service(tcp_port: int | None = None) -> bool:
     """Start the vault service in the background."""
-    if not IS_WINDOWS and not tcp_port:
-        if _start_service_systemd():
+    if tcp_port is None:
+        context = config.resolve_context()
+        if not IS_WINDOWS and context.sources.get("port") == "default" and _start_service_systemd():
             return True
+        tcp_port = context.port
 
     cmd = [sys.executable, "-m", "agent_vault.service"]
     if tcp_port:
@@ -481,6 +489,16 @@ def cmd_lock(args):
     return 1
 
 
+def _current_vault_unlocked(resp: dict, context: ResolvedVault | None = None) -> bool:
+    """Return whether the service has the current vault unlocked."""
+    if not resp or not resp.get("ok"):
+        return False
+    context = context or config.resolve_context()
+    if context.kpdb:
+        return context.kpdb in resp.get("unlocked_vaults", [])
+    return resp.get("cli") == "unlocked"
+
+
 def cmd_unlock(args):
     if getattr(args, "terminal", False) or os.environ.get("VAULT_UNLOCK_TERMINAL"):
         if _terminal_unlock_local():
@@ -493,7 +511,7 @@ def cmd_unlock(args):
         return 1
 
     resp = send_command({"action": "ping"})
-    if resp and resp.get("ok") and resp.get("cli") == "unlocked":
+    if _current_vault_unlocked(resp):
         print("Vault available")
         return 0
 
@@ -509,7 +527,7 @@ def _ensure_unlocked_service() -> bool:
         print("Error: could not start vault service", file=sys.stderr)
         return False
     resp = send_command({"action": "ping"})
-    if resp and resp.get("ok") and resp.get("cli") == "unlocked":
+    if _current_vault_unlocked(resp):
         return True
     if auto_unlock():
         return True
@@ -646,6 +664,80 @@ def cmd_export_key(args):
     return 0
 
 
+def cmd_which(args):
+    context = config.resolve_context()
+    payload = {
+        "vault_name": context.vault_name,
+        "kpdb": context.kpdb,
+        "group": context.group,
+        "port": context.port,
+        "sources": context.sources,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    print(f"vault: {context.vault_name or '(none)'} ({context.sources.get('vault')})")
+    print(f"kpdb: {context.kpdb or '(none)'} ({context.sources.get('kpdb')})")
+    print(f"group: {context.group or '(none)'} ({context.sources.get('group')})")
+    print(f"port: {context.port} ({context.sources.get('port')})")
+    return 0
+
+
+def cmd_vault_list(args):
+    data = config.load_global_config()
+    vaults = config.list_vaults()
+    active = config.resolve_context().vault_name
+    default = data.get("default_vault")
+    if args.json:
+        print(json.dumps({"vaults": vaults, "default_vault": default, "active": active}, indent=2))
+        return 0
+    if not vaults:
+        print("No named vaults configured.")
+        return 0
+    for name in sorted(vaults):
+        item = vaults[name]
+        markers = []
+        if name == default:
+            markers.append("default")
+        if name == active:
+            markers.append("active")
+        marker = f" [{' '.join(markers)}]" if markers else ""
+        print(f"{name}{marker}")
+        print(f"  kpdb: {item.get('kpdb', '(none)')}")
+        if item.get("group"):
+            print(f"  group: {item['group']}")
+        if item.get("port"):
+            print(f"  port: {item['port']}")
+    return 0
+
+
+def cmd_vault_add(args):
+    config.add_vault(args.name, args.kpdb, group=args.group, port=args.port)
+    print(f"Vault added: {args.name}")
+    return 0
+
+
+def cmd_vault_set_default(args):
+    try:
+        config.set_default_vault(args.name)
+    except KeyError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Default vault: {args.name}")
+    return 0
+
+
+def cmd_vault_remove(args):
+    try:
+        config.remove_vault(args.name)
+    except KeyError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Vault removed: {args.name}")
+    return 0
+
+
 def main():
     import argparse
 
@@ -712,9 +804,38 @@ def main():
     p.add_argument("key_name", help="Key filename (e.g. id_ed25519)")
     p.set_defaults(func=cmd_export_key)
 
+    p = sub.add_parser("which", help="Show the resolved vault context")
+    p.add_argument("--json", action="store_true", help="Print JSON")
+    p.set_defaults(func=cmd_which)
+
+    p = sub.add_parser("vault", help="Manage named vaults")
+    vault_sub = p.add_subparsers(dest="vault_command")
+
+    vp = vault_sub.add_parser("list", help="List named vaults")
+    vp.add_argument("--json", action="store_true", help="Print JSON")
+    vp.set_defaults(func=cmd_vault_list)
+
+    vp = vault_sub.add_parser("add", help="Add or update a named vault")
+    vp.add_argument("name", help="Vault name")
+    vp.add_argument("--kpdb", required=True, help="KeePass database path")
+    vp.add_argument("--group", help="Default group")
+    vp.add_argument("--port", type=int, help="Service TCP port")
+    vp.set_defaults(func=cmd_vault_add)
+
+    vp = vault_sub.add_parser("set-default", help="Set the default vault")
+    vp.add_argument("name", help="Vault name")
+    vp.set_defaults(func=cmd_vault_set_default)
+
+    vp = vault_sub.add_parser("remove", help="Remove a named vault")
+    vp.add_argument("name", help="Vault name")
+    vp.set_defaults(func=cmd_vault_remove)
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
+        return 1
+    if args.command == "vault" and not getattr(args, "vault_command", None):
+        p.print_help()
         return 1
 
     return args.func(args)
@@ -722,4 +843,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main() or 0)
-

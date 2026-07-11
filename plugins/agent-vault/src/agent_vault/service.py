@@ -52,15 +52,15 @@ log = logging.getLogger("agent-vault.service")
 class VaultService:
     def __init__(self) -> None:
         self.cli = KeePassXCBackend()
-        self.cache: dict[tuple[str, str], str] = {}
+        self.cache: dict[tuple[str, str, str], str] = {}
         self.last_activity = time.time()
-        self._password_set_at: float | None = None
+        self._password_set_at: dict[str, float] = {}
         self._shutdown = False
         self.ttl_override: int | None = None  # 0 = persistent (never expire)
         self._unlock_lock = threading.Lock()  # prevents concurrent GUI prompts
-        self._unlock_failed_at: float | None = None
-        self._last_unlock_error: str | None = None
-        self._last_dismiss = False  # True if last failure was dismissal/timeout
+        self._unlock_failed_at: dict[str, float] = {}
+        self._last_unlock_error: dict[str, str] = {}
+        self._last_dismiss: dict[str, bool] = {}
         self._request_ctx = threading.local()  # per-thread request context
 
     def keepalive(self) -> None:
@@ -80,14 +80,15 @@ class VaultService:
 
     def _check_password_ttl(self) -> None:
         """Clear cached password if it has exceeded PASSWORD_TTL."""
-        if (self._password_set_at is not None
-                and self.cli.has_password
-                and PASSWORD_TTL > 0
-                and (time.time() - self._password_set_at) > PASSWORD_TTL):
-            log.info("Password TTL expired (%ds) - clearing cached password", PASSWORD_TTL)
-            self.cli.clear_password()
-            self.cache.clear()
-            self._password_set_at = None
+        if PASSWORD_TTL <= 0:
+            return
+        now = time.time()
+        for kpdb, set_at in list(self._password_set_at.items()):
+            if self.cli.has_password(kpdb) and (now - set_at) > PASSWORD_TTL:
+                log.info("Password TTL expired (%ds) - clearing %s", PASSWORD_TTL, kpdb)
+                self.cli.clear_password(kpdb)
+                self.invalidate_cache(kpdb)
+                self._password_set_at.pop(kpdb, None)
 
     def initialize(self) -> None:
         kpdb = resolve_kpdb(required=False)
@@ -97,36 +98,50 @@ class VaultService:
         elif not os.path.isfile(kpdb):
             log.error("KeePass database not found at %s - set KPDB to your .kdbx path", kpdb)
 
-    def invalidate_cache(self) -> None:
-        self.cache.clear()
+    def invalidate_cache(self, kpdb: str | None = None) -> None:
+        if kpdb is None:
+            self.cache.clear()
+            return
+        for key in [key for key in self.cache if key[0] == kpdb]:
+            del self.cache[key]
 
-    def _effective_cooldown(self) -> float:
+    def _effective_cooldown(self, kpdb: str) -> float:
         """Return cooldown duration based on last failure mode."""
-        if self._last_dismiss and PROMPT_DISMISS_COOLDOWN > 0:
+        if self._last_dismiss.get(kpdb, False) and PROMPT_DISMISS_COOLDOWN > 0:
             return PROMPT_DISMISS_COOLDOWN
         return UNLOCK_COOLDOWN
 
-    def ensure_unlocked(self, reason: str = "") -> bool:
+    def _record_unlock_error(self, kpdb: str, message: str | None) -> None:
+        if message:
+            self._last_unlock_error[kpdb] = message
+        else:
+            self._last_unlock_error.pop(kpdb, None)
+
+    def _last_error(self, kpdb: str) -> str | None:
+        return self._last_unlock_error.get(kpdb)
+
+    def ensure_unlocked(self, kpdb: str, vault_name: str = "", reason: str = "") -> bool:
         """Ensure the CLI backend has the master password."""
         if not reason:
             reason = getattr(self._request_ctx, "reason", "")
-        if self.cli.has_password:
+        if not vault_name:
+            vault_name = getattr(self._request_ctx, "vault_name", "")
+        if self.cli.has_password(kpdb):
             return True
 
-        kpdb = resolve_kpdb(required=False)
         if not kpdb:
-            self._last_unlock_error = "KeePass database path is not configured; set KPDB"
-            log.error("Cannot unlock -- %s", self._last_unlock_error)
+            self._record_unlock_error("", "KeePass database path is not configured; set KPDB")
+            log.error("Cannot unlock -- %s", self._last_error(""))
             return False
         if not os.path.isfile(kpdb):
-            self._last_unlock_error = f"KeePass database not found: {kpdb}"
-            log.error("Cannot unlock -- %s", self._last_unlock_error)
+            self._record_unlock_error(kpdb, f"KeePass database not found: {kpdb}")
+            log.error("Cannot unlock -- %s", self._last_error(kpdb))
             return False
 
-        cooldown = self._effective_cooldown()
-        if (self._unlock_failed_at is not None
-                and (time.time() - self._unlock_failed_at) < cooldown):
-            remaining = int(cooldown - (time.time() - self._unlock_failed_at))
+        cooldown = self._effective_cooldown(kpdb)
+        failed_at = self._unlock_failed_at.get(kpdb)
+        if failed_at is not None and (time.time() - failed_at) < cooldown:
+            remaining = int(cooldown - (time.time() - failed_at))
             log.debug("Cooldown active (%ds remaining) -- suppressing prompt%s",
                       remaining, f" [{reason}]" if reason else "")
             return False
@@ -135,30 +150,37 @@ class VaultService:
         if not acquired:
             log.warning("Another unlock prompt is already active%s",
                         f" [{reason}]" if reason else "")
-            self._last_unlock_error = "Another unlock prompt is already active"
+            self._record_unlock_error(kpdb, "Another unlock prompt is already active")
             return False
 
         try:
-            if self.cli.has_password:
+            if self.cli.has_password(kpdb):
                 return True
 
-            cooldown = self._effective_cooldown()
-            if (self._unlock_failed_at is not None
-                    and (time.time() - self._unlock_failed_at) < cooldown):
-                remaining = int(cooldown - (time.time() - self._unlock_failed_at))
+            cooldown = self._effective_cooldown(kpdb)
+            failed_at = self._unlock_failed_at.get(kpdb)
+            if failed_at is not None and (time.time() - failed_at) < cooldown:
+                remaining = int(cooldown - (time.time() - failed_at))
                 log.debug("Cooldown active after lock (%ds remaining) -- suppressing prompt%s",
                           remaining, f" [{reason}]" if reason else "")
                 return False
 
             cancel_streak = 0
             wrong_streak = 0
+            base_prompt = (
+                f"Master password for the '{vault_name}' vault:"
+                if vault_name
+                else f"Master password for {os.path.basename(kpdb)}:"
+            )
 
             while cancel_streak < MAX_UNLOCK_ATTEMPTS and wrong_streak < MAX_UNLOCK_ATTEMPTS:
                 if wrong_streak > 0:
-                    message = (f"Invalid password -- try again ({wrong_streak + 1} of "
-                               f"{MAX_UNLOCK_ATTEMPTS}):")
+                    message = (
+                        f"Invalid password -- try again ({wrong_streak + 1} of "
+                        f"{MAX_UNLOCK_ATTEMPTS}):\n{base_prompt}"
+                    )
                 else:
-                    message = "KeePass master password:"
+                    message = base_prompt
 
                 log.info("Prompting for master password (cancel_streak=%d, wrong_streak=%d)%s",
                          cancel_streak, wrong_streak, f" [{reason}]" if reason else "")
@@ -174,12 +196,12 @@ class VaultService:
 
                 cancel_streak = 0
 
-                if self.cli.verify_password(pw):
-                    self.cli.set_password(pw)
-                    self._password_set_at = time.time()
-                    self._unlock_failed_at = None
-                    self._last_unlock_error = None
-                    self._last_dismiss = False
+                if self.cli.verify_password(kpdb, pw):
+                    self.cli.set_password(kpdb, pw)
+                    self._password_set_at[kpdb] = time.time()
+                    self._unlock_failed_at.pop(kpdb, None)
+                    self._record_unlock_error(kpdb, None)
+                    self._last_dismiss[kpdb] = False
                     log.info("CLI backend unlocked (TTL %ds)%s",
                              PASSWORD_TTL, f" [{reason}]" if reason else "")
                     return True
@@ -190,15 +212,14 @@ class VaultService:
                             f" [{reason}]" if reason else "")
 
             if cancel_streak >= MAX_UNLOCK_ATTEMPTS:
-                self._last_unlock_error = f"Unlock aborted (dismissed {MAX_UNLOCK_ATTEMPTS} times)"
-                self._last_dismiss = True
+                error = f"Unlock aborted (dismissed {MAX_UNLOCK_ATTEMPTS} times)"
+                self._last_dismiss[kpdb] = True
             else:
-                self._last_unlock_error = (
-                    f"Password verification failed ({MAX_UNLOCK_ATTEMPTS} consecutive attempts)"
-                )
-                self._last_dismiss = False
-            self._unlock_failed_at = time.time()
-            log.error("Unlock failed: %s%s", self._last_unlock_error,
+                error = f"Password verification failed ({MAX_UNLOCK_ATTEMPTS} consecutive attempts)"
+                self._last_dismiss[kpdb] = False
+            self._record_unlock_error(kpdb, error)
+            self._unlock_failed_at[kpdb] = time.time()
+            log.error("Unlock failed: %s%s", error,
                       f" [{reason}]" if reason else "")
             return False
         finally:
@@ -206,26 +227,32 @@ class VaultService:
 
     # -- core operations -----------------------------------------------------
 
-    def get(self, entry: str, field: str = "password") -> str | None:
-        entry = normalize_entry(entry)
-        cache_key = (entry, field)
+    def get(
+        self,
+        kpdb: str,
+        entry: str,
+        field: str = "password",
+        group: str | None = None,
+    ) -> str | None:
+        entry = normalize_entry(entry, group)
+        cache_key = (kpdb, entry, field)
         if cache_key in self.cache:
             return self.cache[cache_key]
 
-        if not self.ensure_unlocked():
+        if not self.ensure_unlocked(kpdb):
             return None
 
-        value = self.cli.get_entry(entry, field)
+        value = self.cli.get_entry(kpdb, entry, field)
         if value is not None:
             self.cache[cache_key] = value
         return value
 
-    def has(self, entry: str) -> bool | None:
+    def has(self, kpdb: str, entry: str, group: str | None = None) -> bool | None:
         """Returns True/False, or None if unlock was cancelled."""
-        entry = normalize_entry(entry)
-        if not self.ensure_unlocked():
+        entry = normalize_entry(entry, group)
+        if not self.ensure_unlocked(kpdb):
             return None
-        return self.cli.has_entry(entry)
+        return self.cli.has_entry(kpdb, entry)
 
     # -- request handler -----------------------------------------------------
 
@@ -234,24 +261,32 @@ class VaultService:
         self._check_password_ttl()
         action = request.get("action")
         client = request.get("_client", "")
+        kpdb = request.get("kpdb") or resolve_kpdb(required=False)
+        group = request.get("group")
+        vault_name = request.get("vault", "") or ""
 
         reason_parts = [f"action={action}"]
         if client:
             reason_parts.append(f"client={client}")
+        if vault_name:
+            reason_parts.append(f"vault={vault_name}")
         reason_parts.append(f"peer={peer}")
         reason = " ".join(reason_parts)
 
-        vault_locked = not self.cli.has_password
+        vault_locked = not self.cli.has_password(kpdb)
         if vault_locked and action in UNLOCK_REQUIRED_ACTIONS:
             log.info("AUDIT unlock-required: %s", reason)
         elif vault_locked and action == "unlock" and request.get("prompt"):
             log.info("AUDIT unlock-prompt-requested: %s", reason)
 
         self._request_ctx.reason = reason
+        self._request_ctx.kpdb = kpdb
+        self._request_ctx.group = group
+        self._request_ctx.vault_name = vault_name
 
         allow_prompt = request.get("allow_prompt", True)
         if (not allow_prompt
-                and not self.cli.has_password
+                and not self.cli.has_password(kpdb)
                 and action not in ("ping", "unlock", "lock", "stop")):
             return {"ok": False, "error": "Vault locked (non-interactive)",
                     "needs_unlock": True}
@@ -262,70 +297,87 @@ class VaultService:
                 "pid": os.getpid(),
                 "ttl": self.ttl,
                 "cached": len(self.cache),
-                "cli": self.cli.status,
+                "cli": self.cli.status(),
+                "unlocked_vaults": self.cli.unlocked_vaults(),
             }
 
         if action == "get":
             entry = request.get("entry", "")
             field = request.get("field", "password")
-            value = self.get(entry, field)
+            value = self.get(kpdb, entry, field, group)
             if value is not None:
                 return {"ok": True, "value": value}
-            if not self.cli.has_password:
-                error_msg = self._last_unlock_error or "Vault locked"
+            if not self.cli.has_password(kpdb):
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
             return {"ok": False, "error": f"Entry not found: {entry}"}
 
         if action == "has":
             entry = request.get("entry", "")
-            result = self.has(entry)
+            result = self.has(kpdb, entry, group)
             if result is None:
-                error_msg = self._last_unlock_error or "Vault locked"
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
             return {"ok": True, "exists": result}
 
         if action == "lock":
-            was_unlocked = self.cli.has_password
-            self.cli.clear_password()
-            self._password_set_at = None
-            self._unlock_failed_at = None
-            self._last_unlock_error = None
+            lock_kpdb = request.get("kpdb")
+            if lock_kpdb:
+                was_unlocked = self.cli.has_password(lock_kpdb)
+                self.cli.clear_password(lock_kpdb)
+                self.invalidate_cache(lock_kpdb)
+                self._password_set_at.pop(lock_kpdb, None)
+                self._unlock_failed_at.pop(lock_kpdb, None)
+                self._record_unlock_error(lock_kpdb, None)
+                self._last_dismiss.pop(lock_kpdb, None)
+            else:
+                was_unlocked = bool(self.cli.unlocked_vaults())
+                self.cli.clear_password()
+                self.invalidate_cache()
+                self._password_set_at.clear()
+                self._unlock_failed_at.clear()
+                self._last_unlock_error.clear()
+                self._last_dismiss.clear()
             log.info("CLI backend locked by client request [%s]", reason)
             return {"ok": True, "was_unlocked": was_unlocked}
 
         if action == "unlock":
             password = request.get("password", "")
             if not password and request.get("prompt"):
-                if self.ensure_unlocked():
+                if self.ensure_unlocked(kpdb, vault_name, reason):
                     return {"ok": True}
-                error_msg = self._last_unlock_error or "Unlock failed"
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Unlock failed"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
             if not password:
                 return {"ok": False, "error": "No password provided"}
-            if self.cli.verify_password(password):
-                self.cli.set_password(password)
-                self._password_set_at = time.time()
-                self._unlock_failed_at = None
-                self._last_unlock_error = None
+            if not kpdb:
+                return {"ok": False, "error": "KeePass database path is not configured; set KPDB"}
+            if self.cli.verify_password(kpdb, password):
+                self.cli.set_password(kpdb, password)
+                self._password_set_at[kpdb] = time.time()
+                self._unlock_failed_at.pop(kpdb, None)
+                self._record_unlock_error(kpdb, None)
+                self._last_dismiss[kpdb] = False
                 log.info("CLI backend unlocked (TTL %ds) [%s]", PASSWORD_TTL, reason)
                 return {"ok": True}
             return {"ok": False, "error": "Invalid password"}
 
         if action == "search":
             query = request.get("query", "")
-            if not self.ensure_unlocked():
-                error_msg = self._last_unlock_error or "Vault locked"
+            if not self.ensure_unlocked(kpdb, vault_name, reason):
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
-            return {"ok": True, "results": self.cli.search(query)}
+            return {"ok": True, "results": self.cli.search(kpdb, query)}
 
         if action == "add":
-            entry = normalize_entry(request.get("entry", ""))
+            entry = normalize_entry(request.get("entry", ""), group)
             if not entry:
                 return {"ok": False, "error": "No entry path provided"}
-            if not self.ensure_unlocked():
-                error_msg = self._last_unlock_error or "Vault locked"
+            if not self.ensure_unlocked(kpdb, vault_name, reason):
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
             ok, msg = self.cli.add_entry(
+                kpdb,
                 entry,
                 username=request.get("username"),
                 url=request.get("url"),
@@ -335,18 +387,18 @@ class VaultService:
             return {"ok": ok, "message": msg} if ok else {"ok": False, "error": msg}
 
         if action == "set-password":
-            entry = normalize_entry(request.get("entry", ""))
+            entry = normalize_entry(request.get("entry", ""), group)
             password = request.get("password", "")
             if not entry:
                 return {"ok": False, "error": "No entry path provided"}
             if not password:
                 return {"ok": False, "error": "No password provided"}
-            if not self.ensure_unlocked():
-                error_msg = self._last_unlock_error or "Vault locked"
+            if not self.ensure_unlocked(kpdb, vault_name, reason):
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
-            ok, msg = self.cli.edit_password(entry, password)
+            ok, msg = self.cli.edit_password(kpdb, entry, password)
             if ok:
-                keys_to_remove = [k for k in self.cache if k[0] == entry]
+                keys_to_remove = [k for k in self.cache if k[0] == kpdb and k[1] == entry]
                 for key in keys_to_remove:
                     del self.cache[key]
                 log.info("Password updated for %s, %d cache entries invalidated",
@@ -356,28 +408,28 @@ class VaultService:
         if action == "import-key":
             import base64
 
-            entry = normalize_entry(request.get("entry", ""))
+            entry = normalize_entry(request.get("entry", ""), group)
             key_name = request.get("key_name", "")
             key_data_b64 = request.get("key_data", "")
             pub_data_b64 = request.get("pub_data", "")
             if not entry or not key_name:
                 return {"ok": False, "error": "entry and key_name required"}
-            if not self.ensure_unlocked():
-                error_msg = self._last_unlock_error or "Vault locked"
+            if not self.ensure_unlocked(kpdb, vault_name, reason):
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
-            if not self.cli.has_entry(entry):
-                ok, msg = self.cli.add_entry(entry)
+            if not self.cli.has_entry(kpdb, entry):
+                ok, msg = self.cli.add_entry(kpdb, entry)
                 if not ok:
                     return {"ok": False, "error": f"Failed to create entry: {msg}"}
             if key_data_b64:
                 key_data = base64.b64decode(key_data_b64)
-                ok, msg = self.cli.import_attachment(entry, key_name, key_data)
+                ok, msg = self.cli.import_attachment(kpdb, entry, key_name, key_data)
                 if not ok:
                     return {"ok": False, "error": f"Private key import failed: {msg}"}
             pub_name = key_name + ".pub"
             if pub_data_b64:
                 pub_data = base64.b64decode(pub_data_b64)
-                ok, msg = self.cli.import_attachment(entry, pub_name, pub_data)
+                ok, msg = self.cli.import_attachment(kpdb, entry, pub_name, pub_data)
                 if not ok:
                     return {"ok": False, "error": f"Public key import failed: {msg}"}
             return {"ok": True, "message": f"Imported {key_name} into {entry}"}
@@ -385,18 +437,18 @@ class VaultService:
         if action == "export-key":
             import base64
 
-            entry = normalize_entry(request.get("entry", ""))
+            entry = normalize_entry(request.get("entry", ""), group)
             key_name = request.get("key_name", "")
             if not entry or not key_name:
                 return {"ok": False, "error": "entry and key_name required"}
-            if not self.ensure_unlocked():
-                error_msg = self._last_unlock_error or "Vault locked"
+            if not self.ensure_unlocked(kpdb, vault_name, reason):
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
-            key_data, msg = self.cli.export_attachment(entry, key_name)
+            key_data, msg = self.cli.export_attachment(kpdb, entry, key_name)
             if key_data is None:
                 return {"ok": False, "error": f"Private key export failed: {msg}"}
             pub_name = key_name + ".pub"
-            pub_data, msg = self.cli.export_attachment(entry, pub_name)
+            pub_data, msg = self.cli.export_attachment(kpdb, entry, pub_name)
             if pub_data is None:
                 return {"ok": False, "error": f"Public key export failed: {msg}"}
             return {
@@ -678,7 +730,7 @@ def main() -> None:
 
     if args.foreground:
         print(
-            f"Vault service starting (cli={service.cli.status}, "
+            f"Vault service starting (cli={service.cli.status(resolve_kpdb(required=False))}, "
             f"TCP 127.0.0.1:{tcp_port or configured_tcp_port()})"
         )
 
@@ -715,5 +767,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

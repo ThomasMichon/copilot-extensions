@@ -7,14 +7,12 @@ import os
 import shutil
 import subprocess
 
-from .config import resolve_kpdb
-
 
 class KeePassXCBackend:
     """keepassxc-cli backend - full access with master password."""
 
     def __init__(self):
-        self._master_pass: str | None = None
+        self._master_pass: dict[str, str] = {}
         self._cli_path: str | None = self._find_cli()
 
     @staticmethod
@@ -28,34 +26,49 @@ class KeePassXCBackend:
     def available(self) -> bool:
         return self._cli_path is not None
 
-    @property
-    def has_password(self) -> bool:
-        return self._master_pass is not None
+    def unlocked_vaults(self) -> list[str]:
+        """Return database paths with cached master passwords."""
+        return sorted(self._master_pass)
 
-    @property
-    def status(self) -> str:
+    def has_password(self, kpdb: str) -> bool:
+        """Return whether a master password is cached for this database."""
+        return bool(kpdb and kpdb in self._master_pass)
+
+    def status(self, kpdb: str | None = None) -> str:
+        """Return backend status for one database, or any database when omitted."""
         if not self._cli_path:
             return "not_found"
+        if kpdb:
+            return "unlocked" if self.has_password(kpdb) else "locked"
         return "unlocked" if self._master_pass else "locked"
 
-    def set_password(self, password: str) -> None:
-        self._master_pass = password
+    def set_password(self, kpdb: str, password: str) -> None:
+        """Cache a master password for a database."""
+        if kpdb:
+            self._master_pass[kpdb] = password
 
-    def get_password(self) -> str | None:
-        return self._master_pass
+    def get_password(self, kpdb: str) -> str | None:
+        """Return the cached password for a database."""
+        return self._master_pass.get(kpdb)
 
-    def clear_password(self) -> None:
-        self._master_pass = None
+    def clear_password(self, kpdb: str | None = None) -> None:
+        """Clear one cached password, or all cached passwords when omitted."""
+        if kpdb is None:
+            self._master_pass.clear()
+        else:
+            self._master_pass.pop(kpdb, None)
 
-    def verify_password(self, password: str) -> bool:
-        kpdb = resolve_kpdb(required=False)
+    def verify_password(self, kpdb: str, password: str) -> bool:
+        """Verify a master password against a database."""
         if not self._cli_path or not kpdb:
             return False
         try:
             r = subprocess.run(
                 [self._cli_path, "ls", "-q", kpdb, "/"],
                 input=password + "\n",
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             return r.returncode == 0
         except Exception:
@@ -63,19 +76,26 @@ class KeePassXCBackend:
 
     # -- credential access ---------------------------------------------------
 
-    def _run(self, args: list[str], timeout: int = 10) -> subprocess.CompletedProcess | None:
-        if not self._cli_path or not self._master_pass:
+    def _run(
+        self,
+        kpdb: str,
+        args: list[str],
+        timeout: int = 10,
+    ) -> subprocess.CompletedProcess | None:
+        if not self._cli_path or not self.has_password(kpdb):
             return None
         try:
             return subprocess.run(
                 [self._cli_path, *args],
-                input=self._master_pass + "\n",
-                capture_output=True, text=True, timeout=timeout,
+                input=self._master_pass[kpdb] + "\n",
+                capture_output=True,
+                text=True,
+                timeout=timeout,
             )
         except Exception:
             return None
 
-    def get_entry(self, entry_path: str, field: str = "password") -> str | None:
+    def get_entry(self, kpdb: str, entry_path: str, field: str = "password") -> str | None:
         attr_map = {
             "password": "Password",
             "username": "UserName",
@@ -84,24 +104,24 @@ class KeePassXCBackend:
             "notes": "Notes",
         }
         attr = attr_map.get(field, field)
-        r = self._run(["show", "-q", "-s", resolve_kpdb(), entry_path, "-a", attr])
+        r = self._run(kpdb, ["show", "-q", "-s", kpdb, entry_path, "-a", attr])
         if r and r.returncode == 0:
             return r.stdout.strip()
         return None
 
-    def has_entry(self, entry_path: str) -> bool:
-        r = self._run(["show", "-q", "-s", resolve_kpdb(), entry_path])
+    def has_entry(self, kpdb: str, entry_path: str) -> bool:
+        r = self._run(kpdb, ["show", "-q", "-s", kpdb, entry_path])
         return bool(r and r.returncode == 0)
 
-    def search(self, query: str) -> list[str]:
-        r = self._run(["search", "-q", resolve_kpdb(), query])
+    def search(self, kpdb: str, query: str) -> list[str]:
+        r = self._run(kpdb, ["search", "-q", kpdb, query])
         if r and r.returncode == 0:
             return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
         return []
 
     # -- mutations -----------------------------------------------------------
 
-    def _ensure_parent_groups(self, entry_path: str) -> None:
+    def _ensure_parent_groups(self, kpdb: str, entry_path: str) -> None:
         """Create any missing parent groups for a slash-delimited entry path.
 
         keepassxc-cli ``add`` fails if the entry's parent group does not exist,
@@ -110,22 +130,26 @@ class KeePassXCBackend:
         """
         parts = [p for p in entry_path.strip("/").split("/") if p]
         if len(parts) < 2:
-            return  # top-level entry -- no parent group to create
-        db = resolve_kpdb()
+            return
+        if not self._cli_path or not self.has_password(kpdb):
+            return
         cumulative = ""
         for seg in parts[:-1]:
             cumulative = f"{cumulative}/{seg}" if cumulative else seg
             try:
                 subprocess.run(
-                    [self._cli_path, "mkdir", "-q", db, cumulative],
-                    input=self._master_pass + "\n",
-                    capture_output=True, text=True, timeout=10,
+                    [self._cli_path, "mkdir", "-q", kpdb, cumulative],
+                    input=self._master_pass[kpdb] + "\n",
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
             except Exception:
                 pass
 
     def add_entry(
         self,
+        kpdb: str,
         entry_path: str,
         *,
         username: str | None = None,
@@ -134,24 +158,27 @@ class KeePassXCBackend:
         generate: bool = False,
     ) -> tuple[bool, str]:
         """Create a new KeePass entry. Returns (success, message)."""
-        if not self._cli_path or not self._master_pass:
+        if not self._cli_path or not self.has_password(kpdb):
             return False, "CLI not available or vault locked"
-        self._ensure_parent_groups(entry_path)
-        args = ["add", "-q", resolve_kpdb(), entry_path]
+        self._ensure_parent_groups(kpdb, entry_path)
+        args = ["add", "-q", kpdb, entry_path]
         if username:
             args.extend(["-u", username])
         if url:
             args.extend(["--url", url])
         if generate:
             args.append("-g")
-        stdin = self._master_pass + "\n"
+        stdin = self._master_pass[kpdb] + "\n"
         if password and not generate:
             args.append("-p")
             stdin += password + "\n"
         try:
             r = subprocess.run(
                 [self._cli_path, *args],
-                input=stdin, capture_output=True, text=True, timeout=10,
+                input=stdin,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if r.returncode == 0:
                 return True, "Entry created"
@@ -161,17 +188,21 @@ class KeePassXCBackend:
 
     def edit_password(
         self,
+        kpdb: str,
         entry_path: str,
         password: str,
     ) -> tuple[bool, str]:
         """Update the password of an existing entry. Returns (success, message)."""
-        if not self._cli_path or not self._master_pass:
+        if not self._cli_path or not self.has_password(kpdb):
             return False, "CLI not available or vault locked"
-        stdin = self._master_pass + "\n" + password + "\n"
+        stdin = self._master_pass[kpdb] + "\n" + password + "\n"
         try:
             r = subprocess.run(
-                [self._cli_path, "edit", "-q", resolve_kpdb(), entry_path, "-p"],
-                input=stdin, capture_output=True, text=True, timeout=10,
+                [self._cli_path, "edit", "-q", kpdb, entry_path, "-p"],
+                input=stdin,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if r.returncode == 0:
                 return True, "Password updated"
@@ -181,6 +212,7 @@ class KeePassXCBackend:
 
     def import_attachment(
         self,
+        kpdb: str,
         entry_path: str,
         attachment_name: str,
         data: bytes,
@@ -188,7 +220,7 @@ class KeePassXCBackend:
         """Import an attachment into an entry. Returns (success, message)."""
         import tempfile
 
-        if not self._cli_path or not self._master_pass:
+        if not self._cli_path or not self.has_password(kpdb):
             return False, "CLI not available or vault locked"
         tmp_path = None
         try:
@@ -197,11 +229,19 @@ class KeePassXCBackend:
                 f.write(data)
             r = subprocess.run(
                 [
-                    self._cli_path, "attachment-import", "-q", "-f",
-                    resolve_kpdb(), entry_path, attachment_name, tmp_path,
+                    self._cli_path,
+                    "attachment-import",
+                    "-q",
+                    "-f",
+                    kpdb,
+                    entry_path,
+                    attachment_name,
+                    tmp_path,
                 ],
-                input=self._master_pass + "\n",
-                capture_output=True, text=True, timeout=10,
+                input=self._master_pass[kpdb] + "\n",
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if r.returncode == 0:
                 return True, f"Imported {attachment_name}"
@@ -215,13 +255,14 @@ class KeePassXCBackend:
 
     def export_attachment(
         self,
+        kpdb: str,
         entry_path: str,
         attachment_name: str,
     ) -> tuple[bytes | None, str]:
         """Export an attachment from an entry. Returns (data, message)."""
         import tempfile
 
-        if not self._cli_path or not self._master_pass:
+        if not self._cli_path or not self.has_password(kpdb):
             return None, "CLI not available or vault locked"
         tmp_path = None
         try:
@@ -229,11 +270,18 @@ class KeePassXCBackend:
                 tmp_path = f.name
             r = subprocess.run(
                 [
-                    self._cli_path, "attachment-export", "-q",
-                    resolve_kpdb(), entry_path, attachment_name, tmp_path,
+                    self._cli_path,
+                    "attachment-export",
+                    "-q",
+                    kpdb,
+                    entry_path,
+                    attachment_name,
+                    tmp_path,
                 ],
-                input=self._master_pass + "\n",
-                capture_output=True, text=True, timeout=10,
+                input=self._master_pass[kpdb] + "\n",
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if r.returncode == 0:
                 with open(tmp_path, "rb") as f:

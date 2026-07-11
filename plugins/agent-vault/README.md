@@ -35,18 +35,52 @@ $env:KPDB = "C:\Users\you\Secrets\vault.kdbx"
 export KPDB="$HOME/Secrets/vault.kdbx"
 ```
 
-Optional: set `VAULT_GROUP` to prefix bare entry names. For example, with `VAULT_GROUP=Personal`, `agent-vault get example` reads `Personal/example`; entries that already include a group path are left unchanged.
+Optional: set `VAULT_GROUP` to prefix bare entry names. For example, with `VAULT_GROUP=Personal`, `agent-vault get example` reads `Personal/example`; entries that already include a group path are left unchanged. Missing groups are created automatically on `add`.
 
 Optional: set `AGENT_VAULT_PORT` to override the localhost TCP port. The default is `19999`.
 
-> **Config is read by the service at startup.** `KPDB`, `VAULT_GROUP`, and the
-> port are resolved by the vault **service** when it starts (from the environment
-> or the JSON config file at `$AGENT_VAULT_CONFIG` / the platform config dir), not
-> by each CLI call. Set them **before** the service starts (or in the config
-> file), and restart the service (`agent-vault stop` then a call re-starts it, or
-> restart the systemd unit / scheduled task) after changing them. Setting
-> `VAULT_GROUP` only in a client shell after the daemon is already running has no
-> effect.
+The CLI resolves the effective database, group, and port on **each call** (from the environment, a per-repo `.agent-vault.json`, and the global config — see below) and passes them to the service, so you don't have to restart the daemon to switch vaults.
+
+## Named vaults & per-repo config
+
+For a machine that needs more than one database (e.g. a personal vault and a work vault), give each a **nickname** in the global config and let each repository pick the one it needs.
+
+**1. Register named vaults** (writes the global config at `$AGENT_VAULT_CONFIG` / the platform config dir):
+
+```bash
+agent-vault vault add Personal  --kpdb ~/Personal.kdbx  --group Personal
+agent-vault vault add Microsoft --kpdb ~/work/MS.kdbx   --group Work
+agent-vault vault set-default Personal
+agent-vault vault list
+```
+
+The global config looks like:
+
+```json
+{
+  "vaults": {
+    "Personal":  { "kpdb": "~/Personal.kdbx", "group": "Personal" },
+    "Microsoft": { "kpdb": "~/work/MS.kdbx",  "group": "Work" }
+  },
+  "default_vault": "Personal"
+}
+```
+
+**2. Point a repo at a vault** with an `.agent-vault.json` at (or above) the repo root — discovered by walking up from the current directory, git-style:
+
+```json
+{ "vault": "Microsoft" }
+```
+
+You can also override individual fields inline (`{ "vault": "Microsoft", "group": "SpecialProject" }`) or skip names entirely (`{ "kpdb": "./repo.kdbx", "group": "X" }`).
+
+**3. Resolution precedence** (per field): explicit **env var** › per-repo **`.agent-vault.json`** › **global** named vault › built-in defaults. The global `default_vault` is the backstop when a repo names none.
+
+```bash
+agent-vault which           # show the resolved vault, kpdb, group, port + where each came from
+```
+
+**One service, many vaults.** A single daemon caches master passwords **per database**, so your personal and work vaults can both be unlocked and in use at the same time — each prompts for its own master password the first time it's touched, and the prompt names the vault. Everything stays backward-compatible: with just `KPDB` set (no registry, no repo file) it behaves as a single default vault.
 
 ## Quickstart
 

@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, WSL environment setup, and CLI customization",
-    "version": "1.7.4-dev245"
+    "version": "1.7.4-dev246"
   },
   "plugins": [
     {
@@ -78,7 +78,7 @@
     {
       "name": "agent-vault",
       "description": "Local KeePassXC-backed secret store for Copilot CLI agents. A machine-local service caches the KeePass master password with a TTL and auto-prompts on lock; a CLI fetches API keys, SSH keys, and account credentials on demand (get/has/search/add/set-password/import-key/export-key) without hardcoding, committing, or exporting them. Includes a SUDO_ASKPASS helper for sudo -A on Linux/WSL.",
-      "version": "0.1.0-dev2",
+      "version": "0.1.0-dev3",
       "source": "plugins/agent-vault"
     },
     {
