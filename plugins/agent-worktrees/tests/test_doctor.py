@@ -247,3 +247,76 @@ def test_fix_is_idempotent(home: Path):
     # After a fix, the auto-fixable findings are gone and stay gone.
     assert not [f for f in first if f.fixable]
     assert not [f for f in second if f.fixable]
+
+
+# ---------------------------------------------------------------------------
+# wsl.state promotion (Windows-only)
+# ---------------------------------------------------------------------------
+
+def _adopted_wsl_project(home: Path, state: str = "bootstrap") -> Path:
+    """A consistent adopted project carrying a wsl.state marker + repos entry."""
+    repo_dir = home / "src" / "proj"
+    repo_dir.mkdir(parents=True, exist_ok=True)
+    _write_repos(home, f"""
+repos:
+  proj:
+    class: worktree
+    linux: {repo_dir}
+    windows: {repo_dir}
+""")
+    _write_projects(home, {
+        "proj": {
+            "anchor": str(repo_dir), "expose_agent": True,
+            "default_branch": "main",
+            "wsl": {"state": state, "distro": "Ubuntu",
+                    "path": "$HOME/src/proj"},
+        },
+    })
+    return repo_dir
+
+
+def test_wsl_state_promoted_when_wsl_install_present(home: Path, monkeypatch):
+    _adopted_wsl_project(home)
+    monkeypatch.setattr(doctor, "_wsl_install_present", lambda distro: True)
+
+    findings = doctor.diagnose(plat="windows")
+    stale = _by_repo(findings, "proj")
+    assert any(f.kind == "wsl_state_stale" and f.fixable for f in stale)
+
+    doctor.reconcile(fix=True, plat="windows")
+    assert doctor._read_projects()["proj"]["wsl"]["state"] == "adopted"
+
+
+def test_wsl_state_reported_when_install_absent(home: Path, monkeypatch):
+    _adopted_wsl_project(home)
+    monkeypatch.setattr(doctor, "_wsl_install_present", lambda distro: False)
+
+    findings = doctor.reconcile(fix=True, plat="windows")
+    proj = _by_repo(findings, "proj")
+    assert any(f.kind == "wsl_unadopted" and not f.fixable for f in proj)
+    # Report-only: the marker is NOT promoted.
+    assert doctor._read_projects()["proj"]["wsl"]["state"] == "bootstrap"
+
+
+def test_wsl_state_untouched_when_probe_inconclusive(home: Path, monkeypatch):
+    _adopted_wsl_project(home)
+    monkeypatch.setattr(doctor, "_wsl_install_present", lambda distro: None)
+
+    findings = doctor.reconcile(fix=True, plat="windows")
+    assert not [f for f in findings if f.kind.startswith("wsl_")]
+    assert doctor._read_projects()["proj"]["wsl"]["state"] == "bootstrap"
+
+
+def test_wsl_state_ignored_off_windows(home: Path, monkeypatch):
+    _adopted_wsl_project(home)
+    # The probe must never even run off Windows (the marker isn't ours there).
+    called = {"n": 0}
+
+    def _boom(distro):
+        called["n"] += 1
+        return True
+
+    monkeypatch.setattr(doctor, "_wsl_install_present", _boom)
+    findings = doctor.diagnose(plat="linux")
+    assert not [f for f in findings if f.kind.startswith("wsl_")]
+    assert called["n"] == 0

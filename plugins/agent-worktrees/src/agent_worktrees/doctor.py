@@ -62,6 +62,7 @@ _AUTOFIXABLE = {
     "anchor_mismatch",
     "agent_mismatch",
     "name_collision",
+    "wsl_state_stale",
 }
 
 
@@ -127,6 +128,36 @@ def _detect_remote(path: str) -> str:
     except Exception:
         pass
     return ""
+
+
+def _wsl_install_present(distro: str | None) -> bool | None:
+    """Whether WSL carries a full agent-worktrees install (the venv binstub).
+
+    Read-only probe of the WSL side for the deployed runtime a
+    ``wsl.state: "adopted"`` marker asserts.  Returns ``True`` when the binstub
+    exists, ``False`` when WSL is reachable but the install is absent, and
+    ``None`` when the probe is inconclusive (no ``wsl.exe``, timeout, spawn
+    error) -- callers treat ``None`` as "leave the marker untouched".
+    """
+    import shutil
+    import subprocess
+
+    wsl_exe = shutil.which("wsl.exe") or shutil.which("wsl")
+    if not wsl_exe:
+        return None
+    probe = 'test -x "$HOME/.agent-worktrees/.venv/bin/agent-worktrees"'
+    argv = [wsl_exe]
+    if distro:
+        argv += ["-d", distro]
+    argv += ["--", "bash", "-lc", probe]
+    try:
+        cp = subprocess.run(
+            argv, capture_output=True, text=True, timeout=15,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return cp.returncode == 0
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +288,45 @@ def reconcile(fix: bool = False, plat: str | None = None) -> list[Finding]:
                 dirty_projects = True
                 f.fixed = True
             findings.append(f)
+
+    # --- WSL adoption state: promote a stale 'bootstrap' marker -------------
+    # The ``wsl.state`` marker lives on the Windows host that owns the WSL
+    # environment.  A Windows-side install/adopt always re-registers with
+    # ``wsl_state=None`` (preserving the existing block verbatim), and only a
+    # *WSL-side* install sets ``adopted`` -- in WSL's own registry, never this
+    # one.  So once the Windows record holds ``bootstrap`` it can never promote,
+    # even after WSL is fully adopted.  Probe WSL here and promote.  Windows-
+    # only; other platforms don't own the marker.
+    if plat == "windows":
+        for pname in sorted(projects):
+            wsl = projects[pname].get("wsl")
+            if not isinstance(wsl, dict) or wsl.get("state") != "bootstrap":
+                continue
+            present = _wsl_install_present(wsl.get("distro"))
+            if present is None:
+                continue  # inconclusive -- leave the marker untouched
+            if present:
+                f = Finding(
+                    repo=pname, kind="wsl_state_stale", severity=SEV_WARNING,
+                    detail=(f"'{pname}' wsl.state is 'bootstrap' but WSL carries "
+                            "a full agent-worktrees install"),
+                    fixable=True,
+                    fix_detail="promote wsl.state 'bootstrap' -> 'adopted'",
+                )
+                if fix:
+                    wsl["state"] = "adopted"
+                    dirty_projects = True
+                    f.fixed = True
+                findings.append(f)
+            else:
+                findings.append(Finding(
+                    repo=pname, kind="wsl_unadopted", severity=SEV_WARNING,
+                    detail=(f"'{pname}' wsl.state is 'bootstrap' and no WSL "
+                            "install was detected"),
+                    fixable=False,
+                    fix_detail=("adopt inside WSL: run the agent-worktrees "
+                                "installer in the WSL distro"),
+                ))
 
     # --- worktree/singleton entries that are not adopted --------------------
     for name in sorted(registry.repos):
