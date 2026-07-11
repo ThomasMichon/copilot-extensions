@@ -75,6 +75,26 @@ class TestBuildMuxNewWindowArgv:
         assert "env" not in argv
         assert argv[-5:] == ["pwsh.exe", "-File", "s.ps1", "-i", "seed"]
 
+    def test_psmux_quotes_multiword_args(self):
+        # psmux space-joins the pane argv without re-quoting, so a multi-word
+        # arg (the seed prompt) must be pre-quoted or Copilot word-splits it.
+        argv = sessions.build_mux_new_window_argv(
+            "id2", "C:/w",
+            ["pwsh.exe", "--allow-all-tools", "--interactive", "three word seed"],
+            None, mux="psmux",
+        )
+        # The seed is wrapped; single-word tokens are left untouched.
+        assert argv[-4:] == [
+            "pwsh.exe", "--allow-all-tools", "--interactive", '"three word seed"',
+        ]
+
+    def test_psmux_quote_escapes_embedded_quote(self):
+        argv = sessions.build_mux_new_window_argv(
+            "id2", "C:/w", ["copilot", "--interactive", 'say "hi" now'],
+            None, mux="psmux",
+        )
+        assert argv[-1] == '"say ""hi"" now"'
+
     def test_empty_work_dir_omits_c_flag(self):
         argv = sessions.build_mux_new_window_argv(
             "id3", "", ["copilot"], None, mux="tmux", pane_wrapper="/nope",

@@ -1218,13 +1218,35 @@ def build_mux_new_window_argv(
         else:
             pane_cmd = clean + list(cmd)
     else:
-        pane_cmd = list(cmd)
+        # psmux (Windows tmux port) reconstructs the pane command line and
+        # spawns it via CreateProcess, but it space-JOINS the command argv
+        # WITHOUT re-quoting elements that contain spaces -- so a multi-word arg
+        # (e.g. the ``--interactive "<seed prompt>"``) gets word-split and
+        # Copilot rejects it ("prompt was not quoted"). tmux on Unix preserves
+        # argv via execvp, so this only bites Windows. Pre-quote each element so
+        # it survives psmux's naive join; Python's own list2cmdline round-trips
+        # the pre-quoted token correctly when it invokes psmux.exe.
+        pane_cmd = [_win_quote_arg(a) for a in cmd]
 
     # No ``--`` separator: mux option parsing stops at the first non-option
     # token (``env`` / the launcher binary), so the rest is taken as the
     # command verbatim -- matching launch-session.{sh,ps1}'s new-session call.
     argv += pane_cmd
     return argv
+
+
+def _win_quote_arg(arg: str) -> str:
+    """Quote a single command-line arg for psmux's Windows pane spawn.
+
+    Wrap in double quotes when the arg is empty or contains whitespace / a quote
+    (the tokens psmux would otherwise split on), escaping embedded double quotes
+    by doubling them. A space-free arg is returned unchanged so already-correct
+    tokens (flags, quoteless paths) are untouched.
+    """
+    arg = str(arg)
+    if arg and not any(c in arg for c in ' \t"'):
+        return arg
+    return '"' + arg.replace('"', '""') + '"'
 
 
 def mux_active_pane(worktree_id: str, *, mux: str | None = None) -> str | None:
