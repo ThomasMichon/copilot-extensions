@@ -67,8 +67,8 @@ prompt to reply with:
 
 - **agent-dispatch present →** the handoff is stored as a **`proposed`,
   `handoff`-labeled task** pinned to this worktree (payload = the full markdown;
-  **no** session file). Reply form:
-  `Claim and act on the handoff <id> from agent-dispatch: <one-line topic>.`
+  **no** session file). Reply form (a self-loading resume seed):
+  `You are resuming a handoff (agent-dispatch task <id>); … run: agent-dispatch payload <id> --raw ; then continue: <one-line topic>.`
 - **agent-dispatch absent →** the handoff is written to a **file** in the session
   state folder. Reply form:
   `Read the handoff at <path> and continue: <one-line topic>.`
@@ -130,7 +130,8 @@ The mechanics, for when you must do it by hand (extension not loaded):
     --target-worktree <worktree_id> --target-machine <machine> \
     --source context-handoff \
     --dedup-key "handoff-<sessionId>"
-  # then reply: Claim and act on the handoff <id> from agent-dispatch: <topic>.
+  # then reply with the resume seed: "You are resuming a handoff (agent-dispatch
+  # task <id>) … run: agent-dispatch payload <id> --raw ; then continue: <topic>."
   ```
 
   - **`proposed`** (not `queued`): a handoff is a draft the operator resumes
@@ -200,13 +201,13 @@ window, **never** by a spawned background ACP agent unless the operator
 explicitly asks):
 
 1. **agent-dispatch form** (the default when a coordinator is running). The
-   previous session's reply was `Claim and act on the handoff <id> from
-   agent-dispatch: …`. Resume either by:
+   previous session's reply was the resume seed `You are resuming a handoff
+   (agent-dispatch task <id>) … run: agent-dispatch payload <id> --raw`. Resume either by:
    - running **`/resume-handoff`** (no argument) after `/clear`/`/new` in the
      same worktree — the extension consumes this worktree's pending handoff task
      and **injects its continuation prompt** as your next turn (see below); or
-   - pasting that `Claim and act on the handoff <id> …` prompt, which tells you
-     to claim `<id>` and act on its payload.
+   - pasting that resume seed, which loads the full brief with one command
+     (`agent-dispatch payload <id> --raw`) and tells you to continue in place.
 2. **File form** (the fallback when no coordinator was running). The reply was
    `Read the handoff at <path> and continue: …`; pasted into a new session, it
    names the file and tells you to read it and continue.
@@ -249,11 +250,13 @@ handoff task.
 
 > The command needs the context-handoff **extension** loaded (it registers the
 > slash command). If the extension isn't loaded, `/resume-handoff` won't exist —
-> resume by pasting the previous session's reply prompt instead (`Claim and act
-> on the handoff <id> …` or `Read the handoff at <path> …`). When you *do* get a
-> pasted `Claim and act on the handoff <id> from agent-dispatch` prompt, act on
-> it directly: `agent-dispatch payload <id> --raw` for the handoff, then
-> `agent-dispatch claim --task <id>` / `start` / `complete` to consume it.
+> resume by pasting the previous session's reply prompt instead (the resume seed
+> `You are resuming a handoff (agent-dispatch task <id>) … run: agent-dispatch
+> payload <id> --raw` or `Read the handoff at <path> …`). When you *do* get a
+> pasted agent-dispatch resume seed, act on it directly: `agent-dispatch payload
+> <id> --raw` for the handoff (that alone is enough to continue). The live-cutover
+> path already marks the task consumed; if you resumed by hand and want to tidy
+> the queue, `agent-dispatch claim --task <id>` / `start` / `complete`.
 
 ### If the user says "pick up from last session" with no pasted prompt
 
@@ -291,10 +294,11 @@ fallback mode). Full template:
   actions, and target goals in full.
 - **The inline REPLY prompt must be short — one or two sentences.** It is
   addressed to the **next agent** and is whichever form `save_handoff_prompt`
-  returned: `Claim and act on the handoff <id> from agent-dispatch: <topic>.`
-  (task) or `Read the handoff at <path> and continue: <topic>.` (file). It is
-  copy-pasted verbatim into `/clear` (or `/new`); keep it scannable and do
-  **not** repeat the handoff contents.
+  returned: the agent-dispatch resume seed `You are resuming a handoff
+  (agent-dispatch task <id>) … run: agent-dispatch payload <id> --raw ; then
+  continue: <topic>.` (task) or `Read the handoff at <path> and continue:
+  <topic>.` (file). It is copy-pasted verbatim into `/clear` (or `/new`); keep
+  it scannable and do **not** repeat the handoff contents.
 - **Lead with the original topic.** The "Original Request" must reference the
   session's founding purpose, not just recent activity.
 - **Be specific.** "Fix the auth bug" is useless. "JWT refresh in

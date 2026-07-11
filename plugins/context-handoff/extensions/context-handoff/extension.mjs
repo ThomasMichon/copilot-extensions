@@ -153,8 +153,8 @@ function saveHandoffPrompt(promptText, sid) {
 // When an agent-dispatch coordinator is reachable, a handoff is stored as a
 // *task* (payload = the handoff markdown) instead of a session-folder file, so
 // it becomes durable, browsable, and claimable -- consumed next session with
-// /resume-handoff (or by pasting the "Claim and act on the handoff <id>"
-// prompt). context-handoff sits *on top of* agent-dispatch when it exists, and
+// /resume-handoff (or by pasting the short seed prompt, which loads the full
+// brief with one `agent-dispatch payload <id> --raw` command). context-handoff sits *on top of* agent-dispatch when it exists, and
 // falls back to the file flow when it doesn't. All best-effort: any failure
 // returns null / a safe default so the caller degrades to the file path.
 
@@ -538,7 +538,8 @@ const session = await joinSession({
             "   agent-dispatch task when a coordinator is reachable, else a",
             "   session file — and returns EXACTLY the short prompt to reply with.",
             "3. Reply with ONLY that short prompt (the tool tells you which form):",
-            "   either 'Claim and act on the handoff <id> from agent-dispatch: …'",
+            "   either the agent-dispatch resume seed ('You are resuming a handoff",
+            "   (agent-dispatch task <id>) … run: agent-dispatch payload <id> --raw')",
             "   or 'Read the handoff at <path> and continue: …'. The user pastes",
             "   it into '/clear' (or '/new'); the dispatch form is also resumable",
             "   via /resume-handoff.",
@@ -618,17 +619,26 @@ const session = await joinSession({
         if (agentDispatchAvailable()) {
           const taskId = dispatchHandoff(text, sid, cwd, title);
           if (taskId) {
+            // File-model parity: a short, self-loading seed. The successor gets
+            // the helper framing inline and pulls the full brief with ONE
+            // command (payload readable at any task status), so it starts work
+            // immediately -- no tool discovery, no skill load, no claim
+            // ceremony. Single line + ASCII so it rides `copilot -i` intact.
             seed =
-              `Claim and act on the handoff ${taskId} from agent-dispatch: ${topic}.`;
+              `You are resuming a handoff (agent-dispatch task ${taskId}); ` +
+              `continue the prior session's work IN PLACE -- do not restart or ` +
+              `create a new worktree. Load your full brief by running: ` +
+              `agent-dispatch payload ${taskId} --raw ; then continue: ${topic}.`;
             storedMsg = (
               `Handoff stored as agent-dispatch task ${taskId} (proposed, label ` +
               `'handoff', pinned to this worktree). No session file was written.\n\n` +
               `Reply to the user with ONLY this short prompt. They resume by ` +
               `running /resume-handoff in a fresh session in this worktree, or by ` +
-              `pasting it into '/clear' (or '/new'):\n` +
+              `pasting it into '/clear' (or '/new') -- the successor loads the ` +
+              `full brief itself with the one command embedded in the seed:\n` +
               `  ${seed}\n` +
-              `Do NOT paste the handoff contents -- the payload lives in the task, ` +
-              `and it is never loaded automatically.`
+              `Do NOT paste the handoff contents -- the payload lives in the task ` +
+              `and is loaded on demand by the command in the seed.`
             );
           }
           // Task creation failed -- fall through to the file flow.
@@ -708,6 +718,26 @@ const session = await joinSession({
             "reply prompt into '/clear', or run /resume-handoff in a fresh session " +
             "in this worktree)."
           );
+        }
+        // The cutover succeeded and the successor is seeded deterministically,
+        // so spend the baton now: mark the handoff task consumed so it doesn't
+        // linger as a claimable 'proposed' task (which /resume-handoff would
+        // otherwise re-inject in a later session). The payload blob survives
+        // completion, so the successor's `agent-dispatch payload <id> --raw`
+        // still resolves. Best-effort -- a bookkeeping miss never undoes the
+        // (already-done) cutover.
+        const idMatch = seed.match(/\b([0-9a-f]{32})\b/);
+        if (idMatch && agentDispatchJson(["approve", idMatch[1]], cwd)) {
+          const id = idMatch[1];
+          const claimed = agentDispatchJson(["claim", "--task", id], cwd);
+          const owner = claimed?.owner;
+          if (owner) {
+            agentDispatchJson(["start", id, owner], cwd);
+            agentDispatchJson(
+              ["complete", id, owner, "--result-ref", `cutover:${state.sessionId || "successor"}`],
+              cwd,
+            );
+          }
         }
         // Arm self-retire: this old session quits on the next session.idle
         // (agent-stop of this turn); the successor already holds the seed.

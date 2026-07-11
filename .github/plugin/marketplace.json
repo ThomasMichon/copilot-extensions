@@ -48,7 +48,7 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a Copilot CLI session extension that tracks token utilization and nudges toward a continuation prompt before auto-compaction, plus the /handoff skill (sits on top of agent-dispatch: stores the handoff as a claimable worktree-pinned task when a coordinator is present, else a session file) and the /resume-handoff slash command that digs up this worktree's pending handoff and injects its continuation prompt into the current session",
-      "version": "0.1.0-dev15",
+      "version": "0.1.0-dev16",
       "source": "plugins/context-handoff"
     },
     {
