@@ -23,6 +23,7 @@ Plugins, one marketplace. Install what you need; they compose.
 | [agent-dispatch](plugins/agent-dispatch/) | Task queue + coordinator | Coordinate multiple agents through a single-writer leased task queue (atomic claim, capability routing, lease recovery) instead of racing through `origin/master` pushes. Per-host coordinator, CLI, and MCP tools. |
 | [customizing-copilot](plugins/customizing-copilot/) | Customizing the CLI | Teach an agent how to customize and extend the Copilot CLI — authoring skills, defining sub-agents, registering MCP servers, installing plugins, building a control-harness, reviewing customizations, and authoring `harness-<repo>` plugins. Seven focused skills. Payload-only — no runtime to install. |
 | [harness-copilot-extensions](plugins/harness-copilot-extensions/) | Operator harness | The portable, owner-authored skills to work *on* this suite — **contribute** changes and **diagnose** the deployed runtimes. Enable it in any control repo instead of hand-writing a per-repo narrative. Reference implementation of the `harness-<repo>` standard. Payload-only. |
+| [wsl-setup](plugins/wsl-setup/) | Environment setup | Set up and troubleshoot WSL2 as a reachable, persistent service host — pick the networking mode (NAT + localhostForwarding vs mirrored), diagnose corp-network egress + host↔WSL loopback failures, and keep a distro alive for a hosted listener (e.g. sshd behind a Dev Tunnel). Ships a windowless keepalive helper. |
 
 All support **Windows** and **Linux/WSL** (macOS planned).
 

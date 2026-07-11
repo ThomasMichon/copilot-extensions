@@ -5,8 +5,8 @@
     "email": "thomas@thomasmichon.com"
   },
   "metadata": {
-    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, and CLI customization",
-    "version": "1.7.4-dev238"
+    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, WSL environment setup, and CLI customization",
+    "version": "1.7.4-dev239"
   },
   "plugins": [
     {
@@ -80,6 +80,12 @@
       "description": "Operator harness for the copilot-extensions repo - portable, owner-authored skills to work ON the plugin suite (contribute changes and diagnose the deployed runtimes). Any control repo can enable it instead of hand-writing a per-repo narrative. Reference implementation of the harness-<repo> plugin standard; ships the contributing-to-copilot-extensions and diagnosing-copilot-extensions skills.",
       "version": "0.1.0-dev2",
       "source": "plugins/harness-copilot-extensions"
+    },
+    {
+      "name": "wsl-setup",
+      "description": "Set up and troubleshoot WSL2 as a first-class development and service-hosting environment - install a distro, choose the networking mode (NAT + localhostForwarding vs mirrored + dnsTunneling), keep the distro alive for hosted services, and diagnose corp-network egress and host<->WSL loopback failures. Composes with agent-worktrees' agent-worktrees-wsl-provision; ships the setting-up-wsl and troubleshooting-wsl-networking skills",
+      "version": "0.1.0-dev1",
+      "source": "plugins/wsl-setup"
     }
   ]
 }
