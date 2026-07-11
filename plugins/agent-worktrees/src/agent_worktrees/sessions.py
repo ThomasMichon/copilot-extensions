@@ -1219,14 +1219,14 @@ def build_mux_new_window_argv(
             pane_cmd = clean + list(cmd)
     else:
         # psmux (Windows tmux port) reconstructs the pane command line and
-        # spawns it via CreateProcess, but it space-JOINS the command argv
-        # WITHOUT re-quoting elements that contain spaces -- so a multi-word arg
-        # (e.g. the ``--interactive "<seed prompt>"``) gets word-split and
-        # Copilot rejects it ("prompt was not quoted"). tmux on Unix preserves
-        # argv via execvp, so this only bites Windows. Pre-quote each element so
-        # it survives psmux's naive join; Python's own list2cmdline round-trips
-        # the pre-quoted token correctly when it invokes psmux.exe.
-        pane_cmd = [_win_quote_arg(a) for a in cmd]
+        # CreateProcess-spawns it, space-JOINING the command argv WITHOUT
+        # re-quoting -- so it cannot carry an arg containing spaces at all (a
+        # multi-word arg word-splits, and pre-quoting it breaks the spawn
+        # outright). The seed prompt therefore is NOT passed as a launch arg; a
+        # cutover spawns a plain interactive Copilot and injects the seed via
+        # send-keys afterward (:func:`mux_seed_pane`). This branch runs the
+        # command verbatim; keep every element single-token.
+        pane_cmd = list(cmd)
 
     # No ``--`` separator: mux option parsing stops at the first non-option
     # token (``env`` / the launcher binary), so the rest is taken as the
@@ -1235,18 +1235,69 @@ def build_mux_new_window_argv(
     return argv
 
 
-def _win_quote_arg(arg: str) -> str:
-    """Quote a single command-line arg for psmux's Windows pane spawn.
+def mux_seed_pane(
+    pane_id: str,
+    seed: str,
+    *,
+    mux: str | None = None,
+    ready_timeout: float = 20.0,
+    poll_interval: float = 0.5,
+    settle: float = 0.6,
+) -> dict:
+    """Type ``seed`` as the first interactive prompt into a freshly spawned pane.
 
-    Wrap in double quotes when the arg is empty or contains whitespace / a quote
-    (the tokens psmux would otherwise split on), escaping embedded double quotes
-    by doubling them. A space-free arg is returned unchanged so already-correct
-    tokens (flags, quoteless paths) are untouched.
+    A cutover spawns a *plain* interactive Copilot (no ``--interactive`` launch
+    arg -- see :func:`build_mux_new_window_argv`: psmux cannot carry a
+    spaces-containing pane arg on Windows), then this injects the seed as literal
+    keystrokes once Copilot is ready. ``send-keys -l`` delivers the whole prompt
+    (spaces and all) as one line -- the same mux mechanism the retire path uses --
+    sidestepping every command-line quoting hazard.
+
+    Waits (up to ``ready_timeout``) for Copilot's input prompt to appear before
+    typing, so keystrokes are not eaten by TUI startup, then sends the text, a
+    brief ``settle`` pause, and Enter. Returns ``{ok, pane, ready, sent}``.
     """
-    arg = str(arg)
-    if arg and not any(c in arg for c in ' \t"'):
-        return arg
-    return '"' + arg.replace('"', '""') + '"'
+    import subprocess
+    import time
+
+    mux_bin = _mux_bin(mux)
+
+    def _cap() -> str:
+        try:
+            r = subprocess.run(
+                [mux_bin, "capture-pane", "-p", "-t", pane_id],
+                capture_output=True, text=True, timeout=5,
+            )
+            return r.stdout if r.returncode == 0 else ""
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+
+    # Poll for readiness: Copilot renders a ``❯`` prompt caret + a rule line.
+    ready = False
+    deadline = time.monotonic() + ready_timeout
+    while time.monotonic() < deadline:
+        cap = _cap()
+        if "❯" in cap or "esc interrupt" in cap or "─────" in cap:
+            ready = True
+            break
+        time.sleep(poll_interval)
+
+    def _send(*a: str) -> bool:
+        try:
+            r = subprocess.run(
+                [mux_bin, "send-keys", "-t", pane_id, *a],
+                capture_output=True, timeout=5,
+            )
+            return r.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+    # ``-l`` sends the seed literally (no key-name interpretation), so the whole
+    # multi-word prompt lands as one input line.
+    sent = _send("-l", seed)
+    time.sleep(settle)
+    _send("Enter")
+    return {"ok": bool(sent), "pane": pane_id, "ready": ready, "sent": bool(sent)}
 
 
 def mux_active_pane(worktree_id: str, *, mux: str | None = None) -> str | None:

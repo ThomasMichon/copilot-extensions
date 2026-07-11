@@ -75,25 +75,14 @@ class TestBuildMuxNewWindowArgv:
         assert "env" not in argv
         assert argv[-5:] == ["pwsh.exe", "-File", "s.ps1", "-i", "seed"]
 
-    def test_psmux_quotes_multiword_args(self):
-        # psmux space-joins the pane argv without re-quoting, so a multi-word
-        # arg (the seed prompt) must be pre-quoted or Copilot word-splits it.
+    def test_psmux_runs_command_verbatim_no_quoting(self):
+        # The seed is NOT a launch arg (it is send-keys'd), so the psmux branch
+        # runs the command verbatim -- no quoting layer that could break the spawn.
         argv = sessions.build_mux_new_window_argv(
             "id2", "C:/w",
-            ["pwsh.exe", "--allow-all-tools", "--interactive", "three word seed"],
-            None, mux="psmux",
+            ["pwsh.exe", "--allow-all-tools"], None, mux="psmux",
         )
-        # The seed is wrapped; single-word tokens are left untouched.
-        assert argv[-4:] == [
-            "pwsh.exe", "--allow-all-tools", "--interactive", '"three word seed"',
-        ]
-
-    def test_psmux_quote_escapes_embedded_quote(self):
-        argv = sessions.build_mux_new_window_argv(
-            "id2", "C:/w", ["copilot", "--interactive", 'say "hi" now'],
-            None, mux="psmux",
-        )
-        assert argv[-1] == '"say ""hi"" now"'
+        assert argv[-2:] == ["pwsh.exe", "--allow-all-tools"]
 
     def test_empty_work_dir_omits_c_flag(self):
         argv = sessions.build_mux_new_window_argv(
@@ -197,7 +186,7 @@ class TestCmdHandoffCutover:
         assert rc == 2
         assert "could not resolve" in capfd.readouterr().out
 
-    def test_spawn_dry_run_appends_seed_and_reports_old_pane(
+    def test_spawn_dry_run_reports_plan_and_old_pane(
         self, monkeypatch, capfd, tmp_path,
     ):
         monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtY")
@@ -235,7 +224,9 @@ class TestCmdHandoffCutover:
         assert out["dry_run"] is True
         assert out["old_pane"] == "%1"
         assert out["session"] == "wt-wtY"
-        assert out["cmd"][-2:] == ["--interactive", "continue the work"]
+        # The seed is NOT a launch arg -- the plain launch cmd is reported as-is.
+        assert out["cmd"] == ["bash", "setup.sh", "--allow-all-tools"]
+        assert out["seed_len"] == len("continue the work")
 
     def test_spawn_success_opens_window(self, monkeypatch, capfd, tmp_path):
         monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
@@ -261,13 +252,23 @@ class TestCmdHandoffCutover:
             return {"ok": True, "new_pane": "%5", "error": None}
 
         monkeypatch.setattr(sessions, "mux_new_window", _fake_new_window)
+        # The seed is injected via send-keys, not a launch arg -- capture it.
+        seeded = {}
+        monkeypatch.setattr(
+            sessions, "mux_seed_pane",
+            lambda pane, seed, **k: seeded.update(pane=pane, seed=seed)
+            or {"ok": True, "pane": pane, "ready": True, "sent": True},
+        )
 
-        rc = m.cmd_handoff_cutover(_ns(seed="resume", old_pane="%2"))
+        rc = m.cmd_handoff_cutover(_ns(seed="resume the multi word work", old_pane="%2"))
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
         assert out["ok"] is True
         assert out["old_pane"] == "%2"
         assert out["new_pane"] == "%5"
-        assert out["seed_len"] == len("resume")
-        # --interactive seed appended after the resolved launch cmd
-        assert captured["cmd"][-2:] == ["--interactive", "resume"]
+        assert out["seed_len"] == len("resume the multi word work")
+        assert out["seeded"] is True
+        # The launch cmd carries NO seed arg; the seed is send-keys'd to the pane.
+        assert captured["cmd"] == ["copilot"]
+        assert seeded["pane"] == "%5"
+        assert seeded["seed"] == "resume the multi word work"
