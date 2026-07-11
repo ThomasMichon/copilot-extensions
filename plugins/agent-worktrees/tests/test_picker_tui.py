@@ -12,9 +12,20 @@ import threading
 import time
 import types
 
-from agent_worktrees.picker_tui import derive, new_picker_enabled
-from agent_worktrees.picker_tui.engine import PickerApp, PickerScreen
-from agent_worktrees.picker_tui.selection import ListSelection
+import pytest
+
+# The picker engine is backed by Textual (a declared runtime dependency). When
+# the suite runs in a partial/dev environment that has not installed the heavy
+# TUI dep yet, skip this module rather than aborting collection of the entire
+# suite with a module-level ImportError.
+pytest.importorskip("textual", reason="textual not installed (optional TUI dep)")
+
+from agent_worktrees.picker_tui import derive, new_picker_enabled  # noqa: E402
+from agent_worktrees.picker_tui.engine import (  # noqa: E402
+    PickerApp,
+    PickerScreen,
+)
+from agent_worktrees.picker_tui.selection import ListSelection  # noqa: E402
 
 
 def _fixture_source():
