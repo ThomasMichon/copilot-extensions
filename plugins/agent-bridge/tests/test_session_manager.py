@@ -622,6 +622,86 @@ class TestResyncSession:
             live_task.cancel()
 
 
+class TestReconcileWedged:
+    """Eventual-terminal reconciliation of sessions wedged in RUNNING."""
+
+    @staticmethod
+    def _replay_factory(replay):
+        def factory(*args, on_event=None, **kwargs):
+            client = MagicMock()
+            client.is_running = True
+            client.pid = 333
+            client.acp_session_id = "acp-test-123"
+            client.start = AsyncMock()
+            client.shutdown = AsyncMock()
+            client.cancel_prompt = AsyncMock()
+
+            async def _load(cwd, session_id, suppress_replay=True):
+                if not suppress_replay and on_event:
+                    for etype, data in replay:
+                        on_event(etype, data)
+
+            client.load_session = AsyncMock(side_effect=_load)
+            return client
+        return factory
+
+    @pytest.mark.asyncio
+    async def test_reconciles_stalled_running_with_no_live_turn(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """A RUNNING session that has stopped producing output and has no live
+        prompt task is healed back to idle instead of hanging forever."""
+        session = await session_manager.start_session(spawn_target)
+        session.status = SessionStatus.RUNNING
+        session._prompt_task = None
+        session.last_output_at = time.time() - 10_000  # stalled
+
+        with patch("agent_bridge.session_manager.AcpClient",
+                   side_effect=self._replay_factory([("agent_message", {"text": "x"})])):
+            healed = await session_manager.reconcile_wedged_running()
+
+        assert healed == 1
+        assert session.status == SessionStatus.IDLE
+        assert session.event_log.get_events()[-1].data.get("resynced") is True
+
+    @pytest.mark.asyncio
+    async def test_leaves_actively_progressing_turn(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """A RUNNING session still producing output (liveness 'active') is never
+        reconciled."""
+        session = await session_manager.start_session(spawn_target)
+        session.status = SessionStatus.RUNNING
+        session._prompt_task = None
+        session.last_output_at = time.time()  # active
+
+        healed = await session_manager.reconcile_wedged_running()
+        assert healed == 0
+        assert session.status == SessionStatus.RUNNING
+
+    @pytest.mark.asyncio
+    async def test_leaves_live_prompt_task(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """A RUNNING session with a live prompt task (a turn driven here) is
+        never reconciled, even if output has stalled."""
+        session = await session_manager.start_session(spawn_target)
+        session.status = SessionStatus.RUNNING
+        session.last_output_at = time.time() - 10_000  # stalled
+
+        async def _never() -> None:
+            await asyncio.Event().wait()
+
+        live = asyncio.ensure_future(_never())
+        session._prompt_task = live
+        try:
+            healed = await session_manager.reconcile_wedged_running()
+        finally:
+            live.cancel()
+        assert healed == 0
+        assert session.status == SessionStatus.RUNNING
+
+
 class TestRehydrate:
     """Session rehydration on restart."""
 
