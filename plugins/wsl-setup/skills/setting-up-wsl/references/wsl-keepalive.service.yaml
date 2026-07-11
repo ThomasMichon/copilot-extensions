@@ -1,0 +1,51 @@
+name: wsl-keepalive
+display_name: WSL Keepalive
+description: >
+  Pins a WSL2 distro up (and optionally ensures a systemd service is started)
+  so a WSL-hosted listener -- e.g. sshd behind a Dev Tunnel -- stays reachable.
+  An idle WSL distro terminates and takes its services with it; this keepalive
+  holds it up with a detached `sleep infinity` and re-establishes it at logon.
+
+# Fire-and-forget launcher (not a long-lived monitored daemon). A logon-triggered
+# Windows Scheduled Task invokes a windowless VBS launcher (WScript.Shell.Run
+# style 0) so wsl.exe never flashes a console window -- the same windowless
+# posture as agent-logger's pythonw host.
+type: scheduled-task
+level: user
+platform: windows
+
+runtime:
+  install_dir: "${LOCALAPPDATA}/wsl-keepalive"
+
+parameters:
+  Distro:
+    description: WSL distro to keep alive (e.g. Ubuntu-22.04)
+    required: true
+  Service:
+    description: Optional systemd service to `systemctl start` before pinning (e.g. ssh)
+    required: false
+  TaskName:
+    description: Scheduled Task name (default WSL-Keepalive-<Distro>)
+    required: false
+
+schedule:
+  trigger: at-logon
+
+prereqs:
+  - name: wsl
+    notes: "WSL2 installed with the target distro; systemd enabled for the Service option"
+
+data:
+  internal:
+    - path: "<TaskName>.vbs"
+      description: Windowless launcher (WScript.Shell.Run ..., 0) for the keepalive
+      recovery: Re-run the installer
+    - path: deploy-manifest.json
+      description: Deployment provenance (distro, service, task, timestamp)
+      recovery: Re-run the installer
+
+maturity: alpha
+
+consumers:
+  - "devtunnel-ssh (dev-tmichon): the tunnel's Windows->WSL localhost hop needs the WSL sshd up"
+  - "any WSL-hosted service that must survive idle-termination + reboot"

@@ -1,0 +1,21 @@
+{
+  "name": "wsl-setup",
+  "description": "Set up and troubleshoot WSL2 as a first-class development and service-hosting environment - install a distro, choose the right networking mode (NAT + localhostForwarding vs mirrored + dnsTunneling), keep the distro alive for hosted services, and diagnose corp-network egress and host<->WSL loopback failures. Composes with agent-worktrees' agent-worktrees-wsl-provision (repo cloning + Windows Terminal profiles). Ships the setting-up-wsl and troubleshooting-wsl-networking skills",
+  "version": "0.1.0-dev1",
+  "runtimeScope": "none",
+  "author": {
+    "name": "Thomas Michon"
+  },
+  "homepage": "https://github.com/ThomasMichon/copilot-extensions",
+  "repository": "https://github.com/ThomasMichon/copilot-extensions",
+  "license": "MIT",
+  "keywords": [
+    "wsl",
+    "wsl2",
+    "networking",
+    "localhostforwarding",
+    "provisioning",
+    "copilot-extension"
+  ],
+  "skills": "skills/"
+}
