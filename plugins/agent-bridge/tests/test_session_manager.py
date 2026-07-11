@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -575,6 +576,50 @@ class TestResyncSession:
     async def test_resync_unknown_session(self, session_manager) -> None:
         with pytest.raises(KeyError):
             await session_manager.resync_session("nonexistent")
+
+    @pytest.mark.asyncio
+    async def test_resync_heals_wedged_running_session(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """A session left in RUNNING with no live prompt task (wedged -- e.g.
+        a turn whose runner died without a terminal event, or a session
+        rehydrated after a restart) must be resyncable so it can be healed
+        back to idle (issue #22 / #2385)."""
+        session = await session_manager.start_session(spawn_target)
+        sid = session.session_id
+        session.status = SessionStatus.RUNNING
+        session._prompt_task = None  # no live turn -> wedged, not live
+
+        replay = [("agent_message", {"text": "recovered"})]
+        with patch("agent_bridge.session_manager.AcpClient",
+                   side_effect=self._replay_acp_factory(replay)):
+            count = await session_manager.resync_session(sid)
+
+        assert count == len(replay)
+        assert session.status == SessionStatus.IDLE
+        events = session.event_log.get_events()
+        assert events[-1].event == "session_state_changed"
+        assert events[-1].data.get("resynced") is True
+
+    @pytest.mark.asyncio
+    async def test_resync_refuses_live_running_turn(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """A genuinely live turn (a running prompt task) must still be refused
+        -- healing only applies to a wedged RUNNING with no live turn."""
+        session = await session_manager.start_session(spawn_target)
+        session.status = SessionStatus.RUNNING
+
+        async def _never() -> None:
+            await asyncio.Event().wait()
+
+        live_task = asyncio.ensure_future(_never())
+        session._prompt_task = live_task
+        try:
+            with pytest.raises(ValueError, match="live turn"):
+                await session_manager.resync_session(session.session_id)
+        finally:
+            live_task.cancel()
 
 
 class TestRehydrate:
