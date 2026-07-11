@@ -817,12 +817,12 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
 
     * **spawn** (default; needs ``--seed``): reconstruct this worktree's launch
       command (the same ``_build_launch_cmd`` the picker uses) **plus** a
-      trailing ``-i <seed>`` -- an *interactive* seeded first turn, never ``-p``
-      (which would run headless and exit) -- then open + select a NEW window in
-      the worktree's ``wt-<id>`` mux session so the operator is cut over to the
-      successor. Deliberately omits ``--resume``: a handoff wants a FRESH context
-      window seeded by the prompt, not the old transcript replayed. Returns the
-      OLD (pre-cutover) pane id so the caller can retire it once the old session
+      trailing ``--interactive <seed>`` -- an *interactive* seeded first turn,
+      never ``-p`` (which would run headless and exit) -- then open + select a NEW
+      window in the worktree's ``wt-<id>`` mux session so the operator is cut over
+      to the successor. Deliberately omits ``--resume``: a handoff wants a FRESH
+      context window seeded by the prompt, not the old transcript replayed. Returns
+      the OLD (pre-cutover) pane id so the caller can retire it once the old session
       reaches agent-stop.
     * **retire** (``--retire-pane <id>``): double-Ctrl-C that specific pane
       (Copilot's native clean quit), hard-killing it only if it will not exit.
@@ -871,7 +871,15 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     launch_cmd = _build_launch_cmd(config, args, record.worktree_path)
     env = _build_env(None, _repo_session_env(config, record.worktree_path))
     # Seed the successor's first interactive turn (never --resume: fresh context).
-    launch_cmd = list(launch_cmd) + ["-i", seed]
+    # Use the LONG flag ``--interactive`` (not ``-i``): the launch command wraps
+    # Copilot in ``pwsh -File default-setup.ps1 ... <copilot args>``, and PowerShell
+    # prefix-matches a bare ``-i`` to its common ``-InformationAction`` /
+    # ``-InformationVariable`` params ("parameter 'i' is ambiguous"), killing the
+    # pane before Copilot ever starts. ``--interactive`` (a double-dash arg, like
+    # ``--allow-all-tools``) falls through PowerShell's binder to Copilot's
+    # ValueFromRemainingArguments passthrough. Copilot accepts both forms
+    # (``-i, --interactive <prompt>``); the long form is the cross-platform-safe one.
+    launch_cmd = list(launch_cmd) + ["--interactive", seed]
 
     # Capture the pane to retire (the operator's current Copilot) BEFORE adding
     # the new window, which would become the active pane. ``--old-pane`` lets the

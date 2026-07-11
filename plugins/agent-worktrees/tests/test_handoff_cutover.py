@@ -215,7 +215,7 @@ class TestCmdHandoffCutover:
         assert out["dry_run"] is True
         assert out["old_pane"] == "%1"
         assert out["session"] == "wt-wtY"
-        assert out["cmd"][-2:] == ["-i", "continue the work"]
+        assert out["cmd"][-2:] == ["--interactive", "continue the work"]
 
     def test_spawn_success_opens_window(self, monkeypatch, capfd, tmp_path):
         monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
@@ -249,5 +249,5 @@ class TestCmdHandoffCutover:
         assert out["old_pane"] == "%2"
         assert out["new_pane"] == "%5"
         assert out["seed_len"] == len("resume")
-        # -i seed appended after the resolved launch cmd
-        assert captured["cmd"][-2:] == ["-i", "resume"]
+        # --interactive seed appended after the resolved launch cmd
+        assert captured["cmd"][-2:] == ["--interactive", "resume"]
