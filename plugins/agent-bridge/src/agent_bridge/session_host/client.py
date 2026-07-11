@@ -34,7 +34,10 @@ class SessionHostClient:
 
     @classmethod
     async def connect(cls, host: str = "127.0.0.1", *, port: int) -> SessionHostClient:
-        reader, writer = await asyncio.open_connection(host, port)
+        # Size the reader to the protocol's max message: a relayed ACP frame can
+        # far exceed asyncio's default 64 KiB line limit (e.g. a large PR diff).
+        reader, writer = await asyncio.open_connection(
+            host, port, limit=proto.MAX_MESSAGE_BYTES)
         return cls(reader, writer)
 
     @property

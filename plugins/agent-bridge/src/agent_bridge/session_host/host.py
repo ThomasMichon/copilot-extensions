@@ -249,7 +249,8 @@ class SessionHost:
     async def serve(self, host: str = "127.0.0.1", port: int = 0) -> int:
         """Start serving on loopback. Returns the bound port."""
         self._reader_task = asyncio.create_task(self._reader_loop())
-        self._server = await asyncio.start_server(self._handle_front, host, port)
+        self._server = await asyncio.start_server(
+            self._handle_front, host, port, limit=proto.MAX_MESSAGE_BYTES)
         sock = self._server.sockets[0]
         return sock.getsockname()[1]
 

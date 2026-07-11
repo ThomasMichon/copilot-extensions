@@ -30,6 +30,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .client import SessionHostClient
+from . import protocol as proto
 
 log = logging.getLogger("agent-bridge.session-host")
 
@@ -80,10 +81,16 @@ async def open_acp_streams(
     a, b = socket.socketpair()
     a.setblocking(False)
     b.setblocking(False)
-    # End A: handed to the ACP connection.
-    acp_reader, acp_writer = await asyncio.open_connection(sock=a)
+    # End A: handed to the ACP connection. A single ACP frame can exceed
+    # asyncio's default 64 KiB StreamReader line limit (e.g. a large PR diff),
+    # so size the relay readers to the protocol's max message -- matching the
+    # child-stdout reader -- or ``readline`` raises LimitOverrunError and the
+    # ACP receive loop dies ("Connection closed").
+    acp_reader, acp_writer = await asyncio.open_connection(
+        sock=a, limit=proto.MAX_MESSAGE_BYTES)
     # End B: our relay side.
-    relay_reader, relay_writer = await asyncio.open_connection(sock=b)
+    relay_reader, relay_writer = await asyncio.open_connection(
+        sock=b, limit=proto.MAX_MESSAGE_BYTES)
 
     streams = AcpStreams(
         reader=acp_reader, writer=acp_writer,
