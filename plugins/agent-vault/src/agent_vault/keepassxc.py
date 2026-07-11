@@ -101,6 +101,29 @@ class KeePassXCBackend:
 
     # -- mutations -----------------------------------------------------------
 
+    def _ensure_parent_groups(self, entry_path: str) -> None:
+        """Create any missing parent groups for a slash-delimited entry path.
+
+        keepassxc-cli ``add`` fails if the entry's parent group does not exist,
+        so create each intermediate group first. ``mkdir`` on an already-present
+        group fails harmlessly and is ignored (best-effort).
+        """
+        parts = [p for p in entry_path.strip("/").split("/") if p]
+        if len(parts) < 2:
+            return  # top-level entry -- no parent group to create
+        db = resolve_kpdb()
+        cumulative = ""
+        for seg in parts[:-1]:
+            cumulative = f"{cumulative}/{seg}" if cumulative else seg
+            try:
+                subprocess.run(
+                    [self._cli_path, "mkdir", "-q", db, cumulative],
+                    input=self._master_pass + "\n",
+                    capture_output=True, text=True, timeout=10,
+                )
+            except Exception:
+                pass
+
     def add_entry(
         self,
         entry_path: str,
@@ -113,6 +136,7 @@ class KeePassXCBackend:
         """Create a new KeePass entry. Returns (success, message)."""
         if not self._cli_path or not self._master_pass:
             return False, "CLI not available or vault locked"
+        self._ensure_parent_groups(entry_path)
         args = ["add", "-q", resolve_kpdb(), entry_path]
         if username:
             args.extend(["-u", username])
