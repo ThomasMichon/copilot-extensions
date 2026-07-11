@@ -51,11 +51,28 @@ Optional knobs:
 - `VAULT_PASSWORD_TTL` -- seconds the master password stays cached (default 3600).
 - `AGENT_VAULT_PORT` -- localhost TCP port (default 19999).
 
-> **Config is service-scoped.** `KPDB`, `VAULT_GROUP`, and the port are read by
-> the vault **service** when it starts (environment or the JSON config file at
-> `$AGENT_VAULT_CONFIG`), not per CLI call. Set them **before** starting the
-> service and restart it after changes — setting `VAULT_GROUP` in a client shell
-> after the daemon is running has no effect.
+The CLI resolves the effective database/group/port on **each call** and passes
+them to the service — no daemon restart needed to switch vaults.
+
+## Named vaults, per-repo config, global backstop
+
+For a machine with more than one database (personal + work), give each a nickname
+in the global config and let each repo pick one:
+
+```bash
+agent-vault vault add Personal  --kpdb ~/Personal.kdbx  --group Personal
+agent-vault vault add Microsoft --kpdb ~/work/MS.kdbx   --group Work
+agent-vault vault set-default Personal        # the global backstop
+agent-vault vault list
+```
+
+Point a repo at a vault with an `.agent-vault.json` at/above its root (found by
+walking up from the CWD, git-style): `{ "vault": "Microsoft" }` (or inline
+`kpdb`/`group` overrides). **Precedence, per field:** env var › per-repo
+`.agent-vault.json` › global named vault › defaults. Inspect resolution with
+`agent-vault which`. One service caches master passwords **per database**, so
+personal and work vaults are both usable at once (each prompts once, the prompt
+names the vault). Back-compatible: just `KPDB` set = a single default vault.
 
 Prerequisite: **KeePassXC** with `keepassxc-cli` on PATH (or the standard
 Windows install path).
