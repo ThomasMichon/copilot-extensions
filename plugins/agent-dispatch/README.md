@@ -149,6 +149,10 @@ ref -- so `list`/`find` stay lean and identical payloads dedupe to one file (no
 external deps). `read_payload()` (engine) / `GET /tasks/{id}/payload` /
 `agent-dispatch payload <id> [--raw]` resolve either form transparently; an
 external `payload_ref` (e.g. `pr/123`) is left opaque for the caller.
+`agent-dispatch consume <id>` is the resume-and-consume shortcut: it idempotently
+drives the task to `completed` (approve → claim → start → complete) and then
+prints the payload, so a handoff successor's single command both loads the brief
+and spends the baton.
 
 ### Dedup & scheduling
 

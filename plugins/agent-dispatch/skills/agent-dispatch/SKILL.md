@@ -253,8 +253,16 @@ agent-dispatch abandon <id> --worker-id <owner> --permit --reason "duplicate of 
 agent-dispatch show    <id>       # full task record
 agent-dispatch events  <id>       # append-only audit trail of every transition
 agent-dispatch payload <id>       # resolved payload (inline or blob); --raw prints content only
+agent-dispatch consume <id>       # resume-and-consume: drive to completed (idempotent) + print payload
 agent-dispatch watch              # stream task.* events (SSE) as JSON lines
 ```
+
+> **`consume` is the handoff-pickup shortcut.** It rolls the whole
+> approve → claim → start → complete lifecycle into one idempotent call and then
+> prints the payload, so a successor's *single* command loads the brief **and**
+> marks the baton spent -- a handoff is completed the moment it is picked up. An
+> already-terminal (or unclaimable) task just has its payload re-printed, never
+> an error. Use plain `payload --raw` when you want to read *without* consuming.
 
 ## Routing: `requires` (hard) vs `affinity` (soft)
 

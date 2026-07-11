@@ -51,6 +51,16 @@ def test_parser_claim_task_flag():
     assert args.task == "t9"
 
 
+def test_parser_consume_flags():
+    args = build_parser().parse_args(
+        ["consume", "t9", "--worktree", "wt-1", "--result-ref", "consumed:wt-1"]
+    )
+    assert args.command == "consume"
+    assert args.task_id == "t9"
+    assert args.worktree == "wt-1"
+    assert args.result_ref == "consumed:wt-1"
+
+
 def test_spawn_helper_degrades_gracefully(monkeypatch, capsys):
     import argparse
 

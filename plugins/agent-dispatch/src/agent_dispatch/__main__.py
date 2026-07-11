@@ -330,6 +330,76 @@ def _cmd_payload(args: argparse.Namespace) -> int:
     return _emit(result)
 
 
+def _cmd_consume(args: argparse.Namespace) -> int:
+    """Resume-and-consume a handoff in one shot: drive the task to ``completed``
+    (best-effort, fully idempotent) and print its payload content.
+
+    This is the successor's single pickup command -- loading the brief IS
+    consuming the baton, so a handoff is marked completed the *moment* it is
+    picked up, on every resume path (live cutover, /resume-handoff, or a
+    hand-pasted seed). Transitions are best-effort: an already-advanced or
+    already-terminal task just prints its payload (never an error), and a task
+    the caller can't take ownership of is still read and printed.
+    """
+    task_id = args.task_id
+    machine, worktree = _identity(args)
+    try:
+        repo = _scope_repo(args)
+    except Exception:  # lane resolution is best-effort here -- still print payload
+        repo = None
+    with _client(args) as c:
+        try:
+            task = c.get(task_id)
+        except DispatchError as exc:
+            print(f"agent-dispatch: {exc}", file=sys.stderr)
+            return 1
+        status = task.get("status")
+        if status not in ("completed", "abandoned"):
+            owner: str | None = None
+            if status == "proposed":
+                try:
+                    c.approve(task_id)
+                    status = "queued"
+                except DispatchError:
+                    pass
+            if status in ("queued", "proposed"):
+                try:
+                    claimed = c.claim(
+                        worker_id=args.worker_id,
+                        repo=repo,
+                        machine=machine,
+                        worktree=worktree,
+                        task_id=task_id,
+                    )
+                    owner = (claimed or {}).get("owner")
+                except DispatchError:
+                    owner = None
+            elif status in ("claimed", "started"):
+                owner = task.get("owner")
+            if owner:
+                result_ref = args.result_ref or f"consumed:{worktree or 'successor'}"
+                try:
+                    c.start(task_id, owner)
+                except DispatchError:
+                    pass
+                try:
+                    c.complete(task_id, owner, result_ref=result_ref)
+                except DispatchError:
+                    pass
+        result = c.payload(task_id)
+    content = result.get("payload")
+    if content is None:
+        print(
+            f"agent-dispatch: task {task_id} has no resolvable payload",
+            file=sys.stderr,
+        )
+        return 4
+    sys.stdout.write(content)
+    if not content.endswith("\n"):
+        sys.stdout.write("\n")
+    return 0
+
+
 def _cmd_mcp(args: argparse.Namespace) -> int:
     from .mcp_server import serve_stdio
 
@@ -570,6 +640,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--raw", action="store_true", help="print the payload content only (not JSON)"
     )
     p.set_defaults(func=_cmd_payload)
+
+    p = sub.add_parser(
+        "consume",
+        help="resume-and-consume a handoff: drive it to completed (idempotent) "
+        "and print its payload -- the successor's one-command pickup",
+    )
+    p.add_argument("task_id")
+    p.add_argument("--worker-id", dest="worker_id", help="owner id (default: from machine/worktree)")
+    p.add_argument("--machine", help="override the resolved machine identity")
+    p.add_argument("--worktree", help="override the resolved worktree identity")
+    p.add_argument(
+        "--repo",
+        help="lane to consume from (local name or remote URL). Default: the calling repo.",
+    )
+    p.add_argument("--result-ref", help="result ref recorded on completion")
+    p.set_defaults(func=_cmd_consume)
 
     p = sub.add_parser("recover", help="requeue expired-lease tasks")
     p.set_defaults(func=lambda args: _emit(_client(args).recover()))
