@@ -1,0 +1,241 @@
+// agent-bridge live-session registration extension
+//
+// Bundled with the agent-bridge plugin; loaded automatically in every
+// *interactive* Copilot CLI session (extensions do NOT load in ACP-mode
+// sessions -- those are bridge-owned and tracked natively). This extension
+// makes an interactive CLI session a first-class citizen of the fabric by
+// registering it with the local agent-bridge, so the bridge can later
+// represent and message it. Phase 1: registration + heartbeat only.
+//
+// HOT-POTATO DISCIPLINE (load-bearing): a session.on(...) handler runs on the
+// CLI's own event loop. It must NEVER block or await slow work (network I/O,
+// session.send). Handlers here do only fast, synchronous, in-memory
+// bookkeeping and return immediately; all bridge I/O happens off the event
+// loop -- on a decoupled heartbeat timer, fire-and-forget with .catch(). This
+// is the same shape the context-handoff extension uses (observe on the
+// handler, act on the idle/timer boundary).
+//
+// BEST-EFFORT: if the local bridge is absent (e.g. a machine without
+// agent-bridge) or unreachable, the extension degrades silently -- the CLI
+// session runs exactly as before; it simply is not represented. It never
+// throws into the CLI.
+
+import { existsSync, readFileSync } from "node:fs";
+import { join, basename } from "node:path";
+import { homedir } from "node:os";
+import { execFileSync, execSync } from "node:child_process";
+import { approveAll } from "@github/copilot-sdk";
+import { joinSession } from "@github/copilot-sdk/extension";
+
+// --- Constants ---
+const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
+const HTTP_TIMEOUT_MS = 4_000; // bridge is local; keep it snappy
+const CONFIG_DIR = process.env.AGENT_BRIDGE_CONFIG_DIR
+  ? process.env.AGENT_BRIDGE_CONFIG_DIR
+  : join(homedir(), ".agent-bridge");
+
+// --- State ---
+const state = {
+  sessionId: process.env.SESSION_ID || null,
+  registered: false,
+  base: null, // resolved bridge base url (http://127.0.0.1:PORT)
+  token: null, // bearer token
+  meta: null, // resolved session metadata (machine/cwd/worktree/...)
+  heartbeat: null, // interval handle
+  lastEventAt: 0, // advanced by the observe-only event handler
+};
+
+function extLog(msg) {
+  // Best-effort stderr log (captured by the CLI's extension log).
+  try {
+    process.stderr.write(`[agent-bridge-ext] ${msg}\n`);
+  } catch {
+    /* ignore */
+  }
+}
+
+// --- Portable CLI runner (Windows binstubs are .cmd -> need a shell) ---
+function runCli(bin, args, cwd) {
+  try {
+    if (process.platform === "win32") {
+      const line = [bin, ...args.map((a) => `"${String(a).replace(/"/g, '""')}"`)].join(" ");
+      return execSync(line, { cwd, timeout: 8000, encoding: "utf-8" }).trim();
+    }
+    return execFileSync(bin, args, { cwd, timeout: 8000, encoding: "utf-8" }).trim();
+  } catch {
+    return null;
+  }
+}
+
+// --- Bridge discovery (files written by the local daemon) ---
+function resolveBaseUrl() {
+  const host = "127.0.0.1";
+  // 1) active.json routing table (zero-downtime redeploy port flips live here).
+  try {
+    const p = join(CONFIG_DIR, "active.json");
+    if (existsSync(p)) {
+      const data = JSON.parse(readFileSync(p, "utf-8"));
+      const port = data?.active?.port;
+      if (port) return `http://${host}:${port}`;
+    }
+  } catch {
+    /* fall through */
+  }
+  // 2) static config.yaml port.
+  try {
+    const p = join(CONFIG_DIR, "config.yaml");
+    if (existsSync(p)) {
+      const m = readFileSync(p, "utf-8").match(/^\s*port:\s*(\d+)/m);
+      if (m) return `http://${host}:${m[1]}`;
+    }
+  } catch {
+    /* fall through */
+  }
+  // 3) platform default (Windows 9280, Linux/WSL 9281).
+  return `http://${host}:${process.platform === "win32" ? 9280 : 9281}`;
+}
+
+function resolveToken() {
+  try {
+    const p = join(CONFIG_DIR, "auth.yaml");
+    if (existsSync(p)) {
+      const m = readFileSync(p, "utf-8").match(/^\s*token:\s*(\S+)/m);
+      if (m) return m[1].replace(/^["']|["']$/g, "");
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+// --- One-time session metadata (safe to run sync at load: not a hot path) ---
+function resolveMetadata() {
+  const cwd = process.cwd();
+  const get = (key) => runCli("agent-worktrees", ["get", key], cwd);
+  let branch = null;
+  try {
+    branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd,
+      timeout: 5000,
+      encoding: "utf-8",
+    }).trim();
+  } catch {
+    branch = null;
+  }
+  const wtDir = get("worktree-dir");
+  return {
+    machine: get("machine"),
+    cwd,
+    worktree_id: wtDir ? basename(wtDir) : null,
+    repo: get("project"),
+    branch: branch || null,
+    // process.pid is the extension host process -- a liveness hint, not the
+    // copilot PID. The durable key is session_id; liveness is heartbeat-based.
+    pid: process.pid,
+    role: null,
+  };
+}
+
+// --- Bridge I/O (off the event loop; always best-effort) ---
+async function bridgeFetch(method, path, body) {
+  if (!state.base || !state.token) return false;
+  try {
+    const res = await fetch(`${state.base}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${state.token}`,
+        "Content-Type": "application/json",
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+    });
+    return res.ok;
+  } catch {
+    return false; // bridge down/unreachable -> degrade silently
+  }
+}
+
+async function register() {
+  if (!state.sessionId) return;
+  const payload = { session_id: state.sessionId, ...(state.meta || {}) };
+  const ok = await bridgeFetch("POST", "/api/v1/live-sessions", payload);
+  if (ok && !state.registered) {
+    state.registered = true;
+    extLog(`registered live session ${state.sessionId} with local bridge`);
+  }
+}
+
+async function deregister() {
+  if (!state.sessionId) return;
+  await bridgeFetch(
+    "DELETE",
+    `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}`,
+  );
+}
+
+// --- Extension ---
+const session = await joinSession({
+  // This extension registers no tools, so no permission request is ever routed
+  // to it; approveAll is a proven, inert default (matches talk-mode). It does
+  // NOT auto-approve the operator's own tool calls -- those stay with the CLI.
+  onPermissionRequest: approveAll,
+});
+
+// Observe-only, non-blocking: the ONLY work done on the CLI event loop. Just
+// note that the session is alive and capture the session id if the env var was
+// missing. No I/O, no await -- returns immediately (hot-potato). Bridge writes
+// happen on the heartbeat timer below. Phase 5 will extend this to buffer
+// events into a bounded queue that a decoupled flusher drains to the bridge.
+session.on((event) => {
+  try {
+    state.lastEventAt = Date.now();
+    if (!state.sessionId && event?.sessionId) {
+      state.sessionId = event.sessionId;
+      // Late session id -> kick a one-off registration off the event loop.
+      setTimeout(() => register().catch(() => {}), 0);
+    }
+  } catch {
+    /* never throw out of an event handler */
+  }
+});
+
+// --- Load-time initialization (runs once; async work off the event loop) ---
+try {
+  state.base = resolveBaseUrl();
+  state.token = resolveToken();
+  state.meta = resolveMetadata();
+
+  if (!state.token) {
+    extLog("no local agent-bridge auth token found; not registering (ok)");
+  } else {
+    // Initial registration + periodic heartbeat. The heartbeat is the liveness
+    // signal (refreshes updated_at); the bridge reaps rows that go stale, so an
+    // ungraceful CLI exit is handled even if deregister never runs.
+    register().catch((e) => extLog(`initial register failed: ${e.message}`));
+    state.heartbeat = setInterval(() => {
+      register().catch(() => {});
+    }, HEARTBEAT_MS);
+    // Don't let the heartbeat timer keep the CLI process alive on shutdown.
+    if (state.heartbeat.unref) state.heartbeat.unref();
+  }
+} catch (e) {
+  extLog(`init error (degrading, session unaffected): ${e.message}`);
+}
+
+// --- Best-effort deregister on exit (staleness reaping is the real backstop) ---
+function shutdown() {
+  try {
+    if (state.heartbeat) {
+      clearInterval(state.heartbeat);
+      state.heartbeat = null;
+    }
+    deregister().catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+process.once("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);
+process.once("beforeExit", shutdown);
+
+await session.log("agent-bridge live-session extension loaded");

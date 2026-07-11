@@ -17,7 +17,17 @@ from .agent_registry import build_resolver
 from .auth import BearerAuthMiddleware
 from .config import load_config, load_or_create_auth_token
 from .db import Database
-from .routes import acp_ws, admin, agents, health, providers, sessions, ui, worktrees
+from .routes import (
+    acp_ws,
+    admin,
+    agents,
+    health,
+    live_sessions,
+    providers,
+    sessions,
+    ui,
+    worktrees,
+)
 from .session_manager import SessionManager
 from .transport import shutdown_ssh
 
@@ -450,6 +460,7 @@ def create_app(*, config=None, token: str | None = None) -> FastAPI:
     app.include_router(ui.router)
     app.include_router(acp_ws.router)
     app.include_router(sessions.router)
+    app.include_router(live_sessions.router)
     app.include_router(agents.router)
     app.include_router(providers.router)
     app.include_router(worktrees.router)
