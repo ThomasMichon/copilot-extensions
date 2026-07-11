@@ -198,6 +198,42 @@ class SessionListResponse(BaseModel):
     sessions: list[SessionInfo]
 
 
+# -- Live interactive-session registry (extension-backed) --------------------
+
+
+class RegisterLiveSessionRequest(BaseModel):
+    """Registration payload from the bundled agent-bridge extension."""
+
+    session_id: str
+    machine: str | None = None
+    cwd: str | None = None
+    worktree_id: str | None = None
+    repo: str | None = None
+    branch: str | None = None
+    pid: int | None = None
+    role: str | None = None
+
+
+class LiveSessionInfo(BaseModel):
+    """Public view of a registered live interactive CLI session."""
+
+    session_id: str
+    machine: str | None = None
+    cwd: str | None = None
+    worktree_id: str | None = None
+    repo: str | None = None
+    branch: str | None = None
+    pid: int | None = None
+    role: str | None = None
+    status: str = "live"
+    registered_at: float
+    updated_at: float
+
+
+class LiveSessionListResponse(BaseModel):
+    live_sessions: list[LiveSessionInfo]
+
+
 class CursorInfo(BaseModel):
     """Current delivery-cursor position for a caller on a session."""
 

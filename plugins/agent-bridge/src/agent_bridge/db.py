@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 _EVENT_BATCH_MAX = 256
 _EVENT_BATCH_WINDOW_SECS = 0.05
 _EVENT_WRITE_SENTINEL = object()
@@ -73,8 +73,23 @@ CREATE TABLE IF NOT EXISTS delivery_cursors (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
+CREATE TABLE IF NOT EXISTS live_sessions (
+    session_id TEXT PRIMARY KEY,
+    machine TEXT,
+    cwd TEXT,
+    worktree_id TEXT,
+    repo TEXT,
+    branch TEXT,
+    pid INTEGER,
+    role TEXT,
+    status TEXT NOT NULL DEFAULT 'live',
+    registered_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id, event_id);
+CREATE INDEX IF NOT EXISTS idx_live_sessions_worktree ON live_sessions(worktree_id);
 """
 
 
@@ -350,6 +365,31 @@ class Database:
             conn.commit()
             log.info("Schema migrated to version 5: added delivery_cursors")
 
+        if from_version < 6:
+            # v5 -> v6: add live_sessions registry for extension-backed
+            # interactive CLI sessions (registered by the bundled extension).
+            # NOT bridge-owned, so no FK to sessions; liveness is heartbeat-based.
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS live_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    machine TEXT,
+                    cwd TEXT,
+                    worktree_id TEXT,
+                    repo TEXT,
+                    branch TEXT,
+                    pid INTEGER,
+                    role TEXT,
+                    status TEXT NOT NULL DEFAULT 'live',
+                    registered_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_live_sessions_worktree
+                    ON live_sessions(worktree_id);
+            """)
+            conn.execute("UPDATE schema_version SET version=?", (6,))
+            conn.commit()
+            log.info("Schema migrated to version 6: added live_sessions")
+
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
         conn = self._get_conn()
@@ -447,6 +487,68 @@ class Database:
         else:
             rows = self.execute_read(
                 "SELECT * FROM sessions ORDER BY updated_at DESC"
+            )
+        return [dict(r) for r in rows]
+
+    # -- Live interactive-session registry (extension-backed) ---------------
+    # These sessions are NOT owned by the bridge: an interactive Copilot CLI
+    # registers itself via the bundled extension so the bridge can represent
+    # and (later) message it. Distinct from the `sessions` table (bridge-spawned
+    # ACP sessions). Liveness is heartbeat-based: `updated_at` is refreshed on
+    # each register/heartbeat, and stale rows are reaped rather than trusting a
+    # clean deregister (an interactive session can die ungracefully).
+
+    def register_live_session(
+        self,
+        session_id: str,
+        *,
+        machine: str | None,
+        cwd: str | None,
+        worktree_id: str | None,
+        repo: str | None,
+        branch: str | None,
+        pid: int | None,
+        role: str | None,
+        now: float,
+    ) -> None:
+        """Insert or refresh a live interactive-session registration (upsert)."""
+        self.execute_write(
+            "INSERT INTO live_sessions (session_id, machine, cwd, worktree_id, "
+            "repo, branch, pid, role, status, registered_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET "
+            "machine=excluded.machine, cwd=excluded.cwd, "
+            "worktree_id=excluded.worktree_id, repo=excluded.repo, "
+            "branch=excluded.branch, pid=excluded.pid, role=excluded.role, "
+            "status='live', updated_at=excluded.updated_at",
+            (session_id, machine, cwd, worktree_id, repo, branch, pid, role,
+             now, now),
+        )
+
+    def deregister_live_session(self, session_id: str) -> None:
+        """Remove a live interactive-session registration."""
+        self.execute_write(
+            "DELETE FROM live_sessions WHERE session_id=?", (session_id,)
+        )
+
+    def get_live_session(self, session_id: str) -> dict[str, Any] | None:
+        rows = self.execute_read(
+            "SELECT * FROM live_sessions WHERE session_id=?", (session_id,)
+        )
+        return dict(rows[0]) if rows else None
+
+    def list_live_sessions(
+        self, worktree_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        if worktree_id:
+            rows = self.execute_read(
+                "SELECT * FROM live_sessions WHERE worktree_id=? "
+                "ORDER BY updated_at DESC",
+                (worktree_id,),
+            )
+        else:
+            rows = self.execute_read(
+                "SELECT * FROM live_sessions ORDER BY updated_at DESC"
             )
         return [dict(r) for r in rows]
 

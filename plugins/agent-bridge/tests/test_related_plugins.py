@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from agent_bridge import related_plugins as rp
 from agent_bridge.transport import PluginRef

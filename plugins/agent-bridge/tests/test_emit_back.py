@@ -89,7 +89,6 @@ class TestWorktreesGet:
     """CLI caller/sender identity from `agent-worktrees get` (replaces WORKTREE_ID)."""
 
     def _fake_run(self, stdout="", rc=0):
-        import subprocess
         class _R:
             returncode = rc
             def __init__(self, out): self.stdout = out; self.stderr = ""
