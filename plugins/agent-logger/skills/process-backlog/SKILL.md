@@ -66,6 +66,8 @@ Full example: [`references/manifest.json`](references/manifest.json). Shape:
     }
   ],
   "output_root": "<logs root>",
+  "narration_style": null,
+  "exemplars": null,
   "closing_remark": null
 }
 ```

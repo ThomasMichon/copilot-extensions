@@ -29,6 +29,8 @@ batch). This document is the contract between them and the agent.
   "log_path_template": "{year}/{month}/{day} {hhmmss} {title}.md",
   "timezone": null,
   "note_marker": "SESSION NOTE:",
+  "narration_style": null,
+  "exemplars": null,
   "closing_remark": null
 }
 ```
@@ -46,7 +48,9 @@ batch). This document is the contract between them and the agent.
 | `log_path_template` | no | Defaults to the agent-logger config template. Tokens: `{year} {month} {day} {hhmmss} {machine} {title}`. |
 | `timezone` | no | IANA tz for timestamps; `null` = system local. |
 | `note_marker` | no | Operator-note marker prefix (default `SESSION NOTE:`). |
-| `closing_remark` | no | `null` (default) or caller-injected instructions for a closing remark. |
+| `narration_style` | no | `null` (default) or caller-injected instructions for **interleaved** personality woven through the narrative body (primary voice seam). |
+| `exemplars` | no | `null` (default) or a list of short few-shot tone/depth reference passages (or a path to them). |
+| `closing_remark` | no | `null` (default) or caller-injected instructions for an **end-of-log** sign-off (end-only complement to `narration_style`). |
 
 ## Output contract
 
@@ -57,12 +61,17 @@ batch). This document is the contract between them and the agent.
   `category` / `log_path` / `status`, plus counts) to stdout for a harness
   to parse. Used by batch/service callers.
 
-## The closing-remark seam (how voice is injected)
+## The voice seam (how voice is injected)
 
-**The agent has no personality of its own.** It produces a closing remark
-**only** when `closing_remark` is non-null, and then follows those
-instructions exactly. When `closing_remark` is `null`, the agent writes a
-plain log with no remark, quip, or persona.
+**The agent has no personality of its own.** Voice is injected by the caller
+through three optional, null-by-default fields; when all are null the agent
+writes a plain log with no remark, quip, or persona.
+
+| Field | Where the voice lands |
+|-------|-----------------------|
+| `narration_style` | **Interleaved** through the narrative body -- asides and character beats *between* thematic passages. The primary seam. |
+| `closing_remark` | A single **end-of-log** sign-off after a trailing `---`. The simple, end-only complement. |
+| `exemplars` | Few-shot **tone samples** that inform the writing (not copied). |
 
 This is the single, deliberate seam through which a host repo adds voice
 **without the plugin ever containing one**. To inject a persona:
@@ -70,17 +79,24 @@ This is the single, deliberate seam through which a host repo adds voice
 1. The host owns a **voice skill** (its character/quip rules) in its own
    repo -- not in this plugin.
 2. The host's wrapping caller (its own `log-session` variant, or its
-   orchestrator runner) sets `closing_remark` to the voice skill's
-   instructions -- e.g. the skill text, or a directive like *"Consult the
-   `my-voice` skill and append a 2-3 line in-character sign-off reacting to
-   this session."*
-3. The agent reads those instructions and appends the remark after a `---`
+   orchestrator runner) sets `narration_style` (and optionally `exemplars`
+   and/or `closing_remark`) to the voice skill's instructions -- e.g. a
+   directive like *"Consult the `my-voice` skill; weave brief in-character
+   asides between thematic sections where they add warmth or wit, never
+   forced; then close with a 2-3 line sign-off."*
+3. The agent weaves `narration_style` through the body, emulates any
+   `exemplars` for tone, and appends any `closing_remark` after a `---`
    separator in each standalone log.
 
-The plugin's own `log-session` and `process-backlog` skills always leave
-`closing_remark` null, so out of the box every log is persona-free. Only a
-host that deliberately injects instructions gets styled output, and the
-styling lives entirely in that host.
+The plugin's own `log-session` and `process-backlog` skills always leave all
+three fields null, so out of the box every log is persona-free. Only a host
+that deliberately injects instructions gets styled output, and the styling
+lives entirely in that host.
+
+**Interleaved vs. end-only.** `narration_style` exists precisely so voice
+need not be *"jammed at the end"* -- a host that wants personality *woven
+through* the narrative sets `narration_style`; a host that only wants a brief
+sign-off sets `closing_remark`; a host that wants both sets both.
 
 ## Example: interactive single session
 
@@ -105,6 +121,8 @@ styling lives entirely in that host.
   "return": "json",
   "sessions": [ /* ...N sessions... */ ],
   "output_root": "logs",
-  "closing_remark": "Consult the aperture-voice skill and append a short, in-character sign-off reacting to the specific work in each standalone log."
+  "narration_style": "Consult the aperture-voice skill. Weave brief in-character asides between thematic sections where they add warmth or wit -- interleaved, never forced, never all at the end.",
+  "exemplars": "visions/knowledge/permanent-record/reference-entries.md",
+  "closing_remark": null
 }
 ```
