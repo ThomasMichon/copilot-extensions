@@ -4576,6 +4576,46 @@ def sync_one(wt_id: str) -> dict:
     return _sync_one_record(rec, repo, active_paths)
 
 
+def finalize_one(wt_id: str) -> dict:
+    """Finalize a single worktree by ID; return a JSON-ready result dict.
+
+    The pure result-returning core shared by the picker's in-process local
+    Finalize executor (the ``finalize --worktree-id --json`` CLI has its own
+    path). ``validate_and_finalize`` never squashes/rebases/pushes -- for the
+    conversation-only / unused worktrees the picker offers Finalize on, it
+    verifies nothing is unpushed (there is nothing) and removes the worktree.
+
+    Its human-readable output is suppressed: the picker runs this on a
+    background thread under a live Textual screen, so stray prints would corrupt
+    the render. Only the structured outcome is returned.
+    """
+    import contextlib
+    import io
+
+    try:
+        config = cfg.load_config()
+    except Exception as e:
+        return {"worktree_id": wt_id, "success": False, "ok": False,
+                "reason": str(e) or "config load failed"}
+    wt_id = _resolve_worktree_id(wt_id)
+    sink = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+            success = fin.validate_and_finalize(wt_id, config)
+    except Exception as e:
+        return {"worktree_id": wt_id, "success": False, "ok": False,
+                "reason": (str(e) or type(e).__name__)}
+    status = "finalized"
+    try:
+        yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+        if yaml_path.exists():
+            status = tracking.load_record(yaml_path).status
+    except Exception:
+        pass
+    return {"worktree_id": wt_id, "success": bool(success),
+            "ok": bool(success), "status": status}
+
+
 def cmd_sync(args: argparse.Namespace) -> int:
     """Fast-forward worktrees to their upstream default branch (FF-only).
 

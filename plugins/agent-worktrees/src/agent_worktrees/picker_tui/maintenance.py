@@ -6,8 +6,9 @@ Runs the real per-worktree op on a daemon thread (sequentially, matching the
 run in-process via the ``__main__`` pure helpers (``reap_one`` / ``sync_one``) or
 the ``sessions`` primitive (``restart_worktree_copilot``); **remote** worktrees
 run over SSH per item against the project binstub's JSON CLI
-(``cleanup --worktree-id`` / ``sync --worktree-id`` / ``restart <id>``). The
-engine polls each item's state from its render tick.
+(``cleanup --worktree-id`` / ``sync --worktree-id`` / ``restart <id>`` /
+``finalize --worktree-id``). The engine polls each item's state from its render
+tick.
 
 The executor is the *real* counterpart to the engine's mock progress walker
 (``_advance_progress``). Real ops are the **default**, so Maintenance
@@ -66,6 +67,11 @@ def _result_ok(op, res):
         # stopped a live session (method graceful/hard) or found nothing running
         # (method none) -- either way the worktree is now free to re-Open.
         return bool(res.get("ok"))
+    if op == "finalize":
+        # validate_and_finalize / `finalize --json`: ``success`` is authoritative
+        # (False when content is unpushed, but the picker only offers Finalize on
+        # no-commit conversation/unused worktrees, so it succeeds).
+        return bool(res.get("success"))
     # sync: a no-op that was already current is success; a real skip is not.
     return bool(res.get("updated")) or res.get("reason") == "up-to-date"
 
@@ -110,6 +116,8 @@ def _make_task(op, wt_id, machine, env, is_local, *, include_unused,
             if op == "restart":
                 from .. import sessions
                 return sessions.restart_worktree_copilot(wt_id)
+            if op == "finalize":
+                return cli.finalize_one(wt_id)
             return cli.sync_one(wt_id)
         from . import data_ssh
         argv = data_ssh.remote_op_argv(

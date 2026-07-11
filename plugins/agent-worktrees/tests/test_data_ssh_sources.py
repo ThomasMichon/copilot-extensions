@@ -168,6 +168,17 @@ def test_remote_op_argv_restart_local_returns_none(monkeypatch):
         "Lambda-Core", "Win", "restart", "wt-xyz") is None
 
 
+def test_remote_op_argv_finalize_uses_positional_id_and_json(monkeypatch):
+    """The remote 'finalize' op runs ``<proj> finalize <id> --json`` -- the id
+    is positional (the ``finalize`` CLI has no ``--worktree-id`` flag)."""
+    _remote_roster(monkeypatch)
+    argv = data_ssh.remote_op_argv("Wheatley", "Linux", "finalize", "wt-xyz")
+    assert argv is not None and argv[0] == "ssh"
+    inner = argv[-1]
+    assert "proj finalize wt-xyz --json" in inner
+    assert "--worktree-id" not in inner
+
+
 def test_ssh_not_ready_remote_env_is_disabled(monkeypatch):
     """A ssh.ready:false machine's remote env stays a disabled tab."""
     entries = {

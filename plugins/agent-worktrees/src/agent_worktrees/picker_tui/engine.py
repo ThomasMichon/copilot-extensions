@@ -304,6 +304,8 @@ ACTION_DESC = {
               "session in a fresh TMux/PSMux.",
     "Sync": "Fast-forward this worktree onto the default branch (FF-only).",
     "Cleanup": "Remove this worktree (safe once merged/idle).",
+    "Finalize": "Wrap up this conversation-only / unused worktree: verify "
+                "nothing is unpushed (there is nothing) and remove it.",
     "Stop": "Stop this worktree's Mux/Copilot wrapper now (graceful "
             "double-Ctrl-C, then a hard mux kill) so a following Open "
             "starts a fresh TMux/PSMux + Copilot.",
@@ -318,6 +320,10 @@ MAINT_ACTION_DESC = {
     "Sync": "Fast-forward the FF-eligible selected worktrees onto the default "
             "branch.",
     "Cleanup": "Remove the cleanable selected worktrees (re-checked per worktree).",
+    "Finalize": "Wrap up the conversation-only / unused selected worktrees "
+                "(verify nothing unpushed, then remove).",
+    "Stop": "Stop the Mux/Copilot wrapper of the live selected worktrees "
+            "(graceful double-Ctrl-C, then a hard mux kill).",
 }
 
 
@@ -1137,6 +1143,12 @@ class PickerScreen(Widget):
                 self._open_sync(ids=ids)
             elif act == "Cleanup":
                 self._open_cleanup(ids=ids)
+            elif act == "Finalize":
+                self._start_finalize(
+                    [r for r in self.list_records() if r["id4"] in ids])
+            elif act == "Stop":
+                self._start_stop(
+                    [r for r in self.list_records() if r["id4"] in ids])
         elif key in ("escape", "q", "tab"):
             self.maint_menu = None
 
@@ -1339,6 +1351,11 @@ class PickerScreen(Widget):
             acts.append("Sync")
         if any(self._cleanable(r) for r in chosen):
             acts.append("Cleanup")
+        if any(r.get("cleanup_bucket") in ("conversation", "unused")
+               for r in chosen):
+            acts.append("Finalize")
+        if any(r.get("mux_live") for r in chosen):
+            acts.append("Stop")
         if not acts:
             self.debug = (f"no bulk action for {len(chosen)} "
                           f"selected worktree(s)")
@@ -2878,7 +2895,8 @@ class PickerScreen(Widget):
             if p.get("include_conversations"):
                 extra.append("conversation")
             tail = f" incl. {'/'.join(extra)}" if extra else ""
-            sub = f" ⚠ remove {n} worktree(s){tail}? Enter=proceed Esc=cancel"
+            sub = (f" ⚠ {verb.lower()} {n} worktree(s){tail}? "
+                   "Enter=proceed Esc=cancel")
             substyle = "bold yellow"
         elif p["done"]:
             sub = f" done · {done}/{len(items)}" + (f" · {failed} failed" if failed else "")
@@ -3188,6 +3206,9 @@ class PickerScreen(Widget):
                 self._open_sync(ids={rec.get("id4")})
             elif cur == "Cleanup":
                 self._open_cleanup(ids={rec.get("id4")})
+            elif cur == "Finalize":
+                # Wrap up a conversation-only / unused worktree (#2258 follow-up).
+                self._start_finalize([rec])
             elif cur == "Stop":
                 # Stop the worktree's Mux/Copilot wrapper on demand (#1343),
                 # freeing it to be re-Opened/Resumed with a fresh Mux + Copilot.
@@ -3410,28 +3431,62 @@ class PickerScreen(Widget):
             if self.progress["armed"]:
                 self._start_progress()
 
-    def _start_stop(self, rec):
-        """Stop one worktree's Mux/Copilot wrapper (the row submenu 'Stop').
+    def _start_stop(self, recs):
+        """Stop the Mux/Copilot wrapper of one or more worktrees (the 'Stop'
+        action -- solo from the row sub-menu, or in aggregate from the bulk
+        action menu, #2258 follow-up).
 
-        Drives the same maintenance progress + executor path as Cleanup/Sync,
-        but as a single-item run so the up-to-6 s graceful double-Ctrl-C quit
-        never blocks the render loop and a remote worktree's kill goes over SSH
-        (``restart <id>`` on the project binstub -- the CLI verb stays
-        ``restart``; only the picker label is "Stop"). When it finishes the
-        touched machine reloads (``_refresh_after_maint``), so the row
-        re-renders as a stopped session -- ready to Resume with a fresh Mux +
+        Drives the same maintenance progress + executor path as Cleanup/Sync so
+        the up-to-6 s graceful double-Ctrl-C quit never blocks the render loop
+        and a remote worktree's kill goes over SSH (``restart <id>`` on the
+        project binstub -- the CLI verb stays ``restart``; only the picker label
+        is "Stop"). Only worktrees with a live mux are stopped. When it finishes
+        the touched machines reload (``_refresh_after_maint``), so the rows
+        re-render as stopped sessions -- ready to Resume with a fresh Mux +
         Copilot.
         """
-        item = {"id4": rec.get("id4"), "title": rec.get("title", ""),
-                "machine_env": rec.get("machine_env", ""), "state": "pending"}
+        recs = [recs] if isinstance(recs, dict) else list(recs)
+        live = [r for r in recs if r.get("mux_live")]
+        if not live:
+            self.debug = "no live session to stop"
+            return
+        self._run_op_progress("Stop", "restart", live, armed=True)
+
+    def _start_finalize(self, recs):
+        """Finalize one or more conversation-only / unused worktrees (the
+        'Finalize' action -- solo or aggregate, #2258 follow-up).
+
+        Finalize validates that nothing is unpushed (a no-commit worktree has
+        nothing) and removes it -- the sanctioned lifecycle completion. Because
+        it removes the worktree (and any conversation history), it runs behind a
+        confirm gate (``armed=False``): the progress dialog asks before it
+        executes. Only conversation-only / unused worktrees are targeted.
+        """
+        recs = [recs] if isinstance(recs, dict) else list(recs)
+        targets = [r for r in recs
+                   if r.get("cleanup_bucket") in ("conversation", "unused")]
+        if not targets:
+            self.debug = "no conversation-only / unused worktree to finalize"
+            return
+        self._run_op_progress("Finalize", "finalize", targets, armed=False)
+
+    def _run_op_progress(self, verb, op, recs, *, armed):
+        """Build (and, when ``armed``, start) a maintenance progress run over
+        ``recs`` for a single ``op`` (restart / finalize). An unarmed run shows
+        the confirm gate first (see ``_key_progress`` / ``_overlay_progress``)."""
+        items = [{"id4": r.get("id4"), "title": r.get("title", ""),
+                  "machine_env": r.get("machine_env", ""), "state": "pending"}
+                 for r in recs]
+        scope = (recs[0].get("id4", "") if len(recs) == 1
+                 else f"{len(recs)} selected")
         self.progress = {
-            "verb": "Stop", "op": "restart",
-            "scope": rec.get("id4", ""),
-            "items": [item], "recs": [rec], "picked": [],
-            "ticks": 0, "steps": 3, "done": False, "armed": True,
+            "verb": verb, "op": op, "scope": scope,
+            "items": items, "recs": recs, "picked": [],
+            "ticks": 0, "steps": 3, "done": False, "armed": armed,
             "include_unused": False, "include_conversations": False,
         }
-        self._start_progress()
+        if armed:
+            self._start_progress()
 
     def _start_progress(self):
         """Begin executing the armed progress run (real executor or mock walk)."""
@@ -3557,10 +3612,12 @@ class PickerScreen(Widget):
             elif btn == "PA":
                 self._apply_profiles()
         elif zone == "L":
-            # Enter on the Worktrees list opens the bulk action menu when a
-            # multi-selection is active, else the focused row's sub-menu (which
-            # carries Open/Resume, #1343). Unified list model -- #2228 2b.
-            if self.wt_sel:
+            # Enter routing (#2258 follow-up): a real *multi*-selection (>1)
+            # opens the bulk action menu; a single selection (or none) opens the
+            # focused/selected row's sub-menu, which carries Open/Resume/Stop/…
+            # A single selected row must still reach Open/Resume -- the operator
+            # should not have to deselect it first (#1343 unified model).
+            if len(self.wt_sel) > 1:
                 self._open_wt_action_menu()
             else:
                 self._open_submenu()
@@ -3612,8 +3669,19 @@ class PickerScreen(Widget):
         return rec.get("cleanup_bucket") in (
             "clean", "unused", "conversation", "gone")
 
+    def _submenu_target(self):
+        """The record the per-row sub-menu acts on: the single selected row when
+        exactly one is selected (so Enter opens/resumes *it* even if the cursor
+        has drifted, #2258 follow-up), otherwise the focused row."""
+        if len(self.wt_sel) == 1:
+            wid = next(iter(self.wt_sel.ids))
+            for r in self.list_records():
+                if r.get("id4") == wid:
+                    return r
+        return self._selected_record()
+
     def _open_submenu(self):
-        rec = self._selected_record()
+        rec = self._submenu_target()
         if not rec:
             return
         # Primary verb tracks the session's liveness (#1343): a **live** mux ->
@@ -3631,6 +3699,11 @@ class PickerScreen(Widget):
             acts.append("Sync")
         if self._cleanable(rec):
             acts.append("Cleanup")
+        if rec.get("cleanup_bucket") in ("conversation", "unused"):
+            # A conversation-only / unused worktree (no commits) can be wrapped
+            # up directly -- finalize validates nothing is unpushed (there is
+            # nothing) and removes it (#2258 follow-up).
+            acts.append("Finalize")
         if rec.get("mux_live"):
             acts.append("Stop")
         # #1424/#2178: a bridge/system worktree is host-owned. Prefer jumping to
