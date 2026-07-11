@@ -125,7 +125,10 @@ class _FakeChild:
     """Duck-typed ChildProcess: a feedable stdout + a captured stdin."""
 
     def __init__(self, pid: int = 4242) -> None:
-        self.stdout = asyncio.StreamReader()
+        # Mirror production: the real child stdout reader is sized to the
+        # protocol max (launcher._ACP_STDIO_LIMIT_BYTES), not asyncio's 64 KiB
+        # default, so a large single ACP frame is readable off the child.
+        self.stdout = asyncio.StreamReader(limit=proto.MAX_MESSAGE_BYTES)
         self.stdin = _FakeStdin()
         self._pid = pid
         self._returncode: int | None = None
@@ -1833,3 +1836,77 @@ async def test_reattach_reaps_orphaned_host(tmp_path, monkeypatch):
         db2.close()
     finally:
         _kill_pids((host_pid, child_pid))
+
+
+# --------------------------------------------------------------------------
+# child executable resolution (regression: bare argv[0] under a minimal
+# systemd --user PATH -- the Session Host must resolve against the CHILD's
+# PATH, not the host process's own PATH)
+# --------------------------------------------------------------------------
+def _make_exe(dir_path, name):
+    exe = dir_path / name
+    exe.write_text("#!/bin/sh\nexit 0\n")
+    exe.chmod(0o755)
+    return exe
+
+
+def test_resolve_child_exe_uses_given_path(tmp_path):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    exe = _make_exe(bindir, "copilot")
+    out = launcher._resolve_child_exe(["copilot", "--acp"], str(bindir))
+    assert out == [str(exe), "--acp"]
+
+
+def test_resolve_child_exe_ignores_host_path(tmp_path, monkeypatch):
+    """The child PATH resolves even when the host's own PATH lacks the dir --
+    the exact copilot-not-found regression on the minimal --user service PATH.
+    """
+    bindir = tmp_path / "userbin"
+    bindir.mkdir()
+    exe = _make_exe(bindir, "copilot")
+    # Host process PATH deliberately excludes bindir.
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    out = launcher._resolve_child_exe(["copilot", "--stdio"], str(bindir))
+    assert out[0] == str(exe)
+    assert out[1] == "--stdio"
+
+
+def test_resolve_child_exe_unresolvable_is_unchanged(tmp_path):
+    out = launcher._resolve_child_exe(["definitely-not-a-real-exe-xyz"], str(tmp_path))
+    assert out == ["definitely-not-a-real-exe-xyz"]
+
+
+def test_resolve_child_exe_empty_argv():
+    assert launcher._resolve_child_exe([], "/usr/bin") == []
+
+
+# --------------------------------------------------------------------------
+# large-frame relay (regression: a single ACP frame larger than asyncio's
+# default 64 KiB StreamReader line limit must survive the host->ACP relay.
+# The ACP library reads its transport with readline(); before the fix the
+# socketpair reader in open_acp_streams used the 64 KiB default, so a large
+# frame raised LimitOverrunError -> the ACP receive loop died ("Connection
+# closed"), which reliably failed reviews of PRs with large diffs.)
+# --------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_large_acp_frame_survives_relay():
+    child = _FakeChild()
+    host, port = await _serve(child)
+    client = await SessionHostClient.connect(port=port)
+    await client.attach(0)
+    streams = await open_acp_streams(client, start_from=0)
+    try:
+        # ~1 MiB single-line ACP frame: far exceeds asyncio's 64 KiB default,
+        # under proto.MAX_MESSAGE_BYTES. The ACP library reads End A via
+        # readline(), so the newline terminates exactly one large frame.
+        big = b'{"jsonrpc":"2.0","result":"' + (b"x" * (1024 * 1024)) + b'"}'
+        assert len(big) > 64 * 1024
+        child.feed_frame(big)
+        # streams.reader is End A -- what the ACP ClientSideConnection reads.
+        line = await asyncio.wait_for(streams.reader.readline(), timeout=5)
+        assert line.rstrip(b"\n") == big
+    finally:
+        await streams.aclose()
+        await client.close()
+        await host.close()

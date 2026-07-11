@@ -27,6 +27,7 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -165,6 +166,26 @@ def apply_host_survival() -> None:
             pass
 
 
+def _resolve_child_exe(argv: list[str], path: str | None) -> list[str]:
+    """Resolve ``argv[0]`` against ``path`` (the *child's* PATH).
+
+    ``asyncio.create_subprocess_exec`` resolves a bare ``argv[0]`` against the
+    **host** process's PATH, not the ``env`` we hand the child. Under a minimal
+    systemd ``--user`` service PATH (which omits ``~/.local/bin``), a bare
+    ``copilot`` is not found, the Session Host exits code=1, and every ACP
+    session fails. Mirror the resolution the direct-launch path already does
+    (``transport.py``: ``shutil.which`` with the target PATH). Returns a new
+    argv with an absolute ``argv[0]`` when resolvable; otherwise the argv
+    unchanged (let the OS raise its usual error).
+    """
+    if not argv:
+        return argv
+    resolved = shutil.which(argv[0], path=path)
+    if not resolved:
+        return list(argv)
+    return [resolved, *argv[1:]]
+
+
 async def _spawn_child(
     argv: list[str], cwd: str | None, env: dict[str, str] | None,
 ) -> asyncio.subprocess.Process:
@@ -179,8 +200,9 @@ async def _spawn_child(
     # so a remote (mesh/CodeSpace) far side never orphans copilot. None (default)
     # on Windows, where preexec_fn is unsupported.
     preexec = child_preexec()
+    spawn_argv = _resolve_child_exe(argv, child_env.get("PATH"))
     return await asyncio.create_subprocess_exec(
-        *argv,
+        *spawn_argv,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
