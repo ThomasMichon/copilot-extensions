@@ -404,3 +404,50 @@ def test_sweep_disabled_by_default(tmp_path):
         c.close()
     finally:
         stop()
+
+
+def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatch, capsys):
+    """``agent-dispatch consume`` drives a proposed handoff to completed and
+    prints its payload -- and is idempotent (a second call on the now-terminal
+    task just re-prints the payload, no error)."""
+    import argparse
+
+    from agent_dispatch import __main__
+    from tests._helpers import TEST_REPO
+
+    task = client.create(
+        "handoff",
+        proposed=True,
+        target_worktree="wt-1",
+        payload_inline="BRIEF-BODY",
+        repo=TEST_REPO,
+    )
+    tid = task["id"]
+    assert client.get(tid)["status"] == Status.PROPOSED
+
+    monkeypatch.setattr(__main__, "_client", lambda args: DispatchClient(server_url))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: TEST_REPO)
+    args = argparse.Namespace(
+        task_id=tid,
+        worker_id=None,
+        machine="m1",
+        worktree="wt-1",
+        repo=None,
+        result_ref=None,
+        url=None,
+        token=None,
+    )
+
+    assert __main__._cmd_consume(args) == 0
+    assert "BRIEF-BODY" in capsys.readouterr().out
+    done = client.get(tid)
+    assert done["status"] == Status.COMPLETED
+    # owner is cleared on completion (the lease is released); the result_ref
+    # proves the successor's identity owned it through the complete transition.
+    assert done["result_ref"] == "consumed:wt-1"
+
+    # Idempotent: consuming an already-terminal task just re-prints the payload.
+    assert __main__._cmd_consume(args) == 0
+    assert "BRIEF-BODY" in capsys.readouterr().out
+    assert client.get(tid)["status"] == Status.COMPLETED
+

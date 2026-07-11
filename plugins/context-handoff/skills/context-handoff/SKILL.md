@@ -68,7 +68,7 @@ prompt to reply with:
 - **agent-dispatch present →** the handoff is stored as a **`proposed`,
   `handoff`-labeled task** pinned to this worktree (payload = the full markdown;
   **no** session file). Reply form (a self-loading resume seed):
-  `You are resuming a handoff (agent-dispatch task <id>); … run: agent-dispatch payload <id> --raw ; then continue: <one-line topic>.`
+  `You are resuming a handoff (agent-dispatch task <id>); … run: agent-dispatch consume <id> ; then continue: <one-line topic>.`
 - **agent-dispatch absent →** the handoff is written to a **file** in the session
   state folder. Reply form:
   `Read the handoff at <path> and continue: <one-line topic>.`
@@ -131,7 +131,7 @@ The mechanics, for when you must do it by hand (extension not loaded):
     --source context-handoff \
     --dedup-key "handoff-<sessionId>"
   # then reply with the resume seed: "You are resuming a handoff (agent-dispatch
-  # task <id>) … run: agent-dispatch payload <id> --raw ; then continue: <topic>."
+  # task <id>) … run: agent-dispatch consume <id> ; then continue: <topic>."
   ```
 
   - **`proposed`** (not `queued`): a handoff is a draft the operator resumes
@@ -202,12 +202,13 @@ explicitly asks):
 
 1. **agent-dispatch form** (the default when a coordinator is running). The
    previous session's reply was the resume seed `You are resuming a handoff
-   (agent-dispatch task <id>) … run: agent-dispatch payload <id> --raw`. Resume either by:
+   (agent-dispatch task <id>) … run: agent-dispatch consume <id>`. Resume either by:
    - running **`/resume-handoff`** (no argument) after `/clear`/`/new` in the
      same worktree — the extension consumes this worktree's pending handoff task
      and **injects its continuation prompt** as your next turn (see below); or
-   - pasting that resume seed, which loads the full brief with one command
-     (`agent-dispatch payload <id> --raw`) and tells you to continue in place.
+   - pasting that resume seed, which loads the full brief AND marks the task
+     completed with one command (`agent-dispatch consume <id>`) and tells you to
+     continue in place.
 2. **File form** (the fallback when no coordinator was running). The reply was
    `Read the handoff at <path> and continue: …`; pasted into a new session, it
    names the file and tells you to read it and continue.
@@ -252,11 +253,11 @@ handoff task.
 > slash command). If the extension isn't loaded, `/resume-handoff` won't exist —
 > resume by pasting the previous session's reply prompt instead (the resume seed
 > `You are resuming a handoff (agent-dispatch task <id>) … run: agent-dispatch
-> payload <id> --raw` or `Read the handoff at <path> …`). When you *do* get a
-> pasted agent-dispatch resume seed, act on it directly: `agent-dispatch payload
-> <id> --raw` for the handoff (that alone is enough to continue). The live-cutover
-> path already marks the task consumed; if you resumed by hand and want to tidy
-> the queue, `agent-dispatch claim --task <id>` / `start` / `complete`.
+> consume <id>` or `Read the handoff at <path> …`). When you *do* get a pasted
+> agent-dispatch resume seed, act on it directly: `agent-dispatch consume <id>`
+> loads the brief **and** marks the handoff completed in one shot (idempotent —
+> safe to run even if a live cutover already completed it). If you only want to
+> read without consuming, `agent-dispatch payload <id> --raw`.
 
 ### If the user says "pick up from last session" with no pasted prompt
 
@@ -295,7 +296,7 @@ fallback mode). Full template:
 - **The inline REPLY prompt must be short — one or two sentences.** It is
   addressed to the **next agent** and is whichever form `save_handoff_prompt`
   returned: the agent-dispatch resume seed `You are resuming a handoff
-  (agent-dispatch task <id>) … run: agent-dispatch payload <id> --raw ; then
+  (agent-dispatch task <id>) … run: agent-dispatch consume <id> ; then
   continue: <topic>.` (task) or `Read the handoff at <path> and continue:
   <topic>.` (file). It is copy-pasted verbatim into `/clear` (or `/new`); keep
   it scannable and do **not** repeat the handoff contents.
