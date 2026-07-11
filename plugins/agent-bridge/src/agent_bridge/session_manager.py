@@ -2169,6 +2169,16 @@ class SessionManager:
                 session.session_id, SessionStatus.IDLE.value, time.time()
             )
 
+        # Always drive the event log to a terminal state so no consumer is left
+        # mirroring a turn that never ends. On the happy path this trails the
+        # client's turn_complete; on failure it is paired with the client's
+        # (now non-hanging) error -- either way the stream reaches idle, matching
+        # the synthetic idle a resync would emit (issue #22).
+        if session.event_log:
+            session.event_log.append("session_state_changed", {
+                "status": SessionStatus.IDLE.value,
+            })
+
         session.touch()
 
     def _handle_usage_update(

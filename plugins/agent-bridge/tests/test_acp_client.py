@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from acp.schema import ContentToolCallContent, TextContentBlock, ToolCallProgress, ToolCallStart
 
 from agent_bridge.acp_client import AcpClient
@@ -189,6 +190,70 @@ def test_child_exit_during_prompt_emits_error() -> None:
     assert client._prompt_error is not None
 
 
+def test_transport_lost_wakes_in_flight_prompt() -> None:
+    """A host-mode transport drop mid-turn must fail the in-flight prompt
+    instead of hanging forever on a reply that will never arrive (issue #22).
+
+    Without the wake, ``send_prompt`` awaits ``connection.prompt()`` on a dead
+    reader indefinitely and the session wedges in 'running' with no terminal
+    event."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    async def scenario() -> None:
+        client, events = _client_with_recorder()
+        client._host_mode = True
+        client._acp_session_id = "acp-1"
+
+        conn = MagicMock()
+
+        async def _hang(*_args, **_kwargs):
+            await asyncio.Event().wait()  # never resolves
+
+        conn.prompt = _hang
+        client._connection = conn
+
+        task = asyncio.ensure_future(client.send_prompt("hi"))
+        await asyncio.sleep(0.05)  # let the prompt start awaiting
+        client.mark_transport_lost()
+
+        with pytest.raises(ConnectionResetError):
+            await asyncio.wait_for(task, timeout=1.0)
+
+        assert any(t == "error" for t, _ in events)
+        assert client._prompt_error is not None
+
+    asyncio.run(scenario())
+
+
+def test_transport_lost_does_not_disturb_a_completing_prompt() -> None:
+    """When the prompt completes normally, the transport-lost race must not
+    interfere -- a clean turn still emits turn_complete (issue #22)."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    async def scenario() -> None:
+        client, events = _client_with_recorder()
+        client._host_mode = True
+        client._acp_session_id = "acp-1"
+
+        conn = MagicMock()
+
+        async def _ok(*_args, **_kwargs):
+            result = MagicMock()
+            result.stop_reason = "end_turn"
+            return result
+
+        conn.prompt = _ok
+        client._connection = conn
+
+        await client.send_prompt("hi")
+        assert any(t == "turn_complete" for t, _ in events)
+        assert not any(t == "error" for t, _ in events)
+
+    asyncio.run(scenario())
+
+
 def _tool_call(client: AcpClient, tool_call_id: str, title: str = "Run task") -> None:
     client._handle_session_update(
         ToolCallStart(
@@ -302,8 +367,6 @@ def test_background_tasks_multiple_independent() -> None:
 
 
 # --- per-session MCP injection (build_mcp_servers) ---------------------------
-
-import pytest  # noqa: E402
 
 from acp.schema import (  # noqa: E402
     HttpMcpServer,
