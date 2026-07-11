@@ -1,0 +1,22 @@
+{
+  "name": "agent-vault",
+  "description": "Local KeePassXC-backed secret store for Copilot CLI agents. Provides a small machine-local service and CLI for retrieving and managing entries from a user-selected KeePass database.",
+  "version": "0.1.0-dev1",
+  "runtimeScope": "machine-gated",
+  "author": {
+    "name": "Thomas Michon"
+  },
+  "homepage": "https://github.com/ThomasMichon/copilot-extensions",
+  "repository": "https://github.com/ThomasMichon/copilot-extensions",
+  "license": "MIT",
+  "keywords": [
+    "vault",
+    "secrets",
+    "keepassxc",
+    "credentials",
+    "keychain"
+  ],
+  "skills": [
+    "skills/"
+  ]
+}
