@@ -1978,6 +1978,13 @@ class SessionManager:
         Idempotent: resyncing an already-complete session rebuilds the same
         log. Leaves the session IDLE with a live client, ready for prompts.
         Returns the number of events in the rebuilt log.
+
+        A ``RUNNING`` status only blocks resync while a turn is *actually* live
+        in this daemon. A **wedged** session -- status left at ``RUNNING`` with
+        no live prompt task (a turn whose runner already exited without a
+        terminal event, or a session rehydrated after a daemon restart) -- is
+        exactly what needs healing, so it is allowed through; only a genuinely
+        live turn is refused (issue #22 / #2385).
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
@@ -1990,9 +1997,24 @@ class SessionManager:
 
         async with session._lifecycle_lock:
             if session.status == SessionStatus.RUNNING:
-                raise ValueError(
-                    f"Session {session_id} is running a turn -- cannot resync"
+                turn_live = (
+                    session._prompt_task is not None
+                    and not session._prompt_task.done()
                 )
+                if turn_live:
+                    raise ValueError(
+                        f"Session {session_id} is running a live turn "
+                        "-- cannot resync"
+                    )
+                # Wedged RUNNING: no live turn to protect. Cancel any lingering
+                # (already-finished) task handle and heal the stuck state.
+                log.warning(
+                    "Resyncing wedged RUNNING session %s (no live turn)",
+                    session_id,
+                )
+                if session._prompt_task is not None:
+                    with contextlib.suppress(Exception):
+                        session._prompt_task.cancel()
 
             # Tear down any live client so we can reattach cleanly.
             if session.client:
