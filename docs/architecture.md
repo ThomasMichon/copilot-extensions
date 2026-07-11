@@ -1,13 +1,13 @@
 # Architecture Overview
 
-How the twelve copilot-extensions plugins fit together — install topology,
+How the thirteen copilot-extensions plugins fit together — install topology,
 runtimes, ports, and the credential relay. **Seven ship a runtime** (a `uv`-built
 venv under `~/.agent-*` plus a `~/.local/bin` binstub, deployed by the plugin's
-own installer); **five are payload-only** — `efforts` (skills), `visions`
+own installer); **six are payload-only** — `efforts` (skills), `visions`
 (skills), `context-handoff` (a session extension), `customizing-copilot`
-(skills), and `harness-copilot-extensions` (skills) deploy entirely from the
-marketplace payload with no installer. For per-plugin internals, follow the links
-in each section.
+(skills), `harness-copilot-extensions` (skills), and `wsl-setup` (skills) deploy
+entirely from the marketplace payload with no installer. For per-plugin
+internals, follow the links in each section.
 
 ## The plugins
 

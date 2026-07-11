@@ -31,11 +31,12 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 
 ## Architecture at a glance
 
-Twelve plugins, one marketplace. **Seven ship a runtime** (a `uv`-built venv under
+Thirteen plugins, one marketplace. **Seven ship a runtime** (a `uv`-built venv under
 `~/.agent-*` + a `~/.local/bin` binstub, deployed by the plugin's own
-installer); **five are payload-only** — `efforts` (skills), `visions` (skills),
-`context-handoff` (a session extension), `customizing-copilot` (skills), and
-`harness-copilot-extensions` (skills) need no install beyond enabling the plugin.
+installer); **six are payload-only** — `efforts` (skills), `visions` (skills),
+`context-handoff` (a session extension), `customizing-copilot` (skills),
+`harness-copilot-extensions` (skills), and `wsl-setup` (skills) need no install
+beyond enabling the plugin.
 Everything installs **from the marketplace** and runs
 **from local install paths** — no git checkout required at runtime.
 

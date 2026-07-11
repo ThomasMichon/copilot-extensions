@@ -376,9 +376,33 @@ def test_worktrees_enter_without_selection_opens_submenu():
     asyncio.run(run())
 
 
-def test_worktrees_enter_with_selection_opens_bulk_menu():
-    """Enter with a multi-selection opens the bulk action menu (Sync/Cleanup)
-    for the selected set, not a per-row submenu."""
+def test_worktrees_enter_with_single_selection_opens_submenu():
+    """Enter with exactly ONE worktree selected opens that row's sub-menu
+    (Open/Resume/…), not the bulk menu -- the operator must not have to deselect
+    it first to act on it (#2258 follow-up, request 1)."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert scr.list_records()
+            scr.sel = ("L", 0)
+            scr.handle_key("space")               # select exactly one row
+            assert len(scr.wt_sel) == 1
+            scr.handle_key("enter")               # -> per-row submenu
+            assert scr.maint_menu is None
+            assert scr.submenu is not None
+            assert scr.submenu["actions"][0] in ("Open", "Resume")
+
+    asyncio.run(run())
+
+
+def test_worktrees_enter_with_multi_selection_opens_bulk_menu():
+    """Enter with MORE THAN ONE worktree selected opens the bulk action menu for
+    the set, not a per-row submenu."""
     src = _maint_source()
 
     async def run():
@@ -389,11 +413,11 @@ def test_worktrees_enter_with_selection_opens_bulk_menu():
             await pilot.pause()
             recs = scr.list_records()
             cleanable = [i for i, r in enumerate(recs) if scr._cleanable(r)]
-            if not cleanable:
+            if len(cleanable) < 2:
                 return
+            scr.wt_sel.replace({recs[cleanable[0]]["id4"],
+                                recs[cleanable[1]]["id4"]})
             scr.sel = ("L", cleanable[0])
-            scr.handle_key("space")               # select a cleanable row
-            assert scr.wt_sel
             scr.handle_key("enter")               # -> bulk action menu
             assert scr.submenu is None
             assert scr.maint_menu is not None
@@ -425,6 +449,115 @@ def test_worktrees_bulk_menu_routes_to_scoped_cleanup():
             assert scr.maint_menu is None
             assert scr.cleanup is not None
             assert "selected" in scr.cleanup["scope"]
+
+    asyncio.run(run())
+
+
+def test_submenu_offers_finalize_for_convo_unused():
+    """A conversation-only / unused worktree's sub-menu offers Finalize
+    (#2258 follow-up, request 3)."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            for bucket in ("conversation", "unused"):
+                rec = next(r for r in recs if r["cleanup_bucket"] == bucket)
+                scr.sel = ("L", recs.index(rec))
+                scr.wt_sel.replace({rec["id4"]})
+                scr._open_submenu()
+                assert "Finalize" in scr.submenu["actions"]
+                scr.submenu = None
+            # A 'clean' (merged) worktree does NOT get Finalize.
+            clean = next(r for r in recs if r["cleanup_bucket"] == "clean")
+            scr.sel = ("L", recs.index(clean))
+            scr.wt_sel.replace({clean["id4"]})
+            scr._open_submenu()
+            assert "Finalize" not in scr.submenu["actions"]
+
+    asyncio.run(run())
+
+
+def test_bulk_menu_offers_stop_and_finalize():
+    """The bulk action menu offers Stop when any selected worktree has a live
+    mux, and Finalize when any is conversation-only / unused (#2258 follow-up,
+    requests 2 + 3)."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            convo = next(r for r in recs if r["cleanup_bucket"] == "conversation")
+            unused = next(r for r in recs if r["cleanup_bucket"] == "unused")
+            active = next(r for r in recs if r["cleanup_bucket"] == "active")
+            active["mux_live"] = True             # make it a live session
+            scr.wt_sel.replace({convo["id4"], unused["id4"], active["id4"]})
+            scr._open_wt_action_menu()
+            assert "Finalize" in scr.maint_menu["actions"]
+            assert "Stop" in scr.maint_menu["actions"]
+
+    asyncio.run(run())
+
+
+def test_start_finalize_builds_confirmed_op():
+    """_start_finalize targets only conversation/unused rows and builds an
+    UNARMED finalize progress run (confirm gate before it executes)."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            convo = next(r for r in recs if r["cleanup_bucket"] == "conversation")
+            unused = next(r for r in recs if r["cleanup_bucket"] == "unused")
+            clean = next(r for r in recs if r["cleanup_bucket"] == "clean")
+            # A non-convo/unused row is filtered out of the finalize set.
+            scr._start_finalize([convo, unused, clean])
+            assert scr.progress is not None
+            assert scr.progress["op"] == "finalize"
+            assert scr.progress["verb"] == "Finalize"
+            assert scr.progress["armed"] is False        # confirm gate
+            assert len(scr.progress["items"]) == 2       # clean dropped
+
+    asyncio.run(run())
+
+
+def test_start_stop_filters_live_and_arms(monkeypatch):
+    """_start_stop accepts a list, keeps only live-mux rows, and builds an armed
+    restart run (#2258 follow-up, request 2 aggregate). Uses mock mode so no
+    real session is restarted."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False, mock_mode=True)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            recs[0]["mux_live"] = True
+            recs[1]["mux_live"] = False
+            scr._start_stop([recs[0], recs[1]])
+            assert scr.progress["op"] == "restart"
+            assert scr.progress["verb"] == "Stop"
+            assert scr.progress["armed"] is True
+            assert len(scr.progress["items"]) == 1       # only the live one
+            # Nothing live -> no-op, no progress dialog.
+            scr.progress = None
+            recs[2]["mux_live"] = False
+            scr._start_stop([recs[2]])
+            assert scr.progress is None
 
     asyncio.run(run())
 
