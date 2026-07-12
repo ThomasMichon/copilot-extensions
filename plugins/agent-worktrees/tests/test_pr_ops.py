@@ -877,6 +877,108 @@ class TestMultiPR:
 
 
 # ---------------------------------------------------------------------------
+# pr_status live block (verdict/conflict/merge from the provider snapshot)
+# ---------------------------------------------------------------------------
+
+class TestPRStatusLive:
+    def _config_with_binding(self, base_config):
+        """Clone the fixture config with a merge-consent binding on its repo."""
+        repo = base_config.default_repo
+        pr = cfg.PRConfig(
+            enabled=True, provider="gitea", branch_prefix="feature",
+            head_scheme="snapshot", auto_open=False,
+            api_base="https://h/gitea",
+            automerge_label="auto-merge",
+            hold_labels=("do-not-merge", "needs-rebase", "wip"),
+            wip_title_prefixes=("wip:",),
+        )
+        new_repo = cfg.RepoConfig(
+            anchor=repo.anchor, worktree_root=repo.worktree_root,
+            default_branch=repo.default_branch, remote=repo.remote, pr=pr,
+        )
+        return cfg.Config(
+            srcroot=base_config.srcroot, machine=base_config.machine,
+            platform=base_config.platform, repo_name=base_config.repo_name,
+            repos={base_config.repo_name: new_repo},
+        )
+
+    def _mock_provider(self, monkeypatch, snap):
+        from agent_worktrees import providers
+
+        class _Prov:
+            name = "gitea"
+
+            def get_snapshot(self, repo, number, *, api_base="", token=None):
+                return snap
+
+        monkeypatch.setattr(providers, "get_provider", lambda name: _Prov())
+        monkeypatch.setattr(providers, "resolve_token", lambda prcfg: "tok")
+
+    def test_live_block_present_when_provider_ok(self, pr_repo, monkeypatch):
+        from agent_worktrees import pr_contract as pc
+        config, wid, _wt, _ = pr_repo
+        config = self._config_with_binding(config)
+        pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
+        snap = pc.PRSnapshot(
+            pr_state="open", merged=False, head_sha="h", base_ref="master",
+            author="alice", mergeable=True, title="Feature",
+            reviews=(pc.Review(1, "APPROVED", "bob", commit_id="h"),),
+        )
+        self._mock_provider(monkeypatch, snap)
+        res = pr_ops.pr_status(wid, config=config)
+        assert "live" in res
+        assert res["live"]["verdict"] == "APPROVED"
+        assert res["live"]["merge_state"] == "clean"
+        assert res["live"]["eligible"] is True
+        assert res["live"]["reviews"] == 1
+
+    def test_live_disabled_skips_provider(self, pr_repo, monkeypatch):
+        config, wid, _wt, _ = pr_repo
+        config = self._config_with_binding(config)
+        pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
+
+        def _boom(name):
+            raise AssertionError("provider must not be consulted when live=False")
+
+        from agent_worktrees import providers
+        monkeypatch.setattr(providers, "get_provider", _boom)
+        res = pr_ops.pr_status(wid, live=False, config=config)
+        assert "live" not in res
+
+    def test_live_best_effort_on_provider_error(self, pr_repo, monkeypatch):
+        config, wid, _wt, _ = pr_repo
+        config = self._config_with_binding(config)
+        pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
+        from agent_worktrees import providers
+        from agent_worktrees.providers import ProviderError
+
+        class _Prov:
+            name = "gitea"
+
+            def get_snapshot(self, repo, number, *, api_base="", token=None):
+                raise ProviderError("unreachable", transient=True)
+
+        monkeypatch.setattr(providers, "get_provider", lambda name: _Prov())
+        monkeypatch.setattr(providers, "resolve_token", lambda prcfg: "tok")
+        res = pr_ops.pr_status(wid, config=config)
+        # tracked metadata still present; the live block is simply omitted
+        assert res["has_pr"] is True
+        assert "live" not in res
+
+    def test_live_omitted_when_no_number(self, pr_repo, monkeypatch):
+        config, wid, _wt, _ = pr_repo
+        config = self._config_with_binding(config)
+        pr_ops.set_pr(wid, url="https://h/pulls/x", provider="gitea")  # no number
+        from agent_worktrees import providers
+        monkeypatch.setattr(
+            providers, "get_provider",
+            lambda name: (_ for _ in ()).throw(AssertionError("should not fetch")),
+        )
+        res = pr_ops.pr_status(wid, config=config)
+        assert "live" not in res
+
+
+# ---------------------------------------------------------------------------
 # _worktree_to_dict PR exposure (#1107)
 # ---------------------------------------------------------------------------
 

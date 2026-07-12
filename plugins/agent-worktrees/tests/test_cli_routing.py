@@ -420,3 +420,30 @@ def test_bare_non_headless_project_launches(monkeypatch):
     rc = m.main([])
     assert rc == 0
     assert launched["v"] is True
+
+
+# ---------------------------------------------------------------------------
+# pr-* family aliases / namespace (Phase 4)
+# ---------------------------------------------------------------------------
+
+def test_pr_create_alias_in_command_map():
+    # pr-create resolves to the same handler as create-pr.
+    assert m.COMMAND_MAP["pr-create"] is m.COMMAND_MAP["create-pr"]
+
+
+def test_pr_create_parser_alias():
+    # The parser accepts `pr-create` (argparse alias of create-pr).
+    args = m.build_parser().parse_args(["pr-create", "--title", "x"])
+    assert args.command in ("pr-create", "create-pr")
+
+
+def test_pr_status_no_live_flag():
+    args = m.build_parser().parse_args(["pr-status", "--no-live"])
+    assert args.no_live is True
+
+    args2 = m.build_parser().parse_args(["pr-status"])
+    assert args2.no_live is False
+
+
+def test_pr_namespace_routes_create_to_create_pr():
+    assert m._PR_NAMESPACE["create"] == "create-pr"

@@ -705,6 +705,63 @@ def _reconcile_active_pr(
         tracking.save_record(record)
 
 
+def _live_pr_state(
+    record: tracking.WorktreeRecord | None,
+    active: PRRecord | None,
+    config: Config,
+) -> dict | None:
+    """Best-effort live verdict/conflict/merge read for the active PR.
+
+    Folds ``pr-watch``'s snapshot + the shared classifier into ``pr-status`` so
+    one command answers "where is my PR?" -- the review **verdict**, whether it
+    has a **conflict**, its **merge state**, and whether merge **consent** is
+    present/eligible -- alongside the tracked metadata.  Returns a ``{"live":
+    {...}}`` dict, or ``None`` when there is no numbered active PR or the
+    provider is unconfigured/unreachable (never fatal: pr-status still reports
+    the tracked state).
+    """
+    if active is None or active.number is None:
+        return None
+    prcfg = config.default_repo.pr
+    provider_name = active.provider or prcfg.provider
+    target_repo = active.repo or ((record.repo if record else "") or "")
+    try:
+        from . import pr_contract as pc
+        from . import providers
+
+        provider = providers.get_provider(provider_name)
+        token = providers.resolve_token(prcfg)
+        snap = provider.get_snapshot(
+            target_repo, active.number,
+            api_base=getattr(prcfg, "api_base", "") or "", token=token,
+        )
+    except Exception:
+        # Provider unconfigured/unreachable/unsupported -- omit the live block
+        # rather than guessing; the tracked state is still reported.
+        return None
+    st = pc.classify_state(
+        snap,
+        automerge_label=getattr(prcfg, "automerge_label", "") or "",
+        hold_labels=tuple(getattr(prcfg, "hold_labels", ()) or ()),
+        wip_title_prefixes=tuple(getattr(prcfg, "wip_title_prefixes", ()) or ()),
+    )
+    return {
+        "live": {
+            "verdict": st.verdict,
+            "merge_state": st.merge_state,
+            "conflict": st.conflict,
+            "mergeable": snap.mergeable,
+            "consent_present": st.consent_present,
+            "consent_action": st.consent_action,
+            "eligible": st.eligible,
+            "held": list(st.held),
+            "wip": st.wip,
+            "reviews": len(snap.reviews),
+            "reason": st.reason,
+        }
+    }
+
+
 def _load_record_or_none(worktree_id: str) -> tracking.WorktreeRecord | None:
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
@@ -856,7 +913,7 @@ def pr_ready(
 
 
 def pr_status(worktree_id: str, *, all_prs: bool = False,
-              config: Config | None = None) -> dict:
+              live: bool = True, config: Config | None = None) -> dict:
     """Return the tracked PR metadata for a worktree (for pr-status).
 
     Returns the **active** PR by default.  With ``all_prs`` the full ``prs``
@@ -871,6 +928,12 @@ def pr_status(worktree_id: str, *, all_prs: bool = False,
     recommendation** (``pull_forward_recommended`` + ``next_action``) directing
     the standard post-merge move -- ``agent-worktrees git sync`` to rebase the
     worktree onto the updated default branch.
+
+    With ``live`` (default), a best-effort ``live`` block is added for the
+    active PR carrying its review **verdict**, **conflict**, **merge state**, and
+    merge-**consent** eligibility (from the shared ``pr_contract`` classifier),
+    so one command answers "where is my PR?".  The block is omitted silently when
+    the provider is unconfigured/unreachable.
     """
     base: dict = {"worktree_id": worktree_id}
     record = _load_record_or_none(worktree_id)
@@ -887,6 +950,10 @@ def pr_status(worktree_id: str, *, all_prs: bool = False,
         rec = _pull_forward_recommendation(record, active, config)
         if rec:
             result.update(rec)
+        if live:
+            live_block = _live_pr_state(record, active, config)
+            if live_block:
+                result.update(live_block)
     if all_prs:
         result["prs"] = [_pr_to_dict(p) for p in record.prs]
     return result
