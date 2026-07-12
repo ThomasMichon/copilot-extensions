@@ -121,6 +121,7 @@ async def lifespan(app: FastAPI):
         session_host_stale_reap_seconds=cfg.session_host_stale_reap_seconds,
         graceful_cancel_settle_seconds=cfg.graceful_cancel_settle_seconds,
         idle_reap_ttl_seconds=cfg.idle_reap_ttl_seconds,
+        live_stall_interrupt_after_s=cfg.live_stall_interrupt_after_s,
     )
     app.state.session_manager = mgr
 
