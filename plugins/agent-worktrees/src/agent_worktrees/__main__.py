@@ -7934,6 +7934,8 @@ def build_parser() -> argparse.ArgumentParser:
     # cmd_pr_dispatch). Registered here only so they surface in --help.
     sub.add_parser("pr-watch",
                    help="Block until a PR moves (run 'pr-watch' for usage)")
+    sub.add_parser("pr-merge",
+                   help="Signal merge consent on an approved PR (run 'pr-merge' for usage)")
     sub.add_parser("pr", help="Author-side PR command family (run 'pr' for usage)")
 
     # pre-launch (two-pass self-update protocol)
@@ -9188,6 +9190,141 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         return 2
 
 
+def _pr_merge_usage() -> None:
+    out = sys.stderr
+    print("Usage: <project> pr-merge <owner/name> <pr> [options]", file=out)
+    print("       <project> pr-merge <owner/name> --all [options]", file=out)
+    print(file=out)
+    print("Signal merge consent on an APPROVED PR by applying the repo's", file=out)
+    print("merge-consent label (the .agent-worktrees/config.yaml binding", file=out)
+    print("automerge_label; facility: auto-merge). Applies by default; it never", file=out)
+    print("merges -- the review gate still decides. Only eligible PRs are", file=out)
+    print("touched (approved at head, mergeable, not draft/WIP, no hold label,", file=out)
+    print("targeting the default branch).", file=out)
+    print(file=out)
+    print("  <pr>            Consent to one PR (the author path).", file=out)
+    print("  --all           Sweep every open PR (transition-helper mode).", file=out)
+    print("  --dry-run       Preview classification only; apply nothing.", file=out)
+    print("  --loop          (sweep) Repeat until no PR remains eligible.", file=out)
+    print("  --interval S    (sweep+loop) Seconds between passes (default 30).", file=out)
+    print("  --max-passes N  (sweep+loop) Cap passes (0 = unbounded).", file=out)
+    print("  --json          Emit the result JSON on stdout.", file=out)
+    print("  Overrides: --host URL (api base), --token TOKEN.", file=out)
+
+
+def _pr_merge_print_human(summary: dict) -> None:
+    mode = "APPLY" if summary["apply"] else "preview (dry-run)"
+    output_line = (f"pr-merge [{mode}] {summary['repo']}: {summary['open']} open, "
+                   f"{summary['eligible']} eligible for auto-merge")
+    print(output_line, file=sys.stderr)
+    for d in summary["decisions"]:
+        if d["action"] == "apply":
+            if not summary["apply"]:
+                mark = "+ auto-merge"
+            elif d.get("applied"):
+                mark = "APPLIED"
+            else:
+                mark = f"FAILED ({d.get('error', '')})"
+        elif d["action"] == "already":
+            mark = "already"
+        else:
+            mark = f"skip: {d.get('reason', '')}"
+        print(f"  #{d['pr']:<6} {mark:<14} {d.get('title', '')}", file=sys.stderr)
+
+
+def cmd_pr_merge_dispatch(argv: list[str]) -> int:
+    """Route `pr-merge` -- signal merge consent (apply the consent label).
+
+    The pure eligibility classifier lives in :mod:`agent_worktrees.pr_contract`
+    (``classify_state``); the apply/sweep orchestration in
+    :mod:`agent_worktrees.pr_merge`; the label-apply in the provider. The
+    consent-label vocabulary is the repo's PR binding (``automerge_label`` etc.).
+    """
+    import json as _json
+
+    from . import pr_merge as pm
+    from .providers import ProviderError
+
+    if argv and argv[0] in ("--help", "-h", "help"):
+        _pr_merge_usage()
+        return 0
+
+    p = argparse.ArgumentParser(prog="pr-merge", add_help=True)
+    p.add_argument("repo", type=_pr_parse_repo, help="owner/name")
+    p.add_argument("pr", type=int, nargs="?", default=None, help="PR number")
+    p.add_argument("--all", action="store_true", dest="sweep",
+                   help="sweep every open PR (transition-helper mode)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="preview classification only; apply nothing")
+    p.add_argument("--loop", action="store_true",
+                   help="(sweep) repeat until no PR remains eligible")
+    p.add_argument("--interval", type=float, default=30.0)
+    p.add_argument("--max-passes", type=int, default=0, dest="max_passes")
+    p.add_argument("--host", default="", help="API base URL override")
+    p.add_argument("--token", default=None, help="Provider token override")
+    p.add_argument("--json", action="store_true", help="emit the result JSON")
+    p.add_argument("--config", default=None)
+    try:
+        args = p.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code or 0)
+
+    if args.sweep and args.pr is not None:
+        output.err("pr-merge: pass either a <pr> or --all, not both")
+        return 2
+    if not args.sweep and args.pr is None:
+        output.err("pr-merge: provide a PR number, or --all to sweep")
+        return 2
+
+    apply = not args.dry_run
+    try:
+        config = cfg.load_config(Path(args.config) if args.config else None)
+        repo_cfg = config.default_repo
+        prcfg = repo_cfg.pr
+        default_branch = repo_cfg.default_branch
+        if not getattr(prcfg, "automerge_label", ""):
+            msg = ("pr-merge: no automerge_label configured for this repo "
+                   "(add pr.automerge_label to .agent-worktrees/config.yaml). "
+                   "Nothing to apply.")
+            if args.json:
+                print(_json.dumps({"repo": args.repo, "error": "no automerge_label binding"}))
+            else:
+                output.err(msg)
+            return 2
+
+        if args.sweep:
+            summary = pm.run_sweep(
+                prcfg, args.repo, api_base=args.host, token=args.token, apply=apply,
+                loop=args.loop, interval=args.interval, max_passes=args.max_passes,
+                default_branch=default_branch,
+            )
+        else:
+            row = pm.merge_one(
+                prcfg, args.repo, args.pr, api_base=args.host, token=args.token,
+                apply=apply, default_branch=default_branch,
+            )
+            eligible = 1 if row["action"] == "apply" else 0
+            applied = 1 if row.get("applied") else 0
+            failed = 1 if (row["action"] == "apply" and apply and not row.get("applied")) else 0
+            summary = {
+                "repo": args.repo, "open": 1, "eligible": eligible,
+                "applied": applied, "failed": failed, "apply": apply,
+                "decisions": [row],
+            }
+
+        if args.json:
+            print(_json.dumps(summary))
+        else:
+            _pr_merge_print_human(summary)
+        return 1 if summary["failed"] else 0
+    except ProviderError as exc:
+        output.err(f"pr-merge: {exc}")
+        return 3
+    except ValueError as exc:
+        output.err(f"pr-merge: {exc}")
+        return 2
+
+
 def _pr_usage() -> None:
     out = sys.stderr
     print("Usage: <project> pr <verb> [args...]", file=out)
@@ -9195,6 +9332,7 @@ def _pr_usage() -> None:
     print("Author-side PR command family (verbs also available flat as pr-*):", file=out)
     print("  create   Open a PR from the worktree (= create-pr)", file=out)
     print("  watch    Block until the PR moves (= pr-watch)", file=out)
+    print("  merge    Signal merge consent on an approved PR (= pr-merge)", file=out)
     print("  status   Read tracked PR metadata (= pr-status)", file=out)
     print("  ready    Release a held PR for merge (= pr-ready)", file=out)
 
@@ -9215,6 +9353,8 @@ def cmd_pr_dispatch(argv: list[str]) -> int:
     verb = argv[0]
     if verb == "watch":
         return cmd_pr_watch_dispatch(argv[1:])
+    if verb == "merge":
+        return cmd_pr_merge_dispatch(argv[1:])
     canonical = _PR_NAMESPACE.get(verb)
     if not canonical:
         output.err(f"Unknown pr subcommand: {verb}")
@@ -9230,6 +9370,7 @@ def cmd_pr_dispatch(argv: list[str]) -> int:
         _pr_usage()
         return 1
     return handler(args)
+
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -9380,6 +9521,15 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] == "pr-watch":
         try:
             return cmd_pr_watch_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # pr-merge -- signal merge consent (apply the consent label). Manual
+    # dispatch (owner/name + pr | --all).
+    if args_list[0] == "pr-merge":
+        try:
+            return cmd_pr_merge_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130

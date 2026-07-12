@@ -441,3 +441,67 @@ class GiteaProvider:
                 break
             page += 1
         return tuple(reviews)
+
+    def add_label(
+        self, repo: str, number: int, label: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        """Attach ``label`` to PR/issue ``number`` (verified); return "" on success.
+
+        The consent primitive behind ``pr-merge``: resolve the label name to its
+        id via the (paginated) repo label list, then POST-then-verify it is
+        actually present (the same "applied == verified present" guarantee the
+        create path uses).  Returns "" on success, or a human-readable error.
+        """
+        if not token:
+            return "Gitea provider needs a token to add a label."
+        scope = PRScope(repo=repo, head="", base="", title="", api_base=api_base)
+        try:
+            by_name = self._all_labels(scope, token)
+        except (ProviderError, json.JSONDecodeError, ValueError) as exc:
+            return f"label lookup failed: {exc}"
+        label_id = by_name.get(label.lower())
+        if label_id is None:
+            return f"label not found in {repo}: {label}"
+        return self._attach_labels_verified(scope, number, token, {label: label_id})
+
+    def list_open_pulls(
+        self, repo: str, *, api_base: str = "", token: str | None = None
+    ) -> tuple[int, ...]:
+        """Return the numbers of every open PR on ``repo`` (paginated).
+
+        The sweep input for ``pr-merge --all``: each number is then snapshotted
+        + classified individually, so this returns just the identifiers.
+        """
+        if not token:
+            raise ProviderError("Gitea provider needs a token to list PRs.")
+        scope = PRScope(repo=repo, head="", base="", title="", api_base=api_base)
+        numbers: list[int] = []
+        page = 1
+        page_size = 50
+        while True:
+            status, body = self._curl_with_retry(
+                "GET",
+                self._api(scope.api_base,
+                          f"/repos/{repo}/pulls?state=open&limit={page_size}&page={page}"),
+                token,
+            )
+            if status != 200:
+                raise ProviderError(
+                    f"Gitea open-PR list failed (HTTP {status}) on page {page} "
+                    f"for {repo}",
+                    transient=_is_transient(status),
+                )
+            try:
+                batch = json.loads(body)
+            except json.JSONDecodeError as exc:
+                raise ProviderError(f"Gitea returned non-JSON PR list: {exc}") from exc
+            if not isinstance(batch, list) or not batch:
+                break
+            for p in batch:
+                if isinstance(p, dict) and p.get("number") is not None:
+                    numbers.append(int(p["number"]))
+            if len(batch) < page_size:
+                break
+            page += 1
+        return tuple(numbers)
