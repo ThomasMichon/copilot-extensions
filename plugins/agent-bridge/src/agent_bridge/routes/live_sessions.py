@@ -30,8 +30,11 @@ from ..models import (
     SendMessageRequest,
     SendMessageResult,
 )
-from ..live_representation import await_turn_reply
+from ..live_representation import await_turn_reply, derive_turn_state
 from .sessions import _sse_event_stream
+
+#: A running turn with no activity for longer than this reads as "stalled".
+_TURN_STALL_SECONDS = 90.0
 
 if TYPE_CHECKING:
     from ..db import Database
@@ -68,6 +71,27 @@ def _store(request: Request) -> LiveEventStore:
     return store
 
 
+def _live_liveness(row: dict[str, Any], *, now: float | None = None) -> str | None:
+    """Compute a friendly liveness label from turn-state + activity recency.
+
+    ``active`` (running, recent), ``stalled`` (running but silent past the
+    threshold -- the mid-turn-stall signal), ``idle`` (last turn ended), or None
+    when the session has pushed no turn signal yet.
+    """
+    turn_state = row.get("turn_state")
+    if not turn_state:
+        return None
+    if turn_state == "idle":
+        return "idle"
+    if turn_state == "running":
+        last = row.get("last_activity_at")
+        ts = time.time() if now is None else now
+        if isinstance(last, (int, float)) and ts - last > _TURN_STALL_SECONDS:
+            return "stalled"
+        return "active"
+    return turn_state
+
+
 def _to_info(row: dict[str, Any]) -> LiveSessionInfo:
     return LiveSessionInfo(
         session_id=row["session_id"],
@@ -80,6 +104,9 @@ def _to_info(row: dict[str, Any]) -> LiveSessionInfo:
         role=row.get("role"),
         driven_by=row.get("driven_by"),
         status=row.get("status") or "live",
+        turn_state=row.get("turn_state"),
+        last_activity_at=row.get("last_activity_at"),
+        liveness=_live_liveness(row),
         registered_at=row["registered_at"],
         updated_at=row["updated_at"],
     )
@@ -192,6 +219,14 @@ async def ingest_live_events(
     store = _store(request)
     raw = [e.model_dump() for e in body.events]
     ingested = store.ingest(session_id, raw)
+    # Phase 7 Channel A: fold the raw batch into a coarse turn_state so the
+    # tracker sees running/idle/stalled -- objective and token-free.
+    prior = (db.get_live_session(session_id) or {}).get("turn_state")
+    new_state, saw_activity = derive_turn_state(raw, prior_state=prior)
+    if new_state != prior or saw_activity:
+        db.update_live_turn_state(
+            session_id, turn_state=new_state, last_activity_at=time.time()
+        )
     log = store.get(session_id)
     last_id = log.latest_id if log is not None else 0
     return IngestLiveEventsResult(

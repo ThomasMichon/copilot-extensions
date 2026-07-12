@@ -305,3 +305,100 @@ def test_route_register_is_heartbeat_upsert(client: TestClient) -> None:
     assert second["updated_at"] >= first["updated_at"]
     assert second["machine"] == "b"
     assert len(client.get("/api/v1/live-sessions").json()["live_sessions"]) == 1
+
+
+# -- Phase 7 Channel A: turn-state -------------------------------------------
+
+
+class TestDeriveTurnState:
+    def test_activity_marks_running(self) -> None:
+        from agent_bridge.live_representation import derive_turn_state
+
+        state, saw = derive_turn_state([{"type": "assistant.message"}])
+        assert state == "running" and saw is True
+
+    def test_turn_end_marks_idle(self) -> None:
+        from agent_bridge.live_representation import derive_turn_state
+
+        state, saw = derive_turn_state([{"type": "assistant.turn_end"}])
+        assert state == "idle" and saw is False
+
+    def test_last_signal_wins(self) -> None:
+        from agent_bridge.live_representation import derive_turn_state
+
+        state, _ = derive_turn_state([
+            {"type": "user.message"},
+            {"type": "assistant.message"},
+            {"type": "assistant.turn_end"},
+        ])
+        assert state == "idle"
+
+    def test_empty_or_inert_batch_keeps_prior(self) -> None:
+        from agent_bridge.live_representation import derive_turn_state
+
+        assert derive_turn_state([], prior_state="running") == ("running", False)
+        assert derive_turn_state(
+            [{"type": "assistant.usage"}], prior_state="idle"
+        ) == ("idle", False)
+
+
+def test_db_update_live_turn_state(tmp_db: Database) -> None:
+    now = time.time()
+    tmp_db.register_live_session(
+        "cli-t", machine="m", cwd=None, worktree_id="wt-t", repo=None,
+        branch=None, pid=None, role=None, now=now,
+    )
+    tmp_db.update_live_turn_state("cli-t", turn_state="running", last_activity_at=now + 5)
+    row = tmp_db.get_live_session("cli-t")
+    assert row["turn_state"] == "running"
+    assert row["last_activity_at"] == now + 5
+
+
+def test_fresh_db_has_turn_state_columns(tmp_db: Database) -> None:
+    cols = {r["name"] for r in tmp_db.execute_read("PRAGMA table_info(live_sessions)")}
+    assert {"turn_state", "last_activity_at"} <= cols
+    assert SCHEMA_VERSION >= 11
+
+
+def test_live_liveness_labels() -> None:
+    now = 1000.0
+    # running + recent -> active
+    assert live_sessions._live_liveness(
+        {"turn_state": "running", "last_activity_at": now - 1}, now=now
+    ) == "active"
+    # running + stale -> stalled
+    assert live_sessions._live_liveness(
+        {"turn_state": "running", "last_activity_at": now - 999}, now=now
+    ) == "stalled"
+    # idle -> idle
+    assert live_sessions._live_liveness({"turn_state": "idle"}, now=now) == "idle"
+    # no turn signal -> None
+    assert live_sessions._live_liveness({}, now=now) is None
+
+
+@pytest.fixture
+def client_with_store(tmp_db: Database) -> TestClient:
+    from agent_bridge.live_representation import LiveEventStore
+
+    app = FastAPI()
+    app.state.db = tmp_db
+    app.state.live_event_store = LiveEventStore()
+    app.include_router(live_sessions.router)
+    return TestClient(app)
+
+
+def test_route_ingest_updates_turn_state(client_with_store: TestClient) -> None:
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+    # a turn begins -> running / active
+    c.post("/api/v1/live-sessions/s1/events",
+           json={"events": [{"type": "user.message", "data": {"content": "hi"}}]})
+    got = c.get("/api/v1/live-sessions/s1").json()
+    assert got["turn_state"] == "running"
+    assert got["liveness"] == "active"
+    # the turn ends -> idle
+    c.post("/api/v1/live-sessions/s1/events",
+           json={"events": [{"type": "assistant.turn_end", "data": {}}]})
+    got = c.get("/api/v1/live-sessions/s1").json()
+    assert got["turn_state"] == "idle"
+    assert got["liveness"] == "idle"

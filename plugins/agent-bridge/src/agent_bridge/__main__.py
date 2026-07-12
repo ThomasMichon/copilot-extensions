@@ -752,12 +752,14 @@ def _live_session_summary_line(s: dict[str, Any]) -> str:
     driver = s.get("driven_by")
     driven = f" driven-by={driver}" if driver else ""
     status = s.get("status") or "live"
+    liveness = s.get("liveness")
+    turn = f" turn={liveness}" if liveness else ""
     updated = s.get("updated_at")
     age = ""
     if isinstance(updated, (int, float)):
         secs = max(0, int(time.time() - updated))
         age = f" (heartbeat {secs}s ago)"
-    return f"{s.get('session_id', '?')} [{status}]{driven}{age}"
+    return f"{s.get('session_id', '?')} [{status}]{turn}{driven}{age}"
 
 
 def _cmd_live_sessions(args: argparse.Namespace) -> None:

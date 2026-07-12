@@ -28,7 +28,15 @@ from typing import Any
 _LEASED = frozenset({"claimed", "started"})
 
 #: Fields carried into the compact read-only overlay.
-_OVERLAY_KEYS = ("session_id", "worktree_id", "driven_by", "status", "updated_at")
+_OVERLAY_KEYS = (
+    "session_id",
+    "worktree_id",
+    "driven_by",
+    "status",
+    "turn_state",
+    "liveness",
+    "updated_at",
+)
 
 
 def bridge_available() -> bool:

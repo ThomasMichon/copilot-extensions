@@ -286,10 +286,12 @@ agent-dispatch watch              # stream task.* events (SSE) as JSON lines
 > **`show`/`list` overlay live-session status for a CLI-embodied task.** A
 > leased task's owner is `<machine>/<worktree>`, and agent-bridge's live-session
 > registry is keyed by that worktree. So `show`/`list` join the two and add an
-> `embodiment` block (`driven_by`, `status`, heartbeat `updated_at`) for a
-> leased task whose worktree is currently live — a CLI-embodied task is trackable
-> like a headless one. Best-effort and read-only: with no `agent-bridge` on PATH
-> (or no live session) the overlay is simply omitted and output is unchanged.
+> `embodiment` block (`driven_by`, `status`, `turn_state`/`liveness`, heartbeat
+> `updated_at`) for a leased task whose worktree is currently live — a
+> CLI-embodied task is trackable like a headless one, including whether it is
+> mid-turn (`active`), done (`idle`), or silently `stalled`. Best-effort and
+> read-only: with no `agent-bridge` on PATH (or no live session) the overlay is
+> simply omitted and output is unchanged.
 
 > **`consume` is the handoff-pickup shortcut -- in two flavors.**
 >

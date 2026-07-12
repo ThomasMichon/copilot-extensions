@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # A live interactive session is kept alive by the extension's 30s heartbeat
 # (HEARTBEAT_MS in extension.mjs). A row whose ``updated_at`` is older than this
@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS live_sessions (
     role TEXT,
     driven_by TEXT,
     status TEXT NOT NULL DEFAULT 'live',
+    turn_state TEXT,
+    last_activity_at REAL,
     registered_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
@@ -479,6 +481,28 @@ class Database:
             conn.commit()
             log.info("Schema migrated to version 10: live_sessions.driven_by")
 
+        if from_version < 11:
+            # v10 -> v11: add `turn_state` + `last_activity_at` to live_sessions
+            # (Phase 7 Channel A). Derived from the represented event tail so the
+            # tracker sees running/idle/stalled turn-state, not just coarse
+            # liveness. NULL until the session's extension pushes events.
+            cols = [
+                r[1]
+                for r in conn.execute("PRAGMA table_info(live_sessions)").fetchall()
+            ]
+            if "turn_state" not in cols:
+                conn.execute("ALTER TABLE live_sessions ADD COLUMN turn_state TEXT")
+            if "last_activity_at" not in cols:
+                conn.execute(
+                    "ALTER TABLE live_sessions ADD COLUMN last_activity_at REAL"
+                )
+            conn.execute("UPDATE schema_version SET version=?", (11,))
+            conn.commit()
+            log.info(
+                "Schema migrated to version 11: live_sessions.turn_state + "
+                "last_activity_at"
+            )
+
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
         conn = self._get_conn()
@@ -617,8 +641,33 @@ class Database:
              driven_by, now, now),
         )
 
+    def update_live_turn_state(
+        self,
+        session_id: str,
+        *,
+        turn_state: str | None,
+        last_activity_at: float,
+    ) -> None:
+        """Update a live session's derived turn-state + last-activity timestamp.
+
+        Called from the represented event-ingest path (Phase 7 Channel A). A
+        no-op for a session_id that isn't registered. Also refreshes
+        ``updated_at`` so activity keeps the registration fresh.
+        """
+        self.execute_write(
+            "UPDATE live_sessions SET turn_state=?, last_activity_at=?, "
+            "updated_at=? WHERE session_id=?",
+            (turn_state, last_activity_at, last_activity_at, session_id),
+        )
+
     def deregister_live_session(self, session_id: str) -> None:
         """Remove a live interactive-session registration and its message queue."""
+        self.execute_write(
+            "DELETE FROM live_sessions WHERE session_id=?", (session_id,)
+        )
+        self.execute_write(
+            "DELETE FROM live_messages WHERE session_id=?", (session_id,)
+        )
         self.execute_write(
             "DELETE FROM live_sessions WHERE session_id=?", (session_id,)
         )
