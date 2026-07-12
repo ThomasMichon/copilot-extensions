@@ -17,10 +17,12 @@ def test_autopilot_prompt_mentions_task_verbs_and_deferred_completion():
     assert "abc123" in prompt
     assert "w9" in prompt
     assert "http://c" in prompt
-    # The full deferred-completion worker loop.
-    assert "agent-dispatch claim w9 --task abc123" in prompt
-    assert "agent-dispatch start abc123 w9" in prompt
-    assert "agent-dispatch complete abc123 w9" in prompt
+    # The full deferred-completion worker loop, driven under the worktree
+    # identity (owner-less claim/start/complete so the task owner stays
+    # machine/worktree and live-session tracking can join it).
+    assert "agent-dispatch claim --task abc123" in prompt
+    assert "agent-dispatch start abc123" in prompt
+    assert "agent-dispatch complete abc123" in prompt
     # Autopilot + the deferred-completion guarantee (do not complete early).
     assert "autopilot" in prompt.lower()
     assert "not mark it complete before" in prompt.lower()

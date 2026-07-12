@@ -190,6 +190,84 @@ def test_parser_complete_owner_optional():
     assert b.worker_id == "m/wt" and b.result_ref == "pr/9"
 
 
+def test_parser_start_owner_optional():
+    # Both `start <id>` and `start <id> <owner>` parse (worktree-identity symmetry).
+    a = build_parser().parse_args(["start", "t1"])
+    assert a.task_id == "t1" and a.worker_id is None
+    b = build_parser().parse_args(["start", "t1", "m/wt"])
+    assert b.worker_id == "m/wt"
+
+
+def test_parser_yield_owner_optional():
+    a = build_parser().parse_args(["yield", "t1", "--note", "blocked"])
+    assert a.task_id == "t1" and a.worker_id is None and a.note == "blocked"
+    b = build_parser().parse_args(["yield", "t1", "m/wt"])
+    assert b.worker_id == "m/wt"
+
+
+def test_start_resolves_owner_from_identity(monkeypatch):
+    """`start <id>` (no owner) resolves owner = machine/worktree from CWD."""
+    from agent_dispatch import __main__, identity
+
+    seen = {}
+
+    class _C:
+        def start(self, task_id, owner):
+            seen["task_id"] = task_id
+            seen["owner"] = owner
+            return {"id": task_id, "status": "started", "owner": owner}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
+
+    args = build_parser().parse_args(["start", "T5"])
+    assert args.func(args) == 0
+    assert seen == {"task_id": "T5", "owner": "lambda-core/wt-7"}
+
+
+def test_yield_resolves_owner_from_identity(monkeypatch):
+    """`yield <id>` (no owner) resolves owner = machine/worktree from CWD."""
+    from agent_dispatch import __main__, identity
+
+    seen = {}
+
+    class _C:
+        def yield_task(self, task_id, owner, *, note=None):
+            seen["task_id"] = task_id
+            seen["owner"] = owner
+            seen["note"] = note
+            return {"id": task_id, "status": "queued", "owner": owner}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
+
+    args = build_parser().parse_args(["yield", "T5", "--note", "blocked"])
+    assert args.func(args) == 0
+    assert seen == {"task_id": "T5", "owner": "lambda-core/wt-7", "note": "blocked"}
+
+
+def test_start_without_identity_errors(monkeypatch, capsys):
+    """`start <id>` with no owner and no resolvable identity fails cleanly."""
+    from agent_dispatch import identity
+
+    monkeypatch.setattr(identity, "resolve_identity", lambda: (None, None))
+    args = build_parser().parse_args(["start", "T5"])
+    assert args.func(args) == 2
+    assert "could not resolve the owner for start" in capsys.readouterr().err
+
+
 def test_parser_consume_defer_complete_flag():
     a = build_parser().parse_args(["consume", "t9"])
     assert a.defer_complete is False

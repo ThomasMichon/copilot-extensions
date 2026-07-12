@@ -235,6 +235,14 @@ agent-dispatch heartbeat <id> <owner>        # extend the lease during long work
 agent-dispatch complete <id> <owner> --result-ref pr/123
 ```
 
+> **Owner is optional on `claim`/`start`/`complete`/`yield`.** Omit it and the
+> coordinator resolves your **worktree identity** (`<machine>/<worktree>`) from
+> the CWD -- so an embodied/taken-over worker can drive its whole lifecycle
+> (`agent-dispatch claim --task <id>` → `start <id>` → `complete <id>`) without
+> ever typing an owner. This keeps the task's owner equal to its worktree, which
+> is what lets live-session tracking join a CLI-embodied task to its session (the
+> `embodiment` overlay above).
+
 Recoverable snag -> return it for a later cycle (keep the note!):
 
 ```bash
