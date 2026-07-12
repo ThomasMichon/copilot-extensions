@@ -5700,7 +5700,83 @@ def cmd_update(args: argparse.Namespace) -> int:
     skip_modules = getattr(args, "skip_modules", None)
     _update_modules(plugin_dir, plat, skip_modules)
 
+    # Step 5 -- fast-forward the managed repo anchor(s) so in-repo config
+    # bindings deploy alongside the plugin update (not just on next launch).
+    if not getattr(args, "no_anchor_sync", False):
+        _fast_forward_project_anchors()
+
     return 0
+
+
+def _fast_forward_project_anchors() -> None:
+    """Fast-forward each managed repo's anchor to its upstream default branch.
+
+    ``update`` refreshes the plugin payload from the marketplace, but the repo
+    **anchor checkout** -- the source of truth for in-repo
+    ``.agent-worktrees/config.yaml`` bindings -- is otherwise only synced on the
+    next picker launch or a manual ``git pull``. That lag lets a freshly-rolled
+    command silently no-op on a machine whose anchor still predates a new config
+    binding. Closing it here makes in-repo config deploy alongside the plugin.
+
+    Strictly a fast-forward, and only when the anchor is **on the default
+    branch, clean, and behind** -- mirroring ``git_ops.fast_forward_worktree``'s
+    safety. A dirty, ahead, diverged, or detached anchor, or one checked out on
+    a non-default branch, is left untouched. Best-effort: any failure (no
+    config, offline fetch) is non-fatal and never aborts the update.
+    """
+    try:
+        config = cfg.load_config()
+    except Exception:
+        # No resolvable project config (e.g. generic install) -- nothing to do.
+        return
+
+    repos = config.repos or {}
+    if not repos:
+        return
+
+    output.header("Syncing repo anchor(s)")
+    seen: set[str] = set()
+    for repo in repos.values():
+        anchor = repo.anchor
+        if not anchor or anchor in seen:
+            continue
+        seen.add(anchor)
+
+        anchor_path = Path(anchor)
+        if not (anchor_path / ".git").exists():
+            output.warn(f"Anchor not checked out, skipping: {anchor}")
+            continue
+
+        # Only ever advance an anchor that is *on* its default branch. A
+        # non-default checkout is intentional operator state -- never retarget
+        # it (fast_forward_worktree alone would ff a 0-ahead feature branch).
+        current = git_ops.current_branch(anchor_path)
+        if current is None:
+            output.info(f"{anchor}: detached HEAD -- skipped")
+            continue
+        if current != repo.default_branch:
+            output.info(
+                f"{anchor}: on '{current}', not '{repo.default_branch}' -- skipped"
+            )
+            continue
+
+        ff = git_ops.fast_forward_worktree(
+            anchor_path,
+            remote=repo.remote,
+            default_branch=repo.default_branch,
+            do_fetch=True,
+        )
+        if ff.updated:
+            output.ok(
+                f"{anchor}: fast-forwarded {ff.behind} commit(s) to "
+                f"{repo.remote}/{repo.default_branch}"
+            )
+        elif ff.reason in ("up-to-date",):
+            output.ok(f"{anchor}: up to date")
+        elif ff.reason in ("dirty", "ahead", "diverged"):
+            output.info(f"{anchor}: {ff.reason} -- left untouched")
+        else:
+            output.info(f"{anchor}: not synced ({ff.reason})")
 
 
 def _update_modules(
@@ -7979,6 +8055,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--skip-modules", nargs="*", default=None,
                    metavar="MODULE",
                    help="Skip module updates (all if no names given, or named modules)")
+    p.add_argument("--no-anchor-sync", action="store_true",
+                   help="Skip fast-forwarding the managed repo anchor(s) after update")
 
     # install-status
     sub.add_parser("install-status", help="Show installation status")
