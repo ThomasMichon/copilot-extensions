@@ -59,6 +59,53 @@ def worker_id_for(machine: str, worktree: str) -> str:
     return f"{machine}/{worktree}"
 
 
+#: Hard cap on a progress summary -- keeps the beat a line, never a transcript.
+PROGRESS_SUMMARY_MAX = 280
+#: Hard cap on a progress phase label and blocker/pr fields.
+PROGRESS_PHASE_MAX = 40
+_PROGRESS_PR_MAX = 120
+
+
+def _clip(text: str | None, limit: int) -> str | None:
+    """Trim whitespace and hard-cap ``text`` to ``limit`` chars (ellipsis if cut)."""
+    if text is None:
+        return None
+    text = text.strip()
+    if not text:
+        return None
+    if len(text) > limit:
+        return text[: limit - 1].rstrip() + "\u2026"
+    return text
+
+
+def _progress_snapshot(
+    phase: str,
+    summary: str,
+    *,
+    blocker: str | None = None,
+    pr: str | None = None,
+    ts: float,
+) -> dict[str, object]:
+    """Build a bounded, latest-only progress snapshot dict.
+
+    Every free-text field is hard-capped so a progress beat is a *status line*,
+    not a chat log. ``summary`` is required; empty/whitespace collapses to a
+    dash placeholder so the beat still records a timestamped heartbeat.
+    """
+    snapshot: dict[str, object] = {
+        "phase": _clip(phase, PROGRESS_PHASE_MAX) or "",
+        "summary": _clip(summary, PROGRESS_SUMMARY_MAX) or "-",
+        "ts": ts,
+    }
+    blocker_c = _clip(blocker, PROGRESS_SUMMARY_MAX)
+    if blocker_c:
+        snapshot["blocker"] = blocker_c
+    pr_c = _clip(pr, _PROGRESS_PR_MAX)
+    if pr_c:
+        snapshot["pr"] = pr_c
+    return snapshot
+
+
 class Status:
     """The six task states (string constants, stored verbatim)."""
 
@@ -111,6 +158,9 @@ class Task:
     started_at: float | None = None
     completed_at: float | None = None
     result_ref: str | None = None
+    #: Latest-only structured progress beat (JSON: phase/summary/blocker/pr/ts),
+    #: or None. The "how far toward the goal" signal for at-a-glance tracking.
+    latest_progress: str | None = None
 
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> Task:
@@ -141,6 +191,7 @@ class Task:
             started_at=row["started_at"],
             completed_at=row["completed_at"],
             result_ref=row["result_ref"],
+            latest_progress=row["latest_progress"],
         )
 
 
@@ -172,6 +223,7 @@ _COLUMNS: dict[str, str] = {
     "started_at": "REAL",
     "completed_at": "REAL",
     "result_ref": "TEXT",
+    "latest_progress": "TEXT",
 }
 
 
@@ -648,6 +700,69 @@ class TaskQueue:
             conn.execute(
                 "UPDATE tasks SET lease_expires_at = ?, updated_at = ? WHERE id = ?",
                 (ts + self.lease_seconds, ts, task_id),
+            )
+            result = self._fetch(conn, task_id)
+            conn.execute("COMMIT")
+        return result  # type: ignore[return-value]
+
+    def record_progress(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        phase: str,
+        summary: str,
+        blocker: str | None = None,
+        pr: str | None = None,
+        extend_lease: bool = True,
+        now: float | None = None,
+    ) -> Task:
+        """Record a bounded progress beat on a held task the worker owns.
+
+        Stores a **latest-only** structured snapshot (phase/summary/blocker/pr/ts)
+        on the task and appends a bounded row to the audit trail -- so a reader
+        sees "how far toward the goal" at a glance, never a transcript. Doubles as
+        a heartbeat (refreshes the lease) since a worker reporting progress is
+        alive. The summary is hard-capped (:data:`PROGRESS_SUMMARY_MAX`) so the
+        beat can never balloon into a chat log.
+        """
+        ts = self._now(now)
+        snapshot = _progress_snapshot(phase, summary, blocker=blocker, pr=pr, ts=ts)
+        payload = json.dumps(snapshot, separators=(",", ":"))
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            if task.status not in Status.HELD:
+                conn.execute("COMMIT")
+                raise TaskError(f"cannot record progress on a {task.status!r} task")
+            if task.owner != worker_id:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}"
+                )
+            if extend_lease:
+                conn.execute(
+                    "UPDATE tasks SET latest_progress = ?, lease_expires_at = ?,"
+                    " updated_at = ? WHERE id = ?",
+                    (payload, ts + self.lease_seconds, ts, task_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE tasks SET latest_progress = ?, updated_at = ? WHERE id = ?",
+                    (payload, ts, task_id),
+                )
+            phase_tag = f"[{snapshot['phase']}] " if snapshot.get("phase") else ""
+            self._audit(
+                conn,
+                task_id,
+                ts=ts,
+                from_status=task.status,
+                to_status=task.status,
+                worker=worker_id,
+                note=f"progress: {phase_tag}{snapshot['summary']}",
             )
             result = self._fetch(conn, task_id)
             conn.execute("COMMIT")

@@ -205,6 +205,51 @@ def test_parser_yield_owner_optional():
     assert b.worker_id == "m/wt"
 
 
+def test_parser_progress_owner_optional_and_fields():
+    a = build_parser().parse_args(
+        ["progress", "t1", "--phase", "impl", "--summary", "did the thing"]
+    )
+    assert a.task_id == "t1" and a.worker_id is None
+    assert a.phase == "impl" and a.summary == "did the thing"
+    b = build_parser().parse_args(
+        ["progress", "t1", "m/wt", "--summary", "s", "--pr", "pr/9", "--blocker", "b"]
+    )
+    assert b.worker_id == "m/wt" and b.pr == "pr/9" and b.blocker == "b"
+
+
+def test_progress_resolves_owner_from_identity(monkeypatch):
+    """`progress <id>` (no owner) resolves owner = machine/worktree from CWD."""
+    from agent_dispatch import __main__, identity
+
+    seen = {}
+
+    class _C:
+        def progress(self, task_id, worker_id, *, phase="", summary, blocker=None, pr=None):
+            seen.update(
+                task_id=task_id, worker_id=worker_id, phase=phase,
+                summary=summary, blocker=blocker, pr=pr,
+            )
+            return {"id": task_id, "status": "started", "owner": worker_id}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
+
+    args = build_parser().parse_args(
+        ["progress", "T5", "--phase", "impl", "--summary", "wired it", "--pr", "pr/1"]
+    )
+    assert args.func(args) == 0
+    assert seen == {
+        "task_id": "T5", "worker_id": "lambda-core/wt-7", "phase": "impl",
+        "summary": "wired it", "blocker": None, "pr": "pr/1",
+    }
+
+
 def test_start_resolves_owner_from_identity(monkeypatch):
     """`start <id>` (no owner) resolves owner = machine/worktree from CWD."""
     from agent_dispatch import __main__, identity

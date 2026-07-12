@@ -165,6 +165,29 @@ class DispatchClient:
             self._http.post(f"/tasks/{task_id}/heartbeat", json={"worker_id": worker_id})
         )
 
+    def progress(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        phase: str = "",
+        summary: str,
+        blocker: str | None = None,
+        pr: str | None = None,
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/progress",
+                json={
+                    "worker_id": worker_id,
+                    "phase": phase,
+                    "summary": summary,
+                    "blocker": blocker,
+                    "pr": pr,
+                },
+            )
+        )
+
     def detach(self, task_id: str) -> dict:
         return self._unwrap(self._http.post(f"/tasks/{task_id}/detach"))
 

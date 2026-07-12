@@ -135,6 +135,89 @@ def test_heartbeat_wrong_owner_rejected(q):
         q.heartbeat(t.id, "w2")
 
 
+# -- progress beats ----------------------------------------------------------
+
+
+def test_record_progress_stores_latest_snapshot(q):
+    import json
+
+    t = q.create("work")
+    q.claim_one("w1")
+    q.start(t.id, "w1")
+    q.record_progress(
+        t.id, "w1", phase="implementing", summary="wired the verb", now=2000.0
+    )
+    snap = json.loads(q.get(t.id).latest_progress)
+    assert snap["phase"] == "implementing"
+    assert snap["summary"] == "wired the verb"
+    assert snap["ts"] == pytest.approx(2000.0)
+
+
+def test_record_progress_latest_only_overwrites(q):
+    import json
+
+    t = q.create("work")
+    q.claim_one("w1")
+    q.record_progress(t.id, "w1", phase="planning", summary="first")
+    q.record_progress(t.id, "w1", phase="implementing", summary="second")
+    snap = json.loads(q.get(t.id).latest_progress)
+    assert snap["phase"] == "implementing" and snap["summary"] == "second"
+
+
+def test_record_progress_caps_summary(q):
+    import json
+
+    from agent_dispatch.queue import PROGRESS_SUMMARY_MAX
+
+    t = q.create("work")
+    q.claim_one("w1")
+    q.record_progress(t.id, "w1", phase="p", summary="x" * 500)
+    snap = json.loads(q.get(t.id).latest_progress)
+    assert len(snap["summary"]) <= PROGRESS_SUMMARY_MAX
+    assert snap["summary"].endswith("\u2026")
+
+
+def test_record_progress_optional_fields(q):
+    import json
+
+    t = q.create("work")
+    q.claim_one("w1")
+    q.record_progress(t.id, "w1", phase="pr", summary="opened", pr="pr/42", blocker=None)
+    snap = json.loads(q.get(t.id).latest_progress)
+    assert snap["pr"] == "pr/42"
+    assert "blocker" not in snap  # empty/None optional fields are dropped
+
+
+def test_record_progress_extends_lease(q):
+    t = q.create("work")
+    q.claim_one("w1", now=1000.0, lease_seconds=60)
+    q.record_progress(t.id, "w1", phase="p", summary="alive", now=1050.0)
+    # progress doubles as a heartbeat: lease pushed to 1050 + DEFAULT_LEASE_SECONDS
+    assert q.recover_expired_leases(now=1100.0) == 0
+    assert q.get(t.id).lease_expires_at == pytest.approx(1050.0 + DEFAULT_LEASE_SECONDS)
+
+
+def test_record_progress_wrong_owner_rejected(q):
+    t = q.create("work")
+    q.claim_one("w1")
+    with pytest.raises(TaskError):
+        q.record_progress(t.id, "w2", phase="p", summary="nope")
+
+
+def test_record_progress_requires_held(q):
+    t = q.create("work")  # queued, not held
+    with pytest.raises(TaskError):
+        q.record_progress(t.id, "w1", phase="p", summary="too early")
+
+
+def test_record_progress_appends_audit(q):
+    t = q.create("work")
+    q.claim_one("w1")
+    q.record_progress(t.id, "w1", phase="planning", summary="settled the plan")
+    notes = [e.get("note") for e in q.events(t.id)]
+    assert any(n and "progress:" in n and "settled the plan" in n for n in notes)
+
+
 # -- capability gating -------------------------------------------------------
 
 

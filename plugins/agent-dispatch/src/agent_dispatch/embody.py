@@ -68,7 +68,15 @@ def autopilot_worker_prompt(
         f"Do NOT mark it complete before the goal is met -- completing the task "
         f"is your explicit signal that the work is done. On a real blocker, "
         f"`agent-dispatch yield {task_id} --note <why>` returns it "
-        f"to the queue for a later cycle."
+        f"to the queue for a later cycle. "
+        f"**Report progress as you go** so the operator can watch the fleet at a "
+        f"glance: at each phase boundary (plan settled, implementation done, a PR "
+        f"opened, a blocker hit) run "
+        f"`agent-dispatch progress {task_id} --phase <phase> --summary "
+        f"\"<one line toward the goal>\"` (add `--pr <ref>` or `--blocker <why>` "
+        f"when relevant). Keep each summary to a single line -- it is a status "
+        f"beat, not a transcript; emit one only at real transitions, never on a "
+        f"timer."
     )
 
 
