@@ -459,6 +459,10 @@ def create_app(*, config=None, token: str | None = None) -> FastAPI:
     # Stash the token so the websocket transport (which bypasses
     # BearerAuthMiddleware) can authenticate connections itself.
     app.state.auth_token = auth_token
+    # In-memory registry of represented live-session event logs (Phase 5). Kept
+    # off the ACP-owned SessionManager; see live_representation for rationale.
+    from .live_representation import LiveEventStore
+    app.state.live_event_store = LiveEventStore()
 
     # Auth middleware
     app.add_middleware(BearerAuthMiddleware, token=auth_token)
