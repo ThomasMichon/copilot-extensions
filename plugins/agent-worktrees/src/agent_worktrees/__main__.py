@@ -3231,7 +3231,8 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
     worktree_id = _resolve_worktree_id(worktree_id)
 
     result = pr_ops.pr_status(
-        worktree_id, all_prs=getattr(args, "all", False), config=config,
+        worktree_id, all_prs=getattr(args, "all", False),
+        live=not getattr(args, "no_live", False), config=config,
     )
     if use_json:
         _json_output(result)
@@ -3251,6 +3252,21 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
     print(f"  provider: {result.get('provider')}")
     if result.get("repo"):
         print(f"  repo:     {result.get('repo')}")
+    live = result.get("live")
+    if isinstance(live, dict):
+        verdict = live.get("verdict") or "(none)"
+        print("  live:")
+        print(f"    verdict:     {verdict}")
+        print(f"    merge state: {live.get('merge_state')}")
+        if live.get("conflict"):
+            print("    conflict:    yes (needs rebase)")
+        if live.get("held"):
+            print(f"    held by:     {', '.join(live['held'])}")
+        if live.get("wip"):
+            print("    wip:         yes")
+        consent = ("present" if live.get("consent_present")
+                   else ("eligible" if live.get("eligible") else "not yet"))
+        print(f"    consent:     {consent}")
     if getattr(args, "all", False) and result.get("prs"):
         print(f"  all PRs ({count}):")
         for p in result["prs"]:
@@ -7542,7 +7558,9 @@ def build_parser() -> argparse.ArgumentParser:
     # create-pr (PR-workflow: squash, create + push feature branch)
     p = sub.add_parser(
         "create-pr",
-        help="Squash worktree commits, create + push a feature branch for a PR",
+        aliases=["pr-create"],
+        help="Squash worktree commits, create + push a feature branch for a PR "
+             "(pr-create is the pr-* family alias)",
     )
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--title", default=None,
@@ -7599,12 +7617,15 @@ def build_parser() -> argparse.ArgumentParser:
     # pr-status (read tracked PR metadata)
     p = sub.add_parser(
         "pr-status",
-        help="Show tracked PR metadata (reconciles against the provider; "
-             "recommends pull-forward when the active PR has merged)",
+        help="Show tracked PR metadata + live verdict/conflict/merge state "
+             "(reconciles against the provider; recommends pull-forward when "
+             "the active PR has merged)",
     )
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--all", action="store_true",
                    help="List every tracked PR, not just the active one")
+    p.add_argument("--no-live", action="store_true", dest="no_live",
+                   help="Skip the live provider read (tracked metadata only)")
     p.add_argument("--json", action="store_true", help="JSON output mode")
     p.add_argument("--config", default=None)
 
@@ -8437,6 +8458,7 @@ COMMAND_MAP = {
     "finalize": cmd_finalize,
     "push-changes": cmd_push_changes,
     "create-pr": cmd_create_pr,
+    "pr-create": cmd_create_pr,  # pr-* family alias (also rewritten pre-argparse)
     "set-pr": cmd_set_pr,
     "pr-ready": cmd_pr_ready,
     "pr-status": cmd_pr_status,
@@ -9283,11 +9305,25 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
         prcfg = repo_cfg.pr
         default_branch = repo_cfg.default_branch
         if not getattr(prcfg, "automerge_label", ""):
-            msg = ("pr-merge: no automerge_label configured for this repo "
-                   "(add pr.automerge_label to .agent-worktrees/config.yaml). "
-                   "Nothing to apply.")
+            # No merge-consent binding on THIS machine's checkout. The most
+            # common cause is a stale anchor (the binding landed on the default
+            # branch but this checkout hasn't pulled it), NOT a genuinely
+            # unconfigured repo -- so steer the caller to refresh rather than to
+            # hand-merge or escalate to an admin, which is the wrong reflex.
+            msg = ("pr-merge: no merge-consent label (pr.automerge_label) is "
+                   "configured in this repo's .agent-worktrees/config.yaml on "
+                   "this machine. If the repo is expected to have one, this "
+                   "checkout's anchor is likely behind -- update it "
+                   "('aperture-labs update' / 'git sync' on the anchor) so the "
+                   "binding is present, then retry. pr-merge is still the "
+                   "correct consent path; do NOT hand-merge or escalate to an "
+                   "admin. Nothing applied.")
             if args.json:
-                print(_json.dumps({"repo": args.repo, "error": "no automerge_label binding"}))
+                print(_json.dumps({
+                    "repo": args.repo,
+                    "error": "no automerge_label binding",
+                    "hint": "anchor may be behind; update it, then retry pr-merge",
+                }))
             else:
                 output.err(msg)
             return 2
@@ -9385,6 +9421,13 @@ def main(argv: list[str] | None = None) -> int:
     #   `<project> agent-worktrees cleanup` → `cleanup`)
     if args_list and args_list[0] == "agent-worktrees":
         args_list = args_list[1:]
+
+    # Back-compat / family alias: `pr-create` is the pr-* family name for
+    # `create-pr` (Phase 4 of the pr-command-family effort). Rewrite it to the
+    # canonical verb before argparse so both spellings share one handler; the
+    # original `create-pr` stays fully live.
+    if args_list and args_list[0] == "pr-create":
+        args_list = ["create-pr", *args_list[1:]]
 
     # ── Resolve the active project + assumed CWD (git-like) ──────────────
     # Context is discovered from the current directory, or an explicit
