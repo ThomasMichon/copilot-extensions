@@ -274,6 +274,29 @@ backlog, it has drifted out of its lane.
   newly-created delta — but don't block the revision on it. The vision leads;
   efforts follow.
 
+## Keep vision READMEs lean (decompose into child visions)
+
+A vision README is loaded whole when an agent reads it, so a sprawling one taxes
+every session that opens it. Prefer **breadth of linked visions over depth in one
+file** — the vision folder tree *is* the decomposition mechanism:
+
+- **A branch README is a map, not an encyclopedia.** When a subject's Concepts &
+  Components, Features, or Behaviors grow large, push the deep part **down into a
+  child (leaf) vision** and link it from the parent's Concepts & Components with a
+  one-line summary. The parent states the subject's shape and points at children;
+  the children hold the concrete intent. Depth = specificity.
+- **Why: it cuts upfront context.** An agent reads the branch vision and follows
+  a child link **only when its task needs that subtree** — decomposition keeps the
+  always-read layer small, at the cost of an extra read when the detail is wanted.
+- **Link out *and* link back.** The parent lists each child; every child's See
+  Also points back at its parent. No orphan visions.
+- **Split when a single §Features or §Behaviors section dominates the file**, or
+  when a component under Concepts & Components is really its own subject — that is
+  the seam. Don't wait for the README to become unwieldy.
+
+This is the same *decompose-liberally* instinct that governs docs and efforts,
+expressed through the branch/leaf tree instead of sub-docs.
+
 ## Anti-patterns
 
 - ❌ Acting before reading the repo's addendum (you'll use the wrong organization).
@@ -310,3 +333,6 @@ backlog, it has drifted out of its lane.
   layer.
 - ❌ Treating a **vision-ahead** item (reality simply hasn't caught up) as a blind
   spot — it is the healthy delta; feed it to efforts, not vision edits.
+- ❌ Letting a single vision README balloon with every feature/behavior inline
+  when a component deserves its **own child (leaf) vision** — decompose into the
+  branch/leaf tree and link, so agents load only the subtree their task needs.

@@ -97,13 +97,21 @@ Rules:
   `references/`, `scripts/`, or `assets/` -- don't scatter loose `.md` siblings.
 - **`references/`** holds prose the SKILL.md links to (progressive disclosure).
   Keep links **one level deep** from SKILL.md -- no nested reference chains.
+  **Decompose liberally:** SKILL.md is loaded whole when the skill triggers, but a
+  `references/` doc is fetched **only when the agent follows the link**. So bias
+  toward a lean SKILL.md that links out to focused reference docs — pull each large,
+  self-contained topic (a deep procedure, a full schema, a worked example set) into
+  `references/<topic>.md` and leave a one-line pointer. That keeps per-trigger
+  context small; the trade is an extra read on demand. Link out *and* back; no
+  orphan references. The same bias applies to any long doc a skill owns.
 - **`scripts/`** holds code the agent **executes by path** ("run `scripts/x.py`")
   rather than pasting inline -- more reliable, fewer tokens.
 - **`assets/`** holds templates/fixtures (e.g. a `TEMPLATE.md` the skill copies).
 - **Use forward slashes** in skill-internal references so they resolve on every
   platform (documenting an OS-specific *command* path is fine).
-- **Keep `SKILL.md` under 500 lines.** When it grows, move detail into
-  `references/` and leave a pointer.
+- **Keep `SKILL.md` under 500 lines — and split *before* that when a topic can
+  stand alone.** 500 is the ceiling, not a target; move detail into `references/`
+  proactively at a natural seam and leave a pointer.
 
 ### Validation checklist
 

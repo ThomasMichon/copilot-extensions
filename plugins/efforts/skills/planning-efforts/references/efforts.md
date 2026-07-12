@@ -45,11 +45,20 @@ efforts/
 ├── README.md              # the repo's effort index + the local addendum
 ├── TEMPLATE.md            # the effort README schema (copy when starting one)
 ├── active/                # in-flight efforts
-│   └── <slug>/README.md
+│   └── <slug>/
+│       ├── README.md      # the effort's shared contract (a lean map)
+│       └── <phase>.md     # optional sub-docs: large phases/slices extracted out
 └── <YYYY>/...             # archived efforts, dated by completion
 ```
 
 - **Slug:** kebab-case, descriptive.
+- **Decompose liberally.** The `README.md` is loaded whole every time an agent
+  resumes the effort, so keep it a navigable map. When a phase or slice grows a
+  large self-contained body (detailed sub-plan, deep design notes, its own
+  validation matrix), extract it to a sibling sub-doc (`<slug>/<phase>.md`) and
+  leave the Plan a checklist item with a one-line summary and a link. The agent
+  reads a sub-doc only when working that phase — upfront context stays small, at
+  the cost of an extra read on demand. Link out *and* back; no orphan sub-docs.
 - **Grouping (a binding — set by the addendum):**
   - *flat* — `efforts/active/<slug>/` (default; for a repo that is itself the
     primary unit of work).
