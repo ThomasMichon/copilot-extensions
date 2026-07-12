@@ -34,10 +34,11 @@ approval can only ever happen at the operator's terminal.
 
 from __future__ import annotations
 
+import time
 from threading import Lock
 from typing import Any
 
-from .events import EventLog
+from .events import EventLog, SseEvent
 
 
 def _text(value: Any) -> str | None:
@@ -240,3 +241,63 @@ class LiveEventStore:
                 log.append(event_type, payload)
                 appended += 1
         return appended
+
+
+# -- D1: read a live session's reply turn from its represented stream --------
+
+# One turn's worth of collected assistant text plus how it ended.
+TurnReply = dict[str, Any]
+
+
+async def await_turn_reply(
+    log: EventLog, *, after: int, timeout: float
+) -> TurnReply:
+    """Wait for the represented session's next reply turn, after event ``after``.
+
+    This is D1's read primitive: a message injected into a live session is
+    answered by the receiver's *ordinary* turn, which its extension mirrors into
+    the represented stream as ``agent_message`` text bounded by a
+    ``turn_complete``. We collect the assistant text produced after ``after`` up
+    to (and including) the first ``turn_complete``, then return it -- so a caller
+    ``send``-and-waits and reads the answer with no extra protocol.
+
+    Returns ``{"replied": bool, "reply": str | None, "stop_reason": str | None,
+    "last_id": int}``. On timeout ``replied`` is False and ``reply`` is whatever
+    partial assistant text (if any) had arrived -- the message still sits in the
+    durable queue regardless.
+
+    Honest limit (single-operator, deliberate use): this reads the *next* turn
+    to complete after ``after``. If an unrelated turn was already in flight when
+    the caller sent, that turn's completion is what returns first; correlating a
+    specific reply to a specific ``msg-id`` is a later refinement (the envelope
+    ``msg-id`` is the seed).
+    """
+    deadline = time.monotonic() + timeout
+    cursor = after
+    texts: list[str] = []
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        events: list[SseEvent] = await log.wait_for_events(cursor, timeout=remaining)
+        if not events:
+            break  # timed out with no new events
+        for e in events:
+            cursor = e.id
+            if e.event == "agent_message":
+                text = e.data.get("text")
+                if text:
+                    texts.append(str(text))
+            elif e.event == "turn_complete":
+                return {
+                    "replied": True,
+                    "reply": "".join(texts) or None,
+                    "stop_reason": e.data.get("stop_reason"),
+                    "last_id": cursor,
+                }
+    return {
+        "replied": False,
+        "reply": "".join(texts) or None,
+        "stop_reason": None,
+        "last_id": cursor,
+    }

@@ -30,6 +30,7 @@ from ..models import (
     SendMessageRequest,
     SendMessageResult,
 )
+from ..live_representation import await_turn_reply
 from .sessions import _sse_event_stream
 
 if TYPE_CHECKING:
@@ -241,17 +242,42 @@ async def post_live_message(
     Enqueues an attributed envelope the target session's extension polls and
     injects via ``session.send`` (as an attributed user turn). 404 if the id is
     not a registered live session -- the vision's "clear refusal when the target
-    is not serviceable". Delivery still requires the session to have opted in
-    (``/peer``); until then the message waits in the durable queue.
+    is not serviceable". Delivery is durable: the message waits in the queue
+    until the extension drains it.
+
+    When ``wait`` is set (D1), the bridge also watches the target's *represented*
+    event stream and returns the reply turn's assistant text once the next
+    ``turn_complete`` lands (or ``replied=False`` on timeout). The represented
+    head is captured **before** enqueue so the reply window starts at the moment
+    of sending.
     """
     db = _db(request)
     if db.get_live_session(session_id) is None:
         raise HTTPException(status_code=404, detail="live session not found")
+
+    after = 0
+    if body.wait:
+        store = _store(request)
+        after = store.get_or_create(session_id).latest_id
+
     message_id = db.enqueue_live_message(
         session_id, sender=body.sender, body=body.body, now=time.time(),
         reply_to=body.reply_to,
     )
-    return SendMessageResult(session_id=session_id, message_id=message_id)
+
+    if not body.wait:
+        return SendMessageResult(session_id=session_id, message_id=message_id)
+
+    store = _store(request)
+    log = store.get_or_create(session_id)
+    reply = await await_turn_reply(log, after=after, timeout=body.wait_timeout)
+    return SendMessageResult(
+        session_id=session_id,
+        message_id=message_id,
+        replied=bool(reply["replied"]),
+        reply=reply["reply"],
+        stop_reason=reply["stop_reason"],
+    )
 
 
 @router.get("/{session_id}/messages", response_model=LiveMessageListResponse)

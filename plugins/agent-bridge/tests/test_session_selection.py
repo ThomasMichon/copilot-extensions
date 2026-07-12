@@ -249,12 +249,13 @@ class _LiveFakeClient:
     def resolve_live_session(self, handle):
         return dict(self._resolved) if self._resolved else {}
 
-    def send_live_message(self, session_id, *, sender, body, reply_to=None):
+    def send_live_message(self, session_id, *, sender, body, reply_to=None,
+                          wait=False, wait_timeout=None):
         self.delivered.append(
             {"session_id": session_id, "sender": sender,
-             "body": body, "reply_to": reply_to}
+             "body": body, "reply_to": reply_to, "wait": wait}
         )
-        return {"message_id": 1}
+        return {"message_id": 1, "replied": False}
 
 
 def test_cmd_send_resolves_worktree_handle_and_delivers(monkeypatch, capsys):
@@ -265,12 +266,39 @@ def test_cmd_send_resolves_worktree_handle_and_delivers(monkeypatch, capsys):
     monkeypatch.setattr(m, "_live_reply_to", lambda args: "wt-caller")
     args = argparse.Namespace(
         target="wt-target", prompt="please rebase", new=False, json=False,
+        no_wait=True,
     )
     m._cmd_send(args)
     assert client.delivered == [
         {"session_id": "live-sess-1", "sender": "cjohnson@peer",
-         "body": "please rebase", "reply_to": "wt-caller"}
+         "body": "please rebase", "reply_to": "wt-caller", "wait": False}
     ]
+
+
+class _ReplyingLiveClient(_LiveFakeClient):
+    def send_live_message(self, session_id, *, sender, body, reply_to=None,
+                          wait=False, wait_timeout=None):
+        self.delivered.append({"wait": wait, "wait_timeout": wait_timeout})
+        return {"message_id": 7, "replied": True, "reply": "done - rebased",
+                "stop_reason": "end_turn"}
+
+
+def test_cmd_send_waits_and_prints_reply(monkeypatch, capsys):
+    # By default (no --no-wait) a live send waits for the reply turn and prints
+    # the receiver's assistant output.
+    client = _ReplyingLiveClient(resolved={"session_id": "live-sess-1"})
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_live_sender_label", lambda args: "peer")
+    monkeypatch.setattr(m, "_live_reply_to", lambda args: "wt-caller")
+    args = argparse.Namespace(
+        target="wt-target", prompt="rebase please", new=False, json=False,
+        no_wait=False, reply_timeout=90.0,
+    )
+    m._cmd_send(args)
+    assert client.delivered == [{"wait": True, "wait_timeout": 90.0}]
+    out = capsys.readouterr().out
+    assert "Reply from live-sess-1" in out
+    assert "done - rebased" in out
 
 
 def test_cmd_create_refuses_on_conflict(monkeypatch):
