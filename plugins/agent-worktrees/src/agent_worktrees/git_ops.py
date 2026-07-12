@@ -246,6 +246,15 @@ def _get_current_branch_safe(cwd: str | Path) -> str | None:
     return None if name == "HEAD" else name
 
 
+def current_branch(cwd: str | Path) -> str | None:
+    """Return the checkout's current branch name, or None if detached/unreadable.
+
+    Public wrapper over the internal helper so other modules can gate on the
+    checked-out branch without reaching into a private symbol.
+    """
+    return _get_current_branch_safe(cwd)
+
+
 def classify_worktree(
     worktree_path: str,
     branch: str,

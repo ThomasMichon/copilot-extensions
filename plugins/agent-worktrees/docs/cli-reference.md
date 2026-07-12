@@ -256,7 +256,7 @@ only -- it never rebases, merges, or discards local commits.
 | `install` | Full deploy: runtime + project config + binstubs + terminal profiles |
 | `register` | Register a new project (create config + binstub without full reinstall) |
 | `uninstall` | Remove worktree manager |
-| `update` | Re-deploy runtime from repo source + refresh marketplace plugin |
+| `update` | Re-deploy runtime from repo source + refresh marketplace plugin, then fast-forward the managed repo anchor(s) so in-repo config bindings deploy alongside the plugin (`--no-anchor-sync` to skip) |
 | `install-status` | Show installation and deployment status |
 | `deploy-instructions` | Deploy `machine.instructions.md` from `machines.yaml` |
 | `get` | Query config values (e.g., `agent-worktrees get repo-dir`) |
