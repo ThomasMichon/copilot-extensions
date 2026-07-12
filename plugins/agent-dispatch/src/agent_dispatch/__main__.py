@@ -274,8 +274,11 @@ def _simple(method: str, *arg_names: str):
 
 
 def _cmd_yield(args: argparse.Namespace) -> int:
+    worker_id = _resolve_owner(args, verb="yield")
+    if worker_id is None:
+        return 2
     with _client(args) as c:
-        return _emit(c.yield_task(args.task_id, args.worker_id, note=args.note))
+        return _emit(c.yield_task(args.task_id, worker_id, note=args.note))
 
 
 def _owner_from_identity(args: argparse.Namespace) -> str | None:
@@ -292,19 +295,43 @@ def _owner_from_identity(args: argparse.Namespace) -> str | None:
     return None
 
 
+def _resolve_owner(args: argparse.Namespace, *, verb: str) -> str | None:
+    """Resolve the acting worker's owner for a lease-holding verb.
+
+    Prefers an explicit positional ``worker_id``; otherwise composes
+    ``machine/worktree`` from the CWD identity -- the symmetry that lets an
+    embodied/taken-over worker drive its whole lifecycle
+    (``claim``/``start``/``complete``/``yield``) under its **worktree identity**
+    without typing an owner, so the task's owner stays ``machine/worktree`` and
+    live-session tracking can join it (see :mod:`tracking`). Prints guidance and
+    returns None when neither is available.
+    """
+    worker_id = getattr(args, "worker_id", None) or _owner_from_identity(args)
+    if not worker_id:
+        print(
+            f"agent-dispatch: could not resolve the owner for {verb}. Pass the "
+            f"owner positionally (`{verb} <id> <owner>`) or run inside the "
+            "owning worktree so machine/worktree resolves.",
+            file=sys.stderr,
+        )
+    return worker_id
+
+
+def _cmd_start(args: argparse.Namespace) -> int:
+    worker_id = _resolve_owner(args, verb="start")
+    if worker_id is None:
+        return 2
+    with _client(args) as c:
+        return _emit(c.start(args.task_id, worker_id))
+
+
 def _cmd_complete(args: argparse.Namespace) -> int:
     # Owner is optional: a worker that claimed under its CWD identity can
     # complete with just the task id -- we resolve the same machine/worktree
     # owner. This is what lets a taken-over successor finish a handoff task with
     # one clean command (`agent-dispatch complete <id>`) once the goal is met.
-    worker_id = args.worker_id or _owner_from_identity(args)
-    if not worker_id:
-        print(
-            "agent-dispatch: could not resolve the owner for complete. Pass the "
-            "owner positionally (`complete <id> <owner>`) or run inside the "
-            "owning worktree so machine/worktree resolves.",
-            file=sys.stderr,
-        )
+    worker_id = _resolve_owner(args, verb="complete")
+    if worker_id is None:
         return 2
     with _client(args) as c:
         return _emit(c.complete(args.task_id, worker_id, result_ref=args.result_ref))
@@ -653,15 +680,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.set_defaults(func=_cmd_worktree_status)
 
-    p = sub.add_parser("start", help="mark a claimed task started")
+    p = sub.add_parser(
+        "start", help="mark a claimed task started (identity auto-resolved from CWD)"
+    )
     p.add_argument("task_id")
-    p.add_argument("worker_id")
-    p.set_defaults(func=_simple("start", "task_id", "worker_id"))
+    p.add_argument(
+        "worker_id", nargs="?", help="owner id (default: composed from machine/worktree)"
+    )
+    p.add_argument("--machine", help="override the resolved machine (targeting identity)")
+    p.add_argument("--worktree", help="override the resolved worktree id (targeting identity)")
+    p.set_defaults(func=_cmd_start)
 
-    p = sub.add_parser("yield", help="return a held task to queued (with a note)")
+    p = sub.add_parser(
+        "yield",
+        help="return a held task to queued (with a note; identity auto-resolved)",
+    )
     p.add_argument("task_id")
-    p.add_argument("worker_id")
+    p.add_argument(
+        "worker_id", nargs="?", help="owner id (default: composed from machine/worktree)"
+    )
     p.add_argument("--note")
+    p.add_argument("--machine", help="override the resolved machine (targeting identity)")
+    p.add_argument("--worktree", help="override the resolved worktree id (targeting identity)")
     p.set_defaults(func=_cmd_yield)
 
     p = sub.add_parser("complete", help="mark a started task completed")

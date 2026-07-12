@@ -40,23 +40,34 @@ def autopilot_worker_prompt(
     it frames the session as an autonomous autopilot worker and makes explicit
     that **completing the task is its own deliberate signal that the work is
     done** -- it must not complete before the goal is met.
+
+    The worker drives its whole lifecycle under its **worktree identity**
+    (owner-less ``claim``/``start``/``complete``/``yield``, which the coordinator
+    resolves to ``<machine>/<worktree>``). That keeps the task's owner equal to
+    its worktree, so agent-bridge live-session tracking can join the task to the
+    embodied session (see :mod:`agent_dispatch.tracking`) -- a dispatched CLI
+    body is then as trackable as a headless worker. ``worker_id`` names the
+    session in the seed for legibility only.
     """
     return (
         f"You are a dispatched agent-dispatch **autopilot** worker (worker id: "
         f"{worker_id}), running in a fresh parallel worktree with tools "
         f"auto-approved (--allow-all-tools). A task has been queued for you on "
         f"the coordinator at {coordinator_url}. Work it end-to-end, "
-        f"autonomously, without waiting for a human. Steps: "
+        f"autonomously, without waiting for a human. Claim it under this "
+        f"worktree's own identity (no owner argument -- the coordinator resolves "
+        f"machine/worktree), which keeps the task trackable as your live "
+        f"session. Steps: "
         f"(1) read it with `agent-dispatch show {task_id}`; "
-        f"(2) claim it with `agent-dispatch claim {worker_id} --task {task_id}` "
+        f"(2) claim it with `agent-dispatch claim --task {task_id}` "
         f"(add `--capability <cap>` for each capability the task requires); "
-        f"(3) `agent-dispatch start {task_id} {worker_id}`, then carry out the "
+        f"(3) `agent-dispatch start {task_id}`, then carry out the "
         f"work described in the task's prompt/payload to completion; "
         f"(4) ONLY once you judge the task's goal genuinely reached, run "
-        f"`agent-dispatch complete {task_id} {worker_id} --result-ref <ref>`. "
+        f"`agent-dispatch complete {task_id} --result-ref <ref>`. "
         f"Do NOT mark it complete before the goal is met -- completing the task "
         f"is your explicit signal that the work is done. On a real blocker, "
-        f"`agent-dispatch yield {task_id} {worker_id} --note <why>` returns it "
+        f"`agent-dispatch yield {task_id} --note <why>` returns it "
         f"to the queue for a later cycle."
     )
 
