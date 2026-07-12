@@ -289,6 +289,7 @@ class SendMessageRequest(BaseModel):
     sender: str
     body: str
     reply_to: str | None = None
+    kind: str = "prompt"
     wait: bool = False
     wait_timeout: float = 120.0
 
@@ -318,6 +319,7 @@ class LiveMessage(BaseModel):
     sender: str
     body: str
     reply_to: str | None = None
+    kind: str = "prompt"
     created_at: float
 
 

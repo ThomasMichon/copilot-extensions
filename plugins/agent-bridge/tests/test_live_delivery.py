@@ -54,6 +54,14 @@ class TestLiveMessageQueue:
         assert pending[0]["reply_to"] == "alice-sess"
         assert pending[1]["reply_to"] is None
 
+    def test_enqueue_carries_kind_default_prompt(self, tmp_db: Database) -> None:
+        now = time.time()
+        tmp_db.enqueue_live_message("s", "alice", "do it", now)  # default
+        tmp_db.enqueue_live_message("s", "bob", "alive?", now, kind="status-check")
+        pending = tmp_db.list_pending_live_messages("s")
+        assert pending[0]["kind"] == "prompt"
+        assert pending[1]["kind"] == "status-check"
+
     def test_ack_empty_ids_is_noop(self, tmp_db: Database) -> None:
         assert tmp_db.ack_live_messages("s", [], now=time.time()) == 0
 
@@ -96,13 +104,48 @@ def test_migration_v7_to_v8_adds_reply_to(tmp_path: Path) -> None:
     db = Database(db_path)
     try:
         ver = db.execute_read("SELECT version FROM schema_version")[0]["version"]
-        assert ver == SCHEMA_VERSION == 8
+        assert ver == SCHEMA_VERSION
         mid = db.enqueue_live_message(
             "s", "alice", "hi", time.time(), reply_to="alice-sess"
         )
         assert mid > 0
         pending = db.list_pending_live_messages("s")
         assert pending[0]["reply_to"] == "alice-sess"
+    finally:
+        db.close()
+
+
+def test_migration_v8_to_v9_adds_kind(tmp_path: Path) -> None:
+    """A pre-v9 database bumps to v9 with a usable live_messages.kind (D2)."""
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        "CREATE TABLE schema_version (version INTEGER NOT NULL);"
+        "INSERT INTO schema_version (version) VALUES (8);"
+        "CREATE TABLE live_messages ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,"
+        " sender TEXT NOT NULL, body TEXT NOT NULL, reply_to TEXT,"
+        " created_at REAL NOT NULL, delivered_at REAL);"
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(db_path)
+    try:
+        ver = db.execute_read("SELECT version FROM schema_version")[0]["version"]
+        assert ver == SCHEMA_VERSION
+        # a pre-existing row (no kind) reads back as the default 'prompt'
+        db.execute_write(
+            "INSERT INTO live_messages (session_id, sender, body, created_at) "
+            "VALUES ('s', 'old', 'legacy', ?)", (time.time(),)
+        )
+        mid = db.enqueue_live_message(
+            "s", "alice", "ping", time.time(), kind="status-check"
+        )
+        assert mid > 0
+        pending = db.list_pending_live_messages("s")
+        assert pending[0]["kind"] == "prompt"       # legacy row default
+        assert pending[1]["kind"] == "status-check"  # explicit kind persisted
     finally:
         db.close()
 
@@ -182,3 +225,23 @@ def test_messages_are_ordered_oldest_first(client: TestClient) -> None:
     ]
     listed = client.get("/api/v1/live-sessions/cli-1/messages").json()["messages"]
     assert [m["id"] for m in listed] == ids
+
+
+def test_message_carries_kind_over_route(client: TestClient) -> None:
+    _register(client)
+    client.post(
+        "/api/v1/live-sessions/cli-1/messages",
+        json={"sender": "peer", "body": "status?", "kind": "status-check"},
+    )
+    listed = client.get("/api/v1/live-sessions/cli-1/messages").json()["messages"]
+    assert listed[0]["kind"] == "status-check"
+
+
+def test_message_kind_defaults_to_prompt_over_route(client: TestClient) -> None:
+    _register(client)
+    client.post(
+        "/api/v1/live-sessions/cli-1/messages",
+        json={"sender": "peer", "body": "do the thing"},
+    )
+    listed = client.get("/api/v1/live-sessions/cli-1/messages").json()["messages"]
+    assert listed[0]["kind"] == "prompt"

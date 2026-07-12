@@ -265,12 +265,25 @@ function escAttr(v) {
     .replace(/>/g, "&gt;");
 }
 
+// A non-`prompt` kind (D2) asks only for a terse out-of-band acknowledgement --
+// it must NOT be treated as new work. The guidance line makes that explicit to
+// the receiving agent so a status ping doesn't spawn a task.
+const KIND_GUIDANCE = {
+  notify: "This is a NOTIFY (informational). No reply or new work is expected; " +
+    "acknowledge only if useful.",
+  "status-check": "This is a STATUS-CHECK. Answer tersely via `agent-bridge " +
+    "send <reply-to> \"...\"`; do NOT treat it as new work or start a task.",
+};
+
 function renderDeliveredPrompt(msg) {
+  const kind = msg.kind && msg.kind !== "prompt" ? String(msg.kind) : null;
   const attrs = [`from="${escAttr(msg.sender || "unknown")}"`];
   if (msg.reply_to) attrs.push(`reply-to="${escAttr(msg.reply_to)}"`);
   if (typeof msg.id === "number") attrs.push(`msg-id="${msg.id}"`);
+  if (kind) attrs.push(`kind="${escAttr(kind)}"`);
   const body = String(msg.body ?? "");
-  return `<agent-message ${attrs.join(" ")}>\n${body}\n</agent-message>`;
+  const guidance = kind && KIND_GUIDANCE[kind] ? `\n\n(${KIND_GUIDANCE[kind]})` : "";
+  return `<agent-message ${attrs.join(" ")}>\n${body}${guidance}\n</agent-message>`;
 }
 
 // Poll the bridge inbox and deliver pending messages into THIS session via
