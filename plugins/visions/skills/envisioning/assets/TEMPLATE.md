@@ -39,7 +39,15 @@
 <!-- The high-level mental model: the major concepts and components the subject
      is composed of, and how they relate. This is the map, not the blueprint —
      name the parts and their roles, not their implementation. For a BRANCH
-     vision, this is largely a description of (and links to) child visions. -->
+     vision, this is largely a description of (and links to) child visions.
+
+     DECOMPOSE LIBERALLY: keep this README a lean map. When a component here is
+     really its own subject, or a §Features/§Behaviors area below grows large,
+     push that detail DOWN into a child (leaf) vision and link it from here with
+     a one-line summary — don't absorb it inline. A branch README loads whole
+     when read, so breadth of linked child visions beats depth in one file;
+     agents follow a child link only when their task needs that subtree. Link
+     out and back; no orphan visions. -->
 
 ## Features
 

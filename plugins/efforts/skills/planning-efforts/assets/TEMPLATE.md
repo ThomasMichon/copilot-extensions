@@ -73,6 +73,14 @@
 
 <!-- The implementation plan, in phases. Use checklists so progress is visible
      and a fresh agent can resume. Exploration items are fine ("- [ ] Locate X").
+
+     DECOMPOSE LIBERALLY: this README is loaded whole every time the effort is
+     resumed, so keep it a map. When a phase or slice grows a big self-contained
+     body (a detailed sub-plan, deep design notes, its own validation matrix),
+     extract it to a sibling sub-doc (efforts/active/<slug>/<phase>.md) and leave
+     a checklist item here with a one-line summary and a link. Link back from the
+     sub-doc; no orphans. The agent then reads a phase's detail only when working
+     it, keeping upfront context small.
 -->
 
 ### Phase 1 — <name>

@@ -189,6 +189,16 @@ visions/
 - **Unit:** folder-per-vision, each a `README.md`. A **branch** folder's README
   is a higher-level (abstract) vision that links its children; a **leaf** README
   is a concrete component vision. **Depth = specificity.**
+- **Decompose liberally — breadth of linked visions over depth in one file.** A
+  vision README is loaded whole when read, so a sprawling one taxes every session
+  that opens it. When a §Features or §Behaviors section grows large, or a
+  component under Concepts & Components is really its own subject, push that detail
+  **down into a child leaf vision** and link it from the parent with a one-line
+  summary — the parent stays a map, the child holds the concrete intent. An agent
+  then follows a child link only when its task needs that subtree, keeping upfront
+  context small (the trade is an extra read on demand). Link out *and* back; no
+  orphan visions. This is the branch/leaf expression of the same decompose-liberally
+  bias docs and efforts follow.
 - **Organization (a binding — set by the addendum):** the plugin does **not**
   mandate a top-level hierarchy. A repo may mirror its code layout
   (`visions/services/<name>/`), organize by product, or by domain. Whatever the

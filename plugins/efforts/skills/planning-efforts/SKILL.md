@@ -84,6 +84,15 @@ files in this repo.**
 
 - Fill **Context** (background + sourced issues/plans), **Plan** (phased,
   checklisted), and **Validation Plan**.
+- **Decompose large phases/slices into linked sub-docs.** The README is loaded
+  whole every time an agent resumes the effort, so keep it a navigable map. When a
+  phase or slice grows a big self-contained body — a detailed sub-plan, deep design
+  notes, its own validation matrix — extract it to a sibling sub-doc
+  (`efforts/active/<slug>/<phase>.md`) and leave the Plan a checklist item with a
+  one-line summary and a link. The agent reads the sub-doc **only when working that
+  phase**, cutting upfront context (the trade is an extra read on demand). Link out
+  *and* back; no orphan sub-docs. This is the same *decompose-liberally* bias docs
+  and visions follow.
 - **Be validation-driven:** every effort carries an implementation plan *and* a
   validation/test plan. An effort may *start* as a pure reproduction — a
   failing validation captured first, fix to follow.
@@ -200,3 +209,6 @@ work that's already committed, so:
   record a PR only once it has merged.
 - ❌ Thrashing the effort with a PR per checkbox — batch edits to direction
   changes, phase boundaries, or commits that need pushing anyway.
+- ❌ Letting the README balloon with every phase's full detail inline — extract
+  large phases/slices to linked sibling sub-docs (`<slug>/<phase>.md`) and keep the
+  Plan a map, so a resuming agent loads only the phase it is working.
