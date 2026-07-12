@@ -40,6 +40,20 @@ class TestLiveSessionCRUD:
         assert row["status"] == "live"
         assert row["registered_at"] == now
 
+    def test_register_carries_driven_by(self, tmp_db: Database) -> None:
+        now = time.time()
+        tmp_db.register_live_session(
+            "cli-d", machine=None, cwd=None, worktree_id="wt-d", repo=None,
+            branch=None, pid=None, role=None, now=now, driven_by="orchestrator",
+        )
+        assert tmp_db.get_live_session("cli-d")["driven_by"] == "orchestrator"
+        # default is NULL for an operator-launched session
+        tmp_db.register_live_session(
+            "cli-o", machine=None, cwd=None, worktree_id="wt-o", repo=None,
+            branch=None, pid=None, role=None, now=now,
+        )
+        assert tmp_db.get_live_session("cli-o")["driven_by"] is None
+
     def test_register_is_upsert_refreshing_updated_at(self, tmp_db: Database) -> None:
         tmp_db.register_live_session(
             "cli-1", machine="m", cwd=None, worktree_id=None, repo=None,
@@ -171,6 +185,37 @@ def test_migration_v5_to_v6_adds_live_sessions(tmp_path: Path) -> None:
         db.close()
 
 
+def test_migration_v9_to_v10_adds_driven_by(tmp_path: Path) -> None:
+    """A pre-v10 database bumps to v10 with a usable live_sessions.driven_by (D4)."""
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(db_path)
+    # Seed a pre-v10 live_sessions table WITHOUT driven_by; the migration adds it.
+    conn.executescript(
+        "CREATE TABLE schema_version (version INTEGER NOT NULL);"
+        "INSERT INTO schema_version (version) VALUES (9);"
+        "CREATE TABLE live_sessions ("
+        " session_id TEXT PRIMARY KEY, machine TEXT, cwd TEXT, worktree_id TEXT,"
+        " repo TEXT, branch TEXT, pid INTEGER, role TEXT,"
+        " status TEXT NOT NULL DEFAULT 'live', registered_at REAL NOT NULL,"
+        " updated_at REAL NOT NULL);"
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(db_path)
+    try:
+        ver = db.execute_read("SELECT version FROM schema_version")[0]["version"]
+        assert ver == SCHEMA_VERSION
+        db.register_live_session(
+            "s", machine="m", cwd=None, worktree_id=None, repo=None,
+            branch=None, pid=None, role=None, now=time.time(),
+            driven_by="orchestrator",
+        )
+        assert db.get_live_session("s")["driven_by"] == "orchestrator"
+    finally:
+        db.close()
+
+
 # -- Route layer ------------------------------------------------------------
 
 
@@ -229,6 +274,23 @@ def test_route_resolve_by_handle(client: TestClient) -> None:
         "/api/v1/live-sessions/resolve", params={"handle": "nope"}
     )
     assert missing.status_code == 404
+
+
+def test_route_driven_by_surfaces(client: TestClient) -> None:
+    # D4: an embodied session registers who's driving; the bridge surfaces it so
+    # Neuron Forge shows the "driven by <agent>" banner on takeover.
+    r = client.post(
+        "/api/v1/live-sessions",
+        json={"session_id": "cli-d", "worktree_id": "wt-1",
+              "driven_by": "orchestrator"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["driven_by"] == "orchestrator"
+    got = client.get("/api/v1/live-sessions/cli-d").json()
+    assert got["driven_by"] == "orchestrator"
+    # operator-launched session has no driver
+    client.post("/api/v1/live-sessions", json={"session_id": "cli-o"})
+    assert client.get("/api/v1/live-sessions/cli-o").json()["driven_by"] is None
 
 
 def test_route_register_is_heartbeat_upsert(client: TestClient) -> None:

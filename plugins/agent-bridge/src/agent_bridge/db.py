@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # A live interactive session is kept alive by the extension's 30s heartbeat
 # (HEARTBEAT_MS in extension.mjs). A row whose ``updated_at`` is older than this
@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS live_sessions (
     branch TEXT,
     pid INTEGER,
     role TEXT,
+    driven_by TEXT,
     status TEXT NOT NULL DEFAULT 'live',
     registered_at REAL NOT NULL,
     updated_at REAL NOT NULL
@@ -463,6 +464,21 @@ class Database:
             conn.commit()
             log.info("Schema migrated to version 9: live_messages.kind")
 
+        if from_version < 10:
+            # v9 -> v10: add `driven_by` to live_sessions (D4). Names the agent
+            # steering an agent-owned CLI session (the "driven by <agent>"
+            # banner) so a human dropping in via Neuron Forge sees who's at the
+            # wheel. NULL for an operator-launched session.
+            cols = [
+                r[1]
+                for r in conn.execute("PRAGMA table_info(live_sessions)").fetchall()
+            ]
+            if "driven_by" not in cols:
+                conn.execute("ALTER TABLE live_sessions ADD COLUMN driven_by TEXT")
+            conn.execute("UPDATE schema_version SET version=?", (10,))
+            conn.commit()
+            log.info("Schema migrated to version 10: live_sessions.driven_by")
+
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
         conn = self._get_conn()
@@ -583,19 +599,22 @@ class Database:
         pid: int | None,
         role: str | None,
         now: float,
+        driven_by: str | None = None,
     ) -> None:
         """Insert or refresh a live interactive-session registration (upsert)."""
         self.execute_write(
             "INSERT INTO live_sessions (session_id, machine, cwd, worktree_id, "
-            "repo, branch, pid, role, status, registered_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ?) "
+            "repo, branch, pid, role, driven_by, status, registered_at, "
+            "updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ?) "
             "ON CONFLICT(session_id) DO UPDATE SET "
             "machine=excluded.machine, cwd=excluded.cwd, "
             "worktree_id=excluded.worktree_id, repo=excluded.repo, "
             "branch=excluded.branch, pid=excluded.pid, role=excluded.role, "
+            "driven_by=excluded.driven_by, "
             "status='live', updated_at=excluded.updated_at",
             (session_id, machine, cwd, worktree_id, repo, branch, pid, role,
-             now, now),
+             driven_by, now, now),
         )
 
     def deregister_live_session(self, session_id: str) -> None:

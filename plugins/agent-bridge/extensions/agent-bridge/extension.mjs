@@ -171,6 +171,11 @@ function resolveMetadata() {
     // copilot PID. The durable key is session_id; liveness is heartbeat-based.
     pid: process.pid,
     role: null,
+    // D4: who is steering this session, if an agent embodied it (set by
+    // `agent-worktrees embody --driver`). Surfaces the "driven by <agent>"
+    // banner so a human dropping in via Neuron Forge sees who's at the wheel.
+    // Absent/null for an operator-launched session.
+    driven_by: process.env.AGENT_BRIDGE_DRIVEN_BY || null,
   };
 }
 

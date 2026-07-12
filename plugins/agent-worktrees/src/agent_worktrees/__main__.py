@@ -1000,6 +1000,11 @@ def cmd_embody(args: argparse.Namespace) -> int:
 
     launch_cmd = _build_launch_cmd(config, args, work_dir)
     env = _build_env(None, _repo_session_env(config, work_dir))
+    # D4: stamp the driver so the embodied session registers a "driven by
+    # <agent>" banner (legible when a human takes it over in Neuron Forge).
+    driver = getattr(args, "driver", None)
+    if driver:
+        env["AGENT_BRIDGE_DRIVEN_BY"] = driver
     result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
     if not result.get("ok"):
         return _json_error(
@@ -1031,6 +1036,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         "created": True,
         "resumed": False,
         "new_pane": new_pane,
+        "driven_by": driver,
         "seeded": bool(seed_result.get("sent")) if seed else False,
         "seed_ready": bool(seed_result.get("ready")) if seed else False,
         "mux_verified": verified,
@@ -7690,6 +7696,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", default=None,
                    help="Seed prompt injected as the session's first "
                         "interactive turn once Copilot is ready")
+    p.add_argument("--driver", default=None,
+                   help="Label of the agent steering this session; stamps the "
+                        "'driven by <agent>' banner (AGENT_BRIDGE_DRIVEN_BY) so "
+                        "a human taking over in Neuron Forge sees who's at the "
+                        "wheel")
     p.add_argument("--verify-timeout", dest="verify_timeout", type=float,
                    default=0.0, metavar="SECONDS",
                    help="Wait up to N seconds for the mux session to come up "

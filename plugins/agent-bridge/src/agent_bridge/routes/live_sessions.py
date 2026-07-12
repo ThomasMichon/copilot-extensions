@@ -78,6 +78,7 @@ def _to_info(row: dict[str, Any]) -> LiveSessionInfo:
         branch=row.get("branch"),
         pid=row.get("pid"),
         role=row.get("role"),
+        driven_by=row.get("driven_by"),
         status=row.get("status") or "live",
         registered_at=row["registered_at"],
         updated_at=row["updated_at"],
@@ -104,6 +105,7 @@ async def register_live_session(
         branch=body.branch,
         pid=body.pid,
         role=body.role,
+        driven_by=body.driven_by,
         now=now,
     )
     row = db.get_live_session(body.session_id)
