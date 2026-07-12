@@ -114,6 +114,23 @@ class PRProvider(Protocol):
         """
         ...
 
+    def add_label(
+        self, repo: str, number: int, label: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        """Attach ``label`` to an existing PR; return "" on success.
+
+        The merge-consent primitive behind ``pr-merge`` (applying the facility
+        ``automerge_label``).  Returns a human-readable error string on failure.
+        """
+        ...
+
+    def list_open_pulls(
+        self, repo: str, *, api_base: str = "", token: str | None = None
+    ) -> tuple[int, ...]:
+        """Return the numbers of every open PR on ``repo`` (for the sweep mode)."""
+        ...
+
 
 def _unsupported_snapshot(name: str) -> PRSnapshot:
     raise ProviderError(

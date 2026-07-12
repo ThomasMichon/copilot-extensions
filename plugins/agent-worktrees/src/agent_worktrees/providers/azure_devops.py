@@ -128,3 +128,21 @@ class AzureDevOpsProvider:
         from .base import _unsupported_snapshot
         _ = (repo, number, api_base, token)
         return _unsupported_snapshot(self.name)
+
+    def add_label(
+        self, repo: str, number: int, label: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        """Not implemented: pr-merge label-apply is gitea-only today."""
+        _ = (repo, number, label, api_base, token)
+        return f"add_label is not supported for {self.name} provider"
+
+    def list_open_pulls(
+        self, repo: str, *, api_base: str = "", token: str | None = None
+    ) -> tuple[int, ...]:
+        """Not implemented: pr-merge sweep is gitea-only today."""
+        _ = (repo, api_base, token)
+        raise ProviderError(
+            f"Provider '{self.name}' does not support listing open PRs "
+            "(pr-merge --all is gitea-only today)."
+        )
