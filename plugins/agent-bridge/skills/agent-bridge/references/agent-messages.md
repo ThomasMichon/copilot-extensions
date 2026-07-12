@@ -11,14 +11,17 @@ A delivered message looks like this (a marker in the same family as the runtime'
 `<system_reminder>` / `<system_notification>`):
 
 ```
-<agent-message from="cjohnson@orchestrator" reply-to="81ec1b77-…" msg-id="2">
+<agent-message from="cjohnson@orchestrator" reply-to="lambda-core-wsl-20260710-200009-ffc8" msg-id="2">
 …the actual message body…
 </agent-message>
 ```
 
 - `from` — a human-readable label for who sent it (attribution, not routing).
-- `reply-to` — the **routable session id** to answer. May be absent (then the
-  sender is not itself a live session and cannot receive a reply).
+- `reply-to` — the **routable handle** to answer. Usually a **worktree handle**
+  (an agent is a series of sessions in one worktree, so the handle survives a
+  handoff — the bridge resolves it to whichever session is live now); it may
+  instead be a bare session id. May be absent (then the sender is not itself a
+  live session and cannot receive a reply).
 - `msg-id` — the sender's message id, useful as a correlation reference.
 
 When you see an `<agent-message>` turn: it came from **another agent via the
@@ -35,17 +38,19 @@ any agent** — no special tool:
 agent-bridge send <reply-to> "your reply text"
 ```
 
-`agent-bridge send` recognizes that `<reply-to>` is a live interactive session and
-delivers your message into it (rather than treating it as a spawned agent). Your
-own identity and session are attached automatically as the new envelope's `from`
-and `reply-to`, so the other agent can answer you back — a full peer conversation
-over warm context, no cold sub-agent, no operator relay.
+`agent-bridge send` recognizes that `<reply-to>` is a live interactive session
+(by session id or worktree handle) and delivers your message into it (rather than
+treating it as a spawned agent). Your own identity and **worktree handle** are
+attached automatically as the new envelope's `from` and `reply-to`, so the other
+agent can answer you back — even after you hand off to a fresh session in the same
+worktree — a full peer conversation over warm context, no cold sub-agent, no
+operator relay.
 
 Optional flags:
 
 - `--from "<label>"` — override the attribution label.
-- `--reply-to <session-id>` — override the address a reply should target
-  (defaults to your own session).
+- `--reply-to <handle>` — override the address a reply should target (a worktree
+  handle or a session id; defaults to your own worktree handle).
 
 ## Notes
 

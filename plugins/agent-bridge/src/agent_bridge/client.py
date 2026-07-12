@@ -336,6 +336,25 @@ class BridgeClient:
                 return {}
             raise
 
+    def resolve_live_session(self, handle: str) -> dict[str, Any]:
+        """GET /api/v1/live-sessions/resolve?handle=...; {} if unresolvable.
+
+        Resolves a handle (an exact ``session_id`` OR a **worktree handle**) to
+        its current live session -- the D3 addressing primitive that lets a peer
+        address an agent by worktree and reach whichever session is live now, so
+        ``reply-to`` survives a handoff. Used by ``send`` to detect a live target
+        (worktree handle or session id) before falling back to an ACP agent.
+        """
+        try:
+            return self._request(
+                "GET", "/api/v1/live-sessions/resolve",
+                params={"handle": handle},
+            ) or {}
+        except BridgeClientError as exc:
+            if exc.status == 404:
+                return {}
+            raise
+
     def send_live_message(
         self, session_id: str, *, sender: str, body: str,
         reply_to: str | None = None,

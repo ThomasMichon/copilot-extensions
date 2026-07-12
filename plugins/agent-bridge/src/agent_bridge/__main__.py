@@ -1016,9 +1016,12 @@ def _cmd_send(args: argparse.Namespace) -> None:
     # Interactive-CLI target -> deliver via the live-session message queue
     # (attributed + answerable envelope), not the ACP turn path. This is how a
     # peer/callback message reaches a human-attached session, and how an agent
-    # replies to one (`agent-bridge send <reply-to> "..."`).
-    if client.get_live_session(target):
-        _deliver_to_live_session(client, args, target, prompt)
+    # replies to one (`agent-bridge send <reply-to> "..."`). The target may be
+    # an exact session id OR a **worktree handle** (D3): the bridge resolves the
+    # handle to whichever session is live now, so a reply survives a handoff.
+    live = client.resolve_live_session(target)
+    if live:
+        _deliver_to_live_session(client, args, live["session_id"], prompt)
         return
 
     caller_id = _caller_id_for(args)
@@ -1039,13 +1042,40 @@ def _cmd_send(args: argparse.Namespace) -> None:
     _submit_and_stream(client, args, session_id, prompt, caller_id=caller_id)
 
 
-def _live_reply_to(args: argparse.Namespace) -> str | None:
-    """The routable address a reply should target: this caller's own session.
+def _caller_worktree_handle() -> str | None:
+    """This caller's **worktree handle** -- the durable, handoff-surviving id.
 
-    ``--reply-to`` wins; else the caller's own session id from the environment
-    (``AGENT_BRIDGE_SESSION_ID`` for a bridge-owned agent, ``SESSION_ID`` for an
-    interactive CLI session). None when the sender is not itself a live session
-    (e.g. a one-off script) -- the message is still delivered, just not
+    An agent is a *series of sessions in one worktree*; the worktree handle
+    (``basename`` of ``agent-worktrees get worktree-dir``, matching the
+    ``worktree_id`` the extension registers) names the agent across all its
+    sessions. Using it as ``reply-to`` means a reply routes to whichever session
+    is live *now*, even after the original session was handed off. None when the
+    caller is not inside a worktree (e.g. a bridge-owned agent or a one-off
+    script).
+    """
+    import os as _os
+
+    wt_dir = _worktrees_get("worktree-dir")
+    if not wt_dir:
+        return None
+    return _os.path.basename(wt_dir.rstrip("/")) or None
+
+
+def _live_reply_to(args: argparse.Namespace) -> str | None:
+    """The routable address a reply should target -- a **worktree handle** by
+    default, so the reply survives a handoff.
+
+    Precedence:
+      1. explicit ``--reply-to`` (an operator/caller override wins);
+      2. the caller's **worktree handle** (durable across handoffs; the bridge
+         resolves it to the currently-live session) -- this is the D3 fix for
+         the dev130 bug where a bash-tool subprocess had no ``SESSION_ID`` env,
+         so ``reply_to`` came back None and the reply couldn't route;
+      3. else the caller's own session id from the environment
+         (``AGENT_BRIDGE_SESSION_ID`` for a bridge-owned agent, ``SESSION_ID``
+         for an interactive CLI session) -- an ephemeral fallback for callers
+         outside any worktree.
+    None when none of these resolve; the message is still delivered, just not
     round-trippable.
     """
     import os as _os
@@ -1053,6 +1083,9 @@ def _live_reply_to(args: argparse.Namespace) -> str | None:
     explicit = getattr(args, "reply_to", None)
     if explicit:
         return explicit
+    handle = _caller_worktree_handle()
+    if handle:
+        return handle
     return _os.environ.get("AGENT_BRIDGE_SESSION_ID") or _os.environ.get("SESSION_ID")
 
 
@@ -2441,7 +2474,11 @@ def main(argv: list[str] | None = None) -> None:
         "send", help="Send a prompt to an agent or session (reuses/resumes "
         "this caller's existing session)"
     )
-    send_p.add_argument("target", help="Agent name or session ID")
+    send_p.add_argument(
+        "target",
+        help="Agent name, session ID, or a live session's worktree handle "
+             "(a worktree handle resolves to whichever session is live now)",
+    )
     send_p.add_argument("prompt", help="Prompt text to send")
     send_p.add_argument(
         "--sender", "--from", dest="sender", default=None,
@@ -2450,9 +2487,10 @@ def main(argv: list[str] | None = None) -> None:
     )
     send_p.add_argument(
         "--reply-to", dest="reply_to", default=None,
-        help="Routable session id a reply should target when delivering to a "
-             "live session (default: this caller's own session from the "
-             "environment). Rendered as the envelope's reply-to.",
+        help="Routable handle a reply should target when delivering to a live "
+             "session -- a worktree handle (survives handoff) or a session id "
+             "(default: this caller's own worktree handle, else its session id "
+             "from the environment). Rendered as the envelope's reply-to.",
     )
     send_p.add_argument(
         "--no-wait", action="store_true",

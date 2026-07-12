@@ -84,6 +84,64 @@ class TestLiveSessionCRUD:
         tmp_db.deregister_live_session("a")
 
 
+# -- D3 addressing: resolve a handle -> current live session ----------------
+
+
+class TestResolveLiveSession:
+    def test_exact_session_id_wins(self, tmp_db: Database) -> None:
+        now = time.time()
+        tmp_db.register_live_session(
+            "sess-1", machine=None, cwd=None, worktree_id="wt-1", repo=None,
+            branch=None, pid=None, role=None, now=now,
+        )
+        row = tmp_db.resolve_live_session("sess-1", now=now)
+        assert row is not None and row["session_id"] == "sess-1"
+
+    def test_worktree_handle_resolves_to_session(self, tmp_db: Database) -> None:
+        now = time.time()
+        tmp_db.register_live_session(
+            "sess-1", machine=None, cwd=None, worktree_id="wt-abc", repo=None,
+            branch=None, pid=None, role=None, now=now,
+        )
+        row = tmp_db.resolve_live_session("wt-abc", now=now)
+        assert row is not None and row["session_id"] == "sess-1"
+
+    def test_worktree_handle_picks_freshest_session(self, tmp_db: Database) -> None:
+        # Two sessions in the same worktree (a handoff: old + new). The freshest
+        # heartbeat wins, so a reply routes to the live successor, not the corpse.
+        tmp_db.register_live_session(
+            "old", machine=None, cwd=None, worktree_id="wt", repo=None,
+            branch=None, pid=None, role=None, now=1000.0,
+        )
+        tmp_db.register_live_session(
+            "new", machine=None, cwd=None, worktree_id="wt", repo=None,
+            branch=None, pid=None, role=None, now=2000.0,
+        )
+        row = tmp_db.resolve_live_session("wt", now=2001.0)
+        assert row is not None and row["session_id"] == "new"
+
+    def test_stale_worktree_rows_are_excluded(self, tmp_db: Database) -> None:
+        # A predecessor that stopped heartbeating (>stale window) is not picked.
+        tmp_db.register_live_session(
+            "dead", machine=None, cwd=None, worktree_id="wt", repo=None,
+            branch=None, pid=None, role=None, now=1000.0,
+        )
+        assert tmp_db.resolve_live_session("wt", now=1000.0 + 1000.0) is None
+
+    def test_exact_id_bypasses_staleness(self, tmp_db: Database) -> None:
+        # An exact session-id delivery still resolves even if stale: the durable
+        # message queue waits, so direct-id delivery keeps its dev130 behavior.
+        tmp_db.register_live_session(
+            "sess-1", machine=None, cwd=None, worktree_id="wt", repo=None,
+            branch=None, pid=None, role=None, now=1000.0,
+        )
+        row = tmp_db.resolve_live_session("sess-1", now=1000.0 + 9999.0)
+        assert row is not None and row["session_id"] == "sess-1"
+
+    def test_unknown_handle_returns_none(self, tmp_db: Database) -> None:
+        assert tmp_db.resolve_live_session("nope", now=time.time()) is None
+
+
 # -- Migration --------------------------------------------------------------
 
 
@@ -149,6 +207,28 @@ def test_route_register_list_get_deregister(client: TestClient) -> None:
     assert client.get("/api/v1/live-sessions/cli-1").status_code == 404
     # idempotent deregister
     assert client.delete("/api/v1/live-sessions/cli-1").status_code == 200
+
+
+def test_route_resolve_by_handle(client: TestClient) -> None:
+    # A worktree handle resolves to its live session; /resolve is matched before
+    # the /{session_id} path param (no collision).
+    client.post(
+        "/api/v1/live-sessions",
+        json={"session_id": "sess-1", "worktree_id": "wt-1"},
+    )
+    by_wt = client.get("/api/v1/live-sessions/resolve", params={"handle": "wt-1"})
+    assert by_wt.status_code == 200, by_wt.text
+    assert by_wt.json()["session_id"] == "sess-1"
+
+    by_id = client.get(
+        "/api/v1/live-sessions/resolve", params={"handle": "sess-1"}
+    )
+    assert by_id.status_code == 200 and by_id.json()["session_id"] == "sess-1"
+
+    missing = client.get(
+        "/api/v1/live-sessions/resolve", params={"handle": "nope"}
+    )
+    assert missing.status_code == 404
 
 
 def test_route_register_is_heartbeat_upsert(client: TestClient) -> None:

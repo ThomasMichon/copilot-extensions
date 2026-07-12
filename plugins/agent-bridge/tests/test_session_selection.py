@@ -207,6 +207,72 @@ def test_cmd_send_rejects_new_flag():
     assert ei.value.code == 2
 
 
+# -- D3: worktree-handle addressing + reply-to ------------------------------
+
+
+def test_live_reply_to_prefers_explicit(monkeypatch):
+    monkeypatch.setattr(m, "_worktrees_get", lambda key: "/home/x/wt-cwd")
+    monkeypatch.setenv("SESSION_ID", "env-sess")
+    args = argparse.Namespace(reply_to="explicit-handle")
+    assert m._live_reply_to(args) == "explicit-handle"
+
+
+def test_live_reply_to_uses_worktree_handle(monkeypatch):
+    # The durable, handoff-surviving address is the worktree handle (basename of
+    # the worktree dir) -- preferred over the ephemeral env session id.
+    monkeypatch.setattr(
+        m, "_worktrees_get",
+        lambda key: "/home/x/src/.worktrees/repo/wt-abc" if key == "worktree-dir" else None,
+    )
+    monkeypatch.setenv("SESSION_ID", "env-sess")
+    args = argparse.Namespace(reply_to=None)
+    assert m._live_reply_to(args) == "wt-abc"
+
+
+def test_live_reply_to_falls_back_to_env_session(monkeypatch):
+    # Outside any worktree (e.g. a bridge-owned agent), fall back to the session
+    # id from the environment.
+    monkeypatch.setattr(m, "_worktrees_get", lambda key: None)
+    monkeypatch.delenv("AGENT_BRIDGE_SESSION_ID", raising=False)
+    monkeypatch.setenv("SESSION_ID", "env-sess")
+    args = argparse.Namespace(reply_to=None)
+    assert m._live_reply_to(args) == "env-sess"
+
+
+class _LiveFakeClient:
+    """Stand-in exercising the live-session delivery path of `send`."""
+
+    def __init__(self, resolved):
+        self._resolved = resolved
+        self.delivered: list[dict] = []
+
+    def resolve_live_session(self, handle):
+        return dict(self._resolved) if self._resolved else {}
+
+    def send_live_message(self, session_id, *, sender, body, reply_to=None):
+        self.delivered.append(
+            {"session_id": session_id, "sender": sender,
+             "body": body, "reply_to": reply_to}
+        )
+        return {"message_id": 1}
+
+
+def test_cmd_send_resolves_worktree_handle_and_delivers(monkeypatch, capsys):
+    # `send <worktree-handle>` resolves to the live session and delivers there.
+    client = _LiveFakeClient(resolved={"session_id": "live-sess-1"})
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_live_sender_label", lambda args: "cjohnson@peer")
+    monkeypatch.setattr(m, "_live_reply_to", lambda args: "wt-caller")
+    args = argparse.Namespace(
+        target="wt-target", prompt="please rebase", new=False, json=False,
+    )
+    m._cmd_send(args)
+    assert client.delivered == [
+        {"session_id": "live-sess-1", "sender": "cjohnson@peer",
+         "body": "please rebase", "reply_to": "wt-caller"}
+    ]
+
+
 def test_cmd_create_refuses_on_conflict(monkeypatch):
     client = FakeClient(
         sessions=[], agents=["codespace:cs"], conflict_sid="s9",

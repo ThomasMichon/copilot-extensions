@@ -14,6 +14,15 @@ from typing import Any
 log = logging.getLogger("agent-bridge")
 
 SCHEMA_VERSION = 8
+
+# A live interactive session is kept alive by the extension's 30s heartbeat
+# (HEARTBEAT_MS in extension.mjs). A row whose ``updated_at`` is older than this
+# window has missed several heartbeats and is treated as dead when *resolving* a
+# worktree handle to its current session -- so a handoff's stale predecessor row
+# is never picked over the live successor. Generous (4 missed beats) to tolerate
+# a briefly-busy event loop.
+LIVE_SESSION_STALE_SECONDS = 120.0
+
 _EVENT_BATCH_MAX = 256
 _EVENT_BATCH_WINDOW_SECS = 0.05
 _EVENT_WRITE_SENTINEL = object()
@@ -601,7 +610,44 @@ class Database:
             )
         return [dict(r) for r in rows]
 
-    # -- Live-message delivery queue (Phase 2 write path) --------------------
+    def resolve_live_session(
+        self,
+        handle: str,
+        *,
+        now: float,
+        stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
+    ) -> dict[str, Any] | None:
+        """Resolve a *handle* -> its current live session row (or None).
+
+        A handle is either an exact ``session_id`` or a **worktree handle**
+        (``worktree_id``). This is the load-bearing addressing primitive for
+        D3: an agent is a *series of sessions in one worktree*, so peers address
+        it by worktree handle and the bridge resolves that to whichever session
+        is live *right now* -- so identity and ``reply-to`` survive a handoff.
+
+        Precedence:
+          1. exact ``session_id`` match (returned regardless of freshness, to
+             preserve direct-id delivery; a durable message queue waits for the
+             session either way);
+          2. else the **freshest non-stale** row whose ``worktree_id`` equals
+             the handle (``updated_at`` within ``stale_seconds``). A handoff's
+             abandoned predecessor row (no longer heartbeating) is excluded, so
+             the live successor wins even before any reaper removes the corpse.
+
+        Returns None when the handle is neither a known session id nor a
+        currently-live worktree.
+        """
+        exact = self.get_live_session(handle)
+        if exact is not None:
+            return exact
+        cutoff = now - stale_seconds
+        rows = self.execute_read(
+            "SELECT * FROM live_sessions "
+            "WHERE worktree_id=? AND updated_at>=? "
+            "ORDER BY updated_at DESC LIMIT 1",
+            (handle, cutoff),
+        )
+        return dict(rows[0]) if rows else None
     # Messages posted INTO a live interactive session. Durable (persisted so a
     # zero-downtime cutover doesn't drop an undelivered message); the extension
     # polls pending rows, calls session.send, then acks -- at-least-once, with
