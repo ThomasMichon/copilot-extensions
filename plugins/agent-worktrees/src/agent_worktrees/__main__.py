@@ -12,6 +12,7 @@ Usage (direct):
     agent-worktrees resolve --json --worktree-id <id>
     agent-worktrees list [--json] [--tracking-status active|complete|...]
     agent-worktrees create [--json]       # programmatic: make a worktree, no launch
+    agent-worktrees embody [--worktree-id <id> | --new] [--seed S]  # spawn mux+Copilot
     agent-worktrees finalize [worktree-id] [--dry-run] [--json]
     agent-worktrees mark-complete [worktree-id] [--title T] [--title-only]
     agent-worktrees status [--json]
@@ -915,6 +916,128 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         "seed_len": len(seed),
         "seeded": bool(seed_result.get("sent")),
         "seed_ready": bool(seed_result.get("ready")),
+    })
+    return 0
+
+
+def cmd_embody(args: argparse.Namespace) -> int:
+    """Create or resume a **detached** mux+Copilot CLI session in a worktree (D5).
+
+    The agent-facing "embodiment" verb: spawn a durable, mux-wrapped interactive
+    Copilot in a target worktree so it registers with the local bridge (Phase 1)
+    and becomes viewable/messageable -- the CLI-first embodiment of
+    ``visions/agent-fabric`` §lifetime-decides-embodiment, driven by an agent
+    rather than a human at the picker. JSON out on stdout.
+
+    Target selection:
+      * ``--worktree-id <id>`` embodies in an existing worktree;
+      * ``--new`` creates a fresh worktree first (the outlives-its-caller case).
+
+    Resume semantics: **one live session per worktree**. If a ``wt-<id>`` mux
+    session already exists, this does NOT spawn a duplicate -- it reports the
+    existing session (``created=false``), honoring "to act in an occupied space,
+    interrogate the occupant or embody a fresh space." Otherwise it creates the
+    session detached (never attaching -- the operator or Neuron Forge attaches
+    later). An optional ``--seed`` is injected as the first interactive turn via
+    ``send-keys`` once Copilot is ready (the same mechanism the handoff uses).
+
+    Verification: the caller confirms the embodiment by polling
+    ``agent-bridge live-sessions?worktree_id=<id>`` -- the bundled extension
+    auto-registers the new session. ``--verify-timeout`` optionally waits here
+    for the mux session to come up before returning.
+    """
+    make_new = getattr(args, "new", False)
+    raw_id = getattr(args, "worktree_id", None)
+    if make_new and raw_id:
+        return _json_error("--new and --worktree-id are mutually exclusive", exit_code=2)
+    if not make_new and not raw_id:
+        return _json_error("embody requires --worktree-id <id> or --new", exit_code=2)
+
+    try:
+        config = cfg.load_config()
+    except Exception as e:
+        return _json_error(str(e))
+
+    # Resolve target worktree id + path (creating a fresh worktree for --new).
+    if make_new:
+        try:
+            with output.stdout_to_stderr():
+                created = _create_worktree_core(config, no_mux=True, kind="session")
+        except Exception as e:
+            return _json_error(f"failed to create worktree: {e}")
+        wt_id = created["worktree"]["id"]
+        work_dir = created["worktree"]["path"]
+    else:
+        wt_id = _resolve_worktree_id(raw_id)
+        yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+        if not yaml_path.exists():
+            return _json_error(f"Worktree not found: {wt_id}")
+        work_dir = tracking.load_record(yaml_path).worktree_path
+
+    # Resume: a live mux session already embodies this worktree -- don't
+    # duplicate (one live session per cwd). Report it and stop.
+    already = sessions.has_mux_session(wt_id)
+    seed = getattr(args, "seed", None)
+
+    if getattr(args, "dry_run", False):
+        launch_cmd = _build_launch_cmd(config, args, work_dir)
+        _json_output({
+            "ok": True, "dry_run": True, "worktree_id": wt_id,
+            "session": f"wt-{wt_id}", "work_dir": work_dir,
+            "would": "resume" if already else "create",
+            "cmd": list(launch_cmd), "seed_len": len(seed) if seed else 0,
+        })
+        return 0
+
+    if already:
+        _json_output({
+            "ok": True, "worktree_id": wt_id, "session": f"wt-{wt_id}",
+            "work_dir": work_dir, "created": False, "resumed": True,
+            "new_pane": sessions.mux_active_pane(wt_id),
+            "note": "a live mux session already embodies this worktree",
+        })
+        return 0
+
+    launch_cmd = _build_launch_cmd(config, args, work_dir)
+    env = _build_env(None, _repo_session_env(config, work_dir))
+    result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
+    if not result.get("ok"):
+        return _json_error(
+            f"failed to create session wt-{wt_id}: {result.get('error')}",
+            exit_code=4,
+        )
+
+    new_pane = result.get("new_pane")
+    seed_result = (
+        sessions.mux_seed_pane(new_pane, seed) if (new_pane and seed) else {}
+    )
+
+    verified = None
+    verify_timeout = getattr(args, "verify_timeout", 0.0) or 0.0
+    if verify_timeout > 0:
+        deadline = time.monotonic() + verify_timeout
+        verified = False
+        while time.monotonic() < deadline:
+            if sessions.has_mux_session(wt_id):
+                verified = True
+                break
+            time.sleep(0.3)
+
+    _json_output({
+        "ok": True,
+        "worktree_id": wt_id,
+        "session": f"wt-{wt_id}",
+        "work_dir": work_dir,
+        "created": True,
+        "resumed": False,
+        "new_pane": new_pane,
+        "seeded": bool(seed_result.get("sent")) if seed else False,
+        "seed_ready": bool(seed_result.get("ready")) if seed else False,
+        "mux_verified": verified,
+        "verify_hint": (
+            f"agent-bridge live-sessions | grep {wt_id}  "
+            "(the embodied Copilot auto-registers with the local bridge)"
+        ),
     })
     return 0
 
@@ -7553,6 +7676,31 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Print the resolved plan without opening a window")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only; always on)")
+    # embody (D5: agent-initiated CLI embodiment -- detached mux+Copilot spawn)
+    p = sub.add_parser(
+        "embody",
+        help="Create or resume a DETACHED mux+Copilot CLI session in a worktree "
+             "(the agent-facing embodiment verb; auto-registers with the bridge)",
+    )
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--worktree-id", dest="worktree_id", default=None,
+                   help="Embody in this existing worktree")
+    g.add_argument("--new", action="store_true",
+                   help="Create a fresh worktree first, then embody in it")
+    p.add_argument("--seed", default=None,
+                   help="Seed prompt injected as the session's first "
+                        "interactive turn once Copilot is ready")
+    p.add_argument("--verify-timeout", dest="verify_timeout", type=float,
+                   default=0.0, metavar="SECONDS",
+                   help="Wait up to N seconds for the mux session to come up "
+                        "before returning (default 0: don't wait)")
+    p.add_argument("--recovery", action="store_true",
+                   help="Use the repo's recovery launch command")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Print the resolved plan without spawning anything")
+    p.add_argument("--json", action="store_true",
+                   help="JSON output mode (stdout is JSON only; always on)")
+
     p = sub.add_parser("list", help="List worktrees from tracking records")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
@@ -8279,6 +8427,7 @@ COMMAND_MAP = {
     "status-context": cmd_status_context,
     "status-updater": cmd_status_updater,
     "handoff-cutover": cmd_handoff_cutover,
+    "embody": cmd_embody,
     "list": cmd_list,
     "create": cmd_create,
     "remove-system": cmd_remove_system,
