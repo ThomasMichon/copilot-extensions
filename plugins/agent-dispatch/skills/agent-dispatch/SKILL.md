@@ -278,19 +278,38 @@ agent-dispatch watch              # stream task.* events (SSE) as JSON lines
   a hard worktree pin to a soft affinity (e.g. once local work is pushed, a bound
   handoff becomes portable).
 
-## Spawning a worker via agent-bridge
+## Spawning a worker: headless (bridge) vs CLI-backed autopilot (embody)
 
-`create --spawn` asks **agent-bridge** to spawn a worker that claims and executes
-the task by id:
+`create --spawn` spawns a worker that claims and executes the task by id. A
+**spawn backend** chooses *how* the worker is embodied:
 
 ```bash
+# Headless agent-bridge ACP worker (default backend)
 agent-dispatch create "Summarize the PR" --require review --spawn              # managed (waits)
 agent-dispatch create "Summarize the PR" --spawn --spawn-agent task-worker --async  # fire-and-forget
+
+# CLI-backed AUTOPILOT session -- "dispatch an agent to do X"
+agent-dispatch create "Refactor the auth module" \
+  --prompt "extract JWT handling into src/auth/ …" \
+  --spawn --spawn-backend embody
 ```
 
-If the `agent-bridge` CLI isn't on PATH, `--spawn` **degrades gracefully**: the
-task is left queued for any worker to claim. agent-dispatch stays fully usable
-without a bridge.
+- **`--spawn-backend bridge`** (default) -- a **headless** agent-bridge ACP
+  worker. Ephemeral; torn down with its caller.
+- **`--spawn-backend embody`** -- a **durable, CLI-backed autopilot** session in
+  a **fresh parallel worktree on the same machine**, via `agent-worktrees embody
+  --new` (tools auto-approved with `--allow-all-tools`, stamped `--driver
+  agent-dispatch` so it's viewable in Neuron Forge with a "driven by" banner).
+  This is the **"dispatch an agent to do X"** path: the embodied session claims →
+  starts → works the task autonomously → and **completes it explicitly** only
+  when it judges the goal reached (**deferred completion** -- the task's
+  `completed` state means the *work is done*, not that a baton was handed over).
+  Cross-machine dispatch is not yet supported (same machine only).
+
+Both backends **degrade gracefully**: if the chosen mechanism isn't on PATH
+(no `agent-worktrees` for `embody`, no `agent-bridge` for `bridge`) the embody
+backend falls back to bridge, and if neither is present the task is simply left
+queued for any worker to claim. agent-dispatch stays fully usable standalone.
 
 ## MCP tools instead of the CLI
 
