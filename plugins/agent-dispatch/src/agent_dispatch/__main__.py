@@ -197,14 +197,24 @@ def _scope_repo(args: argparse.Namespace) -> str | None:
 
 def _enrich(result: Any) -> Any:
     """Annotate task dict(s) with a display-only ``repo_name`` (the local name
-    for the canonical ``repo`` remote, when the registry knows it)."""
+    for the canonical ``repo`` remote, when the registry knows it), and parse the
+    stored ``latest_progress`` JSON string into an object for clean at-a-glance
+    output."""
     from .identity import name_for_repo
 
     def one(d: Any) -> Any:
-        if isinstance(d, dict) and "repo" in d and "repo_name" not in d:
+        if not isinstance(d, dict):
+            return d
+        if "repo" in d and "repo_name" not in d:
             name = name_for_repo(d.get("repo"))
             if name:
                 d = {**d, "repo_name": name}
+        lp = d.get("latest_progress")
+        if isinstance(lp, str) and lp:
+            try:
+                d = {**d, "latest_progress": json.loads(lp)}
+            except (ValueError, TypeError):
+                pass
         return d
 
     if isinstance(result, list):
@@ -323,6 +333,23 @@ def _cmd_start(args: argparse.Namespace) -> int:
         return 2
     with _client(args) as c:
         return _emit(c.start(args.task_id, worker_id))
+
+
+def _cmd_progress(args: argparse.Namespace) -> int:
+    worker_id = _resolve_owner(args, verb="progress")
+    if worker_id is None:
+        return 2
+    with _client(args) as c:
+        return _emit(
+            c.progress(
+                args.task_id,
+                worker_id,
+                phase=args.phase or "",
+                summary=args.summary,
+                blocker=args.blocker,
+                pr=args.pr,
+            )
+        )
 
 
 def _cmd_complete(args: argparse.Namespace) -> int:
@@ -727,6 +754,30 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("task_id")
     p.add_argument("worker_id")
     p.set_defaults(func=_simple("heartbeat", "task_id", "worker_id"))
+
+    p = sub.add_parser(
+        "progress",
+        help="record a brief progress beat toward the goal (also heartbeats the "
+             "lease; identity auto-resolved from CWD)",
+    )
+    p.add_argument("task_id")
+    p.add_argument(
+        "worker_id", nargs="?", help="owner id (default: composed from machine/worktree)"
+    )
+    p.add_argument(
+        "--phase", default="",
+        help="short phase label (e.g. 'planning', 'implementing', 'PR open')",
+    )
+    p.add_argument(
+        "--summary", required=True,
+        help="one-line status toward the goal (hard-capped; keep it a line, not a "
+             "transcript)",
+    )
+    p.add_argument("--blocker", help="a real blocker holding progress, if any")
+    p.add_argument("--pr", help="the PR/ref this beat corresponds to, if any")
+    p.add_argument("--machine", help="override the resolved machine (targeting identity)")
+    p.add_argument("--worktree", help="override the resolved worktree id (targeting identity)")
+    p.set_defaults(func=_cmd_progress)
 
     p = sub.add_parser("detach", help="demote a hard worktree pin to a soft affinity")
     p.add_argument("task_id")

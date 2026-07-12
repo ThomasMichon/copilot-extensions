@@ -88,6 +88,14 @@ class CompleteBody(BaseModel):
     result_ref: str | None = None
 
 
+class ProgressBody(BaseModel):
+    worker_id: str
+    phase: str = ""
+    summary: str
+    blocker: str | None = None
+    pr: str | None = None
+
+
 class AbandonBody(BaseModel):
     worker_id: str | None = None
     permitted: bool = False
@@ -324,6 +332,20 @@ def create_app(
     @app.post("/tasks/{task_id}/heartbeat")
     def heartbeat(task_id: str, body: WorkerBody) -> dict:
         return _guard(lambda: queue.heartbeat(task_id, body.worker_id))
+
+    @app.post("/tasks/{task_id}/progress")
+    def progress(task_id: str, body: ProgressBody) -> dict:
+        return _guard(
+            lambda: queue.record_progress(
+                task_id,
+                body.worker_id,
+                phase=body.phase,
+                summary=body.summary,
+                blocker=body.blocker,
+                pr=body.pr,
+            ),
+            "task.progress",
+        )
 
     @app.post("/tasks/{task_id}/detach")
     def detach(task_id: str) -> dict:

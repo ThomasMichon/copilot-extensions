@@ -102,6 +102,25 @@ def test_full_lifecycle_over_http(api):
     assert done["status"] == Status.COMPLETED
 
 
+def test_progress_over_http(api):
+    import json
+
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1"})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    r = api.post(
+        f"/tasks/{tid}/progress",
+        json={"worker_id": "w1", "phase": "impl", "summary": "wired it", "pr": "pr/3"},
+    )
+    assert r.status_code == 200
+    snap = json.loads(r.json()["latest_progress"])
+    assert snap["phase"] == "impl" and snap["summary"] == "wired it" and snap["pr"] == "pr/3"
+    # wrong owner is rejected
+    assert api.post(
+        f"/tasks/{tid}/progress", json={"worker_id": "w2", "summary": "nope"}
+    ).status_code == 409
+
+
 def test_claim_empty_returns_null(api):
     assert api.post("/claim", json={"worker_id": "w1"}).json() is None
 

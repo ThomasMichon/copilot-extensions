@@ -235,13 +235,30 @@ agent-dispatch heartbeat <id> <owner>        # extend the lease during long work
 agent-dispatch complete <id> <owner> --result-ref pr/123
 ```
 
-> **Owner is optional on `claim`/`start`/`complete`/`yield`.** Omit it and the
-> coordinator resolves your **worktree identity** (`<machine>/<worktree>`) from
-> the CWD -- so an embodied/taken-over worker can drive its whole lifecycle
+> **Owner is optional on `claim`/`start`/`complete`/`yield`/`progress`.** Omit it
+> and the coordinator resolves your **worktree identity** (`<machine>/<worktree>`)
+> from the CWD -- so an embodied/taken-over worker can drive its whole lifecycle
 > (`agent-dispatch claim --task <id>` → `start <id>` → `complete <id>`) without
 > ever typing an owner. This keeps the task's owner equal to its worktree, which
 > is what lets live-session tracking join a CLI-embodied task to its session (the
 > `embodiment` overlay above).
+
+Report progress toward the goal so callers/operator watch the fleet at a glance
+(this also heartbeats the lease):
+
+```bash
+agent-dispatch progress <id> --phase implementing --summary "wired the verb; tests green"
+agent-dispatch progress <id> --phase "PR open" --summary "opened the PR" --pr pr/2601
+agent-dispatch progress <id> --summary "stuck on a flaky test" --blocker "CI timeout"
+```
+
+> **`progress` is a *status beat*, not a chat log.** Emit **one** short line only
+> at real transitions -- a plan settled, implementation done, a PR opened, a
+> blocker hit -- never on a timer. The `--summary` is hard-capped and stored
+> **latest-only** as `latest_progress` (a structured object surfaced by
+> `show`/`list`/`inbox`), plus appended to the audit trail -- so a reader sees
+> *how far toward the goal* without a transcript. Identity auto-resolves from CWD
+> like the other lease verbs.
 
 Recoverable snag -> return it for a later cycle (keep the note!):
 
