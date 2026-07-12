@@ -1109,11 +1109,20 @@ def _deliver_to_live_session(
     an attributed ``<agent-message from reply-to>`` user turn. Attribution
     (``sender``) is legibility; ``reply_to`` is the routable address the
     receiver answers with ``agent-bridge send <reply-to> "..."``.
+
+    By default (D1) this *waits* for the receiver's reply turn and prints its
+    assistant output -- the reply is the receiver's ordinary turn, read back off
+    its represented stream, so no extra protocol is needed. ``--no-wait`` returns
+    as soon as the message is enqueued (fire-and-forget); ``--reply-timeout``
+    bounds the wait.
     """
     sender = _live_sender_label(args)
     reply_to = _live_reply_to(args)
+    wait = not getattr(args, "no_wait", False)
+    wait_timeout = getattr(args, "reply_timeout", 120.0)
     result = client.send_live_message(
-        session_id, sender=sender, body=prompt, reply_to=reply_to
+        session_id, sender=sender, body=prompt, reply_to=reply_to,
+        wait=wait, wait_timeout=wait_timeout,
     )
     if args.json:
         _json_out({"delivered": True, "target": session_id, **result})
@@ -1124,6 +1133,17 @@ def _deliver_to_live_session(
         print(f"    reply-to: {reply_to}")
     else:
         print("    (no reply-to: this sender is not a live session; reply won't route)")
+    if not wait:
+        return
+    if result.get("replied"):
+        reply = result.get("reply")
+        print(f"\n[<] Reply from {session_id}:")
+        print(reply if reply else "    (turn completed with no assistant text)")
+    else:
+        print(
+            f"\n[..] No reply within {wait_timeout:g}s "
+            "(message is queued and will still be delivered)."
+        )
 
 
 def _submit_and_stream(
@@ -2495,6 +2515,13 @@ def main(argv: list[str] | None = None) -> None:
     send_p.add_argument(
         "--no-wait", action="store_true",
         help="Return immediately without waiting for response",
+    )
+    send_p.add_argument(
+        "--reply-timeout", type=float, default=120.0, metavar="SECONDS",
+        help="When delivering to a live interactive session, how long to wait "
+             "for the receiver's reply turn before returning (default 120; the "
+             "message is queued and still delivered on timeout). Ignored with "
+             "--no-wait.",
     )
     send_p.add_argument(
         "--new", action="store_true",

@@ -7,7 +7,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agent_bridge.db import Database
-from agent_bridge.live_representation import LiveEventStore, translate_sdk_event
+from agent_bridge.events import EventLog
+from agent_bridge.live_representation import (
+    LiveEventStore,
+    await_turn_reply,
+    translate_sdk_event,
+)
 from agent_bridge.routes import live_sessions
 
 
@@ -302,3 +307,71 @@ def test_stream_replays_represented_tail() -> None:
     assert "user_message" in blob
     assert "agent_message" in blob
 
+
+
+# -- D1: read a live session's reply turn (await_turn_reply + wait route) ----
+
+
+class TestAwaitTurnReply:
+    @pytest.mark.asyncio
+    async def test_collects_agent_text_until_turn_complete(self) -> None:
+        log = EventLog()
+        log.append("user_message", {"content": "injected"})
+        log.append("agent_message", {"text": "part one "})
+        log.append("agent_message", {"text": "part two"})
+        log.append("turn_complete", {"stop_reason": "end_turn"})
+        reply = await await_turn_reply(log, after=0, timeout=1.0)
+        assert reply["replied"] is True
+        assert reply["reply"] == "part one part two"
+        assert reply["stop_reason"] == "end_turn"
+
+    @pytest.mark.asyncio
+    async def test_ignores_events_at_or_before_after(self) -> None:
+        # A turn that completed *before* the send must not be read as the reply.
+        log = EventLog()
+        log.append("agent_message", {"text": "old"})
+        head = log.latest_id
+        log.append("turn_complete", {"stop_reason": "old"})
+        # after=head+1 skips the already-present turn_complete; nothing new -> timeout
+        reply = await await_turn_reply(log, after=head + 1, timeout=0.05)
+        assert reply["replied"] is False
+        assert reply["reply"] is None
+
+    @pytest.mark.asyncio
+    async def test_times_out_with_no_turn(self) -> None:
+        log = EventLog()
+        log.append("agent_message", {"text": "partial only"})
+        reply = await await_turn_reply(log, after=0, timeout=0.05)
+        assert reply["replied"] is False
+        # partial assistant text is still returned on timeout
+        assert reply["reply"] == "partial only"
+
+
+def test_route_wait_times_out_but_queues(client: TestClient) -> None:
+    # A wait with no reply forthcoming returns replied=False, and the message
+    # still sits in the durable queue for later delivery.
+    _register(client, "cli-wait")
+    r = client.post(
+        "/api/v1/live-sessions/cli-wait/messages",
+        json={"sender": "peer", "body": "status?", "wait": True,
+              "wait_timeout": 0.05},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["replied"] is False
+    assert body["reply"] is None
+    assert body["message_id"] > 0
+    pending = client.get("/api/v1/live-sessions/cli-wait/messages").json()
+    assert [m["body"] for m in pending["messages"]] == ["status?"]
+
+
+def test_route_no_wait_returns_immediately(client: TestClient) -> None:
+    _register(client, "cli-nw")
+    r = client.post(
+        "/api/v1/live-sessions/cli-nw/messages",
+        json={"sender": "peer", "body": "fyi"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["replied"] is False
+    assert body["message_id"] > 0

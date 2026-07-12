@@ -358,13 +358,29 @@ class BridgeClient:
     def send_live_message(
         self, session_id: str, *, sender: str, body: str,
         reply_to: str | None = None,
+        wait: bool = False, wait_timeout: float | None = None,
     ) -> dict[str, Any]:
-        """POST /api/v1/live-sessions/{id}/messages -- deliver into a live session."""
+        """POST /api/v1/live-sessions/{id}/messages -- deliver into a live session.
+
+        When ``wait`` is set (D1), the bridge also watches the target's
+        represented stream and the result carries the reply turn's assistant
+        text (``replied``/``reply``/``stop_reason``). The HTTP request blocks for
+        up to ``wait_timeout`` while the receiver processes the message, so the
+        client read timeout is widened to cover it.
+        """
         payload: dict[str, Any] = {"sender": sender, "body": body}
         if reply_to:
             payload["reply_to"] = reply_to
+        request_timeout = None
+        if wait:
+            payload["wait"] = True
+            if wait_timeout is not None:
+                payload["wait_timeout"] = wait_timeout
+            # Give the HTTP read a margin beyond the server-side reply wait.
+            request_timeout = (wait_timeout or 120.0) + 15.0
         return self._request(
-            "POST", f"/api/v1/live-sessions/{session_id}/messages", payload
+            "POST", f"/api/v1/live-sessions/{session_id}/messages", payload,
+            request_timeout=request_timeout,
         ) or {}
 
     def get_session_usage(self, session_id: str) -> dict[str, Any]:

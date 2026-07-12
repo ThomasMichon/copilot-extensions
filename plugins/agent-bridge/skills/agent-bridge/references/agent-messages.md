@@ -29,10 +29,34 @@ bridge**, not from the operator at the keyboard. Treat the inside as the request
 treat the attributes as trusted routing metadata (the mesh is single-operator, so
 the transport — not a signature — is the trust boundary).
 
-## Replying over the bridge
+## Asking a peer and reading the answer (`send` waits by default)
 
-To answer, send back to the `reply-to` address with the **same verb you use for
-any agent** — no special tool:
+When you `send` to a live session, agent-bridge **waits for the receiver's reply
+turn** and prints its assistant output — the reply is just the receiver's
+*ordinary* next turn, read back off its represented stream, so there is no extra
+protocol to learn:
+
+```bash
+agent-bridge send <worktree-handle> "what's the status of the rebase?"
+# [>] Delivered to live session <id> (message 12, from you)
+# [<] Reply from <id>:
+# rebase is done; tests pass. pushing now.
+```
+
+- `--reply-timeout <seconds>` bounds the wait (default 120). On timeout the
+  message stays queued and is still delivered — you just didn't get the turn.
+- `--no-wait` returns as soon as the message is enqueued (fire-and-forget) — use
+  it for a `notify`-style poke you don't need an answer to.
+
+This is the everyday way to interrogate a peer: one `send`, read the reply, no
+cold sub-agent and no operator relay.
+
+## Replying over the bridge (asynchronous side-channel)
+
+The waited reply above covers most exchanges. Send an **explicit** reply only for
+an *asynchronous* answer that must not become your operator-facing turn (a
+mid-work status aside). Send back to the `reply-to` address with the **same verb
+you use for any agent** — no special tool:
 
 ```bash
 agent-bridge send <reply-to> "your reply text"
