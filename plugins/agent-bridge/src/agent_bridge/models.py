@@ -288,6 +288,7 @@ class SendMessageRequest(BaseModel):
 
     sender: str
     body: str
+    reply_to: str | None = None
 
 
 class SendMessageResult(BaseModel):
@@ -304,6 +305,7 @@ class LiveMessage(BaseModel):
     id: int
     sender: str
     body: str
+    reply_to: str | None = None
     created_at: float
 
 

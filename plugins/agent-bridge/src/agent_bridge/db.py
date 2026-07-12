@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 _EVENT_BATCH_MAX = 256
 _EVENT_BATCH_WINDOW_SECS = 0.05
 _EVENT_WRITE_SENTINEL = object()
@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS live_messages (
     session_id TEXT NOT NULL,
     sender TEXT NOT NULL,
     body TEXT NOT NULL,
+    reply_to TEXT,
     created_at REAL NOT NULL,
     delivered_at REAL
 );
@@ -421,6 +422,20 @@ class Database:
             conn.commit()
             log.info("Schema migrated to version 7: added live_messages")
 
+        if from_version < 8:
+            # v7 -> v8: add reply_to to live_messages so a delivered message
+            # carries the sender's routable address -- the receiving agent can
+            # reply over the same bridge (agent-bridge send <reply_to>).
+            cols = [
+                r[1]
+                for r in conn.execute("PRAGMA table_info(live_messages)").fetchall()
+            ]
+            if "reply_to" not in cols:
+                conn.execute("ALTER TABLE live_messages ADD COLUMN reply_to TEXT")
+            conn.execute("UPDATE schema_version SET version=?", (8,))
+            conn.commit()
+            log.info("Schema migrated to version 8: live_messages.reply_to")
+
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
         conn = self._get_conn()
@@ -594,13 +609,14 @@ class Database:
     # injection.
 
     def enqueue_live_message(
-        self, session_id: str, sender: str, body: str, now: float
+        self, session_id: str, sender: str, body: str, now: float,
+        reply_to: str | None = None,
     ) -> int:
         """Enqueue a message for delivery into a live session; return its id."""
         cur = self.execute_write(
-            "INSERT INTO live_messages (session_id, sender, body, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (session_id, sender, body, now),
+            "INSERT INTO live_messages (session_id, sender, body, reply_to, "
+            "created_at) VALUES (?, ?, ?, ?, ?)",
+            (session_id, sender, body, reply_to, now),
         )
         return int(cur.lastrowid or 0)
 

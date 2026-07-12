@@ -250,13 +250,27 @@ async function flushEvents() {
   }
 }
 
-// Render an incoming envelope as an ATTRIBUTED user turn. Attribution is
-// mandatory (Design C/E): the receiving agent and operator must always be able
-// to tell injected peer traffic from operator input. ASCII only (no em dash) so
-// it is safe on any output path.
-function renderDeliveredPrompt(sender, body) {
-  const who = (sender || "unknown").toString().slice(0, 200);
-  return `[via agent-bridge, from ${who}]\n\n${body}`;
+// Render an incoming envelope as an ATTRIBUTED, ANSWERABLE agent-message. The
+// wrapper mirrors the runtime's own system markers (<system_reminder> /
+// <system_notification>) so a cooperating agent parses it as authoritative
+// structure: it can tell peer traffic from operator input, see who sent it, and
+// reply over the same bridge with `agent-bridge send <reply-to> "..."`.
+// Attribute values are escaped; the body is left literal (trusted single-
+// operator mesh) for readability.
+function escAttr(v) {
+  return String(v == null ? "" : v)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function renderDeliveredPrompt(msg) {
+  const attrs = [`from="${escAttr(msg.sender || "unknown")}"`];
+  if (msg.reply_to) attrs.push(`reply-to="${escAttr(msg.reply_to)}"`);
+  if (typeof msg.id === "number") attrs.push(`msg-id="${msg.id}"`);
+  const body = String(msg.body ?? "");
+  return `<agent-message ${attrs.join(" ")}>\n${body}\n</agent-message>`;
 }
 
 // Poll the bridge inbox and deliver pending messages into THIS session via
@@ -282,7 +296,7 @@ async function pollInbox() {
       if (!msg || typeof msg.id !== "number") continue;
       try {
         await session.send({
-          prompt: renderDeliveredPrompt(msg.sender, msg.body ?? ""),
+          prompt: renderDeliveredPrompt(msg),
           displayPrompt: `Message from ${msg.sender || "peer"} (via agent-bridge)`,
         });
         delivered.push(msg.id);

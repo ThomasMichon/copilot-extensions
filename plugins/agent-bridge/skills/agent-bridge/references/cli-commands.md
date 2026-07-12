@@ -50,9 +50,19 @@ agent-bridge send <session-id> "follow-up prompt"
 
 # Fire-and-forget (don't wait for response)
 agent-bridge send <agent-name> "do this" --no-wait
+
+# Deliver INTO a live interactive session (human-attached), attributed and
+# answerable -- routes to the message queue, not an ACP turn. The receiver
+# replies with `agent-bridge send <reply-to> "..."`.
+agent-bridge send <live-session-id> "message body"
+agent-bridge send <live-session-id> "msg" --from "reviewer@lambda-core" --reply-to <my-session-id>
 ```
 
-`send` auto-detects whether the target is an agent name or a session ID.
+`send` auto-detects whether the target is an agent name, a bridge-owned session
+ID, or a **live interactive session** (delivered as an attributed
+`<agent-message>` envelope). See
+[agent-messages.md](agent-messages.md) for the receive/reply convention.
+
 When given an **agent name**, it never starts a *fresh* session on top of an
 existing one: it reuses this caller's session for that agent — keyed by
 `(agent, caller)`, where the caller is the current worktree

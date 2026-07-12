@@ -226,7 +226,8 @@ async def post_live_message(
     if db.get_live_session(session_id) is None:
         raise HTTPException(status_code=404, detail="live session not found")
     message_id = db.enqueue_live_message(
-        session_id, sender=body.sender, body=body.body, now=time.time()
+        session_id, sender=body.sender, body=body.body, now=time.time(),
+        reply_to=body.reply_to,
     )
     return SendMessageResult(session_id=session_id, message_id=message_id)
 
@@ -250,6 +251,7 @@ async def list_live_messages(
                 id=r["id"],
                 sender=r["sender"],
                 body=r["body"],
+                reply_to=r.get("reply_to"),
                 created_at=r["created_at"],
             )
             for r in rows

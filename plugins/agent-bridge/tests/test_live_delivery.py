@@ -46,6 +46,14 @@ class TestLiveMessageQueue:
         assert tmp_db.ack_live_messages("s", [other], now=now) == 0
         assert [p["id"] for p in tmp_db.list_pending_live_messages("s2")] == [other]
 
+    def test_enqueue_carries_reply_to(self, tmp_db: Database) -> None:
+        now = time.time()
+        tmp_db.enqueue_live_message("s", "alice", "hi", now, reply_to="alice-sess")
+        tmp_db.enqueue_live_message("s", "bob", "yo", now)  # no reply_to
+        pending = tmp_db.list_pending_live_messages("s")
+        assert pending[0]["reply_to"] == "alice-sess"
+        assert pending[1]["reply_to"] is None
+
     def test_ack_empty_ids_is_noop(self, tmp_db: Database) -> None:
         assert tmp_db.ack_live_messages("s", [], now=time.time()) == 0
 
@@ -70,13 +78,17 @@ class TestLiveMessageQueue:
 # -- Migration --------------------------------------------------------------
 
 
-def test_migration_v6_to_v7_adds_live_messages(tmp_path: Path) -> None:
-    """A pre-v7 database bumps to v7 with a usable live_messages queue."""
+def test_migration_v7_to_v8_adds_reply_to(tmp_path: Path) -> None:
+    """A pre-v8 database bumps to v8 with a usable live_messages.reply_to."""
     db_path = tmp_path / "old.db"
     conn = sqlite3.connect(db_path)
     conn.executescript(
         "CREATE TABLE schema_version (version INTEGER NOT NULL);"
-        "INSERT INTO schema_version (version) VALUES (6);"
+        "INSERT INTO schema_version (version) VALUES (7);"
+        "CREATE TABLE live_messages ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,"
+        " sender TEXT NOT NULL, body TEXT NOT NULL, created_at REAL NOT NULL,"
+        " delivered_at REAL);"
     )
     conn.commit()
     conn.close()
@@ -84,10 +96,13 @@ def test_migration_v6_to_v7_adds_live_messages(tmp_path: Path) -> None:
     db = Database(db_path)
     try:
         ver = db.execute_read("SELECT version FROM schema_version")[0]["version"]
-        assert ver == SCHEMA_VERSION == 7
-        mid = db.enqueue_live_message("s", "alice", "hi", time.time())
+        assert ver == SCHEMA_VERSION == 8
+        mid = db.enqueue_live_message(
+            "s", "alice", "hi", time.time(), reply_to="alice-sess"
+        )
         assert mid > 0
-        assert len(db.list_pending_live_messages("s")) == 1
+        pending = db.list_pending_live_messages("s")
+        assert pending[0]["reply_to"] == "alice-sess"
     finally:
         db.close()
 
@@ -121,7 +136,7 @@ def test_message_roundtrip_poll_and_ack(client: TestClient) -> None:
     _register(client)
     r = client.post(
         "/api/v1/live-sessions/cli-1/messages",
-        json={"sender": "alice", "body": "please rebase"},
+        json={"sender": "alice", "body": "please rebase", "reply_to": "alice-sess"},
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -129,11 +144,12 @@ def test_message_roundtrip_poll_and_ack(client: TestClient) -> None:
     mid = body["message_id"]
     assert mid > 0
 
-    # poll: message is pending
+    # poll: message is pending, carrying its reply-to address
     listed = client.get("/api/v1/live-sessions/cli-1/messages").json()["messages"]
     assert [m["id"] for m in listed] == [mid]
     assert listed[0]["sender"] == "alice"
     assert listed[0]["body"] == "please rebase"
+    assert listed[0]["reply_to"] == "alice-sess"
 
     # ack: marks delivered, drops from pending
     acked = client.post(

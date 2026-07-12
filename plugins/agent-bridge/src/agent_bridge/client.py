@@ -321,6 +321,33 @@ class BridgeClient:
         """GET /api/v1/sessions/{id}"""
         return self._request("GET", f"/api/v1/sessions/{session_id}") or {}
 
+    def get_live_session(self, session_id: str) -> dict[str, Any]:
+        """GET /api/v1/live-sessions/{id}; {} if not a registered live session.
+
+        Used by ``send`` to detect an interactive-CLI target (delivered via the
+        message queue) vs. a bridge-owned session (delivered as an ACP turn).
+        """
+        try:
+            return self._request(
+                "GET", f"/api/v1/live-sessions/{session_id}"
+            ) or {}
+        except BridgeClientError as exc:
+            if exc.status == 404:
+                return {}
+            raise
+
+    def send_live_message(
+        self, session_id: str, *, sender: str, body: str,
+        reply_to: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/live-sessions/{id}/messages -- deliver into a live session."""
+        payload: dict[str, Any] = {"sender": sender, "body": body}
+        if reply_to:
+            payload["reply_to"] = reply_to
+        return self._request(
+            "POST", f"/api/v1/live-sessions/{session_id}/messages", payload
+        ) or {}
+
     def get_session_usage(self, session_id: str) -> dict[str, Any]:
         """GET /api/v1/sessions/{id}/usage"""
         return self._request("GET", f"/api/v1/sessions/{session_id}/usage") or {}
