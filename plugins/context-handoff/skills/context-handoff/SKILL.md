@@ -59,26 +59,32 @@ is a task list.
 
 ## How to Generate
 
-A handoff has two parts: the **stored handoff** (the full continuation context)
-and a **short reply prompt** you post inline so the next session can pick it up.
-**Where the handoff is stored depends on whether an `agent-dispatch` coordinator
-is running** — the `save_handoff_prompt` tool decides and returns the exact
-prompt to reply with:
+A handoff has three parts: the **stored handoff** (the full continuation
+context), a **live cutover** that spins up the successor *in place* (the
+**primary** path — no copy/paste), and a **short reply prompt** as the fallback
+when a cutover isn't possible.
 
-- **agent-dispatch present →** the handoff is stored as a **`proposed`,
-  `handoff`-labeled task** pinned to this worktree (payload = the full markdown;
-  **no** session file). Reply form (a self-loading resume seed):
-  `You are resuming a handoff (agent-dispatch task <id>); … run: agent-dispatch consume <id> ; then continue: <one-line topic>.`
-- **agent-dispatch absent →** the handoff is written to a **file** in the session
-  state folder. Reply form:
-  `Read the handoff at <path> and continue: <one-line topic>.`
+**Live cutover is the default.** Facility sessions run inside a `wt-<id>` mux
+wrapper (picker-launched or `embody`-spawned), so a handoff should **take over
+in place**: store the handoff task, then spin up a successor Copilot in the same
+mux and retire this session — the operator is **never handed a paste prompt** to
+copy. Only when the session is *not* under a mux (cutover impossible) do you fall
+back to the paste reply.
 
-Either way the reply is short, addressed to the **next** session's agent, and
-**never repeats the handoff contents**. context-handoff sits *on top of*
-agent-dispatch when it exists and falls back to the file otherwise — you don't
-choose; the tool does.
+**Where the handoff is stored** — `save_handoff_prompt` decides:
 
-### Steps
+- **agent-dispatch present →** a **`proposed`, `handoff`-labeled task** pinned to
+  this worktree (payload = the full markdown; **no** session file). It returns a
+  baton paste-seed *and* a **deferred cutover seed** on the `HANDOFF_SEED:` line.
+- **agent-dispatch absent →** a **file** in the session state folder; the reply
+  is `Read the handoff at <path> and continue: <topic>.`
+
+You don't choose the storage — the tool does; it sits *on top of* agent-dispatch
+when it exists and falls back to the file otherwise. **Prefer the task flow:** if
+a coordinator is reachable, the handoff is a task, not a file — do not hand-write
+a `*-prompt.md` file when `agent-dispatch health` answers.
+
+### Steps (default = live cutover)
 
 1. **Call `generate_handoff_prompt`** (registered by the context-handoff
    extension). It returns structured facts: session ID, cwd, branch, files
@@ -88,16 +94,27 @@ choose; the tool does.
    the original request, then direction/motivation, next steps, target goals,
    and gotchas.
 
-3. **Call `save_handoff_prompt`** with that full markdown **as the `prompt_text`
-   argument** (the `prompt` alias is also accepted), plus an optional short
-   `title`. It stores the handoff — **as an agent-dispatch task when a
-   coordinator is reachable, else a session file** — and **returns the exact
-   short prompt to reply with**.
+3. **Call `save_handoff_prompt`** with that markdown as **`prompt_text`** (plus
+   an optional short `title`). It stores the handoff and returns the paste reply
+   **and** a `HANDOFF_SEED:` line (the deferred cutover seed).
 
-4. **Reply with ONLY that short prompt** (the tool tells you which form). The
-   user pastes it into `/clear` (or `/new`); the agent-dispatch form is *also*
-   resumable by running `/resume-handoff` in a fresh session in this worktree
-   (see below). Do **not** paste the handoff contents.
+4. **Perform the cutover (primary):** call **`continue_handoff`** with `seed` =
+   exactly that `HANDOFF_SEED` string. It spawns the successor in a new window of
+   this worktree's mux, seeded to take over the handoff, and cuts the operator
+   over; this session retires itself on the next idle. **End your turn** — do not
+   reply with a paste prompt.
+
+5. **Fallback only if cutover can't run:** if `continue_handoff` reports it is
+   **not under a mux session** (graceful, non-destructive), *then* reply with
+   ONLY the short paste prompt (the user pastes it into `/clear`/`/new`, or runs
+   `/resume-handoff`). Never paste the handoff contents.
+
+> **Two completion models.** The **cutover** successor is a dispatched autopilot
+> CLI: its seed uses `agent-dispatch consume <id> --defer-complete` and it
+> **completes the task explicitly** only when it reaches the handoff's goal —
+> so `completed` means *the work is done*. The **paste / `/resume-handoff`**
+> path is a human quick-resume: its seed uses plain `agent-dispatch consume <id>`
+> (baton — completed on pickup; the *work* is tracked by its effort/issue).
 
 If `generate_handoff_prompt` / `save_handoff_prompt` are unavailable (extension
 not loaded), compose the handoff manually: if `agent-dispatch health` answers,
@@ -107,8 +124,9 @@ write the file with the `create` tool to
 
 **Do not** commit the handoff, write a file anywhere outside the session folder,
 hide the reply prompt inside a tool call, or tell the user the handoff will be
-picked up automatically on restart — **it will not**. The user resumes it
-themselves (paste the reply prompt, or run `/resume-handoff`).
+picked up automatically on restart — **it will not**. A cutover successor picks
+itself up; a fallback paste reply is resumed by the user (paste, or
+`/resume-handoff`).
 
 ### Where the handoff is stored (agent-dispatch vs file)
 
@@ -150,27 +168,27 @@ The mechanics, for when you must do it by hand (extension not loaded):
 
 ---
 
-## Live-Cutover Handoff — hand off *and continue*, automatically
+## Live-Cutover Handoff — the primary path (hand off *and continue* in place)
 
-By default a handoff is a **relay baton the operator carries**: you store it and
-hand back a short reply prompt they paste into a new session. **Live cutover**
-removes the human relay for the common case — the session **spins up its own
-successor in place** and keeps going, hands-free, preserving interactive CLI
-state.
+A handoff is a **takeover in place**: the session **spins up its own successor
+in the same mux** and retires itself, hands-free — no paste prompt for the
+operator to copy. This is the **default** handoff flow whenever the session runs
+under a `wt-<id>` mux (the norm: picker-launched or `embody`-spawned sessions).
 
-**Opt-in only.** It is triggered by the **`/handoff-continue`** slash command
-(or the operator explicitly asking to "hand off and continue" / "live cutover"),
-**never** by a plain `/handoff`. It kills the live session once the successor is
-up, so it must be deliberate.
+**Primary, not opt-in.** A plain `/handoff` performs a cutover when it can; the
+`/handoff-continue` command and phrases like "hand off and continue" are just
+explicit ways to ask for the same thing. It kills the live session once the
+successor is up, so it degrades gracefully (never destructively) when no mux is
+present — *then* it falls back to the paste reply.
 
 **What happens** — two explicit tool calls: `save_handoff_prompt` **stores** the
 handoff, then `continue_handoff` **kicks the cutover** (the mux choreography
 lives in `agent-worktrees handoff-cutover`; you just make the calls):
 
 1. You compose the handoff markdown as usual, then call **`save_handoff_prompt`**
-   (`prompt_text` + a short `title`) exactly as for a normal handoff. It stores
-   the handoff (agent-dispatch task, else file) and returns the short reply
-   prompt **plus a `HANDOFF_SEED:` line** — the exact seed string for a cutover.
+   (`prompt_text` + a short `title`). It stores the handoff (agent-dispatch task,
+   else file) and returns the paste reply **plus a `HANDOFF_SEED:` line** — the
+   **deferred** cutover seed.
 2. You call **`continue_handoff` with `seed` = that exact HANDOFF_SEED string**.
    It spawns a **successor Copilot** in a **new window of this worktree's
    `wt-<id>` mux session**, booted the same way the picker boots one but seeded
@@ -180,6 +198,12 @@ lives in `agent-worktrees handoff-cutover`; you just make the calls):
    of the turn) via a **double-Ctrl-C ~600 ms apart** to its own pane — Copilot's
    native clean quit (a single Ctrl-C does little). Only the successor remains.
 
+**The cutover successor completes explicitly (deferred).** Its seed uses
+`agent-dispatch consume <id> --defer-complete` (load brief + take ownership, but
+NOT complete); it works the handoff and runs `agent-dispatch complete <id>`
+itself only when it reaches the goal — so the handoff task's `completed` state
+means *the work is done*, not that a baton was handed over.
+
 **Your job for a live cutover:** `save_handoff_prompt` → `continue_handoff(seed=
 <HANDOFF_SEED>)` → read the confirmation → **end your turn**. Do not start new
 work; this session quits itself. The successor picks up the handoff on its seeded
@@ -188,7 +212,9 @@ first turn.
 **Graceful fallback.** If the session is **not running under a mux session** (or
 the cutover fails), `continue_handoff` does nothing destructive and says so — the
 handoff is still safely stored by `save_handoff_prompt` and resumable the
-ordinary way (paste the reply prompt into `/clear`, or `/resume-handoff`).
+ordinary way: reply with the short paste prompt (into `/clear`, or
+`/resume-handoff`). That paste path is the human quick-baton (completed on
+pickup).
 
 ---
 
