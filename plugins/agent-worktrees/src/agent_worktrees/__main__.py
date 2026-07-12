@@ -3280,6 +3280,49 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# pr-complete
+# ═══════════════════════════════════════════════════════════════════════════
+
+def cmd_pr_complete(args: argparse.Namespace) -> int:
+    """Reconcile the worktree onto the default branch after its PR merged.
+
+    Distinct from ``finalize``: this lands the worktree *forward* (fast-forward
+    past a squash-merge, or rebase to preserve new work); it does not prune the
+    worktree.  See :func:`agent_worktrees.pr_complete.complete_worktree`.
+    """
+    from . import pr_complete
+
+    use_json = getattr(args, "json", False)
+    try:
+        config = cfg.load_config(Path(args.config) if args.config else None)
+    except Exception as e:
+        if use_json:
+            return _json_error(str(e))
+        raise
+    worktree_id = _infer_worktree_id(args.worktree_id, config)
+    if not worktree_id:
+        msg = ("Could not determine worktree ID. Pass it explicitly "
+               "or run from inside a worktree.")
+        return _json_error(msg) if use_json else (output.err(msg) or 1)
+    worktree_id = _resolve_worktree_id(worktree_id)
+
+    result = pr_complete.complete_worktree(
+        worktree_id, config, dry_run=getattr(args, "dry_run", False),
+    )
+    if use_json:
+        _json_output(result)
+        return 0 if result.get("success") else 1
+    if result.get("success"):
+        output.ok(result.get("message", f"pr-complete: {result.get('action')}"))
+        if result.get("action") == "reset-past-squash" and result.get("backup_ref"):
+            print(f"  recover the pre-complete state with: "
+                  f"git reset --hard {result['backup_ref']}")
+    else:
+        output.err(result.get("error", "pr-complete failed."))
+    return 0 if result.get("success") else 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # mark-complete
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -7629,6 +7672,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="JSON output mode")
     p.add_argument("--config", default=None)
 
+    # pr-complete (post-merge reconcile: ff past a squash-merge, or rebase)
+    p = sub.add_parser(
+        "pr-complete",
+        help="Reconcile the worktree after its PR merged (fast-forward past the "
+             "squash-merge, or rebase to preserve new work). Distinct from finalize.",
+    )
+    p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("--dry-run", action="store_true", dest="dry_run",
+                   help="Report the action that would be taken; change nothing")
+    p.add_argument("--json", action="store_true", help="JSON output mode")
+    p.add_argument("--config", default=None)
+
     # mark-complete (manual recovery only -- hidden from normal help)
     p = sub.add_parser(
         "mark-complete",
@@ -8462,6 +8517,7 @@ COMMAND_MAP = {
     "set-pr": cmd_set_pr,
     "pr-ready": cmd_pr_ready,
     "pr-status": cmd_pr_status,
+    "pr-complete": cmd_pr_complete,
     "mark-complete": cmd_mark_complete,
     "status": cmd_status,
     "status-segment": cmd_status_segment,
@@ -9370,6 +9426,7 @@ def _pr_usage() -> None:
     print("  watch    Block until the PR moves (= pr-watch)", file=out)
     print("  merge    Signal merge consent on an approved PR (= pr-merge)", file=out)
     print("  status   Read tracked PR metadata (= pr-status)", file=out)
+    print("  complete Reconcile the worktree after merge (= pr-complete)", file=out)
     print("  ready    Release a held PR for merge (= pr-ready)", file=out)
 
 
@@ -9377,6 +9434,7 @@ def _pr_usage() -> None:
 _PR_NAMESPACE = {
     "create": "create-pr",
     "status": "pr-status",
+    "complete": "pr-complete",
     "ready": "pr-ready",
 }
 
