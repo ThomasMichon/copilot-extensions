@@ -745,6 +745,69 @@ def _cmd_agents(args: argparse.Namespace) -> None:
             print()
 
 
+def _live_session_summary_line(s: dict[str, Any]) -> str:
+    """One-line human summary of a registered live interactive CLI session."""
+    import time
+
+    driver = s.get("driven_by")
+    driven = f" driven-by={driver}" if driver else ""
+    status = s.get("status") or "live"
+    updated = s.get("updated_at")
+    age = ""
+    if isinstance(updated, (int, float)):
+        secs = max(0, int(time.time() - updated))
+        age = f" (heartbeat {secs}s ago)"
+    return f"{s.get('session_id', '?')} [{status}]{driven}{age}"
+
+
+def _cmd_live_sessions(args: argparse.Namespace) -> None:
+    """List or resolve registered live interactive CLI sessions.
+
+    The live-session registry is the source of truth for a CLI-embodied task's
+    liveness; ``agent-dispatch`` joins a leased task to its session by the
+    worktree in the task owner and resolves it here.
+    """
+    from .client import BridgeClientError
+
+    client = _get_client()
+    action = getattr(args, "live_action", None)
+    if action == "resolve":
+        try:
+            session = client.resolve_live_session(args.handle)
+        except BridgeClientError as exc:
+            if exc.status == 404:
+                session = {}
+            else:
+                raise
+        if args.json:
+            _json_out(session or {})
+            return
+        if not session:
+            print(f"(no live session for handle {args.handle!r})")
+            return
+        print(_live_session_summary_line(session))
+        return
+
+    # default: list
+    try:
+        sessions = client.list_live_sessions(
+            worktree_id=getattr(args, "worktree_id", None)
+        )
+    except BridgeClientError as exc:
+        if exc.status == 404:
+            print("[>] Live-sessions endpoint not available (service may need restart)")
+            return
+        raise
+    if args.json:
+        _json_out(sessions)
+        return
+    if not sessions:
+        print("(no live interactive sessions registered)")
+        return
+    for s in sessions:
+        print(_live_session_summary_line(s))
+
+
 def _cmd_machines(args: argparse.Namespace) -> None:
     """List topology machines."""
     from .client import BridgeClientError
@@ -2445,6 +2508,26 @@ def main(argv: list[str] | None = None) -> None:
 
     machines_p = sub.add_parser("machines", help="List topology machines")
     machines_p.set_defaults(func=_cmd_machines)
+
+    live_p = sub.add_parser(
+        "live-sessions",
+        help="List/resolve registered live interactive CLI sessions",
+    )
+    live_sub = live_p.add_subparsers(dest="live_action")
+    live_list_p = live_sub.add_parser(
+        "list", help="List registered live interactive CLI sessions"
+    )
+    live_list_p.add_argument("--worktree-id", help="Filter by worktree id")
+    live_list_p.set_defaults(func=_cmd_live_sessions)
+    live_resolve_p = live_sub.add_parser(
+        "resolve",
+        help="Resolve a session id OR worktree handle to its live session",
+    )
+    live_resolve_p.add_argument(
+        "--handle", required=True, help="Exact session id OR worktree handle"
+    )
+    live_resolve_p.set_defaults(func=_cmd_live_sessions)
+    live_p.set_defaults(func=_cmd_live_sessions)
 
     sessions_p = sub.add_parser("sessions", help="List sessions")
     sessions_p.add_argument("--status", help="Filter by status")

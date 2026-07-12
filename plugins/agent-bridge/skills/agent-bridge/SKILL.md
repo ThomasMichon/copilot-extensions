@@ -512,6 +512,14 @@ two capabilities without the destructive take-over:
 - **Addressing by worktree handle.** `resolve` maps a worktree handle → its
   currently-live session, so `reply-to` survives a session handoff (an agent is
   a *series of sessions in one worktree*).
+- **Reading the registry (CLI).** `agent-bridge live-sessions list
+  [--worktree-id <id>]` and `agent-bridge live-sessions resolve --handle
+  <session-id|worktree-handle>` expose the registry from the shell (add global
+  `--json` for machine-readable output). This is the surface **agent-dispatch**
+  joins against to track a CLI-embodied task: a leased task's owner is
+  `<machine>/<worktree>`, so it resolves the worktree to its live session and
+  overlays liveness/`driven_by` on `agent-dispatch show`/`list` (best-effort;
+  degrades to status+lease when the bridge is absent).
 
 **Durable work gets a CLI body, not a headless one.** When you *dispatch* work
 meant to outlive its caller, prefer a **CLI-backed autopilot session** (via
