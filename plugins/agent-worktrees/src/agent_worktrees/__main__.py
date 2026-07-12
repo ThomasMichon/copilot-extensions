@@ -5664,6 +5664,16 @@ def cmd_update(args: argparse.Namespace) -> int:
     except subprocess.TimeoutExpired:
         output.warn("Plugin update timed out -- continuing with installed version")
 
+    # Step 1b -- refresh EVERY registered copilot-extensions plugin payload.
+    # All plugin payloads are updated first (this step), then service payloads /
+    # runtimes below. This is the fix for the "phantom deploy" (aperture-labs
+    # #2554): payload-only plugins (runtimeScope: none) such as context-handoff
+    # were never touched by update, so they stayed on a stale version. The
+    # agent-worktrees payload update above stays first (it provides this flow);
+    # read_enabled_plugins already excludes agent-worktrees so it is not
+    # double-updated here.
+    _update_registered_plugins()
+
     # Step 2 -- find the installed plugin directory
     plugin_dir = _find_installed_plugin_dir()
     if not plugin_dir:
@@ -5706,6 +5716,144 @@ def cmd_update(args: argparse.Namespace) -> int:
         _fast_forward_project_anchors()
 
     return 0
+
+
+def _refresh_marketplace(marketplace: str) -> None:
+    """Refresh the local marketplace catalog (best-effort, non-fatal).
+
+    ``copilot plugin update <name>`` resolves the target version from the
+    locally cached marketplace catalog, so a stale catalog can hide a
+    freshly-published version. Refreshing the catalog once before the
+    per-plugin loop makes new versions visible. Any failure (offline,
+    timeout, missing CLI) warns and continues.
+    """
+    try:
+        r = subprocess.run(
+            ["copilot", "plugin", "marketplace", "update", marketplace],
+            capture_output=True, text=True, timeout=120,
+        )
+        if r.returncode != 0:
+            output.warn("Marketplace refresh returned non-zero -- continuing")
+    except FileNotFoundError:
+        output.warn("'copilot' CLI not found -- skipping marketplace refresh")
+    except subprocess.TimeoutExpired:
+        output.warn("Marketplace refresh timed out -- continuing")
+
+
+def _update_one_plugin_payload(name: str, marketplace: str) -> str:
+    """Update (or install) a single copilot-extensions plugin payload.
+
+    Idempotent and network-facing. Chooses ``update`` when the payload is
+    already installed, else ``install``; on a failed ``update`` for a plugin
+    that is not actually installed it falls back to ``install``. Never raises:
+    a single plugin's failure is reported as a short status string so the
+    caller can continue with the rest.
+
+    Returns one of ``"OK"``, ``"OK (installed)"``, or an error description.
+    """
+    from . import reconcile
+
+    ref = f"{name}@{marketplace}"
+    installed = reconcile.installed_payload_dir(name) is not None
+    verb = "update" if installed else "install"
+    try:
+        r = subprocess.run(
+            ["copilot", "plugin", verb, ref],
+            capture_output=True, text=True, timeout=120,
+        )
+    except FileNotFoundError:
+        output.warn("'copilot' CLI not found -- skipping plugin payload update")
+        return "copilot CLI not found"
+    except subprocess.TimeoutExpired:
+        output.warn(f"Plugin {verb} for {name} timed out -- continuing")
+        return "timed out"
+
+    if r.returncode == 0:
+        for line in r.stdout.strip().splitlines():
+            output.ok(line)
+        return "OK" if installed else "OK (installed)"
+
+    # Non-zero. If we tried to update but the plugin was not actually
+    # installed, fall back to a fresh install.
+    if installed:
+        output.warn(f"Plugin update for {name} returned non-zero "
+                    f"(continuing with installed version)")
+        return f"update exited {r.returncode}"
+
+    output.info(f"Plugin install for {name} returned non-zero -- retrying")
+    try:
+        r2 = subprocess.run(
+            ["copilot", "plugin", "install", ref],
+            capture_output=True, text=True, timeout=120,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        output.warn(f"Plugin install retry for {name} failed: {exc}")
+        return "install retry failed"
+    if r2.returncode == 0:
+        for line in r2.stdout.strip().splitlines():
+            output.ok(line)
+        return "OK (installed)"
+    output.warn(f"Plugin install for {name} returned non-zero (skipping)")
+    return f"install exited {r2.returncode}"
+
+
+def _update_registered_plugins() -> None:
+    """Update every copilot-extensions plugin registered for the managed repo(s).
+
+    ``update`` must refresh EVERY registered plugin's payload -- including
+    payload-only plugins (``runtimeScope: none``) such as ``context-handoff``,
+    which the module/runtime steps never touch. This enumerates the plugins
+    enabled in each managed repo's settings
+    (``reconcile.read_enabled_plugins``, the authoritative registered list,
+    which already excludes ``agent-worktrees`` itself), refreshes the
+    marketplace catalog once, then runs ``copilot plugin update`` (or
+    ``install`` when missing) for each. Payloads only -- runtimes are handled
+    afterward by ``_update_modules`` and the anchor reconcile.
+
+    Best-effort and idempotent: a single plugin's failure warns and continues;
+    an already-current plugin is a no-op. No resolvable project config (e.g. a
+    generic install) is a silent no-op.
+    """
+    from . import reconcile
+
+    try:
+        config = cfg.load_config()
+    except Exception:
+        # No resolvable project config -- nothing to enumerate.
+        return
+
+    repos = config.repos or {}
+    if not repos:
+        return
+
+    names: set[str] = set()
+    seen_anchors: set[str] = set()
+    for repo in repos.values():
+        anchor = repo.anchor
+        if not anchor or anchor in seen_anchors:
+            continue
+        seen_anchors.add(anchor)
+        try:
+            names.update(reconcile.read_enabled_plugins(Path(anchor)))
+        except Exception as exc:
+            output.warn(f"Could not read enabled plugins from {anchor}: {exc}")
+
+    if not names:
+        return
+
+    output.header("Updating Registered Plugin Payloads")
+    _refresh_marketplace(reconcile.MARKETPLACE)
+
+    results: list[tuple[str, str]] = []
+    for name in sorted(names):
+        results.append((name, _update_one_plugin_payload(name, reconcile.MARKETPLACE)))
+
+    output.header("Plugin Payload Update Summary")
+    for name, status in results:
+        if status.startswith("OK"):
+            output.ok(name if status == "OK" else f"{name} ({status})")
+        else:
+            output.warn(f"{name}: {status}")
 
 
 def _fast_forward_project_anchors() -> None:
