@@ -121,6 +121,28 @@ async def list_live_sessions(
     return LiveSessionListResponse(live_sessions=[_to_info(r) for r in rows])
 
 
+@router.get("/resolve", response_model=LiveSessionInfo)
+async def resolve_live_session(handle: str, request: Request) -> LiveSessionInfo:
+    """Resolve a handle (session id OR **worktree handle**) -> its live session.
+
+    This is D3's addressing endpoint: an agent is a series of sessions in one
+    worktree, so a peer addresses it by worktree handle and the bridge resolves
+    that to whichever session is live *now* -- letting ``reply-to`` survive a
+    handoff. An exact ``session_id`` still resolves to itself. 404 when the
+    handle names neither a known session nor a currently-live worktree.
+
+    Declared before ``/{session_id}`` so the literal ``/resolve`` path wins over
+    the path-param route.
+    """
+    db = _db(request)
+    row = db.resolve_live_session(handle, now=time.time())
+    if row is None:
+        raise HTTPException(
+            status_code=404, detail="no live session for handle"
+        )
+    return _to_info(row)
+
+
 @router.get("/{session_id}", response_model=LiveSessionInfo)
 async def get_live_session(session_id: str, request: Request) -> LiveSessionInfo:
     """Fetch a single registered live interactive CLI session."""
