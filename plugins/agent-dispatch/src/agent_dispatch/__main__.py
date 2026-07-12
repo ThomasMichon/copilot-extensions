@@ -270,9 +270,36 @@ def _cmd_yield(args: argparse.Namespace) -> int:
         return _emit(c.yield_task(args.task_id, args.worker_id, note=args.note))
 
 
+def _owner_from_identity(args: argparse.Namespace) -> str | None:
+    """Compose the canonical ``machine/worktree`` owner from the CWD identity.
+
+    Mirrors the coordinator's ``worker_id_for`` so a worker can address its own
+    task without typing its owner: ``complete <id>`` (no owner) resolves the same
+    ``machine/worktree`` pair it claimed under. Returns None when identity can't
+    be resolved (no agent-worktrees, outside a worktree).
+    """
+    machine, worktree = _identity(args)
+    if machine and worktree:
+        return f"{machine}/{worktree}"
+    return None
+
+
 def _cmd_complete(args: argparse.Namespace) -> int:
+    # Owner is optional: a worker that claimed under its CWD identity can
+    # complete with just the task id -- we resolve the same machine/worktree
+    # owner. This is what lets a taken-over successor finish a handoff task with
+    # one clean command (`agent-dispatch complete <id>`) once the goal is met.
+    worker_id = args.worker_id or _owner_from_identity(args)
+    if not worker_id:
+        print(
+            "agent-dispatch: could not resolve the owner for complete. Pass the "
+            "owner positionally (`complete <id> <owner>`) or run inside the "
+            "owning worktree so machine/worktree resolves.",
+            file=sys.stderr,
+        )
+        return 2
     with _client(args) as c:
-        return _emit(c.complete(args.task_id, args.worker_id, result_ref=args.result_ref))
+        return _emit(c.complete(args.task_id, worker_id, result_ref=args.result_ref))
 
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
@@ -380,17 +407,28 @@ def _cmd_payload(args: argparse.Namespace) -> int:
 
 
 def _cmd_consume(args: argparse.Namespace) -> int:
-    """Resume-and-consume a handoff in one shot: drive the task to ``completed``
-    (best-effort, fully idempotent) and print its payload content.
+    """Resume-and-consume a handoff and print its payload content.
 
-    This is the successor's single pickup command -- loading the brief IS
-    consuming the baton, so a handoff is marked completed the *moment* it is
-    picked up, on every resume path (live cutover, /resume-handoff, or a
-    hand-pasted seed). Transitions are best-effort: an already-advanced or
+    Two completion modes:
+
+    - **Baton (default):** drive the task all the way to ``completed`` in one
+      shot -- loading the brief IS consuming the baton, so a handoff is marked
+      completed the *moment* it is picked up (the classic quick-baton resume:
+      /resume-handoff, a hand-pasted seed). The continuation *work* is tracked
+      by its effort/issue, not this task.
+    - **Deferred (``--defer-complete``):** approve -> claim -> **start** the task
+      (take ownership, mark it in-progress) and print the brief, but do **not**
+      complete it. This is the *takeover* pickup: a dispatched/embodied successor
+      loads the brief, works the task, and calls ``agent-dispatch complete
+      <id>`` **explicitly** only when it reaches the handoff's goal -- so
+      ``completed`` means *the work is done*, not *the baton was handed over*.
+
+    Transitions are best-effort and idempotent: an already-advanced or
     already-terminal task just prints its payload (never an error), and a task
     the caller can't take ownership of is still read and printed.
     """
     task_id = args.task_id
+    defer = getattr(args, "defer_complete", False)
     machine, worktree = _identity(args)
     try:
         repo = _scope_repo(args)
@@ -426,15 +464,18 @@ def _cmd_consume(args: argparse.Namespace) -> int:
             elif status in ("claimed", "started"):
                 owner = task.get("owner")
             if owner:
-                result_ref = args.result_ref or f"consumed:{worktree or 'successor'}"
                 try:
                     c.start(task_id, owner)
                 except DispatchError:
                     pass
-                try:
-                    c.complete(task_id, owner, result_ref=result_ref)
-                except DispatchError:
-                    pass
+                # Deferred pickup stops at 'started': the successor completes
+                # explicitly when the work is done. Baton mode completes now.
+                if not defer:
+                    result_ref = args.result_ref or f"consumed:{worktree or 'successor'}"
+                    try:
+                        c.complete(task_id, owner, result_ref=result_ref)
+                    except DispatchError:
+                        pass
         result = c.payload(task_id)
     content = result.get("payload")
     if content is None:
@@ -616,7 +657,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("complete", help="mark a started task completed")
     p.add_argument("task_id")
-    p.add_argument("worker_id")
+    p.add_argument(
+        "worker_id", nargs="?",
+        help="owner id (default: the machine/worktree resolved from CWD, so a "
+             "worker can `complete <id>` without typing its own owner)",
+    )
+    p.add_argument("--machine", help="override the resolved machine identity")
+    p.add_argument("--worktree", help="override the resolved worktree identity")
     p.add_argument("--result-ref")
     p.set_defaults(func=_cmd_complete)
 
@@ -720,6 +767,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="lane to consume from (local name or remote URL). Default: the calling repo.",
     )
     p.add_argument("--result-ref", help="result ref recorded on completion")
+    p.add_argument(
+        "--defer-complete", action="store_true",
+        help="takeover pickup: approve->claim->start + print the brief, but do "
+             "NOT complete -- the successor completes explicitly when the goal "
+             "is reached (deferred completion)",
+    )
     p.set_defaults(func=_cmd_consume)
 
     p = sub.add_parser("recover", help="requeue expired-lease tasks")

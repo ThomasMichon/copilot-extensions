@@ -177,3 +177,114 @@ def test_inbox_requires_a_machine(monkeypatch, capsys):
     args = build_parser().parse_args(["inbox"])
     assert args.func(args) == 2
     assert "could not resolve this machine" in capsys.readouterr().err
+
+
+# -- Deferred-completion pickup (takeover) + complete owner auto-resolution ---
+
+
+def test_parser_complete_owner_optional():
+    # Both `complete <id>` and `complete <id> <owner>` parse.
+    a = build_parser().parse_args(["complete", "t1"])
+    assert a.task_id == "t1" and a.worker_id is None
+    b = build_parser().parse_args(["complete", "t1", "m/wt", "--result-ref", "pr/9"])
+    assert b.worker_id == "m/wt" and b.result_ref == "pr/9"
+
+
+def test_parser_consume_defer_complete_flag():
+    a = build_parser().parse_args(["consume", "t9"])
+    assert a.defer_complete is False
+    b = build_parser().parse_args(["consume", "t9", "--defer-complete"])
+    assert b.defer_complete is True
+
+
+def test_complete_resolves_owner_from_identity(monkeypatch, capsys):
+    """`complete <id>` (no owner) resolves owner = machine/worktree from CWD."""
+    from agent_dispatch import __main__, identity
+
+    completed = {}
+
+    class _C:
+        def complete(self, task_id, worker_id, *, result_ref=None):
+            completed["task_id"] = task_id
+            completed["worker_id"] = worker_id
+            return {"id": task_id, "status": "completed", "owner": worker_id}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
+
+    args = build_parser().parse_args(["complete", "T5"])
+    assert args.func(args) == 0
+    assert completed == {"task_id": "T5", "worker_id": "lambda-core/wt-7"}
+
+
+class _PickupClient:
+    """A fake client tracking the consume lifecycle transitions."""
+
+    def __init__(self, status="queued"):
+        self.status = status
+        self.transitions: list[str] = []
+
+    def get(self, task_id):
+        return {"id": task_id, "status": self.status, "owner": None}
+
+    def approve(self, task_id):
+        self.transitions.append("approve")
+        return {"id": task_id, "status": "queued"}
+
+    def claim(self, **kw):
+        self.transitions.append("claim")
+        return {"id": kw.get("task_id"), "owner": "m/wt", "status": "claimed"}
+
+    def start(self, task_id, owner):
+        self.transitions.append("start")
+        return {"id": task_id, "status": "started", "owner": owner}
+
+    def complete(self, task_id, owner, *, result_ref=None):
+        self.transitions.append("complete")
+        return {"id": task_id, "status": "completed", "owner": owner}
+
+    def payload(self, task_id):
+        return {"payload": "the brief"}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return None
+
+
+def test_consume_baton_completes_on_pickup(monkeypatch, capsys):
+    from agent_dispatch import __main__, identity
+
+    fake = _PickupClient("proposed")
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 0
+    # Baton mode drives all the way to completed.
+    assert fake.transitions == ["approve", "claim", "start", "complete"]
+    assert "the brief" in capsys.readouterr().out
+
+
+def test_consume_defer_complete_stops_at_started(monkeypatch, capsys):
+    from agent_dispatch import __main__, identity
+
+    fake = _PickupClient("proposed")
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1", "--defer-complete"])
+    assert args.func(args) == 0
+    # Deferred: take ownership + start, but NEVER complete -- the successor does.
+    assert fake.transitions == ["approve", "claim", "start"]
+    assert "complete" not in fake.transitions
+    assert "the brief" in capsys.readouterr().out
