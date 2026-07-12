@@ -254,15 +254,31 @@ agent-dispatch show    <id>       # full task record
 agent-dispatch events  <id>       # append-only audit trail of every transition
 agent-dispatch payload <id>       # resolved payload (inline or blob); --raw prints content only
 agent-dispatch consume <id>       # resume-and-consume: drive to completed (idempotent) + print payload
+agent-dispatch consume <id> --defer-complete  # TAKEOVER pickup: approve->claim->start + print brief, NO complete
 agent-dispatch watch              # stream task.* events (SSE) as JSON lines
 ```
 
-> **`consume` is the handoff-pickup shortcut.** It rolls the whole
-> approve → claim → start → complete lifecycle into one idempotent call and then
-> prints the payload, so a successor's *single* command loads the brief **and**
-> marks the baton spent -- a handoff is completed the moment it is picked up. An
-> already-terminal (or unclaimable) task just has its payload re-printed, never
-> an error. Use plain `payload --raw` when you want to read *without* consuming.
+> **`consume` is the handoff-pickup shortcut -- in two flavors.**
+>
+> - **Baton (default `consume <id>`):** rolls the whole
+>   approve → claim → start → complete lifecycle into one idempotent call and
+>   then prints the payload, so a successor's *single* command loads the brief
+>   **and** marks the baton spent -- a handoff is completed the moment it is
+>   picked up. The continuation *work* is tracked by its effort/issue, not this
+>   task. Use for a **human in-place resume** (`/resume-handoff`, a pasted seed).
+> - **Deferred (`consume <id> --defer-complete`):** approve → claim → **start**
+>   (take ownership, mark in-progress) + print the brief, but do **not**
+>   complete. This is the **takeover** pickup for a *dispatched / embodied
+>   successor*: it loads the brief, works the task, and runs `agent-dispatch
+>   complete <id>` **explicitly** only when it judges the goal reached -- so
+>   `completed` means *the work is done*, not *the baton was handed over*.
+>
+> An already-terminal (or unclaimable) task just has its payload re-printed,
+> never an error. Use plain `payload --raw` to read *without* any state change.
+>
+> **`complete <id>` needs no owner** when run inside the owning worktree: it
+> resolves `machine/worktree` from the CWD (like `claim`), so a taken-over
+> successor finishes with one clean command once the goal is met.
 
 ## Routing: `requires` (hard) vs `affinity` (soft)
 
