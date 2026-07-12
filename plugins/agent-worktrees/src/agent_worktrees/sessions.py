@@ -1178,6 +1178,30 @@ def _mux_session_target(worktree_id: str, mux_bin: str) -> str:
     return sess if mux_bin == "psmux" else f"={sess}"
 
 
+def _mux_pane_cmd(
+    cmd: list[str], *, is_tmux: bool, pane_wrapper: str | None = None
+) -> list[str]:
+    """Build the in-pane command vector shared by new-window and new-session.
+
+    On Linux/WSL (tmux) the command is prefixed with ``env -u <identity vars>``
+    and wrapped by the pane-wrapper (when present); on Windows (psmux) the server
+    env is already identity-clean so the command runs verbatim (and psmux cannot
+    carry a spaces-containing pane arg -- see :func:`build_mux_new_window_argv`).
+    """
+    if not is_tmux:
+        # psmux: run verbatim; keep every element single-token.
+        return list(cmd)
+    clean: list[str] = ["env"]
+    for var in _IDENTITY_ENV_VARS:
+        clean += ["-u", var]
+    wrapper = pane_wrapper
+    if wrapper is None:
+        wrapper = os.path.expanduser("~/.agent-worktrees/bin/pane-wrapper.sh")
+    if wrapper and os.path.isfile(wrapper) and os.access(wrapper, os.R_OK):
+        return clean + ["bash", wrapper] + list(cmd)
+    return clean + list(cmd)
+
+
 def build_mux_new_window_argv(
     worktree_id: str,
     work_dir: str,
@@ -1206,33 +1230,78 @@ def build_mux_new_window_argv(
     for key, val in (env or {}).items():
         argv += ["-e", f"{key}={val}"]
 
-    if is_tmux:
-        clean: list[str] = ["env"]
-        for var in _IDENTITY_ENV_VARS:
-            clean += ["-u", var]
-        wrapper = pane_wrapper
-        if wrapper is None:
-            wrapper = os.path.expanduser("~/.agent-worktrees/bin/pane-wrapper.sh")
-        if wrapper and os.path.isfile(wrapper) and os.access(wrapper, os.R_OK):
-            pane_cmd = clean + ["bash", wrapper] + list(cmd)
-        else:
-            pane_cmd = clean + list(cmd)
-    else:
-        # psmux (Windows tmux port) reconstructs the pane command line and
-        # CreateProcess-spawns it, space-JOINING the command argv WITHOUT
-        # re-quoting -- so it cannot carry an arg containing spaces at all (a
-        # multi-word arg word-splits, and pre-quoting it breaks the spawn
-        # outright). The seed prompt therefore is NOT passed as a launch arg; a
-        # cutover spawns a plain interactive Copilot and injects the seed via
-        # send-keys afterward (:func:`mux_seed_pane`). This branch runs the
-        # command verbatim; keep every element single-token.
-        pane_cmd = list(cmd)
+    pane_cmd = _mux_pane_cmd(cmd, is_tmux=is_tmux, pane_wrapper=pane_wrapper)
 
     # No ``--`` separator: mux option parsing stops at the first non-option
     # token (``env`` / the launcher binary), so the rest is taken as the
     # command verbatim -- matching launch-session.{sh,ps1}'s new-session call.
     argv += pane_cmd
     return argv
+
+
+def build_mux_new_session_argv(
+    worktree_id: str,
+    work_dir: str,
+    cmd: list[str],
+    env: dict[str, str] | None = None,
+    *,
+    mux: str | None = None,
+    pane_wrapper: str | None = None,
+) -> list[str]:
+    """Build the argv to create a **detached** ``wt-<id>`` session running ``cmd``.
+
+    The new-session analogue of :func:`build_mux_new_window_argv`, used to
+    *embody* a Copilot CLI in a worktree that has no mux session yet (D5). ``-d``
+    keeps it detached -- the caller does not attach; the operator (or Neuron
+    Forge) attaches later. ``-P -F '#{pane_id}'`` prints the new pane id. Same
+    identity-clean + pane-wrapper construction as a new window, so an embodied
+    session is indistinguishable from a picker-launched one.
+    """
+    mux_bin = _mux_bin(mux)
+    is_tmux = mux_bin != "psmux"
+    sess = f"wt-{worktree_id}"
+
+    argv = [mux_bin, "new-session", "-d", "-s", sess, "-P", "-F", "#{pane_id}"]
+    if work_dir:
+        argv += ["-c", work_dir]
+    for key, val in (env or {}).items():
+        argv += ["-e", f"{key}={val}"]
+
+    argv += _mux_pane_cmd(cmd, is_tmux=is_tmux, pane_wrapper=pane_wrapper)
+    return argv
+
+
+def mux_new_session(
+    worktree_id: str,
+    work_dir: str,
+    cmd: list[str],
+    env: dict[str, str] | None = None,
+    *,
+    mux: str | None = None,
+) -> dict:
+    """Create a detached ``wt-<id>`` session running ``cmd``; return its pane.
+
+    Returns ``{ok, session, new_pane, error}``. Detached, so the caller does not
+    take over a terminal -- the embodied Copilot registers itself with the local
+    bridge (Phase 1), which is how the spawn is later verified and viewed.
+    """
+    import subprocess
+
+    sess = f"wt-{worktree_id}"
+    argv = build_mux_new_session_argv(worktree_id, work_dir, cmd, env, mux=mux)
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"ok": False, "session": sess, "new_pane": None, "error": str(e)}
+    if r.returncode != 0:
+        return {
+            "ok": False, "session": sess, "new_pane": None,
+            "error": r.stderr.strip() or f"exit {r.returncode}",
+        }
+    return {
+        "ok": True, "session": sess,
+        "new_pane": r.stdout.strip() or None, "error": None,
+    }
 
 
 def mux_seed_pane(
