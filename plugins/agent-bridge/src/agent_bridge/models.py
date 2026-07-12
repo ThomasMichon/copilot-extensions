@@ -262,6 +262,49 @@ class IngestLiveEventsResult(BaseModel):
     last_id: int
 
 
+class SendMessageRequest(BaseModel):
+    """Post a message INTO a live interactive session (Phase 2 write path)."""
+
+    sender: str
+    body: str
+
+
+class SendMessageResult(BaseModel):
+    """Result of enqueuing a message for delivery into a live session."""
+
+    ok: bool = True
+    session_id: str
+    message_id: int
+
+
+class LiveMessage(BaseModel):
+    """A pending message awaiting delivery into a live session."""
+
+    id: int
+    sender: str
+    body: str
+    created_at: float
+
+
+class LiveMessageListResponse(BaseModel):
+    """Pending messages for a live session, oldest-first (the poll response)."""
+
+    messages: list[LiveMessage]
+
+
+class AckMessagesRequest(BaseModel):
+    """Ack delivered messages by id (the extension acks after ``session.send``)."""
+
+    ids: list[int]
+
+
+class AckMessagesResult(BaseModel):
+    """Result of acking delivered messages."""
+
+    ok: bool = True
+    acked: int
+
+
 class CursorInfo(BaseModel):
     """Current delivery-cursor position for a caller on a session."""
 

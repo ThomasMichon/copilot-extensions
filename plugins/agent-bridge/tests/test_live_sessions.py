@@ -103,7 +103,7 @@ def test_migration_v5_to_v6_adds_live_sessions(tmp_path: Path) -> None:
     db = Database(db_path)
     try:
         ver = db.execute_read("SELECT version FROM schema_version")[0]["version"]
-        assert ver == SCHEMA_VERSION == 6
+        assert ver == SCHEMA_VERSION
         db.register_live_session(
             "s", machine="m", cwd=None, worktree_id=None, repo=None,
             branch=None, pid=None, role=None, now=time.time(),
