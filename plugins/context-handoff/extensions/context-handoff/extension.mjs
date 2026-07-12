@@ -18,8 +18,10 @@
 //
 // The /handoff gesture is handled as a skill invocation (context-handoff
 // skill), not a slash command. The skill triggers the agent to call
-// generate_handoff_prompt, compose prose, and call save_handoff_prompt.
-// The user then copies the short prompt and pastes it into a new session.
+// generate_handoff_prompt, compose prose, and call save_handoff_prompt. The
+// PRIMARY path then performs a live cutover (continue_handoff) -- spinning up a
+// successor in the same mux and retiring this session, hands-free -- and only
+// falls back to a copy/paste reply when no mux session is present.
 
 import {
   existsSync,
@@ -152,12 +154,14 @@ function saveHandoffPrompt(promptText, sid) {
 // --- agent-dispatch integration (soft dependency) ---
 // When an agent-dispatch coordinator is reachable, a handoff is stored as a
 // *task* (payload = the handoff markdown) instead of a session-folder file, so
-// it becomes durable, browsable, and claimable -- consumed next session with
-// /resume-handoff (or by pasting the short seed prompt, which loads the full
-// brief AND marks the task completed with one `agent-dispatch consume <id>`
-// command). context-handoff sits *on top of* agent-dispatch when it exists, and
-// falls back to the file flow when it doesn't. All best-effort: any failure
-// returns null / a safe default so the caller degrades to the file path.
+// it becomes durable, browsable, and claimable. It is picked up two ways, with
+// two completion models: a LIVE CUTOVER successor (the primary path) uses
+// `agent-dispatch consume <id> --defer-complete` and completes the task
+// explicitly when it reaches the goal (deferred); a human paste / /resume-handoff
+// uses `agent-dispatch consume <id>` (baton -- completed on pickup). context-
+// handoff sits *on top of* agent-dispatch when it exists, and falls back to the
+// file flow when it doesn't. All best-effort: any failure returns null / a safe
+// default so the caller degrades to the file path.
 
 // True if the `agent-dispatch` CLI answers a health probe (a live coordinator).
 function agentDispatchAvailable() {
@@ -610,39 +614,54 @@ const session = await joinSession({
         const topic = title || "continue this session";
 
         // Store the handoff (agent-dispatch task preferred, else session file)
-        // and derive both the short reply prompt (== the successor seed) and the
-        // normal instruction message. Storage is single-responsibility here; a
-        // live cutover is a SEPARATE, explicit continue_handoff call the agent
-        // makes afterward, passing the HANDOFF_SEED below.
-        let seed = null;       // the reply prompt == the successor's -i seed
-        let storedMsg = null;  // the instruction to reply with
+        // and derive both the short reply prompt (the baton paste-seed) and the
+        // cutover seed. Storage is single-responsibility here; a live cutover is
+        // a SEPARATE, explicit continue_handoff call the agent makes afterward,
+        // passing the HANDOFF_SEED below (the *deferred* cutover seed).
+        let seed = null;          // baton paste-seed (== the paste reply)
+        let cutoverSeed = null;   // deferred cutover seed (== HANDOFF_SEED)
+        let storedMsg = null;     // the instruction to reply with
 
         if (agentDispatchAvailable()) {
           const taskId = dispatchHandoff(text, sid, cwd, title);
           if (taskId) {
-            // File-model parity: a short, self-loading seed. The successor gets
-            // the helper framing inline and pulls the full brief with ONE
-            // command that BOTH loads the brief and consumes the baton (marks
-            // the task completed), so it starts work immediately -- no tool
-            // discovery, no skill load, no claim ceremony -- and the handoff is
-            // completed the moment it is picked up, on every resume path. Single
-            // line + ASCII so it rides `copilot -i` intact.
+            // Two seeds, two completion models (see the context-handoff skill):
+            //
+            // - PASTE seed (baton): a human resuming in-place (/resume-handoff,
+            //   or pasting into /clear) is driving, so `consume <id>` loads the
+            //   brief AND marks the baton spent -- completed on pickup. The
+            //   continuation *work* is tracked by its effort/issue.
+            // - CUTOVER seed (deferred): a live-cutover successor is a dispatched
+            //   autopilot CLI, so it uses `consume <id> --defer-complete` (load
+            //   brief + take ownership, but NOT complete) and completes the task
+            //   EXPLICITLY only when it reaches the handoff's goal -- so
+            //   `completed` means the work is done, not the baton was handed off.
+            //
+            // Both are single-line ASCII so they ride `copilot -i` intact.
             seed =
               `You are resuming a handoff (agent-dispatch task ${taskId}); ` +
               `continue the prior session's work IN PLACE -- do not restart or ` +
               `create a new worktree. Load your full brief by running: ` +
               `agent-dispatch consume ${taskId} ; then continue: ${topic}.`;
+            cutoverSeed =
+              `You are taking over a handoff (agent-dispatch task ${taskId}) IN ` +
+              `PLACE -- do not restart or create a new worktree. Load your brief ` +
+              `and take ownership with: agent-dispatch consume ${taskId} ` +
+              `--defer-complete ; do the work, and ONLY when you reach the ` +
+              `handoff's goal run: agent-dispatch complete ${taskId} . ` +
+              `Continue: ${topic}.`;
             storedMsg = (
               `Handoff stored as agent-dispatch task ${taskId} (proposed, label ` +
               `'handoff', pinned to this worktree). No session file was written.\n\n` +
-              `Reply to the user with ONLY this short prompt. They resume by ` +
-              `running /resume-handoff in a fresh session in this worktree, or by ` +
-              `pasting it into '/clear' (or '/new') -- the successor loads the ` +
-              `full brief AND marks the handoff completed with the one command ` +
-              `embedded in the seed:\n` +
+              `PRIMARY PATH -- live cutover (no copy/paste): call continue_handoff ` +
+              `with \`seed\` = the HANDOFF_SEED below to spin up the successor in ` +
+              `place and hand off automatically. Only if that reports it is not ` +
+              `under a mux session (graceful fallback) do you reply to the user ` +
+              `with ONLY this short paste prompt (they resume via /resume-handoff ` +
+              `or by pasting into /clear):\n` +
               `  ${seed}\n` +
               `Do NOT paste the handoff contents -- the payload lives in the task ` +
-              `and is loaded (and the task consumed) on demand by that command.`
+              `and is loaded on demand by the embedded command.`
             );
           }
           // Task creation failed -- fall through to the file flow.
@@ -651,6 +670,7 @@ const session = await joinSession({
         if (!seed) {
           const promptPath = saveHandoffPrompt(text, sid);
           seed = `Read the handoff at ${promptPath} and continue: ${topic}.`;
+          cutoverSeed = seed;  // no task in file mode: cutover reuses the paste seed
           storedMsg = (
             `Handoff saved to ${promptPath}\n\n` +
             `(Stored as a session file — no reachable agent-dispatch coordinator, ` +
@@ -665,15 +685,16 @@ const session = await joinSession({
           );
         }
 
-        // The HANDOFF_SEED line is the machine-readable seed for a LIVE cutover:
-        // if performing one (e.g. /handoff-continue), call continue_handoff with
-        // `seed` set to exactly this string. Ignore it for a normal handoff.
+        // The HANDOFF_SEED line is the machine-readable seed for a LIVE cutover
+        // (the PRIMARY handoff path): call continue_handoff with `seed` set to
+        // exactly this string. For a task-backed handoff it is the *deferred*
+        // cutover seed (the successor completes explicitly at the goal).
         return (
           `${storedMsg}\n\n` +
-          `HANDOFF_SEED: ${seed}\n` +
-          `(For a LIVE cutover only: call continue_handoff with \`seed\` set to ` +
-          `exactly the HANDOFF_SEED string above. For a normal handoff, ignore ` +
-          `this line and just reply with the short prompt.)`
+          `HANDOFF_SEED: ${cutoverSeed}\n` +
+          `(Live cutover is the PRIMARY path: call continue_handoff with \`seed\` ` +
+          `set to exactly the HANDOFF_SEED string above. Only fall back to the ` +
+          `short paste prompt if continue_handoff reports no mux session.)`
         );
       },
     },
