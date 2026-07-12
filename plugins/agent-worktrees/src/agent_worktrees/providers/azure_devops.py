@@ -12,8 +12,12 @@ is ``project/repo``.
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from .base import ProviderError, PRScope, PullResult, run_cli
+
+if TYPE_CHECKING:
+    from ..pr_contract import PRSnapshot
 
 
 class AzureDevOpsProvider:
@@ -116,3 +120,11 @@ class AzureDevOpsProvider:
         """
         _ = (repo, number, label, api_base, token)
         return "remove_label is not supported for azure-devops provider"
+
+    def get_snapshot(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> PRSnapshot:
+        """Not implemented: pr-watch/pr-status snapshot reads are gitea-only today."""
+        from .base import _unsupported_snapshot
+        _ = (repo, number, api_base, token)
+        return _unsupported_snapshot(self.name)

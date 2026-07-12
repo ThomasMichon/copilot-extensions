@@ -17,11 +17,26 @@ from __future__ import annotations
 import os
 import subprocess
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from ..pr_contract import PRSnapshot
 
 
 class ProviderError(RuntimeError):
-    """A provider failed to create or query a pull request."""
+    """A provider failed to create or query a pull request.
+
+    ``transient`` distinguishes a retryable hiccup (network blip, timeout, 5xx,
+    429/408, or a curl-level failure) from a **permanent** failure (bad/expired
+    token, wrong repo or PR, malformed response).  A polling caller (``pr-watch``)
+    retries transient errors until its timeout but lets permanent ones propagate
+    so it fails fast instead of hanging the full timeout on a guaranteed failure.
+    Defaults to ``False`` (permanent) so existing raise sites are unchanged.
+    """
+
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
 
 
 @dataclass
@@ -84,6 +99,27 @@ class PRProvider(Protocol):
     ) -> str:
         """Remove ``label`` from an existing PR; return "" on success."""
         ...
+
+    def get_snapshot(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> PRSnapshot:
+        """Fetch a full :class:`~agent_worktrees.pr_contract.PRSnapshot`.
+
+        The review/mergeability/lifecycle view the ``pr-watch`` and ``pr-status``
+        verbs diff and classify.  Distinct from :meth:`get_pull` (which returns
+        only url/number/state/merged): a snapshot also carries reviews, the
+        mergeable flag, author, head sha, labels, title, and draft.  A provider
+        that cannot supply it raises :class:`ProviderError` (the base default),
+        so ``pr-watch`` fails fast on an unsupported backend rather than hanging.
+        """
+        ...
+
+
+def _unsupported_snapshot(name: str) -> PRSnapshot:
+    raise ProviderError(
+        f"Provider '{name}' does not support snapshot reads (pr-watch/pr-status "
+        "need a provider with get_snapshot; only 'gitea' implements it today)."
+    )
 
 
 def resolve_token(prcfg) -> str | None:
