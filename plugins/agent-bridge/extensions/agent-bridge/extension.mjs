@@ -34,11 +34,13 @@ const FLUSH_MS = 1_000; // drain the represented-event queue to the bridge every
 const MAX_QUEUE = 1_000; // bounded buffer; drop OLDEST on overflow (honest reduced fidelity)
 const FLUSH_BATCH = 250; // max events POSTed per flush
 const INBOX_POLL_MS = 2_000; // poll the bridge for messages to deliver every 2s
-// Delivery (Phase 2 write path) is OPT-IN: injecting a message runs it as a user
-// turn under this session's permissions, so it stays OFF until the operator
-// enables it with `/peer` (mirrors `/talk`). An env default lets a session start
-// pre-enabled (AGENT_BRIDGE_DELIVERY=1); anything else stays off.
-const DELIVERY_DEFAULT_ON = /^(1|true|on|yes)$/i.test(
+// Delivery (Phase 2 write path) is SEAMLESS by default. This is a
+// single-operator, multi-agent mesh: the operator owns every agent and the
+// transport (localhost bind + operator-secured SSH + local bearer token), so a
+// message reaching the session that should have it needs no per-session opt-in.
+// `/peer` is an optional MUTE (not a gate); AGENT_BRIDGE_DELIVERY=0 (or
+// off/false/no) starts a session muted.
+const DELIVERY_DEFAULT_ON = !/^(0|false|off|no)$/i.test(
   process.env.AGENT_BRIDGE_DELIVERY || "",
 );
 // SDK event types we represent (Phase 5). Everything else is intentionally not
@@ -71,7 +73,7 @@ const state = {
   pendingEvents: [], // bounded queue of raw SDK events awaiting flush
   flushing: false, // guard against overlapping flushes
   inboxPoll: null, // delivery inbox poll interval handle
-  deliveryEnabled: DELIVERY_DEFAULT_ON, // /peer toggle (opt-in message delivery)
+  deliveryEnabled: DELIVERY_DEFAULT_ON, // /peer MUTE toggle (delivery on by default)
   delivering: false, // guard against overlapping inbox drains
   lastEventAt: 0, // advanced by the observe-only event handler
 };
@@ -253,11 +255,12 @@ function renderDeliveredPrompt(sender, body) {
 }
 
 // Poll the bridge inbox and deliver pending messages into THIS session via
-// session.send (off the CLI event loop, on the poll timer). Opt-in: does
-// nothing unless the operator enabled delivery with /peer. Best-effort and
-// serialized; acks only AFTER session.send resolves, so an undelivered message
-// is redelivered next tick rather than lost, and the ack makes redelivery a
-// no-op on the bridge (idempotent) rather than a double injection.
+// session.send (off the CLI event loop, on the poll timer). Delivery is on by
+// default; this does nothing only while the session is MUTED (/peer).
+// Best-effort and serialized; acks only AFTER session.send resolves, so an
+// undelivered message is redelivered next tick rather than lost, and the ack
+// makes redelivery a no-op on the bridge (idempotent) rather than a double
+// injection.
 async function pollInbox() {
   if (state.delivering) return;
   if (!state.deliveryEnabled) return;
@@ -303,26 +306,28 @@ const session = await joinSession({
   // NOT auto-approve the operator's own tool calls -- those stay with the CLI.
   onPermissionRequest: approveAll,
 
-  // /peer -- opt-in toggle for message delivery INTO this session (Phase 2).
-  // Delivery is OFF by default; injecting a message runs it as a user turn
-  // under this session's permissions, so the operator must consent. Mirrors
-  // /talk. On enable, drains any already-queued messages immediately.
+  // /peer -- optional MUTE toggle for message delivery INTO this session.
+  // Delivery is ON by default (single-operator mesh; trust is the transport, not
+  // a consent prompt) -- this just lets the operator silence a focused session.
+  // Mirrors /talk's role as a control, not a gate.
   commands: [
     {
       name: "peer",
       description:
-        "Toggle agent-bridge message delivery INTO this session (peer/callback " +
-        "messages are injected as attributed user turns). Off by default.",
+        "Mute/unmute agent-bridge message delivery INTO this session. Delivery " +
+        "is on by default (peer/callback messages arrive as attributed user " +
+        "turns); use this to silence or re-enable it.",
       handler: async (ctx) => {
         void ctx;
         state.deliveryEnabled = !state.deliveryEnabled;
-        const st = state.deliveryEnabled ? "ENABLED" : "disabled";
+        const st = state.deliveryEnabled ? "unmuted (ENABLED)" : "MUTED";
         await session.log(
           `agent-bridge peer delivery ${st}` +
             (state.deliveryEnabled
-              ? " -- messages sent to this session will be injected as " +
-                "attributed user turns."
-              : " -- incoming messages will queue but not be delivered."),
+              ? " -- messages sent to this session are injected as attributed " +
+                "user turns."
+              : " -- incoming messages will queue but not be delivered until " +
+                "unmuted."),
         );
         if (state.deliveryEnabled) {
           pollInbox().catch(() => {});
@@ -387,9 +392,9 @@ try {
     }, FLUSH_MS);
     if (state.flusher.unref) state.flusher.unref();
     // Delivery inbox poll (Phase 2): checks the bridge for messages to inject.
-    // Always ticking, but a no-op until the operator enables it with /peer, so
-    // the toggle takes effect at runtime with no restart. Off the event loop,
-    // unref'd, best-effort.
+    // Always ticking; delivers unless the session is muted (/peer), so the mute
+    // takes effect at runtime with no restart. Off the event loop, unref'd,
+    // best-effort.
     state.inboxPoll = setInterval(() => {
       pollInbox().catch(() => {});
     }, INBOX_POLL_MS);
