@@ -182,7 +182,7 @@ class TestHelpers:
 # ---------------------------------------------------------------------------
 
 _BINDING = dict(
-    consent_label="auto-merge",
+    automerge_label="auto-merge",
     hold_labels=("do-not-merge", "needs-rebase", "wip"),
     wip_title_prefixes=("wip:", "[wip]", "draft:"),
 )
@@ -261,7 +261,7 @@ class TestClassifyState:
         assert st.held == ()
         assert st.wip is False
         assert st.consent_action == "skip"
-        assert "no consent label" in st.reason
+        assert "no auto-merge label" in st.reason
         assert st.eligible is False
 
     def test_binding_absent_ignores_hold_and_wip_labels(self):

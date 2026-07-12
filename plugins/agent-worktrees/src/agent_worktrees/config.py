@@ -137,12 +137,14 @@ class PRConfig:
     # family: pr-watch / pr-merge / pr-status). The plugin ships these EMPTY so
     # it stays provider-generic -- a repo with no binding gets a no-op, never a
     # crash. The facility supplies its vocabulary in .agent-worktrees/config.yaml
-    # (e.g. consent_label: auto-merge; hold_labels: [do-not-merge, needs-rebase,
-    # wip]; wip_title_prefixes: ["wip:", "[wip]", "draft:", ...]).
+    # (e.g. automerge_label: auto-merge; hold_labels: [do-not-merge,
+    # needs-rebase, wip]; wip_title_prefixes: ["wip:", "[wip]", "draft:", ...]).
     #
-    # - ``consent_label``      -- the label whose presence signals MERGE CONSENT
-    #   (pr-merge applies it after an approval). Empty => no consent mechanism is
-    #   configured, so pr-merge declines rather than guessing a label.
+    # - ``automerge_label``    -- the label whose presence signals MERGE CONSENT
+    #   (pr-merge applies it after an approval; think ADO's "auto-complete").
+    #   Empty => no auto-merge mechanism is configured, so pr-merge declines
+    #   rather than guessing a label. "Consent" is the *concept*; this field
+    #   names the concrete *label* that expresses it.
     # - ``hold_labels``        -- labels that BLOCK consent/merge (an explicit
     #   hold, or a state needing author action such as a rebase).
     # - ``wip_title_prefixes`` -- case-insensitive title prefixes treated as
@@ -151,8 +153,8 @@ class PRConfig:
     # Verdict semantics (approve / request-changes / comment) are NOT a binding:
     # they are intrinsic to the review backend and live in the provider. A
     # ``dampener:*`` status tag needs no binding -- it is simply neither the
-    # consent label nor a hold label, so the classifier ignores it.
-    consent_label: str = ""
+    # auto-merge label nor a hold label, so the classifier ignores it.
+    automerge_label: str = ""
     hold_labels: tuple[str, ...] = ()
     wip_title_prefixes: tuple[str, ...] = ()
 
@@ -871,7 +873,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         token_command=str(raw.get("token_command", "")),
         labels=labels,
         auto_open=bool(raw.get("auto_open", False)),
-        consent_label=str(raw.get("consent_label", "")).strip(),
+        automerge_label=str(raw.get("automerge_label", "")).strip(),
         hold_labels=_str_tuple(raw.get("hold_labels", ())),
         wip_title_prefixes=_str_tuple(raw.get("wip_title_prefixes", ())),
     )

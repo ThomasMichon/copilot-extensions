@@ -186,19 +186,19 @@ in-repo overlay (below); the in-repo version wins when both are present.
 | `branch_prefix` | string | `feature` | Prefix for generated feature-branch names (e.g. `feature/<slug>-<suffix>`). Used by the `snapshot` head scheme and as the `{prefix}` token in `head_pattern`. |
 | `head_scheme` | string | `refspec` | How `create-pr` publishes the PR head — **naming + push mechanism only**. Both schemes leave the local worktree on `worktree/<id>` at the squashed commit (never reset off it, #1804). `refspec` (default, #1815/#1899): push `worktree/<id>` directly to the PR head ref (`worktree/<id>:refs/heads/pr/<slug>`) — no local feature branch. Requires the repo's pre-push hook to permit the mediated `worktree/<id> → pr/<slug>` push (honor `AGENT_WORKTREES_PR_PUSH=1`). `snapshot` (legacy/compatible): copy the squashed commit onto a separate local `feature/<slug>` branch and push that — no reset, no checkout dance; needs no pre-push-hook cooperation, so it's the safe opt-out for a repo whose hook still blocks the refspec push. A parallel `--new` PR auto-falls-back to a snapshot ref even under `refspec`. A present-but-invalid value falls back to `snapshot` (the compatible scheme), not the refspec default. |
 | `head_pattern` | string | *(scheme default)* | Template for the PR head branch name. Tokens: `{prefix}` `{slug}` `{suffix}` `{username}` `{machine}`. Empty ⇒ scheme default: `pr/{slug}-{suffix}` under `refspec` and `{prefix}/{slug}-{suffix}` under `snapshot` (`feature/<slug>`). Repos that want e.g. `user/{username}/{slug}-{suffix}` set it explicitly. `{username}` resolves from the repo's git identity (`user.email` local-part, then `user.name`). |
-| `consent_label` | string | *(empty)* | **Review-vocabulary binding** for the `pr-*` command family. The label whose presence signals **merge consent** (applied after an approval). Empty ⇒ no consent mechanism configured (the family declines rather than guessing a label). Facility value: `auto-merge`. |
+| `automerge_label` | string | *(empty)* | **Review-vocabulary binding** for the `pr-*` command family. The label whose presence signals **merge consent** — the author's post-approval "auto-complete this" (applied by `pr-merge`). Empty ⇒ no auto-merge mechanism configured (the family declines rather than guessing a label). Facility value: `auto-merge`. |
 | `hold_labels` | list | `[]` | **Review-vocabulary binding.** Labels that **block** consent/merge — an explicit hold or a state needing author action (e.g. a rebase). Empty ⇒ nothing is treated as a hold. Facility value: `[do-not-merge, needs-rebase, wip]`. |
 | `wip_title_prefixes` | list | `[]` | **Review-vocabulary binding.** Case-insensitive PR-title prefixes treated as work-in-progress (never eligible for consent). Empty ⇒ no title is WIP. Facility value: `["wip:", "[wip]", "draft:", "[draft]"]`. |
 
-> **Review-vocabulary binding (the "facility hook").** `consent_label` /
+> **Review-vocabulary binding (the "facility hook").** `automerge_label` /
 > `hold_labels` / `wip_title_prefixes` — alongside the provider fields
 > `provider` / `api_base` / `token_command` / `token_env` — are how a repo binds
 > the provider-generic `pr-*` command family (`pr-watch`, `pr-merge`,
 > `pr-status`) to its review backend. The plugin ships them **empty**: absent a
 > binding the family is a no-op, never a crash. Verdict semantics
 > (approve / request-changes) are provider-intrinsic, not a binding; a
-> `dampener:*`-style status tag needs no binding — being neither the consent nor
-> a hold label, the classifier ignores it. See the `pr-command-family` effort in
+> `dampener:*`-style status tag needs no binding — being neither the auto-merge
+> nor a hold label, the classifier ignores it. See the `pr-command-family` effort in
 > aperture-labs.
 
 Query the effective (post-merge) values at runtime:

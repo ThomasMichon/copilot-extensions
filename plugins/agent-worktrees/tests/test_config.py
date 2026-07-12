@@ -233,7 +233,7 @@ class TestPRConfigParsing:
         cfgfile = tmp_path / "config.yaml"
         self._write(cfgfile, "    pr:\n      enabled: true\n")
         pr = cfg.load_config(cfgfile).repos["ext"].pr
-        assert pr.consent_label == ""
+        assert pr.automerge_label == ""
         assert pr.hold_labels == ()
         assert pr.wip_title_prefixes == ()
 
@@ -244,12 +244,12 @@ class TestPRConfigParsing:
             cfgfile,
             "    pr:\n"
             "      required: true\n"
-            "      consent_label: auto-merge\n"
+            "      automerge_label: auto-merge\n"
             "      hold_labels: [do-not-merge, needs-rebase, wip]\n"
             "      wip_title_prefixes: ['wip:', '[wip]', 'draft:']\n",
         )
         pr = cfg.load_config(cfgfile).repos["ext"].pr
-        assert pr.consent_label == "auto-merge"
+        assert pr.automerge_label == "auto-merge"
         assert pr.hold_labels == ("do-not-merge", "needs-rebase", "wip")
         assert pr.wip_title_prefixes == ("wip:", "[wip]", "draft:")
 

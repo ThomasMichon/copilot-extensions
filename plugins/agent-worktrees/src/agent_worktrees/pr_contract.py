@@ -11,7 +11,7 @@ Design constraints that keep it a *contract*, not an implementation:
 
 - **No network.**  Every function is a pure transform of its inputs; the
   provider fetches a :class:`PRSnapshot` and hands it in.
-- **No config import.**  The facility binding (consent label, hold labels, WIP
+- **No config import.**  The facility binding (auto-merge label, hold labels, WIP
   title prefixes) is passed in as explicit arguments, so this module never
   couples to ``config`` or a specific hosting service.  Binding-absent (empty
   arguments) degrades cleanly -- no holds, no WIP, verdict/mergeability still
@@ -310,7 +310,7 @@ class PRState:
     verdict: str          # "APPROVED" | "CHANGES_REQUESTED" | ""
     merge_state: str      # merged | closed | conflict | clean | unknown
     conflict: bool        # mergeable is False
-    consent_present: bool  # the consent_label is already on the PR
+    consent_present: bool  # the automerge_label is already on the PR
     held: tuple[str, ...]  # hold labels present on the PR
     wip: bool             # draft or a WIP title prefix
     consent_action: str   # "apply" | "already" | "skip" -- what pr-merge should do
@@ -325,23 +325,27 @@ class PRState:
 def classify_state(
     snap: PRSnapshot,
     *,
-    consent_label: str = "",
+    automerge_label: str = "",
     hold_labels: Iterable[str] = (),
     wip_title_prefixes: Iterable[str] = (),
 ) -> PRState:
     """Map a provider snapshot onto the unified :class:`PRState`.
 
     The one classifier the family shares.  The facility binding
-    (``consent_label`` / ``hold_labels`` / ``wip_title_prefixes``) is passed in;
-    with everything empty it degrades cleanly -- no holds, no WIP, and
+    (``automerge_label`` / ``hold_labels`` / ``wip_title_prefixes``) is passed
+    in; with everything empty it degrades cleanly -- no holds, no WIP, and
     ``consent_action`` still reflects the verdict + mergeability (it just reports
-    that no consent label is configured rather than proposing to apply one).
+    that no auto-merge label is configured rather than proposing to apply one).
+
+    "Consent" is the *concept* (has the author authorized the merge?);
+    ``automerge_label`` is the concrete label that expresses it (facility value:
+    ``auto-merge``; think ADO's "auto-complete").
 
     ``consent_action`` mirrors the facility ``pr-consent`` eligibility rules:
 
-    - ``already`` -- the consent label is already present (nothing to do).
+    - ``already`` -- the auto-merge label is already present (nothing to do).
     - ``apply``   -- open, not draft/WIP, no hold, mergeable, approved at head,
-                     and a consent label is configured but not yet present.
+                     and an auto-merge label is configured but not yet present.
     - ``skip``    -- any blocking condition, with ``reason`` naming it.
     """
     label_set = {lbl.lower() for lbl in snap.labels}
@@ -350,11 +354,11 @@ def classify_state(
     wip = snap.draft or title_is_wip(snap.title, wip_title_prefixes)
     verdict = effective_verdict(snap.reviews, snap.head_sha, snap.author)
     ms = merge_state(snap)
-    consent_present = bool(consent_label) and consent_label.lower() in label_set
+    consent_present = bool(automerge_label) and automerge_label.lower() in label_set
 
     action, reason = _consent_decision(
         snap, verdict=verdict, merge_state=ms, held=held, wip=wip,
-        consent_label=consent_label, consent_present=consent_present,
+        automerge_label=automerge_label, consent_present=consent_present,
     )
     return PRState(
         verdict=verdict,
@@ -375,12 +379,12 @@ def _consent_decision(
     merge_state: str,
     held: tuple[str, ...],
     wip: bool,
-    consent_label: str,
+    automerge_label: str,
     consent_present: bool,
 ) -> tuple[str, str]:
     """Decide what ``pr-merge`` should do with this PR (pure; see classify_state)."""
     if consent_present:
-        return "already", f"{consent_label} already present"
+        return "already", f"{automerge_label} already present"
     if merge_state == "merged":
         return "skip", "already merged"
     if merge_state == "closed":
@@ -397,10 +401,10 @@ def _consent_decision(
         return "skip", "changes requested"
     if verdict != "APPROVED":
         return "skip", "not yet approved"
-    if not consent_label:
-        # Approved + eligible, but the repo configured no consent mechanism.
+    if not automerge_label:
+        # Approved + eligible, but the repo configured no auto-merge mechanism.
         # Not an error -- just nothing this command can apply.
-        return "skip", "no consent label configured (binding absent)"
+        return "skip", "no auto-merge label configured (binding absent)"
     return "apply", "approved at current head"
 
 
