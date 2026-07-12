@@ -254,6 +254,14 @@ def _cmd_worktree_status(args: argparse.Namespace) -> int:
     return _emit(_enrich({"machine": machine, "worktree": worktree, "repo": repo, **inbox}))
 
 
+def _cmd_show(args: argparse.Namespace) -> int:
+    with _client(args) as c:
+        task = c.get(args.task_id)
+    from . import tracking
+
+    return _emit(tracking.enrich_task(_enrich(task)))
+
+
 def _simple(method: str, *arg_names: str):
     """Build a handler that forwards positional args to a client method."""
 
@@ -317,16 +325,17 @@ def _cmd_list(args: argparse.Namespace) -> int:
         print(_REPO_UNRESOLVED, file=sys.stderr)
         return 2
     with _client(args) as c:
-        return _emit(_enrich(
-            c.list(
-                repo=repo,
-                status=args.status,
-                target_machine=args.target_machine,
-                target_repo=args.target_repo,
-                label=args.label,
-                limit=args.limit,
-            )
-        ))
+        tasks = c.list(
+            repo=repo,
+            status=args.status,
+            target_machine=args.target_machine,
+            target_repo=args.target_repo,
+            label=args.label,
+            limit=args.limit,
+        )
+    from . import tracking
+
+    return _emit(tracking.enrich_tasks(_enrich(tasks)))
 
 
 def _cmd_inbox(args: argparse.Namespace) -> int:
@@ -737,7 +746,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("show", help="show one task")
     p.add_argument("task_id")
-    p.set_defaults(func=_simple("get", "task_id"))
+    p.set_defaults(func=_cmd_show)
 
     p = sub.add_parser("events", help="show a task's audit trail")
     p.add_argument("task_id")

@@ -336,6 +336,18 @@ class BridgeClient:
                 return {}
             raise
 
+    def list_live_sessions(
+        self, *, worktree_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """GET /api/v1/live-sessions (optionally ?worktree_id=...).
+
+        Returns the registered live interactive-CLI sessions -- the registry
+        that feeds task-coordination tracking of a CLI-embodied task.
+        """
+        params = {"worktree_id": worktree_id} if worktree_id else None
+        resp = self._request("GET", "/api/v1/live-sessions", params=params)
+        return resp.get("live_sessions", []) if resp else []
+
     def resolve_live_session(self, handle: str) -> dict[str, Any]:
         """GET /api/v1/live-sessions/resolve?handle=...; {} if unresolvable.
 
