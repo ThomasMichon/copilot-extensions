@@ -9,9 +9,13 @@ used (the resolve_token None case).
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from .base import ProviderError, PRScope, PullResult, run_cli
+
+if TYPE_CHECKING:
+    from ..pr_contract import PRSnapshot
 
 
 class GitHubProvider:
@@ -96,3 +100,11 @@ class GitHubProvider:
         if "HTTP 404" in detail or "Not Found" in detail:
             return ""
         return f"gh label removal failed for {repo}#{number}: {detail}"
+
+    def get_snapshot(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> PRSnapshot:
+        """Not implemented: pr-watch/pr-status snapshot reads are gitea-only today."""
+        from .base import _unsupported_snapshot
+        _ = (repo, number, api_base, token)
+        return _unsupported_snapshot(self.name)

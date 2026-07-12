@@ -3835,7 +3835,7 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     # git-like from --path before rendering anything.
     _activate_project_for_path(path)
 
-    def _mux(*a: str) -> "subprocess.CompletedProcess[str] | None":
+    def _mux(*a: str) -> subprocess.CompletedProcess[str] | None:
         try:
             return subprocess.run(
                 [mux_bin, *a],
@@ -5890,7 +5890,7 @@ _GET_KEYS: dict[str, str] = {
 }
 
 
-def _resolve_repo_remote(config: "cfg.Config", repo: "cfg.RepoConfig") -> str:
+def _resolve_repo_remote(config: cfg.Config, repo: cfg.RepoConfig) -> str:
     """Canonical remote URL for the active repo -- the device-independent key.
 
     Prefers the **registry** remote for this project (curated and consistent
@@ -7930,6 +7930,12 @@ def build_parser() -> argparse.ArgumentParser:
     # git -- dispatched pre-argparse (see cmd_git_dispatch)
     sub.add_parser("git", help="Git collaboration primitives (run 'git' for usage)")
 
+    # pr-watch / pr -- dispatched pre-argparse (see cmd_pr_watch_dispatch /
+    # cmd_pr_dispatch). Registered here only so they surface in --help.
+    sub.add_parser("pr-watch",
+                   help="Block until a PR moves (run 'pr-watch' for usage)")
+    sub.add_parser("pr", help="Author-side PR command family (run 'pr' for usage)")
+
     # pre-launch (two-pass self-update protocol)
     sub.add_parser("pre-launch", help="Check bootstrap staleness (JSON output)")
 
@@ -9047,6 +9053,185 @@ def cmd_git_dispatch(argv: list[str]) -> int:
     return 1
 
 
+def _pr_watch_usage() -> None:
+    out = sys.stderr
+    print("Usage: <project> pr-watch <wait|cursor> <owner/name> <pr> [options]", file=out)
+    print(file=out)
+    print("Block until a pull request moves, then wake the caller. The review", file=out)
+    print("backend (host, token) is the repo's PR binding (.agent-worktrees/", file=out)
+    print("config.yaml: provider / api_base / token_command).", file=out)
+    print(file=out)
+    print("  wait <repo> <pr>    Block until a transition or timeout.", file=out)
+    print("    --until LIST      Comma-list of transitions or 'any'", file=out)
+    print("                      (default: changes_requested,approved,conflict,", file=out)
+    print("                       mergeable,merged,closed)", file=out)
+    print("    --since CURSOR     Baseline cursor (race-proof); omit to auto-baseline", file=out)
+    print("    --timeout SECS     Max seconds to block (0 = no limit; default 3600)", file=out)
+    print("    --interval SECS    Poll interval (> 0; default 20)", file=out)
+    print("    --json             Emit only the result JSON on stdout", file=out)
+    print("  cursor <repo> <pr>  Print the current baseline cursor for a PR.", file=out)
+    print(file=out)
+    print("  Overrides: --host URL (api base), --token TOKEN.", file=out)
+
+
+def _pr_watch_prcfg(config_path: str | None):
+    """Load the active repo's PR binding (PRConfig) for the pr-watch verb."""
+    config = cfg.load_config(Path(config_path) if config_path else None)
+    return config.default_repo.pr
+
+
+def _pr_parse_repo(value: str) -> str:
+    if value.count("/") != 1 or not all(value.split("/")):
+        raise ValueError("repo must be 'owner/name'")
+    return value
+
+
+def cmd_pr_watch_dispatch(argv: list[str]) -> int:
+    """Route `pr-watch` verbs (wait / cursor) -- the provider-generic watcher.
+
+    The network+timing loop lives in :mod:`agent_worktrees.pr_watch`; the pure
+    transition logic in :mod:`agent_worktrees.pr_contract`; the provider read in
+    the provider plugins. This dispatcher wires the CLI onto the repo's PR
+    binding (host/token/provider from config).
+    """
+    import json as _json
+
+    from . import pr_contract as pc
+    from . import pr_watch as prw
+    from .providers import ProviderError
+
+    if not argv or argv[0] in ("--help", "-h", "help"):
+        _pr_watch_usage()
+        return 0 if argv and argv[0] in ("--help", "-h", "help") else 1
+
+    verb = argv[0]
+    if verb not in ("wait", "cursor"):
+        output.err(f"Unknown pr-watch subcommand: {verb}")
+        _pr_watch_usage()
+        return 1
+
+    p = argparse.ArgumentParser(prog=f"pr-watch {verb}", add_help=True)
+    p.add_argument("repo", type=_pr_parse_repo, help="owner/name")
+    p.add_argument("pr", type=int, help="PR number")
+    p.add_argument("--host", default="",
+                   help="API base URL override (else the binding's api_base)")
+    p.add_argument("--token", default=None, help="Provider token override (else the binding)")
+    p.add_argument("--config", default=None)
+    if verb == "wait":
+        p.add_argument("--until", default=",".join(pc.DEFAULT_UNTIL),
+                       help="comma-list of transitions or 'any'")
+        p.add_argument("--since", default=None, help="baseline cursor (omit to auto-baseline)")
+        p.add_argument("--timeout", type=float, default=3600.0,
+                       help="max seconds to block (0 = no limit)")
+        p.add_argument("--interval", type=float, default=20.0, help="poll interval seconds")
+        p.add_argument("--json", action="store_true", help="emit only the result JSON")
+    try:
+        args = p.parse_args(argv[1:])
+    except SystemExit as exc:
+        return int(exc.code or 0)
+
+    # Parse/validate --until.
+    if verb == "wait":
+        raw = args.until.strip().lower()
+        if raw == "any":
+            until = ["any"]
+        else:
+            until = [v.strip() for v in args.until.split(",") if v.strip()]
+            bad = [v for v in until if v not in pc.ALL_TRANSITIONS]
+            if bad:
+                output.err(f"unknown transition(s) {bad}; choose from "
+                           f"{', '.join(pc.ALL_TRANSITIONS)} or 'any'")
+                return 2
+        if args.timeout < 0:
+            output.err("--timeout must be >= 0 (0 = no limit)")
+            return 2
+        if args.interval <= 0:
+            output.err("--interval must be > 0")
+            return 2
+
+    try:
+        prcfg = _pr_watch_prcfg(args.config)
+        fetch = prw.build_fetch(prcfg, args.repo, args.pr,
+                                api_base=args.host, token=args.token)
+        if verb == "cursor":
+            snap = fetch()
+            print(pc.Baseline.from_snapshot(snap).to_cursor())
+            return 0
+
+        baseline = pc.Baseline.from_cursor(args.since) if args.since else None
+        if not args.json:
+            mode = f"since {args.since}" if args.since else "auto-baseline"
+            print(f"pr-watch: watching {args.repo}#{args.pr} for [{', '.join(until)}] "
+                  f"({mode}, every {args.interval:g}s, timeout {args.timeout:g}s)",
+                  file=sys.stderr)
+        result = prw.run_wait(
+            repo=args.repo, pr=args.pr, until=until, baseline=baseline,
+            fetch=fetch, timeout=args.timeout, interval=args.interval,
+            on_error=lambda e: print(f"pr-watch: poll error (will retry): {e}",
+                                     file=sys.stderr),
+        )
+        if not result.matched:
+            print(_json.dumps({"repo": args.repo, "pr": args.pr, "timed_out": True}))
+            if not args.json:
+                print(f"pr-watch: timed out after {args.timeout:g}s", file=sys.stderr)
+            return 124
+        print(_json.dumps(result.payload))
+        if not args.json:
+            print(f"pr-watch: {args.repo}#{args.pr} -> "
+                  f"{', '.join(result.payload['transitions'])}", file=sys.stderr)
+        return 0
+    except ProviderError as exc:
+        output.err(f"pr-watch: {exc}")
+        return 3
+    except ValueError as exc:
+        output.err(f"pr-watch: {exc}")
+        return 2
+
+
+def _pr_usage() -> None:
+    out = sys.stderr
+    print("Usage: <project> pr <verb> [args...]", file=out)
+    print(file=out)
+    print("Author-side PR command family (verbs also available flat as pr-*):", file=out)
+    print("  create   Open a PR from the worktree (= create-pr)", file=out)
+    print("  watch    Block until the PR moves (= pr-watch)", file=out)
+    print("  status   Read tracked PR metadata (= pr-status)", file=out)
+    print("  ready    Release a held PR for merge (= pr-ready)", file=out)
+
+
+# pr <verb> namespace -> canonical top-level verb (or manual dispatcher).
+_PR_NAMESPACE = {
+    "create": "create-pr",
+    "status": "pr-status",
+    "ready": "pr-ready",
+}
+
+
+def cmd_pr_dispatch(argv: list[str]) -> int:
+    """Route the `pr <verb>` namespace onto the flat pr-* command family."""
+    if not argv or argv[0] in ("--help", "-h", "help"):
+        _pr_usage()
+        return 0 if argv and argv[0] in ("--help", "-h", "help") else 1
+    verb = argv[0]
+    if verb == "watch":
+        return cmd_pr_watch_dispatch(argv[1:])
+    canonical = _PR_NAMESPACE.get(verb)
+    if not canonical:
+        output.err(f"Unknown pr subcommand: {verb}")
+        _pr_usage()
+        return 1
+    parser = build_parser()
+    try:
+        args = parser.parse_args([canonical, *argv[1:]])
+    except SystemExit as exc:
+        return int(exc.code or 0)
+    handler = COMMAND_MAP.get(args.command)
+    if not handler:
+        _pr_usage()
+        return 1
+    return handler(args)
+
+
 def main(argv: list[str] | None = None) -> int:
     output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
@@ -9186,6 +9371,23 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] == "git":
         try:
             return cmd_git_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # pr-watch -- provider-generic PR review-callback watcher (manual dispatch:
+    # sub-subcommands wait/cursor + owner/name + pr).
+    if args_list[0] == "pr-watch":
+        try:
+            return cmd_pr_watch_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # pr <verb> namespace -- sugar over the flat pr-* command family.
+    if args_list[0] == "pr":
+        try:
+            return cmd_pr_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130

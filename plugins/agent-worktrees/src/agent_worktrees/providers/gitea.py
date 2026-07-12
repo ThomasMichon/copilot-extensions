@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import time
 
+from ..pr_contract import PRSnapshot, Review
 from .base import ProviderError, PRScope, PullResult, run_cli
 
 # HTTP statuses (plus the synthetic 0 = curl-level failure) worth retrying when
@@ -27,6 +28,13 @@ _LABEL_BACKOFF = 0.5
 # we re-read the issue's labels and re-POST until the required ones are actually
 # present -- "applied" means *verified present*, not "the POST returned 200".
 _LABEL_ATTACH_ATTEMPTS = 3
+
+
+def _is_transient(status: int) -> bool:
+    """True when an HTTP status is worth retrying (network/5xx/429/408, or the
+    synthetic 0 = curl-level failure); 4xx (auth/not-found/bad-request) is
+    permanent.  Shared by the snapshot reads that back ``pr-watch``."""
+    return status in _TRANSIENT_LABEL_HTTP or status >= 500
 
 
 class GiteaProvider:
@@ -333,3 +341,103 @@ class GiteaProvider:
             state=state,
             merged=merged,
         )
+
+    def get_snapshot(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> PRSnapshot:
+        """Fetch the full review/mergeability/lifecycle snapshot for pr-watch.
+
+        Two reads: the PR object (state, merged, mergeable, head sha, base ref,
+        author, title, draft, labels) and the paginated reviews list.  The
+        result feeds the provider-neutral ``pr_contract`` diff/classify without
+        this provider knowing anything about transitions.
+        """
+        if not token:
+            raise ProviderError("Gitea provider needs a token to query a PR.")
+        status, body = self._curl(
+            "GET", self._api(api_base, f"/repos/{repo}/pulls/{number}"), token,
+        )
+        if status != 200:
+            raise ProviderError(
+                f"Gitea PR #{number} snapshot failed (HTTP {status}).",
+                transient=_is_transient(status),
+            )
+        try:
+            pr = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise ProviderError(f"Gitea returned non-JSON PR payload: {exc}") from exc
+        if not isinstance(pr, dict):
+            raise ProviderError(f"unexpected Gitea PR payload for {repo}#{number}")
+
+        # Gitea computes ``mergeable`` asynchronously and may report it null on a
+        # freshly-opened PR; only a real bool is a known state (else None).
+        mergeable_raw = pr.get("mergeable")
+        labels = tuple(
+            str(lbl.get("name", ""))
+            for lbl in (pr.get("labels") or [])
+            if isinstance(lbl, dict) and lbl.get("name")
+        )
+        return PRSnapshot(
+            pr_state=str(pr.get("state", "")) or "open",
+            merged=bool(pr.get("merged", False)),
+            head_sha=str((pr.get("head") or {}).get("sha", "")),
+            base_ref=str((pr.get("base") or {}).get("ref", "")),
+            reviews=self._all_review_objs(repo, number, api_base, token),
+            author=str((pr.get("user") or {}).get("login", "")),
+            mergeable=mergeable_raw if isinstance(mergeable_raw, bool) else None,
+            labels=labels,
+            title=str(pr.get("title", "")),
+            draft=bool(pr.get("draft", False)),
+        )
+
+    def _all_review_objs(
+        self, repo: str, number: int, api_base: str, token: str
+    ) -> tuple[Review, ...]:
+        """Fetch every review, paging the endpoint, as ``pr_contract.Review``s.
+
+        Gitea paginates ``/pulls/{n}/reviews`` (default ~30) in ascending id
+        order; the watcher keys off the highest review id, so a missed later
+        page would make the newest reviews invisible and hang the wait.  Pages
+        with an explicit limit until an empty (or short) page.
+        """
+        reviews: list[Review] = []
+        page = 1
+        page_size = 50
+        while True:
+            status, body = self._curl_with_retry(
+                "GET",
+                self._api(
+                    api_base,
+                    f"/repos/{repo}/pulls/{number}/reviews?limit={page_size}&page={page}",
+                ),
+                token,
+            )
+            if status != 200:
+                raise ProviderError(
+                    f"Gitea reviews lookup failed (HTTP {status}) on page {page} "
+                    f"for {repo}#{number}",
+                    transient=_is_transient(status),
+                )
+            try:
+                batch = json.loads(body)
+            except json.JSONDecodeError as exc:
+                raise ProviderError(f"Gitea returned non-JSON reviews: {exc}") from exc
+            if not isinstance(batch, list) or not batch:
+                break
+            for r in batch:
+                if not isinstance(r, dict):
+                    continue
+                reviews.append(
+                    Review(
+                        id=int(r.get("id", 0)),
+                        state=str(r.get("state", "")),
+                        user=str((r.get("user") or {}).get("login", "")),
+                        submitted_at=str(r.get("submitted_at", "")),
+                        commit_id=str(r.get("commit_id", "") or ""),
+                        dismissed=bool(r.get("dismissed", False)),
+                    )
+                )
+            if len(batch) < page_size:
+                break
+            page += 1
+        return tuple(reviews)
