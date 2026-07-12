@@ -92,3 +92,8 @@ Optional flags:
 - Attribution is **legibility**, not authentication: it tells you who a message
   claims to be from. That is sufficient because only the operator's own tooling
   can reach the local bridge (localhost bind + operator-secured SSH + bearer).
+- A session an agent **embodied** (`agent-worktrees embody --driver <agent>`)
+  registers a `driven_by` marker with the bridge — the "driven by `<agent>`"
+  banner — so a human dropping into it (e.g. via Neuron Forge takeover) sees who
+  is steering. An operator-launched session has no driver.
+

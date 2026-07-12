@@ -232,6 +232,7 @@ class RegisterLiveSessionRequest(BaseModel):
     branch: str | None = None
     pid: int | None = None
     role: str | None = None
+    driven_by: str | None = None
 
 
 class LiveSessionInfo(BaseModel):
@@ -245,6 +246,7 @@ class LiveSessionInfo(BaseModel):
     branch: str | None = None
     pid: int | None = None
     role: str | None = None
+    driven_by: str | None = None
     status: str = "live"
     registered_at: float
     updated_at: float

@@ -105,8 +105,8 @@ class TestMuxNewSession:
 
 # -- cmd_embody control flow ------------------------------------------------
 def _ns(**kw):
-    base = dict(worktree_id=None, new=False, seed=None, verify_timeout=0.0,
-                recovery=False, dry_run=False)
+    base = dict(worktree_id=None, new=False, seed=None, driver=None,
+                verify_timeout=0.0, recovery=False, dry_run=False)
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -188,6 +188,34 @@ class TestCmdEmbody:
         assert out["seeded"] is True and out["seed_ready"] is True
         assert spawned == {"wt": "wtZ", "wd": "/w/wtZ", "cmd": ["copilot"]}
         assert seeded == {"pane": "%5", "seed": "do the thing"}
+
+    def test_driver_stamps_driven_by_env_and_output(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        # D4: --driver injects AGENT_BRIDGE_DRIVEN_BY into the session env and is
+        # reported in the JSON (the "driven by <agent>" banner source).
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtDr")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtDr.yaml").write_text("x")
+        monkeypatch.setattr(
+            m.tracking, "load_record",
+            lambda p: type("Rec", (), {"worktree_path": "/w/wtDr"})(),
+        )
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        captured_env = {}
+
+        def _spawn(wt, wd, cmd, env, **k):
+            captured_env.update(env)
+            return {"ok": True, "session": f"wt-{wt}", "new_pane": "%3",
+                    "error": None}
+        monkeypatch.setattr(sessions, "mux_new_session", _spawn)
+
+        rc = m.cmd_embody(_ns(worktree_id="wtDr", driver="orchestrator"))
+        assert rc == 0
+        assert captured_env.get("AGENT_BRIDGE_DRIVEN_BY") == "orchestrator"
+        out = json.loads(capfd.readouterr().out)
+        assert out["driven_by"] == "orchestrator"
 
     def test_new_creates_worktree_first(self, monkeypatch, capfd):
         _stub_config(monkeypatch)
