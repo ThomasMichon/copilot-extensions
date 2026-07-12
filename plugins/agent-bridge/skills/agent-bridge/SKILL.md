@@ -490,6 +490,38 @@ own identity/session ride along so the peer can answer back. See
 [references/agent-messages.md](references/agent-messages.md) for the full
 convention. Delivery is on by default; `/peer` mutes a session.
 
+## Live interactive sessions — a distinct surface (represent + message)
+
+Beyond the **ACP-owned** sessions the bridge spawns and drives (`send` /
+`create` / `wait` / `stop`), the bridge also tracks **live interactive Copilot
+CLI sessions it does *not* own** — the picker-launched or `embody`-spawned
+sessions a bundled extension auto-registers. These live under the
+`/api/v1/live-sessions/*` surface (never the ACP `sessions` table) and enable
+two capabilities without the destructive take-over:
+
+- **Representation (read).** A registered session pushes its event stream to the
+  bridge, which re-exposes it over the ordinary SSE machinery so **Neuron Forge
+  views it live, read-only** (seed cold history from the transcript, splice the
+  live tail). A represented `permission_request` is **read-only** (no correlation
+  id — unanswerable by a viewer; approval stays at the operator's terminal), and
+  a **`driven_by`** field names the steering agent for the "driven by `<agent>`"
+  banner (null = operator-launched).
+- **Messaging (write).** The inbox above (`agent-bridge send <live-session>`)
+  delivers an attributed turn *into* a live interactive session — the mirror of
+  the read path.
+- **Addressing by worktree handle.** `resolve` maps a worktree handle → its
+  currently-live session, so `reply-to` survives a session handoff (an agent is
+  a *series of sessions in one worktree*).
+
+**Durable work gets a CLI body, not a headless one.** When you *dispatch* work
+meant to outlive its caller, prefer a **CLI-backed autopilot session** (via
+`agent-dispatch create --spawn --spawn-backend embody` → `agent-worktrees embody
+--new`, `driven_by=agent-dispatch`) over a headless ACP worker — it is durable,
+NF-viewable, and completes its task explicitly. Ephemeral, caller-bounded helpers
+still use headless bridge agents (`send`/`create`). A **handoff** is the in-place
+variant: a live cutover replaces the current CLI in its mux with a successor that
+takes the work over (see the `context-handoff` and `agent-dispatch` skills).
+
 ## Troubleshooting
 
 - **"agent-bridge is not responding"** -- service isn't running. Start it
