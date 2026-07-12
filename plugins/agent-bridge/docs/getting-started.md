@@ -123,7 +123,7 @@ roster is **derived** from it (+ `.agent-worktrees/related.yaml`). See
 Edit `~/.agent-bridge/config.yaml` directly:
 
 ```yaml
-port: 9280            # platform default: 9280 Windows / 9281 Linux-WSL (omit to auto-select)
+port: 9280            # host default: 9280; only a WSL guest uses 9281 (omit to auto-select)
 bind: 127.0.0.1
 log_level: info
 
@@ -153,12 +153,13 @@ agent-bridge start
 
 ```bash
 agent-bridge status
-curl http://localhost:9280/health   # 9281 on Linux/WSL
+curl http://localhost:9280/health   # 9281 only on a WSL guest
 ```
 
-> **Port note:** the bridge listens on a platform-specific default —
-> **9280 on Windows, 9281 on Linux/WSL**. This avoids a TCP collision when
-> WSL2 and Windows share the same host. `agent-bridge status` prints the
+> **Port note:** the bridge listens on a host default of **9280**. Only a
+> **WSL guest** — which shares the Windows host's TCP port namespace — uses
+> **9281**, to avoid a collision with the host's own daemon; bare-metal Linux
+> is an ordinary host on 9280. `agent-bridge status` prints the
 > active port; use it (not a hardcoded number) when probing health.
 
 ## 5. Test It

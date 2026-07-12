@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from datetime import datetime
 from enum import Enum
@@ -12,14 +13,34 @@ from pydantic import BaseModel, Field
 # -- Platform defaults -------------------------------------------------------
 
 
+def _is_wsl() -> bool:
+    """True when running as a WSL guest.
+
+    A WSL guest shares the Windows host's TCP port namespace, so it (and only
+    it) needs a distinct default port to avoid colliding with the host's own
+    daemon. Bare-metal Linux is **not** WSL and must not be treated as such --
+    the discriminator is "am I a WSL guest?", not "am I non-Windows?".
+    """
+    if sys.platform == "win32":
+        return False
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return True
+    try:
+        with open("/proc/sys/kernel/osrelease", encoding="utf-8") as fh:
+            return "microsoft" in fh.read().lower()
+    except OSError:
+        return False
+
+
 def default_port() -> int:
     """Return the platform-default listen port.
 
-    Windows uses 9280, Linux/WSL uses 9281.  This avoids TCP port
-    collisions when both environments run on the same host (WSL2
-    shares the Windows TCP port space).
+    A host exposes **9280**. Only a **WSL guest** -- which shares the Windows
+    host's TCP port namespace -- uses **9281**, to avoid colliding with the
+    host's own daemon. Bare-metal Linux (and macOS) are ordinary single-context
+    hosts on 9280.
     """
-    return 9280 if sys.platform == "win32" else 9281
+    return 9281 if _is_wsl() else 9280
 
 
 # -- Session status ----------------------------------------------------------
