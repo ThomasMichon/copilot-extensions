@@ -453,3 +453,23 @@ class ServiceConfig(BaseModel):
         "(#1826). Clamped to a 30s floor. Only meaningful when "
         "session_host_enabled and idle_reap_ttl_seconds are both > 0.",
     )
+    live_stall_interrupt_after_s: int = Field(
+        default=900,
+        description="Live-stall interrupt threshold (#2427, Phase 5). When > 0, "
+        "the staleness watchdog interrupts a RUNNING session that is liveness "
+        "'stalled' (its ACP transport is up but no frame has flowed for "
+        "_STALL_AFTER_S = 180s) AND still has a live in-daemon prompt task "
+        "(_prompt_task) once its silence (now - last_output_at) exceeds this many "
+        "seconds. The interrupt is a graceful ACP session/cancel (interrupt_turn, "
+        "#899), never a task-cancel or child kill: the in-flight send_prompt "
+        "returns/raises, the runner settles the session to IDLE with a terminal "
+        "session_state_changed, and consumers converge instead of watching a "
+        "frozen 'Responding...' forever. This is the live-stall case the Sub-B "
+        "watchdog (reconcile_wedged_running) otherwise leaves untouched because a "
+        "live prompt task looks like a real turn. Deliberately DISTINCT from and "
+        "much larger than the 180s stall threshold, because a legitimately long "
+        "tool call also shows a live task + 'stalled' liveness -- the long "
+        "threshold plus the graceful (non-killing) cancel are what make aborting "
+        "acceptable. Set conservatively; 0 disables the live-stall interrupt "
+        "entirely (the runner-less resync path is unaffected).",
+    )

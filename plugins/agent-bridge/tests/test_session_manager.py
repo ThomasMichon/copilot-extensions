@@ -680,14 +680,16 @@ class TestReconcileWedged:
         assert session.status == SessionStatus.RUNNING
 
     @pytest.mark.asyncio
-    async def test_leaves_live_prompt_task(
+    async def test_leaves_live_prompt_task_within_threshold(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp
     ) -> None:
-        """A RUNNING session with a live prompt task (a turn driven here) is
-        never reconciled, even if output has stalled."""
+        """A RUNNING session with a live prompt task that is stalled but still
+        WITHIN the live-stall interrupt threshold is left untouched -- only real
+        silence past the large threshold triggers an interrupt (#2427)."""
         session = await session_manager.start_session(spawn_target)
         session.status = SessionStatus.RUNNING
-        session.last_output_at = time.time() - 10_000  # stalled
+        # Stalled (>180s silent) but well within the 900s interrupt threshold.
+        session.last_output_at = time.time() - 300
 
         async def _never() -> None:
             await asyncio.Event().wait()
@@ -700,6 +702,69 @@ class TestReconcileWedged:
             live.cancel()
         assert healed == 0
         assert session.status == SessionStatus.RUNNING
+        session.client.cancel_prompt.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_interrupts_live_stalled_turn_past_threshold(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """A RUNNING session with a *live* prompt task that has gone silent past
+        the conservative live-stall threshold is gracefully interrupted so it
+        settles to IDLE with the session intact (#2427, Phase 5)."""
+        session = await session_manager.start_session(spawn_target)
+
+        cancelled = asyncio.Event()
+
+        async def _blocking_prompt(_text):
+            await cancelled.wait()
+            return {
+                "response_text": "", "thought_text": "", "tool_calls": [],
+                "stop_reason": "cancelled", "error": None,
+            }
+
+        async def _cancel():
+            cancelled.set()
+
+        session.client.send_prompt = AsyncMock(side_effect=_blocking_prompt)
+        session.client.cancel_prompt = AsyncMock(side_effect=_cancel)
+
+        await session_manager.submit_prompt(session.session_id, "Hello")
+        assert session.status == SessionStatus.RUNNING
+        assert session._prompt_task is not None and not session._prompt_task.done()
+
+        # Live-stalled: transport up, output silent far past the 900s threshold.
+        session.last_output_at = time.time() - 10_000
+
+        healed = await session_manager.reconcile_wedged_running()
+
+        assert healed == 1
+        session.client.cancel_prompt.assert_awaited()
+        assert session.status == SessionStatus.IDLE
+        assert session.client is not None  # session survives -- not torn down
+
+    @pytest.mark.asyncio
+    async def test_live_stall_interrupt_disabled_by_zero_threshold(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """With live_stall_interrupt_after_s=0 the watchdog never interrupts a
+        live-stalled turn, no matter how long it has been silent (opt-out)."""
+        mgr = SessionManager(tmp_db, live_stall_interrupt_after_s=0)
+        session = await mgr.start_session(spawn_target)
+        session.status = SessionStatus.RUNNING
+        session.last_output_at = time.time() - 10_000  # stalled, long silence
+
+        async def _never() -> None:
+            await asyncio.Event().wait()
+
+        live = asyncio.ensure_future(_never())
+        session._prompt_task = live
+        try:
+            healed = await mgr.reconcile_wedged_running()
+        finally:
+            live.cancel()
+        assert healed == 0
+        assert session.status == SessionStatus.RUNNING
+        session.client.cancel_prompt.assert_not_awaited()
 
 
 class TestInterruptTurn:

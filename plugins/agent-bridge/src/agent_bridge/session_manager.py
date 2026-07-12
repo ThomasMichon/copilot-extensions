@@ -381,6 +381,7 @@ class SessionManager:
         session_host_stale_reap_seconds: float = 0.0,
         graceful_cancel_settle_seconds: float = 45.0,
         idle_reap_ttl_seconds: float = 0.0,
+        live_stall_interrupt_after_s: float = 900.0,
     ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
@@ -394,6 +395,12 @@ class SessionManager:
         # this many seconds to free its Copilot child (resumable via replay).
         # 0 disables. Only acts in Session-Host mode.
         self._idle_reap_ttl_seconds = idle_reap_ttl_seconds
+        # Live-stall interrupt threshold (#2427, Phase 5): the watchdog
+        # interrupts a RUNNING session that is liveness 'stalled' AND still has a
+        # live _prompt_task once its silence exceeds this many seconds. Distinct
+        # from (and much larger than) the 180s stall so a legitimately long tool
+        # call is not aborted. 0 disables the live-stall interrupt entirely.
+        self._live_stall_interrupt_after_s = live_stall_interrupt_after_s
         self._host_index: Any = None
         # Live remote-boundary forwards (session_id -> LocalForward). Held so a
         # CodeSpace/mesh Session Host's -L/-R forward can be refreshed on
@@ -1354,32 +1361,73 @@ class SessionManager:
         return recovered
 
     async def reconcile_wedged_running(self, now: float | None = None) -> int:
-        """Heal sessions wedged in RUNNING with no live turn (issue #22 / #2384).
+        """Heal sessions wedged in RUNNING (issues #22 / #2384 / #2427).
 
-        Eventual-terminal reconciliation: a session persisted as RUNNING whose
-        turn can no longer reach a terminal event -- output has stopped
-        (``liveness_state`` ``stalled`` or ``disconnected``) and there is **no
-        live prompt task** driving it in this daemon -- would otherwise mirror
-        "Responding..." forever. Resync it (rebuild from the agent's
-        authoritative replay, respawning the child if the transport is gone) so
-        it lands IDLE with a terminal ``session_state_changed``.
+        Eventual-terminal reconciliation across two shapes of wedge:
 
-        Two guards keep a real turn untouched: a genuinely in-progress turn
-        either still has a live ``_prompt_task`` (awaited here) or is still
-        producing output (liveness ``active``) -- both are skipped. Best-effort
-        and per-session isolated; a single failure never stalls the sweep.
-        Returns the count healed.
+        1. **No live turn** (#2384): a session persisted as RUNNING whose turn
+           can no longer reach a terminal event -- output has stopped
+           (``liveness_state`` ``stalled`` or ``disconnected``) and there is **no
+           live prompt task** driving it in this daemon -- would otherwise mirror
+           "Responding..." forever. Resync it (rebuild from the agent's
+           authoritative replay, respawning the child if the transport is gone)
+           so it lands IDLE with a terminal ``session_state_changed``.
+
+        2. **Live-stalled turn** (#2427, Phase 5): a session that is liveness
+           ``stalled`` (transport up, no ACP frame for ``_STALL_AFTER_S``) but
+           **still has a live ``_prompt_task``** -- the child is alive and a
+           ``send_prompt`` is awaiting output that has gone silent. Resync cannot
+           touch it (a live turn); instead, once its silence exceeds the separate,
+           conservative ``live_stall_interrupt_after_s`` threshold, gracefully
+           ``interrupt_turn()`` it (ACP session/cancel, #899). The in-flight
+           ``send_prompt`` returns/raises, the runner settles the session to IDLE
+           with a terminal event, and consumers converge. Never a task-cancel or
+           child kill.
+
+        Guards keep a genuinely progressing turn untouched: a session still
+        producing output (liveness ``active``) is always skipped; a live turn is
+        interrupted only after real silence past the large, operator-tunable
+        threshold (0 disables the live-stall interrupt entirely). Best-effort and
+        per-session isolated; a single failure never stalls the sweep. Returns the
+        count reconciled (resynced + interrupted).
         """
         now = now if now is not None else time.time()
         healed = 0
         for sid, session in list(self._sessions.items()):
             if session.status != SessionStatus.RUNNING:
                 continue
-            if session.liveness_state(now) not in ("stalled", "disconnected"):
+            liveness = session.liveness_state(now)
+            if liveness not in ("stalled", "disconnected"):
                 continue
             task = session._prompt_task
             if task is not None and not task.done():
-                # A live turn is being driven here -- never abandon it.
+                # A live turn is being driven here. The only safe action is a
+                # graceful interrupt, and only for a *live-stalled* turn (client
+                # up, output silent) that has been silent past the separate,
+                # conservative live-stall threshold -- never a 'disconnected'
+                # transport (cancel needs the client) and never a merely-long
+                # turn still producing output. Diagnose-before-remediating: err
+                # toward leaving a live turn alone.
+                threshold = self._live_stall_interrupt_after_s
+                silent_for = (
+                    now - session.last_output_at
+                    if session.last_output_at is not None else 0.0
+                )
+                if (liveness == "stalled" and threshold > 0
+                        and silent_for > threshold):
+                    try:
+                        await self.interrupt_turn(sid)
+                        healed += 1
+                        log.warning(
+                            "Interrupted live-stalled RUNNING session %s "
+                            "(live turn silent for %.0fs > %.0fs threshold)",
+                            sid, silent_for, threshold,
+                        )
+                    except Exception:
+                        log.warning(
+                            "Failed to interrupt live-stalled session %s",
+                            sid, exc_info=True,
+                        )
                 continue
             try:
                 await self.resync_session(sid)
