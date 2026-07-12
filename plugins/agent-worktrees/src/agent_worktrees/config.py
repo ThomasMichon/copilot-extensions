@@ -133,6 +133,28 @@ class PRConfig:
     token_command: str = ""
     labels: tuple[str, ...] = ()
     auto_open: bool = False        # opt-in: open the PR via the provider after push
+    # Review-vocabulary binding (the "facility hook" for the pr-* command
+    # family: pr-watch / pr-merge / pr-status). The plugin ships these EMPTY so
+    # it stays provider-generic -- a repo with no binding gets a no-op, never a
+    # crash. The facility supplies its vocabulary in .agent-worktrees/config.yaml
+    # (e.g. consent_label: auto-merge; hold_labels: [do-not-merge, needs-rebase,
+    # wip]; wip_title_prefixes: ["wip:", "[wip]", "draft:", ...]).
+    #
+    # - ``consent_label``      -- the label whose presence signals MERGE CONSENT
+    #   (pr-merge applies it after an approval). Empty => no consent mechanism is
+    #   configured, so pr-merge declines rather than guessing a label.
+    # - ``hold_labels``        -- labels that BLOCK consent/merge (an explicit
+    #   hold, or a state needing author action such as a rebase).
+    # - ``wip_title_prefixes`` -- case-insensitive title prefixes treated as
+    #   work-in-progress (never eligible for consent).
+    #
+    # Verdict semantics (approve / request-changes / comment) are NOT a binding:
+    # they are intrinsic to the review backend and live in the provider. A
+    # ``dampener:*`` status tag needs no binding -- it is simply neither the
+    # consent label nor a hold label, so the classifier ignores it.
+    consent_label: str = ""
+    hold_labels: tuple[str, ...] = ()
+    wip_title_prefixes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -813,14 +835,22 @@ def _parse_pr(raw: Any) -> PRConfig:
     # ``required`` implies ``enabled``: enforcing PRs only makes sense when
     # PR mode is on, so a lone ``required: true`` turns the mode on too.
     enabled = bool(raw.get("enabled", False)) or required
-    raw_labels = raw.get("labels", ())
-    labels: tuple[str, ...]
-    if isinstance(raw_labels, (list, tuple)):
-        labels = tuple(str(x) for x in raw_labels)
-    elif raw_labels:
-        labels = (str(raw_labels),)
-    else:
-        labels = ()
+
+    def _str_tuple(value: Any) -> tuple[str, ...]:
+        """Coerce a scalar-or-list config value into a tuple of strings.
+
+        Accepts a list/tuple (each item stringified), a lone scalar (wrapped),
+        or a falsy/missing value (empty tuple). Empty strings are dropped so a
+        stray ``""`` in a YAML list can't become a match-everything token.
+        """
+        if isinstance(value, (list, tuple)):
+            return tuple(s for s in (str(x).strip() for x in value) if s)
+        if value:
+            s = str(value).strip()
+            return (s,) if s else ()
+        return ()
+
+    labels = _str_tuple(raw.get("labels", ()))
     head_scheme = str(raw.get("head_scheme", "refspec")).strip().lower()
     if head_scheme not in ("snapshot", "refspec"):
         # A present-but-garbage value signals misconfiguration -- fall back to
@@ -841,6 +871,9 @@ def _parse_pr(raw: Any) -> PRConfig:
         token_command=str(raw.get("token_command", "")),
         labels=labels,
         auto_open=bool(raw.get("auto_open", False)),
+        consent_label=str(raw.get("consent_label", "")).strip(),
+        hold_labels=_str_tuple(raw.get("hold_labels", ())),
+        wip_title_prefixes=_str_tuple(raw.get("wip_title_prefixes", ())),
     )
 
 

@@ -228,6 +228,46 @@ class TestPRConfigParsing:
         pr = cfg.load_config(cfgfile).repos["ext"].pr
         assert pr.required is False
 
+    def test_review_vocabulary_binding_defaults_empty(self, tmp_path: Path):
+        # Binding-absent: the pr-* family fields default empty (no-op / no crash).
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile, "    pr:\n      enabled: true\n")
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.consent_label == ""
+        assert pr.hold_labels == ()
+        assert pr.wip_title_prefixes == ()
+
+    def test_review_vocabulary_binding_parsed(self, tmp_path: Path):
+        # The facility hook: the pr: block supplies the review vocabulary.
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      required: true\n"
+            "      consent_label: auto-merge\n"
+            "      hold_labels: [do-not-merge, needs-rebase, wip]\n"
+            "      wip_title_prefixes: ['wip:', '[wip]', 'draft:']\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.consent_label == "auto-merge"
+        assert pr.hold_labels == ("do-not-merge", "needs-rebase", "wip")
+        assert pr.wip_title_prefixes == ("wip:", "[wip]", "draft:")
+
+    def test_review_vocabulary_scalar_and_blanks_coerced(self, tmp_path: Path):
+        # A lone scalar becomes a 1-tuple; blank/whitespace entries are dropped
+        # so a stray "" can't become a match-everything token.
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      hold_labels: do-not-merge\n"
+            "      wip_title_prefixes: ['wip:', '', '  ']\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.hold_labels == ("do-not-merge",)
+        assert pr.wip_title_prefixes == ("wip:",)
+
 
 class TestInRepoPRPolicy:
     """In-repo config is the BASE for repo settings; machine-local overrides it."""
