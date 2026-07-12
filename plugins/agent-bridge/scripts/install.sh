@@ -37,7 +37,24 @@ VENV_DIR="$INSTALL_DIR/venv"
 LOCAL_BIN="$HOME/.local/bin"
 BINSTUB="$LOCAL_BIN/agent-bridge"
 PID_FILE="$INSTALL_DIR/agent-bridge.pid"
-PORT=9281
+# Effective listen port. A host is 9280; only a WSL guest (which shares the
+# Windows host's TCP port namespace) uses 9281 -- matching
+# agent_bridge.models.default_port(). Prefer the deployed config's explicit
+# port (source of truth: honors an operator override AND catches config drift
+# where the running service is on a non-default port), else the WSL-guest
+# discriminator ("am I a WSL guest?", not "am I non-Windows?").
+_cfg_yaml="${AGENT_BRIDGE_CONFIG_DIR:-$INSTALL_DIR}/config.yaml"
+PORT=""
+if [[ -f "$_cfg_yaml" ]]; then
+    PORT="$(sed -n 's/^[[:space:]]*port:[[:space:]]*\([0-9]\{1,\}\).*/\1/p' "$_cfg_yaml" | head -1)"
+fi
+if [[ -z "$PORT" ]]; then
+    if [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qiE 'microsoft|wsl' /proc/sys/kernel/osrelease 2>/dev/null; then
+        PORT=9281
+    else
+        PORT=9280
+    fi
+fi
 RELAY_PORT=9857   # integrated credential relay (in-process with the bridge)
 SYSTEMD_UNIT="agent-bridge.service"
 
