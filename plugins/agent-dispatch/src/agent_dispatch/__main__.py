@@ -88,7 +88,51 @@ def _cmd_create(args: argparse.Namespace) -> int:
 
 
 def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
-    """Spawn a worker via agent-bridge for a freshly created task (best effort)."""
+    """Spawn a worker for a freshly created task (best effort).
+
+    Two backends select *how* the worker is embodied:
+
+    - ``embody`` -- a **CLI-backed autopilot** session in a fresh parallel
+      worktree via ``agent-worktrees embody`` (the "dispatch an agent to do X"
+      path: a durable, NF-viewable session that works the task to explicit
+      completion). Falls back to the bridge backend if agent-worktrees is
+      absent.
+    - ``bridge`` (default) -- a **headless** agent-bridge ACP worker.
+
+    Either way, if no spawn mechanism is available the task is simply left
+    queued for any worker to claim -- never a hard failure.
+    """
+    backend = getattr(args, "spawn_backend", "bridge")
+    coordinator_url = args.url or client_url()
+
+    if backend == "embody":
+        from . import embody
+
+        if embody.embody_available():
+            worker_id = f"embody-{uuid.uuid4().hex[:8]}"
+            try:
+                result = embody.spawn_embodied_worker(
+                    task["id"],
+                    coordinator_url=coordinator_url,
+                    worker_id=worker_id,
+                    verify_timeout=getattr(args, "verify_timeout", 0) or 0,
+                )
+            except embody.EmbodyUnavailable as exc:
+                print(
+                    f"agent-dispatch: --spawn (embody) skipped ({exc}); task "
+                    f"{task['id']} left queued for any worker to claim",
+                    file=sys.stderr,
+                )
+                return
+            _report_spawn_result(result, task["id"], "agent-worktrees embody")
+            return
+        # Graceful degrade: no agent-worktrees -> try the headless bridge path.
+        print(
+            "agent-dispatch: embody backend unavailable (agent-worktrees not on "
+            "PATH); falling back to the bridge backend",
+            file=sys.stderr,
+        )
+
     from . import bridge
 
     worker_id = f"spawn-{uuid.uuid4().hex[:8]}"
@@ -96,7 +140,7 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
         result = bridge.spawn_worker(
             task["id"],
             agent=args.spawn_agent,
-            coordinator_url=args.url or client_url(),
+            coordinator_url=coordinator_url,
             worker_id=worker_id,
             wait=not args.run_async,
         )
@@ -107,10 +151,15 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
             file=sys.stderr,
         )
         return
+    _report_spawn_result(result, task["id"], "agent-bridge")
+
+
+def _report_spawn_result(result, task_id: str, via: str) -> None:
+    """Print a warning if a best-effort spawn subprocess reported failure."""
     if result.returncode != 0:
         print(
-            f"agent-dispatch: spawn via agent-bridge failed (exit {result.returncode}); "
-            f"task {task['id']} remains queued. stderr: {result.stderr.strip()[:400]}",
+            f"agent-dispatch: spawn via {via} failed (exit {result.returncode}); "
+            f"task {task_id} remains queued. stderr: {result.stderr.strip()[:400]}",
             file=sys.stderr,
         )
 
@@ -495,11 +544,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--not-before", type=float, default=0.0)
     p.add_argument(
         "--spawn", action="store_true",
-        help="after creating, spawn a worker via agent-bridge to execute it",
+        help="after creating, spawn a worker to execute it (best effort)",
+    )
+    p.add_argument(
+        "--spawn-backend", choices=["bridge", "embody"], default="bridge",
+        help="how to embody the spawned worker: 'embody' = a CLI-backed "
+             "autopilot session in a fresh parallel worktree (agent-worktrees "
+             "embody -- the 'dispatch an agent to do X' path); 'bridge' "
+             "(default) = a headless agent-bridge ACP worker",
     )
     p.add_argument(
         "--spawn-agent", default="task-worker",
-        help="agent-bridge agent name to spawn (default: task-worker)",
+        help="agent-bridge agent name to spawn (bridge backend only; "
+             "default: task-worker)",
+    )
+    p.add_argument(
+        "--verify-timeout", type=int, default=0,
+        help="embody backend: wait up to N seconds for the spawned mux session "
+             "to come up before returning (default 0: don't wait)",
     )
     p.add_argument(
         "--async", dest="run_async", action="store_true",
@@ -647,7 +709,10 @@ def build_parser() -> argparse.ArgumentParser:
         "and print its payload -- the successor's one-command pickup",
     )
     p.add_argument("task_id")
-    p.add_argument("--worker-id", dest="worker_id", help="owner id (default: from machine/worktree)")
+    p.add_argument(
+        "--worker-id", dest="worker_id",
+        help="owner id (default: from machine/worktree)",
+    )
     p.add_argument("--machine", help="override the resolved machine identity")
     p.add_argument("--worktree", help="override the resolved worktree identity")
     p.add_argument(
