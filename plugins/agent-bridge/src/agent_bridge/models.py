@@ -9,7 +9,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
 # -- Platform defaults -------------------------------------------------------
 
 
@@ -232,6 +231,35 @@ class LiveSessionInfo(BaseModel):
 
 class LiveSessionListResponse(BaseModel):
     live_sessions: list[LiveSessionInfo]
+
+
+class SdkEventIn(BaseModel):
+    """One raw Copilot extension SDK event, as forwarded by the extension.
+
+    ``data`` is passed through verbatim to the bridge-side translator; only the
+    fields the translator reads are used. ``timestamp``/``id`` are accepted for
+    forward-compat but the bridge assigns its own monotonic event ids.
+    """
+
+    type: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    timestamp: float | None = None
+    id: str | None = None
+
+
+class IngestLiveEventsRequest(BaseModel):
+    """A batch of SDK events pushed by a represented live session's extension."""
+
+    events: list[SdkEventIn] = Field(default_factory=list)
+
+
+class IngestLiveEventsResult(BaseModel):
+    """Result of an ingest batch: how many bridge events it produced."""
+
+    ok: bool = True
+    session_id: str
+    ingested: int
+    last_id: int
 
 
 class CursorInfo(BaseModel):

@@ -30,6 +30,23 @@ import { joinSession } from "@github/copilot-sdk/extension";
 // --- Constants ---
 const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
 const HTTP_TIMEOUT_MS = 4_000; // bridge is local; keep it snappy
+const FLUSH_MS = 1_000; // drain the represented-event queue to the bridge every 1s
+const MAX_QUEUE = 1_000; // bounded buffer; drop OLDEST on overflow (honest reduced fidelity)
+const FLUSH_BATCH = 250; // max events POSTed per flush
+// SDK event types we represent (Phase 5). Everything else is intentionally not
+// forwarded -- the bridge-side translator maps exactly this subset into its
+// event vocabulary; keeping the whitelist here avoids buffering noise.
+const REPRESENT_TYPES = new Set([
+  "user.message",
+  "assistant.message",
+  "assistant.reasoning",
+  "tool.execution_start",
+  "tool.execution_complete",
+  "assistant.usage",
+  "session.usage_info",
+  "assistant.turn_end",
+  "permission.requested",
+]);
 const CONFIG_DIR = process.env.AGENT_BRIDGE_CONFIG_DIR
   ? process.env.AGENT_BRIDGE_CONFIG_DIR
   : join(homedir(), ".agent-bridge");
@@ -42,6 +59,9 @@ const state = {
   token: null, // bearer token
   meta: null, // resolved session metadata (machine/cwd/worktree/...)
   heartbeat: null, // interval handle
+  flusher: null, // represented-event flush interval handle
+  pendingEvents: [], // bounded queue of raw SDK events awaiting flush
+  flushing: false, // guard against overlapping flushes
   lastEventAt: 0, // advanced by the observe-only event handler
 };
 
@@ -173,6 +193,29 @@ async function deregister() {
   );
 }
 
+// Drain the represented-event queue to the bridge's ingest endpoint. Runs off
+// the CLI event loop (on the flush timer, or once at shutdown). Best-effort:
+// spliced events are dropped whether or not the POST succeeds, so a transient
+// bridge blip gaps the live view rather than growing the buffer unboundedly --
+// NF still has the on-disk transcript for durable history.
+async function flushEvents() {
+  if (state.flushing) return;
+  if (!state.sessionId || !state.registered) return;
+  if (state.pendingEvents.length === 0) return;
+  state.flushing = true;
+  try {
+    const batch = state.pendingEvents.splice(0, FLUSH_BATCH);
+    if (batch.length === 0) return;
+    await bridgeFetch(
+      "POST",
+      `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}/events`,
+      { events: batch },
+    );
+  } finally {
+    state.flushing = false;
+  }
+}
+
 // --- Extension ---
 const session = await joinSession({
   // This extension registers no tools, so no permission request is ever routed
@@ -193,6 +236,17 @@ session.on((event) => {
       state.sessionId = event.sessionId;
       // Late session id -> kick a one-off registration off the event loop.
       setTimeout(() => register().catch(() => {}), 0);
+    }
+    // Represent (Phase 5): enqueue whitelisted events for the flusher. This is
+    // pure in-memory bookkeeping -- NO I/O, NO await, NO translation (the bridge
+    // translates) -- so the hot-potato rule holds. The bounded queue drops the
+    // OLDEST event on overflow so a burst never grows memory without limit.
+    const type = event?.type;
+    if (type && REPRESENT_TYPES.has(type)) {
+      state.pendingEvents.push({ type, data: event.data ?? {} });
+      if (state.pendingEvents.length > MAX_QUEUE) {
+        state.pendingEvents.splice(0, state.pendingEvents.length - MAX_QUEUE);
+      }
     }
   } catch {
     /* never throw out of an event handler */
@@ -217,6 +271,13 @@ try {
     }, HEARTBEAT_MS);
     // Don't let the heartbeat timer keep the CLI process alive on shutdown.
     if (state.heartbeat.unref) state.heartbeat.unref();
+    // Decoupled represented-event flusher (Phase 5): drains the queue the event
+    // handler fills, off the CLI event loop, best-effort. Unref'd so it never
+    // pins the process open on exit.
+    state.flusher = setInterval(() => {
+      flushEvents().catch(() => {});
+    }, FLUSH_MS);
+    if (state.flusher.unref) state.flusher.unref();
   }
 } catch (e) {
   extLog(`init error (degrading, session unaffected): ${e.message}`);
@@ -229,6 +290,13 @@ function shutdown() {
       clearInterval(state.heartbeat);
       state.heartbeat = null;
     }
+    if (state.flusher) {
+      clearInterval(state.flusher);
+      state.flusher = null;
+    }
+    // One best-effort final drain so the tail's last events aren't lost, then
+    // deregister (staleness reaping is the real backstop for either failing).
+    flushEvents().catch(() => {});
     deregister().catch(() => {});
   } catch {
     /* ignore */
