@@ -1012,6 +1012,15 @@ def _cmd_send(args: argparse.Namespace) -> None:
     client = _get_client()
     target = args.target
     prompt = args.prompt
+
+    # Interactive-CLI target -> deliver via the live-session message queue
+    # (attributed + answerable envelope), not the ACP turn path. This is how a
+    # peer/callback message reaches a human-attached session, and how an agent
+    # replies to one (`agent-bridge send <reply-to> "..."`).
+    if client.get_live_session(target):
+        _deliver_to_live_session(client, args, target, prompt)
+        return
+
     caller_id = _caller_id_for(args)
 
     # Resolve: existing session id, else reuse-or-start this caller's session
@@ -1028,6 +1037,60 @@ def _cmd_send(args: argparse.Namespace) -> None:
         _mark_resume_if_behind(client, session_id, caller_id=caller_id)
 
     _submit_and_stream(client, args, session_id, prompt, caller_id=caller_id)
+
+
+def _live_reply_to(args: argparse.Namespace) -> str | None:
+    """The routable address a reply should target: this caller's own session.
+
+    ``--reply-to`` wins; else the caller's own session id from the environment
+    (``AGENT_BRIDGE_SESSION_ID`` for a bridge-owned agent, ``SESSION_ID`` for an
+    interactive CLI session). None when the sender is not itself a live session
+    (e.g. a one-off script) -- the message is still delivered, just not
+    round-trippable.
+    """
+    import os as _os
+
+    explicit = getattr(args, "reply_to", None)
+    if explicit:
+        return explicit
+    return _os.environ.get("AGENT_BRIDGE_SESSION_ID") or _os.environ.get("SESSION_ID")
+
+
+def _live_sender_label(args: argparse.Namespace) -> str:
+    """A human-readable sender label for attribution (never routing)."""
+    import os as _os
+    import socket as _socket
+
+    explicit = getattr(args, "sender", None)
+    if explicit:
+        return explicit
+    return _get_caller_id() or _os.environ.get("USER") or _socket.gethostname()
+
+
+def _deliver_to_live_session(
+    client, args: argparse.Namespace, session_id: str, prompt: str
+) -> None:
+    """Deliver a prompt into a live interactive session's message queue.
+
+    The target session's extension polls the queue and injects the message as
+    an attributed ``<agent-message from reply-to>`` user turn. Attribution
+    (``sender``) is legibility; ``reply_to`` is the routable address the
+    receiver answers with ``agent-bridge send <reply-to> "..."``.
+    """
+    sender = _live_sender_label(args)
+    reply_to = _live_reply_to(args)
+    result = client.send_live_message(
+        session_id, sender=sender, body=prompt, reply_to=reply_to
+    )
+    if args.json:
+        _json_out({"delivered": True, "target": session_id, **result})
+        return
+    mid = result.get("message_id")
+    print(f"[>] Delivered to live session {session_id} (message {mid}, from {sender})")
+    if reply_to:
+        print(f"    reply-to: {reply_to}")
+    else:
+        print("    (no reply-to: this sender is not a live session; reply won't route)")
 
 
 def _submit_and_stream(
@@ -2380,6 +2443,17 @@ def main(argv: list[str] | None = None) -> None:
     )
     send_p.add_argument("target", help="Agent name or session ID")
     send_p.add_argument("prompt", help="Prompt text to send")
+    send_p.add_argument(
+        "--sender", "--from", dest="sender", default=None,
+        help="Attribution label when the target is a live interactive session "
+             "(default: this caller's worktree/user). Legibility only, not routing.",
+    )
+    send_p.add_argument(
+        "--reply-to", dest="reply_to", default=None,
+        help="Routable session id a reply should target when delivering to a "
+             "live session (default: this caller's own session from the "
+             "environment). Rendered as the envelope's reply-to.",
+    )
     send_p.add_argument(
         "--no-wait", action="store_true",
         help="Return immediately without waiting for response",

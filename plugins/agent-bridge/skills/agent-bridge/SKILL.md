@@ -466,6 +466,30 @@ distinguish bridge-spawned worktrees from user-created ones. A future
 improvement will track the worktree ID in the bridge session metadata,
 enabling targeted cleanup of only bridge-spawned orphans.
 
+## Receiving and answering agent messages
+
+The fabric can deliver a message **into a live interactive session** (yours or a
+peer's). It arrives as a user turn wrapped in a structured envelope:
+
+```
+<agent-message from="cjohnson@orchestrator" reply-to="81ec1b77-…" msg-id="2">
+…body…
+</agent-message>
+```
+
+This marker (same family as `<system_reminder>`) means the turn came from
+**another agent via the bridge**, not the operator. To answer, reply to the
+`reply-to` address with the same verb you use for any agent:
+
+```bash
+agent-bridge send <reply-to> "your reply"
+```
+
+`agent-bridge send` recognizes a live-session target and delivers into it; your
+own identity/session ride along so the peer can answer back. See
+[references/agent-messages.md](references/agent-messages.md) for the full
+convention. Delivery is on by default; `/peer` mutes a session.
+
 ## Troubleshooting
 
 - **"agent-bridge is not responding"** -- service isn't running. Start it
