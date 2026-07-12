@@ -187,6 +187,45 @@ def translate_sdk_event(
     return []
 
 
+#: SDK event types that mean "the assistant is actively working a turn."
+_TURN_ACTIVITY_TYPES = frozenset({
+    "user.message",
+    "assistant.message",
+    "assistant.reasoning",
+    "tool.execution_start",
+    "tool.execution_complete",
+    "permission.requested",
+})
+#: SDK event type that ends a turn (the assistant went idle).
+_TURN_END_TYPE = "assistant.turn_end"
+
+
+def derive_turn_state(
+    raw_events: list[dict[str, Any]], *, prior_state: str | None = None
+) -> tuple[str | None, bool]:
+    """Fold a batch of raw SDK events into a coarse ``turn_state``.
+
+    Returns ``(turn_state, saw_activity)`` where ``turn_state`` is ``"running"``
+    (a turn is in progress), ``"idle"`` (the last turn ended), or ``prior_state``
+    if the batch carried no turn signal. ``saw_activity`` is True when any
+    activity event was seen (used to refresh ``last_activity_at``). Pure and
+    order-sensitive: the *last* turn signal in the batch wins. This is the
+    objective, token-free half of progress legibility (Phase 7 Channel A) --
+    ``stalled`` is *not* decided here; it is computed on read from
+    ``last_activity_at`` vs. a threshold.
+    """
+    state = prior_state
+    saw_activity = False
+    for event in raw_events:
+        etype = event.get("type")
+        if etype == _TURN_END_TYPE:
+            state = "idle"
+        elif etype in _TURN_ACTIVITY_TYPES:
+            state = "running"
+            saw_activity = True
+    return state, saw_activity
+
+
 class LiveEventStore:
     """In-memory registry of represented ``EventLog``s, keyed by session id.
 

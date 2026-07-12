@@ -248,6 +248,12 @@ class LiveSessionInfo(BaseModel):
     role: str | None = None
     driven_by: str | None = None
     status: str = "live"
+    #: Coarse turn-state derived from the represented event tail (Phase 7
+    #: Channel A): "running" | "idle" | None (no turn signal yet).
+    turn_state: str | None = None
+    last_activity_at: float | None = None
+    #: Friendly liveness label computed on read: active / stalled / idle / None.
+    liveness: str | None = None
     registered_at: float
     updated_at: float
 
