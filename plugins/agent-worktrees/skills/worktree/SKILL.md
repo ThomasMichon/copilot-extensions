@@ -201,24 +201,41 @@ push did not succeed or was not run, so retry `push-changes` first.
 ## PR Workflow (PR mode)
 
 Some repos opt into a **pull-request workflow** instead of direct-push
-finalization (config `pr.enabled: true`). Check before signing off:
+finalization (config `pr.enabled: true`). **Check the target repo's flow
+before signing off -- it is not the same everywhere:**
 
 ```
+agent-worktrees get pr-profile      # direct | pr-human-merge | pr-agent-merge
 agent-worktrees get pr-enabled      # "true" or "false"
 agent-worktrees get pr-required     # "true" -> direct-to-master is blocked
 agent-worktrees get pr-provider     # gitea | github | azure-devops
 ```
 
-In **direct mode** (default), use the two-phase `push-changes` + `finalize`
-flow above. In **PR mode**, sign-off becomes `create-pr` -> review -> merge ->
-`finalize`, and `push-changes` targets the *feature* branch, never master.
+The **profile** tells you how the repo lands work and which `pr-*` verbs apply:
+
+- **`direct`** -- no PR flow; `finalize` lands to the default branch.
+- **`pr-human-merge`** -- PR-gated, but a **human** approves + merges: use
+  `create-pr` / `pr-watch` / `pr-status` / `pr-complete`; **`pr-merge` does not
+  apply** (there is no consent label to signal).
+- **`pr-agent-merge`** -- PR-gated with an auto-merge consent label bound: after
+  approval the author runs `pr-merge` to signal consent and the review gate
+  merges. The full `pr-*` family applies.
+
+The verbs are **self-describing**: `pr-status` prints the `flow:` profile, and
+`pr-merge` refuses (naming the reason + the right next step) on a repo where it
+does not apply. Believe them -- never hand-merge or escalate past a verb that
+says it does not apply.
+
+In **direct mode**, use the two-phase `push-changes` + `finalize` flow above.
+In **PR mode**, sign-off becomes `create-pr` -> review -> merge -> `finalize`,
+and `push-changes` targets the *feature* branch, never master.
 **An opened PR is final by default** -- land everything before `create-pr` (or
 open it held with `--hold` / `pr-ready`), since a late push races the merge.
 
-The full PR-mode reference -- config resolution (machine-local vs in-repo),
-`create-pr` auto-open + attribution + labels, the disposition modes
-(keep-alive / detach), held PRs, and multiple PRs per worktree -- is in
-[references/pr-workflow.md](references/pr-workflow.md).
+The full PR-mode reference -- profiles + verb applicability, config resolution
+(machine-local vs in-repo), `create-pr` auto-open + attribution + labels, the
+disposition modes (keep-alive / detach), held PRs, and multiple PRs per
+worktree -- is in [references/pr-workflow.md](references/pr-workflow.md).
 
 ## Committing and Pushing
 
@@ -303,6 +320,7 @@ worktrees from anywhere without env-var contamination.
 | **PR mode: create + push a feature branch** | `agent-worktrees create-pr --title "desc"` |
 | **PR mode: record PR metadata** (after sub-agent opens it) | `agent-worktrees set-pr --url URL --number N` |
 | **PR mode: show tracked PR state** (reconciles vs. provider; flags pull-forward when merged) | `agent-worktrees pr-status` |
+| **Check the target repo's PR flow** (direct / human-merge / agent-merge) | `agent-worktrees get pr-profile` |
 | **Check if PRs are required** (direct-to-master blocked) | `agent-worktrees get pr-required` |
 | Set/update title only | `agent-worktrees push-changes --title "desc" --title-only` |
 | Show worktree git status | `agent-worktrees status` |

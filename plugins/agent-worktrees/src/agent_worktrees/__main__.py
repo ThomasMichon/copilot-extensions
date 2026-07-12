@@ -3234,12 +3234,23 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         worktree_id, all_prs=getattr(args, "all", False),
         live=not getattr(args, "no_live", False), config=config,
     )
+    # Attach the repo's PR-flow profile so the caller can see, at a glance,
+    # which flow this repo uses and whether the pr-* verbs apply here.
+    flow = _pr_flow_profile(config.default_repo)
+    result["flow"] = {
+        "profile": flow.profile,
+        "requires_pr": flow.requires_pr,
+        "merge_mode": flow.merge_mode,
+        "applicable_verbs": list(flow.applicable_verbs),
+        "summary": flow.summary,
+    }
     if use_json:
         _json_output(result)
         return 0 if result.get("has_pr") or "error" not in result else 1
     if result.get("error"):
         output.err(result["error"])
         return 1
+    print(f"  flow:     {flow.profile} -- {flow.summary}")
     if not result.get("has_pr"):
         print(f"{worktree_id}: no PR recorded (direct-push or not yet created).")
         return 0
@@ -6170,6 +6181,7 @@ _GET_KEYS: dict[str, str] = {
     "pr-enabled":    "Whether PR mode is enabled (true/false)",
     "pr-required":   "Whether PRs are required, blocking direct-to-master (true/false)",
     "pr-provider":   "PR provider (gitea|github|azure-devops) when PR mode is on",
+    "pr-profile":    "PR-flow profile: direct|pr-human-merge|pr-agent-merge (check first)",
 }
 
 
@@ -6194,6 +6206,24 @@ def _resolve_repo_remote(config: cfg.Config, repo: cfg.RepoConfig) -> str:
         # remote is simply unknown rather than an error.
         pass
     return ""
+
+
+def _pr_flow_profile(repo: cfg.RepoConfig):
+    """Derive this repo's PR-flow profile from its config (pure, no network).
+
+    Wraps :func:`pr_contract.classify_pr_flow` with the repo's ``pr`` binding so
+    every surface (``get pr-profile``, ``pr-status``, ``pr-merge``) reports the
+    same profile: ``direct`` | ``pr-human-merge`` | ``pr-agent-merge``.
+    """
+    from . import pr_contract as pc
+
+    prc = repo.pr
+    return pc.classify_pr_flow(
+        enabled=prc.enabled,
+        required=prc.required,
+        provider=prc.provider,
+        automerge_label=getattr(prc, "automerge_label", ""),
+    )
 
 
 def cmd_get(args: argparse.Namespace) -> int:
@@ -6231,6 +6261,7 @@ def cmd_get(args: argparse.Namespace) -> int:
         "pr-enabled":    "true" if repo.pr.enabled else "false",
         "pr-required":   "true" if repo.pr.required else "false",
         "pr-provider":   repo.pr.provider if repo.pr.enabled else "",
+        "pr-profile":    _pr_flow_profile(repo).profile,
     }
 
     if key not in values:
@@ -9587,24 +9618,40 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
         prcfg = repo_cfg.pr
         default_branch = repo_cfg.default_branch
         if not getattr(prcfg, "automerge_label", ""):
-            # No merge-consent binding on THIS machine's checkout. The most
-            # common cause is a stale anchor (the binding landed on the default
-            # branch but this checkout hasn't pulled it), NOT a genuinely
-            # unconfigured repo -- so steer the caller to refresh rather than to
-            # hand-merge or escalate to an admin, which is the wrong reflex.
-            msg = ("pr-merge: no merge-consent label (pr.automerge_label) is "
-                   "configured in this repo's .agent-worktrees/config.yaml on "
-                   "this machine. If the repo is expected to have one, this "
-                   "checkout's anchor is likely behind -- update it "
-                   "('aperture-labs update' / 'git sync' on the anchor) so the "
-                   "binding is present, then retry. pr-merge is still the "
-                   "correct consent path; do NOT hand-merge or escalate to an "
-                   "admin. Nothing applied.")
+            # No merge-consent label bound -> pr-merge cannot apply consent here.
+            # Two distinct causes wear the same face; name both and point at the
+            # right process for each (see the repo's PR-flow profile):
+            #   (a) HUMAN-MERGE repo -- PR-gated, but a human approves + merges.
+            #       pr-merge legitimately does not apply; open the PR, address
+            #       review (pr-watch), and let a human merge.
+            #   (b) STALE ANCHOR -- a repo that *should* have the binding, whose
+            #       checkout hasn't pulled it yet. Refresh the anchor and retry;
+            #       do NOT hand-merge or escalate.
+            flow = _pr_flow_profile(repo_cfg)
+            msg = (
+                "pr-merge: no merge-consent label (pr.automerge_label) is bound "
+                f"in this repo's .agent-worktrees/config.yaml on this machine. "
+                f"This repo's PR-flow profile is '{flow.profile}'. Two cases:\n"
+                "  - Human-merge repo (expected): PR-gated but a HUMAN approves "
+                "and merges -- pr-merge does not apply. Open the PR (create-pr), "
+                "address review with pr-watch, then a human merges. Check the "
+                "repo's CONTRIBUTING / review process for who merges.\n"
+                "  - Stale anchor (if you EXPECTED an auto-merge label here): "
+                "this checkout is likely behind -- update the anchor "
+                "('aperture-labs update' / 'git sync' on the anchor) so the "
+                "binding is present, then retry pr-merge. Do NOT hand-merge or "
+                "escalate to an admin. Nothing applied."
+            )
             if args.json:
                 print(_json.dumps({
                     "repo": args.repo,
                     "error": "no automerge_label binding",
-                    "hint": "anchor may be behind; update it, then retry pr-merge",
+                    "flow_profile": flow.profile,
+                    "merge_mode": flow.merge_mode,
+                    "applies": False,
+                    "hint": ("human-merge repo: a human merges (pr-merge N/A); "
+                             "OR stale anchor if an auto-merge label was "
+                             "expected -- update the anchor and retry"),
                 }))
             else:
                 output.err(msg)

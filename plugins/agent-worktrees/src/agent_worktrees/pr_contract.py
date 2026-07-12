@@ -413,12 +413,128 @@ __all__ = [
     "DEFAULT_UNTIL",
     "VERDICT_STATES",
     "Baseline",
+    "PRFlowProfile",
     "PRSnapshot",
     "PRState",
     "Review",
+    "classify_pr_flow",
     "classify_state",
     "compute_events",
     "effective_verdict",
     "merge_state",
     "title_is_wip",
 ]
+
+
+# ---------------------------------------------------------------------------
+# PR-flow profile -- which flow a repo's config selects, and which pr-* verbs
+# apply to it. Pure: derived from config *values* (never imports config), so it
+# stays provider-generic and network-free like the rest of this contract.
+# ---------------------------------------------------------------------------
+
+#: Canonical flow-profile tokens (stable; safe to switch on).
+PROFILE_DIRECT = "direct"                  # no PR flow: land straight to default branch
+PROFILE_PR_HUMAN_MERGE = "pr-human-merge"  # PR-gated, a human approves/merges
+PROFILE_PR_AGENT_MERGE = "pr-agent-merge"  # PR-gated, author signals merge consent
+
+#: Every pr-* author verb, for describing applicability.
+_ALL_PR_VERBS = ("create-pr", "pr-watch", "pr-status", "pr-merge", "pr-complete")
+
+
+@dataclass(frozen=True)
+class PRFlowProfile:
+    """How a repo lands work, derived from its PR config -- the answer to
+    "which flow does *this* repo use, and do the pr-* verbs apply here?"
+
+    Not a per-PR classification (that is :class:`PRState`); a per-*repo* one.
+    Agents should read this **before** driving a PR so they pick the right flow
+    for the target repo instead of assuming the local facility's shape.
+
+    - ``profile``       -- one of the ``PROFILE_*`` tokens.
+    - ``requires_pr``   -- direct-to-default-branch is refused (``pr.required``).
+    - ``merge_mode``    -- who lands it: ``"direct"`` | ``"human"`` |
+      ``"agent-consent"``.
+    - ``applicable_verbs`` -- pr-* verbs that apply to this repo.
+    - ``summary``       -- one-line human description of the flow.
+    """
+
+    profile: str
+    requires_pr: bool
+    merge_mode: str
+    provider: str
+    automerge_label: str
+    applicable_verbs: tuple[str, ...]
+    summary: str
+
+    def applies(self, verb: str) -> bool:
+        """True when ``verb`` (e.g. ``"pr-merge"``) is part of this repo's flow."""
+        return verb in self.applicable_verbs
+
+
+def classify_pr_flow(
+    *,
+    enabled: bool,
+    required: bool = False,
+    provider: str = "",
+    automerge_label: str = "",
+) -> PRFlowProfile:
+    """Derive a repo's :class:`PRFlowProfile` from its PR config values.
+
+    Three shapes, distinguished only by config (no network, no provider call):
+
+    - **direct** (``pr.enabled`` false): no PR flow. ``finalize`` lands the
+      worktree to the default branch; the pr-* verbs do not apply.
+    - **pr-agent-merge** (enabled + an ``automerge_label`` is bound): the author
+      signals **merge consent** with that label after approval, and the review
+      gate merges. The full pr-* family applies -- this is the facility's own
+      auto-review + auto-merge shape.
+    - **pr-human-merge** (enabled but **no** ``automerge_label``): PR-gated, but
+      the agent has no consent/merge mechanism -- a **human** approves and
+      merges. ``create-pr`` / ``pr-watch`` / ``pr-status`` / ``pr-complete``
+      apply; **``pr-merge`` does not** (there is no consent label to apply).
+
+    The absence of ``automerge_label`` is the human-merge signal *by design*.
+    The one ambiguity a caller must resolve out-of-band: an ``enabled`` repo
+    that *should* have an ``automerge_label`` but is missing it because the
+    checkout's anchor is stale looks identical to a genuine human-merge repo.
+    Callers that expect agent-merge (e.g. the facility) should confirm the
+    anchor is current before treating an empty label as "human-merge".
+    """
+    if not enabled:
+        return PRFlowProfile(
+            profile=PROFILE_DIRECT,
+            requires_pr=False,
+            merge_mode="direct",
+            provider="",
+            automerge_label="",
+            applicable_verbs=(),
+            summary=("Direct-push repo -- no PR flow; finalize lands the "
+                     "worktree to the default branch."),
+        )
+    if automerge_label:
+        return PRFlowProfile(
+            profile=PROFILE_PR_AGENT_MERGE,
+            requires_pr=required,
+            merge_mode="agent-consent",
+            provider=provider,
+            automerge_label=automerge_label,
+            applicable_verbs=_ALL_PR_VERBS,
+            summary=(
+                f"PR-gated ({provider or 'provider'}); the author signals merge "
+                f"consent (label '{automerge_label}') after approval and the "
+                f"review gate merges. Full pr-* family applies."
+            ),
+        )
+    return PRFlowProfile(
+        profile=PROFILE_PR_HUMAN_MERGE,
+        requires_pr=required,
+        merge_mode="human",
+        provider=provider,
+        automerge_label="",
+        applicable_verbs=tuple(v for v in _ALL_PR_VERBS if v != "pr-merge"),
+        summary=(
+            f"PR-gated ({provider or 'provider'}); a human approves and merges "
+            f"(no auto-merge consent label bound). Use create-pr / pr-watch / "
+            f"pr-status / pr-complete; pr-merge does not apply here."
+        ),
+    )

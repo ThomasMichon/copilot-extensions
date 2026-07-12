@@ -98,6 +98,13 @@ A repo's local path **varies by machine**. Always resolve it with
    - elsewhere -> delegate via agent-bridge / agent-codespaces.
 4. Land changes through the **target repo's** own contribution flow (its branch
    naming, PR/merge policy, version-bump rules) -- not this repo's.
+   - **Check the target repo's PR flow before you drive one:**
+     `agent-worktrees get pr-profile` reports `direct` (no PR),
+     `pr-human-merge` (PR-gated, a **human** approves + merges -- `pr-merge`
+     does not apply), or `pr-agent-merge` (author signals consent with
+     `pr-merge` and the gate merges). Do **not** assume the flow your home repo
+     uses. When a `pr-*` verb reports it does not apply to the target, follow
+     its pointer (and the repo's `CONTRIBUTING`) rather than hand-merging.
 
 ## Anti-patterns (don't)
 
