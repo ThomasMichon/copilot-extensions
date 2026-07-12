@@ -250,10 +250,10 @@ class _LiveFakeClient:
         return dict(self._resolved) if self._resolved else {}
 
     def send_live_message(self, session_id, *, sender, body, reply_to=None,
-                          wait=False, wait_timeout=None):
+                          kind="prompt", wait=False, wait_timeout=None):
         self.delivered.append(
             {"session_id": session_id, "sender": sender,
-             "body": body, "reply_to": reply_to, "wait": wait}
+             "body": body, "reply_to": reply_to, "kind": kind, "wait": wait}
         )
         return {"message_id": 1, "replied": False}
 
@@ -271,13 +271,14 @@ def test_cmd_send_resolves_worktree_handle_and_delivers(monkeypatch, capsys):
     m._cmd_send(args)
     assert client.delivered == [
         {"session_id": "live-sess-1", "sender": "cjohnson@peer",
-         "body": "please rebase", "reply_to": "wt-caller", "wait": False}
+         "body": "please rebase", "reply_to": "wt-caller",
+         "kind": "prompt", "wait": False}
     ]
 
 
 class _ReplyingLiveClient(_LiveFakeClient):
     def send_live_message(self, session_id, *, sender, body, reply_to=None,
-                          wait=False, wait_timeout=None):
+                          kind="prompt", wait=False, wait_timeout=None):
         self.delivered.append({"wait": wait, "wait_timeout": wait_timeout})
         return {"message_id": 7, "replied": True, "reply": "done - rebased",
                 "stop_reason": "end_turn"}
@@ -299,6 +300,42 @@ def test_cmd_send_waits_and_prints_reply(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Reply from live-sess-1" in out
     assert "done - rebased" in out
+
+
+def test_live_message_kind_precedence():
+    # --notify / --status-check are shorthands; else --kind; else prompt.
+    assert m._live_message_kind(argparse.Namespace(notify=True)) == "notify"
+    assert m._live_message_kind(
+        argparse.Namespace(notify=False, status_check=True)
+    ) == "status-check"
+    assert m._live_message_kind(
+        argparse.Namespace(notify=False, status_check=False, kind="notify")
+    ) == "notify"
+    assert m._live_message_kind(
+        argparse.Namespace(notify=False, status_check=False, kind="prompt")
+    ) == "prompt"
+    assert m._live_message_kind(argparse.Namespace()) == "prompt"
+
+
+class _KindCapturingClient(_LiveFakeClient):
+    def send_live_message(self, session_id, *, sender, body, reply_to=None,
+                          kind="prompt", wait=False, wait_timeout=None):
+        self.delivered.append({"kind": kind, "wait": wait})
+        return {"message_id": 3, "replied": False}
+
+
+def test_cmd_send_passes_status_check_kind(monkeypatch):
+    client = _KindCapturingClient(resolved={"session_id": "live-1"})
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_live_sender_label", lambda args: "peer")
+    monkeypatch.setattr(m, "_live_reply_to", lambda args: "wt-caller")
+    args = argparse.Namespace(
+        target="wt-1", prompt="alive?", new=False, json=False,
+        no_wait=False, reply_timeout=120.0,
+        notify=False, status_check=True, kind="prompt",
+    )
+    m._cmd_send(args)
+    assert client.delivered == [{"kind": "status-check", "wait": True}]
 
 
 def test_cmd_create_refuses_on_conflict(monkeypatch):

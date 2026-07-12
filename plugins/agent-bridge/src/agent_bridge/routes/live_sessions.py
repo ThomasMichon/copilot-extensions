@@ -262,7 +262,7 @@ async def post_live_message(
 
     message_id = db.enqueue_live_message(
         session_id, sender=body.sender, body=body.body, now=time.time(),
-        reply_to=body.reply_to,
+        reply_to=body.reply_to, kind=body.kind,
     )
 
     if not body.wait:
@@ -300,6 +300,7 @@ async def list_live_messages(
                 sender=r["sender"],
                 body=r["body"],
                 reply_to=r.get("reply_to"),
+                kind=r.get("kind") or "prompt",
                 created_at=r["created_at"],
             )
             for r in rows

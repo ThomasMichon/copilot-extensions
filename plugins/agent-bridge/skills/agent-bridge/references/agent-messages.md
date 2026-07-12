@@ -23,6 +23,11 @@ A delivered message looks like this (a marker in the same family as the runtime'
   instead be a bare session id. May be absent (then the sender is not itself a
   live session and cannot receive a reply).
 - `msg-id` — the sender's message id, useful as a correlation reference.
+- `kind` — the message's **intent** (absent means `prompt`). `prompt` is a work
+  directive — act on it. `notify` is informational — no reply or new work
+  expected. `status-check` asks only for a **terse status answer** via the
+  side-channel — reply briefly and do **not** start a task. When `kind` is not
+  `prompt`, a short guidance line inside the envelope restates this.
 
 When you see an `<agent-message>` turn: it came from **another agent via the
 bridge**, not from the operator at the keyboard. Treat the inside as the request;
@@ -47,6 +52,10 @@ agent-bridge send <worktree-handle> "what's the status of the rebase?"
   message stays queued and is still delivered — you just didn't get the turn.
 - `--no-wait` returns as soon as the message is enqueued (fire-and-forget) — use
   it for a `notify`-style poke you don't need an answer to.
+- `--kind` sets intent: `--notify` (informational, no answer expected) or
+  `--status-check` (asks the receiver for a terse status ack, not new work), vs
+  the default `prompt` (a work directive). Pair `--status-check` with the default
+  wait to send a ping and read the short answer; pair `--notify` with `--no-wait`.
 
 This is the everyday way to interrogate a peer: one `send`, read the reply, no
 cold sub-agent and no operator relay.

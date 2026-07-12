@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # A live interactive session is kept alive by the extension's 30s heartbeat
 # (HEARTBEAT_MS in extension.mjs). A row whose ``updated_at`` is older than this
@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS live_messages (
     sender TEXT NOT NULL,
     body TEXT NOT NULL,
     reply_to TEXT,
+    kind TEXT NOT NULL DEFAULT 'prompt',
     created_at REAL NOT NULL,
     delivered_at REAL
 );
@@ -445,6 +446,23 @@ class Database:
             conn.commit()
             log.info("Schema migrated to version 8: live_messages.reply_to")
 
+        if from_version < 9:
+            # v8 -> v9: add a typed `kind` to live_messages (D2). `prompt` (the
+            # default) is a work directive; `notify`/`status-check` ask only for
+            # a terse out-of-band ack and must not be treated as new work.
+            cols = [
+                r[1]
+                for r in conn.execute("PRAGMA table_info(live_messages)").fetchall()
+            ]
+            if "kind" not in cols:
+                conn.execute(
+                    "ALTER TABLE live_messages ADD COLUMN kind TEXT "
+                    "NOT NULL DEFAULT 'prompt'"
+                )
+            conn.execute("UPDATE schema_version SET version=?", (9,))
+            conn.commit()
+            log.info("Schema migrated to version 9: live_messages.kind")
+
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
         conn = self._get_conn()
@@ -648,6 +666,8 @@ class Database:
             (handle, cutoff),
         )
         return dict(rows[0]) if rows else None
+
+    # -- Live-message delivery queue (Phase 2 write path) --------------------
     # Messages posted INTO a live interactive session. Durable (persisted so a
     # zero-downtime cutover doesn't drop an undelivered message); the extension
     # polls pending rows, calls session.send, then acks -- at-least-once, with
@@ -656,13 +676,19 @@ class Database:
 
     def enqueue_live_message(
         self, session_id: str, sender: str, body: str, now: float,
-        reply_to: str | None = None,
+        reply_to: str | None = None, kind: str = "prompt",
     ) -> int:
-        """Enqueue a message for delivery into a live session; return its id."""
+        """Enqueue a message for delivery into a live session; return its id.
+
+        ``kind`` is the D2 intent tag: ``prompt`` (a work directive, the
+        default) vs ``notify``/``status-check`` (a terse out-of-band ack, never
+        new work). Rendered into the delivered envelope so the receiver reacts
+        appropriately.
+        """
         cur = self.execute_write(
             "INSERT INTO live_messages (session_id, sender, body, reply_to, "
-            "created_at) VALUES (?, ?, ?, ?, ?)",
-            (session_id, sender, body, reply_to, now),
+            "kind, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, sender, body, reply_to, kind, now),
         )
         return int(cur.lastrowid or 0)
 

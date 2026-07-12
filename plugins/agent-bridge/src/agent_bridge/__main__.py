@@ -1100,6 +1100,21 @@ def _live_sender_label(args: argparse.Namespace) -> str:
     return _get_caller_id() or _os.environ.get("USER") or _socket.gethostname()
 
 
+def _live_message_kind(args: argparse.Namespace) -> str:
+    """The typed intent of a delivered message (D2).
+
+    ``prompt`` (default) is a work directive; ``notify``/``status-check`` ask the
+    receiver only for a terse, out-of-band acknowledgement and must not be
+    treated as new work. ``--notify`` / ``--status-check`` are shorthands for
+    ``--kind``.
+    """
+    if getattr(args, "notify", False):
+        return "notify"
+    if getattr(args, "status_check", False):
+        return "status-check"
+    return getattr(args, "kind", None) or "prompt"
+
+
 def _deliver_to_live_session(
     client, args: argparse.Namespace, session_id: str, prompt: str
 ) -> None:
@@ -1118,17 +1133,22 @@ def _deliver_to_live_session(
     """
     sender = _live_sender_label(args)
     reply_to = _live_reply_to(args)
+    kind = _live_message_kind(args)
     wait = not getattr(args, "no_wait", False)
     wait_timeout = getattr(args, "reply_timeout", 120.0)
     result = client.send_live_message(
         session_id, sender=sender, body=prompt, reply_to=reply_to,
-        wait=wait, wait_timeout=wait_timeout,
+        kind=kind, wait=wait, wait_timeout=wait_timeout,
     )
     if args.json:
         _json_out({"delivered": True, "target": session_id, **result})
         return
     mid = result.get("message_id")
-    print(f"[>] Delivered to live session {session_id} (message {mid}, from {sender})")
+    kind_note = "" if kind == "prompt" else f", kind {kind}"
+    print(
+        f"[>] Delivered to live session {session_id} "
+        f"(message {mid}, from {sender}{kind_note})"
+    )
     if reply_to:
         print(f"    reply-to: {reply_to}")
     else:
@@ -2511,6 +2531,20 @@ def main(argv: list[str] | None = None) -> None:
              "session -- a worktree handle (survives handoff) or a session id "
              "(default: this caller's own worktree handle, else its session id "
              "from the environment). Rendered as the envelope's reply-to.",
+    )
+    send_p.add_argument(
+        "--kind", choices=["prompt", "notify", "status-check"], default="prompt",
+        help="Typed intent when delivering to a live session: 'prompt' (a work "
+             "directive, default) vs 'notify'/'status-check' (asks only for a "
+             "terse out-of-band ack, never treated as new work).",
+    )
+    send_p.add_argument(
+        "--notify", action="store_true",
+        help="Shorthand for --kind notify (informational; no work expected).",
+    )
+    send_p.add_argument(
+        "--status-check", dest="status_check", action="store_true",
+        help="Shorthand for --kind status-check (asks for a terse status ack).",
     )
     send_p.add_argument(
         "--no-wait", action="store_true",

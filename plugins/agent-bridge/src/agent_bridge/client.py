@@ -357,11 +357,12 @@ class BridgeClient:
 
     def send_live_message(
         self, session_id: str, *, sender: str, body: str,
-        reply_to: str | None = None,
+        reply_to: str | None = None, kind: str = "prompt",
         wait: bool = False, wait_timeout: float | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/live-sessions/{id}/messages -- deliver into a live session.
 
+        ``kind`` is the D2 intent tag (``prompt`` vs ``notify``/``status-check``).
         When ``wait`` is set (D1), the bridge also watches the target's
         represented stream and the result carries the reply turn's assistant
         text (``replied``/``reply``/``stop_reason``). The HTTP request blocks for
@@ -371,6 +372,8 @@ class BridgeClient:
         payload: dict[str, Any] = {"sender": sender, "body": body}
         if reply_to:
             payload["reply_to"] = reply_to
+        if kind and kind != "prompt":
+            payload["kind"] = kind
         request_timeout = None
         if wait:
             payload["wait"] = True
