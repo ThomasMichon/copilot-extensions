@@ -18,11 +18,17 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ..models import (
+    AckMessagesRequest,
+    AckMessagesResult,
     IngestLiveEventsRequest,
     IngestLiveEventsResult,
+    LiveMessage,
+    LiveMessageListResponse,
     LiveSessionInfo,
     LiveSessionListResponse,
     RegisterLiveSessionRequest,
+    SendMessageRequest,
+    SendMessageResult,
 )
 from .sessions import _sse_event_stream
 
@@ -202,3 +208,66 @@ async def stream_live_events(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/{session_id}/messages", response_model=SendMessageResult)
+async def post_live_message(
+    session_id: str, body: SendMessageRequest, request: Request
+) -> SendMessageResult:
+    """Post a message INTO a live interactive session (Phase 2 write path).
+
+    Enqueues an attributed envelope the target session's extension polls and
+    injects via ``session.send`` (as an attributed user turn). 404 if the id is
+    not a registered live session -- the vision's "clear refusal when the target
+    is not serviceable". Delivery still requires the session to have opted in
+    (``/peer``); until then the message waits in the durable queue.
+    """
+    db = _db(request)
+    if db.get_live_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="live session not found")
+    message_id = db.enqueue_live_message(
+        session_id, sender=body.sender, body=body.body, now=time.time()
+    )
+    return SendMessageResult(session_id=session_id, message_id=message_id)
+
+
+@router.get("/{session_id}/messages", response_model=LiveMessageListResponse)
+async def list_live_messages(
+    session_id: str, request: Request
+) -> LiveMessageListResponse:
+    """Pending (undelivered) messages for a live session, oldest-first.
+
+    This is the extension's inbox **poll**: it drains these, injects each via
+    ``session.send``, then acks. 404 if the session is not registered.
+    """
+    db = _db(request)
+    if db.get_live_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="live session not found")
+    rows = db.list_pending_live_messages(session_id)
+    return LiveMessageListResponse(
+        messages=[
+            LiveMessage(
+                id=r["id"],
+                sender=r["sender"],
+                body=r["body"],
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+    )
+
+
+@router.post("/{session_id}/messages/ack", response_model=AckMessagesResult)
+async def ack_live_messages(
+    session_id: str, body: AckMessagesRequest, request: Request
+) -> AckMessagesResult:
+    """Mark delivered messages acked (the extension acks after ``session.send``).
+
+    Idempotent and scoped to ``session_id``: re-acking an already-delivered id
+    is a no-op, so a redelivered ack never errors or double-counts.
+    """
+    db = _db(request)
+    if db.get_live_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="live session not found")
+    acked = db.ack_live_messages(session_id, body.ids, now=time.time())
+    return AckMessagesResult(acked=acked)

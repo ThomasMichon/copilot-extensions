@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 _EVENT_BATCH_MAX = 256
 _EVENT_BATCH_WINDOW_SECS = 0.05
 _EVENT_WRITE_SENTINEL = object()
@@ -87,9 +87,20 @@ CREATE TABLE IF NOT EXISTS live_sessions (
     updated_at REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS live_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    sender TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    delivered_at REAL
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id, event_id);
 CREATE INDEX IF NOT EXISTS idx_live_sessions_worktree ON live_sessions(worktree_id);
+CREATE INDEX IF NOT EXISTS idx_live_messages_pending
+    ON live_messages(session_id, delivered_at, id);
 """
 
 
@@ -390,6 +401,26 @@ class Database:
             conn.commit()
             log.info("Schema migrated to version 6: added live_sessions")
 
+        if from_version < 7:
+            # v6 -> v7: add live_messages delivery queue for posting a message
+            # INTO a live interactive CLI session (Phase 2 write path). Own
+            # autoincrement PK, NO FK to sessions (targets a live_sessions id).
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS live_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    sender TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    delivered_at REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_live_messages_pending
+                    ON live_messages(session_id, delivered_at, id);
+            """)
+            conn.execute("UPDATE schema_version SET version=?", (7,))
+            conn.commit()
+            log.info("Schema migrated to version 7: added live_messages")
+
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
         conn = self._get_conn()
@@ -526,9 +557,12 @@ class Database:
         )
 
     def deregister_live_session(self, session_id: str) -> None:
-        """Remove a live interactive-session registration."""
+        """Remove a live interactive-session registration and its message queue."""
         self.execute_write(
             "DELETE FROM live_sessions WHERE session_id=?", (session_id,)
+        )
+        self.execute_write(
+            "DELETE FROM live_messages WHERE session_id=?", (session_id,)
         )
 
     def get_live_session(self, session_id: str) -> dict[str, Any] | None:
@@ -551,6 +585,52 @@ class Database:
                 "SELECT * FROM live_sessions ORDER BY updated_at DESC"
             )
         return [dict(r) for r in rows]
+
+    # -- Live-message delivery queue (Phase 2 write path) --------------------
+    # Messages posted INTO a live interactive session. Durable (persisted so a
+    # zero-downtime cutover doesn't drop an undelivered message); the extension
+    # polls pending rows, calls session.send, then acks -- at-least-once, with
+    # the ack (delivered_at) making a redelivery a no-op rather than a double
+    # injection.
+
+    def enqueue_live_message(
+        self, session_id: str, sender: str, body: str, now: float
+    ) -> int:
+        """Enqueue a message for delivery into a live session; return its id."""
+        cur = self.execute_write(
+            "INSERT INTO live_messages (session_id, sender, body, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (session_id, sender, body, now),
+        )
+        return int(cur.lastrowid or 0)
+
+    def list_pending_live_messages(self, session_id: str) -> list[dict[str, Any]]:
+        """Undelivered messages for a session, oldest-first (delivery order)."""
+        rows = self.execute_read(
+            "SELECT * FROM live_messages "
+            "WHERE session_id=? AND delivered_at IS NULL ORDER BY id ASC",
+            (session_id,),
+        )
+        return [dict(r) for r in rows]
+
+    def ack_live_messages(
+        self, session_id: str, ids: list[int], now: float
+    ) -> int:
+        """Mark the given messages delivered; return how many rows changed.
+
+        Scoped to ``session_id`` so a caller can only ack its own queue, and
+        idempotent (already-delivered rows are left untouched by the
+        ``delivered_at IS NULL`` guard), so a redelivered ack never errors.
+        """
+        if not ids:
+            return 0
+        placeholders = ",".join("?" for _ in ids)
+        cur = self.execute_write(
+            f"UPDATE live_messages SET delivered_at=? "
+            f"WHERE session_id=? AND delivered_at IS NULL AND id IN ({placeholders})",
+            (now, session_id, *ids),
+        )
+        return cur.rowcount
 
     def delete_session(self, session_id: str) -> None:
         self.flush()

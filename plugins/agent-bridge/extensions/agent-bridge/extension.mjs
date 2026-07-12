@@ -33,6 +33,14 @@ const HTTP_TIMEOUT_MS = 4_000; // bridge is local; keep it snappy
 const FLUSH_MS = 1_000; // drain the represented-event queue to the bridge every 1s
 const MAX_QUEUE = 1_000; // bounded buffer; drop OLDEST on overflow (honest reduced fidelity)
 const FLUSH_BATCH = 250; // max events POSTed per flush
+const INBOX_POLL_MS = 2_000; // poll the bridge for messages to deliver every 2s
+// Delivery (Phase 2 write path) is OPT-IN: injecting a message runs it as a user
+// turn under this session's permissions, so it stays OFF until the operator
+// enables it with `/peer` (mirrors `/talk`). An env default lets a session start
+// pre-enabled (AGENT_BRIDGE_DELIVERY=1); anything else stays off.
+const DELIVERY_DEFAULT_ON = /^(1|true|on|yes)$/i.test(
+  process.env.AGENT_BRIDGE_DELIVERY || "",
+);
 // SDK event types we represent (Phase 5). Everything else is intentionally not
 // forwarded -- the bridge-side translator maps exactly this subset into its
 // event vocabulary; keeping the whitelist here avoids buffering noise.
@@ -62,6 +70,9 @@ const state = {
   flusher: null, // represented-event flush interval handle
   pendingEvents: [], // bounded queue of raw SDK events awaiting flush
   flushing: false, // guard against overlapping flushes
+  inboxPoll: null, // delivery inbox poll interval handle
+  deliveryEnabled: DELIVERY_DEFAULT_ON, // /peer toggle (opt-in message delivery)
+  delivering: false, // guard against overlapping inbox drains
   lastEventAt: 0, // advanced by the observe-only event handler
 };
 
@@ -175,6 +186,22 @@ async function bridgeFetch(method, path, body) {
   }
 }
 
+// GET a JSON body from the bridge (returns parsed object, or null on any error).
+async function bridgeGetJson(path) {
+  if (!state.base || !state.token) return null;
+  try {
+    const res = await fetch(`${state.base}${path}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${state.token}` },
+      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 async function register() {
   if (!state.sessionId) return;
   const payload = { session_id: state.sessionId, ...(state.meta || {}) };
@@ -216,12 +243,93 @@ async function flushEvents() {
   }
 }
 
+// Render an incoming envelope as an ATTRIBUTED user turn. Attribution is
+// mandatory (Design C/E): the receiving agent and operator must always be able
+// to tell injected peer traffic from operator input. ASCII only (no em dash) so
+// it is safe on any output path.
+function renderDeliveredPrompt(sender, body) {
+  const who = (sender || "unknown").toString().slice(0, 200);
+  return `[via agent-bridge, from ${who}]\n\n${body}`;
+}
+
+// Poll the bridge inbox and deliver pending messages into THIS session via
+// session.send (off the CLI event loop, on the poll timer). Opt-in: does
+// nothing unless the operator enabled delivery with /peer. Best-effort and
+// serialized; acks only AFTER session.send resolves, so an undelivered message
+// is redelivered next tick rather than lost, and the ack makes redelivery a
+// no-op on the bridge (idempotent) rather than a double injection.
+async function pollInbox() {
+  if (state.delivering) return;
+  if (!state.deliveryEnabled) return;
+  if (!state.sessionId || !state.registered) return;
+  state.delivering = true;
+  try {
+    const data = await bridgeGetJson(
+      `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}/messages`,
+    );
+    const messages = data?.messages;
+    if (!Array.isArray(messages) || messages.length === 0) return;
+    const delivered = [];
+    for (const msg of messages) {
+      if (!msg || typeof msg.id !== "number") continue;
+      try {
+        await session.send({
+          prompt: renderDeliveredPrompt(msg.sender, msg.body ?? ""),
+          displayPrompt: `Message from ${msg.sender || "peer"} (via agent-bridge)`,
+        });
+        delivered.push(msg.id);
+      } catch (e) {
+        // Stop the batch on the first send failure; unacked messages redeliver.
+        extLog(`deliver failed for message ${msg.id}: ${e.message}`);
+        break;
+      }
+    }
+    if (delivered.length > 0) {
+      await bridgeFetch(
+        "POST",
+        `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}/messages/ack`,
+        { ids: delivered },
+      );
+    }
+  } finally {
+    state.delivering = false;
+  }
+}
+
 // --- Extension ---
 const session = await joinSession({
   // This extension registers no tools, so no permission request is ever routed
   // to it; approveAll is a proven, inert default (matches talk-mode). It does
   // NOT auto-approve the operator's own tool calls -- those stay with the CLI.
   onPermissionRequest: approveAll,
+
+  // /peer -- opt-in toggle for message delivery INTO this session (Phase 2).
+  // Delivery is OFF by default; injecting a message runs it as a user turn
+  // under this session's permissions, so the operator must consent. Mirrors
+  // /talk. On enable, drains any already-queued messages immediately.
+  commands: [
+    {
+      name: "peer",
+      description:
+        "Toggle agent-bridge message delivery INTO this session (peer/callback " +
+        "messages are injected as attributed user turns). Off by default.",
+      handler: async (ctx) => {
+        void ctx;
+        state.deliveryEnabled = !state.deliveryEnabled;
+        const st = state.deliveryEnabled ? "ENABLED" : "disabled";
+        await session.log(
+          `agent-bridge peer delivery ${st}` +
+            (state.deliveryEnabled
+              ? " -- messages sent to this session will be injected as " +
+                "attributed user turns."
+              : " -- incoming messages will queue but not be delivered."),
+        );
+        if (state.deliveryEnabled) {
+          pollInbox().catch(() => {});
+        }
+      },
+    },
+  ],
 });
 
 // Observe-only, non-blocking: the ONLY work done on the CLI event loop. Just
@@ -278,6 +386,14 @@ try {
       flushEvents().catch(() => {});
     }, FLUSH_MS);
     if (state.flusher.unref) state.flusher.unref();
+    // Delivery inbox poll (Phase 2): checks the bridge for messages to inject.
+    // Always ticking, but a no-op until the operator enables it with /peer, so
+    // the toggle takes effect at runtime with no restart. Off the event loop,
+    // unref'd, best-effort.
+    state.inboxPoll = setInterval(() => {
+      pollInbox().catch(() => {});
+    }, INBOX_POLL_MS);
+    if (state.inboxPoll.unref) state.inboxPoll.unref();
   }
 } catch (e) {
   extLog(`init error (degrading, session unaffected): ${e.message}`);
@@ -293,6 +409,10 @@ function shutdown() {
     if (state.flusher) {
       clearInterval(state.flusher);
       state.flusher = null;
+    }
+    if (state.inboxPoll) {
+      clearInterval(state.inboxPoll);
+      state.inboxPoll = null;
     }
     // One best-effort final drain so the tail's last events aren't lost, then
     // deregister (staleness reaping is the real backstop for either failing).
