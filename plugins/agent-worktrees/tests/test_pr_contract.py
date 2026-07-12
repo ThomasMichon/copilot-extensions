@@ -270,3 +270,52 @@ class TestClassifyState:
         st = pc.classify_state(snap)
         assert st.held == ()
         assert st.wip is False
+
+
+# ---------------------------------------------------------------------------
+# PR-flow profile (classify_pr_flow) -- per-repo applicability
+# ---------------------------------------------------------------------------
+
+class TestClassifyPRFlow:
+    def test_direct_when_pr_disabled(self):
+        f = pc.classify_pr_flow(enabled=False)
+        assert f.profile == pc.PROFILE_DIRECT
+        assert f.requires_pr is False
+        assert f.merge_mode == "direct"
+        assert f.applicable_verbs == ()
+        assert f.applies("pr-merge") is False
+        assert f.applies("create-pr") is False
+
+    def test_agent_merge_when_automerge_label_bound(self):
+        f = pc.classify_pr_flow(
+            enabled=True, required=True, provider="gitea",
+            automerge_label="auto-merge",
+        )
+        assert f.profile == pc.PROFILE_PR_AGENT_MERGE
+        assert f.requires_pr is True
+        assert f.merge_mode == "agent-consent"
+        # Full family applies, including pr-merge (the consent step).
+        assert f.applies("pr-merge") is True
+        assert f.applies("pr-watch") is True
+        assert f.applies("pr-complete") is True
+        assert "auto-merge" in f.summary
+
+    def test_human_merge_when_enabled_but_no_label(self):
+        f = pc.classify_pr_flow(
+            enabled=True, required=True, provider="github", automerge_label="",
+        )
+        assert f.profile == pc.PROFILE_PR_HUMAN_MERGE
+        assert f.merge_mode == "human"
+        # Everything BUT pr-merge applies -- a human merges.
+        assert f.applies("pr-merge") is False
+        assert f.applies("create-pr") is True
+        assert f.applies("pr-watch") is True
+        assert f.applies("pr-status") is True
+        assert f.applies("pr-complete") is True
+        assert "human" in f.summary.lower()
+        assert "pr-merge does not apply" in f.summary
+
+    def test_required_reflected_even_without_label(self):
+        f = pc.classify_pr_flow(enabled=True, required=False, automerge_label="")
+        assert f.profile == pc.PROFILE_PR_HUMAN_MERGE
+        assert f.requires_pr is False

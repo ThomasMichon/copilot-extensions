@@ -6,6 +6,7 @@ two-phase `push-changes` + `finalize` flow (direct mode), and the safety
 rules.
 
 ## Contents
+- Check the target repo's PR flow first (profiles + verb applicability)
 - Detecting PR mode + where PR config lives (machine-local vs in-repo)
 - `create-pr` (auto-open, attribution marker, labels)
 - Dispositions: keep-alive vs detach
@@ -18,13 +19,48 @@ rules.
 
 Some repos opt into a **pull-request workflow** instead of direct-push
 finalization. A repo is in PR mode when its config sets `pr.enabled: true`.
-Check before signing off:
+
+### Check the target repo's PR flow FIRST -- it is not the same everywhere
+
+**Never assume a PR flow; read the target repo's config before you drive one.**
+Different repos land work differently, and the `pr-*` verbs apply to different
+subsets. Query the repo's **flow profile** up front:
 
 ```
+agent-worktrees get pr-profile      # direct | pr-human-merge | pr-agent-merge
 agent-worktrees get pr-enabled      # "true" or "false"
 agent-worktrees get pr-required     # "true" -> direct-to-master is blocked
 agent-worktrees get pr-provider     # gitea | github | azure-devops (empty in direct mode)
 ```
+
+The three profiles (derived purely from config -- provider-generic, no network):
+
+| Profile | Config shape | How work lands | Verbs that apply |
+|---------|--------------|----------------|------------------|
+| **`direct`** | `pr.enabled: false` | `finalize` lands to the default branch | *(none -- no PR flow)* |
+| **`pr-human-merge`** | enabled, **no** `automerge_label` | PR-gated; a **human** approves + merges | `create-pr`, `pr-watch`, `pr-status`, `pr-complete` -- **not `pr-merge`** |
+| **`pr-agent-merge`** | enabled + an `automerge_label` bound | PR-gated; the author **signals merge consent** after approval; the review gate merges | the full `pr-*` family, including `pr-merge` |
+
+**Applicability is self-describing.** `pr-status` prints the profile (`flow:`
+line + a `flow` block in `--json`), and `pr-merge` **refuses** on a repo whose
+profile is not `pr-agent-merge`, naming the reason and pointing at the right
+process (human merge vs a stale anchor). So when a verb reports it does not
+apply, believe it and follow its pointer -- do **not** hand-merge, escalate to
+an admin, or invent a flow.
+
+- On a **`pr-human-merge`** repo: open the PR (`create-pr`), address review with
+  `pr-watch`, then **a human approves and merges** -- consult the repo's
+  `CONTRIBUTING` / related narrative for who merges. `pr-merge` does not apply.
+- On a **`pr-agent-merge`** repo (e.g. an auto-reviewer + auto-merge repo where
+  review typically lands in minutes): after approval, `pr-merge` signals consent
+  and the gate merges. This is the flow the sections below assume.
+- If `pr-merge` reports "no automerge_label" on a repo you **expected** to be
+  `pr-agent-merge`, suspect a **stale anchor** first (the binding landed on the
+  default branch but this checkout hasn't pulled it): refresh the anchor
+  (`git sync` on the anchor / the project's update command) and retry -- do not
+  fall back to a hand-merge.
+
+Check before signing off:
 
 In **direct mode** (the default), use the two-phase `push-changes` +
 `finalize` flow above. In **PR mode**, the flow becomes
