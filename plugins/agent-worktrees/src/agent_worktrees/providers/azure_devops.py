@@ -237,34 +237,47 @@ class AzureDevOpsProvider:
         delete_source_branch: bool = True, bypass_policy: bool = False,
         bypass_reason: str = "",
     ) -> str:
-        """Set native auto-complete on the PR (ADO merges when policy passes).
+        """Request the PR to merge via ``az repos pr update`` (no label on ADO).
 
-        The Azure DevOps implementation of "request auto-complete": no label --
-        ``az repos pr update --auto-complete true`` with the completion options.
-        ``bypass_policy`` completes *past* branch policies (needed for a repo
-        whose default branch carries a policy that never auto-satisfies for our
-        own PRs, e.g. a central governance status policy).
+        Two shapes, because ADO **rejects ``--bypass-policy`` together with
+        ``--auto-complete``** ("The bypass option cannot be used with
+        auto-complete"):
+
+        - **``bypass_policy`` (self-complete).** Complete the PR *now*, past
+          branch policy (``--status completed --bypass-policy true``). Needed for
+          a default branch whose policy never auto-satisfies for our own PRs
+          (e.g. a central governance status policy) -- auto-complete would wait
+          forever. Mirrors ``tools/ado-pr.ps1``. Completion is async; the caller
+          confirms via ``pr-status`` / ``get_pull``.
+        - **no bypass.** Set native ``--auto-complete true``; ADO merges once
+          every branch policy passes.
+
+        Either way applies the squash / delete-source-branch completion options.
         """
-        _ = automerge_label  # ADO has no consent label; auto-complete is native
+        _ = automerge_label  # ADO has no consent label; completion is native
         if not api_base:
             return "Azure DevOps provider needs the org URL (api_base)."
         args = [
             "az", "repos", "pr", "update",
             "--id", str(number),
             "--organization", api_base,
-            "--auto-complete", "true",
             "--squash", "true" if squash else "false",
             "--delete-source-branch", "true" if delete_source_branch else "false",
             "--output", "json",
         ]
         if bypass_policy:
-            args += ["--bypass-policy", "true"]
+            # Direct completion past policy -- NOT auto-complete (they are
+            # mutually exclusive in ADO).
+            args += ["--status", "completed", "--bypass-policy", "true"]
             if bypass_reason:
                 args += ["--bypass-policy-reason", bypass_reason]
+        else:
+            args += ["--auto-complete", "true"]
         proc = run_cli(args, env=self._env(token))
         if proc.returncode != 0:
+            verb = "complete (bypass)" if bypass_policy else "auto-complete"
             return (
-                f"az repos pr update --auto-complete failed for {repo}#{number}: "
+                f"az repos pr update --{verb} failed for {repo}#{number}: "
                 f"{proc.stderr.strip() or proc.stdout.strip()}"
             )
         return ""

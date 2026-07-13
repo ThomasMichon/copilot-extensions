@@ -1159,7 +1159,7 @@ class TestAzureDevOpsCapabilities:
         snap = prov.get_snapshot("proj/repo", 5, api_base=self.ORG, token="t")
         assert snap.merged is True and snap.pr_state == "closed"
 
-    def test_request_auto_complete_sets_native(self, monkeypatch):
+    def test_request_auto_complete_no_bypass_sets_autocomplete(self, monkeypatch):
         azure, prov = self._prov()
         captured = {}
         monkeypatch.setattr(
@@ -1169,15 +1169,34 @@ class TestAzureDevOpsCapabilities:
         err = prov.request_auto_complete(
             "proj/repo", 5, api_base=self.ORG, token="t",
             automerge_label="auto-complete", squash=True,
-            delete_source_branch=True, bypass_policy=True, bypass_reason="self")
+            delete_source_branch=True, bypass_policy=False)
         assert err == ""
         a = captured["args"]
         assert a[:4] == ["az", "repos", "pr", "update"]
         assert a[a.index("--auto-complete") + 1] == "true"
         assert a[a.index("--squash") + 1] == "true"
         assert a[a.index("--delete-source-branch") + 1] == "true"
+        assert "--status" not in a  # auto-complete path, not direct completion
+
+    def test_request_auto_complete_bypass_completes_directly(self, monkeypatch):
+        # ADO rejects --bypass-policy with --auto-complete, so a bypass request
+        # is a DIRECT completion (--status completed --bypass-policy), never
+        # --auto-complete.
+        azure, prov = self._prov()
+        captured = {}
+        monkeypatch.setattr(
+            azure, "run_cli",
+            lambda args, **kw: (captured.__setitem__("args", args),
+                                _proc(stdout="{}"))[1])
+        err = prov.request_auto_complete(
+            "proj/repo", 5, api_base=self.ORG, token="t",
+            bypass_policy=True, bypass_reason="self")
+        assert err == ""
+        a = captured["args"]
+        assert a[a.index("--status") + 1] == "completed"
         assert a[a.index("--bypass-policy") + 1] == "true"
         assert a[a.index("--bypass-policy-reason") + 1] == "self"
+        assert "--auto-complete" not in a  # mutually exclusive with bypass
 
     def test_request_auto_complete_failure(self, monkeypatch):
         azure, prov = self._prov()
