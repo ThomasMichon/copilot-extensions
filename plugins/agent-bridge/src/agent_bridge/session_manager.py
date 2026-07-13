@@ -2419,6 +2419,33 @@ class SessionManager:
         log.info("Interrupted in-flight turn for session %s", session_id)
         return session
 
+    async def answer_ask_user(
+        self,
+        session_id: str,
+        tool_call_id: str,
+        content: dict[str, Any] | None,
+        *,
+        action: str = "accept",
+    ) -> bool:
+        """Answer a parked ``ask_user`` elicitation on a live session.
+
+        Resolves the ACP client's pending ``elicitation/create`` for the given
+        tool call so the agent's ``ask_user`` completes and the turn continues.
+        ``action`` is ``accept`` (with ``content``), ``decline``, or ``cancel``.
+        Returns ``True`` when a matching request was outstanding, ``False`` when
+        none was (already answered/withdrawn). Raises ``KeyError`` if the
+        session is unknown and ``ValueError`` if it has no live ACP client.
+        """
+        session_id = self._resolve_ref(session_id) or session_id
+        session = self._sessions.get(session_id)
+        if not session:
+            raise KeyError(f"Session {session_id} not found")
+        if session.client is None:
+            raise ValueError(f"Session {session_id} has no live ACP client")
+        return session.client.resolve_elicitation(
+            tool_call_id, content, action=action,
+        )
+
     async def stop_session(
         self, session_id: str, *, force: bool = False, reap_host: bool = False
     ) -> None:

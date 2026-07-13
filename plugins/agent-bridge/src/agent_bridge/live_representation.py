@@ -97,6 +97,28 @@ def translate_sdk_event(
         if not tool_call_id:
             return []
         name = d.get("toolName") or "tool"
+        if name == "ask_user":
+            # The agent has stopped mid-turn to ask the operator a question.
+            # Represent it as a first-class, legible request (prompt + offered
+            # choices) rather than an opaque tool spinner that never completes
+            # -- the exact failure that leaves a represented CLI session looking
+            # permanently "Responding…". READ-ONLY here (mirrors
+            # ``permission.requested``): this SDK path represents a *live CLI
+            # session* whose interactive Copilot owns the reply, so the answer
+            # affordance downstream is a take-over, never an inline reply. Kept
+            # in step with the NF-side translator
+            # (services/neuron-forge/server/core/live_representation.py).
+            args = d.get("arguments")
+            args = args if isinstance(args, dict) else {}
+            return [(
+                "ask_user_request",
+                _out({
+                    "tool_call_id": tool_call_id,
+                    "message": _text(args.get("message")),
+                    "requested_schema": args.get("requestedSchema"),
+                    "read_only": True,
+                }),
+            )]
         return [(
             "tool_call_start",
             _out({

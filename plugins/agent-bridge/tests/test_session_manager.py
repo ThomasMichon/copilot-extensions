@@ -826,6 +826,69 @@ class TestInterruptTurn:
             await session_manager.interrupt_turn("nonexistent")
 
 
+class TestAnswerAskUser:
+    """Answering a parked ask_user elicitation on a live session."""
+
+    @pytest.mark.asyncio
+    async def test_answer_proxies_to_client_resolve(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        session.client.resolve_elicitation = MagicMock(return_value=True)
+
+        ok = await session_manager.answer_ask_user(
+            session.session_id, "tc-1", {"choice": "a"}
+        )
+
+        assert ok is True
+        session.client.resolve_elicitation.assert_called_once_with(
+            "tc-1", {"choice": "a"}, action="accept"
+        )
+
+    @pytest.mark.asyncio
+    async def test_answer_forwards_action(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        session.client.resolve_elicitation = MagicMock(return_value=True)
+
+        await session_manager.answer_ask_user(
+            session.session_id, "tc-1", None, action="decline"
+        )
+
+        session.client.resolve_elicitation.assert_called_once_with(
+            "tc-1", None, action="decline"
+        )
+
+    @pytest.mark.asyncio
+    async def test_answer_returns_false_when_nothing_pending(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        session.client.resolve_elicitation = MagicMock(return_value=False)
+
+        ok = await session_manager.answer_ask_user(
+            session.session_id, "tc-x", {}
+        )
+        assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_answer_unknown_session(self, session_manager) -> None:
+        with pytest.raises(KeyError):
+            await session_manager.answer_ask_user("nonexistent", "tc", {})
+
+    @pytest.mark.asyncio
+    async def test_answer_no_live_client(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        session.client = None
+        with pytest.raises(ValueError):
+            await session_manager.answer_ask_user(
+                session.session_id, "tc", {}
+            )
+
+
 class TestRehydrate:
     """Session rehydration on restart."""
 

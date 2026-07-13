@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ..models import (
+    AnswerAskUserRequest,
     CursorAckRequest,
     CursorInfo,
     ResyncSessionResponse,
@@ -580,6 +581,37 @@ async def interrupt_turn(session_id: str, request: Request):
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     return _session_info(session)
+
+
+@router.post("/{session_id}/ask-user")
+async def answer_ask_user(
+    session_id: str, req: AnswerAskUserRequest, request: Request,
+):
+    """Answer a parked ``ask_user`` elicitation, unblocking the agent's turn.
+
+    Resolves the session's pending ACP ``elicitation/create`` for the given
+    tool call with the human's answer so the agent's ``ask_user`` completes.
+    ``409`` if no matching request is outstanding (already answered, withdrawn,
+    or never asked).
+    """
+    mgr: SessionManager = request.app.state.session_manager
+    try:
+        resolved = await mgr.answer_ask_user(
+            session_id, req.tool_call_id, req.content, action=req.action,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    if not resolved:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No pending ask_user for tool call {req.tool_call_id} "
+                f"on session {session_id}"
+            ),
+        )
+    return {"status": "answered"}
 
 
 @router.post("/{session_id}/resume", response_model=SessionInfo)

@@ -21,14 +21,19 @@ from typing import Any
 from acp import PROTOCOL_VERSION, Client, RequestError, text_block
 from acp.client.connection import ClientSideConnection
 from acp.schema import (
+    AcceptElicitationResponse,
     AgentMessageChunk,
     AgentPlanUpdate,
     AgentThoughtChunk,
     AvailableCommandsUpdate,
+    CancelElicitationResponse,
     ClientCapabilities,
     ConfigOptionUpdate,
     CreateTerminalResponse,
     CurrentModeUpdate,
+    DeclineElicitationResponse,
+    ElicitationCapabilities,
+    ElicitationFormCapabilities,
     EnvVariable,
     HttpHeader,
     HttpMcpServer,
@@ -220,6 +225,27 @@ class _BridgeClientImpl(Client):
     ) -> RequestPermissionResponse:
         return await self._owner._handle_permission_request(options, tool_call)
 
+    async def create_elicitation(
+        self, message: str, mode: Any, **kwargs: Any
+    ) -> AcceptElicitationResponse | DeclineElicitationResponse | CancelElicitationResponse:
+        """Handle an ``elicitation/create`` request (the agent's ``ask_user``).
+
+        Delegates to the owner, which surfaces the question as an
+        ``ask_user_request`` event and blocks on a human answer -- never
+        auto-answering.
+        """
+        return await self._owner._handle_elicitation(message, mode)
+
+    async def complete_elicitation(
+        self, elicitation_id: str, **kwargs: Any
+    ) -> None:
+        """Handle an ``elicitation/complete`` notification (agent withdrew it).
+
+        The agent no longer needs the answer (e.g. it cancelled the turn), so
+        drop the parked request without resolving it as an answer.
+        """
+        self._owner._withdraw_elicitation(elicitation_id)
+
     async def session_update(
         self,
         session_id: str,
@@ -357,6 +383,19 @@ class AcpClient:
         self._prompt_error: str | None = None
         self._stop_reason: str | None = None
         self._pending_permission_future: asyncio.Future[RequestPermissionResponse] | None = None
+
+        # Parked ``ask_user`` elicitations, keyed by tool_call_id. Each future
+        # resolves to a CreateElicitationResponse once a human answers (via
+        # :meth:`resolve_elicitation`), the agent withdraws it, or the session
+        # shuts down. Empty except while a question is outstanding.
+        self._pending_elicitations: dict[
+            str,
+            asyncio.Future[
+                AcceptElicitationResponse
+                | DeclineElicitationResponse
+                | CancelElicitationResponse
+            ],
+        ] = {}
 
         # True only while awaiting a prompt turn result. Distinguishes a
         # real mid-turn crash from an idle/just-resumed process exit.
@@ -503,7 +542,17 @@ class AcpClient:
         )
         await self._connection.initialize(
             protocol_version=PROTOCOL_VERSION,
-            client_capabilities=ClientCapabilities(),
+            client_capabilities=ClientCapabilities(
+                # Advertise form elicitation so the agent's ``ask_user`` calls
+                # are delivered (as ``elicitation/create``) instead of being
+                # self-cancelled by the agent for want of a capable client. The
+                # bridge parks each request and surfaces it as an
+                # ``ask_user_request`` event for a human to answer -- it does
+                # NOT auto-answer.
+                elicitation=ElicitationCapabilities(
+                    form=ElicitationFormCapabilities(),
+                ),
+            ),
             client_info=Implementation(
                 name="agent-bridge",
                 version=__version__,
@@ -660,6 +709,13 @@ class AcpClient:
                 RequestPermissionResponse(outcome={"outcome": "cancelled"})
             )
             self._pending_permission_future = None
+
+        # Cancel any parked ask_user elicitations so the agent's blocked
+        # `elicitation/create` calls unwind instead of hanging on teardown.
+        for fut in self._pending_elicitations.values():
+            if not fut.done():
+                fut.set_result(CancelElicitationResponse(action="cancel"))
+        self._pending_elicitations.clear()
 
         if self._connection:
             with contextlib.suppress(Exception):
@@ -921,6 +977,111 @@ class AcpClient:
         self._pending_permission_future = loop.create_future()
         self._completion_event.set()
         return await self._pending_permission_future
+
+    async def _handle_elicitation(
+        self, message: str, mode: Any
+    ) -> AcceptElicitationResponse | DeclineElicitationResponse | CancelElicitationResponse:
+        """Surface an ``ask_user`` elicitation and block on a human answer.
+
+        Emits an ``ask_user_request`` event (question + requested schema) and
+        parks a future keyed by the tool call. The future resolves when a human
+        answers via :meth:`resolve_elicitation`, the agent withdraws the request
+        (:meth:`_withdraw_elicitation`), or the session shuts down. The bridge
+        never auto-answers -- an unanswered question simply keeps the turn
+        parked, exactly as an interactive Copilot would wait at its terminal.
+
+        Only *form* elicitations are supported; URL elicitations are declined
+        (the bridge advertises only ``form`` capability, so a well-behaved agent
+        will not send them).
+        """
+        tool_call_id = getattr(mode, "tool_call_id", None) or ""
+        requested_schema = getattr(mode, "requested_schema", None)
+        if requested_schema is None:
+            # Not a form elicitation (e.g. URL mode) -- we don't handle it.
+            return DeclineElicitationResponse(action="decline")
+
+        schema_data: Any = None
+        if hasattr(requested_schema, "model_dump"):
+            schema_data = requested_schema.model_dump(
+                by_alias=True, mode="json", exclude_none=True,
+            )
+        else:
+            schema_data = requested_schema
+
+        self._emit("ask_user_request", {
+            "tool_call_id": tool_call_id,
+            "message": message,
+            "requested_schema": schema_data,
+        })
+
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[
+            AcceptElicitationResponse
+            | DeclineElicitationResponse
+            | CancelElicitationResponse
+        ] = loop.create_future()
+        # If the agent re-asks with the same tool_call_id, retire the stale
+        # future so it never dangles.
+        stale = self._pending_elicitations.pop(tool_call_id, None)
+        if stale is not None and not stale.done():
+            stale.set_result(CancelElicitationResponse(action="cancel"))
+        self._pending_elicitations[tool_call_id] = fut
+        self._completion_event.set()
+        try:
+            return await fut
+        finally:
+            # Drop our entry only if it is still the current one (a withdraw or
+            # re-ask may have replaced it).
+            if self._pending_elicitations.get(tool_call_id) is fut:
+                self._pending_elicitations.pop(tool_call_id, None)
+
+    def resolve_elicitation(
+        self,
+        tool_call_id: str,
+        content: dict[str, Any] | None,
+        *,
+        action: str = "accept",
+    ) -> bool:
+        """Resolve a parked ``ask_user`` elicitation with a human's answer.
+
+        ``action`` selects the reply kind: ``accept`` (with ``content``),
+        ``decline``, or ``cancel``. Returns ``True`` if a matching pending
+        request was resolved, ``False`` if none was outstanding (already
+        answered, withdrawn, or unknown tool call).
+        """
+        fut = self._pending_elicitations.get(tool_call_id)
+        if fut is None or fut.done():
+            return False
+        if action == "decline":
+            fut.set_result(DeclineElicitationResponse(action="decline"))
+        elif action == "cancel":
+            fut.set_result(CancelElicitationResponse(action="cancel"))
+        else:
+            fut.set_result(AcceptElicitationResponse(action="accept", content=content or {}))
+        self._emit("ask_user_resolved", {
+            "tool_call_id": tool_call_id,
+            "action": action,
+        })
+        return True
+
+    def _withdraw_elicitation(self, elicitation_id: str) -> None:
+        """Drop a parked elicitation the agent no longer needs.
+
+        ``elicitation_id`` correlates to the parked request's tool call. Form
+        elicitations carry no distinct id, so if the id does not match a key we
+        cancel the sole outstanding request when there is exactly one (the
+        common case: an agent withdraws the single question it was blocked on).
+        """
+        fut = self._pending_elicitations.get(elicitation_id)
+        if fut is None and len(self._pending_elicitations) == 1:
+            elicitation_id, fut = next(iter(self._pending_elicitations.items()))
+        if fut is not None and not fut.done():
+            fut.set_result(CancelElicitationResponse(action="cancel"))
+
+    def has_pending_elicitation(self, tool_call_id: str) -> bool:
+        """Whether an unanswered ``ask_user`` request is parked for a tool call."""
+        fut = self._pending_elicitations.get(tool_call_id)
+        return fut is not None and not fut.done()
 
     # -- Buffer management ---------------------------------------------------
 

@@ -433,3 +433,131 @@ def test_build_mcp_servers_rejects_bad_specs() -> None:
         build_mcp_servers([{"type": "http", "name": "m"}])  # http missing url
     with pytest.raises(ValueError):
         build_mcp_servers([{"type": "bogus", "name": "m"}])  # unknown type
+
+
+# -- ask_user elicitation ---------------------------------------------------
+
+
+def _form_session_mode(tool_call_id: str, schema: dict):
+    from acp.schema import ElicitationFormSessionMode, ElicitationSchema
+
+    return ElicitationFormSessionMode(
+        session_id="acp-1",
+        tool_call_id=tool_call_id,
+        requested_schema=ElicitationSchema.model_validate(schema),
+    )
+
+
+def test_ask_user_elicitation_emits_request_and_parks() -> None:
+    """create_elicitation surfaces an ask_user_request event and blocks until
+    a human answers -- it must never auto-answer."""
+    import asyncio
+
+    from acp.schema import AcceptElicitationResponse
+
+    async def scenario() -> None:
+        client, events = _client_with_recorder()
+        client._acp_session_id = "acp-1"
+        mode = _form_session_mode(
+            "tc-ask",
+            {"type": "object", "properties": {"choice": {"type": "string"}}},
+        )
+
+        task = asyncio.ensure_future(
+            client._handle_elicitation("Pick one", mode)
+        )
+        await asyncio.sleep(0.05)  # let it emit + park
+
+        # The question is surfaced, and nothing is resolved yet.
+        assert ("ask_user_request", {
+            "tool_call_id": "tc-ask",
+            "message": "Pick one",
+            "requested_schema": {
+                "type": "object",
+                "properties": {"choice": {"type": "string"}},
+            },
+        }) in events
+        assert not task.done()
+        assert client.has_pending_elicitation("tc-ask")
+
+        # A human answers -> the parked future resolves with the content.
+        assert client.resolve_elicitation("tc-ask", {"choice": "a"}) is True
+        result = await asyncio.wait_for(task, timeout=1.0)
+        assert isinstance(result, AcceptElicitationResponse)
+        assert result.content == {"choice": "a"}
+        assert not client.has_pending_elicitation("tc-ask")
+
+    asyncio.run(scenario())
+
+
+def test_resolve_elicitation_unknown_returns_false() -> None:
+    client, _ = _client_with_recorder()
+    assert client.resolve_elicitation("nope", {"x": 1}) is False
+
+
+def test_ask_user_elicitation_decline_and_cancel() -> None:
+    import asyncio
+
+    from acp.schema import CancelElicitationResponse, DeclineElicitationResponse
+
+    async def scenario() -> None:
+        client, _ = _client_with_recorder()
+        client._acp_session_id = "acp-1"
+        mode = _form_session_mode(
+            "tc-d", {"type": "object", "properties": {}}
+        )
+        task = asyncio.ensure_future(client._handle_elicitation("m", mode))
+        await asyncio.sleep(0.05)
+        assert client.resolve_elicitation("tc-d", None, action="decline") is True
+        assert isinstance(await asyncio.wait_for(task, 1.0), DeclineElicitationResponse)
+
+        mode2 = _form_session_mode(
+            "tc-c", {"type": "object", "properties": {}}
+        )
+        task2 = asyncio.ensure_future(client._handle_elicitation("m", mode2))
+        await asyncio.sleep(0.05)
+        assert client.resolve_elicitation("tc-c", None, action="cancel") is True
+        assert isinstance(await asyncio.wait_for(task2, 1.0), CancelElicitationResponse)
+
+    asyncio.run(scenario())
+
+
+def test_withdraw_elicitation_cancels_sole_pending() -> None:
+    """An elicitation/complete withdrawal (agent no longer needs the answer)
+    unwinds the parked request as cancelled."""
+    import asyncio
+
+    from acp.schema import CancelElicitationResponse
+
+    async def scenario() -> None:
+        client, _ = _client_with_recorder()
+        client._acp_session_id = "acp-1"
+        mode = _form_session_mode(
+            "tc-w", {"type": "object", "properties": {}}
+        )
+        task = asyncio.ensure_future(client._handle_elicitation("m", mode))
+        await asyncio.sleep(0.05)
+        # id doesn't match the tool_call_id, but it's the sole pending one.
+        client._withdraw_elicitation("some-elicitation-id")
+        assert isinstance(await asyncio.wait_for(task, 1.0), CancelElicitationResponse)
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_cancels_pending_elicitations() -> None:
+    import asyncio
+
+    from acp.schema import CancelElicitationResponse
+
+    async def scenario() -> None:
+        client, _ = _client_with_recorder()
+        client._acp_session_id = "acp-1"
+        mode = _form_session_mode(
+            "tc-s", {"type": "object", "properties": {}}
+        )
+        task = asyncio.ensure_future(client._handle_elicitation("m", mode))
+        await asyncio.sleep(0.05)
+        await client.shutdown()
+        assert isinstance(await asyncio.wait_for(task, 1.0), CancelElicitationResponse)
+
+    asyncio.run(scenario())
