@@ -138,12 +138,14 @@ def test_is_peer_machine_false_when_local_unresolvable(monkeypatch):
     assert remote_dispatch.is_peer_machine("borealis") is False
 
 
-def test_build_remote_browse_argv_list_forwards_filters_drops_machine():
+def test_build_remote_browse_argv_list_forwards_filters_and_machine():
     args = _browse_args(status="queued,started", label="bug", limit=50,
                         target_machine="borealis", target_repo="x")
     argv = remote_dispatch.build_remote_browse_argv("list", args, repo="gitea/lane")
     assert argv[:2] == ["agent-dispatch", "list"]
-    assert "--machine" not in argv  # the peer selector never hops again
+    # --machine is forwarded (hop-safe: the peer IS this machine -> stays local),
+    # and gives the peer its identity for scoping.
+    assert argv[argv.index("--machine") + 1] == "borealis"
     assert argv[argv.index("--status") + 1] == "queued,started"
     assert argv[argv.index("--label") + 1] == "bug"
     assert argv[argv.index("--limit") + 1] == "50"
@@ -156,7 +158,7 @@ def test_build_remote_browse_argv_inbox_minimal():
     args = _browse_args(status="proposed", label=None, limit=200)
     argv = remote_dispatch.build_remote_browse_argv("inbox", args)
     assert argv[:2] == ["agent-dispatch", "inbox"]
-    assert "--machine" not in argv
+    assert argv[argv.index("--machine") + 1] == "borealis"  # peer identity forwarded
     assert "--repo" not in argv  # inbox is cross-lane; no repo forwarded
     assert argv[argv.index("--status") + 1] == "proposed"
 

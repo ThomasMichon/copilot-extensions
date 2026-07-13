@@ -161,13 +161,20 @@ def build_remote_browse_argv(
     for a peer-queue browse.
 
     Forwards the read filters (``--status``/``--label``/``--limit``, plus
-    ``--repo``/``--target-machine``/``--target-repo`` for ``list``) but **drops
-    the ``--machine`` peer selector** -- on the peer that machine is *local*, so
-    a second mesh hop can't be triggered. ``list`` scopes to a repo lane, which
-    can't be resolved from the peer's SSH home dir, so the locally-resolved
-    ``repo`` is passed explicitly.
+    ``--repo``/``--target-machine``/``--target-repo`` for ``list``). ``list``
+    scopes to a repo lane, which can't be resolved from the peer's SSH home dir,
+    so the locally-resolved ``repo`` is passed explicitly.
+
+    ``--machine Y`` **is** forwarded: the peer needs it as its identity
+    (``inbox`` can't resolve a machine from the SSH home dir) *and* it is
+    hop-safe -- the peer we reached over SSH **is** ``Y``, so its
+    :func:`local_machine` resolves to ``Y`` (or ``None`` outside a worktree),
+    and :func:`is_peer_machine` returns False either way, keeping the peer's run
+    strictly local. No second hop can occur.
     """
     argv = ["agent-dispatch", subcommand]
+    if getattr(args, "machine", None):
+        argv += ["--machine", args.machine]
     if getattr(args, "status", None):
         argv += ["--status", args.status]
     if getattr(args, "label", None):
