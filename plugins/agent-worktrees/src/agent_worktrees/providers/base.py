@@ -15,6 +15,7 @@ prints a token -- how the facility points at its vault), then ``pr.token_env``
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -227,17 +228,35 @@ def run_cli(
 
     Centralized so providers share one subprocess shape and tests can patch a
     single seam.  The caller inspects ``returncode``/``stdout``/``stderr``.
+
+    Two Windows-robustness guards keep the "never raises" contract:
+
+    - **PATHEXT resolution.** ``args[0]`` is resolved via ``shutil.which`` so a
+      batch shim (``az`` -> ``az.cmd``, ``gh`` -> ``gh.cmd``) is found. Bare
+      ``CreateProcess`` only appends ``.exe``, so an unresolved ``az`` would
+      otherwise raise ``FileNotFoundError`` (WinError 2).
+    - **Spawn failures become results, not exceptions.** A missing executable /
+      spawn error is surfaced as ``returncode=127`` so it never aborts an
+      unrelated command (e.g. ``create-pr``'s git work that already succeeded);
+      the caller turns the non-zero result into a ``ProviderError`` it handles.
     """
     full_env = {**os.environ, **(env or {})}
-    return subprocess.run(
-        args,
-        capture_output=True,
-        text=True,
-        input=input_text,
-        env=full_env,
-        timeout=timeout,
-        check=False,
-    )
+    exe = shutil.which(args[0], path=full_env.get("PATH")) or args[0]
+    resolved = [exe, *args[1:]]
+    try:
+        return subprocess.run(
+            resolved,
+            capture_output=True,
+            text=True,
+            input=input_text,
+            env=full_env,
+            timeout=timeout,
+            check=False,
+        )
+    except (FileNotFoundError, OSError) as exc:
+        return subprocess.CompletedProcess(
+            args=resolved, returncode=127, stdout="", stderr=str(exc),
+        )
 
 
 # Registry -- name -> provider class.  Imported lazily so a missing provider

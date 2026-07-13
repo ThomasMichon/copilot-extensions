@@ -55,6 +55,37 @@ class TestGetProvider:
             base.get_provider("bitbucket")
 
 
+class TestRunCli:
+    def test_resolves_pathext_shim(self, monkeypatch):
+        # A Windows batch shim (az -> az.cmd) is resolvable only via PATHEXT;
+        # run_cli must resolve it via shutil.which, not hand the bare name to
+        # CreateProcess (which only appends .exe -> WinError 2).
+        captured = {}
+        monkeypatch.setattr(
+            base.shutil, "which",
+            lambda name, path=None: r"C:\tools\az.cmd" if name == "az" else None)
+        monkeypatch.setattr(
+            base.subprocess, "run",
+            lambda args, **kw: (captured.__setitem__("argv0", args[0]),
+                                subprocess.CompletedProcess(args, 0, "ok", ""))[1])
+        r = base.run_cli(["az", "--version"])
+        assert captured["argv0"] == r"C:\tools\az.cmd"
+        assert r.returncode == 0
+
+    def test_never_raises_on_spawn_failure(self, monkeypatch):
+        # A missing exe / spawn error must become a returncode=127 result, never
+        # an exception that aborts an unrelated command (create-pr's git work).
+        monkeypatch.setattr(base.shutil, "which", lambda name, path=None: None)
+
+        def boom(args, **kw):
+            raise FileNotFoundError(2, "The system cannot find the file specified")
+
+        monkeypatch.setattr(base.subprocess, "run", boom)
+        r = base.run_cli(["definitely-missing"])
+        assert r.returncode == 127
+        assert "cannot find the file" in r.stderr
+
+
 class TestScopeFromResult:
     def test_builds_scope_and_templates_labels(self):
         prcfg = cfg.PRConfig(api_base="https://h/gitea", labels=("auto-merge", "source:{machine}"))
