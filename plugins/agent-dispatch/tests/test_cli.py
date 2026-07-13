@@ -489,7 +489,7 @@ def test_list_peer_browse_delegates_over_ssh(monkeypatch, capsys):
     assert captured["machine"] == "borealis"
     assert captured["argv"][:2] == ["agent-dispatch", "list"]
     assert "--repo" in captured["argv"]  # locally-resolved lane forwarded
-    assert "--machine" not in captured["argv"]  # peer selector never re-hops
+    assert captured["argv"][captured["argv"].index("--machine") + 1] == "borealis"
     assert "t-remote" in capsys.readouterr().out
 
 
@@ -518,7 +518,7 @@ def test_inbox_peer_browse_delegates_over_ssh(monkeypatch, capsys):
     assert rc == 0
     assert captured["machine"] == "borealis"
     assert captured["argv"][:2] == ["agent-dispatch", "inbox"]
-    assert "--machine" not in captured["argv"]
+    assert captured["argv"][captured["argv"].index("--machine") + 1] == "borealis"
 
 
 def test_peer_browse_degrades_when_ssh_unavailable(monkeypatch, capsys):
