@@ -47,6 +47,15 @@ class _WorktreeEntry:
     mux_session: bool = False
     mux_clients: int | None = None
     mux_attached: bool | None = None
+    # #2668 two-axis taxonomy, surfaced from ``agent-worktrees list --json`` so
+    # NF's cockpit can foreground the operator's own work. ``interface`` is
+    # cli|acp, ``origin`` is user|system|delegate, and ``picker_hidden`` is the
+    # agent-worktrees Picker's own visibility verdict (origin in system/delegate).
+    # All default to "unknown/shown" so an older agent-worktrees runtime that
+    # doesn't emit them degrades to today's show-everything behavior.
+    interface: str | None = None
+    origin: str | None = None
+    picker_hidden: bool = False
 
     def interactive_cli_state(self) -> str:
         """Classify interactive-CLI ownership from mux liveness.
@@ -83,6 +92,9 @@ class _WorktreeEntry:
             "mux_clients": self.mux_clients,
             "mux_attached": self.mux_attached,
             "interactive_cli": self.interactive_cli_state(),
+            "interface": self.interface,
+            "origin": self.origin,
+            "picker_hidden": self.picker_hidden,
         }
 
 
@@ -365,6 +377,10 @@ def _parse_worktree_list(raw: str, agent_name: str) -> list[_WorktreeEntry]:
             mux_session=bool(w.get("mux_session", False)),
             mux_clients=w.get("mux_clients"),
             mux_attached=w.get("mux_attached"),
+            # #2668: taxonomy marks (absent on older agent-worktrees -> None/shown).
+            interface=w.get("interface"),
+            origin=w.get("origin"),
+            picker_hidden=bool(w.get("picker_hidden", False)),
         ))
     return entries
 
