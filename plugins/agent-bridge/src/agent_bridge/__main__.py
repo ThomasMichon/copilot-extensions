@@ -759,7 +759,12 @@ def _live_session_summary_line(s: dict[str, Any]) -> str:
     if isinstance(updated, (int, float)):
         secs = max(0, int(time.time() - updated))
         age = f" (heartbeat {secs}s ago)"
-    return f"{s.get('session_id', '?')} [{status}]{turn}{driven}{age}"
+    lp = s.get("latest_progress") or {}
+    prog = ""
+    if isinstance(lp, dict) and lp.get("summary"):
+        phase = f"{lp['phase']}: " if lp.get("phase") else ""
+        prog = f"\n    progress: {phase}{lp['summary']}"
+    return f"{s.get('session_id', '?')} [{status}]{turn}{driven}{age}{prog}"
 
 
 def _cmd_live_sessions(args: argparse.Namespace) -> None:
@@ -788,6 +793,27 @@ def _cmd_live_sessions(args: argparse.Namespace) -> None:
             print(f"(no live session for handle {args.handle!r})")
             return
         print(_live_session_summary_line(session))
+        return
+
+    if action == "progress":
+        try:
+            session = client.record_live_progress(
+                args.handle,
+                summary=args.summary,
+                phase=getattr(args, "phase", "") or "",
+                blocker=getattr(args, "blocker", None),
+                pr=getattr(args, "pr", None),
+            )
+        except BridgeClientError as exc:
+            if exc.status == 404:
+                print(f"(no live session for handle {args.handle!r})", file=sys.stderr)
+                return
+            raise
+        if args.json:
+            _json_out(session or {})
+            return
+        lp = (session or {}).get("latest_progress") or {}
+        print(f"progress recorded: {lp.get('phase', '')} {lp.get('summary', '')}".strip())
         return
 
     # default: list
@@ -2529,6 +2555,21 @@ def main(argv: list[str] | None = None) -> None:
         "--handle", required=True, help="Exact session id OR worktree handle"
     )
     live_resolve_p.set_defaults(func=_cmd_live_sessions)
+    live_progress_p = live_sub.add_parser(
+        "progress",
+        help="Record an operator-driven session's progress beat (Phase 7 7c)",
+    )
+    live_progress_p.add_argument(
+        "--handle", required=True, help="Exact session id OR worktree handle"
+    )
+    live_progress_p.add_argument(
+        "--summary", required=True,
+        help="one-line status toward the goal (hard-capped; keep it a line)",
+    )
+    live_progress_p.add_argument("--phase", default="", help="short phase label")
+    live_progress_p.add_argument("--blocker", help="a real blocker, if any")
+    live_progress_p.add_argument("--pr", help="the PR/ref this beat corresponds to")
+    live_progress_p.set_defaults(func=_cmd_live_sessions)
     live_p.set_defaults(func=_cmd_live_sessions)
 
     sessions_p = sub.add_parser("sessions", help="List sessions")

@@ -10,6 +10,7 @@ is reaped by staleness rather than relying on a clean deregister.
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -24,13 +25,18 @@ from ..models import (
     IngestLiveEventsResult,
     LiveMessage,
     LiveMessageListResponse,
+    LiveProgressRequest,
     LiveSessionInfo,
     LiveSessionListResponse,
     RegisterLiveSessionRequest,
     SendMessageRequest,
     SendMessageResult,
 )
-from ..live_representation import await_turn_reply, derive_turn_state
+from ..live_representation import (
+    await_turn_reply,
+    build_progress_snapshot,
+    derive_turn_state,
+)
 from .sessions import _sse_event_stream
 
 #: A running turn with no activity for longer than this reads as "stalled".
@@ -92,6 +98,17 @@ def _live_liveness(row: dict[str, Any], *, now: float | None = None) -> str | No
     return turn_state
 
 
+def _parse_progress(raw: Any) -> dict[str, Any] | None:
+    """Parse the stored ``latest_progress`` JSON string into an object, or None."""
+    if not raw or not isinstance(raw, str):
+        return None
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _to_info(row: dict[str, Any]) -> LiveSessionInfo:
     return LiveSessionInfo(
         session_id=row["session_id"],
@@ -107,6 +124,7 @@ def _to_info(row: dict[str, Any]) -> LiveSessionInfo:
         turn_state=row.get("turn_state"),
         last_activity_at=row.get("last_activity_at"),
         liveness=_live_liveness(row),
+        latest_progress=_parse_progress(row.get("latest_progress")),
         registered_at=row["registered_at"],
         updated_at=row["updated_at"],
     )
@@ -181,6 +199,37 @@ async def get_live_session(session_id: str, request: Request) -> LiveSessionInfo
     if row is None:
         raise HTTPException(status_code=404, detail="live session not found")
     return _to_info(row)
+
+
+@router.post("/{session_id}/progress", response_model=LiveSessionInfo)
+async def record_live_progress(
+    session_id: str, body: LiveProgressRequest, request: Request
+) -> LiveSessionInfo:
+    """Record an operator-driven session's progress beat (Phase 7 Slice 7c).
+
+    The live-session analogue of the dispatched-task progress beat: a bounded,
+    latest-only status line the agent emits (via a tool call) when the extension
+    nudges it. ``session_id`` may be an exact id or a **worktree handle**, so the
+    agent can address itself the same way peers do. 404 if it resolves to no live
+    session. Every field is hard-capped so the beat stays a status line.
+    """
+    db = _db(request)
+    now = time.time()
+    row = db.resolve_live_session(session_id, now=now)
+    if row is None:
+        row = db.get_live_session(session_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="live session not found")
+    snapshot = build_progress_snapshot(
+        body.summary, phase=body.phase, blocker=body.blocker, pr=body.pr, ts=now
+    )
+    db.update_live_progress(
+        row["session_id"],
+        latest_progress=json.dumps(snapshot, separators=(",", ":")),
+        now=now,
+    )
+    updated = db.get_live_session(row["session_id"])
+    return _to_info(updated if updated is not None else row)
 
 
 @router.delete("/{session_id}")

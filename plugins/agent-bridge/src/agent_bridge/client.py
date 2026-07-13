@@ -348,6 +348,23 @@ class BridgeClient:
         resp = self._request("GET", "/api/v1/live-sessions", params=params)
         return resp.get("live_sessions", []) if resp else []
 
+    def record_live_progress(
+        self,
+        handle: str,
+        *,
+        summary: str,
+        phase: str = "",
+        blocker: str | None = None,
+        pr: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/live-sessions/{handle}/progress -- an operator session's
+        progress beat. ``handle`` is a session id or a worktree handle."""
+        return self._request(
+            "POST",
+            f"/api/v1/live-sessions/{handle}/progress",
+            {"summary": summary, "phase": phase, "blocker": blocker, "pr": pr},
+        ) or {}
+
     def resolve_live_session(self, handle: str) -> dict[str, Any]:
         """GET /api/v1/live-sessions/resolve?handle=...; {} if unresolvable.
 

@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # A live interactive session is kept alive by the extension's 30s heartbeat
 # (HEARTBEAT_MS in extension.mjs). A row whose ``updated_at`` is older than this
@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS live_sessions (
     status TEXT NOT NULL DEFAULT 'live',
     turn_state TEXT,
     last_activity_at REAL,
+    latest_progress TEXT,
     registered_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
@@ -503,6 +504,23 @@ class Database:
                 "last_activity_at"
             )
 
+        if from_version < 12:
+            # v11 -> v12: add `latest_progress` to live_sessions (Phase 7 Slice
+            # 7c). Holds an operator-driven session's bounded, latest-only
+            # progress beat (JSON) -- the live-session analogue of a dispatched
+            # task's latest_progress, since an operator session has no task.
+            cols = [
+                r[1]
+                for r in conn.execute("PRAGMA table_info(live_sessions)").fetchall()
+            ]
+            if "latest_progress" not in cols:
+                conn.execute(
+                    "ALTER TABLE live_sessions ADD COLUMN latest_progress TEXT"
+                )
+            conn.execute("UPDATE schema_version SET version=?", (12,))
+            conn.commit()
+            log.info("Schema migrated to version 12: live_sessions.latest_progress")
+
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
         conn = self._get_conn()
@@ -659,6 +677,23 @@ class Database:
             "updated_at=? WHERE session_id=?",
             (turn_state, last_activity_at, last_activity_at, session_id),
         )
+
+    def update_live_progress(
+        self, session_id: str, *, latest_progress: str, now: float
+    ) -> bool:
+        """Store an operator-driven session's latest progress beat (JSON).
+
+        Latest-only (overwrite); also refreshes ``updated_at``. Returns True if a
+        registered session was updated, False if ``session_id`` is unknown
+        (Phase 7 Slice 7c). The live-session analogue of a dispatched task's
+        ``latest_progress``.
+        """
+        cur = self.execute_write(
+            "UPDATE live_sessions SET latest_progress=?, updated_at=? "
+            "WHERE session_id=?",
+            (latest_progress, now, session_id),
+        )
+        return cur.rowcount > 0
 
     def deregister_live_session(self, session_id: str) -> None:
         """Remove a live interactive-session registration and its message queue."""

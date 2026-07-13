@@ -518,12 +518,20 @@ two capabilities without the destructive take-over:
   `--json` for machine-readable output). Beyond registration/liveness the view
   carries **turn-state** derived from the represented event tail --
   `turn_state` (`running`/`idle`) plus a computed `liveness` label
-  (`active`/`stalled`/`idle`) -- so a reader sees whether a session is mid-turn,
-  done, or silently stalled. This is the surface **agent-dispatch** joins against
-  to track a CLI-embodied task: a leased task's owner is `<machine>/<worktree>`,
-  so it resolves the worktree to its live session and overlays
+  (`active`/`stalled`/`idle`) -- and an operator session's **`latest_progress`**
+  beat (see below). This is the surface **agent-dispatch** joins against to track
+  a CLI-embodied task: a leased task's owner is `<machine>/<worktree>`, so it
+  resolves the worktree to its live session and overlays
   liveness/turn-state/`driven_by` on `agent-dispatch show`/`list` (best-effort;
   degrades to status+lease when the bridge is absent).
+- **Progress beat for an operator session (Phase 7 7c).** `agent-bridge
+  live-sessions progress --handle <session-id|worktree-handle> --summary "<one
+  line>" [--phase <p> --pr <ref> --blocker <why>]` records a **bounded,
+  latest-only** status beat on the live-session record -- the operator-session
+  analogue of a dispatched task's `latest_progress` (a dispatched worker uses
+  `agent-dispatch progress` against its task instead). Every field is hard-capped
+  so the beat stays a status line, never a chat log. The bundled extension nudges
+  an operator-driven session to emit one at a gentle cadence.
 
 **Durable work gets a CLI body, not a headless one.** When you *dispatch* work
 meant to outlive its caller, prefer a **CLI-backed autopilot session** (via
