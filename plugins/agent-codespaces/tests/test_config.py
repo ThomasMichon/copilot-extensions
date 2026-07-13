@@ -105,20 +105,17 @@ class TestMergedConfig:
         # so by default no harness is placed on a venue.
         config = load_merged_config()
         assert config.harness_repo is None
-        assert config.harness_dir == "/workspaces/harness"
 
-    def test_harness_repo_and_dir_from_defaults(self, config_dir):
+    def test_harness_repo_from_defaults(self, config_dir):
         repo = config_dir / "harness-repo"
         _write_codespaces_yaml(repo, {
             "defaults": {
                 "harness_repo": "acme/harness",
-                "harness_dir": "/workspaces/harness",
             },
         })
         save_adopted_repos([AdoptedRepo(path=repo)])
         config = load_merged_config()
         assert config.harness_repo == "acme/harness"
-        assert config.harness_dir == "/workspaces/harness"
         # decoupled from the dotfiles shim, which stays unset here
         assert config.dotfiles_repo is None
 

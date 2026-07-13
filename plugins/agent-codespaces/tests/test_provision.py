@@ -166,18 +166,25 @@ class TestBuildDotfilesCommand:
 
 
 class TestBuildHarnessCommand:
-    def _cmd(self, repo="acme/harness", target="/workspaces/harness", port=9857):
+    def _cmd(self, repo="acme/harness", port=9857):
         from agent_codespaces.provision import build_harness_command
 
-        return build_harness_command(repo, target, port)
+        return build_harness_command(repo, port)
 
-    def test_clones_into_harness_dir_when_absent(self) -> None:
+    def test_clones_into_standard_workspace_dir_when_absent(self) -> None:
         cmd = self._cmd()
         assert "https://github.com/acme/harness" in cmd
+        # standard repo-layout convention: /workspaces/<basename>
         assert "/workspaces/harness" in cmd
         assert "git clone --depth 1" in cmd
         # kept separate from the dotfiles shim path
         assert "/workspaces/.codespaces/.persistedshare/dotfiles" not in cmd
+
+    def test_derives_dir_from_repo_basename(self) -> None:
+        # an org-qualified repo maps to /workspaces/<basename>, not the org path
+        cmd = self._cmd(repo="my-org/control-plane")
+        assert "/workspaces/control-plane" in cmd
+        assert "/workspaces/my-org" not in cmd
 
     def test_never_runs_install_sh(self) -> None:
         # the harness is referenced in place, not installed
@@ -200,9 +207,11 @@ class TestBuildHarnessCommand:
         assert "NOT syncing" in cmd
         assert "status --porcelain" in cmd
 
-    def test_respects_custom_harness_dir(self) -> None:
-        cmd = self._cmd(target="/workspaces/custom-harness")
-        assert "/workspaces/custom-harness" in cmd
+    def test_harness_dir_for_maps_basename(self) -> None:
+        from agent_codespaces.provision import harness_dir_for
+
+        assert harness_dir_for("acme/harness") == "/workspaces/harness"
+        assert harness_dir_for("acme/control-plane/") == "/workspaces/control-plane"
 
     def test_repo_is_shell_quoted(self) -> None:
         cmd = self._cmd(repo="acme/c;rm -rf")
