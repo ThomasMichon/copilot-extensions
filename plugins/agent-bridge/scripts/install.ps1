@@ -763,10 +763,14 @@ function Invoke-Install {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     if ($SshManagerDir) {
-        # --reinstall-package: a vendored lib's version rarely bumps but its
-        # source changes; without forcing, uv keeps the cached build and the
-        # daemon venv goes stale (e.g. new ssh_manager modules never land). #177
-        $sshOut = & uv pip install --python $VenvPython "$SshManagerDir" --reinstall-package agent-ssh-manager --quiet 2>&1
+        # A vendored lib's version rarely bumps but its source changes, so force
+        # a clean rebuild: --reinstall-package drops the installed dist and
+        # --refresh-package busts uv's *build cache* (else uv serves a stale
+        # cached wheel for the same version and new modules never land -- the
+        # #186 CodespaceConfigSource regression). NOTE the dist name is
+        # `ssh-manager` (renamed from the old `agent-ssh-manager`); using the old
+        # name here silently no-ops the reinstall. #177/#186
+        $sshOut = & uv pip install --python $VenvPython "$SshManagerDir" --reinstall-package ssh-manager --refresh-package ssh-manager --quiet 2>&1
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "ssh-manager install failed (exit $LASTEXITCODE)"
@@ -781,7 +785,7 @@ function Invoke-Install {
     # credential-relay (the relay framework agent-bridge runs in its daemon).
     $CredRelayDir = Resolve-CredentialRelay
     if ($CredRelayDir) {
-        $crOut = & uv pip install --python $VenvPython "$CredRelayDir" --reinstall-package agent-credential-relay --quiet 2>&1
+        $crOut = & uv pip install --python $VenvPython "$CredRelayDir" --reinstall-package agent-credential-relay --refresh-package agent-credential-relay --quiet 2>&1
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "credential-relay install failed (exit $LASTEXITCODE)"
@@ -796,7 +800,7 @@ function Invoke-Install {
     # zdd (zero-downtime cutover primitives: routing table + orchestrator).
     $ZddDir = Resolve-Zdd
     if ($ZddDir) {
-        $zddOut = & uv pip install --python $VenvPython "$ZddDir" --reinstall-package agent-zdd --quiet 2>&1
+        $zddOut = & uv pip install --python $VenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet 2>&1
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "zdd install failed (exit $LASTEXITCODE)"
@@ -1254,7 +1258,9 @@ function Invoke-Update {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         if ($SshManagerDir) {
-            $sshOut = & uv pip install --python $VenvPython --reinstall-package agent-ssh-manager `
+            # Dist renamed agent-ssh-manager -> ssh-manager; --refresh-package
+            # busts uv's build cache so a same-version source change lands (#186).
+            $sshOut = & uv pip install --python $VenvPython --reinstall-package ssh-manager --refresh-package ssh-manager `
                 "$SshManagerDir" --quiet 2>&1
             if ($LASTEXITCODE -ne 0) {
                 $ErrorActionPreference = $prevEAP
@@ -1270,7 +1276,7 @@ function Invoke-Update {
         # without a version bump (uv otherwise skips a same-version path dep).
         $CredRelayDir = Resolve-CredentialRelay
         if ($CredRelayDir) {
-            $crOut = & uv pip install --python $VenvPython --reinstall-package agent-credential-relay `
+            $crOut = & uv pip install --python $VenvPython --reinstall-package agent-credential-relay --refresh-package agent-credential-relay `
                 "$CredRelayDir" --quiet 2>&1
             if ($LASTEXITCODE -ne 0) {
                 $ErrorActionPreference = $prevEAP
@@ -1286,7 +1292,7 @@ function Invoke-Update {
         # version bump (uv otherwise skips a same-version path dep).
         $ZddDir = Resolve-Zdd
         if ($ZddDir) {
-            $zddOut = & uv pip install --python $VenvPython --reinstall-package agent-zdd `
+            $zddOut = & uv pip install --python $VenvPython --reinstall-package agent-zdd --refresh-package agent-zdd `
                 "$ZddDir" --quiet 2>&1
             if ($LASTEXITCODE -ne 0) {
                 $ErrorActionPreference = $prevEAP
