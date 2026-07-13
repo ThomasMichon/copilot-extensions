@@ -443,6 +443,12 @@ def _worktree_to_dict(
         d["kind"] = rec.kind
         if rec.owner:
             d["owner"] = rec.owner
+    # #2668: expose the two orthogonal marks (resolved, so consumers read a
+    # concrete value without re-deriving from kind) + whether the everyday
+    # Picker/cockpit hides this worktree.
+    d["interface"] = rec.resolved_interface
+    d["origin"] = rec.resolved_origin
+    d["picker_hidden"] = rec.is_picker_hidden
     # #2178: expose the bridge caller-worktree pointer so the Picker can offer
     # "Jump to caller" from a bridge worktree.
     if rec.caller_worktree:
@@ -503,6 +509,8 @@ def _create_worktree_core(
     no_mux: bool = False,
     kind: tracking.WorktreeKind = "session",
     owner: str | None = None,
+    interface: tracking.WorktreeInterface | None = None,
+    origin: tracking.WorktreeOrigin | None = None,
     name: str | None = None,
     parent_session: str | None = None,
     caller_worktree: str | None = None,
@@ -569,6 +577,8 @@ def _create_worktree_core(
         tracking_path=tracking_path,
         kind=kind,
         owner=owner,
+        interface=interface,
+        origin=origin,
         # #1029: link the new worktree back to the session that spawned it, so a
         # later resume (esp. a PR/feedback worktree with no sessions of its own)
         # restores context instead of cold-starting.
@@ -1334,7 +1344,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 r for r in records
                 if Path(r.worktree_path).exists()
                 and (Path(r.worktree_path) / ".git").exists()
-                and r.kind not in tracking.MANAGED_KINDS  # agent-owned; hidden
+                and not r.is_picker_hidden  # tucked-away automation (origin-based)
             ]
 
             # Scan for live Copilot sessions and mux sessions
@@ -2036,7 +2046,7 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
     """
     tracking_path = cfg.tracking_dir()
     records = [r for r in tracking.list_records(tracking_path)
-               if r.kind in tracking.MANAGED_KINDS]
+               if r.is_picker_hidden]
     records = [r for r in records if r.repo == config.repo_name]
 
     if not records:
@@ -2048,7 +2058,7 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
     while True:
         records = [
             r for r in tracking.list_records(tracking_path)
-            if r.kind in tracking.MANAGED_KINDS and r.repo == config.repo_name
+            if r.is_picker_hidden and r.repo == config.repo_name
         ]
         if not records:
             _system_pause("No system worktrees remain.")
@@ -4126,6 +4136,8 @@ def cmd_create(args: argparse.Namespace) -> int:
                 owner=(getattr(args, "owner", None) or getattr(args, "name", None))
                 if is_system else None,
                 name=getattr(args, "name", None) if is_system else None,
+                interface=getattr(args, "interface", None),
+                origin=getattr(args, "origin", None),
             )
         except Exception as e:
             if args.json:
@@ -8072,6 +8084,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="With --system: short slug for the worktree id (e.g. the service name)")
     p.add_argument("--owner", default=None,
                    help="With --system: owning service name (recorded for the browse view)")
+    p.add_argument("--interface", default=None, choices=["cli", "acp"],
+                   help="Stamp the worktree's interface mark (cli|acp). Default: "
+                        "derived from kind (bridge=acp, else cli). See #2668.")
+    p.add_argument("--origin", default=None, choices=["user", "system", "delegate"],
+                   help="Stamp who kicked the work off (user|system|delegate). "
+                        "user = operator (NF/Picker), delegate = agent-spawned, "
+                        "system = background/daemon. Default: derived from kind + "
+                        "caller. Governs Picker/cockpit visibility. See #2668.")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
 

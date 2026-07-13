@@ -881,3 +881,100 @@ class TestSystemWorktreeKind:
         loaded = load_record(tmp_path / "sys-x.yaml")
         assert loaded.kind == "system"
         assert loaded.owner == "session-sync"
+
+
+# ---------------------------------------------------------------------------
+# #2668 -- two-axis taxonomy (interface x origin) + Picker visibility
+# ---------------------------------------------------------------------------
+
+class TestOriginInterfaceTaxonomy:
+    """The interface/origin marks derive from kind (+ caller) when unstamped,
+    an explicit stamp always wins, and visibility keys on origin (not kind)."""
+
+    def _base(self, **overrides) -> WorktreeRecord:
+        defaults = dict(
+            worktree_id="wt", branch="b", worktree_path="/tmp/wt",
+            repo="r", machine="m", platform="wsl",
+            started_at="t", last_resumed_at="t", resume_count=0,
+            title=None, status="active", completed_at=None,
+        )
+        defaults.update(overrides)
+        return WorktreeRecord(**defaults)
+
+    # -- derivation from kind -------------------------------------------------
+
+    def test_session_derives_cli_user_shown(self):
+        r = self._base(kind="session")
+        assert r.resolved_interface == "cli"
+        assert r.resolved_origin == "user"
+        assert r.is_picker_hidden is False
+
+    def test_system_derives_system_hidden(self):
+        r = self._base(kind="system")
+        assert r.resolved_origin == "system"
+        assert r.is_picker_hidden is True
+
+    def test_bridge_without_caller_is_user_acp_shown(self):
+        # An operator/NF-launched ACP session: no spawning caller -> user, shown.
+        r = self._base(kind="bridge")
+        assert r.resolved_interface == "acp"
+        assert r.resolved_origin == "user"
+        assert r.is_picker_hidden is False
+
+    def test_bridge_with_caller_is_delegate_hidden(self):
+        # An agent-spawned ACP session carries its caller worktree -> delegate.
+        r = self._base(kind="bridge", caller_worktree="wt-parent")
+        assert r.resolved_interface == "acp"
+        assert r.resolved_origin == "delegate"
+        assert r.is_picker_hidden is True
+
+    # -- explicit stamp overrides derivation ----------------------------------
+
+    def test_explicit_origin_overrides_caller_heuristic(self):
+        # agent-bridge (Phase 2) stamps the authoritative origin: a bridge
+        # worktree with a caller but an explicit origin=user stays shown.
+        r = self._base(kind="bridge", caller_worktree="wt-parent", origin="user")
+        assert r.resolved_origin == "user"
+        assert r.is_picker_hidden is False
+
+    def test_explicit_delegate_on_session_hides_it(self):
+        r = self._base(kind="session", origin="delegate")
+        assert r.resolved_origin == "delegate"
+        assert r.is_picker_hidden is True
+
+    def test_explicit_interface_overrides_kind(self):
+        r = self._base(kind="session", interface="acp")
+        assert r.resolved_interface == "acp"
+
+    def test_invalid_stamps_fall_back_to_derivation(self):
+        r = self._base(kind="session", interface="bogus", origin="bogus")  # type: ignore[arg-type]
+        # Raw invalid values still derive cleanly.
+        assert r.resolved_interface == "cli"
+        assert r.resolved_origin == "user"
+
+    # -- persistence ----------------------------------------------------------
+
+    def test_stamped_marks_round_trip(self, tmp_path: Path):
+        create_new_record(
+            "b1", "worktree/b1", "/tmp/b1", "r", "m", "wsl", tmp_path,
+            kind="bridge", interface="acp", origin="user",
+        )
+        loaded = load_record(tmp_path / "b1.yaml")
+        assert loaded.interface == "acp"
+        assert loaded.origin == "user"
+        assert loaded.resolved_origin == "user"
+        assert loaded.is_picker_hidden is False
+
+    def test_unstamped_session_yaml_omits_marks(self, tmp_path: Path):
+        # A plain session record stays lean: no interface/origin keys emitted
+        # (values derive), so legacy YAMLs are byte-stable.
+        create_new_record(
+            "s1", "worktree/s1", "/tmp/s1", "r", "m", "wsl", tmp_path,
+        )
+        text = (tmp_path / "s1.yaml").read_text()
+        assert "interface:" not in text
+        assert "origin:" not in text
+        # ...yet they still resolve.
+        loaded = load_record(tmp_path / "s1.yaml")
+        assert loaded.resolved_interface == "cli"
+        assert loaded.resolved_origin == "user"

@@ -29,9 +29,34 @@ WorktreeStatus = Literal["active", "complete", "pushed", "finalized", "orphaned"
 # See the agent-worktrees docs and the aperture-labs system-worktrees effort.
 WorktreeKind = Literal["session", "system", "bridge"]
 
-# Agent/daemon-owned kinds: hidden from the Picker + exempt from routine
-# cleanup/reap (their owning service or bridge manages their lifecycle).
+# Agent/daemon-owned kinds: exempt from routine cleanup/reap and never
+# fast-forwarded (their owning service or bridge manages their lifecycle).
+# NOTE: this governs *lifecycle management*, NOT Picker visibility -- an
+# operator-owned bridge (ACP) worktree is lifecycle-managed (here) yet still
+# shown in the Picker (visibility keys on ``origin`` -- see MANAGED_ORIGINS).
 MANAGED_KINDS: tuple[WorktreeKind, ...] = ("system", "bridge")
+
+# A worktree's two orthogonal marks (see the aperture-labs
+# worktree-origin-interface-visibility effort / agent-fabric vision behavior
+# ``origin-and-interface-are-marked``):
+#
+#   * interface -- how the work is *currently driven*: an interactive "cli" at a
+#     terminal, or a programmatic "acp" client (Neuron Forge or a bridge).
+#   * origin -- *who kicked it off*: the operator ("user", via NF or the Picker),
+#     a background/scheduled process ("system"), or another agent ("delegate").
+#
+# The axes are independent: the operator may launch either a CLI or an ACP
+# session, and an agent-spawned worktree may itself take either body. Both are
+# optional stored fields -- when absent (legacy records) they are *derived* from
+# ``kind`` (+ the caller heuristic for a bridge worktree) so existing YAMLs need
+# no migration. See ``WorktreeRecord.resolved_interface`` / ``resolved_origin``.
+WorktreeInterface = Literal["cli", "acp"]
+WorktreeOrigin = Literal["user", "system", "delegate"]
+
+# Origins tucked out of the everyday launch Picker + NF cockpit (the machine's
+# own autonomous chatter), reachable through the explicit "System" affordance.
+# The operator's own work (origin "user") is shown on *either* interface.
+MANAGED_ORIGINS: tuple[WorktreeOrigin, ...] = ("system", "delegate")
 
 
 @dataclass
@@ -101,6 +126,13 @@ class WorktreeRecord:
     prs: list[PRRecord] = field(default_factory=list)
     kind: WorktreeKind = "session"
     owner: str | None = None  # owning service name, for system worktrees
+    # #2668: the two orthogonal marks. Stored only when explicitly stamped
+    # (e.g. agent-bridge stamping origin=user for an NF-launched session);
+    # ``None`` means "derive from kind" via the resolved_* properties below, so
+    # legacy YAMLs need no migration. Read them through resolved_interface /
+    # resolved_origin, never these raw fields.
+    interface: WorktreeInterface | None = None
+    origin: WorktreeOrigin | None = None
     # #1029: the Copilot session that originated this worktree's work. Seeded at
     # creation (the spawning session) and backfilled at PR-create, so a
     # PR/feedback worktree whose own ``sessions`` list is empty can still resume
@@ -110,6 +142,49 @@ class WorktreeRecord:
     # it (agent-bridge's caller_id == the caller's WORKTREE_ID). Lets the Picker
     # "Jump to caller" from a bridge worktree back to the worktree that kicked it.
     caller_worktree: str | None = None
+
+    @property
+    def resolved_interface(self) -> WorktreeInterface:
+        """The worktree's current interface -- stored stamp, else derived.
+
+        Derivation from ``kind``: a bridge worktree is programmatically driven
+        (``acp``); everything else defaults to an interactive terminal
+        (``cli``). An explicit ``interface`` stamp always wins.
+        """
+        if self.interface in ("cli", "acp"):
+            return self.interface  # type: ignore[return-value]
+        return "acp" if self.kind == "bridge" else "cli"
+
+    @property
+    def resolved_origin(self) -> WorktreeOrigin:
+        """Who kicked the work off -- stored stamp, else derived.
+
+        Derivation from ``kind`` (+ the caller heuristic): a ``system`` worktree
+        is daemon-owned; a ``bridge`` worktree is the operator's (``user``) when
+        nothing spawned it, else another agent's (``delegate``) when it carries a
+        ``caller_worktree`` (an agent-to-agent spawn -- #2178); a plain
+        ``session`` is the operator's. An explicit ``origin`` stamp always wins
+        (e.g. agent-bridge stamping the authoritative value at launch -- #2670).
+        """
+        if self.origin in ("user", "system", "delegate"):
+            return self.origin  # type: ignore[return-value]
+        if self.kind == "system":
+            return "system"
+        if self.kind == "bridge":
+            return "delegate" if self.caller_worktree else "user"
+        return "user"
+
+    @property
+    def is_picker_hidden(self) -> bool:
+        """True when this worktree is tucked out of the everyday Picker/cockpit.
+
+        Visibility keys on **origin**, not kind: the machine's autonomous work
+        (``system`` / ``delegate``) is hidden behind the explicit System
+        affordance, while the operator's own work (``user``) is shown on either
+        interface -- so an NF-launched ACP (bridge) session is visible even
+        though it stays lifecycle-managed (see ``MANAGED_KINDS``).
+        """
+        return self.resolved_origin in MANAGED_ORIGINS
 
     def active_pr(self) -> PRRecord | None:
         """Return the PR a no-selector command should target.
@@ -304,6 +379,15 @@ def load_record(path: Path) -> WorktreeRecord:
     if owner_raw in (None, "", "null"):
         owner_raw = None
 
+    # #2668: the two orthogonal marks. Absent (legacy) or unknown values stay
+    # None so the resolved_* properties derive them from kind.
+    iface_raw = data.get("interface")
+    iface_val: WorktreeInterface | None = (
+        iface_raw if iface_raw in ("cli", "acp") else None)
+    origin_raw = data.get("origin")
+    origin_val: WorktreeOrigin | None = (
+        origin_raw if origin_raw in ("user", "system", "delegate") else None)
+
     return WorktreeRecord(
         worktree_id=data["worktree_id"],
         branch=data["branch"],
@@ -321,6 +405,8 @@ def load_record(path: Path) -> WorktreeRecord:
         prs=prs_list,
         kind=kind_val,
         owner=str(owner_raw) if owner_raw else None,
+        interface=iface_val,
+        origin=origin_val,
         parent_session=(str(data["parent_session"])
                         if data.get("parent_session") else None),
         caller_worktree=(str(data["caller_worktree"])
@@ -360,6 +446,15 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         content += f"kind: {record.kind}\n"
         if record.owner:
             content += f"owner: {record.owner}\n"
+
+    # #2668: the two orthogonal marks -- emitted only when explicitly stamped
+    # (not derived), so a plain session YAML stays byte-identical while an
+    # authoritative stamp (e.g. agent-bridge's origin=user for an NF session)
+    # persists across reloads.
+    if record.interface in ("cli", "acp"):
+        content += f"interface: {record.interface}\n"
+    if record.origin in ("user", "system", "delegate"):
+        content += f"origin: {record.origin}\n"
 
     # #1029: originating-session pointer. Emitted only when set, so the
     # common-case session-record YAML stays byte-identical (no churn).
@@ -499,6 +594,8 @@ def create_new_record(
     *,
     kind: WorktreeKind = "session",
     owner: str | None = None,
+    interface: WorktreeInterface | None = None,
+    origin: WorktreeOrigin | None = None,
     parent_session: str | None = None,
     caller_worktree: str | None = None,
 ) -> WorktreeRecord:
@@ -520,6 +617,8 @@ def create_new_record(
         sessions=[],
         kind=kind,
         owner=owner,
+        interface=interface,
+        origin=origin,
         parent_session=parent_session or None,
         caller_worktree=caller_worktree or None,
     )
