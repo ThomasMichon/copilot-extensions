@@ -138,14 +138,14 @@ def test_is_peer_machine_false_when_local_unresolvable(monkeypatch):
     assert remote_dispatch.is_peer_machine("borealis") is False
 
 
-def test_build_remote_browse_argv_list_forwards_filters_and_machine():
+def test_build_remote_browse_argv_list_forwards_filters_drops_machine():
     args = _browse_args(status="queued,started", label="bug", limit=50,
                         target_machine="borealis", target_repo="x")
     argv = remote_dispatch.build_remote_browse_argv("list", args, repo="gitea/lane")
     assert argv[:2] == ["agent-dispatch", "list"]
-    # --machine is forwarded (hop-safe: the peer IS this machine -> stays local),
-    # and gives the peer its identity for scoping.
-    assert argv[argv.index("--machine") + 1] == "borealis"
+    # list needs no machine identity (scopes by --repo); dropping --machine keeps
+    # a peer on an older agent-dispatch (no `list --machine`) compatible.
+    assert "--machine" not in argv
     assert argv[argv.index("--status") + 1] == "queued,started"
     assert argv[argv.index("--label") + 1] == "bug"
     assert argv[argv.index("--limit") + 1] == "50"
