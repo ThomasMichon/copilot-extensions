@@ -47,10 +47,17 @@ is a task list.
 ## When to Generate a Handoff
 
 - The context-handoff extension monitors `session.usage_info` events for
-  **exact token counts**. It injects reminders via `additionalContext`
-  when context utilization crosses thresholds:
-  - **55%** — gentle reminder ("consider generating a handoff soon")
-  - **70%** — urgent reminder ("generate NOW, compaction at ~80%")
+  **exact token counts** and, on the next idle, sends you an **agent-facing
+  nudge that tells you to invoke this skill** when context utilization crosses
+  a threshold:
+  - **55%** — gentle reminder ("hand off soon")
+  - **70%** — urgent reminder ("hand off now, compaction at ~80%")
+  The nudge deliberately **does not prescribe individual tool calls** or a
+  "write a file" outcome — it hands you to this skill, which owns the
+  sequencing. When you receive it **under a mux session**, the correct response
+  is the **autonomous live cutover** described below (store the handoff, spin up
+  the successor Copilot in place, end your turn) — *not* a paste prompt back to
+  the operator. The nudge fires once per threshold and resets after compaction.
 - The user explicitly asks for a handoff or continuation prompt.
 - You sense the conversation is getting complex (even if token usage
   hasn't hit thresholds yet — they reset after compaction).
@@ -85,6 +92,12 @@ a coordinator is reachable, the handoff is a task, not a file — do not hand-wr
 a `*-prompt.md` file when `agent-dispatch health` answers.
 
 ### Steps (default = live cutover)
+
+This is the **same autonomous sequence** whichever entry point triggered it —
+the automated context-pressure nudge, a plain `/handoff`, `/handoff-continue`,
+or the operator asking to "hand off and continue." Under a mux session you run
+all of it hands-free and **end your turn**; the operator is not asked to paste
+anything.
 
 1. **Call `generate_handoff_prompt`** (registered by the context-handoff
    extension). It returns structured facts: session ID, cwd, branch, files

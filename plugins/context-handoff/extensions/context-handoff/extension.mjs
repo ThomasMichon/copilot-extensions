@@ -14,7 +14,10 @@
 // 4. tool.execution_start / _complete events -- track modified files + tools
 // 5. user.message event -- tracks turn count + first prompt (topic bias)
 // 6. session.idle event -- delivers the queued context-pressure nudge to the
-//    agent via session.send() (replaces onPostToolUse additionalContext)
+//    agent via session.send() (replaces onPostToolUse additionalContext). The
+//    nudge JUST tells the agent to invoke the context-handoff skill; it does
+//    not prescribe tool calls or a "write a file" outcome -- the skill owns the
+//    sequencing (a live cutover under mux).
 //
 // The /handoff gesture is handled as a skill invocation (context-handoff
 // skill), not a slash command. The skill triggers the agent to call
@@ -970,13 +973,21 @@ session.on("session.idle", () => {
   const pct = Math.round(state.lastUtilization * 100);
   const tokens =
     `${state.currentTokens.toLocaleString()} / ${state.tokenLimit.toLocaleString()} tokens`;
+  // The nudge JUST hands the agent to the context-handoff skill -- it does NOT
+  // prescribe individual tool calls (generate_handoff_prompt/save_handoff_prompt/
+  // continue_handoff) or a "write a file" outcome. The skill owns the sequencing;
+  // under a mux session that means the autonomous live cutover (spin up a
+  // successor Copilot in place, end the turn), not a paste prompt.
   const msg = level === "hard"
     ? `[Context Handoff -- automated] Context window is ${pct}% full (${tokens}). ` +
-      `Auto-compaction triggers at ~80%. Invoke the context-handoff skill now ` +
-      `(call generate_handoff_prompt) to write a handoff file before context is lost.`
+      `Auto-compaction triggers at ~80%. Invoke the context-handoff skill now to ` +
+      `hand off before context is lost -- under a mux session it cuts over to a ` +
+      `fresh successor Copilot in place, automatically (no copy/paste); otherwise ` +
+      `it stores the handoff and hands you a short resume prompt.`
     : `[Context Handoff -- automated] Context window is ${pct}% full (${tokens}). ` +
-      `Consider invoking the context-handoff skill soon (call generate_handoff_prompt) ` +
-      `to write a handoff file. No rush -- finish your current task first.`;
+      `Consider invoking the context-handoff skill soon to hand off -- under a mux ` +
+      `session it cuts over to a fresh successor Copilot in place. No rush -- ` +
+      `finish your current task first.`;
   session.send(msg).catch((e) =>
     session.log(`[Context Handoff] nudge send failed: ${e.message}`, { level: "warning" })
   );
@@ -1019,7 +1030,7 @@ session.on("session.usage_info", (event) => {
     session.log(
       `[Context Handoff] Context utilization at ${pct}% ` +
       `(${d.currentTokens.toLocaleString()} / ${d.tokenLimit.toLocaleString()} tokens). ` +
-      `Consider generating a handoff prompt soon.`,
+      `Consider handing off soon (invoke the context-handoff skill).`,
       { level: "warning" }
     );
   }
@@ -1032,7 +1043,7 @@ session.on("session.usage_info", (event) => {
     session.log(
       `[Context Handoff] ⚠️ Context utilization at ${pct}% ` +
       `(${d.currentTokens.toLocaleString()} / ${d.tokenLimit.toLocaleString()} tokens). ` +
-      `Auto-compaction triggers at ~80%. Generate a handoff prompt NOW.`,
+      `Auto-compaction triggers at ~80%. Hand off NOW -- invoke the context-handoff skill.`,
       { level: "warning" }
     );
   }
