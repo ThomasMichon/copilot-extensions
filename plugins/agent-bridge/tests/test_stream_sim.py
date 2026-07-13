@@ -233,3 +233,57 @@ class TestToolProgressLiveness:
         # Only the real event (id 1) is acked; the liveness event never is.
         assert [aid for (_c, aid) in bridge.acks] == [1]
         assert bridge.get_cursor("sess-1", caller_id="wt-1") == 1
+
+
+class _SettleLagBridge:
+    """turn_complete arrives while the session is still ``running``; it settles
+    one check later. Reproduces the #189c gap where a heartbeat fired between
+    turn_complete and settle and printed a climbing "still working" line for an
+    already-finished turn.
+    """
+
+    def __init__(self):
+        self.real = [
+            {"id": 1, "event": "agent_message", "data": {"text": "done"}},
+            {"id": 2, "event": "turn_complete", "data": {"stop_reason": "end_turn"}},
+        ]
+        self.cursors = {}
+        self.acks = []
+        self.streamed = []
+        self._session_calls = 0
+
+    def get_cursor(self, session_id, *, caller_id=None):
+        return self.cursors.get(caller_id, 0)
+
+    def ack_cursor(self, session_id, last_id, *, caller_id=None):
+        self.cursors[caller_id] = max(self.cursors.get(caller_id, 0), last_id)
+        self.acks.append((caller_id, last_id))
+        return self.cursors[caller_id]
+
+    def get_session(self, session_id):
+        # Not settled at the turn_complete check; settled on the next (heartbeat).
+        self._session_calls += 1
+        return {"status": "running" if self._session_calls <= 1 else "idle"}
+
+    def read_range(self, session_id, *, start=0, end=None):
+        return [e for e in self.real
+                if e["id"] >= start and (end is None or e["id"] <= end)]
+
+    def stream_events(self, session_id, *, after=0, caller_id=None):
+        for e in self.real:
+            if e["id"] > after:
+                self.streamed.append(e["id"])
+                yield e
+        yield {"id": "", "event": "_heartbeat", "data": {}}
+
+
+class TestTurnCompleteSuppressesLiveness:
+    def test_no_still_working_after_turn_complete(self, monkeypatch) -> None:
+        # Zero throttle: a heartbeat WOULD print immediately if not suppressed.
+        monkeypatch.setattr("agent_bridge.__main__._PROGRESS_INTERVAL", 0.0)
+        bridge = _SettleLagBridge()
+        status, out = _run(bridge)
+        assert status == "complete"
+        assert "Turn complete" in out
+        # The turn already ended -> no climbing "still working" liveness line.
+        assert "still working" not in out

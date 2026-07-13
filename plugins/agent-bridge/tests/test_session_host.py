@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 
 import pytest
 
@@ -1844,9 +1845,17 @@ async def test_reattach_reaps_orphaned_host(tmp_path, monkeypatch):
 # PATH, not the host process's own PATH)
 # --------------------------------------------------------------------------
 def _make_exe(dir_path, name):
-    exe = dir_path / name
-    exe.write_text("#!/bin/sh\nexit 0\n")
-    exe.chmod(0o755)
+    # _resolve_child_exe() resolves via shutil.which(), which on Windows needs a
+    # PATHEXT extension to recognize an executable (POSIX resolves the bare
+    # name). Lay the file down the way the real target OS exposes `copilot` so
+    # this test passes on both platforms.
+    if os.name == "nt":
+        exe = dir_path / f"{name}.cmd"
+        exe.write_text("@echo off\r\nexit /b 0\r\n")
+    else:
+        exe = dir_path / name
+        exe.write_text("#!/bin/sh\nexit 0\n")
+        exe.chmod(0o755)
     return exe
 
 
@@ -1855,7 +1864,9 @@ def test_resolve_child_exe_uses_given_path(tmp_path):
     bindir.mkdir()
     exe = _make_exe(bindir, "copilot")
     out = launcher._resolve_child_exe(["copilot", "--acp"], str(bindir))
-    assert out == [str(exe), "--acp"]
+    # normcase: shutil.which returns the PATHEXT-cased extension on Windows
+    # (copilot.CMD), so compare case-insensitively; identity on POSIX.
+    assert [os.path.normcase(out[0]), out[1]] == [os.path.normcase(str(exe)), "--acp"]
 
 
 def test_resolve_child_exe_ignores_host_path(tmp_path, monkeypatch):
@@ -1868,7 +1879,7 @@ def test_resolve_child_exe_ignores_host_path(tmp_path, monkeypatch):
     # Host process PATH deliberately excludes bindir.
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     out = launcher._resolve_child_exe(["copilot", "--stdio"], str(bindir))
-    assert out[0] == str(exe)
+    assert os.path.normcase(out[0]) == os.path.normcase(str(exe))
     assert out[1] == "--stdio"
 
 

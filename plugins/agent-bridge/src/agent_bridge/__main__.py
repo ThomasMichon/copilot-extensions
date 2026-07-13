@@ -1960,6 +1960,11 @@ def _stream_feed(
     last_activity = start
     deadline = (start + command_timeout) if command_timeout else None
     max_attempts = 100000
+    # Once the turn's terminal event has been rendered we are only waiting for
+    # the session to settle -- suppress the transient "still working"/"still
+    # running" liveness lines so a completed turn never looks like it is still
+    # hanging with a climbing timer (#189c).
+    turn_complete_seen = False
 
     def _ack(up_to: int) -> None:
         # Best-effort: a failed ack just means a future read re-delivers
@@ -1978,7 +1983,7 @@ def _stream_feed(
                 etype = evt.get("event", "")
 
                 if etype == "_heartbeat":
-                    if now - last_activity >= _PROGRESS_INTERVAL:
+                    if not turn_complete_seen and now - last_activity >= _PROGRESS_INTERVAL:
                         sys.stdout.write(renderer.heartbeat_line(now - start))
                         sys.stdout.flush()
                         last_activity = now
@@ -1995,7 +2000,7 @@ def _stream_feed(
                 if etype == "tool_progress":
                     # Quiet-period liveness naming the in-flight tool call.
                     # Cursor-neutral (no id); throttled like the heartbeat.
-                    if now - last_activity >= _PROGRESS_INTERVAL:
+                    if not turn_complete_seen and now - last_activity >= _PROGRESS_INTERVAL:
                         sys.stdout.write(
                             renderer.tool_progress_line(evt.get("data", {}))
                         )
@@ -2027,6 +2032,15 @@ def _stream_feed(
                 if new_id > cursor:
                     cursor = new_id
                     _ack(cursor)
+
+                # The terminal turn event: stop emitting liveness lines, and
+                # return as soon as the session has settled (idle/terminal, no
+                # backlog) instead of waiting for the next heartbeat to notice --
+                # which is what used to print a stale "still working" (#189c).
+                if etype == "turn_complete":
+                    turn_complete_seen = True
+                    if _turn_settled(client, session_id, cursor):
+                        return "complete"
 
                 if etype == "error":
                     return "error"
