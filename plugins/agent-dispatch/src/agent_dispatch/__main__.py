@@ -444,11 +444,48 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         )
 
 
+def _browse_peer(args: argparse.Namespace, subcommand: str, *, repo: str | None = None) -> int:
+    """Peer-queue browse (Phase 8 Slice 8c): run the read command on the remote
+    ``--machine`` over the SSH mesh and stream its JSON straight through.
+
+    The remote CLI reads *its own* loopback coordinator (and, via 8b, enriches
+    against its own local bridge), so the output is exactly what a local run on
+    the peer would produce.
+    """
+    from . import remote_dispatch
+
+    argv = remote_dispatch.build_remote_browse_argv(subcommand, args, repo=repo)
+    try:
+        result = remote_dispatch.browse_remote(args.machine, argv)
+    except remote_dispatch.RemoteDispatchUnavailable as exc:
+        print(
+            f"agent-dispatch: peer-queue browse of {args.machine!r} unavailable "
+            f"({exc})",
+            file=sys.stderr,
+        )
+        return 2
+    if result.stdout:
+        sys.stdout.write(result.stdout)
+    if result.returncode != 0:
+        if result.stderr:
+            sys.stderr.write(result.stderr)
+        print(
+            f"agent-dispatch: peer browse on {args.machine!r} failed "
+            f"(exit {result.returncode})",
+            file=sys.stderr,
+        )
+    return result.returncode
+
+
 def _cmd_list(args: argparse.Namespace) -> int:
     repo = _scope_repo(args)
     if not repo:
         print(_REPO_UNRESOLVED, file=sys.stderr)
         return 2
+    from . import remote_dispatch
+
+    if remote_dispatch.is_peer_machine(getattr(args, "machine", None)):
+        return _browse_peer(args, "list", repo=repo)
     with _client(args) as c:
         tasks = c.list(
             repo=repo,
@@ -473,7 +510,15 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
     start" state. Each entry carries ``target_worktree``, ``affinity``,
     ``labels`` and the display-only ``repo_name`` so a consumer (e.g. the
     worktree picker's task pivot) can group by worktree and badge handoffs.
+
+    With ``--machine Y`` naming a *remote* peer, the inbox is read from **Y's
+    own coordinator** over the SSH mesh (Phase 8 Slice 8c) -- what Y can actually
+    pick up -- rather than filtering the local queue.
     """
+    from . import remote_dispatch
+
+    if remote_dispatch.is_peer_machine(args.machine):
+        return _browse_peer(args, "inbox")
     machine = args.machine
     if not machine:
         from .identity import resolve_identity
@@ -884,6 +929,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target-repo")
     p.add_argument("--label")
     p.add_argument("--limit", type=int, default=200)
+    p.add_argument(
+        "--machine",
+        help="read another machine's queue over the SSH mesh (peer browse); "
+             "default: this machine's local coordinator",
+    )
     p.set_defaults(func=_cmd_list)
 
     p = sub.add_parser(
@@ -893,7 +943,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--machine",
-        help="machine to scope to (default: this machine, resolved via agent-worktrees)",
+        help="machine to scope to; a *remote* machine reads that peer's queue "
+             "over the SSH mesh (default: this machine, resolved via agent-worktrees)",
     )
     p.add_argument(
         "--status",

@@ -1,12 +1,17 @@
-"""Cross-machine dispatch via SSH-push (Phase 8 Slice 8a).
+"""Cross-machine dispatch + peer-queue browse via SSH-push (Phase 8 Slices 8a, 8c).
 
 agent-dispatch is **per-host**: each machine runs its own loopback coordinator
 and ``agent-worktrees embody`` spawns a detached session *locally*. So "dispatch
 to machine Y" runs the **same-machine** embody-dispatch **on Y** over the facility
 SSH mesh -- the task lives on Y's coordinator and the autopilot session runs +
-completes explicitly on Y. Reuses Tier-1 SSH + per-host embody; no coordinator
-federation, no reverse tunnels, no dependency on the (unbuilt) peer-delegation
-transport.
+completes explicitly on Y (Slice 8a). Reuses Tier-1 SSH + per-host embody; no
+coordinator federation, no reverse tunnels, no dependency on the (unbuilt)
+peer-delegation transport.
+
+The same SSH-exec pattern also powers **peer-queue browse** (Slice 8c):
+``list``/``inbox --machine Y`` (Y != local) run the read command **on Y** and
+stream back its JSON, so an operator can inspect a peer's queue -- and, since 8b
+runs there, its live embodiment overlays -- without leaving the local box.
 
 The machine name **is** its facility SSH alias (``ssh borealis``) -- never a raw
 IP (the ``facility-ssh`` discipline). The payload is streamed over the SSH pipe's
@@ -124,6 +129,78 @@ def dispatch_to_remote(
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
         cmd,
         input=payload,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+# -- Peer-queue browse (Phase 8 Slice 8c) ------------------------------------
+
+
+def is_peer_machine(machine: str | None) -> bool:
+    """True when ``machine`` names a *remote* peer (not this machine).
+
+    Used by ``list``/``inbox --machine Y`` to decide whether to read Y's queue
+    over the mesh (Y != local) or fall through to local behavior. Returns False
+    when ``machine`` is unset, is this machine, or the local machine can't be
+    resolved (then we can't prove it's remote, so stay local -- the safe
+    degrade, mirroring :func:`is_cross_machine`).
+    """
+    if not machine:
+        return False
+    local = local_machine()
+    return bool(local) and machine != local
+
+
+def build_remote_browse_argv(
+    subcommand: str, args: argparse.Namespace, *, repo: str | None = None
+) -> list[str]:
+    """Build the ``agent-dispatch <subcommand> ...`` argv to run **on the peer**
+    for a peer-queue browse.
+
+    Forwards the read filters (``--status``/``--label``/``--limit``, plus
+    ``--repo``/``--target-machine``/``--target-repo`` for ``list``) but **drops
+    the ``--machine`` peer selector** -- on the peer that machine is *local*, so
+    a second mesh hop can't be triggered. ``list`` scopes to a repo lane, which
+    can't be resolved from the peer's SSH home dir, so the locally-resolved
+    ``repo`` is passed explicitly.
+    """
+    argv = ["agent-dispatch", subcommand]
+    if getattr(args, "status", None):
+        argv += ["--status", args.status]
+    if getattr(args, "label", None):
+        argv += ["--label", args.label]
+    limit = getattr(args, "limit", None)
+    if limit:
+        argv += ["--limit", str(limit)]
+    if subcommand == "list":
+        if repo:
+            argv += ["--repo", repo]
+        if getattr(args, "target_machine", None):
+            argv += ["--target-machine", args.target_machine]
+        if getattr(args, "target_repo", None):
+            argv += ["--target-repo", args.target_repo]
+    return argv
+
+
+def browse_remote(
+    machine: str, argv: list[str], *, timeout: float | None = None
+) -> subprocess.CompletedProcess:
+    """SSH to ``machine`` (its facility alias) and run an ``agent-dispatch`` read
+    command there, returning its captured result (JSON on stdout).
+
+    Raises :class:`RemoteDispatchUnavailable` if ``ssh`` is not on PATH; the
+    caller degrades from there.
+    """
+    exe = shutil.which("ssh")
+    if exe is None:
+        raise RemoteDispatchUnavailable("ssh not found on PATH")
+    remote_cmd = " ".join(shlex.quote(a) for a in argv)
+    cmd = [exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", machine, remote_cmd]
+    return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
+        cmd,
         check=False,
         capture_output=True,
         text=True,

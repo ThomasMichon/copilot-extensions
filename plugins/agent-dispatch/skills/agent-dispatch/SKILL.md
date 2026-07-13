@@ -387,6 +387,18 @@ agent-dispatch create "Refactor the auth module" \
 > machine over the mesh (turn-state/liveness included). Degrades cleanly: no
 > `ssh` / unreachable host → nothing is queued, with a clear message.
 
+> **Peer-queue browse (Phase 8 8c).** Add `--machine <Y>` to `list` or `inbox`
+> to read **Y's own queue** over the SSH mesh instead of the local coordinator:
+> `agent-dispatch list --machine borealis --status started` /
+> `agent-dispatch inbox --machine borealis`. When `Y` is a remote peer, the read
+> command is run **on Y** (`ssh Y agent-dispatch …`), so it reads Y's loopback
+> coordinator and — via 8b — enriches against Y's own bridge; the JSON streams
+> straight back. `list` forwards the locally-resolved repo lane (+ any
+> `--status`/`--label`/`--limit`/`--target-*` filters); the `--machine` selector
+> itself is never re-forwarded, so there is no second hop. `Y` = local (or unset)
+> keeps the existing local behavior. Degrades cleanly: no `ssh` / unreachable
+> host → a clear message and non-zero exit.
+
 Both backends **degrade gracefully**: if the chosen mechanism isn't on PATH
 (no `agent-worktrees` for `embody`, no `agent-bridge` for `bridge`) the embody
 backend falls back to bridge, and if neither is present the task is simply left
