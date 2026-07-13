@@ -304,9 +304,13 @@ agent-dispatch watch              # stream task.* events (SSE) as JSON lines
 > `embodiment` block (`driven_by`, `status`, `turn_state`/`liveness`, heartbeat
 > `updated_at`) for a leased task whose worktree is currently live — a
 > CLI-embodied task is trackable like a headless one, including whether it is
-> mid-turn (`active`), done (`idle`), or silently `stalled`. Best-effort and
-> read-only: with no `agent-bridge` on PATH (or no live session) the overlay is
-> simply omitted and output is unchanged.
+> mid-turn (`active`), done (`idle`), or silently `stalled`. **Cross-machine
+> (Phase 8 8b):** the overlay resolves against the *owner's* machine — a task
+> whose owner is a remote machine (an SSH-pushed dispatch) resolves its live
+> session on that machine over the SSH mesh (`ssh <machine> agent-bridge …`), so
+> a remote-dispatched task is trackable from the originator like a local one.
+> Best-effort and read-only: with no `agent-bridge`/`ssh` on PATH (or no live
+> session) the overlay is simply omitted and output is unchanged.
 
 > **`consume` is the handoff-pickup shortcut -- in two flavors.**
 >
@@ -378,9 +382,10 @@ agent-dispatch create "Refactor the auth module" \
 > embody), the whole create+embody is run **on Y** over the facility SSH mesh (Y's
 > name is its SSH alias -- never a raw IP); the task lives on Y's coordinator and
 > the autopilot session runs + completes there. Observe it with `ssh Y
-> agent-dispatch show <id>` (cross-machine tracking from the originator is a
-> follow-on). Degrades cleanly: no `ssh` / unreachable host → nothing is queued,
-> with a clear message.
+> agent-dispatch show <id>`, or — since **8b** — directly from the originator:
+> `show`/`list` resolve a remote-owned task's `embodiment` overlay on the owner's
+> machine over the mesh (turn-state/liveness included). Degrades cleanly: no
+> `ssh` / unreachable host → nothing is queued, with a clear message.
 
 Both backends **degrade gracefully**: if the chosen mechanism isn't on PATH
 (no `agent-worktrees` for `embody`, no `agent-bridge` for `bridge`) the embody
