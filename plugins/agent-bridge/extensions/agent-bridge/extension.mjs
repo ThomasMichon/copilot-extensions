@@ -34,17 +34,17 @@ const FLUSH_MS = 1_000; // drain the represented-event queue to the bridge every
 const MAX_QUEUE = 1_000; // bounded buffer; drop OLDEST on overflow (honest reduced fidelity)
 const FLUSH_BATCH = 250; // max events POSTed per flush
 const INBOX_POLL_MS = 2_000; // poll the bridge for messages to deliver every 2s
-// Progress nudge (Phase 7 Slice 7c): gently prompt an OPERATOR-driven session to
-// post a one-line status beat so the cockpit shows how far it has gotten. Always
-// on for operator sessions (AGENT_BRIDGE_PROGRESS_NUDGE=0/off/false/no disables);
-// never fires for an agent-driven session (it reports via `agent-dispatch
-// progress` instead). Gated on real work since the last nudge so an idle session
-// is never nagged.
-const NUDGE_CHECK_MS = 60_000; // evaluate whether to nudge every ~1 min
-const NUDGE_MIN_INTERVAL_MS = 600_000; // at most one nudge per ~10 min (gentle)
-const NUDGE_QUIET_MS = 4_000; // only nudge when the session has been quiet this long
-const NUDGE_MIN_TURNS = 1; // require >= this many completed turns since last nudge
-const NUDGE_DEFAULT_ON = !/^(0|false|off|no)$/i.test(
+// Progress nudge (Phase 7 Slice 7c): OPT-IN. Gently prompt an OPERATOR-driven
+// session to post a one-line status beat for the cockpit. **Default OFF** --
+// enable per session with AGENT_BRIDGE_PROGRESS_NUDGE=1 (or on/true/yes). A
+// per-session injected turn proved too noisy in aggregate across a fleet of
+// operator sessions, so it no longer fires unless the operator asks for it. Never
+// fires for an agent-driven session (it reports via `agent-dispatch progress`).
+const NUDGE_CHECK_MS = 120_000; // evaluate whether to nudge every ~2 min
+const NUDGE_MIN_INTERVAL_MS = 1_800_000; // at most one nudge per ~30 min (gentle)
+const NUDGE_QUIET_MS = 8_000; // only nudge when the session has been quiet this long
+const NUDGE_MIN_TURNS = 3; // require >= this many completed turns since last nudge
+const NUDGE_DEFAULT_ON = /^(1|true|on|yes)$/i.test(
   process.env.AGENT_BRIDGE_PROGRESS_NUDGE || "",
 );
 // Delivery (Phase 2 write path) is SEAMLESS by default. This is a
