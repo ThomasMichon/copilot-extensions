@@ -59,10 +59,18 @@ def _cmd_create(args: argparse.Namespace) -> int:
     if not repo:
         print(_REPO_UNRESOLVED, file=sys.stderr)
         return 2
+    # Cross-machine dispatch (Phase 8 8a): an embody spawn targeted at *another*
+    # machine runs the whole create+embody THERE over the facility SSH mesh, so
+    # the task lives on the target's coordinator and the autopilot session runs
+    # + completes on the target. agent-dispatch is per-host, so there is no local
+    # task in this path.
+    from . import remote_dispatch
+
+    if remote_dispatch.is_cross_machine(args):
+        return _dispatch_cross_machine(args, repo)
     payload_inline = args.payload_inline
     if args.payload_file:
-        with open(args.payload_file, encoding="utf-8") as fh:
-            payload_inline = fh.read()
+        payload_inline = _read_payload_file(args.payload_file)
     with _client(args) as c:
         task = c.create(
             args.title,
@@ -85,6 +93,46 @@ def _cmd_create(args: argparse.Namespace) -> int:
     if args.spawn and not args.proposed:
         _spawn_worker_for(args, task)
     return _emit(_enrich(task))
+
+
+def _read_payload_file(path: str) -> str:
+    """Read a payload file, or stdin when ``path`` is ``-``."""
+    if path == "-":
+        return sys.stdin.read()
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _dispatch_cross_machine(args: argparse.Namespace, repo: str) -> int:
+    """SSH-push the create+embody to the target machine (Phase 8 8a)."""
+    from . import remote_dispatch
+
+    payload: str | None = None
+    if args.payload_file:
+        payload = _read_payload_file(args.payload_file)
+    elif args.payload_inline:
+        payload = args.payload_inline
+    try:
+        result = remote_dispatch.dispatch_to_remote(
+            args.target_machine, args, repo=repo, payload=payload
+        )
+    except remote_dispatch.RemoteDispatchUnavailable as exc:
+        print(
+            f"agent-dispatch: cross-machine dispatch to {args.target_machine!r} "
+            f"unavailable ({exc}); nothing was queued",
+            file=sys.stderr,
+        )
+        return 2
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.returncode != 0:
+        print(
+            f"agent-dispatch: remote dispatch on {args.target_machine!r} failed "
+            f"(exit {result.returncode}):\n{result.stderr}",
+            file=sys.stderr,
+        )
+        return result.returncode
+    return 0
 
 
 def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
@@ -637,9 +685,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--payload-inline")
     p.add_argument(
         "--payload-file",
-        help="read the payload from a file (large payloads spill to a blob automatically)",
+        help="read the payload from a file (large payloads spill to a blob "
+             "automatically); '-' reads from stdin",
     )
-    p.add_argument("--target-machine")
+    p.add_argument(
+        "--target-machine",
+        help="route the task to this machine. With `--spawn --spawn-backend "
+             "embody` for another machine, dispatch runs there over the facility "
+             "SSH mesh (Phase 8: create+embody land on the target's coordinator).",
+    )
     p.add_argument("--target-worktree")
     p.add_argument("--target-repo")
     p.add_argument("--source")

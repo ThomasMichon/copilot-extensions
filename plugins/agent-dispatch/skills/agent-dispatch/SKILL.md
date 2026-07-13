@@ -355,7 +355,17 @@ agent-dispatch create "Refactor the auth module" \
   starts → works the task autonomously → and **completes it explicitly** only
   when it judges the goal reached (**deferred completion** -- the task's
   `completed` state means the *work is done*, not that a baton was handed over).
-  Cross-machine dispatch is not yet supported (same machine only).
+
+> **Cross-machine dispatch (Phase 8, SSH-push).** Add `--target-machine <Y>` to an
+> `embody` spawn to dispatch **on another machine**: `agent-dispatch create <task>
+> --target-machine borealis --spawn --spawn-backend embody`. Because
+> agent-dispatch is per-host (each machine owns a loopback coordinator + local
+> embody), the whole create+embody is run **on Y** over the facility SSH mesh (Y's
+> name is its SSH alias -- never a raw IP); the task lives on Y's coordinator and
+> the autopilot session runs + completes there. Observe it with `ssh Y
+> agent-dispatch show <id>` (cross-machine tracking from the originator is a
+> follow-on). Degrades cleanly: no `ssh` / unreachable host → nothing is queued,
+> with a clear message.
 
 Both backends **degrade gracefully**: if the chosen mechanism isn't on PATH
 (no `agent-worktrees` for `embody`, no `agent-bridge` for `bridge`) the embody
