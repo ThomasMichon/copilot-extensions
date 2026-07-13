@@ -9,18 +9,37 @@ import sys
 
 PROMPT_TIMEOUT = 60
 PROMPT_TITLE = "Agent Vault"
+PROMPT_TITLE_ENV = "VAULT_PROMPT_TITLE"
 
 
-def prompt_password(message: str = "KeePass master password:") -> str | None:
-    """Prompt for the KeePass master password via GUI dialog or terminal."""
+def _resolve_title(title: str | None) -> str:
+    """Resolve the dialog title: explicit arg, then env, then the default."""
+    if title:
+        return title
+    env_title = os.environ.get(PROMPT_TITLE_ENV)
+    if env_title:
+        return env_title
+    return PROMPT_TITLE
+
+
+def prompt_password(
+    message: str = "KeePass master password:", title: str | None = None
+) -> str | None:
+    """Prompt for the KeePass master password via GUI dialog or terminal.
+
+    The dialog title defaults to "Agent Vault"; override it with the ``title``
+    argument or the ``VAULT_PROMPT_TITLE`` environment variable so a branded
+    downstream can display its own name.
+    """
     safe_msg = message.replace('"', "'")
+    safe_title = _resolve_title(title).replace('"', "'")
 
     # Windows GUI
     try:
         ps_script = r'''
 Add-Type -AssemblyName System.Windows.Forms
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Agent Vault"
+$form.Text = "VAULT_PROMPT_TITLE"
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
@@ -48,7 +67,7 @@ $form.Controls.Add($ok)
 $form.Size = New-Object System.Drawing.Size(370, 150)
 if ($form.ShowDialog() -ne "OK" -or -not $box.Text) { Write-Output "CANCELLED"; return }
 Write-Output $box.Text
-'''.replace("VAULT_PROMPT_MSG", safe_msg)
+'''.replace("VAULT_PROMPT_TITLE", safe_title).replace("VAULT_PROMPT_MSG", safe_msg)
         r = subprocess.run(
             ["powershell.exe", "-NoProfile", "-Command", ps_script],
             capture_output=True, text=True, timeout=PROMPT_TIMEOUT,
@@ -67,9 +86,9 @@ Write-Output $box.Text
         if shutil.which(gui) and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
             try:
                 if gui == "zenity":
-                    args = ["zenity", "--password", "--title=Agent Vault"]
+                    args = ["zenity", "--password", f"--title={safe_title}"]
                 else:
-                    args = ["kdialog", "--password", message, "--title", "Agent Vault"]
+                    args = ["kdialog", "--password", message, "--title", safe_title]
                 r = subprocess.run(args, capture_output=True, text=True, timeout=PROMPT_TIMEOUT)
                 if r.returncode == 0 and r.stdout.strip():
                     return r.stdout.strip()
