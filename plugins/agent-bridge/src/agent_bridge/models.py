@@ -267,6 +267,9 @@ class LiveSessionInfo(BaseModel):
     last_activity_at: float | None = None
     #: Friendly liveness label computed on read: active / stalled / idle / None.
     liveness: str | None = None
+    #: Operator-driven session's latest progress beat (parsed object) or None
+    #: (Phase 7 Slice 7c). The live-session analogue of a task's latest_progress.
+    latest_progress: dict[str, Any] | None = None
     registered_at: float
     updated_at: float
 
@@ -302,6 +305,19 @@ class IngestLiveEventsResult(BaseModel):
     session_id: str
     ingested: int
     last_id: int
+
+
+class LiveProgressRequest(BaseModel):
+    """An operator-driven session's progress beat (Phase 7 Slice 7c).
+
+    The live-session analogue of the dispatched-task progress beat: a bounded,
+    latest-only status line the agent emits when the extension nudges it.
+    """
+
+    summary: str
+    phase: str = ""
+    blocker: str | None = None
+    pr: str | None = None
 
 
 class SendMessageRequest(BaseModel):

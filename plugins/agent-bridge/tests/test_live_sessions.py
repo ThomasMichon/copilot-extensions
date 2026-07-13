@@ -402,3 +402,61 @@ def test_route_ingest_updates_turn_state(client_with_store: TestClient) -> None:
     got = c.get("/api/v1/live-sessions/s1").json()
     assert got["turn_state"] == "idle"
     assert got["liveness"] == "idle"
+
+
+# -- Phase 7 Slice 7c: operator-session progress ------------------------------
+
+
+class TestBuildProgressSnapshot:
+    def test_caps_summary_and_drops_empty_optionals(self) -> None:
+        from agent_bridge.live_representation import (
+            PROGRESS_SUMMARY_MAX,
+            build_progress_snapshot,
+        )
+
+        snap = build_progress_snapshot("x" * 500, phase="impl", ts=1.0)
+        assert len(snap["summary"]) <= PROGRESS_SUMMARY_MAX
+        assert snap["summary"].endswith("\u2026")
+        assert snap["phase"] == "impl"
+        assert "blocker" not in snap and "pr" not in snap
+        assert snap["ts"] == 1.0
+
+    def test_empty_summary_becomes_dash(self) -> None:
+        from agent_bridge.live_representation import build_progress_snapshot
+
+        assert build_progress_snapshot("   ", ts=1.0)["summary"] == "-"
+
+
+def test_db_update_live_progress(tmp_db: Database) -> None:
+    now = time.time()
+    tmp_db.register_live_session(
+        "cli-p", machine="m", cwd=None, worktree_id="wt-p", repo=None,
+        branch=None, pid=None, role=None, now=now,
+    )
+    ok = tmp_db.update_live_progress("cli-p", latest_progress='{"summary":"hi"}', now=now + 1)
+    assert ok is True
+    assert tmp_db.get_live_session("cli-p")["latest_progress"] == '{"summary":"hi"}'
+    # unknown session -> False, no-op
+    assert tmp_db.update_live_progress("nope", latest_progress="{}", now=now) is False
+
+
+def test_route_record_progress(client: TestClient) -> None:
+    client.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+    # address by worktree handle
+    r = client.post(
+        "/api/v1/live-sessions/wt-1/progress",
+        json={"summary": "wired the endpoint", "phase": "impl", "pr": "pr/9"},
+    )
+    assert r.status_code == 200, r.text
+    lp = r.json()["latest_progress"]
+    assert lp["summary"] == "wired the endpoint" and lp["phase"] == "impl" and lp["pr"] == "pr/9"
+    # persisted + surfaced on get
+    got = client.get("/api/v1/live-sessions/s1").json()
+    assert got["latest_progress"]["summary"] == "wired the endpoint"
+    # latest-only overwrite
+    client.post("/api/v1/live-sessions/s1/progress", json={"summary": "second"})
+    assert client.get("/api/v1/live-sessions/s1").json()["latest_progress"]["summary"] == "second"
+    # unknown handle -> 404
+    assert client.post(
+        "/api/v1/live-sessions/ghost/progress", json={"summary": "x"}
+    ).status_code == 404

@@ -248,6 +248,51 @@ def derive_turn_state(
     return state, saw_activity
 
 
+#: Hard cap on a live-session progress summary -- a status line, not a transcript.
+PROGRESS_SUMMARY_MAX = 280
+_PROGRESS_PHASE_MAX = 40
+_PROGRESS_PR_MAX = 120
+
+
+def _clip(text: str | None, limit: int) -> str | None:
+    if text is None:
+        return None
+    text = text.strip()
+    if not text:
+        return None
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "\u2026"
+
+
+def build_progress_snapshot(
+    summary: str,
+    *,
+    phase: str = "",
+    blocker: str | None = None,
+    pr: str | None = None,
+    ts: float,
+) -> dict[str, object]:
+    """Build a bounded, latest-only progress snapshot for a live session.
+
+    The live-session analogue of agent-dispatch's dispatched-task progress beat
+    (Phase 7 Slice 7c): every free-text field is hard-capped so an operator
+    session's beat stays a *status line*, never a chat log.
+    """
+    snapshot: dict[str, object] = {
+        "summary": _clip(summary, PROGRESS_SUMMARY_MAX) or "-",
+        "ts": ts,
+    }
+    phase_c = _clip(phase, _PROGRESS_PHASE_MAX)
+    if phase_c:
+        snapshot["phase"] = phase_c
+    blocker_c = _clip(blocker, PROGRESS_SUMMARY_MAX)
+    if blocker_c:
+        snapshot["blocker"] = blocker_c
+    pr_c = _clip(pr, _PROGRESS_PR_MAX)
+    if pr_c:
+        snapshot["pr"] = pr_c
+    return snapshot
+
+
 class LiveEventStore:
     """In-memory registry of represented ``EventLog``s, keyed by session id.
 
