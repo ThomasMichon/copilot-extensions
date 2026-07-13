@@ -39,6 +39,11 @@ FLEET_LABEL = "agent-containers.fleet"
 # resolver. ``--allow-all-tools`` is required for headless dispatch.
 DEFAULT_ACP_COMMAND = "copilot --acp --stdio --allow-all-tools"
 
+# Default container path the control-plane *harness* checkout is reproduced at
+# -- kept DISTINCT from the dotfiles shim location. Mirrors the codespaces
+# ``HARNESS_DIR``.
+HARNESS_DIR = "/workspaces/harness"
+
 
 @dataclass
 class DotfilesConfig:
@@ -64,6 +69,32 @@ class DotfilesConfig:
     # Command run in ``target`` after the copy (login shell, as the remote
     # user). Empty / null skips the install step (mount + copy still happen).
     install_command: str | None = "bash install.sh"
+
+    def host_repo(self) -> Path | None:
+        return Path(self.repo).expanduser() if self.repo else None
+
+
+@dataclass
+class HarnessConfig:
+    """A designated host *harness* repo (the control-plane checkout that carries
+    effort / vision state) reproduced inside a fleet container.
+
+    Kept DISTINCT from :class:`DotfilesConfig` (the GitHub-dotfiles shim): the
+    harness carries effort / vision state referenced *in place*. Same
+    copy-not-mount mechanics, but materialized at ``/workspaces/harness`` and
+    with **no install step** by default -- the harness is referenced, not
+    installed. Optional + opt-in: a missing ``repo`` disables the step, so by
+    default no harness is placed on the container and the local control-plane
+    agent owns effort updates.
+    """
+
+    # Host path to the harness repo to reproduce (absolute or ~-expanded).
+    repo: str | None = None
+    # Container path the harness is materialised at (distinct from the shim).
+    target: str = HARNESS_DIR
+    # Command run in ``target`` after the copy. None (default) skips it -- the
+    # harness is a checkout referenced in place, not an installer.
+    install_command: str | None = None
 
     def host_repo(self) -> Path | None:
         return Path(self.repo).expanduser() if self.repo else None
@@ -152,6 +183,11 @@ class ContainersConfig:
     # Optional designated dotfiles repo reproduced inside fleet containers
     # (Codespaces-style clone + install.sh). None disables the step.
     dotfiles: DotfilesConfig | None = None
+    # Optional control-plane *harness* repo reproduced inside fleet containers,
+    # kept SEPARATE from ``dotfiles`` (copied in place at ``/workspaces/harness``,
+    # no install). None (default) disables it -> no on-venue harness; the local
+    # control-plane agent owns effort updates.
+    harness: HarnessConfig | None = None
     fleets: dict[str, FleetConfig] = field(default_factory=dict)
 
     def effective_acp_command(
@@ -226,6 +262,16 @@ def load_config() -> ContainersConfig:
             ic = dotfiles["install_command"]
             df.install_command = str(ic) if ic else None
         config.dotfiles = df
+
+    harness = data.get("harness", None)
+    if isinstance(harness, dict) and harness.get("repo"):
+        hc = HarnessConfig(repo=str(harness["repo"]))
+        if harness.get("target"):
+            hc.target = str(harness["target"])
+        if "install_command" in harness:
+            ic = harness["install_command"]
+            hc.install_command = str(ic) if ic else None
+        config.harness = hc
 
     fleets = data.get("fleets", {}) or {}
     for name, raw in fleets.items():

@@ -23,7 +23,9 @@ log = logging.getLogger("agent-codespaces")
 
 # ``DOTFILES_DIR`` is defined canonically in :mod:`agent_codespaces.config` (the
 # layer the request-folder resolver shares) and re-exported here for back-compat
-# with existing ``from .provision import DOTFILES_DIR`` importers.
+# with existing ``from .provision import DOTFILES_DIR`` importers. The harness
+# analogue ``HARNESS_DIR`` is passed in as ``harness_dir`` (see
+# ``build_harness_command``), so it is not imported here.
 
 
 def build_dotfiles_command(dotfiles_repo: str, relay_port: int) -> str:
@@ -83,6 +85,57 @@ else
     else
       echo "[dotfiles] up to date"
     fi
+  fi
+fi"""
+
+
+def build_harness_command(
+    harness_repo: str, harness_dir: str, relay_port: int
+) -> str:
+    """Idempotent bash ensuring the control-plane *harness* checkout is present
+    and current on a venue at ``harness_dir``.
+
+    The harness analogue of :func:`build_dotfiles_command`, with two deliberate
+    differences:
+
+    - **No ``install.sh``.** The harness is a checkout referenced *in place* for
+      effort / vision state -- it is not an installer, so nothing is run after
+      clone/sync.
+    - **Distinct path + labels.** Materialized at ``harness_dir``
+      (a generic ``/workspaces/harness`` by default), kept separate from the
+      class-D dotfiles shim at ``DOTFILES_DIR``.
+
+    Same safety as the dotfiles bootstrap: clone-if-absent; on the default
+    branch and clean, ``fetch`` + ``--ff-only``; on a feature branch or dirty,
+    **never touched** (prints a directive so parked work is synced deliberately).
+    Auth for the clone/fetch rides the credential relay. This is only invoked
+    when ``defaults.harness_repo`` is set (opt-in); by default no harness is
+    placed on the venue.
+    """
+    url = shlex.quote(f"https://github.com/{harness_repo}")
+    hd = shlex.quote(harness_dir)
+    port = int(relay_port)
+    return f"""\
+export LC_GIT_CREDENTIAL_RELAY={port} GIT_TERMINAL_PROMPT=0
+hd={hd}
+if [ ! -d "$hd/.git" ]; then
+  # A non-git directory here is a broken/partial clone; git refuses to clone
+  # into a non-empty dir, so clear it first.
+  if [ -e "$hd" ]; then
+    echo "[harness] removing partial non-git dir at $hd"
+    rm -rf "$hd"
+  fi
+  echo "[harness] cloning {harness_repo}"
+  git clone --depth 1 {url} "$hd" || {{ echo "[harness] clone FAILED" >&2; exit 1; }}
+else
+  br=$(git -C "$hd" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')
+  def=$(git -C "$hd" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
+  [ -n "$def" ] || def=main
+  if [ "$br" != "$def" ] || [ -n "$(git -C "$hd" status --porcelain 2>/dev/null)" ]; then
+    echo "[harness] $hd is on '$br' (default '$def') or has local changes -- NOT syncing. Sync it yourself if you parked work here."
+  else
+    git -C "$hd" fetch --quiet origin "$def" 2>/dev/null && git -C "$hd" merge --ff-only --quiet "origin/$def" 2>/dev/null
+    echo "[harness] up to date"
   fi
 fi"""
 

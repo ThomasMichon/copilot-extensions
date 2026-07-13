@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import sys
 
-from .config import FLEET_LABEL, ContainersConfig, DotfilesConfig, FleetConfig
+from .config import FLEET_LABEL, ContainersConfig, DotfilesConfig, FleetConfig, HarnessConfig
 from .lifecycle import (
     DockerContainerInfo,
     _check_docker,
@@ -79,6 +79,7 @@ def _devcontainer_up(
     fleet: FleetConfig,
     name: str,
     dotfiles: DotfilesConfig | None = None,
+    harness: HarnessConfig | None = None,
     exec_user: str = "vscode",
 ) -> str:
     """Bring up one container via the devcontainer CLI; return its name.
@@ -86,8 +87,10 @@ def _devcontainer_up(
     Tags the container with ``agent-containers.fleet`` (via id-label, which
     devcontainer applies as a docker label) and renames it to ``name``. When
     ``fleet.devcontainer_config`` is set it is passed as ``--config`` (for
-    nested specs). When ``dotfiles.repo`` is set the host repo is reproduced
-    inside the container after creation (via ``docker cp``).
+    nested specs). When ``dotfiles.repo`` is set the host dotfiles repo is
+    reproduced inside the container after creation (via ``docker cp``); likewise
+    ``harness.repo`` reproduces the control-plane harness checkout at its
+    (distinct) ``target``.
     """
     devcontainer_exe = shutil.which("devcontainer")
     if not devcontainer_exe:
@@ -133,26 +136,30 @@ def _devcontainer_up(
         name = container_id
 
     if dotfiles and dotfiles.host_repo():
-        _materialize_dotfiles(name, exec_user, dotfiles)
+        _materialize_repo(name, exec_user, dotfiles, label="dotfiles")
+    if harness and harness.host_repo():
+        _materialize_repo(name, exec_user, harness, label="harness")
     return name
 
 
-def _materialize_dotfiles(
-    container: str, user: str, dotfiles: DotfilesConfig
+def _materialize_repo(
+    container: str, user: str, spec: DotfilesConfig | HarnessConfig, *, label: str,
 ) -> None:
-    """Reproduce the dotfiles repo inside the container (copy + install).
+    """Reproduce a host repo (``spec.repo``) inside the container (copy + optional
+    install).
 
-    Copies the host repo into the container at ``target`` via ``docker cp``
+    Copies the host repo into the container at ``spec.target`` via ``docker cp``
     (the host checkout is only read, never mounted, so it is never mutated),
-    chowns it to the remote user, then runs ``install_command`` in ``target``
-    as that user -- mirroring the Codespaces ``install.sh`` flow. Best-effort:
-    a failed copy/install is warned about, never fatal (the container is
-    already usable).
+    chowns it to the remote user, then runs ``spec.install_command`` (if any) in
+    ``target`` as that user. Used for BOTH the dotfiles shim (``label`` =
+    ``"dotfiles"``, runs ``install.sh``) and the control-plane harness (``label``
+    = ``"harness"``, no install by default). Best-effort: a failed copy/install
+    is warned about, never fatal (the container is already usable).
     """
-    host_repo = dotfiles.host_repo()
+    host_repo = spec.host_repo()
     if host_repo is None:
         return
-    target = dotfiles.target
+    target = spec.target
 
     mk = _docker(
         ["exec", "-u", "0", container, "bash", "-lc", f"mkdir -p {target}"],
@@ -160,8 +167,8 @@ def _materialize_dotfiles(
     )
     if mk.returncode != 0:
         log.warning(
-            "dotfiles target mkdir failed in %s: %s",
-            container, mk.stderr.strip() or mk.stdout.strip(),
+            "%s target mkdir failed in %s: %s",
+            label, container, mk.stderr.strip() or mk.stdout.strip(),
         )
         return
     cp = _docker(
@@ -169,8 +176,8 @@ def _materialize_dotfiles(
     )
     if cp.returncode != 0:
         log.warning(
-            "dotfiles copy into %s failed: %s",
-            container, cp.stderr.strip() or cp.stdout.strip(),
+            "%s copy into %s failed: %s",
+            label, container, cp.stderr.strip() or cp.stdout.strip(),
         )
         return
     chown = _docker(
@@ -179,27 +186,27 @@ def _materialize_dotfiles(
     )
     if chown.returncode != 0:
         log.warning(
-            "dotfiles chown in %s failed (continuing): %s",
-            container, chown.stderr.strip() or chown.stdout.strip(),
+            "%s chown in %s failed (continuing): %s",
+            label, container, chown.stderr.strip() or chown.stdout.strip(),
         )
-    log.info("Reproduced dotfiles repo at %s in %s", target, container)
+    log.info("Reproduced %s repo at %s in %s", label, target, container)
 
-    if not dotfiles.install_command:
+    if not spec.install_command:
         return
     res = _docker(
         [
             "exec", "-u", user, "-w", target, container,
-            "bash", "-lc", dotfiles.install_command,
+            "bash", "-lc", spec.install_command,
         ],
         timeout=600,
     )
     if res.returncode != 0:
         log.warning(
-            "dotfiles install_command failed in %s (non-fatal): %s",
-            container, res.stderr.strip() or res.stdout.strip(),
+            "%s install_command failed in %s (non-fatal): %s",
+            label, container, res.stderr.strip() or res.stdout.strip(),
         )
     else:
-        log.info("Ran dotfiles install_command in %s", container)
+        log.info("Ran %s install_command in %s", label, container)
 
 
 def _image_run(fleet_name: str, fleet: FleetConfig, name: str) -> str:
@@ -254,7 +261,8 @@ def up(config: ContainersConfig, fleet_name: str, count: int | None = None) -> l
             created.append(
                 _devcontainer_up(
                     fleet_name, fleet, name,
-                    dotfiles=config.dotfiles, exec_user=exec_user,
+                    dotfiles=config.dotfiles, harness=config.harness,
+                    exec_user=exec_user,
                 )
             )
         else:

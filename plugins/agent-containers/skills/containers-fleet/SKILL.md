@@ -52,6 +52,18 @@ fleets:
   `docker cp` (read-only on the host side), so `install.sh` never mutates the
   host checkout. The install step is best-effort (a failure is logged, never
   aborts `up`).
+- `harness` (optional, opt-in) materialises a separate **control-plane harness**
+  checkout (effort/vision state) at its own `target` (default
+  `/workspaces/harness`), kept **distinct** from `dotfiles` and with **no
+  install step** — the harness is referenced in place, not installed. Omit it
+  (the default) to keep the harness **off** the container (the local
+  control-plane agent owns effort updates); set it only when an in-container
+  agent needs local effort-state reference:
+  ```yaml
+  harness:
+    repo: /path/to/your/harness   # host checkout copied in (read-only)
+    # target: /workspaces/harness     # optional; this is the default
+  ```
 
 ## Borrow / release (effort owns a container)
 
