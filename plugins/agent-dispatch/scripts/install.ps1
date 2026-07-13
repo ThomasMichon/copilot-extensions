@@ -424,6 +424,9 @@ function Install-CoordinatorTask {
         $envDefault = @"
 # agent-dispatch coordinator service environment.
 # Edit, then: Start-ScheduledTask -TaskName agent-dispatch
+# Windows is always a host, so it uses the preferred port 9330. (A WSL guest
+# coordinator uses 9331 -- preferred+1 -- to share the host loopback; see the
+# Linux install.sh and agent_dispatch.config.default_port().)
 AGENT_DISPATCH_HOST=127.0.0.1
 AGENT_DISPATCH_PORT=9330
 # AGENT_DISPATCH_DB=%USERPROFILE%\.agent-dispatch\tasks.db   # default; uncomment to override

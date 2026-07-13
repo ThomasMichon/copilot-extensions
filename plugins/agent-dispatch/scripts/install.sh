@@ -9,8 +9,11 @@
 #
 # Runtime lives at ~/.agent-dispatch/ (venv, config, DB). Binstub goes to
 # ~/.local/bin/agent-dispatch. On its deploy machines the coordinator runs as a
-# systemd **user** service (loopback 127.0.0.1:9330) -- a per-host local
-# coordinator, matching agent-bridge's per-host service model.
+# systemd **user** service -- a per-host local coordinator, matching
+# agent-bridge's per-host service model. It binds loopback 127.0.0.1:9330 on a
+# host; a WSL guest binds 9331 (preferred+1) because it shares the Windows
+# host's loopback under mirrored networking -- mirroring agent-bridge's
+# 9280/9281 split.
 #
 # Usage:
 #   bash scripts/install.sh install        # venv + binstub + service + pivot
@@ -67,6 +70,17 @@ STUB="$LOCAL_BIN/agent-dispatch"
 SYSTEMD_UNIT="agent-dispatch.service"
 UNIT_DIR="$HOME/.config/systemd/user"
 ENV_FILE="$INSTALL_DIR/service.env"
+
+# Effective coordinator port. A host uses 9330; only a WSL guest (which shares
+# the Windows host's loopback under mirrored networking) uses 9331 -- matching
+# agent-bridge's 9280/9281 split and agent_dispatch.config.default_port().
+# Discriminator: "am I a WSL guest?", not "am I non-Windows?" (bare-metal Linux
+# stays on 9330).
+if [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; then
+    AD_PORT=9331
+else
+    AD_PORT=9330
+fi
 
 # === install-contract:v3 source-kind -- keep byte-identical across plugins ===
 _source_kind() {
@@ -280,10 +294,10 @@ _install_service() {
     fi
     mkdir -p "$UNIT_DIR"
     if [[ ! -f "$ENV_FILE" ]]; then
-        cat > "$ENV_FILE" << 'ENVEOF'
-# agent-dispatch coordinator service environment (edit + `systemctl --user restart agent-dispatch`)
+        cat > "$ENV_FILE" << ENVEOF
+# agent-dispatch coordinator service environment (edit + 'systemctl --user restart agent-dispatch')
 AGENT_DISPATCH_HOST=127.0.0.1
-AGENT_DISPATCH_PORT=9330
+AGENT_DISPATCH_PORT=$AD_PORT
 # AGENT_DISPATCH_DB=%h/.agent-dispatch/tasks.db   # default; uncomment to override
 # AGENT_DISPATCH_TOKEN=                            # set to require bearer auth
 ENVEOF

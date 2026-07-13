@@ -228,7 +228,7 @@ ruff check .
 Run the per-host coordinator (loopback by default), then drive it with the CLI:
 
 ```bash
-agent-dispatch serve                     # binds 127.0.0.1:9330 (AGENT_DISPATCH_* to override)
+agent-dispatch serve                     # binds 127.0.0.1:9330 on a host, 9331 on a WSL guest (AGENT_DISPATCH_* to override)
 
 # from any agent/producer (AGENT_DISPATCH_URL points at the coordinator):
 agent-dispatch create "Add narration track" --require logger --dedup-key seg42
