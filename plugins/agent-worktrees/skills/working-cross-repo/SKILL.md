@@ -74,6 +74,16 @@ Always read the repo's `CONTRIBUTING.md` / `AGENTS.md` and its narrative
 - **not available on this machine** (per `locus.machines`) -- do **not**
   blind-clone. Follow the locus: delegate to a machine that has it.
 
+> **Mind cross-repo plan/effort state on a venue.** When you delegate to a
+> CodeSpace/container agent but the task tracks against a **plan, effort, or spec
+> doc that lives in a *different* repo** than the one on the venue, the on-venue
+> agent **cannot see it** unless that repo is *also* materialized there
+> (`/workspaces/<repo>` by convention). Don't point the agent at a path that
+> isn't present: either ensure the doc's repo is on the venue and name its
+> `/workspaces/<repo>` path, or **relay the needed context inline in the dispatch
+> prompt and have the agent report results back** for you (the host) to record.
+> Your control-plane's own dispatch skill owns the concrete host↔venue interop.
+
 ### 3. Prefer DELEGATION over reaching across machines
 
 If the repo has an owning agent (a same-machine agent-bridge agent, another
