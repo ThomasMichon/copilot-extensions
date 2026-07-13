@@ -628,6 +628,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         # and syncs it forward on reconnect. Needs the relay up for git auth.
         if not args.no_relay:
             await _provision_dotfiles(manager, args.name, config)
+            await _provision_harness(manager, args.name, config)
 
         # Register CodeSpace-scoped plugins (the CodeSpace-scoped axis) via BOTH
         # lanes: (1) the CodeSpace user settings so they load for interactive /
@@ -819,6 +820,43 @@ async def _provision_dotfiles(manager, name: str, config) -> None:
             )
     except Exception as exc:
         log.warning("Dotfiles provisioning on %s failed: %s", name, exc)
+
+
+async def _provision_harness(manager, name: str, config) -> None:
+    """Ensure the configured control-plane *harness* checkout is present +
+    current on a venue at ``config.harness_dir``.
+
+    The harness analogue of :func:`_provision_dotfiles`, kept SEPARATE from the
+    dotfiles shim. **Opt-in:** only runs when ``defaults.harness_repo`` is set;
+    unset by default, so by default NO harness is placed on the venue and the
+    local control-plane agent owns effort / vision updates. Clone-if-absent +
+    sync-forward on the default branch (no ``install.sh`` -- the harness is
+    referenced in place, not installed); a parked feature branch / dirty tree is
+    never touched. Best-effort and idempotent: logs a warning, never raises.
+    """
+    if not config.harness_repo:
+        return
+
+    from .provision import build_harness_command
+
+    try:
+        command = build_harness_command(
+            config.harness_repo, config.harness_dir, config.credentials.relay_port,
+        )
+        # Login shell, same rationale as the dotfiles clone: the harness clone
+        # authenticates to GitHub via the CodeSpace's own credential helper,
+        # which needs the platform env only a login shell loads.
+        login_command = f"bash -l -c {shlex.quote(command)}"
+        result = await manager.exec_command(name, login_command, timeout=900.0)
+        if result.exit_code == 0:
+            log.debug("Harness provisioned on %s", name)
+        else:
+            log.warning(
+                "Harness provisioning on %s exited %s: %s",
+                name, result.exit_code, result.stderr.strip(),
+            )
+    except Exception as exc:
+        log.warning("Harness provisioning on %s failed: %s", name, exc)
 
 
 async def _register_codespace_plugins(
@@ -1997,6 +2035,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
         await manager.ensure_connected(info.name, source, port_forwards)
         await _provision_relay_helpers(manager, info.name)
         await _provision_dotfiles(manager, info.name, config)
+        await _provision_harness(manager, info.name, config)
         await _provision_repo_hooks(
             manager, info.name, config, args.repo, include_on_create=True,
         )

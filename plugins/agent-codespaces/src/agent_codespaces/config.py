@@ -30,6 +30,16 @@ CONFIG_FILENAME = "codespaces.yaml"
 # resolver share); ``provision`` re-exports it for back-compat.
 DOTFILES_DIR = "/workspaces/.codespaces/.persistedshare/dotfiles"
 
+# Standard location the control-plane *harness* checkout is materialized at on a
+# venue -- kept DISTINCT from the ``DOTFILES_DIR`` housekeeping shim above. The
+# harness carries effort / vision state; the dotfiles repo is just the
+# GitHub-dotfiles bootstrap. Opt-in: the harness is only placed on a venue when
+# ``defaults.harness_repo`` is set (see ``_provision_harness``); unset by
+# default, so by default there is NO on-venue harness and the local
+# control-plane agent owns effort updates. ``defaults.harness_dir`` overrides
+# this generic default path.
+HARNESS_DIR = "/workspaces/harness"
+
 
 def ensure_runtime_dir() -> None:
     """Create the runtime directory (~/.agent-codespaces) if it is absent."""
@@ -181,6 +191,18 @@ class CodespacesConfig:
     default_location: str = "EastUs"
     dotfiles_repo: str | None = None
     ssh_user: str = "vscode"
+
+    # Control-plane *harness* repo (the repo that carries effort / vision
+    # state), kept SEPARATE from ``dotfiles_repo`` (the GitHub-dotfiles
+    # housekeeping shim). When set, the harness is cloned/synced onto the venue
+    # at ``harness_dir`` on connect (see ``_provision_harness``) so an on-venue
+    # agent can reference effort / vision state locally. Unset by default -> the
+    # harness is NOT put on the venue; the local control-plane agent manages
+    # effort updates. This decouples "the harness" from "the dotfiles shim":
+    # where the two were once the same repo (so the dotfiles clone doubled as
+    # the harness), they are now independent.
+    harness_repo: str | None = None
+    harness_dir: str = HARNESS_DIR
 
     # Fallback devcontainer config path used when a repo exposes more than one
     # discoverable ``devcontainer.json`` and no per-repo ``devcontainer_path``
@@ -507,6 +529,12 @@ def load_merged_config() -> CodespacesConfig:
             )
             merged.dotfiles_repo = defaults.get(
                 "dotfiles_repo", merged.dotfiles_repo
+            )
+            merged.harness_repo = defaults.get(
+                "harness_repo", merged.harness_repo
+            )
+            merged.harness_dir = defaults.get(
+                "harness_dir", merged.harness_dir
             )
             merged.ssh_user = defaults.get(
                 "ssh_user", merged.ssh_user

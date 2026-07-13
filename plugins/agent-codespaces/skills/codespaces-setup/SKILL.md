@@ -139,6 +139,33 @@ find and update the dotfiles repo as a good citizen:
    how to test a change on a CodeSpace), so future sessions edit it knowingly
    rather than guessing.
 
+### 1c. (Optional) Declare a separate control-plane *harness* repo
+
+`dotfiles_repo` above is the GitHub-dotfiles **shim** (the account-wide repo with
+`install.sh`, cloned to `/workspaces/.codespaces/.persistedshare/dotfiles`). It is
+**distinct** from your control-plane **harness** — the repo that carries your
+effort / vision / planning state. Historically the two were the same repo, so the
+dotfiles clone doubled as the harness; if you've split them (a renamed harness +
+a minimal dotfiles shim), name the harness separately:
+
+```yaml
+defaults:
+  harness_repo: <your-org>/<harness>     # the repo carrying your effort/vision state
+  harness_dir: /workspaces/harness       # optional; this is the default
+```
+
+- **Opt-in / default OFF.** With `harness_repo` **unset** (the default), **no
+  harness is placed on a venue** — the *local* control-plane agent manages effort
+  updates, and the on-venue agent works the product repo directly (no extra
+  checkout, no game-of-telephone).
+- When **set**, connect-time housekeeping clones/ff-syncs the harness to
+  `harness_dir` (over the credential relay) so an on-venue agent can reference
+  effort/vision state locally. Unlike the dotfiles shim, **no `install.sh` is
+  run** — the harness is referenced in place, not installed. A parked feature
+  branch / dirty tree is never touched.
+- This is purely additive: it does **not** change the dotfiles bootstrap, and
+  both can be set independently.
+
 ### 2. Adopt the repo
 
 ```bash
@@ -166,6 +193,8 @@ agent-codespaces config show
 | `machine_type` | string | `largePremiumLinux` | Default VM size for `gh codespace create` |
 | `location` | string | `EastUs` | Default Azure region |
 | `dotfiles_repo` | string | -- | Your **account-wide** dotfiles repo (the single repo GitHub clones into every CodeSpace; set at `github.com/settings/codespaces`). Records the choice so connect-time housekeeping finds it — GitHub has no API to read it. See "Declare your dotfiles repo" above. Not per-repo. |
+| `harness_repo` | string | -- | Optional control-plane **harness** repo (effort/vision state), **distinct** from `dotfiles_repo`. When set, cloned/ff-synced to `harness_dir` on connect (no `install.sh`). **Unset = OFF** → no on-venue harness; the local agent owns effort updates. See "Declare a separate control-plane harness repo" above. |
+| `harness_dir` | string | `/workspaces/harness` | Venue path the `harness_repo` is materialized at (kept separate from the dotfiles shim path). Only used when `harness_repo` is set. |
 | `ssh_user` | string | `vscode` | SSH user on CodeSpaces |
 | `devcontainer_path` | string | `.devcontainer/devcontainer.json` | Fallback devcontainer config, used **only** when a repo exposes more than one discoverable `devcontainer.json` (otherwise `gh codespace create` prompts and hard-fails headless). Single-devcontainer repos are unaffected — the flag is passed only when there are multiple. Override per-repo (`repos.<repo>.devcontainer_path`) or per-create (`--devcontainer-path`). |
 | `workspace_folder` | string | -- | **Global** workspace root applied to every CodeSpace (e.g., `/workspaces/<your-repo>`). Used to `cd` before launching Copilot, preventing CWD race conditions during cold starts. When you adopt more than one CodeSpaces repo, prefer per-repo `repos.<repo>.workspace_repo`/`workspace_folder` instead (see `repos`). |

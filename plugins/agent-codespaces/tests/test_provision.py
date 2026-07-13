@@ -163,3 +163,52 @@ class TestBuildDotfilesCommand:
         cmd = build_dotfiles_command("acme/dotfiles", 9857)
         assert 'rm -rf "$df"' in cmd
         assert "partial non-git dir" in cmd
+
+
+class TestBuildHarnessCommand:
+    def _cmd(self, repo="acme/harness", target="/workspaces/harness", port=9857):
+        from agent_codespaces.provision import build_harness_command
+
+        return build_harness_command(repo, target, port)
+
+    def test_clones_into_harness_dir_when_absent(self) -> None:
+        cmd = self._cmd()
+        assert "https://github.com/acme/harness" in cmd
+        assert "/workspaces/harness" in cmd
+        assert "git clone --depth 1" in cmd
+        # kept separate from the dotfiles shim path
+        assert "/workspaces/.codespaces/.persistedshare/dotfiles" not in cmd
+
+    def test_never_runs_install_sh(self) -> None:
+        # the harness is referenced in place, not installed
+        cmd = self._cmd()
+        assert "install.sh" not in cmd
+
+    def test_uses_harness_label_not_dotfiles(self) -> None:
+        cmd = self._cmd()
+        assert "[harness]" in cmd
+        assert "[dotfiles]" not in cmd
+
+    def test_sets_relay_env_and_noninteractive_git(self) -> None:
+        cmd = self._cmd(port=1234)
+        assert "LC_GIT_CREDENTIAL_RELAY=1234" in cmd
+        assert "GIT_TERMINAL_PROMPT=0" in cmd
+
+    def test_syncs_forward_only_on_clean_default_branch(self) -> None:
+        cmd = self._cmd()
+        assert "merge --ff-only" in cmd
+        assert "NOT syncing" in cmd
+        assert "status --porcelain" in cmd
+
+    def test_respects_custom_harness_dir(self) -> None:
+        cmd = self._cmd(target="/workspaces/custom-harness")
+        assert "/workspaces/custom-harness" in cmd
+
+    def test_repo_is_shell_quoted(self) -> None:
+        cmd = self._cmd(repo="acme/c;rm -rf")
+        assert "'https://github.com/acme/c;rm -rf'" in cmd
+
+    def test_clone_failure_exits_nonzero(self) -> None:
+        cmd = self._cmd()
+        assert 'echo "[harness] clone FAILED" >&2' in cmd
+        assert "exit 1" in cmd
