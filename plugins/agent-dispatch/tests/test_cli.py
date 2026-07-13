@@ -534,3 +534,27 @@ def test_peer_browse_degrades_when_ssh_unavailable(monkeypatch, capsys):
     args = build_parser().parse_args(["inbox", "--machine", "borealis"])
     assert args.func(args) == 2
     assert "unavailable" in capsys.readouterr().err
+
+
+def test_peer_browse_surfaces_actionable_diagnosis_on_127(monkeypatch, capsys):
+    import types
+
+    from agent_dispatch import remote_dispatch
+
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+
+    def fake_browse(machine, argv, **kw):
+        return types.SimpleNamespace(
+            returncode=127, stdout="", stderr="bash: agent-dispatch: command not found\n"
+        )
+
+    monkeypatch.setattr(remote_dispatch, "browse_remote", fake_browse)
+
+    args = build_parser().parse_args(["inbox", "--machine", "wheatley"])
+    rc = args.func(args)
+    assert rc == 127
+    err = capsys.readouterr().err
+    assert "wheatley" in err
+    assert "not installed" in err
+    # The raw remote line is not dumped verbatim.
+    assert "command not found" not in err
