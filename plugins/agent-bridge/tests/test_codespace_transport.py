@@ -131,6 +131,28 @@ def test_parse_codespace_target_recognizes_shape():
     assert parsed["name"] == "plugin-propagation-test-v467"
     assert parsed["repo"] == "odsp-microsoft/odsp-web-codespaces"
     assert parsed["acp_command"].startswith("cd /workspaces/odsp-web")
+    # The ACP session cwd is parsed from the leading `cd` so copilot's tools run
+    # in the workspace checkout, not /home/<user> (regression: agent ran blind).
+    assert parsed["workspace_folder"] == "/workspaces/odsp-web"
+
+
+def test_workspace_folder_from_acp_command():
+    from agent_bridge.session_host.codespace_transport import (
+        workspace_folder_from_acp_command,
+    )
+
+    assert (
+        workspace_folder_from_acp_command("cd /workspaces/odsp-web && copilot --acp")
+        == "/workspaces/odsp-web"
+    )
+    # Env-expanded fallback (no static path) -> None, so the caller keeps its
+    # default cwd rather than passing an unresolved shell expression to ACP.
+    assert workspace_folder_from_acp_command(
+        'cd "${CODESPACE_VSCODE_FOLDER:-.}" && copilot --acp'
+    ) is None
+    # No cd prefix at all.
+    assert workspace_folder_from_acp_command("copilot --acp --stdio") is None
+    assert workspace_folder_from_acp_command("") is None
 
 
 def test_parse_codespace_target_rejects_non_codespace():

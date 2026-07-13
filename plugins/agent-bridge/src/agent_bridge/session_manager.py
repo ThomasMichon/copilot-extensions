@@ -1030,7 +1030,7 @@ class SessionManager:
                     ),
                     timeout=self._timeouts.session_start,
                 )
-                session_cwd = target.cwd or _default_cwd(target)
+                session_cwd = remote_cwd or target.cwd or _default_cwd(target)
                 acp_sid = await asyncio.wait_for(
                     client.new_session(cwd=session_cwd, mcp_servers=mcp_servers),
                     timeout=self._timeouts.session_start,
@@ -1863,6 +1863,12 @@ class SessionManager:
                 # relay prelude prepended); copilot inherits the host's stdio pipe
                 # as fd 0/1 and its exit ends the shell (child-liveness tracks it).
                 remote_argv = ["bash", "-lc", relay_prelude + cs_target["acp_command"]]
+                # Copilot runs its tools from the ACP session cwd, so it must be
+                # the CodeSpace workspace checkout (e.g. /workspaces/odsp-web) --
+                # NOT the _default_cwd() /home/<user> fallback, or the agent works
+                # blind with no repo in view. Prefer the structured provider
+                # workspace_folder; else the cd-target parsed from acp_command.
+                remote_cwd = cs_target.get("workspace_folder") or None
                 client, acp_sid = await self._connect_via_session_host(
                     target,
                     tracker=tracker,
@@ -1872,7 +1878,7 @@ class SessionManager:
                     mcp_servers=mcp_servers,
                     spawner=cs_spawner,
                     remote_child_argv=remote_argv,
-                    remote_cwd=None,
+                    remote_cwd=remote_cwd,
                 )
             else:
                 # Spawn the subprocess (local/SSH/command). Emits per-stage

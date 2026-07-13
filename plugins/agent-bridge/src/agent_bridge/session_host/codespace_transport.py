@@ -111,14 +111,48 @@ class CodeSpaceTransport:
         return []
 
 
+def workspace_folder_from_acp_command(acp_command: str) -> str | None:
+    """Extract the literal target dir of a leading ``cd <dir> && …`` clause.
+
+    The remote ACP launch string is typically ``cd /workspaces/<repo> && copilot
+    --acp --stdio`` (see ``agent_codespaces.config.effective_acp_command_for``).
+    Copilot uses the ACP ``session/new`` ``cwd`` as the working directory its
+    tools run from -- **not** just the process cwd the ``cd`` sets -- so the
+    frontend must pass this same absolute path as the session cwd, or the agent
+    operates from ``/home/<user>`` with no repo checkout in view.
+
+    Returns the absolute POSIX path, or ``None`` when the command has no literal
+    ``cd`` prefix (e.g. the env-expanded ``cd "${CODESPACE_VSCODE_FOLDER:-…}"``
+    fallback, which can't be resolved host-side).
+    """
+    import shlex
+
+    s = (acp_command or "").strip()
+    if not s.startswith("cd "):
+        return None
+    clause = s.split("&&", 1)[0].strip()  # "cd /workspaces/odsp-web"
+    try:
+        parts = shlex.split(clause)
+    except ValueError:
+        return None
+    if len(parts) < 2:
+        return None
+    target = parts[1]
+    # Only a literal absolute POSIX path is usable; skip ${ENV} expansions.
+    return target if target.startswith("/") else None
+
+
 def parse_codespace_target(spawn_command: list[str]) -> dict | None:
     """Recognize a codespace command-target from its ``spawn_command`` shape.
 
     ``agent-codespaces``'s bridge provider registers each CodeSpace as a command
     agent: ``… agent_codespaces ssh --stdio <name> --repo <repo> --remote-cmd
-    <acp_command>``. This extracts ``{name, repo, acp_command}`` so the daemon can
-    route the agent through the :class:`CodeSpaceSpawner` (Session-Host mode)
-    instead of the front-owns-stdio path -- **without** a provider-API change.
+    <acp_command>``. This extracts ``{name, repo, acp_command, workspace_folder}``
+    so the daemon can route the agent through the :class:`CodeSpaceSpawner`
+    (Session-Host mode) instead of the front-owns-stdio path -- **without** a
+    provider-API change. ``workspace_folder`` is the ``cd`` target parsed from
+    ``acp_command`` (used as the ACP session cwd; see
+    :func:`workspace_folder_from_acp_command`).
     Returns ``None`` for any command that is not a codespace stdio launch.
 
     (Structured provider metadata -- a first-class ``codespace`` block on the
@@ -156,6 +190,7 @@ def parse_codespace_target(spawn_command: list[str]) -> dict | None:
         "name": name,
         "repo": _opt("--repo") or "",
         "acp_command": acp_command,
+        "workspace_folder": workspace_folder_from_acp_command(acp_command),
     }
 
 
