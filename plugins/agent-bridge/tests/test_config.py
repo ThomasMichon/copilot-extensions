@@ -89,6 +89,43 @@ class TestMigrateConfig:
         migrated = migrate_config(load_config())
         assert migrated.session_host_enabled is True
 
+    def test_idle_reap_default_armed(self, config_home):
+        # The idle-session reaper is armed by default now (#1826 complement to
+        # Session Hosts being default-on).
+        assert ServiceConfig().idle_reap_ttl_seconds == 600
+        assert ServiceConfig().idle_reap_sweep_seconds == 120
+
+    def test_idle_reap_flips_stale_zero_to_600_once(self, config_home):
+        from agent_bridge.config import migrate_config
+
+        # A machine still carrying the OLD explicit disabled value...
+        save_config(ServiceConfig(idle_reap_ttl_seconds=0))
+        migrated = migrate_config(load_config())
+        assert migrated.idle_reap_ttl_seconds == 600
+        # ...persisted...
+        assert load_config().idle_reap_ttl_seconds == 600
+        # ...and its own marker is written.
+        assert (config_home / ".migrations" / "idle_reap_default_on").exists()
+
+    def test_idle_reap_respects_opt_out_after_marker(self, config_home):
+        from agent_bridge.config import migrate_config
+
+        # Marker already present -> a deliberate 0 (opt-out) sticks.
+        (config_home / ".migrations").mkdir(parents=True)
+        (config_home / ".migrations" / "idle_reap_default_on").write_text("applied\n")
+        save_config(ServiceConfig(idle_reap_ttl_seconds=0))
+        migrated = migrate_config(load_config())
+        assert migrated.idle_reap_ttl_seconds == 0
+        assert load_config().idle_reap_ttl_seconds == 0
+
+    def test_idle_reap_idempotent_leaves_custom_untouched(self, config_home):
+        from agent_bridge.config import migrate_config
+
+        # A non-zero value (default or custom) is never touched by the migration.
+        save_config(ServiceConfig(idle_reap_ttl_seconds=300))
+        migrated = migrate_config(load_config())
+        assert migrated.idle_reap_ttl_seconds == 300
+
 
 class TestAdoptTopology:
     def test_auto_discovers_machines_not_agents(self, config_home, fake_repo):

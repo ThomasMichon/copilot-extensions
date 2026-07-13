@@ -549,7 +549,7 @@ class ServiceConfig(BaseModel):
         "frontend reattaches. Only meaningful when session_host_enabled is True.",
     )
     idle_reap_ttl_seconds: int = Field(
-        default=0,
+        default=600,
         description="Idle-session reaper TTL (#1826, ownership inversion). When "
         "> 0, a session that is IDLE (the agent reached its own stop, not "
         "mid-turn), has ZERO active subscribers (no SSE stream / front watching "
@@ -561,11 +561,14 @@ class ServiceConfig(BaseModel):
         "reasons. Never touches a running/mid-turn session (goal 1) nor one with "
         "a live subscriber or active background sub-agents. Complementary to "
         "session_host_stale_reap_seconds (which bounds a never-idle stranded "
-        "old-version host). 0 disables (the default). Only meaningful when "
-        "session_host_enabled is True.",
+        "old-version host). Default 600s: armed by default so an idle Session "
+        "Host child can't leak indefinitely if a consumer crashes/forgets to "
+        "DELETE its session -- the natural complement to session_host_enabled "
+        "being default-on. 0 disables. Only meaningful when session_host_enabled "
+        "is True.",
     )
     idle_reap_sweep_seconds: int = Field(
-        default=300,
+        default=120,
         description="How often the idle-session reaper sweep runs, in seconds "
         "(#1826). Clamped to a 30s floor. Only meaningful when "
         "session_host_enabled and idle_reap_ttl_seconds are both > 0.",
