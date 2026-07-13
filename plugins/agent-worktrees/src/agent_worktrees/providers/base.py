@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from ..pr_contract import PRSnapshot
+    from ..pr_contract import PRSnapshot, ThreadsResult
 
 
 class ProviderError(RuntimeError):
@@ -120,8 +120,50 @@ class PRProvider(Protocol):
     ) -> str:
         """Attach ``label`` to an existing PR; return "" on success.
 
-        The merge-consent primitive behind ``pr-merge`` (applying the facility
-        ``automerge_label``).  Returns a human-readable error string on failure.
+        A label-apply primitive.  On the label-based providers (gitea/github)
+        it is the mechanism behind :meth:`request_auto_complete`; on Azure DevOps
+        auto-complete is native and does not go through a label.
+        """
+        ...
+
+    def request_auto_complete(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        automerge_label: str = "", squash: bool = True,
+        delete_source_branch: bool = True, bypass_policy: bool = False,
+        bypass_reason: str = "",
+    ) -> str:
+        """Request that the PR **auto-complete** (merge when the gate is satisfied).
+
+        The first-class "signal merge consent" primitive behind ``pr-merge``.
+        *How* a provider honors it is an implementation detail:
+
+        - **gitea / github** apply the configured ``automerge_label`` -- the
+          review gate watches the label and merges. (The ``squash`` /
+          ``delete_source_branch`` / ``bypass_*`` options do not apply.)
+        - **Azure DevOps** sets native auto-complete on the PR (``--auto-complete``
+          with the given squash / delete-source-branch / policy-bypass options);
+          there is no label.
+
+        Returns "" on success, or a human-readable error string.
+        """
+        ...
+
+    def get_comment_threads(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> ThreadsResult:
+        """Return the PR's review comment threads (first-class across providers).
+
+        ``ThreadsResult.supported`` is False when the provider cannot read them.
+        """
+        ...
+
+    def resolve_threads(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        thread_ids: tuple[int, ...] = (),
+    ) -> str:
+        """Mark active threads resolved (all active, or the given ``thread_ids``).
+
+        Returns "" on success, or a human-readable error string.
         """
         ...
 
@@ -136,6 +178,15 @@ def _unsupported_snapshot(name: str) -> PRSnapshot:
     raise ProviderError(
         f"Provider '{name}' does not support snapshot reads (pr-watch/pr-status "
         "need a provider with get_snapshot; only 'gitea' implements it today)."
+    )
+
+
+def _unsupported_threads(name: str) -> ThreadsResult:
+    from ..pr_contract import ThreadsResult as _TR
+
+    return _TR(
+        supported=False,
+        error=f"Provider '{name}' does not support comment-thread reads.",
     )
 
 

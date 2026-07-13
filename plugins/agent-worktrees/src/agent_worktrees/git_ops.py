@@ -672,6 +672,7 @@ def remote_slug(remote: str, *, cwd: str | Path) -> str | None:
 
         https://host/gitea/tmichon/aperture-labs.git -> tmichon/aperture-labs
         git@github.com:owner/repo.git                -> owner/repo
+        https://{org}.visualstudio.com/{proj}/_git/{repo} -> {proj}/{repo}
 
     This is the value a PR provider needs (the API is keyed on owner/name),
     as opposed to the local project name.
@@ -687,6 +688,16 @@ def remote_slug(remote: str, *, cwd: str | Path) -> str | None:
     parts = [p for p in re.split(r"[/:]", s) if p]
     if len(parts) < 2:
         return None
+    # Azure DevOps https remotes carry a ``_git`` segment:
+    #   https://{org}.visualstudio.com/{project}/_git/{repo}
+    #   https://dev.azure.com/{org}/{project}/_git/{repo}
+    # The provider API is keyed on ``{project}/{repo}`` -- the segment before
+    # ``_git`` is the project, the one after is the repo. (ADO ssh remotes use
+    # ``v3/{org}/{project}/{repo}`` with no ``_git`` and resolve fine below.)
+    if "_git" in parts:
+        gi = parts.index("_git")
+        if 0 < gi < len(parts) - 1:
+            return f"{parts[gi - 1]}/{parts[gi + 1]}"
     return f"{parts[-2]}/{parts[-1]}"
 
 

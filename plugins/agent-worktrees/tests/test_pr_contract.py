@@ -319,3 +319,46 @@ class TestClassifyPRFlow:
         f = pc.classify_pr_flow(enabled=True, required=False, automerge_label="")
         assert f.profile == pc.PROFILE_PR_HUMAN_MERGE
         assert f.requires_pr is False
+
+
+# ---------------------------------------------------------------------------
+# approval_required knob (self-complete: eligible without an approval vote)
+# ---------------------------------------------------------------------------
+
+class TestApprovalRequired:
+    def test_no_reviews_requires_approval_by_default(self):
+        snap = pc.PRSnapshot(pr_state="open", mergeable=True, title="ok")
+        st = pc.classify_state(snap, automerge_label="auto-complete")
+        assert st.consent_action == "skip"
+        assert "not yet approved" in st.reason
+
+    def test_no_reviews_eligible_when_approval_not_required(self):
+        snap = pc.PRSnapshot(pr_state="open", mergeable=True, title="ok")
+        st = pc.classify_state(snap, automerge_label="auto-complete",
+                               approval_required=False)
+        assert st.consent_action == "apply"
+
+    def test_changes_requested_still_blocks_without_approval(self):
+        snap = pc.PRSnapshot(pr_state="open", mergeable=True,
+                             reviews=(_rev(1, "CHANGES_REQUESTED"),))
+        st = pc.classify_state(snap, automerge_label="auto-complete",
+                               approval_required=False)
+        assert st.consent_action == "skip"
+        assert "changes requested" in st.reason
+
+    def test_approved_eligible_regardless(self):
+        snap = pc.PRSnapshot(pr_state="open", mergeable=True,
+                             reviews=(_rev(1, "APPROVED"),))
+        st = pc.classify_state(snap, automerge_label="auto-complete")
+        assert st.consent_action == "apply"
+
+
+class TestThreadTypes:
+    def test_thread_active_and_result_helpers(self):
+        active = pc.CommentThread(id=1, status="active",
+                                  comments=(pc.Comment(author="a", content="x"),))
+        resolved = pc.CommentThread(id=2, status="fixed")
+        res = pc.ThreadsResult(threads=(active, resolved))
+        assert active.is_active is True and resolved.is_active is False
+        assert [t.id for t in res.active] == [1]
+        assert res.supported is True

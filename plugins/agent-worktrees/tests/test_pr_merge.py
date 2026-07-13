@@ -60,6 +60,16 @@ class _FakeProvider:
         self.added.append((repo, number, label))
         return self._add_error
 
+    def request_auto_complete(
+        self, repo, number, *, api_base="", token=None, automerge_label="",
+        squash=True, delete_source_branch=True, bypass_policy=False,
+        bypass_reason="",
+    ):
+        # The label-apply is the gitea/github implementation of "request
+        # auto-complete"; delegate so subclasses overriding add_label still work.
+        return self.add_label(repo, number, automerge_label, api_base=api_base,
+                              token=token)
+
     def list_open_pulls(self, repo, *, api_base="", token=None):
         return self._open
 
@@ -278,7 +288,16 @@ class TestUnsupportedProviders:
         err = get_provider("github").add_label("o/r", 1, "x", token="t")
         assert "not supported" in err
 
-    def test_ado_list_open_pulls_unsupported(self):
-        from agent_worktrees.providers import get_provider
-        with pytest.raises(ProviderError, match="does not support"):
-            get_provider("azure-devops").list_open_pulls("o/r", token="t")
+    def test_ado_list_open_pulls_supported(self, monkeypatch):
+        # ADO now supports the sweep list via `az repos pr list`.
+        import subprocess
+
+        from agent_worktrees.providers import azure_devops as azure
+        monkeypatch.setattr(
+            azure, "run_cli",
+            lambda args, **kw: subprocess.CompletedProcess(
+                args=[], returncode=0,
+                stdout='[{"pullRequestId": 5}, {"pullRequestId": 8}]', stderr=""))
+        nums = azure.AzureDevOpsProvider().list_open_pulls(
+            "proj/repo", api_base="https://dev.azure.com/org", token="t")
+        assert nums == (5, 8)

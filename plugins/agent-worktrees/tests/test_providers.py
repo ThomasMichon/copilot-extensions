@@ -1067,3 +1067,236 @@ class TestRerunAutoOpen:
         assert len(rec.prs) == 2
         assert rec.prs[0].number == n1 and rec.prs[0].state == "merged"
         assert rec.prs[1].number == r2["number"] and rec.prs[1].state == "open"
+
+
+# ---------------------------------------------------------------------------
+# Azure DevOps: get_snapshot / request_auto_complete / list_open_pulls / threads
+# ---------------------------------------------------------------------------
+
+class TestAzureDevOpsCapabilities:
+    ORG = "https://dev.azure.com/org"
+
+    def _prov(self):
+        from agent_worktrees.providers import azure_devops as azure
+        return azure, azure.AzureDevOpsProvider()
+
+    def test_get_snapshot_maps_votes_and_mergestatus(self, monkeypatch):
+        azure, prov = self._prov()
+        show = {
+            "status": "active",
+            "mergeStatus": "succeeded",
+            "targetRefName": "refs/heads/main",
+            "isDraft": False,
+            "title": "My change",
+            "createdBy": {"displayName": "Author"},
+            "lastMergeSourceCommit": {"commitId": "abc123"},
+            "reviewers": [
+                {"displayName": "Approver", "vote": 10},
+                {"displayName": "Rejecter", "vote": -10},
+                {"displayName": "NoVote", "vote": 0},
+            ],
+        }
+        monkeypatch.setattr(azure, "run_cli",
+                            lambda args, **kw: _proc(stdout=json.dumps(show)))
+        snap = prov.get_snapshot("proj/repo", 5, api_base=self.ORG, token="t")
+        assert snap.pr_state == "open" and snap.merged is False
+        assert snap.mergeable is True
+        assert snap.base_ref == "main" and snap.head_sha == "abc123"
+        assert snap.author == "Author" and snap.title == "My change"
+        # 0-vote reviewer dropped; rejection sorts last (highest id) so it wins.
+        assert len(snap.reviews) == 2
+        from agent_worktrees.pr_contract import effective_verdict
+        assert effective_verdict(snap.reviews, snap.head_sha, snap.author) == \
+            "CHANGES_REQUESTED"
+
+    def test_get_snapshot_autocomplete_marker(self, monkeypatch):
+        azure, prov = self._prov()
+        show = {"status": "active", "mergeStatus": "queued",
+                "autoCompleteSetBy": {"id": "x"}, "reviewers": []}
+        monkeypatch.setattr(azure, "run_cli",
+                            lambda args, **kw: _proc(stdout=json.dumps(show)))
+        snap = prov.get_snapshot("proj/repo", 5, api_base=self.ORG, token="t")
+        assert "auto-complete" in snap.labels
+        assert snap.mergeable is None  # queued -> not yet known
+
+    def test_get_snapshot_completed_is_merged(self, monkeypatch):
+        azure, prov = self._prov()
+        monkeypatch.setattr(
+            azure, "run_cli",
+            lambda args, **kw: _proc(stdout=json.dumps(
+                {"status": "completed", "mergeStatus": "succeeded", "reviewers": []})))
+        snap = prov.get_snapshot("proj/repo", 5, api_base=self.ORG, token="t")
+        assert snap.merged is True and snap.pr_state == "closed"
+
+    def test_request_auto_complete_sets_native(self, monkeypatch):
+        azure, prov = self._prov()
+        captured = {}
+        monkeypatch.setattr(
+            azure, "run_cli",
+            lambda args, **kw: (captured.__setitem__("args", args),
+                                _proc(stdout="{}"))[1])
+        err = prov.request_auto_complete(
+            "proj/repo", 5, api_base=self.ORG, token="t",
+            automerge_label="auto-complete", squash=True,
+            delete_source_branch=True, bypass_policy=True, bypass_reason="self")
+        assert err == ""
+        a = captured["args"]
+        assert a[:4] == ["az", "repos", "pr", "update"]
+        assert a[a.index("--auto-complete") + 1] == "true"
+        assert a[a.index("--squash") + 1] == "true"
+        assert a[a.index("--delete-source-branch") + 1] == "true"
+        assert a[a.index("--bypass-policy") + 1] == "true"
+        assert a[a.index("--bypass-policy-reason") + 1] == "self"
+
+    def test_request_auto_complete_failure(self, monkeypatch):
+        azure, prov = self._prov()
+        monkeypatch.setattr(azure, "run_cli",
+                            lambda args, **kw: _proc(returncode=1, stderr="no perms"))
+        err = prov.request_auto_complete("proj/repo", 5, api_base=self.ORG, token="t")
+        assert "no perms" in err
+
+    def test_list_open_pulls(self, monkeypatch):
+        azure, prov = self._prov()
+        monkeypatch.setattr(
+            azure, "run_cli",
+            lambda args, **kw: _proc(stdout=json.dumps(
+                [{"pullRequestId": 3}, {"pullRequestId": 9}])))
+        assert prov.list_open_pulls("proj/repo", api_base=self.ORG, token="t") == (3, 9)
+
+    def test_get_comment_threads_filters_system(self, monkeypatch):
+        azure, prov = self._prov()
+        payload = {"value": [
+            {"id": 1, "status": "active", "threadContext": {"filePath": "/a.py"},
+             "comments": [
+                 {"author": {"displayName": "Rev"}, "content": "fix",
+                  "commentType": "text"},
+                 {"author": {"displayName": "sys"}, "content": "voted",
+                  "commentType": "system"}]},
+            {"id": 2, "status": "active",
+             "comments": [{"author": {"displayName": "sys"}, "content": "x",
+                           "commentType": "system"}]},
+            {"id": 3, "status": "fixed",
+             "comments": [{"author": {"displayName": "R"}, "content": "done",
+                           "commentType": "text"}]},
+        ]}
+        monkeypatch.setattr(azure, "run_cli",
+                            lambda args, **kw: _proc(stdout=json.dumps(payload) + "\n200"))
+        res = prov.get_comment_threads("proj/repo", 5, api_base=self.ORG, token="pat")
+        assert [t.id for t in res.threads] == [1, 3]
+        assert [t.id for t in res.active] == [1]
+        assert res.threads[0].comments[0].content == "fix"
+
+    def test_get_comment_threads_uses_aad_when_no_pat(self, monkeypatch):
+        azure, prov = self._prov()
+        payload = {"value": [{"id": 1, "status": "active",
+                              "comments": [{"author": {"displayName": "R"},
+                                            "content": "x", "commentType": "text"}]}]}
+
+        def fake(args, **kw):
+            if args[:2] == ["az", "account"]:
+                return _proc(stdout="aad-tok\n")
+            assert any("Bearer aad-tok" in a for a in args)
+            return _proc(stdout=json.dumps(payload) + "\n200")
+
+        monkeypatch.setattr(azure, "run_cli", fake)
+        res = prov.get_comment_threads("proj/repo", 5, api_base=self.ORG, token=None)
+        assert res.supported is True and [t.id for t in res.threads] == [1]
+
+    def test_resolve_threads_patches_closed(self, monkeypatch):
+        azure, prov = self._prov()
+        calls = []
+        monkeypatch.setattr(azure, "run_cli",
+                            lambda args, **kw: (calls.append(args), _proc(stdout="\n200"))[1])
+        err = prov.resolve_threads("proj/repo", 5, api_base=self.ORG, token="pat",
+                                   thread_ids=(11, 12))
+        assert err == "" and len(calls) == 2
+        payload = json.loads(calls[0][calls[0].index("-d") + 1])
+        assert payload == {"status": "closed"}
+
+
+class TestGiteaThreads:
+    def test_get_comment_threads(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+        prov = gitea.GiteaProvider()
+        reviews = [{"id": 7}]
+        comments = [{"user": {"login": "rev"}, "body": "please fix", "path": "a.py"}]
+
+        def fake_curl(method, url, token, *, payload=None):
+            if url.endswith("/reviews"):
+                return 200, json.dumps(reviews)
+            if "/reviews/7/comments" in url:
+                return 200, json.dumps(comments)
+            return 404, ""
+
+        monkeypatch.setattr(prov, "_curl", fake_curl)
+        res = prov.get_comment_threads("o/r", 3, api_base="https://h", token="t")
+        assert res.supported is True
+        assert [t.id for t in res.threads] == [7]
+        assert res.threads[0].status == "active"
+        assert res.threads[0].comments[0].content == "please fix"
+
+    def test_resolve_threads_reports_unsupported(self):
+        from agent_worktrees.providers import gitea
+        err = gitea.GiteaProvider().resolve_threads("o/r", 3, token="t")
+        assert "not exposed by the Gitea REST API" in err
+
+    def test_request_auto_complete_applies_label(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+        prov = gitea.GiteaProvider()
+        called = {}
+        monkeypatch.setattr(prov, "add_label",
+                            lambda repo, number, label, *, api_base="", token=None:
+                            (called.update(repo=repo, label=label), "")[1])
+        err = prov.request_auto_complete("o/r", 3, api_base="https://h", token="t",
+                                         automerge_label="auto-merge")
+        assert err == "" and called["label"] == "auto-merge"
+
+
+class TestGitHubThreads:
+    def test_request_auto_complete_edits_label(self, monkeypatch):
+        from agent_worktrees.providers import github
+        captured = {}
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.__setitem__("args", args), _proc())[1])
+        err = github.GitHubProvider().request_auto_complete(
+            "o/r", 3, automerge_label="auto-merge", token="t")
+        assert err == ""
+        a = captured["args"]
+        assert a[:3] == ["gh", "pr", "edit"]
+        assert a[a.index("--add-label") + 1] == "auto-merge"
+
+    def test_get_comment_threads_graphql(self, monkeypatch):
+        from agent_worktrees.providers import github
+        gql = {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [
+            {"id": "T1", "isResolved": False, "isOutdated": False, "path": "a.py",
+             "comments": {"nodes": [{"author": {"login": "rev"}, "body": "fix"}]}},
+            {"id": "T2", "isResolved": True, "path": "b.py",
+             "comments": {"nodes": [{"author": {"login": "rev"}, "body": "ok"}]}},
+        ]}}}}}
+        monkeypatch.setattr(github, "run_cli",
+                            lambda args, **kw: _proc(stdout=json.dumps(gql)))
+        res = github.GitHubProvider().get_comment_threads("o/r", 3, token="t")
+        assert res.supported is True
+        assert [t.status for t in res.threads] == ["active", "resolved"]
+        assert [t.id for t in res.active] == [1]
+
+    def test_resolve_threads_mutates_unresolved(self, monkeypatch):
+        from agent_worktrees.providers import github
+        gql = {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [
+            {"id": "T1", "isResolved": False,
+             "comments": {"nodes": [{"author": {"login": "r"}, "body": "x"}]}},
+            {"id": "T2", "isResolved": True,
+             "comments": {"nodes": [{"author": {"login": "r"}, "body": "y"}]}},
+        ]}}}}}
+        mutations = []
+
+        def fake(args, **kw):
+            if "resolveReviewThread" in " ".join(args):
+                mutations.append(args)
+                return _proc(stdout='{"data":{}}')
+            return _proc(stdout=json.dumps(gql))
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        err = github.GitHubProvider().resolve_threads("o/r", 3, token="t")
+        assert err == "" and len(mutations) == 1  # only the unresolved thread

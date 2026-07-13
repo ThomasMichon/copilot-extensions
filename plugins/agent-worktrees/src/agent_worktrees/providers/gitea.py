@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import time
 
-from ..pr_contract import PRSnapshot, Review
+from ..pr_contract import Comment, CommentThread, PRSnapshot, Review, ThreadsResult
 from .base import ProviderError, PRScope, PullResult, run_cli
 
 # HTTP statuses (plus the synthetic 0 = curl-level failure) worth retrying when
@@ -505,3 +505,109 @@ class GiteaProvider:
                 break
             page += 1
         return tuple(numbers)
+
+    def request_auto_complete(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        automerge_label: str = "", squash: bool = True,
+        delete_source_branch: bool = True, bypass_policy: bool = False,
+        bypass_reason: str = "",
+    ) -> str:
+        """Request auto-complete by applying the consent label (the Gitea way).
+
+        Gitea has no native auto-complete; the merge mechanism is the
+        ``automerge_label`` the review gate watches. The squash / delete-source /
+        bypass options do not apply here.
+        """
+        _ = (squash, delete_source_branch, bypass_policy, bypass_reason)
+        if not automerge_label:
+            return "gitea: no automerge_label bound to signal merge consent."
+        return self.add_label(repo, number, automerge_label, api_base=api_base, token=token)
+
+    def get_comment_threads(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> ThreadsResult:
+        """List PR review threads (one per Gitea review that carries comments).
+
+        Gitea's irritating detail: there is no first-class "thread" -- code
+        comments hang off reviews, so a review with code comments is treated as a
+        thread, resolved when its comments carry a ``resolver``.
+        """
+        if not token:
+            return ThreadsResult(
+                supported=False,
+                error="Gitea provider needs a token to read comment threads.",
+            )
+        try:
+            status, body = self._curl(
+                "GET", self._api(api_base, f"/repos/{repo}/pulls/{number}/reviews"),
+                token,
+            )
+        except ProviderError as exc:
+            return ThreadsResult(supported=True, error=str(exc))
+        if status != 200:
+            return ThreadsResult(
+                supported=True, error=f"gitea reviews GET returned HTTP {status}"
+            )
+        try:
+            reviews = json.loads(body) or []
+        except json.JSONDecodeError as exc:
+            return ThreadsResult(supported=True, error=f"bad reviews JSON: {exc}")
+        threads: list[CommentThread] = []
+        for rv in reviews:
+            if not isinstance(rv, dict) or rv.get("id") is None:
+                continue
+            rid = int(rv["id"])
+            try:
+                cstatus, cbody = self._curl(
+                    "GET",
+                    self._api(api_base,
+                              f"/repos/{repo}/pulls/{number}/reviews/{rid}/comments"),
+                    token,
+                )
+            except ProviderError:
+                continue
+            if cstatus != 200:
+                continue
+            try:
+                raw = json.loads(cbody) or []
+            except json.JSONDecodeError:
+                continue
+            comments = tuple(
+                Comment(
+                    author=str((c.get("user") or {}).get("login", "")),
+                    content=str(c.get("body", "")).strip(),
+                )
+                for c in raw
+                if isinstance(c, dict) and str(c.get("body", "")).strip()
+            )
+            if not comments:
+                continue
+            resolved = any(isinstance(c, dict) and c.get("resolver") for c in raw)
+            path = next(
+                (str(c.get("path", "")) for c in raw
+                 if isinstance(c, dict) and c.get("path")), "",
+            )
+            threads.append(
+                CommentThread(
+                    id=rid, status=("resolved" if resolved else "active"),
+                    file_path=path, comments=comments,
+                )
+            )
+        return ThreadsResult(threads=tuple(threads))
+
+    def resolve_threads(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        thread_ids: tuple[int, ...] = (),
+    ) -> str:
+        """Gitea exposes no programmatic conversation-resolve on its PR API.
+
+        The irritating gap: resolving a review conversation on Gitea is a UI-only
+        action (no stable REST endpoint), so this reports that rather than
+        pretending to resolve. Reading threads (:meth:`get_comment_threads`)
+        works; resolution is manual on Gitea.
+        """
+        _ = (repo, number, api_base, token, thread_ids)
+        return (
+            "gitea: resolving review conversations is not exposed by the Gitea "
+            "REST API (resolve them in the web UI)."
+        )

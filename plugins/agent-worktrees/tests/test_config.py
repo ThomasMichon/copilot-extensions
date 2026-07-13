@@ -148,6 +148,12 @@ class TestDataModels:
         pr = cfg.PRConfig()
         assert pr.enabled is False
         assert pr.provider == "gitea"
+        # Auto-complete completion defaults.
+        assert pr.approval_required is True
+        assert pr.squash is True
+        assert pr.delete_source_branch is True
+        assert pr.bypass_policy is False
+        assert pr.bypass_reason == ""
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +199,32 @@ class TestPRConfigParsing:
         assert pr.provider == "github"
         assert pr.strategy == "keep-alive"
         assert pr.branch_prefix == "pr"
+
+    def test_pr_autocomplete_block_parsed(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      required: true\n"
+            "      provider: azure-devops\n"
+            "      api_base: https://onedrive.visualstudio.com\n"
+            "      automerge_label: auto-complete\n"
+            "      approval_required: false\n"
+            "      bypass_policy: true\n"
+            "      bypass_reason: self-serve\n"
+            "      squash: true\n"
+            "      delete_source_branch: false\n",
+        )
+        conf = cfg.load_config(cfgfile)
+        pr = conf.repos["ext"].pr
+        assert pr.provider == "azure-devops"
+        assert pr.automerge_label == "auto-complete"
+        assert pr.approval_required is False
+        assert pr.bypass_policy is True
+        assert pr.bypass_reason == "self-serve"
+        assert pr.squash is True
+        assert pr.delete_source_branch is False
 
     def test_pr_required_parsed(self, tmp_path: Path):
         cfgfile = tmp_path / "config.yaml"

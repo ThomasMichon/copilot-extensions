@@ -157,6 +157,26 @@ class PRConfig:
     automerge_label: str = ""
     hold_labels: tuple[str, ...] = ()
     wip_title_prefixes: tuple[str, ...] = ()
+    # ── Auto-complete completion policy (consumed when pr-merge requests
+    # auto-complete). ``automerge_label`` is the abstract "merge consent /
+    # auto-complete requested" marker: gitea/github apply it as a real label;
+    # Azure DevOps has *native* auto-complete (no label) and emits the marker in
+    # a snapshot only once auto-complete is set. These knobs shape ADO's native
+    # completion and the eligibility gate:
+    #
+    # - ``approval_required`` -- must a PR be APPROVED before pr-merge requests
+    #   completion? True (default) preserves the review-gated shape. False suits
+    #   a self-complete repo (we own the merge): eligible when simply not
+    #   changes-requested (no approval vote needed).
+    # - ``squash`` / ``delete_source_branch`` -- ADO auto-complete options.
+    # - ``bypass_policy`` / ``bypass_reason`` -- complete PAST branch policies
+    #   (for a default branch whose policy never auto-satisfies for our own PRs,
+    #   e.g. a central governance status policy). ADO-only; ignored elsewhere.
+    approval_required: bool = True
+    squash: bool = True
+    delete_source_branch: bool = True
+    bypass_policy: bool = False
+    bypass_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -876,6 +896,11 @@ def _parse_pr(raw: Any) -> PRConfig:
         automerge_label=str(raw.get("automerge_label", "")).strip(),
         hold_labels=_str_tuple(raw.get("hold_labels", ())),
         wip_title_prefixes=_str_tuple(raw.get("wip_title_prefixes", ())),
+        approval_required=bool(raw.get("approval_required", True)),
+        squash=bool(raw.get("squash", True)),
+        delete_source_branch=bool(raw.get("delete_source_branch", True)),
+        bypass_policy=bool(raw.get("bypass_policy", False)),
+        bypass_reason=str(raw.get("bypass_reason", "")),
     )
 
 
