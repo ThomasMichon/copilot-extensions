@@ -576,7 +576,11 @@ def _open_via_provider(
         provider = providers.get_provider(prcfg.provider)
         token = providers.resolve_token(prcfg)
         pull = provider.create_pull(scope, token=token)
-    except providers.ProviderError as e:
+    except (providers.ProviderError, OSError) as e:
+        # A provider failure (or a spawn error that slipped past run_cli) must
+        # degrade to a recorded pr_open_error, never crash create-pr -- the
+        # feature branch is already pushed, so the agent can open the PR
+        # manually from the surfaced error.
         result["pr_open_error"] = str(e)
         result["pr_opened"] = False
         return
