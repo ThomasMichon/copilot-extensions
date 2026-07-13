@@ -470,3 +470,15 @@ def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatc
     assert "BRIEF-BODY" in capsys.readouterr().out
     assert client.get(tid)["status"] == Status.COMPLETED
 
+
+
+def test_focus_over_http(api):
+    r = api.post("/focus", json={"machine": "lambda-core", "worktree": "wt-1", "focus": "Phase 8"})
+    assert r.status_code == 200, r.text
+    assert r.json()["focus"] == "Phase 8"
+    listed = api.get("/focus").json()["focus"]
+    assert any(f["worktree"] == "wt-1" and f["focus"] == "Phase 8" for f in listed)
+    # latest-only overwrite
+    api.post("/focus", json={"machine": "lambda-core", "worktree": "wt-1", "focus": "Phase 9"})
+    listed2 = api.get("/focus", params={"machine": "lambda-core"}).json()["focus"]
+    assert next(f for f in listed2 if f["worktree"] == "wt-1")["focus"] == "Phase 9"

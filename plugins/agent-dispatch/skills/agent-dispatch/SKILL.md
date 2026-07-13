@@ -252,6 +252,21 @@ agent-dispatch progress <id> --phase "PR open" --summary "opened the PR" --pr pr
 agent-dispatch progress <id> --summary "stuck on a flaky test" --blocker "CI timeout"
 ```
 
+Set **this worktree's current focus** (for an operator or task-less worktree —
+the cockpit shows what each worktree is working on). Post it when you *start
+substantial work* and *change direction*, never on a timer:
+
+```bash
+agent-dispatch focus "driving live-session-messaging Phase 8 (multi-machine dispatch)"
+agent-dispatch focus            # show this worktree's current focus
+agent-dispatch focus --list     # every worktree's focus, freshest first
+```
+
+> `focus` resolves `machine/worktree` from the CWD (no id to type); it is
+> latest-only + hard-capped. It is the operator/task-less analogue of a
+> dispatched worker's `progress` (which is keyed to a task). See AGENTS.md
+> § Worktree Focus for when to post.
+
 > **`progress` is a *status beat*, not a chat log.** Emit **one** short line only
 > at real transitions -- a plan settled, implementation done, a PR opened, a
 > blocker hit -- never on a timer. The `--summary` is hard-capped and stored
