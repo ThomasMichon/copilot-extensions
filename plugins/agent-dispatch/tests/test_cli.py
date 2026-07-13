@@ -411,3 +411,42 @@ def test_consume_defer_complete_stops_at_started(monkeypatch, capsys):
     assert fake.transitions == ["approve", "claim", "start"]
     assert "complete" not in fake.transitions
     assert "the brief" in capsys.readouterr().out
+
+
+def test_parser_focus_positional_and_list():
+    a = build_parser().parse_args(["focus", "working on X"])
+    assert a.focus_text == "working on X" and a.list is False
+    b = build_parser().parse_args(["focus", "--list", "--machine", "borealis"])
+    assert b.list is True and b.machine == "borealis" and b.focus_text is None
+
+
+def test_focus_sets_resolved_worktree(monkeypatch):
+    from agent_dispatch import __main__, identity
+
+    seen = {}
+
+    class _C:
+        def set_focus(self, machine, worktree, focus):
+            seen.update(machine=machine, worktree=worktree, focus=focus)
+            return {"machine": machine, "worktree": worktree, "focus": focus}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
+    args = build_parser().parse_args(["focus", "driving Phase 8"])
+    assert args.func(args) == 0
+    assert seen == {"machine": "lambda-core", "worktree": "wt-7", "focus": "driving Phase 8"}
+
+
+def test_focus_without_identity_errors(monkeypatch, capsys):
+    from agent_dispatch import identity
+
+    monkeypatch.setattr(identity, "resolve_identity", lambda: (None, None))
+    args = build_parser().parse_args(["focus", "x"])
+    assert args.func(args) == 2
+    assert "could not resolve this worktree's identity" in capsys.readouterr().err

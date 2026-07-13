@@ -528,3 +528,42 @@ def test_sentinel_backfill_on_migration(tmp_path):
     q2 = RealTaskQueue(db)
     assert q2.get(t.id).repo == LEGACY_REPO
 
+
+
+# -- worktree focus ----------------------------------------------------------
+
+
+def test_set_and_list_focus(q):
+    q.set_focus("lambda-core", "wt-1", "working Phase 8", now=1000.0)
+    rows = q.list_focus()
+    assert len(rows) == 1
+    assert rows[0]["machine"] == "lambda-core"
+    assert rows[0]["worktree"] == "wt-1"
+    assert rows[0]["focus"] == "working Phase 8"
+    assert rows[0]["updated_at"] == 1000.0
+
+
+def test_set_focus_is_latest_only(q):
+    q.set_focus("m", "wt", "first")
+    q.set_focus("m", "wt", "second")
+    rows = q.list_focus()
+    assert len(rows) == 1 and rows[0]["focus"] == "second"
+
+
+def test_set_focus_caps_length(q):
+    from agent_dispatch.queue import FOCUS_MAX
+
+    q.set_focus("m", "wt", "x" * 500)
+    assert len(q.list_focus()[0]["focus"]) <= FOCUS_MAX
+
+
+def test_list_focus_filters_by_machine(q):
+    q.set_focus("lambda-core", "a", "one")
+    q.set_focus("borealis", "b", "two")
+    assert [r["worktree"] for r in q.list_focus(machine="borealis")] == ["b"]
+
+
+def test_list_focus_freshest_first(q):
+    q.set_focus("m", "old", "o", now=1.0)
+    q.set_focus("m", "new", "n", now=2.0)
+    assert [r["worktree"] for r in q.list_focus()] == ["new", "old"]

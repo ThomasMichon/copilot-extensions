@@ -400,6 +400,29 @@ def _cmd_progress(args: argparse.Namespace) -> int:
         )
 
 
+def _cmd_focus(args: argparse.Namespace) -> int:
+    if args.list:
+        with _client(args) as c:
+            return _emit(c.list_focus(machine=args.machine))
+    machine, worktree = _identity(args)
+    if not machine or not worktree:
+        print(
+            "agent-dispatch: could not resolve this worktree's identity — run "
+            "inside a worktree, or pass --machine and --worktree.",
+            file=sys.stderr,
+        )
+        return 2
+    if not args.focus_text:
+        with _client(args) as c:
+            mine = [
+                f for f in c.list_focus(machine=machine)
+                if f.get("worktree") == worktree
+            ]
+        return _emit(mine[0] if mine else {})
+    with _client(args) as c:
+        return _emit(c.set_focus(machine, worktree, args.focus_text))
+
+
 def _cmd_complete(args: argparse.Namespace) -> int:
     # Owner is optional: a worker that claimed under its CWD identity can
     # complete with just the task id -- we resolve the same machine/worktree
@@ -832,6 +855,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--machine", help="override the resolved machine (targeting identity)")
     p.add_argument("--worktree", help="override the resolved worktree id (targeting identity)")
     p.set_defaults(func=_cmd_progress)
+
+    p = sub.add_parser(
+        "focus",
+        help="set/show this worktree's current focus (cockpit fleet legibility); "
+             "identity auto-resolved from CWD",
+    )
+    p.add_argument(
+        "focus_text", nargs="?",
+        help="one-line focus for this worktree; omit to show the current focus",
+    )
+    p.add_argument("--list", action="store_true", help="list every worktree's focus")
+    p.add_argument("--machine", help="filter --list to a machine / override resolved machine")
+    p.add_argument("--worktree", help="override the resolved worktree id")
+    p.set_defaults(func=_cmd_focus)
 
     p = sub.add_parser("detach", help="demote a hard worktree pin to a soft affinity")
     p.add_argument("task_id")
