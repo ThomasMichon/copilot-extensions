@@ -24,8 +24,8 @@ log = logging.getLogger("agent-codespaces")
 # ``DOTFILES_DIR`` is defined canonically in :mod:`agent_codespaces.config` (the
 # layer the request-folder resolver shares) and re-exported here for back-compat
 # with existing ``from .provision import DOTFILES_DIR`` importers. The harness
-# analogue ``HARNESS_DIR`` is passed in as ``harness_dir`` (see
-# ``build_harness_command``), so it is not imported here.
+# has no analogous constant: its venue path derives from the repo name via
+# ``harness_dir_for`` (the standard ``/workspaces/<basename>`` convention).
 
 
 def build_dotfiles_command(dotfiles_repo: str, relay_port: int) -> str:
@@ -89,11 +89,19 @@ else
 fi"""
 
 
-def build_harness_command(
-    harness_repo: str, harness_dir: str, relay_port: int
-) -> str:
+def harness_dir_for(harness_repo: str) -> str:
+    """Venue path a harness repo is materialized at: ``/workspaces/<basename>``.
+
+    The **standard repo-layout convention** (#174) -- the harness is just a
+    named repo, mapped like any other; there is no bespoke harness location.
+    """
+    basename = harness_repo.rstrip("/").split("/")[-1]
+    return f"/workspaces/{basename}"
+
+
+def build_harness_command(harness_repo: str, relay_port: int) -> str:
     """Idempotent bash ensuring the control-plane *harness* checkout is present
-    and current on a venue at ``harness_dir``.
+    and current on a venue at ``/workspaces/<basename(harness_repo)>``.
 
     The harness analogue of :func:`build_dotfiles_command`, with two deliberate
     differences:
@@ -101,8 +109,9 @@ def build_harness_command(
     - **No ``install.sh``.** The harness is a checkout referenced *in place* for
       effort / vision state -- it is not an installer, so nothing is run after
       clone/sync.
-    - **Distinct path + labels.** Materialized at ``harness_dir``
-      (a generic ``/workspaces/harness`` by default), kept separate from the
+    - **Standard repo path, distinct labels.** Materialized at
+      ``/workspaces/<basename>`` by the repo-layout convention (#174) -- same as
+      any named repo, *not* a bespoke harness dir -- kept separate from the
       class-D dotfiles shim at ``DOTFILES_DIR``.
 
     Same safety as the dotfiles bootstrap: clone-if-absent; on the default
@@ -113,7 +122,7 @@ def build_harness_command(
     placed on the venue.
     """
     url = shlex.quote(f"https://github.com/{harness_repo}")
-    hd = shlex.quote(harness_dir)
+    hd = shlex.quote(harness_dir_for(harness_repo))
     port = int(relay_port)
     return f"""\
 export LC_GIT_CREDENTIAL_RELAY={port} GIT_TERMINAL_PROMPT=0

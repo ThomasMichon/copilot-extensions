@@ -171,33 +171,22 @@ def test_load_config_harness(tmp_path, monkeypatch):
     c = load_config()
     assert c.harness is not None
     assert c.harness.repo == "/host/harness"
-    # distinct default target from the dotfiles shim, no install by default
+    # target derived from the repo basename by the standard convention, no install
     assert c.harness.target == "/workspaces/harness"
     assert c.harness.install_command is None
     # dotfiles and harness are independent
     assert c.dotfiles is None
 
 
-def test_load_config_harness_custom_target(tmp_path, monkeypatch):
-    cfg = tmp_path / "containers.yaml"
-    cfg.write_text(
-        textwrap.dedent(
-            """
-            harness:
-              repo: /host/harness
-              target: /workspaces/ctl
-            """
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(cfg))
-    c = load_config()
-    assert c.harness is not None
-    assert c.harness.target == "/workspaces/ctl"
+def test_harness_target_derives_from_repo_basename():
+    from agent_containers.config import HarnessConfig
+
+    assert HarnessConfig(repo="/host/control-plane").target == "/workspaces/control-plane"
+    assert HarnessConfig(repo="D:/Src/myharness").target == "/workspaces/myharness"
 
 
 def test_load_config_no_harness_when_repo_missing(tmp_path, monkeypatch):
     cfg = tmp_path / "containers.yaml"
-    cfg.write_text("harness:\n  target: /x\n", encoding="utf-8")
+    cfg.write_text("harness:\n  install_command: bash x\n", encoding="utf-8")
     monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(cfg))
     assert load_config().harness is None

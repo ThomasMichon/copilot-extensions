@@ -824,15 +824,16 @@ async def _provision_dotfiles(manager, name: str, config) -> None:
 
 async def _provision_harness(manager, name: str, config) -> None:
     """Ensure the configured control-plane *harness* checkout is present +
-    current on a venue at ``config.harness_dir``.
+    current on a venue at ``/workspaces/<basename(harness_repo)>``.
 
     The harness analogue of :func:`_provision_dotfiles`, kept SEPARATE from the
     dotfiles shim. **Opt-in:** only runs when ``defaults.harness_repo`` is set;
     unset by default, so by default NO harness is placed on the venue and the
     local control-plane agent owns effort / vision updates. Clone-if-absent +
     sync-forward on the default branch (no ``install.sh`` -- the harness is
-    referenced in place, not installed); a parked feature branch / dirty tree is
-    never touched. Best-effort and idempotent: logs a warning, never raises.
+    referenced in place, not installed) at the **standard** ``/workspaces/<repo>``
+    path (#174); a parked feature branch / dirty tree is never touched.
+    Best-effort and idempotent: logs a warning, never raises.
     """
     if not config.harness_repo:
         return
@@ -841,7 +842,7 @@ async def _provision_harness(manager, name: str, config) -> None:
 
     try:
         command = build_harness_command(
-            config.harness_repo, config.harness_dir, config.credentials.relay_port,
+            config.harness_repo, config.credentials.relay_port,
         )
         # Login shell, same rationale as the dotfiles clone: the harness clone
         # authenticates to GitHub via the CodeSpace's own credential helper,
