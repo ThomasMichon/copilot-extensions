@@ -3254,6 +3254,14 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         "applicable_verbs": list(flow.applicable_verbs),
         "summary": flow.summary,
     }
+    # First-class comment threads (opt-in). Fetched before any JSON emit so the
+    # machine-readable output carries them too.
+    want_threads = getattr(args, "threads", False) or getattr(args, "resolve_threads", False)
+    if want_threads and result.get("has_pr"):
+        result["thread_report"] = pr_ops.pr_threads(
+            worktree_id, resolve=getattr(args, "resolve_threads", False),
+            config=config,
+        )
     if use_json:
         _json_output(result)
         return 0 if result.get("has_pr") or "error" not in result else 1
@@ -3297,6 +3305,27 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         print()
         output.warn("Pull-forward recommended (active PR merged):")
         print(f"  {result.get('next_action')}")
+
+    threads = result.get("thread_report")
+    if isinstance(threads, dict):
+        if not threads.get("supported", True):
+            output.warn(f"  threads:  unavailable ({threads.get('reason', '')})")
+        else:
+            active = threads.get("active_count", 0)
+            print(f"  threads:  {len(threads.get('threads', []))} "
+                  f"({active} active)")
+            for t in threads.get("threads", []):
+                if not t.get("active"):
+                    continue
+                loc = f" {t['file_path']}" if t.get("file_path") else ""
+                print(f"    - #{t.get('id')} [{t.get('status')}]{loc}")
+                for c in t.get("comments", []):
+                    body = (c.get("content") or "").strip().replace("\n", " ")
+                    print(f"        {c.get('author')}: {body[:200]}")
+            if threads.get("resolved"):
+                output.ok("  resolved active comment threads.")
+            elif threads.get("resolve_error"):
+                output.warn(f"  resolve failed: {threads.get('resolve_error')}")
     return 0
 
 
@@ -7936,6 +7965,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="List every tracked PR, not just the active one")
     p.add_argument("--no-live", action="store_true", dest="no_live",
                    help="Skip the live provider read (tracked metadata only)")
+    p.add_argument("--threads", action="store_true",
+                   help="Also list the PR's review comment threads")
+    p.add_argument("--resolve-threads", action="store_true", dest="resolve_threads",
+                   help="Mark active comment threads resolved (implies --threads)")
     p.add_argument("--json", action="store_true", help="JSON output mode")
     p.add_argument("--config", default=None)
 

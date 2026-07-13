@@ -126,6 +126,55 @@ class PRSnapshot:
 
 
 @dataclass(frozen=True)
+class Comment:
+    """One comment inside a review thread (system/automation notes filtered out)."""
+
+    author: str = ""
+    content: str = ""
+
+
+@dataclass(frozen=True)
+class CommentThread:
+    """A review discussion thread on a PR, normalized across providers.
+
+    ``status`` follows a small provider-neutral vocabulary -- ``active`` /
+    ``pending`` (or empty) is *unresolved*; anything else (``fixed`` / ``closed``
+    / ``wontfix`` / ``bydesign`` / ``resolved`` / ``outdated``) is resolved.
+    Comment-threading is first-class in the contract so every provider speaks it
+    (Azure DevOps maps it cleanly; GitHub/Gitea carry more-irritating details).
+    """
+
+    id: int | None = None
+    status: str = ""
+    file_path: str = ""
+    comments: tuple[Comment, ...] = ()
+
+    @property
+    def is_active(self) -> bool:
+        """True when the thread is still unresolved (needs the author's attention)."""
+        return (self.status or "").strip().lower() in ("", "active", "pending")
+
+
+@dataclass(frozen=True)
+class ThreadsResult:
+    """Comment threads on a PR, plus whether the provider could report them.
+
+    ``supported`` is False (with ``error`` explaining) when a provider cannot
+    read threads -- callers treat that as "no thread signal", never as "no open
+    feedback".
+    """
+
+    threads: tuple[CommentThread, ...] = ()
+    supported: bool = True
+    error: str = ""
+
+    @property
+    def active(self) -> tuple[CommentThread, ...]:
+        """Unresolved threads (the ones a merge gate / feedback loop cares about)."""
+        return tuple(t for t in self.threads if t.is_active)
+
+
+@dataclass(frozen=True)
 class Baseline:
     """The arm-time reference a wait diffs against ("notify me of changes from
     here on"), serializable as an opaque cursor."""
@@ -328,6 +377,7 @@ def classify_state(
     automerge_label: str = "",
     hold_labels: Iterable[str] = (),
     wip_title_prefixes: Iterable[str] = (),
+    approval_required: bool = True,
 ) -> PRState:
     """Map a provider snapshot onto the unified :class:`PRState`.
 
@@ -359,6 +409,7 @@ def classify_state(
     action, reason = _consent_decision(
         snap, verdict=verdict, merge_state=ms, held=held, wip=wip,
         automerge_label=automerge_label, consent_present=consent_present,
+        approval_required=approval_required,
     )
     return PRState(
         verdict=verdict,
@@ -381,6 +432,7 @@ def _consent_decision(
     wip: bool,
     automerge_label: str,
     consent_present: bool,
+    approval_required: bool = True,
 ) -> tuple[str, str]:
     """Decide what ``pr-merge`` should do with this PR (pure; see classify_state)."""
     if consent_present:
@@ -400,12 +452,17 @@ def _consent_decision(
     if verdict == "CHANGES_REQUESTED":
         return "skip", "changes requested"
     if verdict != "APPROVED":
-        return "skip", "not yet approved"
+        if approval_required:
+            return "skip", "not yet approved"
+        # Approval-optional repo (self-complete: we own the merge). No blocking
+        # verdict and no changes requested -> eligible without an approval vote.
     if not automerge_label:
-        # Approved + eligible, but the repo configured no auto-merge mechanism.
+        # Eligible, but the repo configured no auto-merge/auto-complete mechanism.
         # Not an error -- just nothing this command can apply.
         return "skip", "no auto-merge label configured (binding absent)"
-    return "apply", "approved at current head"
+    if verdict == "APPROVED":
+        return "apply", "approved at current head"
+    return "apply", "eligible (no changes requested; approval not required)"
 
 
 __all__ = [
@@ -413,10 +470,13 @@ __all__ = [
     "DEFAULT_UNTIL",
     "VERDICT_STATES",
     "Baseline",
+    "Comment",
+    "CommentThread",
     "PRFlowProfile",
     "PRSnapshot",
     "PRState",
     "Review",
+    "ThreadsResult",
     "classify_pr_flow",
     "classify_state",
     "compute_events",

@@ -33,6 +33,7 @@ def _binding(prcfg) -> dict:
         "automerge_label": getattr(prcfg, "automerge_label", "") or "",
         "hold_labels": tuple(getattr(prcfg, "hold_labels", ()) or ()),
         "wip_title_prefixes": tuple(getattr(prcfg, "wip_title_prefixes", ()) or ()),
+        "approval_required": bool(getattr(prcfg, "approval_required", True)),
     }
 
 
@@ -85,8 +86,17 @@ def merge_one(
         "verdict": state.verdict, "merge_state": state.merge_state,
     }
     if action == "apply" and apply:
-        label = _binding(prcfg)["automerge_label"]
-        err = provider.add_label(repo, number, label, api_base=base, token=tok)
+        # "Request auto-complete" is the first-class concept; the provider
+        # decides how (gitea/github apply the automerge_label; ADO sets native
+        # auto-complete). Applying the label is an implementation detail here.
+        err = provider.request_auto_complete(
+            repo, number, api_base=base, token=tok,
+            automerge_label=_binding(prcfg)["automerge_label"],
+            squash=getattr(prcfg, "squash", True),
+            delete_source_branch=getattr(prcfg, "delete_source_branch", True),
+            bypass_policy=getattr(prcfg, "bypass_policy", False),
+            bypass_reason=getattr(prcfg, "bypass_reason", ""),
+        )
         if err:
             row["applied"] = False
             row["error"] = err

@@ -60,6 +60,42 @@ an admin, or invent a flow.
   (`git sync` on the anchor / the project's update command) and retry -- do not
   fall back to a hand-merge.
 
+### "Request auto-complete" -- the same shape across providers (incl. Azure DevOps)
+
+`pr-merge` is **"request auto-complete of this PR"**. *How* the provider honors
+that is an implementation detail, so ADO is the **same `pr-agent-merge` shape**
+as gitea/github -- not a special case:
+
+| Provider | How `pr-merge` requests auto-complete | Consent marker in a snapshot |
+|----------|----------------------------------------|-------------------------------|
+| gitea / github | applies the `automerge_label` (the review gate then merges) | the real label on the PR |
+| azure-devops | sets **native** auto-complete (`az repos pr update --auto-complete` with `squash` / `delete_source_branch` / `bypass_policy`) -- no label | the synthetic `auto-complete` marker, present once auto-complete is set |
+
+So an **ADO repo** (e.g. `dev.tmichon`) binds `automerge_label: auto-complete`
+(the abstract consent-marker name) and uses the full family. Extra ADO knobs:
+
+- `approval_required: false` -- **self-complete**: eligible when simply *not*
+  changes-requested (we own the merge; no approval vote needed). A
+  `CHANGES_REQUESTED` review still blocks -- address it, then re-run.
+- `bypass_policy: true` -- complete **past** a branch policy that never
+  auto-satisfies for our own PRs (e.g. a central governance status policy);
+  otherwise ADO auto-complete would wait forever.
+
+The natural "wait for the auto-review, then complete" loop is
+`pr-watch` (blocks until the reviewer weighs in / mergeability settles) →
+`pr-merge` (requests auto-complete once eligible) → `pr-complete` (post-merge
+reconcile).
+
+### Comment threads -- first-class, every provider
+
+Review **comment threads** are a first-class capability (`pr-status --threads`
+lists them; `--resolve-threads` marks the active ones resolved). Azure DevOps
+maps threads cleanly (REST; AAD or PAT auth); gitea/github carry more-irritating
+details (gitea has no programmatic conversation-resolve -- read-only there;
+github threads use GraphQL and resolve all active threads at once). The
+feedback loop: `pr-status --threads` (read) → fix in the worktree →
+`push-changes` → `pr-status --resolve-threads` → `pr-merge`.
+
 Check before signing off:
 
 In **direct mode** (the default), use the two-phase `push-changes` +

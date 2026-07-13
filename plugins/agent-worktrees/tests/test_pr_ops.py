@@ -1103,3 +1103,68 @@ class TestClassifyRecordsConvo:
         ctx.turn_count[m._normalize_path(str(tmp_path))] = 9
         out = m._classify_records([rec], ctx)
         assert out["wt-003"].state == git_ops.WorktreeState.WIP
+
+
+class TestPRThreads:
+    def _mock_provider(self, monkeypatch, threads_result, *, resolve_err=""):
+        from agent_worktrees import providers
+
+        state = {"resolved": False}
+
+        class _Prov:
+            name = "azure-devops"
+
+            def get_comment_threads(self, repo, number, *, api_base="", token=None):
+                return threads_result
+
+            def resolve_threads(self, repo, number, *, api_base="", token=None,
+                                 thread_ids=()):
+                state["resolved"] = True
+                return resolve_err
+
+        monkeypatch.setattr(providers, "get_provider", lambda name: _Prov())
+        monkeypatch.setattr(providers, "resolve_token", lambda prcfg: "tok")
+        return state
+
+    def test_threads_listed(self, pr_repo, monkeypatch):
+        from agent_worktrees import pr_contract as pc
+        config, wid, _wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open", provider="azure-devops")
+        tr = pc.ThreadsResult(threads=(
+            pc.CommentThread(id=1, status="active",
+                             comments=(pc.Comment(author="rev", content="fix this"),)),
+            pc.CommentThread(id=2, status="fixed",
+                             comments=(pc.Comment(author="rev", content="done"),)),
+        ))
+        self._mock_provider(monkeypatch, tr)
+        res = pr_ops.pr_threads(wid, config=config)
+        assert res["has_pr"] is True and res["supported"] is True
+        assert res["active_count"] == 1
+        assert len(res["threads"]) == 2
+
+    def test_threads_resolve(self, pr_repo, monkeypatch):
+        from agent_worktrees import pr_contract as pc
+        config, wid, _wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open", provider="azure-devops")
+        tr = pc.ThreadsResult(threads=(
+            pc.CommentThread(id=1, status="active",
+                             comments=(pc.Comment(author="r", content="x"),)),
+        ))
+        prov = self._mock_provider(monkeypatch, tr)
+        res = pr_ops.pr_threads(wid, resolve=True, config=config)
+        assert res["resolved"] is True
+        assert prov["resolved"] is True
+
+    def test_threads_unsupported_degrades(self, pr_repo, monkeypatch):
+        from agent_worktrees import pr_contract as pc
+        config, wid, _wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
+        tr = pc.ThreadsResult(supported=False, error="no token")
+        self._mock_provider(monkeypatch, tr)
+        res = pr_ops.pr_threads(wid, config=config)
+        assert res["supported"] is False and res["threads"] == []
+
+    def test_threads_no_pr(self, pr_repo):
+        config, wid, _wt, _ = pr_repo
+        res = pr_ops.pr_threads(wid, config=config)
+        assert res["has_pr"] is False

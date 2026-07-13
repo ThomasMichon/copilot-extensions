@@ -744,6 +744,7 @@ def _live_pr_state(
         automerge_label=getattr(prcfg, "automerge_label", "") or "",
         hold_labels=tuple(getattr(prcfg, "hold_labels", ()) or ()),
         wip_title_prefixes=tuple(getattr(prcfg, "wip_title_prefixes", ()) or ()),
+        approval_required=bool(getattr(prcfg, "approval_required", True)),
     )
     return {
         "live": {
@@ -957,6 +958,78 @@ def pr_status(worktree_id: str, *, all_prs: bool = False,
     if all_prs:
         result["prs"] = [_pr_to_dict(p) for p in record.prs]
     return result
+
+
+def pr_threads(
+    worktree_id: str,
+    *,
+    resolve: bool = False,
+    config: Config | None = None,
+) -> dict:
+    """Read (and optionally resolve) the active PR's review comment threads.
+
+    First-class comment-threading tied to the worktree flow: resolves the
+    active PR's provider/repo, lists its threads via ``get_comment_threads``,
+    and -- with ``resolve`` -- marks the active (unresolved) ones resolved
+    (``resolve_threads``). Returns ``{has_pr, threads: [...], active_count, ...}``
+    (never fatal: an unsupported/unreachable provider yields ``supported:
+    False`` with a ``reason``).
+    """
+    base: dict = {"worktree_id": worktree_id}
+    record = _load_record_or_none(worktree_id)
+    if record is None:
+        return {**base, "has_pr": False,
+                "error": f"No tracking record found for '{worktree_id}'."}
+    if config is None:
+        config = cfg.load_config()
+    active = record.active_pr()
+    if active is None or active.number is None:
+        return {**base, "has_pr": False, "threads": [], "active_count": 0}
+    prcfg = config.default_repo.pr
+    provider_name = active.provider or prcfg.provider
+    target_repo = active.repo or (record.repo or "")
+    api_base = getattr(prcfg, "api_base", "") or ""
+    out: dict = {**base, "has_pr": True, "number": active.number, "repo": target_repo}
+    try:
+        from . import providers
+
+        provider = providers.get_provider(provider_name)
+        token = providers.resolve_token(prcfg)
+        listing = provider.get_comment_threads(
+            target_repo, active.number, api_base=api_base, token=token,
+        )
+    except Exception as exc:
+        return {**out, "supported": False, "reason": str(exc), "threads": [],
+                "active_count": 0}
+    out["supported"] = listing.supported
+    if not listing.supported:
+        out["reason"] = listing.error
+        out["threads"] = []
+        out["active_count"] = 0
+        return out
+    if listing.error:
+        out["reason"] = listing.error
+    out["threads"] = [
+        {
+            "id": t.id, "status": t.status, "file_path": t.file_path,
+            "active": t.is_active,
+            "comments": [{"author": c.author, "content": c.content}
+                         for c in t.comments],
+        }
+        for t in listing.threads
+    ]
+    out["active_count"] = len(listing.active)
+    if resolve and listing.active:
+        try:
+            err = provider.resolve_threads(
+                target_repo, active.number, api_base=api_base, token=token,
+            )
+        except Exception as exc:
+            err = str(exc)
+        out["resolved"] = not err
+        if err:
+            out["resolve_error"] = err
+    return out
 
 
 def _pull_forward_recommendation(

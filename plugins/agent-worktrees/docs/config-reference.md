@@ -189,6 +189,21 @@ in-repo overlay (below); the in-repo version wins when both are present.
 | `automerge_label` | string | *(empty)* | **Review-vocabulary binding** for the `pr-*` command family. The label whose presence signals **merge consent** — the author's post-approval "auto-complete this" (applied by `pr-merge`). Empty ⇒ no auto-merge mechanism configured (the family declines rather than guessing a label). Facility value: `auto-merge`. |
 | `hold_labels` | list | `[]` | **Review-vocabulary binding.** Labels that **block** consent/merge — an explicit hold or a state needing author action (e.g. a rebase). Empty ⇒ nothing is treated as a hold. Facility value: `[do-not-merge, needs-rebase, wip]`. |
 | `wip_title_prefixes` | list | `[]` | **Review-vocabulary binding.** Case-insensitive PR-title prefixes treated as work-in-progress (never eligible for consent). Empty ⇒ no title is WIP. Facility value: `["wip:", "[wip]", "draft:", "[draft]"]`. |
+| `approval_required` | bool | `true` | Must a PR be **approved** before `pr-merge` requests auto-complete? `true` preserves the review-gated shape (a `CHANGES_REQUESTED` still always blocks). `false` suits a **self-complete** repo (we own the merge): eligible when simply *not* changes-requested — no approval vote needed. |
+| `squash` | bool | `true` | Auto-complete completion option (Azure DevOps): squash-merge. |
+| `delete_source_branch` | bool | `true` | Auto-complete completion option (Azure DevOps): delete the source branch on merge. |
+| `bypass_policy` | bool | `false` | Complete the PR **past** branch policies when requesting auto-complete (Azure DevOps). Needed for a default branch whose policy never auto-satisfies for our own PRs (e.g. a central governance **status** policy). Only set true where we are authorized to self-complete. |
+| `bypass_reason` | string | *(empty)* | Reason recorded on the policy bypass. |
+
+> **"Request auto-complete" is the first-class concept; the label is an
+> implementation detail.** `pr-merge` asks the provider to *auto-complete* the
+> PR. On **gitea / github** the provider honors that by applying `automerge_label`
+> (the review gate then merges). On **Azure DevOps** there is no label —
+> the provider sets **native auto-complete** (`az repos pr update --auto-complete`
+> with `squash` / `delete_source_branch` / `bypass_policy`), and a snapshot
+> reports the `auto-complete` consent marker in its labels once set. So an ADO
+> repo binds `automerge_label: auto-complete` (the abstract consent-marker name)
+> and gets the full `pr-agent-merge` flow — no new flow shape.
 
 > **Review-vocabulary binding (the "facility hook").** `automerge_label` /
 > `hold_labels` / `wip_title_prefixes` — alongside the provider fields
