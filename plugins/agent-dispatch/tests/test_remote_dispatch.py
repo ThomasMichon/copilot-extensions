@@ -107,3 +107,83 @@ def test_dispatch_to_remote_unavailable_without_ssh(monkeypatch):
         remote_dispatch.dispatch_to_remote(
             "borealis", _args(), repo="r", payload=None
         )
+
+
+# -- Peer-queue browse (Phase 8 Slice 8c) ------------------------------------
+
+
+def _browse_args(**kw) -> argparse.Namespace:
+    base = dict(
+        machine="borealis", status=None, label=None, limit=200,
+        repo=None, target_machine=None, target_repo=None,
+    )
+    base.update(kw)
+    return argparse.Namespace(**base)
+
+
+def test_is_peer_machine_true_for_remote(monkeypatch):
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+    assert remote_dispatch.is_peer_machine("borealis") is True
+
+
+def test_is_peer_machine_false_for_local_and_unset(monkeypatch):
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "borealis")
+    assert remote_dispatch.is_peer_machine("borealis") is False
+    assert remote_dispatch.is_peer_machine(None) is False
+
+
+def test_is_peer_machine_false_when_local_unresolvable(monkeypatch):
+    # Can't prove it's remote -> stay local (safe degrade).
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: None)
+    assert remote_dispatch.is_peer_machine("borealis") is False
+
+
+def test_build_remote_browse_argv_list_forwards_filters_drops_machine():
+    args = _browse_args(status="queued,started", label="bug", limit=50,
+                        target_machine="borealis", target_repo="x")
+    argv = remote_dispatch.build_remote_browse_argv("list", args, repo="gitea/lane")
+    assert argv[:2] == ["agent-dispatch", "list"]
+    assert "--machine" not in argv  # the peer selector never hops again
+    assert argv[argv.index("--status") + 1] == "queued,started"
+    assert argv[argv.index("--label") + 1] == "bug"
+    assert argv[argv.index("--limit") + 1] == "50"
+    assert argv[argv.index("--repo") + 1] == "gitea/lane"  # locally-resolved lane
+    assert argv[argv.index("--target-machine") + 1] == "borealis"
+    assert argv[argv.index("--target-repo") + 1] == "x"
+
+
+def test_build_remote_browse_argv_inbox_minimal():
+    args = _browse_args(status="proposed", label=None, limit=200)
+    argv = remote_dispatch.build_remote_browse_argv("inbox", args)
+    assert argv[:2] == ["agent-dispatch", "inbox"]
+    assert "--machine" not in argv
+    assert "--repo" not in argv  # inbox is cross-lane; no repo forwarded
+    assert argv[argv.index("--status") + 1] == "proposed"
+
+
+def test_browse_remote_builds_ssh_command(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(returncode=0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
+
+    out = remote_dispatch.browse_remote("borealis", ["agent-dispatch", "list"])
+    cmd = captured["cmd"]
+    assert cmd[0] == "/usr/bin/ssh"
+    assert "borealis" in cmd
+    assert "BatchMode=yes" in cmd
+    assert "ConnectTimeout=5" in cmd
+    assert cmd[-1] == "agent-dispatch list"
+    assert out.stdout == "[]"
+
+
+def test_browse_remote_unavailable_without_ssh(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: None)
+    with pytest.raises(remote_dispatch.RemoteDispatchUnavailable):
+        remote_dispatch.browse_remote("borealis", ["agent-dispatch", "inbox"])

@@ -450,3 +450,87 @@ def test_focus_without_identity_errors(monkeypatch, capsys):
     args = build_parser().parse_args(["focus", "x"])
     assert args.func(args) == 2
     assert "could not resolve this worktree's identity" in capsys.readouterr().err
+
+
+# -- Peer-queue browse (Phase 8 Slice 8c) ------------------------------------
+
+
+def test_parser_list_machine_flag():
+    args = build_parser().parse_args(["list", "--machine", "borealis"])
+    assert args.command == "list"
+    assert args.machine == "borealis"
+
+
+def test_list_peer_browse_delegates_over_ssh(monkeypatch, capsys):
+    import types
+
+    from agent_dispatch import __main__, remote_dispatch
+
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "gitea/lane")
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+
+    captured = {}
+
+    def fake_browse(machine, argv, **kw):
+        captured["machine"] = machine
+        captured["argv"] = argv
+        return types.SimpleNamespace(returncode=0, stdout='[{"id": "t-remote"}]\n', stderr="")
+
+    monkeypatch.setattr(remote_dispatch, "browse_remote", fake_browse)
+    # The local coordinator client must NOT be used for a peer browse.
+    monkeypatch.setattr(
+        __main__, "_client",
+        lambda args: (_ for _ in ()).throw(AssertionError("local client used for peer browse")),
+    )
+
+    args = build_parser().parse_args(["list", "--machine", "borealis", "--status", "started"])
+    rc = args.func(args)
+    assert rc == 0
+    assert captured["machine"] == "borealis"
+    assert captured["argv"][:2] == ["agent-dispatch", "list"]
+    assert "--repo" in captured["argv"]  # locally-resolved lane forwarded
+    assert "--machine" not in captured["argv"]  # peer selector never re-hops
+    assert "t-remote" in capsys.readouterr().out
+
+
+def test_inbox_peer_browse_delegates_over_ssh(monkeypatch, capsys):
+    import types
+
+    from agent_dispatch import __main__, remote_dispatch
+
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+
+    captured = {}
+
+    def fake_browse(machine, argv, **kw):
+        captured["machine"] = machine
+        captured["argv"] = argv
+        return types.SimpleNamespace(returncode=0, stdout="[]\n", stderr="")
+
+    monkeypatch.setattr(remote_dispatch, "browse_remote", fake_browse)
+    monkeypatch.setattr(
+        __main__, "_client",
+        lambda args: (_ for _ in ()).throw(AssertionError("local client used for peer browse")),
+    )
+
+    args = build_parser().parse_args(["inbox", "--machine", "borealis"])
+    rc = args.func(args)
+    assert rc == 0
+    assert captured["machine"] == "borealis"
+    assert captured["argv"][:2] == ["agent-dispatch", "inbox"]
+    assert "--machine" not in captured["argv"]
+
+
+def test_peer_browse_degrades_when_ssh_unavailable(monkeypatch, capsys):
+    from agent_dispatch import remote_dispatch
+
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+
+    def fake_browse(machine, argv, **kw):
+        raise remote_dispatch.RemoteDispatchUnavailable("ssh not found on PATH")
+
+    monkeypatch.setattr(remote_dispatch, "browse_remote", fake_browse)
+
+    args = build_parser().parse_args(["inbox", "--machine", "borealis"])
+    assert args.func(args) == 2
+    assert "unavailable" in capsys.readouterr().err
