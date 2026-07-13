@@ -1075,6 +1075,7 @@ def graceful_quit_mux_session(
     settle_timeout: float = 6.0,
     poll_interval: float = 0.3,
     ctrl_c_gap: float = 0.5,
+    escalate_after: float = 1.5,
 ) -> bool:
     """Ask the interactive Copilot in a worktree's mux session to quit cleanly.
 
@@ -1087,6 +1088,15 @@ def graceful_quit_mux_session(
     exits, the pane's only command ends, dropping the single-window
     ``wt-<id>`` session.
 
+    **Escalation ladder (up to three Ctrl-C).** Two interrupts is the common
+    case, but some Copilot states swallow the second (a prompt mid-render, a
+    modal, a busy turn flushing state). So after the double-interrupt we wait a
+    *brief* ``escalate_after`` window; if the session is still alive we deliver
+    a **conditional third** Ctrl-C within the same burst before falling back to
+    the hard kill. The third still routes through Copilot's own interrupt
+    handling, so session state is persisted (letting a later ACP resume pick it
+    back up) rather than being severed by a signal.
+
     Returns True if the session ended within ``settle_timeout`` (graceful quit
     succeeded), False otherwise (the caller should fall back to a hard
     ``kill_tmux_session``). A worktree with no live mux session counts as
@@ -1096,19 +1106,34 @@ def graceful_quit_mux_session(
 
     if not has_mux_session(worktree_id):
         return True
-    # Double Ctrl-C, ``ctrl_c_gap`` apart (default 0.5 s, within Copilot's
-    # 300-800 ms window). If the first send fails the mux is already gone.
+
+    def _dropped_within(window: float) -> bool:
+        """Poll until the session drops or ``window`` seconds elapse."""
+        deadline = time.monotonic() + window
+        while time.monotonic() < deadline:
+            if not has_mux_session(worktree_id):
+                return True
+            time.sleep(poll_interval)
+        return not has_mux_session(worktree_id)
+
+    # First Ctrl-C. If the first send fails the mux is already gone.
     if not _mux_send_keys(worktree_id, "C-c"):
         return not has_mux_session(worktree_id)
     time.sleep(ctrl_c_gap)
+    # Second Ctrl-C, ``ctrl_c_gap`` after the first (default 0.5 s, within
+    # Copilot's 300-800 ms double-interrupt window) -- the native clean quit.
     _mux_send_keys(worktree_id, "C-c")
-    # Wait for Copilot to exit and the session to drop.
-    deadline = time.monotonic() + settle_timeout
-    while time.monotonic() < deadline:
-        if not has_mux_session(worktree_id):
-            return True
-        time.sleep(poll_interval)
-    return not has_mux_session(worktree_id)
+
+    # Give the double-interrupt a *brief* window to land: Copilot flushes and
+    # persists its session state, then exits, dropping the pane's only command.
+    escalate_at = min(max(escalate_after, 0.0), settle_timeout)
+    if _dropped_within(escalate_at):
+        return True
+
+    # Still alive after two -- deliver the conditional THIRD Ctrl-C, then wait
+    # out the remaining budget before the caller resorts to a hard kill.
+    _mux_send_keys(worktree_id, "C-c")
+    return _dropped_within(settle_timeout - escalate_at)
 
 
 def restart_worktree_copilot(
