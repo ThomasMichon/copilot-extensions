@@ -126,9 +126,12 @@ def _dispatch_cross_machine(args: argparse.Namespace, repo: str) -> int:
     if result.stdout:
         print(result.stdout, end="")
     if result.returncode != 0:
+        diagnosis = remote_dispatch.diagnose_remote_failure(
+            args.target_machine, result.returncode, result.stderr
+        )
         print(
-            f"agent-dispatch: remote dispatch on {args.target_machine!r} failed "
-            f"(exit {result.returncode}):\n{result.stderr}",
+            f"agent-dispatch: remote dispatch to {args.target_machine!r} failed -- "
+            f"{diagnosis}; nothing was queued on {args.target_machine!r}",
             file=sys.stderr,
         )
         return result.returncode
@@ -467,13 +470,10 @@ def _browse_peer(args: argparse.Namespace, subcommand: str, *, repo: str | None 
     if result.stdout:
         sys.stdout.write(result.stdout)
     if result.returncode != 0:
-        if result.stderr:
-            sys.stderr.write(result.stderr)
-        print(
-            f"agent-dispatch: peer browse on {args.machine!r} failed "
-            f"(exit {result.returncode})",
-            file=sys.stderr,
+        diagnosis = remote_dispatch.diagnose_remote_failure(
+            args.machine, result.returncode, result.stderr
         )
+        print(f"agent-dispatch: {diagnosis}", file=sys.stderr)
     return result.returncode
 
 

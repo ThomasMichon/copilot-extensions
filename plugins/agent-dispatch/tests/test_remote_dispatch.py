@@ -189,3 +189,43 @@ def test_browse_remote_unavailable_without_ssh(monkeypatch):
     monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: None)
     with pytest.raises(remote_dispatch.RemoteDispatchUnavailable):
         remote_dispatch.browse_remote("borealis", ["agent-dispatch", "inbox"])
+
+
+# -- Actionable degradation for failed remote invocations (issue #2735) -------
+
+
+def test_diagnose_remote_failure_not_installed_127():
+    msg = remote_dispatch.diagnose_remote_failure(
+        "wheatley", 127, "bash: agent-dispatch: command not found\n"
+    )
+    assert "wheatley" in msg
+    assert "not installed" in msg
+    assert "PATH" in msg
+
+
+def test_diagnose_remote_failure_coordinator_unreachable():
+    stderr = (
+        "Traceback (most recent call last):\n"
+        "httpx.ConnectError: [WinError 10061] No connection could be made "
+        "because the target machine actively refused it\n"
+    )
+    msg = remote_dispatch.diagnose_remote_failure("borealis", 1, stderr)
+    assert "borealis" in msg
+    assert "coordinator" in msg
+    assert "running" in msg
+    # The raw traceback is not echoed.
+    assert "Traceback" not in msg
+
+
+def test_diagnose_remote_failure_generic_tail():
+    msg = remote_dispatch.diagnose_remote_failure(
+        "borealis", 3, "line one\nsomething specific went wrong\n"
+    )
+    assert "exit 3" in msg
+    assert "something specific went wrong" in msg  # last non-empty line
+
+
+def test_diagnose_remote_failure_no_stderr():
+    msg = remote_dispatch.diagnose_remote_failure("borealis", 2, "")
+    assert "borealis" in msg
+    assert "exit 2" in msg

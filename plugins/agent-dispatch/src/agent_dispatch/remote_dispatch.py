@@ -220,3 +220,41 @@ def browse_remote(
         text=True,
         timeout=timeout,
     )
+
+
+def diagnose_remote_failure(
+    machine: str, returncode: int, stderr: str | None
+) -> str:
+    """Translate a failed remote ``agent-dispatch`` invocation into one concise,
+    actionable line -- shared by cross-machine dispatch (8a) and peer-queue
+    browse (8c) so a peer that lacks the install or a running coordinator
+    reports *why*, not a raw ``command not found`` or an httpx traceback.
+
+    - **exit 127** -- the shell couldn't find ``agent-dispatch`` on the peer
+      (not installed, or its binstub dir isn't on the non-interactive SSH PATH).
+    - **connection refused / ConnectError** in stderr -- the peer has the CLI but
+      its per-host coordinator isn't reachable (not running).
+    - otherwise -- a trimmed tail of the remote stderr with the exit code.
+    """
+    if returncode == 127:
+        return (
+            f"agent-dispatch is not installed (or not on the non-interactive SSH "
+            f"PATH) on {machine!r} -- install it there; a per-host coordinator is "
+            f"required for cross-machine dispatch/browse"
+        )
+    low = (stderr or "").lower()
+    if any(
+        s in low
+        for s in ("connecterror", "refused", "10061", "max retries",
+                  "failed to establish", "connection error")
+    ):
+        return (
+            f"could not reach the agent-dispatch coordinator on {machine!r} "
+            f"-- is its coordinator running?"
+        )
+    tail = ""
+    if stderr:
+        lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
+        tail = lines[-1] if lines else ""
+    base = f"agent-dispatch on {machine!r} failed (exit {returncode})"
+    return f"{base}: {tail}" if tail else base
