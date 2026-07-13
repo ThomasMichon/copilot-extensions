@@ -144,6 +144,35 @@ class TestTranslateSdkEvent:
         assert "request_id" not in data
         assert "req-42" not in str(data)
 
+    def test_ask_user_tool_start_is_read_only_request(self) -> None:
+        """A live CLI session's ask_user surfaces as a legible, READ-ONLY
+        ask_user_request (take-over to answer) -- never an opaque spinner."""
+        out = translate_sdk_event(
+            "tool.execution_start",
+            {
+                "toolCallId": "tc-ask",
+                "toolName": "ask_user",
+                "arguments": {
+                    "message": "Pick one",
+                    "requestedSchema": {
+                        "type": "object",
+                        "properties": {"choice": {"type": "string"}},
+                    },
+                },
+            },
+        )
+        assert len(out) == 1
+        event_type, data = out[0]
+        assert event_type == "ask_user_request"
+        assert data["tool_call_id"] == "tc-ask"
+        assert data["message"] == "Pick one"
+        assert data["requested_schema"]["properties"] == {
+            "choice": {"type": "string"}
+        }
+        # Represented CLI session: owner Copilot holds the reply, so this is
+        # read-only downstream (answer affordance is take-over, not inline).
+        assert data["read_only"] is True
+
     def test_agent_id_passed_through(self) -> None:
         out = translate_sdk_event(
             "assistant.message", {"content": "sub", "agentId": "sub-1"}

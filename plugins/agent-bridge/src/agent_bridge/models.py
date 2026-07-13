@@ -180,6 +180,19 @@ class ResumeSessionRequest(BaseModel):
     pass
 
 
+class AnswerAskUserRequest(BaseModel):
+    """Answer to a parked ``ask_user`` elicitation on a session.
+
+    ``content`` maps each requested schema field to the human's value
+    (str | int | float | bool | list[str]). ``action`` selects the reply kind:
+    ``accept`` (submit ``content``), ``decline``, or ``cancel``.
+    """
+
+    tool_call_id: str
+    content: dict[str, Any] = Field(default_factory=dict)
+    action: str = "accept"
+
+
 class CursorAckRequest(BaseModel):
     """Acknowledge delivery of events up to ``last_id`` for a caller.
 

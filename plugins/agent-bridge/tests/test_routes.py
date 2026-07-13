@@ -166,6 +166,48 @@ class TestSessionRoutes:
         assert resp.json()["status"] == "idle"
         mock_client.cancel_prompt.assert_not_called()
 
+    def test_ask_user_nonexistent(self, client) -> None:
+        resp = client.post(
+            "/api/v1/sessions/nonexistent/ask-user",
+            json={"tool_call_id": "tc", "content": {}},
+        )
+        assert resp.status_code == 404
+
+    def test_ask_user_answers_pending(self, client, app) -> None:
+        mgr = app.state.session_manager
+        with patch.object(
+            mgr, "answer_ask_user", AsyncMock(return_value=True)
+        ) as m:
+            resp = client.post(
+                "/api/v1/sessions/s1/ask-user",
+                json={"tool_call_id": "tc-1", "content": {"choice": "a"}},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "answered"
+        m.assert_awaited_once_with(
+            "s1", "tc-1", {"choice": "a"}, action="accept"
+        )
+
+    def test_ask_user_none_pending_returns_409(self, client, app) -> None:
+        mgr = app.state.session_manager
+        with patch.object(mgr, "answer_ask_user", AsyncMock(return_value=False)):
+            resp = client.post(
+                "/api/v1/sessions/s1/ask-user",
+                json={"tool_call_id": "tc-x", "content": {}},
+            )
+        assert resp.status_code == 409
+
+    def test_ask_user_no_live_client_returns_409(self, client, app) -> None:
+        mgr = app.state.session_manager
+        with patch.object(
+            mgr, "answer_ask_user", AsyncMock(side_effect=ValueError("no client"))
+        ):
+            resp = client.post(
+                "/api/v1/sessions/s1/ask-user",
+                json={"tool_call_id": "tc", "content": {}},
+            )
+        assert resp.status_code == 409
+
     def test_delete_nonexistent(self, client) -> None:
         resp = client.delete("/api/v1/sessions/nonexistent")
         assert resp.status_code == 404
