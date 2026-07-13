@@ -85,14 +85,65 @@ def test_graceful_quit_double_ctrl_c_then_session_drops():
 
 
 def test_graceful_quit_times_out_when_session_persists():
-    # Session never drops: start True, and stays True through the poll loop.
-    monotonic_vals = iter([0.0, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5])
+    # Session never drops: stays alive through both poll windows. Uses a
+    # monotonically advancing clock so both _dropped_within loops terminate.
+    clock = {"t": 0.0}
+
+    def _mono():
+        clock["t"] += 0.4
+        return clock["t"]
+
     with patch.object(sessions, "has_mux_session", return_value=True), \
-         patch.object(sessions, "_mux_send_keys", return_value=True), \
+         patch.object(sessions, "_mux_send_keys", return_value=True) as send, \
          patch("time.sleep"), \
-         patch("time.monotonic", side_effect=lambda: next(monotonic_vals)):
+         patch("time.monotonic", side_effect=_mono):
         ok = sessions.graceful_quit_mux_session("wt-8", settle_timeout=2.0)
     assert ok is False
+    # Full escalation ladder fired: two, then the conditional third Ctrl-C.
+    assert send.call_count == 3
+    assert all(call.args[1] == "C-c" for call in send.call_args_list)
+
+
+def test_graceful_quit_third_ctrl_c_when_two_dont_land():
+    # Alive until the third Ctrl-C lands (the first two are swallowed), then
+    # the session drops -> graceful success with the full three-interrupt burst.
+    sent = {"n": 0}
+
+    def _send(_id, _keys):
+        sent["n"] += 1
+        return True
+
+    def _alive(_id):
+        return sent["n"] < 3  # stays alive until the conditional third Ctrl-C
+
+    clock = {"t": 0.0}
+
+    def _mono():
+        clock["t"] += 1.0  # advance a full second per poll step
+        return clock["t"]
+
+    with patch.object(sessions, "has_mux_session", side_effect=_alive), \
+         patch.object(sessions, "_mux_send_keys", side_effect=_send) as send, \
+         patch("time.sleep"), \
+         patch("time.monotonic", side_effect=_mono):
+        ok = sessions.graceful_quit_mux_session(
+            "wt-esc", settle_timeout=6.0, escalate_after=1.5,
+        )
+    assert ok is True
+    assert send.call_count == 3  # two, then the conditional third
+    assert all(call.args[1] == "C-c" for call in send.call_args_list)
+
+
+def test_graceful_quit_no_third_when_two_suffice():
+    # Drops during the brief escalate_after window -> only two Ctrl-C, no
+    # escalation to a third.
+    states = iter([True, False])
+    with patch.object(sessions, "has_mux_session", side_effect=lambda _id: next(states)), \
+         patch.object(sessions, "_mux_send_keys", return_value=True) as send, \
+         patch("time.sleep"):
+        ok = sessions.graceful_quit_mux_session("wt-two", settle_timeout=4.0)
+    assert ok is True
+    assert send.call_count == 2  # second interrupt sufficed; no third sent
 
 
 def test_graceful_quit_send_fails_but_session_already_gone():
