@@ -165,15 +165,22 @@ def build_remote_browse_argv(
     scopes to a repo lane, which can't be resolved from the peer's SSH home dir,
     so the locally-resolved ``repo`` is passed explicitly.
 
-    ``--machine Y`` **is** forwarded: the peer needs it as its identity
-    (``inbox`` can't resolve a machine from the SSH home dir) *and* it is
-    hop-safe -- the peer we reached over SSH **is** ``Y``, so its
-    :func:`local_machine` resolves to ``Y`` (or ``None`` outside a worktree),
-    and :func:`is_peer_machine` returns False either way, keeping the peer's run
-    strictly local. No second hop can occur.
+    ``--machine Y`` handling differs by subcommand:
+
+    - ``inbox`` **forwards** it -- the peer needs it as its scoping identity
+      (``inbox`` can't resolve a machine from the SSH home dir), it is
+      backward-compatible (``inbox --machine`` has always existed), and it is
+      hop-safe: the peer we reached over SSH **is** ``Y``, so its
+      :func:`local_machine` resolves to ``Y`` (or ``None``) and
+      :func:`is_peer_machine` returns False -- the peer's run stays strictly
+      local, no second hop.
+    - ``list`` **drops** it -- ``list`` needs no machine identity (it scopes by
+      ``--repo``), so forwarding a *new* ``list --machine`` flag would only break
+      a peer running an older agent-dispatch that doesn't know it. Dropping it
+      also guarantees no second hop.
     """
     argv = ["agent-dispatch", subcommand]
-    if getattr(args, "machine", None):
+    if subcommand == "inbox" and getattr(args, "machine", None):
         argv += ["--machine", args.machine]
     if getattr(args, "status", None):
         argv += ["--status", args.status]

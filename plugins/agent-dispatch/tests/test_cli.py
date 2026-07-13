@@ -489,7 +489,7 @@ def test_list_peer_browse_delegates_over_ssh(monkeypatch, capsys):
     assert captured["machine"] == "borealis"
     assert captured["argv"][:2] == ["agent-dispatch", "list"]
     assert "--repo" in captured["argv"]  # locally-resolved lane forwarded
-    assert captured["argv"][captured["argv"].index("--machine") + 1] == "borealis"
+    assert "--machine" not in captured["argv"]  # list drops it (old-peer compatible)
     assert "t-remote" in capsys.readouterr().out
 
 
