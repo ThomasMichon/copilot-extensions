@@ -720,6 +720,43 @@ class TestWorktreeRoutes:
         assert entries[0].mux_attached is True
         assert entries[0].interactive_cli_state() == "held"
 
+    def test_parse_worktree_list_reads_taxonomy_marks(self) -> None:
+        """#2668: _parse_worktree_list threads interface/origin/picker_hidden
+        from ``agent-worktrees list --json`` and to_dict re-exposes them."""
+        from agent_bridge.routes import worktrees as wt_routes
+
+        raw = (
+            '{"version": 1, "worktrees": ['
+            '{"id": "u1", "path": "/u1", "branch": "b", "status": "active",'
+            ' "interface": "acp", "origin": "user", "picker_hidden": false},'
+            '{"id": "d1", "path": "/d1", "branch": "b", "status": "active",'
+            ' "interface": "acp", "origin": "delegate", "picker_hidden": true}]}'
+        )
+        entries = wt_routes._parse_worktree_list(raw, "test-agent")
+        by_id = {e.id: e for e in entries}
+        # Operator-owned ACP session: shown.
+        assert by_id["u1"].origin == "user"
+        assert by_id["u1"].interface == "acp"
+        assert by_id["u1"].picker_hidden is False
+        assert by_id["u1"].to_dict()["origin"] == "user"
+        assert by_id["u1"].to_dict()["picker_hidden"] is False
+        # Agent-spawned (delegate): hidden.
+        assert by_id["d1"].origin == "delegate"
+        assert by_id["d1"].picker_hidden is True
+
+    def test_parse_worktree_list_taxonomy_defaults_when_absent(self) -> None:
+        """An older agent-worktrees runtime omits the marks -> degrade to
+        None/shown so the cockpit shows everything (today's behavior)."""
+        from agent_bridge.routes import worktrees as wt_routes
+
+        raw = ('{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
+               ' "branch": "b", "status": "active"}]}')
+        entries = wt_routes._parse_worktree_list(raw, "test-agent")
+        assert entries[0].origin is None
+        assert entries[0].interface is None
+        assert entries[0].picker_hidden is False
+        assert entries[0].to_dict()["picker_hidden"] is False
+
     def test_resume_worktree_with_no_session_404s(self, client) -> None:
         self._seed_worktree("test-agent", "lambda-core-wsl-20250101-160000-empty")
         resp = client.post(
