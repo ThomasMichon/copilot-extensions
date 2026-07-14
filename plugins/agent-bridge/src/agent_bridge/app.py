@@ -28,7 +28,7 @@ from .routes import (
     ui,
     worktrees,
 )
-from .session_manager import SessionManager
+from .session_manager import session_manager_from_config
 from .transport import shutdown_ssh
 
 log = logging.getLogger("agent-bridge")
@@ -112,17 +112,7 @@ async def lifespan(app: FastAPI):
     db.start_writer()
     app.state.db = db
 
-    mgr = SessionManager(
-        db,
-        context_thresholds=cfg.context_thresholds,
-        timeouts=cfg.timeouts,
-        retention=cfg.retention,
-        session_host_enabled=cfg.session_host_enabled,
-        session_host_stale_reap_seconds=cfg.session_host_stale_reap_seconds,
-        graceful_cancel_settle_seconds=cfg.graceful_cancel_settle_seconds,
-        idle_reap_ttl_seconds=cfg.idle_reap_ttl_seconds,
-        live_stall_interrupt_after_s=cfg.live_stall_interrupt_after_s,
-    )
+    mgr = session_manager_from_config(db, cfg)
     app.state.session_manager = mgr
 
     # Session-Host mode: reattach to any Session Hosts that survived a prior

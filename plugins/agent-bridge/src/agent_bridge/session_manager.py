@@ -25,7 +25,13 @@ from .acp_client import AcpClient
 from .connect import ConnectError, ConnectStage, ConnectTracker
 from .db import Database
 from .events import EventLog
-from .models import ContextThresholds, PhasedTimeouts, RetentionConfig, SessionStatus
+from .models import (
+    ContextThresholds,
+    PhasedTimeouts,
+    RetentionConfig,
+    ServiceConfig,
+    SessionStatus,
+)
 from .transport import SpawnTarget, spawn
 
 log = logging.getLogger("agent-bridge")
@@ -385,9 +391,14 @@ class SessionManager:
     ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
-        # Session-Host mode (experimental, default off): local children live in
-        # a survivable Session Host that outlives a frontend restart. The host
-        # index is the durable session_id -> host-endpoint map used to reattach.
+        # Session-Host mode: local children live in a survivable Session Host
+        # that outlives a frontend restart. The host index is the durable
+        # session_id -> host-endpoint map used to reattach. The SERVICE config
+        # default is ON (ServiceConfig.session_host_enabled, #145/#177); this
+        # constructor param defaults off only for embedding/test ergonomics, so
+        # every real entrypoint that wires from config (app.py, ACP-agent mode)
+        # MUST pass cfg.session_host_enabled -- omitting it silently disables
+        # survival for that process.
         self._session_host_enabled = session_host_enabled
         self._session_host_stale_reap_seconds = session_host_stale_reap_seconds
         self._graceful_cancel_settle_seconds = graceful_cancel_settle_seconds
@@ -2574,3 +2585,29 @@ class SessionManager:
         if status:
             sessions = [s for s in sessions if s.status.value == status]
         return sorted(sessions, key=lambda s: s.updated_at, reverse=True)
+
+
+def session_manager_from_config(db: Database, cfg: ServiceConfig) -> SessionManager:
+    """Build a :class:`SessionManager` wired from service config.
+
+    The **single** construction site for a config-driven manager, so every
+    entrypoint -- the HTTP daemon (``app.py``) and ACP-agent mode
+    (``__main__._cmd_agent``) -- honors the operator's session-host settings
+    identically. Constructing ``SessionManager`` inline and omitting a
+    session-host param silently falls back to the constructor defaults (chiefly
+    ``session_host_enabled=False``), which disables survival for that process --
+    the ACP-agent-mode CodeSpace regression where a bridged remote child died on
+    a brief SSH drop (#145/#177, codespace-dispatch-reliability). Route every
+    config-driven construction through here.
+    """
+    return SessionManager(
+        db,
+        context_thresholds=cfg.context_thresholds,
+        timeouts=cfg.timeouts,
+        retention=cfg.retention,
+        session_host_enabled=cfg.session_host_enabled,
+        session_host_stale_reap_seconds=cfg.session_host_stale_reap_seconds,
+        graceful_cancel_settle_seconds=cfg.graceful_cancel_settle_seconds,
+        idle_reap_ttl_seconds=cfg.idle_reap_ttl_seconds,
+        live_stall_interrupt_after_s=cfg.live_stall_interrupt_after_s,
+    )
