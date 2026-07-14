@@ -1,0 +1,220 @@
+# Agent Fabric — Vision
+
+- **Subject:** The **agent fabric** — the layered system that turns isolated
+  Copilot CLI sessions into one coordinated, observable, multi-agent fabric
+  spanning worktrees, machines, CodeSpaces, and containers.
+- **Scope:** branch (links per-plugin child visions as they are authored)
+- **Status:** Active
+- **Last revised:** 2026-07-14
+- **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
+  [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
+  `docs/architecture.md`
+
+## Purpose & Intent
+
+A single Copilot session is one agent, alone in one working tree. The **agent
+fabric** is what lets many such agents — spread across parallel worktrees, other
+machines, CodeSpaces, and containers — be **spun up, discovered, delegated to,
+communicated with, and recovered** as one legible whole, without an account per
+agent and without agents clobbering each other's resources.
+
+The north star is a fabric built as **composable layers**. Each layer is an
+independently installable plugin that stands alone with a coherent capability;
+**adding a layer strictly augments what the layers below already provide**,
+never breaks their standalone contract. The lower a layer sits, the more
+foundational and **passive** it is (legible with no running service); the higher
+it sits, the more **active** — creation, delegation, recovery. A participant
+aware of only a lower layer still gets that layer's full value; awareness of a
+higher layer unlocks more.
+
+The friction this vision exists to abolish is the **coordination tax** of a
+fleet: not knowing whether an agent is already on a job, spinning up a duplicate
+worktree for work already in flight, losing an ephemeral agent's output when its
+container is torn down, and having no shared place to hand a task from one agent
+to the next. The fabric makes *who-is-doing-what* and *hand-this-onward*
+first-class.
+
+## Concepts & Components
+
+The fabric is a **layered stack of plugins**; each layer is its own subject (a
+per-plugin child vision refines it under `visions/plugins/<name>/`). Two
+load-bearing properties bind the layers:
+
+- **Graceful composition.** A lower layer is fully useful alone; a higher layer
+  augments it opportunistically. No layer demands that a higher one be present.
+- **Derive, don't duplicate.** Each piece of fabric state has exactly **one**
+  owning layer; higher layers *coordinate over* and *derive from* that state
+  rather than keeping a second copy. This is what keeps the layers'
+  responsibilities separate as the stack grows.
+
+### agent-worktrees — the isolation & session ground layer
+Owns **agent-per-worktree isolation**, the Copilot **session process
+lifecycle**, and core **worktree + git** state. It is the foundation every other
+layer builds on. On its own it yields **passive, coarse legibility**: state
+discoverable through declarative hooks and on-demand reads of raw session state —
+an Active / Recent / Completed view of agents, process management, and basic
+remote-shell interop — with **no always-on service required**.
+
+### agent-bridge — the coordination layer
+Adds **remote agent creation, inspection, and communication** over discoverable
+channels. It augments the ground layer with **granular, live state** and gives an
+agent the means to **call other agents**: create agents and worktrees, peer into
+another agent's status, send a message into an agent (whether one it controls or
+a peer), and get a sense of what others are doing — including answering *"is an
+agent already up and running to cover this worktree or repo?"*. The live state it
+surfaces is rich enough to bring **granular, live status into the worktree
+picker**.
+
+### agent-dispatch — the delegation layer
+Adds **task management and role assignment**: a **shared, transactional store**
+of task definitions, plus a place for an agent to report **summary status** —
+distinct from the in-conversation messages the coordination layer carries,
+because dispatch asks an agent to do work *on the fabric's behalf* and record an
+outcome. Aware of **only** this layer, agents **stash** tasks to be picked up
+later or handed off. Aware of this layer **and** the coordination layer, agents
+**delegate** tasks to spun-off agents.
+
+### agent-codespaces — a venue provider
+**Provisions CodeSpaces** for related repos, injects the right plugins and
+environment to **run agents headlessly** there, and then presents those CodeSpace
+agents to the fabric as a **provider for the coordination layer** — so a remote
+CodeSpace agent is created, inspected, and reached by the *same* contract as a
+local one.
+
+### agent-containers — a venue provider
+Does the same for **local containers**: provision and set up a container-hosted
+agent and present it to the fabric as a coordination-layer provider, so a
+containerized agent is a first-class fabric participant.
+
+### agent-logger — the memory layer
+**Recovers Copilot session data** from local and remote-dispatched agents —
+especially from **ephemeral containers** whose state would otherwise vanish with
+them — and provides **session compilation and segmentation**, distilling raw
+session state into a form a **later agent can digest**. Work survives the agent
+that did it and can be handed forward.
+
+### agent-vault — the trust layer
+Provides **credentials** to agents in the cases where an SSO / identity provider
+alone is insufficient, so an agent can authenticate to the resources its work
+requires.
+
+## Features
+
+### layered-composition
+The fabric is assembled from independently installable layers. Each layer is
+fully functional on its own; installing a higher layer **adds** capability to the
+layers below without altering or breaking their standalone behavior.
+
+### one-fabric-many-venues
+A local worktree agent, an agent on another machine, a CodeSpace agent, and a
+container agent are all reachable through **one** creation / inspection /
+communication contract. Where an agent runs is a venue detail, not a different
+interface.
+
+### discover-before-duplicate
+Before an agent spins up work on a target, the fabric can answer **"is someone
+already on this?"** — is an agent or worktree already covering this repo/target,
+running or parked — so a duplicate is a deliberate choice, not an accident.
+
+### delegate-and-hand-off
+Work can be **stashed** for later pickup, **handed off** between agents, or
+**delegated** to a spun-off agent, with a shared record of the task and its
+outcome — so a fleet cooperates through durable artifacts, not just live chatter.
+
+### legible-live-state
+What every agent is doing is **observable** — from a coarse Active / Recent /
+Completed floor with no service, up to granular live status surfaced into the
+worktree picker when the coordination layer is present.
+
+### survivable-work
+An agent's session output is **recoverable and digestible** after the fact —
+including from short-lived remote venues — so a successor agent can catch up on
+what a prior one did without the original conversation.
+
+### no-account-per-agent
+A whole fleet of agents cooperates through the fabric **without** provisioning a
+separate identity / account per agent and without agents racing each other
+through a shared default branch.
+
+## Behaviors
+
+### compose-by-awareness
+Capability scales with which layers a participant knows about. An agent aware of
+only the ground layer still gets isolation + coarse legibility; adding awareness
+of coordination, delegation, or a venue provider unlocks the next capability —
+and never *removes* a lower one.
+
+### derive-dont-duplicate
+Each fabric state (worktree / session state, live agent status, task records,
+credentials) has a **single owning layer**. Higher layers **read and coordinate
+over** lower-layer state; they do not persist a competing copy. Cross-layer
+answers (e.g. "who is on this target, and are they live or parked?") are
+**derived** at read time from the owning layers, not stored anew.
+
+### passive-legibility-floor
+The ground layer is legible **without any running service** — its state is
+discoverable through declarative hooks and on-demand reads — so the fabric is
+never wholly blind, even with no daemon up.
+
+### uniform-venue-reach
+Adding, moving, or losing a venue (a CodeSpace, a container, another machine)
+does not change how its agents are addressed: a venue provider makes its agents
+reachable by the fabric's one coordination contract.
+
+### recover-not-lose
+A dropped connection to a remote agent is **not** treated as a dead agent, and a
+torn-down ephemeral venue does **not** silently lose its work: in-flight agents
+are diagnosed and reattached where possible, and session state is recovered and
+compiled for whoever comes next.
+
+### summary-status-is-first-class
+The fabric distinguishes an agent's **in-conversation messages** (what it is
+saying now) from a **recorded summary outcome** of work done on the fabric's
+behalf. Delegated and handed-off work leaves a durable, queryable result, not
+only a transcript.
+
+## Non-Goals / Boundaries
+
+- **Not the per-host service model.** *How* each layer's runtime is deployed,
+  exposed, and reached as a machine-local service — à-la-carte installability,
+  collision-free discoverable endpoints, platform-native supervision — is the
+  **[plugin-services](../plugin-services/README.md)** vision's territory. The
+  fabric builds *on* that model; it does not restate or duplicate it.
+- **Not an account-per-agent model.** The fabric deliberately coordinates many
+  agents under a shared identity via leased / claimed work, not by minting an
+  account per agent.
+- **Not a replacement for the human's editor or terminal.** The fabric
+  coordinates *agents*; it does not own the human's own interactive editing
+  surface.
+- **No second store of another layer's state.** A higher layer must not persist
+  its own copy of state a lower layer owns — it derives and coordinates. (Stated
+  as a boundary precisely so realizations don't smear one capability's state
+  across layers.)
+- **Not a specification.** This vision fixes the *layering, roles, and
+  guarantees* of the fabric, not the wiring — it does not pin transports,
+  storage engines, on-disk formats, endpoints, or command grammars. Binding
+  detail of that kind belongs to the reality docs or a future `specifications`
+  layer.
+
+## See Also
+
+- Parent vision: [visions index](../README.md)
+- Sibling vision: [plugin-services](../plugin-services/README.md) — the per-host
+  service model the fabric's layers deploy as (it defers cross-host agent reach
+  to this fabric).
+- Child visions: none yet (per-plugin leaves will live under
+  `visions/plugins/<name>/` — e.g. a future `visions/plugins/agent-bridge/`).
+- Reality docs: [`docs/architecture.md`](../../docs/architecture.md) ·
+  [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
+  `docs/`.
+
+## Provenance
+
+- **2026-07-14** — Initial authoring. Intent mined from the operator's
+  description of the layered agent-* stack (ground isolation → coordination →
+  delegation → venue providers → memory → trust) and the composition property
+  that each layer stands alone and augments the ones below. The
+  *derive-don't-duplicate / single-owning-layer* rule crystallized from
+  reconciling where overlapping cross-layer responsibilities (dedup, liveness,
+  identity) should live — generalized here as the standing boundary that keeps
+  the layers separate.
