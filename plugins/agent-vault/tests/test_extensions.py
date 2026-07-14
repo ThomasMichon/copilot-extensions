@@ -1,10 +1,11 @@
 """Tests for the agent-vault extension seam.
 
-Each of the four hook categories is exercised at its wiring point:
+Each of the hook categories is exercised at its wiring point:
 - unlock-source provider   -> service.VaultService.ensure_unlocked
 - registrable action       -> service.VaultService.handle_request
 - client transport         -> cli.send_command
 - config source            -> config.resolve_context
+- CLI command              -> cli.main() subparser wiring
 
 Plus the registry ordering and the env-var loader.
 """
@@ -284,3 +285,67 @@ def test_repo_config_outranks_config_source(registry, clean_env):
     ctx = config.resolve_context(cwd=str(clean_env))
     assert ctx.sources["kpdb"] == "repo"
     assert ctx.kpdb.replace("\\", "/").endswith("repo-vault.kdbx")
+
+
+# ---------------------------------------------------------------------------
+# CLI command -> main() subparser wiring
+# ---------------------------------------------------------------------------
+
+
+def test_registered_cli_command_adds_verb(registry, monkeypatch):
+    ran = {}
+
+    def build(subparsers):
+        p = subparsers.add_parser("probe", help="facility probe")
+        p.add_argument("target")
+
+        def handler(args):
+            ran["target"] = args.target
+            return 7
+
+        p.set_defaults(func=handler)
+
+    registry.register_cli_command(build, name="probe")
+    monkeypatch.setattr(sys, "argv", ["agent-vault", "probe", "db1"])
+    rc = cli.main()
+    assert rc == 7
+    assert ran["target"] == "db1"
+
+
+def test_cli_commands_apply_in_priority_order(registry):
+    import argparse
+
+    built = []
+    registry.register_cli_command(
+        lambda sp: built.append("b") or sp.add_parser("vb"), priority=50, name="b"
+    )
+    registry.register_cli_command(
+        lambda sp: built.append("a") or sp.add_parser("va"), priority=10, name="a"
+    )
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers()
+    registry.apply_cli_commands(sub)
+    assert built == ["a", "b"]  # priority asc
+
+
+def test_broken_cli_command_builder_is_skipped(registry):
+    import argparse
+
+    good = {}
+
+    def boom(subparsers):
+        raise RuntimeError("bad builder")
+
+    def build_good(subparsers):
+        p = subparsers.add_parser("probe2")
+        p.set_defaults(func=lambda args: 0)
+        good["built"] = True
+
+    registry.register_cli_command(boom, name="boom")
+    registry.register_cli_command(build_good, name="good")
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers()
+    registry.apply_cli_commands(sub)  # must not raise
+    assert good["built"] is True
+    args = parser.parse_args(["probe2"])
+    assert args.func(args) == 0

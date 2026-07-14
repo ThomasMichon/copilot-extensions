@@ -151,7 +151,7 @@ sudo -A apt update
 
 The core daemon and CLI ship a fixed feature set. A downstream harness that needs
 extra behavior can register **extensions** against a small seam instead of forking
-the core. Four generic hook categories are exposed (all in `agent_vault.extensions`):
+the core. Six generic hook categories are exposed (all in `agent_vault.extensions`):
 
 | Hook | Signature | Consulted |
 |------|-----------|-----------|
@@ -160,11 +160,12 @@ the core. Four generic hook categories are exposed (all in `agent_vault.extensio
 | **Client transport** | `transport(request, timeout, ctx) -> dict \| None` | in the CLI *after* the built-in unix-socket + TCP transports both fail — reach a daemon they can't (e.g. over a tunnel). Register with `before_builtin=True` to be consulted *ahead* of the built-ins (for a transport that must take precedence over the local daemon; return `None` when it does not apply) |
 | **Config source** | `source(cwd) -> dict` | in the resolver, at a tier below per-repo config and above the named-vault base — contribute `kpdb`/`group`/`port`/`vault` |
 | **Cache source** | `source(machine) -> iterable` | in `cache-populate` — yield entries to pre-warm, each a `"path"` string or an `(entry, field)` pair (e.g. entries derived from installed services) |
+| **CLI command** | `builder(subparsers) -> None` | in `cli.main()` *after* the built-in verbs — call `subparsers.add_parser(...)` then `set_defaults(func=handler)` to add a subcommand (e.g. facility-only verbs) instead of forking `cli.py` |
 
 An extension is a module exposing `register(registry)` that calls
 `registry.register_unlock_provider(...)`, `register_action(...)`,
-`register_transport(...)`, `register_config_source(...)`, or
-`register_cache_source(...)`. Extensions are
+`register_transport(...)`, `register_config_source(...)`,
+`register_cache_source(...)`, or `register_cli_command(...)`. Extensions are
 discovered via the `agent_vault.extensions` **entry-point group** or the
 `AGENT_VAULT_EXTENSIONS` env var (comma-separated `module` / `module:callable`
 paths). Loading is idempotent and **fail-open**: a broken extension is logged and

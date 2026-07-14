@@ -1113,6 +1113,9 @@ def main():
     vp.add_argument("name", help="Vault name")
     vp.set_defaults(func=cmd_vault_remove)
 
+    from .extensions import get_registry
+    get_registry().apply_cli_commands(sub)
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
