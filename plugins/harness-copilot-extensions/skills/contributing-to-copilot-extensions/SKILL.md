@@ -4,26 +4,21 @@ description: >
   How to make a change to a copilot-extensions plugin and land it correctly --
   repo layout, the worktree contribution flow, the MANDATORY version bump (the
   single most common mistake), the test + install-contract gates, deploy after
-  push, and the source-of-truth rules. Use when editing, fixing, or extending
-  any plugin in the copilot-extensions suite (agent-worktrees, agent-bridge,
-  agent-codespaces, agent-containers, agent-mcp, agent-logger, agent-dispatch,
-  context-handoff, efforts, visions, customizing-copilot, harness-*). Covers the
-  design-guidance layers a change reconciles to — the repo's visions (intent) and
-  architecture patterns (how we build) — not just the mechanical land-it flow.
+  push, and the source-of-truth rules. Also covers the design-guidance layers a
+  change reconciles to: the repo's visions (intent) and architecture patterns
+  (how we build). Use when editing, fixing, or extending any plugin in the
+  copilot-extensions suite (agent-worktrees, agent-bridge, agent-mcp,
+  agent-logger, agent-dispatch, context-handoff, efforts, visions, harness-*).
   Trigger phrases include:
   - 'change a copilot-extensions plugin'
   - 'fix agent-worktrees'
-  - 'fix the agent-bridge plugin'
   - 'edit a plugin'
-  - 'plugin code change'
-  - 'design a plugin service'
   - 'plugin architecture pattern'
   - 'reconcile to the vision'
   - 'fix the installer'
   - 'bump the plugin version'
   - 'push a plugin update'
   - 'contribute to copilot-extensions'
-  - 'ssh-manager'
 ---
 
 # Contributing to copilot-extensions

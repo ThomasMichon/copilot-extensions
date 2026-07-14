@@ -1,54 +1,74 @@
 #!/usr/bin/env bash
-# pre-commit hook: basic, high-signal ruff lint on staged Python files.
-# Enable with:  git config core.hooksPath tools/hooks
+# pre-commit hook: high-signal, staged-only guards for this repo.
+# Enable with:  git config core.hooksPath tools/hooks   (or: tools/setup-hooks.sh)
 #
-# Scope is deliberately narrow: only the staged files in this commit, and only
-# the pyflakes (F) + syntax-error (E9) rule groups. This keeps the hook
-# decoupled from each plugin's full [tool.ruff] config so it does NOT block on
-# the repo's pre-existing style debt -- it fails only on genuine problems
-# (undefined names, unused imports/vars, syntax errors) in the code you touch.
-# Run a full `ruff check .` manually for the complete style pass.
+#   1. ruff (F, E9)   -- pyflakes + syntax errors on staged Python. Scope is
+#      deliberately narrow so the hook does NOT block on the repo's pre-existing
+#      style debt -- only genuine problems (undefined names, unused imports/vars,
+#      syntax errors) in the code you touch. Run `ruff check .` for the full pass.
+#   2. check-skills   -- staged SKILL.md files: frontmatter validity, name rules,
+#      and the description <=1024-char HARD limit the Copilot CLI enforces (over
+#      it, the loader silently DROPS the skill). See tools/check-skills.py.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-# Collect staged Python files (added/copied/modified), NUL-safe so paths with
-# spaces survive.
-STAGED=()
-while IFS= read -r -d '' f; do
-    STAGED+=("$f")
-done < <(git diff --cached --name-only --diff-filter=ACM -z -- '*.py')
-
-if [[ ${#STAGED[@]} -eq 0 ]]; then
-    exit 0
-fi
-
-# Resolve ruff: prefer a ruff on PATH, else fall back to `python -m ruff`
-# (skipping the Windows Store python stub under WindowsApps, then `py`).
-if command -v ruff >/dev/null 2>&1; then
-    RUFF=(ruff)
-else
-    PY=()
-    for c in python3 python; do
-        p="$(command -v "$c" 2>/dev/null || true)"
-        case "$p" in *WindowsApps*) continue ;; esac
-        if [[ -n "$p" ]]; then PY=("$p"); break; fi
-    done
-    if [[ ${#PY[@]} -eq 0 ]] && command -v py >/dev/null 2>&1; then
-        PY=(py -3)
-    fi
-    if [[ ${#PY[@]} -gt 0 ]] && "${PY[@]}" -m ruff --version >/dev/null 2>&1; then
-        RUFF=("${PY[@]}" -m ruff)
-    else
-        echo "pre-commit: ruff not found -- skipping lint (pip install ruff to enable)" >&2
-        exit 0
-    fi
+# Resolve a *working* python: skip the Windows Store execution-alias stub under
+# WindowsApps (it only prints an install message and exits non-zero), then fall
+# back to the `py` launcher on Windows. Sets the PY array (may be empty).
+PY=()
+for c in python3 python; do
+    p="$(command -v "$c" 2>/dev/null || true)"
+    case "$p" in *WindowsApps*) continue ;; esac
+    if [[ -n "$p" ]]; then PY=("$p"); break; fi
+done
+if [[ ${#PY[@]} -eq 0 ]] && command -v py >/dev/null 2>&1; then
+    PY=(py -3)
 fi
 
 cd "$ROOT"
-if ! "${RUFF[@]}" check --select F,E9 --force-exclude "${STAGED[@]}"; then
-    echo "" >&2
-    echo "pre-commit: ruff found issues in staged files (rules: F, E9)." >&2
-    echo "  Fix them, or run with --no-verify to bypass (discouraged)." >&2
-    echo "  Many are auto-fixable: ruff check --select F,E9 --fix <files>" >&2
-    exit 1
+failed=0
+
+# --- 1. ruff on staged Python -------------------------------------------------
+STAGED_PY=()
+while IFS= read -r -d '' f; do
+    STAGED_PY+=("$f")
+done < <(git diff --cached --name-only --diff-filter=ACM -z -- '*.py')
+
+if [[ ${#STAGED_PY[@]} -gt 0 ]]; then
+    # Prefer a ruff on PATH, else `python -m ruff`.
+    RUFF=()
+    if command -v ruff >/dev/null 2>&1; then
+        RUFF=(ruff)
+    elif [[ ${#PY[@]} -gt 0 ]] && "${PY[@]}" -m ruff --version >/dev/null 2>&1; then
+        RUFF=("${PY[@]}" -m ruff)
+    fi
+    if [[ ${#RUFF[@]} -eq 0 ]]; then
+        echo "pre-commit: ruff not found -- skipping lint (pip install ruff to enable)" >&2
+    elif ! "${RUFF[@]}" check --select F,E9 --force-exclude "${STAGED_PY[@]}"; then
+        echo "" >&2
+        echo "pre-commit: ruff found issues in staged files (rules: F, E9)." >&2
+        echo "  Fix them, or run with --no-verify to bypass (discouraged)." >&2
+        echo "  Many are auto-fixable: ruff check --select F,E9 --fix <files>" >&2
+        failed=1
+    fi
 fi
+
+# --- 2. check-skills on staged SKILL.md --------------------------------------
+STAGED_SKILLS=()
+while IFS= read -r -d '' f; do
+    STAGED_SKILLS+=("$f")
+done < <(git diff --cached --name-only --diff-filter=ACM -z -- '*SKILL.md')
+
+if [[ ${#STAGED_SKILLS[@]} -gt 0 ]]; then
+    if [[ ${#PY[@]} -eq 0 ]]; then
+        echo "pre-commit: python not found -- skipping SKILL.md validation" >&2
+    elif ! "${PY[@]}" "$ROOT/tools/check-skills.py" "${STAGED_SKILLS[@]}"; then
+        echo "" >&2
+        echo "pre-commit: SKILL.md validation failed (see errors above)." >&2
+        echo "  A description over 1024 chars makes the Copilot CLI DROP the skill." >&2
+        echo "  Fix it, or run with --no-verify to bypass (discouraged)." >&2
+        failed=1
+    fi
+fi
+
+exit "$failed"
