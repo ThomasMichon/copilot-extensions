@@ -11,14 +11,24 @@ from typing import Any
 
 IS_WINDOWS = platform.system() == "Windows"
 DEFAULT_TCP_PORT = 19999
+
+# Runtime endpoint paths. Each honors an environment override so a deployment can
+# run the daemon at custom paths (e.g. a branded service, or several named vaults
+# side by side without colliding). Unset -> the platform default below.
+SOCKET_ENV = "AGENT_VAULT_SOCKET"
+PID_ENV = "AGENT_VAULT_PID"
+LOG_ENV = "AGENT_VAULT_LOG"
+
 DEFAULT_SOCKET_PATH = "/tmp/agent-vault-service.sock"
-SOCKET_PATH = DEFAULT_SOCKET_PATH
+SOCKET_PATH = os.environ.get(SOCKET_ENV) or DEFAULT_SOCKET_PATH
 PID_FILE_LINUX = "/tmp/agent-vault-service.pid"
 PID_FILE_WIN = Path(os.environ.get("TEMP", "C:/Temp")) / "agent-vault-service.pid"
-PID_FILE = str(PID_FILE_WIN) if IS_WINDOWS else PID_FILE_LINUX
+PID_FILE = os.environ.get(PID_ENV) or (
+    str(PID_FILE_WIN) if IS_WINDOWS else PID_FILE_LINUX
+)
 LOG_FILE_LINUX = Path("/tmp") / "agent-vault-service.log"
 LOG_FILE_WIN = Path(os.environ.get("TEMP", "C:/Temp")) / "agent-vault-service.log"
-LOG_FILE = LOG_FILE_WIN if IS_WINDOWS else LOG_FILE_LINUX
+LOG_FILE = Path(os.environ.get(LOG_ENV) or (LOG_FILE_WIN if IS_WINDOWS else LOG_FILE_LINUX))
 CONFIG_ENV = "AGENT_VAULT_CONFIG"
 REPO_CONFIG_NAME = ".agent-vault.json"
 
@@ -30,7 +40,7 @@ class VaultConfig:
     kpdb: str | None = None
     group: str | None = None
     port: int = DEFAULT_TCP_PORT
-    socket_path: str = DEFAULT_SOCKET_PATH
+    socket_path: str = SOCKET_PATH
     pid_file: str = PID_FILE
     log_file: Path = LOG_FILE
 
@@ -317,7 +327,7 @@ def load_config() -> VaultConfig:
     """Resolve configuration from JSON settings and environment variables."""
     data = load_global_config()
     context = resolve_context()
-    socket_path = str(data.get("socket_path") or DEFAULT_SOCKET_PATH)
+    socket_path = str(data.get("socket_path") or SOCKET_PATH)
     pid_file = str(data.get("pid_file") or PID_FILE)
     log_file = Path(str(data.get("log_file") or LOG_FILE))
     return VaultConfig(
