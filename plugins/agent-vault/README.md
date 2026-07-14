@@ -105,11 +105,20 @@ Useful commands:
 
 The vault service caches the master password in memory (default 1 h TTL) and
 serves reads over a loopback endpoint (Unix socket + `127.0.0.1`). It is
-**passively locked**: it prompts for the master password (GUI dialog or
-terminal) only at the moment a secret is actually requested, and re-locks when
-the TTL expires. The CLI cold-starts it on first use; the installer also deploys
-it as a background service (systemd `--user` unit on Linux, a windowless
-scheduled task on Windows) so `sudo -A` and other non-interactive callers work.
+**passively locked**: a secret is served from the in-memory master password, and
+it re-locks when the TTL expires.
+
+**Locked reads fail fast (opt into prompting).** When a credential is requested
+and the vault is locked, the service **does not block on an interactive prompt by
+default** — it returns promptly with an actionable `needs_unlock` result
+("run `agent-vault unlock` … then retry") so a caller (e.g. an agent) can surface
+it rather than stalling on a dialog. Unlock-source *providers* (an extension seam
+hook) still run first, so inline resolution is never skipped — only the blocking
+prompt is gated. To prompt: run `agent-vault unlock` (the explicit unlock), or
+pass `--prompt` to `agent-vault get`. The CLI cold-starts the service on first
+use; the installer also deploys it as a background service (systemd `--user` unit
+on Linux, a windowless scheduled task on Windows) so `sudo -A` and other
+non-interactive callers work.
 
 ## SUDO_ASKPASS (Linux / WSL)
 
