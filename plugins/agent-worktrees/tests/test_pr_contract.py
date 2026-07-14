@@ -169,6 +169,40 @@ class TestHelpers:
     def test_title_is_wip_no_prefixes_is_noop(self):
         assert pc.title_is_wip("WIP: thing", ()) is False
 
+    def test_ensure_wip_title_prepends_canonical(self):
+        # A plain title gains the canonical server-recognised prefix.
+        assert pc.ensure_wip_title("Add feature") == "WIP: Add feature"
+
+    def test_ensure_wip_title_idempotent_on_native_prefix(self):
+        # Already server-recognised (WIP:/[WIP]) -> returned unchanged.
+        assert pc.ensure_wip_title("WIP: Add feature") == "WIP: Add feature"
+        assert pc.ensure_wip_title("[WIP] Add feature") == "[WIP] Add feature"
+
+    def test_ensure_wip_title_forces_prefix_on_non_native_marker(self):
+        # "Draft:" is NOT a server-recognised prefix, so the PR would open
+        # non-draft -- ensure must still prepend the canonical WIP: so the
+        # server actually marks it draft (issue: false draft:true report).
+        assert pc.ensure_wip_title("Draft: Add feature") == "WIP: Draft: Add feature"
+
+    def test_strip_wip_title_removes_single_prefix(self):
+        clean, was_wip = pc.strip_wip_title("WIP: Add feature")
+        assert (clean, was_wip) == ("Add feature", True)
+
+    def test_strip_wip_title_removes_all_stacked_prefixes(self):
+        # A doubly-marked title must end fully un-drafted, not with a residual
+        # recognised prefix that leaves the server still seeing it as draft.
+        clean, was_wip = pc.strip_wip_title("WIP: [WIP] Add feature")
+        assert (clean, was_wip) == ("Add feature", True)
+
+    def test_strip_wip_title_noop_reports_not_wip(self):
+        clean, was_wip = pc.strip_wip_title("Add feature")
+        assert (clean, was_wip) == ("Add feature", False)
+
+    def test_strip_wip_title_does_not_overstrip(self):
+        # A title whose body merely starts with a WIP-ish word is left intact.
+        clean, was_wip = pc.strip_wip_title("WIP: wips of change")
+        assert (clean, was_wip) == ("wips of change", True)
+
     def test_merge_state(self):
         assert pc.merge_state(pc.PRSnapshot(merged=True)) == "merged"
         assert pc.merge_state(pc.PRSnapshot(pr_state="closed")) == "closed"

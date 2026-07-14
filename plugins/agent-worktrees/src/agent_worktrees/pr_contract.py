@@ -335,6 +335,77 @@ def title_is_wip(title: str, wip_title_prefixes: Iterable[str]) -> bool:
     return any(t.startswith(p.strip().lower()) for p in wip_title_prefixes if p.strip())
 
 
+#: Canonical prefix used when *marking* a PR draft. Gitea (<= 1.26, the facility
+#: server) has no native ``draft`` boolean -- a WIP title prefix IS its native
+#: draft mechanism, and the API's ``draft`` field is derived from it. ``WIP:`` is
+#: Gitea's default ``WORK_IN_PROGRESS_PREFIXES`` entry, so the server recognises
+#: it regardless of the local ``wip_title_prefixes`` binding.
+DEFAULT_WIP_PREFIX = "WIP:"
+
+#: WIP prefixes always recognised in addition to the repo binding, so stripping /
+#: detection works even against a title marked by a different tool or the server
+#: default. Kept lowercase for case-insensitive comparison.
+_BUILTIN_WIP_PREFIXES = ("wip:", "wip ", "[wip]", "draft:", "[draft]")
+
+#: The prefixes the Gitea server actually treats as draft (its default
+#: ``WORK_IN_PROGRESS_PREFIXES`` = ``WIP:,[WIP]``). ``ensure_wip_title`` must
+#: guarantee **one of these** -- not merely any binding/builtin variant like
+#: ``Draft:`` -- or the server won't mark the PR draft even though the title
+#: "looks" WIP. Kept lowercase for case-insensitive comparison.
+_SERVER_NATIVE_WIP_PREFIXES = ("wip:", "[wip]")
+
+
+def ensure_wip_title(title: str, wip_title_prefixes: Iterable[str] = ()) -> str:
+    """Return ``title`` guaranteed to carry a *server-recognised* WIP prefix.
+
+    Used by ``create_pr --draft`` to open a native Gitea draft (a WIP-prefixed
+    title). Idempotent only against the prefixes the **server** treats as draft
+    (``WIP:`` / ``[WIP]``): a title already carrying a non-native marker (e.g.
+    ``Draft:``) is NOT a Gitea draft, so the canonical ``WIP:`` is still
+    prepended to guarantee the PR actually opens draft. ``wip_title_prefixes`` is
+    accepted for signature symmetry with :func:`strip_wip_title` but is not used
+    for the idempotency check -- a binding variant the server ignores must not
+    suppress the canonical prefix.
+    """
+    if title_is_wip(title, _SERVER_NATIVE_WIP_PREFIXES):
+        return title or ""
+    return f"{DEFAULT_WIP_PREFIX} {(title or '').strip()}".strip()
+
+
+def strip_wip_title(
+    title: str, wip_title_prefixes: Iterable[str] = ()
+) -> tuple[str, bool]:
+    """Strip **all** leading WIP prefixes from ``title`` (fully un-draft it).
+
+    Returns ``(clean_title, was_wip)``. ``was_wip`` is False when the title
+    carried no recognised WIP prefix, so the caller can refuse to "un-draft" a PR
+    that is not a draft rather than silently no-op. Strips repeatedly so a
+    doubly-marked title (e.g. ``"WIP: [WIP] x"``) is left with **no** recognised
+    prefix -- otherwise the server would still see it as draft after a "success".
+    """
+    prefixes = sorted(
+        # Preserve each prefix verbatim (do NOT strip): the binding's bare-word
+        # marker is spelled ``"wip "`` *with* a trailing space precisely so it
+        # matches a word boundary and not a longer word ("wips", "wiped"). Only
+        # drop entries that are empty/whitespace-only and dedupe.
+        {p for p in (*tuple(wip_title_prefixes), *_BUILTIN_WIP_PREFIXES) if p.strip()},
+        key=len,
+        reverse=True,  # longest match first so "[wip]" wins over a bare "wip "
+    )
+    current = (title or "").lstrip()
+    stripped_any = False
+    while True:
+        low = current.lower()
+        for p in prefixes:
+            if low.startswith(p.lower()):
+                current = current[len(p):].lstrip(" :\t")
+                stripped_any = True
+                break
+        else:
+            break
+    return current.strip(), stripped_any
+
+
 def merge_state(snap: PRSnapshot) -> str:
     """One-word merge disposition for a glance: merged/closed/conflict/clean/unknown."""
     if snap.merged:
@@ -521,6 +592,7 @@ def merge_readiness(
 __all__ = [
     "ALL_TRANSITIONS",
     "DEFAULT_UNTIL",
+    "DEFAULT_WIP_PREFIX",
     "VERDICT_STATES",
     "Baseline",
     "Comment",
@@ -534,8 +606,10 @@ __all__ = [
     "classify_state",
     "compute_events",
     "effective_verdict",
+    "ensure_wip_title",
     "merge_readiness",
     "merge_state",
+    "strip_wip_title",
     "title_is_wip",
 ]
 

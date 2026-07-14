@@ -90,12 +90,20 @@ class GiteaProvider:
                 "vault fetch) or 'pr.token_env' in the repo config."
             )
         url = self._api(scope.api_base, f"/repos/{scope.repo}/pulls")
+        # Gitea (<= 1.26) has no native draft flag: a WIP title prefix IS its
+        # native draft mechanism (the API's ``draft`` field is derived from it).
+        # For a draft PR, ensure the title carries a WIP prefix the server
+        # recognises.
+        title = scope.title
+        if scope.draft:
+            from ..pr_contract import ensure_wip_title
+            title = ensure_wip_title(scope.title)
         status, body = self._curl(
             "POST", url, token,
             payload={
                 "head": scope.head,
                 "base": scope.base,
-                "title": scope.title,
+                "title": title,
                 "body": scope.body,
             },
         )
@@ -256,6 +264,60 @@ class GiteaProvider:
         detail = body.strip()
         suffix = f": {detail[:200]}" if detail else ""
         return f"label removal failed (HTTP {status}) for {repo}#{number}{suffix}"
+
+    def mark_ready(
+        self, repo: str, number: int, *, api_base: str = "",
+        token: str | None = None, title: str = "",
+        wip_title_prefixes: tuple[str, ...] = (),
+    ) -> str:
+        """Move a PR out of draft by stripping the WIP prefix from its title.
+
+        Gitea has no native draft flag (<= 1.26): a draft PR is one whose title
+        carries a WIP prefix.  Un-drafting therefore edits the title to remove
+        that prefix.  Returns "" on success, or an error string -- including
+        ``"PR #N is not in draft state"`` when the title carries no WIP prefix,
+        so ``pr-ready`` errors on a non-draft PR instead of reporting a false
+        success.
+        """
+        from ..pr_contract import strip_wip_title
+
+        if not token:
+            return "Gitea provider needs a token to mark a PR ready."
+        cur = title
+        if not cur:
+            # No title supplied by the caller -- read it.
+            try:
+                status, body = self._curl(
+                    "GET", self._api(api_base, f"/repos/{repo}/pulls/{number}"),
+                    token,
+                )
+            except ProviderError as exc:
+                return str(exc)
+            if status != 200:
+                return f"Gitea PR #{number} lookup failed (HTTP {status})."
+            try:
+                cur = str(json.loads(body).get("title", ""))
+            except json.JSONDecodeError as exc:
+                return f"Gitea returned non-JSON PR payload: {exc}"
+
+        clean, was_wip = strip_wip_title(cur, wip_title_prefixes)
+        if not was_wip:
+            return (
+                f"PR #{number} in {repo} is not in draft state "
+                "(its title carries no WIP prefix); nothing to un-draft."
+            )
+        try:
+            status, body = self._curl_with_retry(
+                "PATCH", self._api(api_base, f"/repos/{repo}/pulls/{number}"),
+                token, payload={"title": clean},
+            )
+        except ProviderError as exc:
+            return str(exc)
+        if status in (200, 201):
+            return ""
+        detail = body.strip()
+        suffix = f": {detail[:200]}" if detail else ""
+        return f"un-draft failed (HTTP {status}) for {repo}#{number}{suffix}"
 
     def _issue_label_names(
         self, scope: PRScope, number: int, token: str

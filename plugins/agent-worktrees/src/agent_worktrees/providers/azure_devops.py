@@ -131,6 +131,15 @@ class AzureDevOpsProvider:
         _ = (repo, number, label, api_base, token)
         return "remove_label is not supported for azure-devops provider"
 
+    def mark_ready(
+        self, repo: str, number: int, *, api_base: str = "",
+        token: str | None = None, title: str = "",
+        wip_title_prefixes: tuple[str, ...] = (),
+    ) -> str:
+        """Un-draft is not supported for the CLI-backed azure-devops provider."""
+        _ = (repo, number, api_base, token, title, wip_title_prefixes)
+        return "mark_ready is not supported for azure-devops provider"
+
     def get_snapshot(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PRSnapshot:

@@ -36,6 +36,8 @@ class GitHubProvider:
             "--title", scope.title,
             "--body", scope.body,
         ]
+        if scope.draft:
+            args.append("--draft")
         for label in scope.labels:
             args += ["--label", label]
         proc = run_cli(args, env=self._env(token))
@@ -101,6 +103,27 @@ class GitHubProvider:
         if "HTTP 404" in detail or "Not Found" in detail:
             return ""
         return f"gh label removal failed for {repo}#{number}: {detail}"
+
+    def mark_ready(
+        self, repo: str, number: int, *, api_base: str = "",
+        token: str | None = None, title: str = "",
+        wip_title_prefixes: tuple[str, ...] = (),
+    ) -> str:
+        """Move a native draft PR to ready-for-review via ``gh pr ready``."""
+        _ = (api_base, title, wip_title_prefixes)
+        proc = run_cli(
+            ["gh", "pr", "ready", str(number), "--repo", repo],
+            env=self._env(token),
+        )
+        if proc.returncode == 0:
+            return ""
+        detail = (proc.stderr.strip() or proc.stdout.strip())
+        if "not a draft" in detail.lower() or "already ready" in detail.lower():
+            return (
+                f"PR #{number} in {repo} is not in draft state; nothing to "
+                f"un-draft ({detail})."
+            )
+        return f"gh pr ready failed for {repo}#{number}: {detail}"
 
     def get_snapshot(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None

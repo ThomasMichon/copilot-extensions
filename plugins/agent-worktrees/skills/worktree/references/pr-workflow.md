@@ -10,7 +10,7 @@ rules.
 - Detecting PR mode + where PR config lives (machine-local vs in-repo)
 - `create-pr` (auto-open, attribution marker, labels)
 - Dispositions: keep-alive vs detach
-- Held PRs (`--hold` / `pr-ready`)
+- Draft PRs (`--draft` / `pr-ready`)
 - Multiple PRs from one worktree
 - Recovery
 
@@ -315,6 +315,41 @@ Add `--all` to list every tracked PR (serial/parallel), not just the active
 one. When a worktree tracks several PRs, `set-pr` updates the **active** PR by
 default; target a specific one with `--pr <number>` or
 `--select-branch <branch>`.
+
+### Draft PRs (`--draft` / `pr-ready`)
+
+Open a PR as a **draft** when you want it visible (a shareable URL, or a place to
+iterate with `push-changes`) *before* inviting review:
+
+```
+agent-worktrees create-pr --draft --title "..."   # opens as a DRAFT
+# ... iterate: edit -> commit -> push-changes ...
+agent-worktrees pr-ready                            # draft -> ready-for-review
+```
+
+`--draft` uses the provider's **native** not-ready-for-review state, and
+`pr-ready` clears it. *How* a provider encodes a draft is an implementation
+detail the CLI hides:
+
+| Provider | Draft encoding | `pr-ready` |
+|----------|----------------|------------|
+| `github` | native draft flag (`gh pr create --draft`) | `gh pr ready` |
+| `gitea` | a `WIP:` title prefix (Gitea ≤ 1.26 has no draft boolean; the API's `draft` field is derived from it) | strips the WIP prefix by editing the title |
+| `azure-devops` | not supported here | reports unsupported |
+
+**`pr-ready` is an un-draft verb, not a merge signal.** It performs exactly one
+transition — **draft → ready-for-review** — and states it explicitly. It does
+**not** grant merge consent; that stays with `pr-merge` (a separate,
+post-approval transition). `pr-ready` **errors** when the PR is not a draft (a
+no-op never reports success). Whether an auto-reviewer reviews a draft depends on
+the review backend — many skip drafts until the `ready_for_review` transition
+that `pr-ready` triggers, so un-drafting is what invites review.
+
+> **Deprecated `--hold`.** `create-pr --hold` is retained as an alias for
+> `--draft`. The old model opened a PR carrying a `do-not-merge` label (a
+> merge-only hold); that is retired in favour of native draft state. For a legacy
+> PR still carrying a `do-not-merge` label, `pr-ready` removes it as a
+> backward-compat transition. Prefer `--draft`.
 
 ### Multiple PRs per worktree (serial & parallel)
 
