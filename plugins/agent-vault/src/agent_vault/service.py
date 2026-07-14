@@ -28,6 +28,7 @@ from .config import (
     tcp_port as configured_tcp_port,
 )
 from .extensions import ActionContext, UnlockContext, get_registry
+from .gcm import git_credential_action
 from .keepassxc import KeePassXCBackend
 from .prompt import prompt_password
 
@@ -618,6 +619,11 @@ class VaultService:
         if action == "stop":
             self._shutdown = True
             return {"ok": True}
+
+        if action == "git-credential":
+            # Delegate an HTTPS git credential to the local GCM for allowlisted
+            # hosts. Independent of KeePassXC -- no vault unlock required.
+            return git_credential_action({**request, "allow_prompt": self._request_ctx.allow_prompt})
 
         handler = get_registry().action(action)
         if handler is not None:

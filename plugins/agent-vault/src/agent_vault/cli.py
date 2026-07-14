@@ -698,6 +698,51 @@ def cmd_move(args):
     return 1
 
 
+def cmd_git_credential(args):
+    """git credential helper: delegate an allowlisted host's credential to GCM.
+
+    Reads the git-credential protocol (key=value lines, blank-line terminated)
+    on stdin. Only ``get`` resolves a credential (via the daemon's
+    ``git-credential`` action); ``store``/``erase`` are no-ops because the vault
+    is the source of truth and GCM manages its own cache.
+    """
+    if args.op != "get":
+        return 0
+
+    fields: dict[str, str] = {}
+    for line in sys.stdin:
+        line = line.rstrip("\n")
+        if not line:
+            break
+        key, _, value = line.partition("=")
+        if key:
+            fields[key.strip()] = value.strip()
+
+    host = fields.get("host", "")
+    if not host:
+        return 0
+
+    if not ensure_service():
+        return 0  # helper: stay silent so git falls through to other helpers
+
+    request = {
+        "action": "git-credential",
+        "protocol": fields.get("protocol", "https"),
+        "host": host,
+    }
+    if fields.get("path"):
+        request["path"] = fields["path"]
+    if fields.get("username"):
+        request["username"] = fields["username"]
+    resp = send_command(request, timeout=None)
+    if resp and resp.get("ok"):
+        print(f"protocol={resp.get('protocol', request['protocol'])}")
+        print(f"host={resp.get('host', host)}")
+        print(f"username={resp.get('username', '')}")
+        print(f"password={resp.get('password', '')}")
+    return 0
+
+
 def cmd_import_key(args):
     import base64
 
@@ -930,6 +975,11 @@ def main():
     p.add_argument("-f", "--force", action="store_true",
                    help="Allow moving an entry outside the vault group")
     p.set_defaults(func=cmd_move)
+
+    p = sub.add_parser("git-credential",
+                       help="git credential helper (delegates allowlisted hosts to GCM)")
+    p.add_argument("op", choices=["get", "store", "erase"], help="git credential operation")
+    p.set_defaults(func=cmd_git_credential)
 
     p = sub.add_parser("import-key", help="Import key pair into entry")
     p.add_argument("entry", help="Entry path")
