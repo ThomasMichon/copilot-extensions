@@ -268,6 +268,39 @@ def machines():
     ]
 
 
+def machine_key_map() -> dict[str, str]:
+    """``display_name -> registry key`` from ``machines.yaml``.
+
+    A machine's registry key is its canonical identity (lowercase; it doubles as
+    the SSH-alias base) -- the value ``agent-worktrees get machine`` returns and
+    that other facility tools (agent-dispatch, agent-bridge) match against. The
+    picker's tab labels carry the *display* name, so a registered pivot that
+    scopes its CLI ``{machine}`` needs this translation to hand over the identity,
+    not the label. Best-effort: an unreadable roster yields ``{}`` (the caller
+    then falls back to the display name). Uncached -- the engine caches the
+    result for a session; keeping this pure keeps it trivially testable.
+    """
+    mapping: dict[str, str] = {}
+    try:
+        config = cfg.load_config()
+        entries = cfg.load_machines_yaml(config.default_repo.anchor)
+    except (FileNotFoundError, ValueError, AttributeError):
+        return mapping
+    for key, m in entries.items():
+        display = getattr(m, "display_name", None)
+        if display:
+            mapping[display] = key
+    return mapping
+
+
+def machine_key(display_name: str | None) -> str | None:
+    """The registry key (canonical identity) for a machine's ``display_name``,
+    or the display name itself when the roster can't resolve it."""
+    if not display_name:
+        return display_name
+    return machine_key_map().get(display_name, display_name)
+
+
 def load_profile_column(machine, env):
     """Read a host's terminal-profile column (local in-process / remote SSH)."""
     from . import profiles_io

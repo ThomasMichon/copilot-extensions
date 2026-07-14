@@ -357,3 +357,54 @@ def test_reconcile_remote_prs_noop_when_cancelled(monkeypatch):
         lambda *a, **k: ["x"])
     loader._cancelled.set()
     assert loader.reconcile_remote_prs() == 0
+
+
+# -- display_name -> registry key resolution (registered-pivot {machine}) ------
+
+
+def test_machine_key_map_maps_display_names_to_registry_keys(monkeypatch):
+    entries = {
+        "lambda-core": _entry("lambda-core", "Lambda-Core", []),
+        "borealis": _entry("borealis", "Borealis", []),
+    }
+    _install_roster(
+        monkeypatch, entries, machine="lambda-core",
+        local_id=("lambda-core", "windows"))
+
+    assert data_ssh.machine_key_map() == {
+        "Lambda-Core": "lambda-core",
+        "Borealis": "borealis",
+    }
+
+
+def test_machine_key_translates_display_to_key(monkeypatch):
+    entries = {"lambda-core": _entry("lambda-core", "Lambda-Core", [])}
+    _install_roster(
+        monkeypatch, entries, machine="lambda-core",
+        local_id=("lambda-core", "windows"))
+
+    # A tab's display name resolves to the canonical (lowercase) identity that
+    # agent-dispatch and the SSH alias expect.
+    assert data_ssh.machine_key("Lambda-Core") == "lambda-core"
+
+
+def test_machine_key_falls_back_to_display_when_unknown(monkeypatch):
+    entries = {"lambda-core": _entry("lambda-core", "Lambda-Core", [])}
+    _install_roster(
+        monkeypatch, entries, machine="lambda-core",
+        local_id=("lambda-core", "windows"))
+
+    # An unknown display name (roster gap) degrades to itself, not None.
+    assert data_ssh.machine_key("Unlisted") == "Unlisted"
+    assert data_ssh.machine_key(None) is None
+
+
+def test_machine_key_map_empty_on_unreadable_roster(monkeypatch):
+    def _boom(_anchor):
+        raise FileNotFoundError("no machines.yaml")
+
+    monkeypatch.setattr(data_ssh.cfg, "load_config", lambda: types.SimpleNamespace(
+        default_repo=types.SimpleNamespace(anchor="/repo"), machine="m"))
+    monkeypatch.setattr(data_ssh.cfg, "load_machines_yaml", _boom)
+    assert data_ssh.machine_key_map() == {}
+    assert data_ssh.machine_key("Anything") == "Anything"
