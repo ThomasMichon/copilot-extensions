@@ -43,6 +43,33 @@ def ssh_available() -> bool:
     return shutil.which("ssh") is not None
 
 
+def _norm_machine(name: str | None) -> str:
+    """Normalize a machine name for **identity comparison**: trimmed + casefolded.
+
+    Facility machine names (a machine's registry key / SSH alias) are lowercase
+    by convention, but a caller may hand us a display-cased variant -- e.g. the
+    worktree picker passes the ``machines.yaml`` ``display_name`` (``Lambda-Core``)
+    while this machine's resolved identity is the registry key (``lambda-core``).
+    A case-sensitive ``==`` would then misread the *local* machine as a remote
+    peer and try to SSH to itself. Comparing casefolded values keeps local/peer
+    detection case-insensitive. Returns ``""`` for ``None``/empty.
+    """
+    return (name or "").strip().casefold()
+
+
+def _ssh_alias(machine: str) -> str:
+    """The SSH alias to connect to for ``machine``: lowercased.
+
+    SSH ``Host`` matching is case-sensitive, and facility ``Host`` blocks are
+    lowercase by convention (``Host borealis``). A display-cased name
+    (``Borealis``) would miss its ``Host`` block and fall back to a literal
+    ``Borealis`` hostname on the default port -- which fails. Lowercasing keeps a
+    case-insensitive caller reaching the intended peer over the mesh. The
+    original (caller-supplied) name is still used for human-facing diagnostics.
+    """
+    return machine.strip().lower()
+
+
 def is_cross_machine(args: argparse.Namespace) -> bool:
     """True when this create is an embody spawn targeted at *another* machine.
 
@@ -59,7 +86,7 @@ def is_cross_machine(args: argparse.Namespace) -> bool:
     if not target:
         return False
     local = local_machine()
-    return bool(local) and target != local
+    return bool(local) and _norm_machine(target) != _norm_machine(local)
 
 
 def build_remote_create_argv(
@@ -124,8 +151,9 @@ def dispatch_to_remote(
     )
     remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
     # `machine` is the facility SSH alias (never a raw IP). BatchMode so a missing
-    # key fails fast instead of hanging on a password prompt.
-    cmd = [exe, "-o", "BatchMode=yes", machine, remote_cmd]
+    # key fails fast instead of hanging on a password prompt. Lowercased so a
+    # display-cased name still matches its lowercase `Host` block.
+    cmd = [exe, "-o", "BatchMode=yes", _ssh_alias(machine), remote_cmd]
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
         cmd,
         input=payload,
@@ -151,7 +179,7 @@ def is_peer_machine(machine: str | None) -> bool:
     if not machine:
         return False
     local = local_machine()
-    return bool(local) and machine != local
+    return bool(local) and _norm_machine(machine) != _norm_machine(local)
 
 
 def build_remote_browse_argv(
@@ -212,7 +240,8 @@ def browse_remote(
     if exe is None:
         raise RemoteDispatchUnavailable("ssh not found on PATH")
     remote_cmd = " ".join(shlex.quote(a) for a in argv)
-    cmd = [exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", machine, remote_cmd]
+    cmd = [exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+           _ssh_alias(machine), remote_cmd]
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
         cmd,
         check=False,
