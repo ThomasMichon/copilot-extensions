@@ -49,6 +49,15 @@ def test_is_cross_machine_false_when_local_unresolvable(monkeypatch):
     assert remote_dispatch.is_cross_machine(_args()) is False
 
 
+def test_is_cross_machine_case_insensitive_local_target(monkeypatch):
+    # A display-cased target that names *this* machine must read as local, not a
+    # remote peer (else we'd SSH to ourselves).
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+    assert remote_dispatch.is_cross_machine(
+        _args(target_machine="Lambda-Core")
+    ) is False
+
+
 def test_build_remote_argv_drops_target_machine_and_adds_repo():
     argv = remote_dispatch.build_remote_create_argv(
         _args(prompt="go", label=["a", "b"], require=["cap"]),
@@ -138,6 +147,20 @@ def test_is_peer_machine_false_when_local_unresolvable(monkeypatch):
     assert remote_dispatch.is_peer_machine("borealis") is False
 
 
+def test_is_peer_machine_case_insensitive_local(monkeypatch):
+    # The picker passes the machines.yaml display_name ("Lambda-Core") while the
+    # resolved identity is the registry key ("lambda-core"); a display-cased name
+    # for *this* machine must not be treated as a peer (no self-SSH).
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+    assert remote_dispatch.is_peer_machine("Lambda-Core") is False
+
+
+def test_is_peer_machine_case_insensitive_remote_still_peer(monkeypatch):
+    # A display-cased name for a *different* machine is still a peer.
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "lambda-core")
+    assert remote_dispatch.is_peer_machine("Borealis") is True
+
+
 def test_build_remote_browse_argv_list_forwards_filters_drops_machine():
     args = _browse_args(status="queued,started", label="bug", limit=50,
                         target_machine="borealis", target_repo="x")
@@ -189,6 +212,42 @@ def test_browse_remote_unavailable_without_ssh(monkeypatch):
     monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: None)
     with pytest.raises(remote_dispatch.RemoteDispatchUnavailable):
         remote_dispatch.browse_remote("borealis", ["agent-dispatch", "inbox"])
+
+
+def test_browse_remote_lowercases_display_cased_alias(monkeypatch):
+    # A display-cased peer name ("Borealis") must connect via its lowercase
+    # `Host borealis` block, not a literal "Borealis" hostname.
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(returncode=0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
+
+    remote_dispatch.browse_remote("Borealis", ["agent-dispatch", "list"])
+    cmd = captured["cmd"]
+    assert "borealis" in cmd
+    assert "Borealis" not in cmd
+
+
+def test_dispatch_to_remote_lowercases_display_cased_alias(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
+
+    remote_dispatch.dispatch_to_remote(
+        "Borealis", _args(prompt="go"), repo="gitea/x", payload="brief"
+    )
+    cmd = captured["cmd"]
+    assert "borealis" in cmd
+    assert "Borealis" not in cmd
 
 
 # -- Actionable degradation for failed remote invocations (issue #2735) -------
