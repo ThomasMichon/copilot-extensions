@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, WSL environment setup, and CLI customization",
-    "version": "1.7.4-dev262"
+    "version": "1.7.4-dev263"
   },
   "plugins": [
     {
@@ -84,7 +84,7 @@
     {
       "name": "harness-copilot-extensions",
       "description": "Operator harness for the copilot-extensions repo - portable, owner-authored skills to work ON the plugin suite (contribute changes and diagnose the deployed runtimes). Any control repo can enable it instead of hand-writing a per-repo narrative. Reference implementation of the harness-<repo> plugin standard; ships the contributing-to-copilot-extensions and diagnosing-copilot-extensions skills.",
-      "version": "0.1.0-dev2",
+      "version": "0.1.0-dev3",
       "source": "plugins/harness-copilot-extensions"
     },
     {

@@ -7,13 +7,18 @@ description: >
   push, and the source-of-truth rules. Use when editing, fixing, or extending
   any plugin in the copilot-extensions suite (agent-worktrees, agent-bridge,
   agent-codespaces, agent-containers, agent-mcp, agent-logger, agent-dispatch,
-  context-handoff, efforts, visions, customizing-copilot, harness-*).
+  context-handoff, efforts, visions, customizing-copilot, harness-*). Covers the
+  design-guidance layers a change reconciles to — the repo's visions (intent) and
+  architecture patterns (how we build) — not just the mechanical land-it flow.
   Trigger phrases include:
   - 'change a copilot-extensions plugin'
   - 'fix agent-worktrees'
   - 'fix the agent-bridge plugin'
   - 'edit a plugin'
   - 'plugin code change'
+  - 'design a plugin service'
+  - 'plugin architecture pattern'
+  - 'reconcile to the vision'
   - 'fix the installer'
   - 'bump the plugin version'
   - 'push a plugin update'
@@ -27,6 +32,21 @@ The authoritative, versioned rules live in the repo's own **`CONTRIBUTING.md`**,
 **`AGENTS.md`**, **`docs/install-contract.md`**, and **`docs/architecture.md`** —
 read them for the current detail. This skill is the operator's map: what to
 touch, in what order, and the gotchas that bite.
+
+**Two guidance layers a change reconciles to** (design work, not just the
+mechanical flow):
+
+- **Visions** ([`visions/`](visions/README.md)) — the *intent*, the standing
+  what-should-be. Before an architectural/behavioral change, reconcile it (the
+  three kinds): it **closes** a stated vision item (cite it), **extends** the
+  vision (revise the vision first), or is **below-altitude** (say so, proceed).
+  Never silently contradict or bypass a vision. This binds **every** contributor —
+  including an agent driving from a downstream control repo.
+- **Patterns** ([`docs/patterns/`](docs/patterns/README.md)) — *how we build it
+  here*: plugin shapes, design principles, binding invariants, and focused pattern
+  docs (endpoint discovery, service supervision, à-la-carte independence,
+  cross-platform parity). Honor them; extend the library when you establish a new
+  reusable convention.
 
 Resolve the local checkout before anything else — its path varies by machine.
 Do not hardcode it.
@@ -55,6 +75,12 @@ installer. Know which kind you are changing.
 
 ## The flow
 
+0. **Reconcile (architectural/behavioral changes).** Before building, reconcile
+   the change to the repo's **visions** (close / extend / below-altitude — see
+   above) and check it against the **patterns** (`docs/patterns/`) and their
+   binding **invariants**. A below-altitude fix (lint, typo, dependency bump)
+   skips this with a word; a design change owes the reconcile. This is a guide,
+   not a gate.
 1. **Isolate.** This is a worktree-class repo — never edit the anchor checkout.
    Create a worktree, edit and commit there. (Owners push directly to `main`, no
    PR. Without push access, use a fork + PR — the target repo's policy, not
@@ -157,6 +183,7 @@ contributor — because to a reader, you are.
 
 `CONTRIBUTING.md` (versioning + release), `AGENTS.md` (dev guide),
 `docs/install-contract.md` (the runtime-plugin contract),
-`docs/architecture.md` (payload/runtime split, ports). To work the repo as a
-good citizen from another control repo, pair this with the `working-cross-repo`
-skill.
+`docs/architecture.md` (payload/runtime split, ports), `docs/patterns/` (how we
+build — shapes, principles, invariants, focused patterns), `visions/` (the
+standing what-should-be). To work the repo as a good citizen from another control
+repo, pair this with the `working-cross-repo` skill.
