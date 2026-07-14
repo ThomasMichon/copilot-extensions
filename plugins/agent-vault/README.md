@@ -103,9 +103,18 @@ Useful commands:
 - `agent-vault remove ENTRY [-f]` (alias `rm`) / `agent-vault move ENTRY DEST [-f]` (alias `mv`)
 - `agent-vault import-key ENTRY path/to/key`
 - `agent-vault export-key ENTRY dest_dir key_name`
+- `agent-vault git-credential get|store|erase` (git credential helper)
 
 `remove` and `move` are **scoped to the configured vault group**: an entry
 outside that group is refused unless you pass `-f`/`--force`.
+
+Configure `git-credential` as a helper so allowlisted HTTPS hosts (see
+`VAULT_GCM_HOSTS`, default GitHub / Azure DevOps) resolve through Git Credential
+Manager via the vault:
+
+```sh
+git config --global credential.helper '!agent-vault git-credential'
+```
 
 ## The service
 
