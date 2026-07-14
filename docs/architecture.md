@@ -33,6 +33,7 @@ internals, follow the links in each section.
 | [context-handoff](../plugins/context-handoff/) | Session **extension** + `/handoff` skill | Marketplace payload (`extensions/context-handoff/extension.mjs`) | Auto-discovered from the enabled plugin's `extensions/` dir; no copy to `~/.copilot/extensions/`, no deploy manifest |
 | [customizing-copilot](../plugins/customizing-copilot/) | Customization skills (authoring skills, sub-agents, MCP servers, plugins, harnesses, review) | Marketplace payload (skills) | Loaded on demand when a CLI-customization prompt matches; no runtime to install |
 | [harness-copilot-extensions](../plugins/harness-copilot-extensions/) | Operator-harness skills (`contributing-to-copilot-extensions`, `diagnosing-copilot-extensions`) | Marketplace payload (skills) | Loaded on demand when a work-on-this-repo prompt matches; no runtime to install |
+| [wsl-setup](../plugins/wsl-setup/) | WSL2 setup / troubleshooting skills | Marketplace payload (skills) | Loaded on demand when a WSL-setup prompt matches; no runtime to install |
 
 Every runtime plugin is itself a **Python package** — its `src/` package plus
 any vendored `libs/` — installed by its own `scripts/install.*` / `scripts/init.*`
@@ -60,7 +61,9 @@ flowchart TB
       AN["agent-containers/<br/>scripts • src"]
       AM["agent-mcp/<br/>scripts • src"]
       AL["agent-logger/<br/>scripts • src"]
-      PO["efforts/ • context-handoff/ • customizing-copilot/<br/>(payload-only: skills / extension)"]
+      AD["agent-dispatch/<br/>scripts • src"]
+      AV["agent-vault/<br/>scripts • src"]
+      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • harness-copilot-extensions/ • wsl-setup/<br/>(payload-only: skills / extension)"]
     end
     subgraph RT["Local runtimes"]
       RW["~/.agent-worktrees/<br/>.venv • lib • bin"]
@@ -69,14 +72,18 @@ flowchart TB
       RN["~/.agent-containers/<br/>.venv • leases.json"]
       RM["~/.agent-mcp/<br/>.venv • deploy-manifest.json"]
       RL["~/.agent-logger/<br/>.venv • digests • sync task"]
+      RD["~/.agent-dispatch/<br/>.venv • queue db • coordinator"]
+      RV["~/.agent-vault/<br/>.venv • secret store service"]
     end
-    BIN["~/.local/bin/<br/>agent-worktrees • agent-bridge • agent-codespaces • agent-containers • agent-mcp • agent-logger"]
+    BIN["~/.local/bin/<br/>agent-worktrees • agent-bridge • agent-codespaces • agent-containers • agent-mcp • agent-logger • agent-dispatch • agent-vault"]
     MP --> AW --> RW
     MP --> AB --> RB
     MP --> AC --> RC
     MP --> AN --> RN
     MP --> AM --> RM
     MP --> AL --> RL
+    MP --> AD --> RD
+    MP --> AV --> RV
     MP --> PO
     RW --> BIN
     RB --> BIN
@@ -84,12 +91,14 @@ flowchart TB
     RN --> BIN
     RM --> BIN
     RL --> BIN
+    RD --> BIN
+    RV --> BIN
     AC -.->|package imported into bridge venv| RB
     AN -.->|package imported into bridge venv| RB
 ```
 
-> `efforts`, `context-handoff`, and `customizing-copilot` (the `PO` node) deploy
-> entirely from the
+> The `PO` node — `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
+> `harness-copilot-extensions`, and `wsl-setup` — deploys entirely from the
 > marketplace payload — no installer, no `~/.agent-*` runtime, no binstub.
 
 Key rule: the **agent-codespaces and agent-containers binstubs are owned by

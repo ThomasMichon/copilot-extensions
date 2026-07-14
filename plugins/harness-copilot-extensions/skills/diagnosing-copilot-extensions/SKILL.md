@@ -32,7 +32,7 @@ retry is a fine first move; never force-deploy or kill a process on a hunch.
 | What | Path |
 |------|------|
 | Installed plugin payloads | `~/.copilot/installed-plugins/copilot-extensions/<plugin>/` |
-| Runtime venvs | `~/.agent-worktrees/`, `~/.agent-bridge/`, `~/.agent-codespaces/`, `~/.agent-containers/`, `~/.agent-mcp/`, `~/.agent-logger/`, `~/.agent-dispatch/` |
+| Runtime venvs | `~/.agent-worktrees/`, `~/.agent-bridge/`, `~/.agent-codespaces/`, `~/.agent-containers/`, `~/.agent-mcp/`, `~/.agent-logger/`, `~/.agent-dispatch/`, `~/.agent-vault/` |
 | Binstubs | `~/.local/bin/agent-*` |
 | Enablement | `~/.copilot/settings.json` (`experimental: true`) + repo `.github/copilot/settings.json` (`enabledPlugins`) |
 | Catalog | `.github/plugin/marketplace.json` in the repo |
