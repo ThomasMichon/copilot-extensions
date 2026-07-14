@@ -104,6 +104,7 @@ Useful commands:
 - `agent-vault import-key ENTRY path/to/key`
 - `agent-vault export-key ENTRY dest_dir key_name`
 - `agent-vault git-credential get|store|erase` (git credential helper)
+- `agent-vault cache-populate [--entry P[:FIELD]] [--manifest F] [--machine M]` (pre-warm the cache)
 
 `remove` and `move` are **scoped to the configured vault group**: an entry
 outside that group is refused unless you pass `-f`/`--force`.
@@ -158,10 +159,12 @@ the core. Four generic hook categories are exposed (all in `agent_vault.extensio
 | **Protocol action** | `handler(service, request, ctx) -> dict` | in the daemon *before* the `Unknown action` fallback — add a request action keyed by name |
 | **Client transport** | `transport(request, timeout, ctx) -> dict \| None` | in the CLI *after* the built-in unix-socket + TCP transports both fail — reach a daemon they can't (e.g. over a tunnel). Register with `before_builtin=True` to be consulted *ahead* of the built-ins (for a transport that must take precedence over the local daemon; return `None` when it does not apply) |
 | **Config source** | `source(cwd) -> dict` | in the resolver, at a tier below per-repo config and above the named-vault base — contribute `kpdb`/`group`/`port`/`vault` |
+| **Cache source** | `source(machine) -> iterable` | in `cache-populate` — yield entries to pre-warm, each a `"path"` string or an `(entry, field)` pair (e.g. entries derived from installed services) |
 
 An extension is a module exposing `register(registry)` that calls
 `registry.register_unlock_provider(...)`, `register_action(...)`,
-`register_transport(...)`, or `register_config_source(...)`. Extensions are
+`register_transport(...)`, `register_config_source(...)`, or
+`register_cache_source(...)`. Extensions are
 discovered via the `agent_vault.extensions` **entry-point group** or the
 `AGENT_VAULT_EXTENSIONS` env var (comma-separated `module` / `module:callable`
 paths). Loading is idempotent and **fail-open**: a broken extension is logged and

@@ -814,6 +814,90 @@ def cmd_export_key(args):
     return 0
 
 
+def _read_cache_manifest(path: Path) -> list[tuple[str, str]]:
+    """Parse ``entry | field`` lines (``#`` comments) from a manifest file."""
+    pairs: list[tuple[str, str]] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        entry, sep, field = line.partition("|")
+        entry = entry.strip()
+        field = field.strip() if sep else "password"
+        if entry:
+            pairs.append((entry, field or "password"))
+    return pairs
+
+
+def cmd_cache_populate(args):
+    """Pre-warm the vault cache for a set of entries.
+
+    Entries come from (deduped, in order): explicit ``--entry`` values, a
+    ``--manifest`` file, and every registered cache-source extension. Each entry
+    is fetched so the daemon caches it (and missing entries surface early).
+    """
+    from .extensions import get_registry
+
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(entry: str, field: str) -> None:
+        pair = (entry, field or "password")
+        if pair[0] and pair not in seen:
+            seen.add(pair)
+            pairs.append(pair)
+
+    for entry in (args.entry or []):
+        e, sep, f = entry.partition(":")
+        _add(e.strip(), (f.strip() if sep else "password"))
+
+    if args.manifest:
+        manifest = Path(args.manifest)
+        if not manifest.exists():
+            print(f"Error: manifest not found: {manifest}", file=sys.stderr)
+            return 1
+        for e, f in _read_cache_manifest(manifest):
+            _add(e, f)
+
+    for e, f in get_registry().collect_cache_entries(args.machine):
+        _add(e, f)
+
+    if not pairs:
+        print("No entries to cache (no --entry, --manifest, or cache-source extension).",
+              file=sys.stderr)
+        return 1
+
+    if not ensure_service():
+        print("Error: could not start vault service", file=sys.stderr)
+        return 1
+
+    verb = "Verifying" if args.verify else "Populating"
+    print(f"{verb} cache for {len(pairs)} entr{'y' if len(pairs) == 1 else 'ies'}...")
+    ok = 0
+    missing: list[str] = []
+    for entry, field in pairs:
+        action = "has" if args.verify else "get"
+        request = {"action": action, "entry": entry, "field": field}
+        if args.prompt and not args.verify:
+            request["allow_prompt"] = True
+        resp = send_command(request, timeout=None if args.prompt else 15.0)
+        present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
+        if present:
+            ok += 1
+        else:
+            missing.append(f"{entry} [{field}]")
+
+    fail = len(pairs) - ok
+    if args.verify:
+        print(f"Present: {ok}/{len(pairs)}")
+    else:
+        print(f"Cached {ok} credential(s), {fail} failed")
+    if missing:
+        for m in missing:
+            print(f"  missing: {m}", file=sys.stderr)
+    return 1 if fail > 0 else 0
+
+
 def cmd_which(args):
     context = config.resolve_context()
     payload = {
@@ -995,6 +1079,17 @@ def main():
     p = sub.add_parser("which", help="Show the resolved vault context")
     p.add_argument("--json", action="store_true", help="Print JSON")
     p.set_defaults(func=cmd_which)
+
+    p = sub.add_parser("cache-populate", help="Pre-warm the cache for a set of entries")
+    p.add_argument("--entry", action="append", metavar="PATH[:FIELD]",
+                   help="An entry to cache (repeatable; FIELD defaults to password)")
+    p.add_argument("--manifest", help="File of 'entry | field' lines to cache")
+    p.add_argument("--machine", help="Machine hint passed to cache-source extensions")
+    p.add_argument("--prompt", action="store_true",
+                   help="Allow an interactive unlock prompt for the fetches")
+    p.add_argument("--verify", action="store_true",
+                   help="Only check the entries exist (no fetch/cache)")
+    p.set_defaults(func=cmd_cache_populate)
 
     p = sub.add_parser("vault", help="Manage named vaults")
     vault_sub = p.add_subparsers(dest="vault_command")
