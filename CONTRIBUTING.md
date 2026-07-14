@@ -369,17 +369,23 @@ binstub in `~/.local/bin/`.
 
 The repo ships git hooks under `tools/hooks/`:
 
-- **`pre-commit`** — runs `ruff check --select F,E9` on staged Python files
-  (unused imports/vars, undefined names, syntax errors).
-- **`pre-push`** — runs `tools/check-install-contract.py` (the
-  [install contract](docs/install-contract.md)) and
-  `tools/check-no-internal-identifiers.py`.
+- **`pre-commit`** — on staged files: `ruff check --select F,E9` on Python
+  (unused imports/vars, undefined names, syntax errors), and
+  `tools/check-skills.py` on any staged `SKILL.md` (frontmatter validity, `name`
+  rules, and the **1024-char `description` limit** the Copilot CLI enforces —
+  over it, the loader silently drops the skill).
+- **`pre-push`** — runs the repo-wide guards: `tools/check-install-contract.py`
+  (the [install contract](docs/install-contract.md)),
+  `tools/check-no-internal-identifiers.py`, `tools/check-skills.py`,
+  `tools/check-docs-consistency.py`, and `tools/check-runbook-references.py`.
 
 They are **not active until wired** per clone (git does not auto-enable a
-committed hooks dir):
+committed hooks dir). Run the helper once per checkout:
 
 ```bash
-git config core.hooksPath tools/hooks
+tools/setup-hooks.sh          # macOS / Linux / Git Bash / WSL
+tools\setup-hooks.ps1         # Windows PowerShell
+# equivalent to: git config core.hooksPath tools/hooks
 ```
 
 Bypass in a pinch with `git commit/push --no-verify` (discouraged). The
