@@ -408,6 +408,72 @@ mcp-servers:
 > doesn't reliably stream stdin -- hence the deliberate `.cmd`-only layout.) On
 > Linux/WSL the binstub is the usual bash script.
 
+## MCP → CLI: `call` and `materialize`
+
+The bridge exposes an upstream MCP *to an MCP client*. The **`call`** and
+**`materialize`** verbs expose it *to the shell* instead — the same upstream, the
+same auth + `tools:` filtering, projected as command-line tools for agents (or
+people) who would rather `ls`/`cat`/pipe than speak JSON-RPC.
+
+### `call` — one-shot invoke one tool
+
+```sh
+agent-mcp call <bridge> <tool> '<arguments-json>'
+```
+
+Connects to the bridge's upstream, runs the MCP `initialize` handshake, invokes
+one tool, and prints its result — then exits. There is **no per-call daemon**: a
+one-shot connect avoids the resident-server cost while still being a live session.
+
+- **Arguments** are the tool's **raw MCP `arguments` object** as JSON. Supply it
+  inline, via `--arguments '<json>'`, via `--request-file PATH` (a file holding
+  the bare object or `{"arguments": {...}}`), or on **stdin**. No `--flag` grammar
+  is synthesized — the schema *is* the interface.
+- **Output** is **raw passthrough**: the upstream's text content verbatim, or its
+  advertised `structuredContent` as JSON when there is no text. Nothing is
+  wrapped in a synthetic envelope.
+- **Errors** are a non-zero exit + a stderr message. The wait is bounded by the
+  config `timeout`, so a dead or silent upstream fails fast instead of hanging.
+
+```sh
+agent-mcp call gitea list_issues '{"owner":"me","repo":"x"}'
+echo '{"owner":"me","repo":"x"}' | agent-mcp call gitea list_issues
+agent-mcp call gitea create_issue --request-file req.json
+```
+
+### `materialize` — project the whole catalog into a stub fleet
+
+```sh
+agent-mcp materialize <bridge> [--server-name NAME] [--dest DIR] [--windows]
+```
+
+Introspects `tools/list` and writes a **hierarchical, discoverable, pipeable**
+command fleet under `~/.agent-mcp/materialized/<server>/`:
+
+```
+bin/    one short-named stub per tool
+        POSIX:   symlinks to a single `_amcp-dispatch` (argv[0] dispatch)
+        Windows: a `.ps1` + `.cmd` shim per tool (`--windows` to force)
+doc/    a plated sidecar per tool: upstream description + raw inputSchema + TS sig
+index.md      the server's tool table
+manifest.json stub → tool + bridge reference (read by `call`)
+```
+
+Generation is **purely mechanical — no LLM**: sidecars plate the raw MCP
+definition, stubs accept the raw `arguments` JSON, and structure is emitted only
+when the upstream advertises it. Each stub forwards to `agent-mcp call`, so a
+materialized tool is invocable by short name from `PATH` and pipes like any CLI:
+
+```sh
+agent-mcp materialize gitea            # -> ~/.agent-mcp/materialized/gitea/
+export PATH="$HOME/.agent-mcp/materialized/gitea/bin:$PATH"
+list_issues '{"owner":"me","repo":"x"}' | jq '.[].number'
+```
+
+Re-running `materialize` rebuilds the tree in a temp dir and swaps it in
+atomically, so it doubles as a drift refresh (no partial-write window). The
+bridge's `tools:` allow/deny filter gates which tools are materialized.
+
 ## Install
 
 ```powershell
@@ -437,4 +503,9 @@ stdin/stdout        Bridge        Decorator pipeline           UpstreamClient   
   `storage` decorators.
 - `bridge.py` — stdio framing, per-request dispatch through the pipeline,
   unsolicited-message passthrough.
+- `client.py` — `OneShotSession`: connect + `initialize` + one `tools/list` /
+  `tools/call` against an upstream, then exit (the engine under `call` and the
+  introspection step of `materialize`).
+- `materialize.py` — project a `tools/list` catalog into the on-disk stub fleet
+  (symlink farm on POSIX, `.ps1`/`.cmd` shim farm on Windows) + plated sidecars.
 

@@ -188,7 +188,53 @@ agent-mcp bridge --config FILE    # run the bridge from an in-repo config (prefe
 agent-mcp bridge <name>           # run a named bridge (~/.agent-mcp/bridges/<name>.*)
 agent-mcp validate <name|FILE>    # parse + schema-check
 agent-mcp status                  # prerequisites + available named bridges
+agent-mcp call <bridge> <tool> [JSON]     # one-shot: invoke one upstream tool
+agent-mcp materialize <bridge>            # project the catalog into a CLI stub fleet
 ```
+
+## MCP -> CLI: `call` and `materialize`
+
+Besides serving an MCP client, agent-mcp can expose an upstream MCP **to the
+shell** -- for agents (or humans) that prefer to `ls`/`cat`/pipe tools instead
+of speaking JSON-RPC.
+
+- **`call`** is the one-shot engine: it connects to the bridge's upstream,
+  runs `initialize`, invokes one tool, and prints the result. Arguments are the
+  tool's **raw MCP `arguments` object** as JSON -- via an inline arg, `--arguments`,
+  `--request-file PATH`, or stdin. Output is **raw passthrough** (the upstream's
+  text content verbatim; the advertised `structuredContent` as JSON when there is
+  no text). A tool error is a non-zero exit + a stderr message -- never a hang
+  (the wait is bounded by the config `timeout`).
+
+  ```sh
+  agent-mcp call gitea list_issues '{"owner":"me","repo":"x"}'
+  echo '{"owner":"me","repo":"x"}' | agent-mcp call gitea list_issues
+  agent-mcp call gitea create_issue --request-file req.json   # req.json: {"arguments": {...}}
+  ```
+
+- **`materialize`** projects the whole `tools/list` catalog into a discoverable,
+  pipeable command fleet under `~/.agent-mcp/materialized/<server>/`:
+
+  ```
+  bin/    one short-named stub per tool (POSIX: symlinks to one dispatcher;
+          Windows: a .ps1 + .cmd shim per tool). Put bin/ on PATH.
+  doc/    a plated sidecar per tool: the upstream description + raw inputSchema.
+  index.md, manifest.json
+  ```
+
+  Generation is **purely mechanical** -- sidecars plate the raw MCP definition,
+  stubs accept the raw `arguments` JSON (no `--flag` synthesis), and nothing is
+  guessed by a model. Each stub forwards to `agent-mcp call`, so a materialized
+  tool is invocable by name and pipes like any CLI:
+
+  ```sh
+  agent-mcp materialize gitea               # writes ~/.agent-mcp/materialized/gitea/
+  list_issues '{"owner":"me","repo":"x"}' | jq '.[].number'
+  ```
+
+  Re-running `materialize` rebuilds the tree atomically (temp dir + swap), so it
+  doubles as a drift refresh. The bridge's `tools:` allow/deny filter gates which
+  tools are materialized.
 
 ## Install
 
