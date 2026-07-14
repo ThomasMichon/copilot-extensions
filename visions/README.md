@@ -30,6 +30,7 @@ never edited to record that cycle; it changes only when the **intent** changes.
 | Vision | Scope | Subject |
 |--------|-------|---------|
 | [plugin-services](plugin-services/README.md) | branch | The plugin **service model** — how installer-deployed plugin runtimes expose, coordinate, and are reached as local services, à la carte and without shared infrastructure. |
+| [agent-fabric](agent-fabric/README.md) | branch | The layered **agent coordination fabric** — how many Copilot agents across worktrees, machines, CodeSpaces, and containers are spun up, discovered, delegated to, communicated with, and recovered as one legible whole. |
 
 <!-- Add rows as visions are authored. A per-plugin vision lives at
      visions/plugins/<name>/; a cross-cutting capability vision at
