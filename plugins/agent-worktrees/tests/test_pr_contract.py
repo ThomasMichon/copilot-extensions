@@ -273,6 +273,42 @@ class TestClassifyState:
 
 
 # ---------------------------------------------------------------------------
+# merge_readiness -- the caller-facing "what to do next" summary
+# ---------------------------------------------------------------------------
+
+class TestMergeReadiness:
+    def test_approved_needs_consent(self):
+        m = pc.merge_readiness(_approved(), **_BINDING)
+        assert m["needs_consent"] is True          # caller must add the label
+        assert m["consent_action"] == "apply"
+        assert m["clear_to_merge"] is True
+        assert m["consent_present"] is False
+        assert m["consent_label"] == "auto-merge"
+        assert m["verdict"] == "APPROVED"
+
+    def test_consent_already_present(self):
+        m = pc.merge_readiness(_approved(labels=("auto-merge",)), **_BINDING)
+        assert m["needs_consent"] is False
+        assert m["consent_action"] == "already"
+        assert m["clear_to_merge"] is True
+
+    def test_changes_requested_no_consent(self):
+        snap = _approved(reviews=(_rev(1, "CHANGES_REQUESTED", commit_id="head"),))
+        m = pc.merge_readiness(snap, **_BINDING)
+        assert m["needs_consent"] is False
+        assert m["clear_to_merge"] is False
+        assert m["consent_action"] == "skip"
+        assert m["reason"] == "changes requested"
+
+    def test_binding_absent_degrades_cleanly(self):
+        m = pc.merge_readiness(_approved())
+        assert m["needs_consent"] is False
+        assert m["clear_to_merge"] is False
+        assert m["consent_label"] == ""
+        assert "no auto-merge label" in m["reason"]
+
+
+# ---------------------------------------------------------------------------
 # PR-flow profile (classify_pr_flow) -- per-repo applicability
 # ---------------------------------------------------------------------------
 

@@ -6222,7 +6222,8 @@ _GET_KEYS: dict[str, str] = {
     "machine":       "Machine name from config",
     "platform":      "Platform (win/wsl/linux)",
     "project":       "Project name",
-    "repo-remote":   "Canonical remote URL of this repo (registry remote; falls back to git origin) -- the device-independent repo key",
+    "repo-remote":   "Canonical remote URL of this repo (registry remote; falls "
+                     "back to git origin) -- the device-independent repo key",
     "pr-enabled":    "Whether PR mode is enabled (true/false)",
     "pr-required":   "Whether PRs are required, blocking direct-to-master (true/false)",
     "pr-provider":   "PR provider (gitea|github|azure-devops) when PR mode is on",
@@ -9481,6 +9482,14 @@ def _pr_watch_usage() -> None:
     print("  cursor <repo> <pr>  Print the current baseline cursor for a PR.", file=out)
     print(file=out)
     print("  Overrides: --host URL (api base), --token TOKEN.", file=out)
+    print(file=out)
+    print("  The result payload carries a 'merge' block describing what stands", file=out)
+    print("  between the PR and a merge -- act on it after a review lands:", file=out)
+    print("    needs_consent   true => approved+unblocked but the merge-consent", file=out)
+    print("                    label is not applied yet; YOU must add it (the PR", file=out)
+    print("                    will NOT merge on its own).", file=out)
+    print("    consent_action  apply | already | skip  (+ 'reason').", file=out)
+    print("    clear_to_merge  true when only consent stands in the way.", file=out)
 
 
 def _pr_watch_prcfg(config_path: str | None):
@@ -9576,6 +9585,10 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         result = prw.run_wait(
             repo=args.repo, pr=args.pr, until=until, baseline=baseline,
             fetch=fetch, timeout=args.timeout, interval=args.interval,
+            automerge_label=getattr(prcfg, "automerge_label", "") or "",
+            hold_labels=tuple(getattr(prcfg, "hold_labels", ()) or ()),
+            wip_title_prefixes=tuple(getattr(prcfg, "wip_title_prefixes", ()) or ()),
+            approval_required=bool(getattr(prcfg, "approval_required", True)),
             on_error=lambda e: print(f"pr-watch: poll error (will retry): {e}",
                                      file=sys.stderr),
         )
@@ -9588,6 +9601,17 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         if not args.json:
             print(f"pr-watch: {args.repo}#{args.pr} -> "
                   f"{', '.join(result.payload['transitions'])}", file=sys.stderr)
+            # Surface the next action so a woken caller doesn't assume "approved
+            # == done": an approved+unblocked PR still needs merge consent.
+            merge = result.payload.get("merge") or {}
+            if merge.get("needs_consent"):
+                label = merge.get("consent_label") or "the merge-consent label"
+                print(f"pr-watch: NEXT -> grant merge consent (add label "
+                      f"'{label}') -- the PR will not merge until you do "
+                      f"({merge.get('reason', '')})", file=sys.stderr)
+            elif merge.get("consent_action") == "already":
+                print("pr-watch: merge consent already granted; the merge gate "
+                      "will proceed", file=sys.stderr)
         return 0
     except ProviderError as exc:
         output.err(f"pr-watch: {exc}")

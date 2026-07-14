@@ -142,7 +142,77 @@ class TestDecorateEvents:
             "transitions": ["approved"], "pr_state": "open", "merged": False,
             "mergeable": True, "head_sha": "abc", "base_ref": "master",
             "cursor": "r3",
+            # Additive merge-readiness block. No consent label bound here, so it
+            # degrades to a verdict/merge-state readout with no action to take.
+            "merge": {
+                "verdict": "APPROVED", "merge_state": "clean", "conflict": False,
+                "mergeable": True, "consent_present": False,
+                "consent_action": "skip", "consent_label": "", "eligible": False,
+                "needs_consent": False, "clear_to_merge": False, "held": [],
+                "wip": False,
+                "reason": "no auto-merge label configured (binding absent)",
+            },
         }
+
+    def test_merge_block_flags_needs_consent_when_label_absent(self):
+        """Approved + mergeable + no consent label yet => needs_consent True, so
+        a woken caller learns it must grant consent (add the label)."""
+        snap = _snap(pr_state="open", mergeable=True, head_sha="abc",
+                     reviews=(pc.Review(3, "APPROVED", "bob"),), labels=())
+        payload = prw.decorate_events(
+            [{"event": "approved"}], "o/r", 7, snap, automerge_label="auto-merge",
+        )
+        merge = payload["merge"]
+        assert merge["needs_consent"] is True
+        assert merge["consent_action"] == "apply"
+        assert merge["clear_to_merge"] is True
+        assert merge["consent_present"] is False
+        assert merge["consent_label"] == "auto-merge"
+        assert merge["reason"] == "approved at current head"
+
+    def test_merge_block_consent_already_present(self):
+        snap = _snap(pr_state="open", mergeable=True, head_sha="abc",
+                     reviews=(pc.Review(3, "APPROVED", "bob"),),
+                     labels=("auto-merge",))
+        payload = prw.decorate_events(
+            [{"event": "approved"}], "o/r", 7, snap, automerge_label="auto-merge",
+        )
+        merge = payload["merge"]
+        assert merge["needs_consent"] is False
+        assert merge["consent_action"] == "already"
+        assert merge["clear_to_merge"] is True
+        assert merge["consent_present"] is True
+
+    def test_merge_block_changes_requested_blocks_consent(self):
+        snap = _snap(pr_state="open", mergeable=True, head_sha="abc",
+                     reviews=(pc.Review(3, "CHANGES_REQUESTED", "bob"),))
+        payload = prw.decorate_events(
+            [{"event": "changes_requested"}], "o/r", 7, snap,
+            automerge_label="auto-merge",
+        )
+        merge = payload["merge"]
+        assert merge["needs_consent"] is False
+        assert merge["consent_action"] == "skip"
+        assert merge["clear_to_merge"] is False
+        assert merge["reason"] == "changes requested"
+
+    def test_run_wait_forwards_consent_binding_into_payload(self):
+        """The consent binding threads from run_wait through to the fired
+        payload's merge block (regression: an agent that only waited never saw
+        the consent action)."""
+        snap = _snap(pr_state="open", mergeable=True, head_sha="abc",
+                     reviews=(pc.Review(3, "APPROVED", "bob"),))
+        clock = _Clock()
+        res = prw.run_wait(
+            repo="o/r", pr=1, until=["approved"],
+            baseline=pc.Baseline.from_cursor("r0"),
+            fetch=lambda: snap, timeout=100.0, interval=1.0,
+            automerge_label="auto-merge",
+            now=clock.now, sleep=lambda s: None,
+        )
+        assert res.matched
+        assert res.payload["merge"]["needs_consent"] is True
+        assert res.payload["merge"]["consent_action"] == "apply"
 
 
 # ---------------------------------------------------------------------------
