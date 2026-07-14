@@ -59,6 +59,24 @@ def worker_id_for(machine: str, worktree: str) -> str:
     return f"{machine}/{worktree}"
 
 
+def machine_matches(target: str | None, machine: str | None) -> bool:
+    """True when a task's stored ``target_machine`` matches the ``machine`` a
+    caller is scoping to -- **case-insensitively**.
+
+    Facility machine names (a machine's registry key / SSH alias) are lowercase
+    by convention, but a caller may pass a display-cased variant (the worktree
+    picker scopes ``inbox`` by the ``machines.yaml`` display name ``Lambda-Core``
+    while a task's ``target_machine`` is stored as the identity ``lambda-core``).
+    A case-sensitive comparison would then hide legitimately-targeted work. An
+    unset ``target_machine`` (a machine-agnostic task) matches any caller.
+    """
+    if target is None:
+        return True
+    if machine is None:
+        return False
+    return target.casefold() == machine.casefold()
+
+
 #: Hard cap on a progress summary -- keeps the beat a line, never a transcript.
 PROGRESS_SUMMARY_MAX = 280
 #: Hard cap on a worktree focus line -- one line, not a transcript.
@@ -542,7 +560,7 @@ class TaskQueue:
                 requires = set(json.loads(row["requires"] or "[]"))
                 if not requires.issubset(caps):
                     continue
-                if row["target_machine"] is not None and row["target_machine"] != machine:
+                if not machine_matches(row["target_machine"], machine):
                     continue
                 if row["target_worktree"] is not None and row["target_worktree"] != worktree:
                     continue
@@ -594,7 +612,7 @@ class TaskQueue:
             assigned_rows = conn.execute(
                 "SELECT * FROM tasks WHERE status = ? AND ("  # noqa: S608 (repo_clause is a constant; all values parameterized)
                 "  target_worktree = ?"
-                "  OR (target_machine = ? AND target_worktree IS NULL)"
+                "  OR (target_machine = ? COLLATE NOCASE AND target_worktree IS NULL)"
                 ")" + repo_clause + " ORDER BY created_at ASC",
                 (Status.QUEUED, worktree, machine, *repo_param),
             ).fetchall()
@@ -931,7 +949,7 @@ class TaskQueue:
                 clauses.append(f"status IN ({placeholders})")
                 params.extend(statuses)
         if target_machine is not None:
-            clauses.append("target_machine = ?")
+            clauses.append("target_machine = ? COLLATE NOCASE")
             params.append(target_machine)
         if target_repo is not None:
             clauses.append("target_repo = ?")
