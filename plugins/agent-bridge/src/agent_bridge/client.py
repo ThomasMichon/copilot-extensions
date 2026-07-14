@@ -462,17 +462,27 @@ class BridgeClient:
             "POST", f"/api/v1/sessions/{session_id}/turns", {"prompt": prompt}
         ) or {}
 
-    def stop_session(self, session_id: str) -> None:
-        """POST /api/v1/sessions/{id}/stop"""
-        self._request("POST", f"/api/v1/sessions/{session_id}/stop")
+    def stop_session(self, session_id: str, *, force: bool = False) -> None:
+        """POST /api/v1/sessions/{id}/stop
+
+        ``force`` maps to the route's ``?force=true`` — tear down even with
+        active background sub-agent tasks (they are killed). See #191.
+        """
+        params = {"force": "true"} if force else None
+        self._request("POST", f"/api/v1/sessions/{session_id}/stop", params=params)
 
     def resume_session(self, session_id: str) -> dict[str, Any]:
         """POST /api/v1/sessions/{id}/resume"""
         return self._request("POST", f"/api/v1/sessions/{session_id}/resume") or {}
 
-    def end_session(self, session_id: str) -> None:
-        """DELETE /api/v1/sessions/{id}"""
-        self._request("DELETE", f"/api/v1/sessions/{session_id}")
+    def end_session(self, session_id: str, *, force: bool = False) -> None:
+        """DELETE /api/v1/sessions/{id}
+
+        ``force`` maps to the route's ``?force=true`` — tear down even with
+        active background sub-agent tasks (they are killed). See #191.
+        """
+        params = {"force": "true"} if force else None
+        self._request("DELETE", f"/api/v1/sessions/{session_id}", params=params)
 
     def gc(self) -> dict[str, Any]:
         """POST /api/v1/gc -- prune aged terminal sessions and compact the DB."""

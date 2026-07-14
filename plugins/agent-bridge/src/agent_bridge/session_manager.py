@@ -77,8 +77,8 @@ class SessionBusyError(Exception):
         tasks = ", ".join(active_background_tasks) or "(unknown)"
         super().__init__(
             f"Session {session_id} has active background tasks [{tasks}]; "
-            "tearing it down would kill them. Wait for them to finish or pass "
-            "force=true to override."
+            "tearing it down would kill them. Wait for them to finish, then "
+            "end the session."
         )
 
 
