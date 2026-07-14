@@ -12,57 +12,28 @@ Copilot CLI marketplace.
 
 ```
 copilot-extensions/
-  plugins/
-    agent-worktrees/           # Worktree lifecycle plugin
-      bin/                     # Binstubs (agent-worktrees, launch-session)
-      docs/                    # Plugin documentation
-      scripts/                 # Installers (init.ps1/sh, install.ps1/sh)
-      skills/                  # Plugin-provided skills
-      src/agent_worktrees/     # Python source
-      terminal/                # Terminal config (tmux, tabby, psmux)
-      hooks.json               # Plugin hooks
-      plugin.json              # Plugin manifest
-      pyproject.toml           # Python project config
-    agent-bridge/              # Inter-agent communication plugin
-      skills/                  # Plugin-provided skills
-      src/agent_bridge/        # Python source
-      tests/                   # Test suite
-      docs/                    # Architecture, machine-config, getting-started
-      libs/ssh-manager/        # Vendored SSH multiplexing library
-      plugin.json              # Plugin manifest
-      pyproject.toml           # Python project config
-    agent-codespaces/          # GitHub Codespaces lifecycle + credential relay
-      scripts/                 # Installers (init.ps1/sh, install.ps1/sh)
-      skills/                  # codespaces-setup, codespaces-lifecycle
-      src/agent_codespaces/    # Python source (CLI, relay, bridge provider)
-      tests/                   # Test suite
-      plugin.json              # Plugin manifest
-      pyproject.toml           # Python project config
-    agent-containers/          # Local Docker dev-container fleet + container: resolver
-      scripts/                 # Installer (init.ps1/sh)
-      skills/                  # containers-fleet
-      src/agent_containers/    # Python source (CLI, lease broker, resolver)
-      tests/                   # Test suite
-      plugin.json              # Plugin manifest
-      pyproject.toml           # Python project config
-    agent-mcp/                 # Swiss-army MCP bridge (wrap upstream MCP + auth + decorator stack)
-      scripts/                 # Installer (init.ps1/sh)
-      skills/                  # agent-mcp
-      src/agent_mcp/           # Python source (bridge, pipeline, transports, auth, decorators)
-      tests/                   # Test suite
-      plugin.json              # Plugin manifest
-      pyproject.toml           # Python project config
-    efforts/                   # Efforts planning system (pure skill plugin -- no runtime)
-      skills/                  # planning-efforts (+ references/, assets/), efforts-setup
-      plugin.json              # Plugin manifest
-  docs/
-    architecture.md            # Repo-level architecture overview
-    plans/                     # Rollout + validation plans
-  .github/
-    plugin/
-      marketplace.json         # Marketplace catalog (versions live here too)
-  CONTRIBUTING.md              # Full versioning and release docs
+  plugins/<plugin>/            # one dir per plugin — marketplace.json is the roster (see below)
+    plugin.json                # manifest (name, version, skills path)
+    pyproject.toml             # runtime plugins only: Python package + version
+    src/<pkg>/                 # runtime plugins only: Python source
+    scripts/                   # runtime plugins only: installers (init.ps1/sh, install.ps1/sh)
+    skills/                    # plugin-provided skills
+    tests/                     # runtime plugins with a suite
+    hooks.json | extensions/   # optional: session-start hook / session extension
+    docs/                      # plugin docs
+  libs/<lib>/                  # shared libs vendored into consuming venvs: ssh-manager, credential-relay, zdd
+  docs/                        # repo architecture (architecture.md), patterns/, plans/
+  visions/                     # standing north-star visions (should-be)
+  .github/plugin/marketplace.json   # marketplace catalog — the SINGLE SOURCE OF TRUTH for the plugin roster + versions
+  CONTRIBUTING.md              # full versioning and release docs
 ```
+
+> **The roster is deliberately not enumerated here.** The canonical plugin list
+> (and every version) lives in
+> [`.github/plugin/marketplace.json`](.github/plugin/marketplace.json), rendered
+> for humans in [`docs/architecture.md`](docs/architecture.md) and the
+> [README](README.md) table. Read those for *which* plugins exist; this tree
+> shows only the *shape* of a plugin dir.
 
 ---
 

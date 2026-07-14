@@ -63,7 +63,7 @@ copilot-extensions/
     skills/                   # plugin-provided skills
     tests/                    # runtime plugins with a suite
     docs/                     # plugin docs
-  libs/ssh-manager/           # shared SSH lib (imported by bridge + codespaces)
+  libs/<lib>/                 # shared libs vendored into consuming venvs (ssh-manager, credential-relay, zdd)
   .github/plugin/marketplace.json   # the catalog — versions live here too
   tools/                      # repo-level guards (check-install-contract.py, reset.*)
 ```
