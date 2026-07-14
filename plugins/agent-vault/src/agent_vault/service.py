@@ -20,6 +20,7 @@ from .config import (
     LOG_FILE,
     PID_FILE,
     SOCKET_PATH,
+    load_config,
     normalize_entry,
     resolve_kpdb,
 )
@@ -46,10 +47,26 @@ UNLOCK_COOLDOWN = 5
 PROMPT_DISMISS_COOLDOWN = int(os.environ.get("VAULT_PROMPT_DISMISS_COOLDOWN", "120"))
 
 UNLOCK_REQUIRED_ACTIONS = frozenset({
-    "get", "has", "search", "add", "set-password", "import-key", "export-key",
+    "get", "has", "search", "add", "set-password", "set-username",
+    "import-key", "export-key", "list", "ls", "show", "remove", "rm",
+    "move", "mv",
 })
 
 log = logging.getLogger("agent-vault.service")
+
+
+def _within_group(entry: str, group: str | None) -> bool:
+    """Whether a normalized entry falls within the resolved vault group.
+
+    When no group is configured there is nothing to scope to, so every entry is
+    considered in-scope. Used to gate destructive operations (remove/move) so a
+    caller cannot delete or move an entry outside the active vault's group
+    without an explicit ``force``.
+    """
+    if not group:
+        return True
+    root = group.rstrip("/")
+    return entry == root or entry.startswith(root + "/")
 
 
 class VaultService:
@@ -498,6 +515,105 @@ class VaultService:
                 "key_data": base64.b64encode(key_data).decode(),
                 "pub_data": base64.b64encode(pub_data).decode(),
             }
+
+        if action in ("list", "ls"):
+            list_path = request.get("path") or request.get("group") or "/"
+            recursive = bool(request.get("recursive", False))
+            flatten = bool(request.get("flatten", False))
+            if not self.ensure_unlocked(kpdb, vault_name, reason):
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
+                return {"ok": False, "error": error_msg, "needs_unlock": True}
+            entries = self.cli.list_entries(
+                kpdb, list_path, recursive=recursive, flatten=flatten
+            )
+            if entries is None:
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
+                return {"ok": False, "error": error_msg, "needs_unlock": True}
+            return {"ok": True, "entries": entries}
+
+        if action == "show":
+            entry = normalize_entry(request.get("entry", ""), group)
+            if not entry:
+                return {"ok": False, "error": "No entry path provided"}
+            show_protected = bool(request.get("show_protected", False))
+            if not self.ensure_unlocked(kpdb, vault_name, reason):
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
+                return {"ok": False, "error": error_msg, "needs_unlock": True}
+            output = self.cli.show_entry(kpdb, entry, show_protected=show_protected)
+            if output is None:
+                return {"ok": False, "error": f"Entry not found: {entry}"}
+            return {"ok": True, "output": output}
+
+        if action == "set-username":
+            entry = normalize_entry(request.get("entry", ""), group)
+            username = request.get("username", "")
+            if not entry:
+                return {"ok": False, "error": "No entry path provided"}
+            if not username:
+                return {"ok": False, "error": "No username provided"}
+            if not self.ensure_unlocked(kpdb, vault_name, reason):
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
+                return {"ok": False, "error": error_msg, "needs_unlock": True}
+            ok, msg = self.cli.edit_username(kpdb, entry, username)
+            if ok:
+                keys_to_remove = [k for k in self.cache if k[0] == kpdb and k[1] == entry]
+                for key in keys_to_remove:
+                    del self.cache[key]
+                log.info("Username updated for %s, %d cache entries invalidated",
+                         entry, len(keys_to_remove))
+            return {"ok": ok, "message": msg} if ok else {"ok": False, "error": msg}
+
+        if action in ("remove", "rm"):
+            entry = normalize_entry(request.get("entry", ""), group)
+            if not entry:
+                return {"ok": False, "error": "No entry path provided"}
+            force = bool(request.get("force", False))
+            effective_group = group or load_config().group
+            if not force and not _within_group(entry, effective_group):
+                return {"ok": False, "error": (
+                    f"Entry '{entry}' is outside the '{effective_group}' group "
+                    "scope. Send force=true to override.")}
+            if not self.ensure_unlocked(kpdb, vault_name, reason):
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
+                return {"ok": False, "error": error_msg, "needs_unlock": True}
+            ok, msg = self.cli.remove_entry(kpdb, entry)
+            if ok:
+                keys_to_remove = [k for k in self.cache if k[0] == kpdb and k[1] == entry]
+                for key in keys_to_remove:
+                    del self.cache[key]
+                log.info("Removed entry %s, %d cache entries invalidated",
+                         entry, len(keys_to_remove))
+            return {"ok": ok, "message": msg} if ok else {"ok": False, "error": msg}
+
+        if action in ("move", "mv"):
+            entry = normalize_entry(request.get("entry", ""), group)
+            dest_group = request.get("dest") or request.get("dest_group") or ""
+            if not entry:
+                return {"ok": False, "error": "No entry path provided"}
+            if not dest_group:
+                return {"ok": False, "error": "No destination group provided"}
+            force = bool(request.get("force", False))
+            effective_group = group or load_config().group
+            if not force and not _within_group(entry, effective_group):
+                return {"ok": False, "error": (
+                    f"Entry '{entry}' is outside the '{effective_group}' group "
+                    "scope. Send force=true to override.")}
+            if not self.ensure_unlocked(kpdb, vault_name, reason):
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
+                return {"ok": False, "error": error_msg, "needs_unlock": True}
+            ok, msg = self.cli.move_entry(kpdb, entry, dest_group)
+            if ok:
+                # Invalidate cache for the old path and any stale cache at the new path.
+                entry_name = entry.rsplit("/", 1)[-1]
+                new_path = dest_group.rstrip("/") + "/" + entry_name
+                keys_to_remove = [
+                    k for k in self.cache
+                    if k[0] == kpdb and k[1] in (entry, new_path)
+                ]
+                for key in keys_to_remove:
+                    del self.cache[key]
+                log.info("Moved entry %s -> %s", entry, dest_group)
+            return {"ok": ok, "message": msg} if ok else {"ok": False, "error": msg}
 
         if action == "stop":
             self._shutdown = True

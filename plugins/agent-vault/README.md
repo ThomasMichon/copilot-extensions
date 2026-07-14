@@ -96,10 +96,16 @@ Useful commands:
 - `agent-vault get ENTRY [field]`
 - `agent-vault has ENTRY`
 - `agent-vault search QUERY`
+- `agent-vault list [GROUP] [-R] [-f]` (alias `ls`) / `agent-vault show ENTRY [-s]`
 - `agent-vault lock` / `agent-vault unlock`
-- `agent-vault set-password ENTRY`
+- `agent-vault add ENTRY [-u USER] [--url URL] [-g|--password PW]`
+- `agent-vault set-password ENTRY` / `agent-vault set-username ENTRY USERNAME`
+- `agent-vault remove ENTRY [-f]` (alias `rm`) / `agent-vault move ENTRY DEST [-f]` (alias `mv`)
 - `agent-vault import-key ENTRY path/to/key`
 - `agent-vault export-key ENTRY dest_dir key_name`
+
+`remove` and `move` are **scoped to the configured vault group**: an entry
+outside that group is refused unless you pass `-f`/`--force`.
 
 ## The service
 
