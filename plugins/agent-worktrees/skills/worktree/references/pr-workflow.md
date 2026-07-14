@@ -86,6 +86,16 @@ The natural "wait for the auto-review, then complete" loop is
 `pr-merge` (requests auto-complete once eligible) → `pr-complete` (post-merge
 reconcile).
 
+**`pr-watch` tells you when to run `pr-merge`.** Its result payload carries a
+`merge` block derived from the same verdict/consent classifier `pr-status` uses:
+`merge.needs_consent` (true = the PR is approved and unblocked but the
+merge-consent label is not applied yet — **you** must apply it via `pr-merge`;
+it will not merge on its own), `merge.consent_action` (`apply` | `already` |
+`skip`), `merge.clear_to_merge`, and `merge.reason`. So an `approved` transition
+is a *review* signal, not the finish line: when `needs_consent` is true, run
+`pr-merge` and re-arm the watch. On a `pr-human-merge` repo (no consent label
+bound) the block degrades to a verdict/merge-state readout with no action.
+
 ### Comment threads -- first-class, every provider
 
 Review **comment threads** are a first-class capability (`pr-status --threads`
