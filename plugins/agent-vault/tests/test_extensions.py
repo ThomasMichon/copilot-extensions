@@ -224,6 +224,42 @@ def test_transport_not_consulted_when_builtin_succeeds(registry, monkeypatch, cl
     assert called["n"] == 0
 
 
+def test_before_builtin_transport_wins_over_builtins(registry, monkeypatch, clean_env):
+    # A built-in TCP that would succeed must NOT be reached when a before_builtin
+    # transport handles the request.
+    monkeypatch.setattr(cli, "_send_socket", lambda req, timeout=5.0: None)
+    tcp_calls = {"n": 0}
+
+    def _tcp(req, host, port, timeout):
+        tcp_calls["n"] += 1
+        return {"ok": True, "value": "via-local"}
+
+    monkeypatch.setattr(cli, "_send_tcp", _tcp)
+    registry.register_transport(
+        lambda request, timeout, ctx: {"ok": True, "value": "via-tunnel"},
+        name="tunnel", before_builtin=True,
+    )
+    result = cli.send_command({"action": "get", "entry": "x"})
+    assert result["value"] == "via-tunnel"
+    assert result["_transport"] == "ext:tunnel"
+    assert tcp_calls["n"] == 0  # built-in TCP never consulted
+
+
+def test_before_builtin_none_falls_through_to_builtins(registry, monkeypatch, clean_env):
+    monkeypatch.setattr(cli, "_send_socket", lambda req, timeout=5.0: None)
+    monkeypatch.setattr(
+        cli, "_send_tcp",
+        lambda req, host, port, timeout: {"ok": True, "value": "local"},
+    )
+    # before_builtin transport declines (not applicable) -> built-ins run.
+    registry.register_transport(
+        lambda request, timeout, ctx: None, name="inactive", before_builtin=True,
+    )
+    result = cli.send_command({"action": "get", "entry": "x"})
+    assert result["value"] == "local"
+    assert result["_transport"] == "tcp"
+
+
 # ---------------------------------------------------------------------------
 # Config source -> resolve_context
 # ---------------------------------------------------------------------------

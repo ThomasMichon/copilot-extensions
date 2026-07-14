@@ -78,7 +78,7 @@
     {
       "name": "agent-vault",
       "description": "Local KeePassXC-backed secret store for Copilot CLI agents. A machine-local service caches the KeePass master password with a TTL and auto-prompts on lock; a CLI fetches API keys, SSH keys, and account credentials on demand (get/has/search/add/set-password/import-key/export-key) without hardcoding, committing, or exporting them. Includes a SUDO_ASKPASS helper for sudo -A on Linux/WSL.",
-      "version": "0.1.0-dev5",
+      "version": "0.1.0-dev6",
       "source": "plugins/agent-vault"
     },
     {

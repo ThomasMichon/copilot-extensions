@@ -93,25 +93,32 @@ def send_command(request: dict, timeout: float | None = 5.0) -> dict | None:
             result["_transport"] = transport
         return result
 
-    if not IS_WINDOWS and context.sources.get("port") == "default":
-        result = _send_socket(request, timeout)
-        if result is not None:
-            return _tag(result, "unix-socket")
+    from .extensions import TransportContext, get_registry
 
     host = os.environ.get("AGENT_VAULT_HOST", "127.0.0.1")
     port = context.port
-    result = _send_tcp(request, host, port, timeout)
-    if result is not None:
-        return _tag(result, "tcp")
-
-    from .extensions import TransportContext, get_registry
-
     ext_ctx = TransportContext(
         kpdb=context.kpdb,
         group=context.group,
         vault_name=context.vault_name,
         port=port,
     )
+
+    # Extension transports registered before_builtin take precedence over the
+    # local daemon (e.g. an SSH-tunnel that should reach the caller's own vault).
+    result = get_registry().try_transports(request, timeout, ext_ctx, before_builtin=True)
+    if result is not None:
+        return result
+
+    if not IS_WINDOWS and context.sources.get("port") == "default":
+        result = _send_socket(request, timeout)
+        if result is not None:
+            return _tag(result, "unix-socket")
+
+    result = _send_tcp(request, host, port, timeout)
+    if result is not None:
+        return _tag(result, "tcp")
+
     return get_registry().try_transports(request, timeout, ext_ctx)
 
 

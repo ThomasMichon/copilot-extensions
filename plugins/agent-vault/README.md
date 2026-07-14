@@ -132,7 +132,7 @@ the core. Four generic hook categories are exposed (all in `agent_vault.extensio
 |------|-----------|-----------|
 | **Unlock-source provider** | `provider(ctx) -> str \| None` | in the daemon *before* the interactive prompt — return a candidate master password (verified before use), or `None` to fall through |
 | **Protocol action** | `handler(service, request, ctx) -> dict` | in the daemon *before* the `Unknown action` fallback — add a request action keyed by name |
-| **Client transport** | `transport(request, timeout, ctx) -> dict \| None` | in the CLI *after* the built-in unix-socket + TCP transports both fail — reach a daemon they can't (e.g. over a tunnel) |
+| **Client transport** | `transport(request, timeout, ctx) -> dict \| None` | in the CLI *after* the built-in unix-socket + TCP transports both fail — reach a daemon they can't (e.g. over a tunnel). Register with `before_builtin=True` to be consulted *ahead* of the built-ins (for a transport that must take precedence over the local daemon; return `None` when it does not apply) |
 | **Config source** | `source(cwd) -> dict` | in the resolver, at a tier below per-repo config and above the named-vault base — contribute `kpdb`/`group`/`port`/`vault` |
 
 An extension is a module exposing `register(registry)` that calls
