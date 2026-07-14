@@ -35,14 +35,27 @@ class WaitResult:
 
 
 def decorate_events(
-    events: list[dict], repo: str, pr: int, snap: pc.PRSnapshot
+    events: list[dict], repo: str, pr: int, snap: pc.PRSnapshot,
+    *,
+    automerge_label: str = "",
+    hold_labels: tuple[str, ...] = (),
+    wip_title_prefixes: tuple[str, ...] = (),
+    approval_required: bool = True,
 ) -> dict:
     """Wrap the raw transition list into the final result payload.
 
-    Field-for-field identical to the facility ``tools/pr-watch`` payload so a
-    thin shim delegating here is a drop-in (same keys, same JSON shape).
+    The base keys are field-for-field identical to the facility
+    ``tools/pr-watch`` payload so a thin shim delegating here is a drop-in (same
+    keys, same JSON shape). Additively, a **``merge``** block
+    (:func:`pr_contract.merge_readiness`) reports what stands between the PR and
+    a merge -- crucially ``needs_consent`` / ``consent_action`` -- so a caller
+    woken by an ``approved`` transition learns it must still *grant merge
+    consent* (add the auto-merge label) rather than assuming the PR will merge on
+    its own. The consent vocabulary is a facility binding passed in by the CLI
+    (``automerge_label`` etc.); with none configured the block degrades to a
+    verdict/merge-state readout with no action.
     """
-    return {
+    payload = {
         "repo": repo,
         "pr": pr,
         "events": events,
@@ -54,6 +67,14 @@ def decorate_events(
         "base_ref": snap.base_ref,
         "cursor": pc.Baseline.from_snapshot(snap).to_cursor(),
     }
+    payload["merge"] = pc.merge_readiness(
+        snap,
+        automerge_label=automerge_label,
+        hold_labels=hold_labels,
+        wip_title_prefixes=wip_title_prefixes,
+        approval_required=approval_required,
+    )
+    return payload
 
 
 def run_wait(
@@ -65,6 +86,10 @@ def run_wait(
     fetch: Callable[[], pc.PRSnapshot],
     timeout: float,
     interval: float,
+    automerge_label: str = "",
+    hold_labels: tuple[str, ...] = (),
+    wip_title_prefixes: tuple[str, ...] = (),
+    approval_required: bool = True,
     now: Callable[[], float] | None = None,
     sleep: Callable[[float], None] | None = None,
     on_poll: Callable[[pc.PRSnapshot], None] | None = None,
@@ -79,11 +104,25 @@ def run_wait(
     ON the terminal state and hangs (aperture-labs #1139).  Transient provider
     errors are tolerated (retried next interval); permanent ones propagate so a
     bad token / wrong repo fails fast instead of hanging the full timeout.
+
+    The consent binding (``automerge_label`` / ``hold_labels`` /
+    ``wip_title_prefixes`` / ``approval_required``) is forwarded to
+    :func:`decorate_events` so the fired payload's ``merge`` block reports
+    whether the caller must still grant merge consent.
     """
     import time as _time
 
     now = now or _time.monotonic
     sleep = sleep or _time.sleep
+
+    def _decorate(events: list[dict], snap: pc.PRSnapshot) -> dict:
+        return decorate_events(
+            events, repo, pr, snap,
+            automerge_label=automerge_label,
+            hold_labels=hold_labels,
+            wip_title_prefixes=wip_title_prefixes,
+            approval_required=approval_required,
+        )
 
     deadline = now() + timeout if timeout > 0 else None
     base = baseline
@@ -109,7 +148,7 @@ def run_wait(
                 )
                 events = pc.compute_events(first_base, snap, until)
                 if events:
-                    return WaitResult(True, decorate_events(events, repo, pr, snap))
+                    return WaitResult(True, _decorate(events, snap))
                 base = pc.Baseline.from_snapshot(snap)
             else:
                 # Lazily complete a not-yet-known mergeable baseline: the provider
@@ -120,7 +159,7 @@ def run_wait(
                     base = replace(base, mergeable=snap.mergeable)
                 events = pc.compute_events(base, snap, until)
                 if events:
-                    return WaitResult(True, decorate_events(events, repo, pr, snap))
+                    return WaitResult(True, _decorate(events, snap))
 
         if deadline is not None and now() >= deadline:
             return WaitResult(False)

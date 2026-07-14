@@ -465,6 +465,59 @@ def _consent_decision(
     return "apply", "eligible (no changes requested; approval not required)"
 
 
+def merge_readiness(
+    snap: PRSnapshot,
+    *,
+    automerge_label: str = "",
+    hold_labels: Iterable[str] = (),
+    wip_title_prefixes: Iterable[str] = (),
+    approval_required: bool = True,
+) -> dict:
+    """A caller-facing "what stands between this PR and merge" summary.
+
+    Runs the shared :func:`classify_state` and renders its verdict/consent
+    vocabulary into a JSON-able dict -- so ``pr-watch`` can tell a woken caller
+    *what to do next* rather than only *that a review landed*. Beyond the raw
+    classification it adds two action booleans the caller keys off directly:
+
+    - ``needs_consent`` -- the PR is approved (or approval-optional) and
+      otherwise unblocked, but the merge-consent label is not yet applied
+      (``consent_action == "apply"``). The caller must **grant consent** (e.g.
+      add the auto-merge label) for the PR to merge; it will NOT merge on its
+      own. This is the signal a bare ``approved`` transition failed to convey.
+    - ``clear_to_merge`` -- nothing but consent stands between the PR and a
+      merge: consent is already present, or a single consent action away
+      (``consent_action`` in ``{"apply", "already"}``).
+
+    Binding-absent (no ``automerge_label`` configured) degrades cleanly:
+    ``needs_consent`` / ``clear_to_merge`` are False and ``reason`` says so --
+    a repo whose merges are human-driven simply reports the verdict + merge
+    state with no consent action to take.
+    """
+    st = classify_state(
+        snap,
+        automerge_label=automerge_label,
+        hold_labels=hold_labels,
+        wip_title_prefixes=wip_title_prefixes,
+        approval_required=approval_required,
+    )
+    return {
+        "verdict": st.verdict,
+        "merge_state": st.merge_state,
+        "conflict": st.conflict,
+        "mergeable": snap.mergeable,
+        "consent_present": st.consent_present,
+        "consent_action": st.consent_action,
+        "consent_label": automerge_label,
+        "eligible": st.eligible,
+        "needs_consent": st.consent_action == "apply",
+        "clear_to_merge": st.consent_action in ("apply", "already"),
+        "held": list(st.held),
+        "wip": st.wip,
+        "reason": st.reason,
+    }
+
+
 __all__ = [
     "ALL_TRANSITIONS",
     "DEFAULT_UNTIL",
@@ -481,6 +534,7 @@ __all__ = [
     "classify_state",
     "compute_events",
     "effective_verdict",
+    "merge_readiness",
     "merge_state",
     "title_is_wip",
 ]
