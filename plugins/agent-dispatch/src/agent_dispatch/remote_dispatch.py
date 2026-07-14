@@ -25,6 +25,7 @@ import argparse
 import shlex
 import shutil
 import subprocess
+import sys
 
 
 class RemoteDispatchUnavailable(RuntimeError):
@@ -41,6 +42,38 @@ def local_machine() -> str | None:
 def ssh_available() -> bool:
     """True if the ``ssh`` client is on PATH."""
     return shutil.which("ssh") is not None
+
+
+def wsl_coordinator_present() -> bool:
+    """True on Windows when a WSL distro has agent-dispatch installed.
+
+    On a physical box that runs both a Windows and a WSL coordinator, the
+    coordinator MUST live in WSL: a WSL-bound loopback port is reachable from
+    BOTH envs (Windows via WSL2 localhost-forwarding, WSL natively), whereas a
+    Windows-bound port is NOT reachable from WSL over localhost. So a Windows
+    ``serve`` must **defer** when a WSL peer exists -- starting a second
+    coordinator would either collide on ``127.0.0.1:9330`` (bind failure) or,
+    if it wins the race, split-brain into two coordinators with two task DBs
+    (issue #2777). The Windows CLI still reaches the WSL coordinator via the
+    forwarded ``127.0.0.1:9330``.
+
+    Off Windows this is always False (Linux/WSL is the correct coordinator home).
+    Best-effort and bounded: a missing/broken ``wsl.exe`` yields False.
+    """
+    if sys.platform != "win32":
+        return False
+    exe = shutil.which("wsl.exe") or shutil.which("wsl")
+    if exe is None:
+        return False
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
+            [exe, "-e", "bash", "-lc",
+             'test -x "$HOME/.agent-dispatch/.venv/bin/agent-dispatch"'],
+            check=False, capture_output=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
 
 
 def _norm_machine(name: str | None) -> str:
