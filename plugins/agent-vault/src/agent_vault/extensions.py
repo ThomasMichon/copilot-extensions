@@ -97,7 +97,8 @@ class ExtensionRegistry:
     def __init__(self) -> None:
         self._unlock_providers: list[_Ranked] = []
         self._actions: dict[str, Callable] = {}
-        self._transports: list[_Ranked] = []
+        self._transports_before: list[_Ranked] = []
+        self._transports_after: list[_Ranked] = []
         self._config_sources: list[_Ranked] = []
         self._seq = 0
         self._loaded = False
@@ -126,13 +127,23 @@ class ExtensionRegistry:
         self._actions[name] = fn
 
     def register_transport(
-        self, fn: ClientTransport, *, priority: int = 100, name: str | None = None
+        self, fn: ClientTransport, *, priority: int = 100, name: str | None = None,
+        before_builtin: bool = False,
     ) -> None:
-        """Register a client transport consulted after the built-in transports."""
-        self._transports.append(
+        """Register a client transport.
+
+        By default a transport is a *fallback*, consulted only after the built-in
+        unix-socket + TCP transports both fail. Pass ``before_builtin=True`` to
+        register a transport consulted *ahead* of the built-ins -- for a transport
+        that must take precedence over the local daemon in some contexts. Such a
+        transport should return ``None`` when it does not apply, so the built-ins
+        still run.
+        """
+        target = self._transports_before if before_builtin else self._transports_after
+        target.append(
             _Ranked(priority, self._next_seq(), name or getattr(fn, "__name__", "?"), fn)
         )
-        self._transports.sort()
+        target.sort()
 
     def register_config_source(
         self, fn: ConfigSource, *, priority: int = 100, name: str | None = None
@@ -158,7 +169,7 @@ class ExtensionRegistry:
 
     @property
     def transports(self) -> list[_Ranked]:
-        return list(self._transports)
+        return list(self._transports_before) + list(self._transports_after)
 
     @property
     def config_sources(self) -> list[_Ranked]:
@@ -197,10 +208,17 @@ class ExtensionRegistry:
         return None
 
     def try_transports(
-        self, request: dict, timeout: float | None, ctx: TransportContext
+        self, request: dict, timeout: float | None, ctx: TransportContext,
+        *, before_builtin: bool = False,
     ) -> dict | None:
-        """Consult client transports in priority order; first non-None wins."""
-        for ranked in self._transports:
+        """Consult client transports in priority order; first non-None wins.
+
+        ``before_builtin`` selects the phase: the transports registered to run
+        ahead of the built-in unix/TCP transports, or (default) the fallback
+        transports consulted after them.
+        """
+        transports = self._transports_before if before_builtin else self._transports_after
+        for ranked in transports:
             try:
                 result = ranked.fn(request, timeout, ctx)
             except Exception as exc:
