@@ -21,6 +21,9 @@ Four generic hook categories are exposed, each a plain callable:
 - **config source** ``source(cwd) -> dict`` -- contributes resolver settings
   (``kpdb``/``group``/``port``/``vault`` and arbitrary keys) at a precedence tier
   below repo config and above the named-vault base. (e.g. a per-machine map.)
+- **cache source** ``source(machine) -> iterable`` -- yields entries for
+  ``cache-populate`` to pre-warm, each a ``"path"`` string or an
+  ``(entry, field)`` pair. (e.g. entries derived from installed services.)
 
 Extensions are discovered two ways (union, deduped), each pointing at a
 ``register(registry)`` callable:
@@ -52,6 +55,7 @@ UnlockProvider = Callable[["UnlockContext"], "str | None"]
 ProtocolAction = Callable[[Any, dict, "ActionContext"], dict]
 ClientTransport = Callable[[dict, "float | None", "TransportContext"], "dict | None"]
 ConfigSource = Callable[["str | None"], dict]
+CacheSource = Callable[["str | None"], "object"]
 
 
 @dataclass(frozen=True)
@@ -100,6 +104,7 @@ class ExtensionRegistry:
         self._transports_before: list[_Ranked] = []
         self._transports_after: list[_Ranked] = []
         self._config_sources: list[_Ranked] = []
+        self._cache_sources: list[_Ranked] = []
         self._seq = 0
         self._loaded = False
 
@@ -154,6 +159,20 @@ class ExtensionRegistry:
         )
         self._config_sources.sort()
 
+    def register_cache_source(
+        self, fn: CacheSource, *, priority: int = 100, name: str | None = None
+    ) -> None:
+        """Register a source of entries to pre-warm via ``cache-populate``.
+
+        The callable receives an optional ``machine`` hint and returns an iterable
+        of entries to cache -- each either a ``"path"`` string (defaults the field
+        to ``password``) or an ``(entry, field)`` pair.
+        """
+        self._cache_sources.append(
+            _Ranked(priority, self._next_seq(), name or getattr(fn, "__name__", "?"), fn)
+        )
+        self._cache_sources.sort()
+
     # -- ordered access --------------------------------------------------
 
     @property
@@ -174,6 +193,10 @@ class ExtensionRegistry:
     @property
     def config_sources(self) -> list[_Ranked]:
         return list(self._config_sources)
+
+    @property
+    def cache_sources(self) -> list[_Ranked]:
+        return list(self._cache_sources)
 
     # -- hook invocation helpers ----------------------------------------
 
@@ -247,6 +270,38 @@ class ExtensionRegistry:
             for key, value in contribution.items():
                 merged.setdefault(key, value)
         return merged
+
+    def collect_cache_entries(self, machine: str | None) -> list[tuple[str, str]]:
+        """Collect ``(entry, field)`` pairs to pre-warm from all cache sources.
+
+        Sources run in priority order; the result is deduped preserving first-seen
+        order. Each yielded item is either a ``"path"`` string (field defaults to
+        ``password``) or an ``(entry, field)`` pair. A source that raises is
+        logged and skipped (fail-open).
+        """
+        pairs: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for ranked in self._cache_sources:
+            try:
+                items = ranked.fn(machine)
+            except Exception as exc:
+                log.warning("Cache source %r raised: %s", ranked.name, exc)
+                continue
+            if not items:
+                continue
+            for item in items:
+                if isinstance(item, str):
+                    pair = (item, "password")
+                elif isinstance(item, (tuple, list)) and len(item) >= 1:
+                    entry = item[0]
+                    field = item[1] if len(item) >= 2 and item[1] else "password"
+                    pair = (str(entry), str(field))
+                else:
+                    continue
+                if pair[0] and pair not in seen:
+                    seen.add(pair)
+                    pairs.append(pair)
+        return pairs
 
 
 # ---------------------------------------------------------------------------
