@@ -409,9 +409,52 @@ function Register-PickerPivot {
 
 # -- Coordinator Scheduled Task (default-on on deploy machines) --------------
 
+function Test-WslAgentDispatch {
+    # True if a WSL distro on this Windows host has an agent-dispatch coordinator
+    # installed. On such a box the coordinator MUST live in WSL: a WSL-bound
+    # loopback port is reachable from BOTH Windows (via WSL2 localhost-forwarding)
+    # and WSL, whereas a Windows-bound port is NOT reachable from WSL over
+    # localhost. So the Windows coordinator must not run, or the two collide on
+    # 127.0.0.1:9330 (issue #2777). The Windows CLI still reaches the WSL
+    # coordinator through the default 127.0.0.1:9330 (forwarded), so a Windows
+    # client needs no URL config.
+    if ($env:OS -ne 'Windows_NT') { return $false }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return $false }
+    try {
+        & wsl.exe -e bash -lc 'test -x "$HOME/.agent-dispatch/.venv/bin/agent-dispatch"' 2>$null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
+}
+
+function Remove-CoordinatorTask {
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+        return $true
+    }
+    return $false
+}
+
 function Install-CoordinatorTask {
-    if ($NoService) {
-        Write-Skip 'Coordinator service skipped (-NoService): this host is a client only'
+    # Decide full-vs-client. Explicit -NoService always wins; otherwise a Windows
+    # box whose WSL peer already runs the coordinator becomes a client so the two
+    # don't collide on 127.0.0.1:9330 (issue #2777).
+    $clientOnly = [bool]$NoService
+    $reason = 'this host is a client only (-NoService)'
+    if (-not $clientOnly -and (Test-WslAgentDispatch)) {
+        $clientOnly = $true
+        $reason = 'the WSL peer owns the coordinator on this box (issue #2777)'
+    }
+    if ($clientOnly) {
+        # Remove a coordinator task left from a prior full install so a host that
+        # became a client stops colliding on the port.
+        if (Remove-CoordinatorTask) {
+            Write-Ok "Removed local coordinator Scheduled Task -- $reason"
+        } else {
+            Write-Skip "Coordinator service skipped -- $reason"
+        }
         return
     }
     if ($env:OS -ne 'Windows_NT') { return }
