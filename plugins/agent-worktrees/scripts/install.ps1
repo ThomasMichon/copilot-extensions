@@ -1025,12 +1025,25 @@ function Build-TerminalFragment {
         $cfg = Join-Path $env:USERPROFILE ".$ProjName\config.yaml"
         if (-not (Test-Path $cfg)) { return $null }
         try {
+            # The one-liner prints '' when the key is ABSENT (v is None) and a
+            # JSON array (e.g. '[]') when it is PRESENT -- so $raw distinguishes
+            # "legacy/unselected" from "explicit empty selection".
             $raw = & $VenvPython -c "import yaml,json,sys; d=yaml.safe_load(open(sys.argv[1],encoding='utf-8')) or {}; v=d.get('terminal_profiles'); print(json.dumps(v) if v is not None else '')" $cfg 2>$null
-            if (-not $raw) { return $null }
-            $sel = $raw | ConvertFrom-Json
-            if ($null -eq $sel) { return $null }
+            if ($null -eq $raw) { return $null }
+            $trimmed = $raw.Trim()
+            if ($trimmed -eq '') { return $null }        # key absent -> legacy (emit all)
+            # Explicit empty list = "no terminal profiles for this project". Note
+            # '[]' | ConvertFrom-Json yields $null (not @()), so this MUST be
+            # special-cased before the parse -- otherwise it would be mistaken
+            # for the absent/legacy case and wrongly emit every profile.
+            if ($trimmed -eq '[]') { return @{} }
+            $sel = $trimmed | ConvertFrom-Json
+            # $raw was non-empty JSON, so treat a null/empty parse as an explicit
+            # (empty) selection -> no profiles, NOT legacy.
+            if ($null -eq $sel) { return @{} }
             $set = @{}
             foreach ($t in @($sel)) {
+                if ($null -eq $t) { continue }
                 $k = if ($t.kind) { $t.kind } else { 'agent' }
                 $set["$($t.machine)|$($t.env)|$k"] = $true
             }

@@ -5572,10 +5572,24 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Write global machine-wide config (lowest tier), then per-project config
     config_path = proj_dir / "config.yaml"
     _write_global_config(machine, plat, repo_dir.parent)
+    # Resolve agent exposure up front: explicit flags win, else the repos.yaml
+    # classification, else default ON (adopting a repo means working in it).
+    # A no-agent adoption is worked programmatically (create --json) rather than
+    # launched from the terminal dropdown, so it also gets NO terminal profile.
+    if getattr(args, "no_agent", False):
+        expose_agent = False
+    elif getattr(args, "agent", False):
+        expose_agent = True
+    else:
+        from . import repos as _repos
+        _entry = _repos.find_repo(project)
+        expose_agent = _entry.agent if _entry else True
+
     if not config_path.exists() or args.force:
         _write_config(
             config_path, repo_dir, machine, plat, project, default_branch,
             headless=getattr(args, "headless", False),
+            no_terminal_profile=not expose_agent,
         )
     else:
         output.skipped(f"Config exists at {config_path} (use --force to overwrite)")
@@ -5599,16 +5613,6 @@ def cmd_register(args: argparse.Namespace) -> int:
         wsl_state = "adopted"
         wsl_distro = wsl_distro_name
         wsl_path = str(repo_dir)
-    # Resolve agent exposure: explicit flags win, else the repos.yaml
-    # classification, else default ON (adopting a repo means working in it).
-    if getattr(args, "no_agent", False):
-        expose_agent = False
-    elif getattr(args, "agent", False):
-        expose_agent = True
-    else:
-        from . import repos as _repos
-        _entry = _repos.find_repo(project)
-        expose_agent = _entry.agent if _entry else True
 
     inst.register_project(
         project,
@@ -7783,6 +7787,7 @@ platform: {plat}
 def _write_config(
     path: Path, repo_dir: Path, machine: str, plat: str,
     project: str, default_branch: str = "master", *, headless: bool = False,
+    no_terminal_profile: bool = False,
 ) -> None:
     """Write the machine-local per-project config YAML.
 
@@ -7791,17 +7796,31 @@ def _write_config(
     <anchor>/.agent-worktrees/config.yaml. This file keeps only the project
     marker and machine paths (anchor / worktree_root) plus repo defaults that a
     foreign repo without in-repo config still needs.
+
+    ``no_terminal_profile`` seeds an explicit empty ``terminal_profiles: []`` so
+    the Windows-Terminal generator emits **no** profile for this project (used
+    for a ``--no-agent`` adoption: worktree-managed + binstub, but nothing to
+    launch from the terminal dropdown). An *absent* key means "legacy / emit
+    everything", so the empty list must be written explicitly to suppress.
     """
     wt_root = f"{repo_dir}.worktrees"
 
     headless_line = "headless: true\n" if headless else ""
+    # Explicit empty selection = "no terminal profile for this project".
+    # Absent would mean legacy (emit everything), so it must be written out.
+    terminal_block = (
+        "\n# No Windows Terminal profile for this project (--no-agent adoption):\n"
+        "# an empty selection suppresses generation (absent would emit all).\n"
+        "terminal_profiles: []\n"
+        if no_terminal_profile else ""
+    )
     content = f"""# ~/.{project}/config.yaml
 # Machine-local config for {project} (overrides + machine paths only).
 # Machine-wide defaults -> ~/.agent-worktrees/config.yaml.
 # Repo settings may live in-repo -> <anchor>/.agent-worktrees/config.yaml.
 
 repo_name: {project}
-{headless_line}
+{headless_line}{terminal_block}
 repos:
   {project}:
     anchor: {repo_dir}

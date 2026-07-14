@@ -16,6 +16,39 @@ def test_load_missing_file_returns_empty(tmp_path):
     assert profiles.load_selection(tmp_path / "nope.yaml") == []
 
 
+def test_no_agent_config_seeds_empty_managed_selection(tmp_path):
+    """`register --no-agent` seeds `terminal_profiles: []` -> a *managed* empty
+    selection (has_selection True, load_selection []), so the WT generator emits
+    NO profile -- distinct from an absent key (legacy = emit everything)."""
+    from pathlib import Path
+
+    from agent_worktrees import __main__ as m
+
+    cfg_path = tmp_path / "config.yaml"
+    m._write_config(
+        cfg_path, Path("D:/Src/dev.tmichon"), "tmichon-dev6", "windows",
+        "dev.tmichon", "main", no_terminal_profile=True)
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert data["terminal_profiles"] == []
+    # Managed (key present) + empty -> no profiles, NOT legacy.
+    assert profiles.has_selection(cfg_path) is True
+    assert profiles.load_selection(cfg_path) == []
+
+
+def test_default_config_omits_terminal_profiles_key(tmp_path):
+    """Without --no-agent, the key is absent -> legacy (has_selection False)."""
+    from pathlib import Path
+
+    from agent_worktrees import __main__ as m
+
+    cfg_path = tmp_path / "config.yaml"
+    m._write_config(
+        cfg_path, Path("D:/Src/x"), "tmichon-dev6", "windows", "x", "main")
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert profiles.CONFIG_KEY not in data
+    assert profiles.has_selection(cfg_path) is False
+
+
 def test_save_then_load_roundtrip(tmp_path):
     cfg_path = tmp_path / ".aperture-labs" / "config.yaml"
     sels = [
