@@ -123,8 +123,20 @@ class VaultService:
     def _last_error(self, kpdb: str) -> str | None:
         return self._last_unlock_error.get(kpdb)
 
-    def ensure_unlocked(self, kpdb: str, vault_name: str = "", reason: str = "") -> bool:
-        """Ensure the CLI backend has the master password."""
+    def ensure_unlocked(
+        self, kpdb: str, vault_name: str = "", reason: str = "",
+        allow_prompt: bool | None = None,
+    ) -> bool:
+        """Ensure the CLI backend has the master password.
+
+        Unlock-source providers always run (inline resolution). The interactive
+        prompt is opt-in: when ``allow_prompt`` is False (the default -- fail-fast),
+        a still-locked vault returns an actionable error instead of popping a
+        blocking prompt. Pass ``allow_prompt=True`` (or set it on the request
+        context) for the explicit, at-console unlock path.
+        """
+        if allow_prompt is None:
+            allow_prompt = getattr(self._request_ctx, "allow_prompt", False)
         if not reason:
             reason = getattr(self._request_ctx, "reason", "")
         if not vault_name:
@@ -190,6 +202,18 @@ class VaultService:
                 log.info("CLI backend unlocked via provider %r (TTL %ds)%s",
                          provider_name, PASSWORD_TTL, f" [{reason}]" if reason else "")
                 return True
+
+            # Fail-fast: inline resolution (providers) did not unlock and the
+            # caller has not opted into an interactive prompt. Return an
+            # actionable error instead of popping a blocking dialog.
+            if not allow_prompt:
+                self._record_unlock_error(
+                    kpdb,
+                    "Vault locked -- run 'agent-vault unlock' to unlock, then retry",
+                )
+                log.info("Vault locked; prompting disabled -- fail-fast%s",
+                         f" [{reason}]" if reason else "")
+                return False
 
             while cancel_streak < MAX_UNLOCK_ATTEMPTS and wrong_streak < MAX_UNLOCK_ATTEMPTS:
                 if wrong_streak > 0:
@@ -301,13 +325,12 @@ class VaultService:
         self._request_ctx.kpdb = kpdb
         self._request_ctx.group = group
         self._request_ctx.vault_name = vault_name
-
-        allow_prompt = request.get("allow_prompt", True)
-        if (not allow_prompt
-                and not self.cli.has_password(kpdb)
-                and action not in ("ping", "unlock", "lock", "stop")):
-            return {"ok": False, "error": "Vault locked (non-interactive)",
-                    "needs_unlock": True}
+        # Fail-fast by default: credential ops do not pop an interactive prompt
+        # unless the caller explicitly opts in (allow_prompt=True). Unlock-source
+        # providers still run inside ensure_unlocked, so inline resolution is not
+        # skipped -- only the blocking prompt is gated. A still-locked op then
+        # returns an actionable needs_unlock rather than stalling on a dialog.
+        self._request_ctx.allow_prompt = bool(request.get("allow_prompt", False))
 
         if action == "ping":
             return {
@@ -362,7 +385,8 @@ class VaultService:
         if action == "unlock":
             password = request.get("password", "")
             if not password and request.get("prompt"):
-                if self.ensure_unlocked(kpdb, vault_name, reason):
+                # Explicit unlock-with-prompt opts into the interactive prompt.
+                if self.ensure_unlocked(kpdb, vault_name, reason, allow_prompt=True):
                     return {"ok": True}
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Unlock failed"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}

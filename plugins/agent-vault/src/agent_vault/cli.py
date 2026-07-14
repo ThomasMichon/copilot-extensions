@@ -393,7 +393,10 @@ def cmd_get(args):
         print("Error: could not start vault service", file=sys.stderr)
         return 1
 
-    resp = send_command({"action": "get", "entry": entry, "field": field}, timeout=None)
+    request = {"action": "get", "entry": entry, "field": field}
+    if getattr(args, "prompt", False):
+        request["allow_prompt"] = True
+    resp = send_command(request, timeout=None)
     if resp and resp.get("ok"):
         print(resp["value"])
         return 0
@@ -767,6 +770,9 @@ def main():
     p.add_argument("entry", help="Entry path")
     p.add_argument("field", nargs="?", default="password",
                    help="Field to read (default: password)")
+    p.add_argument("-p", "--prompt", action="store_true",
+                   help="Prompt for the master password if locked "
+                        "(default: fail fast and ask you to run 'agent-vault unlock')")
     p.set_defaults(func=cmd_get)
 
     p = sub.add_parser("has", help="Check if an entry exists")
