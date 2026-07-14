@@ -44,6 +44,26 @@ def test_no_routing_table_env_forces_config_port(cfg_dir: Path, monkeypatch):
     assert client._base == "http://127.0.0.1:9281"
 
 
+def test_end_stop_thread_force_query_param(cfg_dir: Path, monkeypatch):
+    """`--force` on end/stop maps to the route's ?force=true (#191)."""
+    client = BridgeClient.from_config()
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        client, "_request",
+        lambda method, path, **kw: calls.append((method, path, kw)) or None,
+    )
+    client.end_session("s1")
+    client.end_session("s2", force=True)
+    client.stop_session("s3")
+    client.stop_session("s4", force=True)
+    assert calls == [
+        ("DELETE", "/api/v1/sessions/s1", {"params": None}),
+        ("DELETE", "/api/v1/sessions/s2", {"params": {"force": "true"}}),
+        ("POST", "/api/v1/sessions/s3/stop", {"params": None}),
+        ("POST", "/api/v1/sessions/s4/stop", {"params": {"force": "true"}}),
+    ]
+
+
 def test_explicit_base_url_env_wins(cfg_dir: Path, monkeypatch):
     monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
     routing.publish_active(cfg_dir, bind="127.0.0.1", port=9290, version="v")

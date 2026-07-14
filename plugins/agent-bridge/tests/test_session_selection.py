@@ -48,7 +48,7 @@ class FakeClient:
                 s["status"] = "idle"
         return {"status": "idle"}
 
-    def end_session(self, sid):
+    def end_session(self, sid, *, force=False):
         self.ended.append(sid)
         self.sessions = [
             s for s in self.sessions if s.get("session_id") != sid
@@ -359,7 +359,7 @@ def test_cmd_create_refuses_on_conflict(monkeypatch):
 
 def test_cmd_end_treats_404_as_already_ended(monkeypatch, capsys):
     class _C:
-        def end_session(self, sid):
+        def end_session(self, sid, *, force=False):
             raise BridgeClientError(404, f"Session {sid} not found")
 
     monkeypatch.setattr(m, "_get_client", lambda: _C())
@@ -370,7 +370,7 @@ def test_cmd_end_treats_404_as_already_ended(monkeypatch, capsys):
 
 def test_cmd_end_reports_error_without_traceback(monkeypatch, capsys):
     class _C:
-        def end_session(self, sid):
+        def end_session(self, sid, *, force=False):
             raise BridgeClientError(500, "boom")
 
     monkeypatch.setattr(m, "_get_client", lambda: _C())

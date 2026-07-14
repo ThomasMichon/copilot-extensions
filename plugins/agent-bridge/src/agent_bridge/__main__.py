@@ -2189,7 +2189,7 @@ def _cmd_read(args: argparse.Namespace) -> None:
 def _cmd_stop(args: argparse.Namespace) -> None:
     """Stop a session."""
     client = _get_client()
-    client.stop_session(args.session_id)
+    client.stop_session(args.session_id, force=getattr(args, "force", False))
     print(f"[OK] Session {args.session_id} stopped")
 
 
@@ -2204,7 +2204,7 @@ def _cmd_end(args: argparse.Namespace) -> None:
 
     client = _get_client()
     try:
-        client.end_session(args.session_id)
+        client.end_session(args.session_id, force=getattr(args, "force", False))
     except BridgeClientError as exc:
         if exc.status == 404:
             print(f"[OK] Session {args.session_id} already ended")
@@ -2776,10 +2776,20 @@ def main(argv: list[str] | None = None) -> None:
 
     stop_p = sub.add_parser("stop", help="Stop a session")
     stop_p.add_argument("session_id", help="Session ID")
+    stop_p.add_argument(
+        "--force", action="store_true",
+        help="Tear down even with active background sub-agent tasks (kills "
+             "them). Prefer waiting for them to finish.",
+    )
     stop_p.set_defaults(func=_cmd_stop)
 
     end_p = sub.add_parser("end", help="End (delete) a session")
     end_p.add_argument("session_id", help="Session ID")
+    end_p.add_argument(
+        "--force", action="store_true",
+        help="Tear down even with active background sub-agent tasks (kills "
+             "them). Prefer waiting for them to finish.",
+    )
     end_p.set_defaults(func=_cmd_end)
 
     resume_p = sub.add_parser("resume", help="Resume a stopped session")
