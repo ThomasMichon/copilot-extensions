@@ -24,6 +24,12 @@ Four generic hook categories are exposed, each a plain callable:
 - **cache source** ``source(machine) -> iterable`` -- yields entries for
   ``cache-populate`` to pre-warm, each a ``"path"`` string or an
   ``(entry, field)`` pair. (e.g. entries derived from installed services.)
+- **CLI command** ``builder(subparsers) -> None`` -- adds one (or more)
+  subcommand(s) to the ``agent-vault`` CLI. The builder receives the argparse
+  subparsers action and calls ``subparsers.add_parser(...)`` then
+  ``set_defaults(func=handler)``, where ``handler(args) -> int | None`` runs the
+  command. Consulted *after* the built-in verbs are registered, so an extension
+  adds facility-only verbs instead of forking ``cli.py``.
 
 Extensions are discovered two ways (union, deduped), each pointing at a
 ``register(registry)`` callable:
@@ -56,6 +62,7 @@ ProtocolAction = Callable[[Any, dict, "ActionContext"], dict]
 ClientTransport = Callable[[dict, "float | None", "TransportContext"], "dict | None"]
 ConfigSource = Callable[["str | None"], dict]
 CacheSource = Callable[["str | None"], "object"]
+CliCommand = Callable[[Any], None]
 
 
 @dataclass(frozen=True)
@@ -105,6 +112,7 @@ class ExtensionRegistry:
         self._transports_after: list[_Ranked] = []
         self._config_sources: list[_Ranked] = []
         self._cache_sources: list[_Ranked] = []
+        self._cli_commands: list[_Ranked] = []
         self._seq = 0
         self._loaded = False
 
@@ -173,6 +181,22 @@ class ExtensionRegistry:
         )
         self._cache_sources.sort()
 
+    def register_cli_command(
+        self, fn: CliCommand, *, priority: int = 100, name: str | None = None
+    ) -> None:
+        """Register a builder that adds subcommand(s) to the ``agent-vault`` CLI.
+
+        The callable receives the argparse *subparsers action* and should call
+        ``subparsers.add_parser(...)`` then ``set_defaults(func=handler)`` where
+        ``handler(args) -> int | None`` runs the command. Builders run in priority
+        order *after* the built-in verbs, letting a downstream harness add its own
+        verbs instead of forking ``cli.py``.
+        """
+        self._cli_commands.append(
+            _Ranked(priority, self._next_seq(), name or getattr(fn, "__name__", "?"), fn)
+        )
+        self._cli_commands.sort()
+
     # -- ordered access --------------------------------------------------
 
     @property
@@ -197,6 +221,10 @@ class ExtensionRegistry:
     @property
     def cache_sources(self) -> list[_Ranked]:
         return list(self._cache_sources)
+
+    @property
+    def cli_commands(self) -> list[_Ranked]:
+        return list(self._cli_commands)
 
     # -- hook invocation helpers ----------------------------------------
 
@@ -302,6 +330,18 @@ class ExtensionRegistry:
                     seen.add(pair)
                     pairs.append(pair)
         return pairs
+
+    def apply_cli_commands(self, subparsers) -> None:
+        """Let each registered CLI-command builder add its subparser(s).
+
+        Builders run in priority order. One that raises is logged and skipped
+        (fail-open) so a broken extension never prevents the CLI from starting.
+        """
+        for ranked in self._cli_commands:
+            try:
+                ranked.fn(subparsers)
+            except Exception as exc:
+                log.warning("CLI command builder %r raised: %s", ranked.name, exc)
 
 
 # ---------------------------------------------------------------------------
