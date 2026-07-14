@@ -429,12 +429,19 @@ function Test-WslAgentDispatch {
 }
 
 function Remove-CoordinatorTask {
-    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-        Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-        return $true
+    # Returns 'removed' | 'blocked' | 'absent'. Unregister-ScheduledTask may need
+    # elevation (Access denied) for a task in the root folder; when it does, the
+    # leftover task is harmless -- the coordinator defers on Windows when a WSL
+    # peer exists, so 'agent-dispatch serve' just exits cleanly (issue #2777).
+    if (-not (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
+        return 'absent'
     }
-    return $false
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        return 'blocked'
+    }
+    return 'removed'
 }
 
 function Install-CoordinatorTask {
@@ -449,11 +456,12 @@ function Install-CoordinatorTask {
     }
     if ($clientOnly) {
         # Remove a coordinator task left from a prior full install so a host that
-        # became a client stops colliding on the port.
-        if (Remove-CoordinatorTask) {
-            Write-Ok "Removed local coordinator Scheduled Task -- $reason"
-        } else {
-            Write-Skip "Coordinator service skipped -- $reason"
+        # became a client stops colliding on the port. Removal may be blocked
+        # without elevation -- that's fine, the coordinator defers on Windows.
+        switch (Remove-CoordinatorTask) {
+            'removed' { Write-Ok   "Removed local coordinator Scheduled Task -- $reason" }
+            'blocked' { Write-Skip "Coordinator task present but not removable without elevation -- harmless: 'serve' defers on Windows when a WSL peer exists ($reason)" }
+            default   { Write-Skip "Coordinator service skipped -- $reason" }
         }
         return
     }
