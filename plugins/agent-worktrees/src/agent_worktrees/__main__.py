@@ -69,7 +69,7 @@ from . import installer as inst
 from . import services as svc
 from . import validate as val
 from .picker import ItemKind, MenuItem, pick
-from .update_stage import cmd_stage_update
+from .update_stage import cmd_stage_update, discover_plugin_dir
 
 # ── Env var migration helpers ───────────────────────────────────────────
 # Phase 2 of copilot-worktrees extraction: APERTURE_* → WORKTREE_*
@@ -5443,30 +5443,81 @@ def cmd_install(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_terminal_install_script() -> Path | None:
+    """Locate ``install.ps1`` for the Windows Terminal profile refresh.
+
+    Resolution order (first existing wins):
+      1. The deploy-manifest's ``plugin_source`` -- authoritative when set, but
+         the marketplace-install flow leaves it empty (dotfiles#211), so it is
+         only a hint, not a hard gate.
+      2. The installed plugin dir (``~/.copilot/installed-plugins/...``) as
+         discovered by :func:`update_stage.discover_plugin_dir` -- the robust fallback
+         that does not depend on manifest correctness.
+      3. The running module's own plugin root (``<plugin>/scripts/install.ps1``)
+         -- covers direct/dev runs from a checkout.
+
+    Returns the first candidate whose ``scripts/install.ps1`` exists, else None.
+    """
+    candidates: list[Path] = []
+
+    # 1. deploy-manifest plugin_source (may be empty after a marketplace install)
+    manifest_path = cfg.install_dir() / "deploy-manifest.json"
+    if manifest_path.exists():
+        try:
+            m = json.loads(manifest_path.read_text())
+            plugin_source = m.get("plugin_source")
+            if plugin_source:
+                candidates.append(Path(plugin_source) / "scripts" / "install.ps1")
+        except Exception:
+            pass
+
+    # 2. installed plugin dir (marketplace or _direct) -- robust fallback
+    try:
+        plugin_dir, _layout = discover_plugin_dir()
+        if plugin_dir:
+            candidates.append(plugin_dir / "scripts" / "install.ps1")
+    except Exception:
+        pass
+
+    # 3. the running module's own scripts dir (src/agent_worktrees -> plugin root)
+    try:
+        candidates.append(
+            Path(__file__).resolve().parents[2] / "scripts" / "install.ps1"
+        )
+    except Exception:
+        pass
+
+    for candidate in candidates:
+        try:
+            if candidate.exists():
+                return candidate
+        except Exception:
+            continue
+    return None
+
+
 def _refresh_terminal_profiles() -> None:
     """Re-run the install.ps1 terminal-profile generator if available.
 
-    After adopting a new project, the WT fragment needs to be regenerated
-    to include the new project's profile.  Delegates to the PowerShell
-    installer's Deploy-Shortcuts function via a lightweight wrapper call.
+    After adopting a new project, the WT fragment needs to be regenerated to
+    include (or drop) the project's profile.  Delegates to the PowerShell
+    installer's Deploy-Shortcuts function via the ``update`` action.
+
+    The installer script is resolved via :func:`_resolve_terminal_install_script`
+    so an empty deploy-manifest ``plugin_source`` (marketplace install) no longer
+    silently no-ops the refresh; when it genuinely cannot be found we emit a
+    warning rather than returning silently (dotfiles#211).
     """
-    install_dir = cfg.install_dir()
-    manifest_path = install_dir / "deploy-manifest.json"
-    if not manifest_path.exists():
+    install_script = _resolve_terminal_install_script()
+    if install_script is None:
+        output.warn(
+            "Could not refresh Windows Terminal profiles: install.ps1 not found "
+            "(checked deploy-manifest plugin_source and installed-plugin dir)"
+        )
         return
 
     try:
-        m = json.loads(manifest_path.read_text())
-        plugin_source = m.get("plugin_source")
-        if not plugin_source or not Path(plugin_source).exists():
-            return
-
-        install_script = Path(plugin_source) / "scripts" / "install.ps1"
-        if not install_script.exists():
-            return
-
-        # The install script's "update" action regenerates terminal profiles
-        # Use a targeted powershell invocation that just refreshes shortcuts
+        # The install script's "update" action regenerates terminal profiles.
         subprocess.run(
             ["pwsh", "-NoProfile", "-File", str(install_script), "update"],
             capture_output=True, text=True, timeout=30,
