@@ -60,6 +60,13 @@ plugin you changed.
 > the original plugins — the same rule covers agent-logger, agent-dispatch,
 > context-handoff, efforts, visions, customizing-copilot,
 > harness-copilot-extensions, and anything added later.
+>
+> **Keep any in-package `__version__` in sync.** A runtime plugin that exposes a
+> Python `__version__` (e.g. `agent-dispatch`'s `src/agent_dispatch/__init__.py`,
+> surfaced by `--version` and the coordinator's `/health`) must bump it to match
+> the `pyproject.toml` version in the **same** commit — it is a *fourth* file for
+> that plugin, easy to miss because the marketplace doesn't read it. A stale
+> `__version__` makes a correctly-deployed runtime misreport its own version.
 
 **agent-worktrees:**
 

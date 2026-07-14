@@ -497,12 +497,55 @@ class PickerScreen(Widget):
     def _pivot_machine(self):
         """The machine name the registered pivot's ``list``/actions run against:
         the selected machine sub-tab, or the local machine when 'All' is
-        selected (a registered pivot is inherently machine-scoped)."""
+        selected (a registered pivot is inherently machine-scoped).
+
+        This returns the tab's *display* name (``machines.yaml`` ``display_name``)
+        -- use it for human-facing status lines. For the value handed to a
+        contributed pivot's CLI, use :meth:`_pivot_machine_id`."""
         label, m, _e, _ok = self.machines[self.machine_idx]
         if m is not None:
             return m
         loc = self.machines[self.local_index()] if self.machines else (None, None, None, None)
         return loc[1]
+
+    def _machine_key_map(self):
+        """Cached ``machines.yaml`` ``display_name -> registry key`` map.
+
+        The registry key is a machine's canonical identity (lowercase; it doubles
+        as the SSH-alias base) -- the value ``agent-worktrees get machine`` returns
+        and that other facility tools (agent-dispatch, agent-bridge) match against.
+        Tab labels carry the *display* name, so registered-pivot commands need
+        this translation. Delegates to :func:`data_ssh.machine_key_map` and caches
+        it for the session; any failure degrades to ``{}`` so the caller falls
+        back to the display name."""
+        cached = getattr(self, "_mkey_map", None)
+        if cached is not None:
+            return cached
+        try:
+            from . import data_ssh
+
+            mapping = data_ssh.machine_key_map()
+        except Exception:
+            mapping = {}
+        self._mkey_map = mapping
+        return mapping
+
+    def _pivot_machine_id(self):
+        """The **canonical machine identity** (``machines.yaml`` registry key) for
+        the current registered-pivot scope -- the value a contributed pivot's CLI
+        should receive as ``{machine}``.
+
+        A registered pivot's ``{machine}`` names a *machine identity*, not a tab
+        label: agent-dispatch resolves the local machine and its SSH aliases by
+        the registry key, so handing it the display name (``Lambda-Core`` vs the
+        identity ``lambda-core``) would make it treat the local machine as a
+        remote peer or miss a peer's lowercase ``Host`` block. Falls back to the
+        display name when the roster can't be read (harmless: a downstream that
+        casefolds still matches)."""
+        display = self._pivot_machine()
+        if not display:
+            return display
+        return self._machine_key_map().get(display, display)
 
     def _pivot_runtime(self, reg):
         """Lazily build (and cache) the background runtime for a registered
@@ -842,7 +885,7 @@ class PickerScreen(Widget):
         reg = self._reg_pivot()
         if reg is None:
             return ("idle", [], "")
-        machine = self._pivot_machine()
+        machine = self._pivot_machine_id()
         rt = self._pivot_runtime(reg)
         rt.ensure(machine)
         return rt.get(machine)
@@ -3880,7 +3923,7 @@ class PickerScreen(Widget):
         ctx["title"] = rec.get(reg.title_field)
         wt = rec.get(reg.worktree_field) if reg.worktree_field else None
         ctx["worktree"] = wt or ""
-        ctx["machine"] = self._pivot_machine() or ""
+        ctx["machine"] = self._pivot_machine_id() or ""
         return ctx
 
     def _key_task_menu(self, key):
