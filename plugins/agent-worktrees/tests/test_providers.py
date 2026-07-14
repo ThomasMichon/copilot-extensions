@@ -10,6 +10,7 @@ import pytest
 
 from agent_worktrees import config as cfg
 from agent_worktrees import git_ops, pr_ops, tracking
+from agent_worktrees.pr_contract import PRSnapshot
 from agent_worktrees.providers import (
     ProviderError,
     PRScope,
@@ -592,11 +593,24 @@ class _FakeProvider:
     def remove_label(self, repo, number, label, *, api_base="", token=None):
         return ""
 
+    def mark_ready(self, repo, number, *, api_base="", token=None, title="",
+                   wip_title_prefixes=()):
+        return ""
+
 
 @dataclass
 class _FakeReadyProvider:
+    """Fake whose ``get_snapshot`` drives the un-draft / legacy-hold branches.
+
+    ``snapshot`` is the PRSnapshot ``pr_ready`` sees; ``mark_ready_error`` lets a
+    test force the un-draft primitive to fail. Records what was called.
+    """
+
     name: str = "gitea"
+    snapshot: PRSnapshot | None = None
+    mark_ready_error: str = ""
     removed: dict | None = None
+    marked_ready: dict | None = None
 
     def create_pull(self, scope, *, token=None):
         return PullResult(url="https://h/gitea/ext/pulls/99", number=99, state="open")
@@ -604,6 +618,20 @@ class _FakeReadyProvider:
     def get_pull(self, repo, number, *, api_base="", token=None):
         return PullResult(url=f"https://h/gitea/{repo}/pulls/{number}",
                           number=number, state="open")
+
+    def get_snapshot(self, repo, number, *, api_base="", token=None):
+        if self.snapshot is not None:
+            return self.snapshot
+        return PRSnapshot(pr_state="open")
+
+    def mark_ready(self, repo, number, *, api_base="", token=None, title="",
+                   wip_title_prefixes=()):
+        self.marked_ready = {
+            "repo": repo, "number": number, "api_base": api_base,
+            "token": token, "title": title,
+            "wip_title_prefixes": tuple(wip_title_prefixes),
+        }
+        return self.mark_ready_error
 
     def remove_label(self, repo, number, label, *, api_base="", token=None):
         self.removed = {
@@ -655,7 +683,22 @@ class TestCreatePRAutoOpen:
         assert "source:test" in scope.labels
         assert fake.captured["token"] == "tok"
 
-    def test_auto_open_hold_adds_do_not_merge_label(self, pr_repo, monkeypatch):
+    def test_auto_open_draft_marks_scope_draft(self, pr_repo, monkeypatch):
+        config, wid, _wt, _ = pr_repo
+        config = self._enable_open(config)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider()
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda name: fake)
+
+        res = pr_ops.create_pr(wid, config, title="Add feature", draft=True)
+        assert res["success"] is True
+        assert res["draft"] is True
+        # Native draft: the scope carries draft=True (no do-not-merge label).
+        assert fake.captured["scope"].draft is True
+        assert pr_ops.HOLD_LABEL not in fake.captured["scope"].labels
+
+    def test_auto_open_hold_is_deprecated_alias_for_draft(self, pr_repo, monkeypatch):
+        # --hold is retained as a deprecated alias for --draft.
         config, wid, _wt, _ = pr_repo
         config = self._enable_open(config)
         monkeypatch.setenv("EXT_TOKEN", "tok")
@@ -664,8 +707,9 @@ class TestCreatePRAutoOpen:
 
         res = pr_ops.create_pr(wid, config, title="Add feature", hold=True)
         assert res["success"] is True
-        assert res["held"] is True
-        assert pr_ops.HOLD_LABEL in fake.captured["scope"].labels
+        assert res["draft"] is True
+        assert fake.captured["scope"].draft is True
+        assert pr_ops.HOLD_LABEL not in fake.captured["scope"].labels
 
     def test_no_open_skips_provider(self, pr_repo, monkeypatch):
         config, wid, _wt, _ = pr_repo
@@ -707,27 +751,93 @@ class TestCreatePRAutoOpen:
         assert attr.parse_marker(scope.body) is None
         assert scope.body == "Hello"
 
-    def test_pr_ready_removes_hold_label(self, pr_repo, monkeypatch):
+    def _ready_config(self, pr_repo):
         import dataclasses
-
         config, wid, _wt, _ = pr_repo
         repo = config.repos["ext"]
         pr = dataclasses.replace(
             repo.pr, api_base="https://h/gitea", token_env="EXT_TOKEN",
+            wip_title_prefixes=("wip:", "[wip]"),
+            hold_labels=("do-not-merge",),
         )
         config = dataclasses.replace(
             config, repos={"ext": dataclasses.replace(repo, pr=pr)}
         )
-        monkeypatch.setenv("EXT_TOKEN", "tok")
+        return config, wid
+
+    def _track_pr(self, wid, config):
         pr_ops.create_pr(wid, config, title="Add feature")
         pr_ops.set_pr(
             wid, url="https://h/gitea/o/r/pulls/99", number=99, provider="gitea",
         )
-        fake = _FakeReadyProvider()
+
+    def test_pr_ready_undrafts_draft_pr(self, pr_repo, monkeypatch):
+        config, wid = self._ready_config(pr_repo)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        self._track_pr(wid, config)
+        fake = _FakeReadyProvider(
+            snapshot=PRSnapshot(pr_state="open", draft=True, title="WIP: Add feature"),
+        )
         monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda name: fake)
 
         res = pr_ops.pr_ready(wid, config, target_repo="o/r")
         assert res["success"] is True
+        assert res["transition"] == "undraft"
+        assert res["was_draft"] is True
+        # The un-draft primitive was invoked with the snapshot title + binding.
+        assert fake.marked_ready["repo"] == "o/r"
+        assert fake.marked_ready["number"] == 99
+        assert fake.marked_ready["title"] == "WIP: Add feature"
+        assert fake.marked_ready["wip_title_prefixes"] == ("wip:", "[wip]")
+        # It must NOT touch the legacy hold label on the draft path.
+        assert fake.removed is None
+
+    def test_pr_ready_errors_when_mark_ready_fails(self, pr_repo, monkeypatch):
+        config, wid = self._ready_config(pr_repo)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        self._track_pr(wid, config)
+        fake = _FakeReadyProvider(
+            snapshot=PRSnapshot(pr_state="open", draft=True, title="WIP: x"),
+            mark_ready_error="un-draft failed (HTTP 500)",
+        )
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda name: fake)
+
+        res = pr_ops.pr_ready(wid, config, target_repo="o/r")
+        assert res["success"] is False
+        assert "un-draft failed" in res["error"]
+
+    def test_pr_ready_errors_when_not_draft(self, pr_repo, monkeypatch):
+        # A no-op must never masquerade as success (issue #2779).
+        config, wid = self._ready_config(pr_repo)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        self._track_pr(wid, config)
+        fake = _FakeReadyProvider(
+            snapshot=PRSnapshot(pr_state="open", draft=False, title="Add feature",
+                                labels=("source:test",)),
+        )
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda name: fake)
+
+        res = pr_ops.pr_ready(wid, config, target_repo="o/r")
+        assert res["success"] is False
+        assert "not in draft state" in res["error"]
+        assert fake.marked_ready is None
+        assert fake.removed is None
+
+    def test_pr_ready_removes_legacy_hold_label(self, pr_repo, monkeypatch):
+        # Backward-compat: a non-draft PR carrying the retired do-not-merge hold
+        # label is released by removing the label (the equivalent transition).
+        config, wid = self._ready_config(pr_repo)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        self._track_pr(wid, config)
+        fake = _FakeReadyProvider(
+            snapshot=PRSnapshot(pr_state="open", draft=False, title="Add feature",
+                                labels=(pr_ops.HOLD_LABEL, "source:test")),
+        )
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda name: fake)
+
+        res = pr_ops.pr_ready(wid, config, target_repo="o/r")
+        assert res["success"] is True
+        assert res["transition"] == "release-legacy-hold"
         assert res["removed"] is True
         assert fake.removed == {
             "repo": "o/r",
@@ -736,6 +846,7 @@ class TestCreatePRAutoOpen:
             "api_base": "https://h/gitea",
             "token": "tok",
         }
+        assert fake.marked_ready is None
 
 
 class TestAutoOpenDefault:
@@ -923,7 +1034,7 @@ class TestCreatePRReconcile:
         # rejects it and tracking wedges at 'creating'. create-pr must instead
         # detect the branch is gone from the remote, treat the PR as terminal,
         # and open a FRESH branch/PR derived from --title.
-        config, wid, wt_path, remote_dir = pr_repo
+        config, wid, wt_path, _remote_dir = pr_repo
         config = self._enable_open(config)
         monkeypatch.setenv("EXT_TOKEN", "tok")
         fake = _StatefulFakeProvider()

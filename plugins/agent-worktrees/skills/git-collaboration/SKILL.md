@@ -111,22 +111,27 @@ This is the **review-gate continuation** for efforts: submit the effort PR ->
 it's reviewed + merged -> confirm via `pr-status` -> `git sync` -> build Phase
 work on top.
 
-## Iterating on an open PR (the merge-only hold)
+## Iterating on an open PR (open it as a draft)
 
-Use a hold when you want the reviewer to keep commenting on the PR, but you do
-not want the fast auto-merge path to land it while you are still iterating:
+Open a PR as a **draft** when you want to iterate on it — with the PR visible for
+a shareable URL or ongoing pushes — before inviting review, so the fast
+auto-merge path can't land it while you are still working:
 
 ```
-agent-worktrees create-pr --hold
+agent-worktrees create-pr --draft
 # ...address feedback locally...
 agent-worktrees push-changes
 agent-worktrees pr-ready
 ```
 
-`create-pr --hold` opens the PR with `do-not-merge`: the Intelligence Dampener
-still reviews it (unlike a draft/`wip`), but the merge gate refuses to merge it.
-Each `push-changes` update is re-reviewed and remains held. `pr-ready` removes
-the hold label and releases the active PR for merge.
+`create-pr --draft` opens the PR in the provider's native draft state (a `WIP:`
+title on the facility's Gitea). The Intelligence Dampener **skips draft / WIP /
+`wip`-labelled PRs**, so it does not review while you iterate. `pr-ready` moves
+the PR **out of draft** (draft → ready-for-review), which fires the
+`ready_for_review` event the Dampener reviews on. `pr-ready` grants **no merge
+consent** — that stays a separate post-approval step (`pr-merge`). (`--hold` is a
+deprecated alias for `--draft`; a legacy PR still carrying a `do-not-merge` label
+is released by `pr-ready` for backward-compat.)
 
 ## Shared feature branch -- many agents, one branch
 

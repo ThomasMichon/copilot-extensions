@@ -3079,6 +3079,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             body=body,
             open_pr=(False if getattr(args, "no_open", False) else None),
             hold=getattr(args, "hold", False),
+            draft=getattr(args, "draft", False),
             attribution=(not getattr(args, "no_attribution", False)),
             dry_run=args.dry_run,
         )
@@ -3099,10 +3100,11 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                     f"Opened PR #{result.get('number')} via '{provider}': "
                     f"{result.get('url')}"
                 )
-                if result.get("held"):
+                if result.get("draft"):
                     output.warn(
-                        f"PR #{result.get('number')} opened HELD (do-not-merge). "
-                        "Run 'agent-worktrees pr-ready' to release it for merge."
+                        f"PR #{result.get('number')} opened as a DRAFT "
+                        f"(not yet ready for review). Run "
+                        f"'agent-worktrees pr-ready' to move it out of draft."
                     )
                 if result.get("pr_label_error"):
                     output.warn(
@@ -3177,7 +3179,7 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
 
 
 def cmd_pr_ready(args: argparse.Namespace) -> int:
-    """Release a held PR by removing the merge-only hold label."""
+    """Move a PR out of draft (draft -> ready-for-review)."""
     use_json = getattr(args, "json", False)
     if use_json:
         ctx = output.stdout_to_stderr()
@@ -3212,10 +3214,21 @@ def cmd_pr_ready(args: argparse.Namespace) -> int:
         if use_json:
             _json_output(result)
         elif result.get("success"):
-            output.ok(
-                f"Released PR #{result.get('number')} for merge "
-                f"({result.get('repo')}): {result.get('url')}"
-            )
+            n = result.get("number")
+            repo = result.get("repo")
+            url = result.get("url")
+            if result.get("transition") == "release-legacy-hold":
+                output.ok(
+                    f"Removed legacy hold label from PR #{n} ({repo}): {url}. "
+                    f"PR is ready for review (it does not grant merge consent -- "
+                    f"use pr-merge for that)."
+                )
+            else:
+                output.ok(
+                    f"Moved PR #{n} out of draft ({repo}): {url}. "
+                    f"It is now ready for review (pr-ready does not grant merge "
+                    f"consent -- use pr-merge for that)."
+                )
         else:
             output.err(result.get("error", "pr-ready failed."))
         return 0 if result.get("success") else 1
@@ -6417,7 +6430,7 @@ def _worktree_usage() -> None:
     print(
         "  create-pr [id] [--title T] [--branch B]  "
         "PR mode: squash + push a feature branch", file=out)
-    print("  pr-ready [id]          Release a held PR for merge", file=out)
+    print("  pr-ready [id]          Move a PR out of draft (ready-for-review)", file=out)
     print("  finalize [id]          Validate content on upstream and clean up", file=out)
     print("  cleanup                List and remove orphaned/finalized worktrees", file=out)
 
@@ -7936,9 +7949,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Read the PR body from a file")
     p.add_argument("--no-open", action="store_true", dest="no_open",
                    help="Push the branch only; do not auto-open the PR via the provider")
-    p.add_argument("--hold", action="store_true",
-                   help="Open the PR held (do-not-merge): reviewed but not merged "
-                        "until 'pr-ready'. Lets you iterate on the open PR.")
+    p.add_argument("--draft", action="store_true",
+                   help="Open the PR as a native DRAFT (not yet ready for "
+                        "review). 'pr-ready' moves it out of draft. Lets you "
+                        "iterate on the open PR before requesting review.")
+    p.add_argument("--hold", action="store_true", dest="hold",
+                   help="Deprecated alias for --draft (the old do-not-merge "
+                        "label hold is retired in favour of native draft state).")
     p.add_argument("--no-attribution", action="store_true", dest="no_attribution",
                    help="Do not embed the source-worktree attribution marker in the PR body")
     p.add_argument("--dry-run", action="store_true")
@@ -7963,8 +7980,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="JSON output mode")
     p.add_argument("--config", default=None)
 
-    # pr-ready (remove the merge-only hold label)
-    p = sub.add_parser("pr-ready", help="Release a held PR for merge")
+    # pr-ready (move a PR out of draft -> ready-for-review)
+    p = sub.add_parser(
+        "pr-ready",
+        help="Move a PR out of draft (draft -> ready-for-review). Does NOT "
+             "grant merge consent -- use pr-merge for that.",
+    )
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--repo", default=None,
                    help="Target repo 'owner/name' for the PR (default: tracked repo)")
@@ -9777,6 +9798,46 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
             print(_json.dumps(summary))
         else:
             _pr_merge_print_human(summary)
+
+        # Single-PR (author) mode: the operator named one PR and expects a
+        # concrete state transition. A "skip" here means the action does NOT
+        # apply to that PR (unapproved, not mergeable, draft/WIP, already merged,
+        # hold label, wrong base) -- that is an ERROR, not success. A no-op must
+        # never masquerade as success (issue #2779 / the defect that stranded
+        # PR #2774). --all sweep mode legitimately skips ineligible PRs.
+        if not args.sweep:
+            row = summary["decisions"][0]
+            action = row["action"]
+            n = row["pr"]
+            if action == "skip":
+                if not args.json:
+                    output.err(
+                        f"pr-merge: PR #{n} in {args.repo} is not eligible for "
+                        f"merge consent ({row.get('reason', 'ineligible')}); no "
+                        f"consent applied. pr-merge only applies to an APPROVED, "
+                        f"mergeable, non-draft PR -- nothing changed."
+                    )
+                return 1
+            if action == "apply" and apply and not row.get("applied"):
+                if not args.json:
+                    output.err(
+                        f"pr-merge: failed to apply merge consent to PR #{n} in "
+                        f"{args.repo}: {row.get('error', 'unknown error')}"
+                    )
+                return 1
+            if not args.json and apply:
+                if action == "already":
+                    output.ok(
+                        f"pr-merge: merge consent already granted on PR #{n} in "
+                        f"{args.repo}; the review gate will merge when satisfied."
+                    )
+                elif action == "apply" and row.get("applied"):
+                    output.ok(
+                        f"pr-merge: applied auto-merge consent to PR #{n} in "
+                        f"{args.repo}; the review gate will merge when satisfied."
+                    )
+            return 0
+
         return 1 if summary["failed"] else 0
     except ProviderError as exc:
         output.err(f"pr-merge: {exc}")
@@ -9796,7 +9857,7 @@ def _pr_usage() -> None:
     print("  merge    Signal merge consent on an approved PR (= pr-merge)", file=out)
     print("  status   Read tracked PR metadata (= pr-status)", file=out)
     print("  complete Reconcile the worktree after merge (= pr-complete)", file=out)
-    print("  ready    Release a held PR for merge (= pr-ready)", file=out)
+    print("  ready    Move a PR out of draft, ready-for-review (= pr-ready)", file=out)
 
 
 # pr <verb> namespace -> canonical top-level verb (or manual dispatcher).

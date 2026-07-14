@@ -230,11 +230,12 @@ In **direct mode**, use the two-phase `push-changes` + `finalize` flow above.
 In **PR mode**, sign-off becomes `create-pr` -> review -> merge -> `finalize`,
 and `push-changes` targets the *feature* branch, never master.
 **An opened PR is final by default** -- land everything before `create-pr` (or
-open it held with `--hold` / `pr-ready`), since a late push races the merge.
+open it as a draft with `--draft`, then `pr-ready` when ready for review), since
+a late push races the merge.
 
 The full PR-mode reference -- profiles + verb applicability, config resolution
 (machine-local vs in-repo), `create-pr` auto-open + attribution + labels, the
-disposition modes (keep-alive / detach), held PRs, and multiple PRs per
+disposition modes (keep-alive / detach), draft PRs, and multiple PRs per
 worktree -- is in [references/pr-workflow.md](references/pr-workflow.md).
 
 ## Committing and Pushing

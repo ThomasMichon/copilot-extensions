@@ -51,6 +51,7 @@ class PRScope:
     body: str = ""
     api_base: str = ""              # provider endpoint (self-hosted gitea / ADO org)
     labels: tuple[str, ...] = ()
+    draft: bool = False             # open as a draft (not-yet-ready-for-review)
 
 
 @dataclass
@@ -99,6 +100,30 @@ class PRProvider(Protocol):
         token: str | None = None,
     ) -> str:
         """Remove ``label`` from an existing PR; return "" on success."""
+        ...
+
+    def mark_ready(
+        self, repo: str, number: int, *, api_base: str = "",
+        token: str | None = None, title: str = "",
+        wip_title_prefixes: tuple[str, ...] = (),
+    ) -> str:
+        """Move a PR out of draft (draft -> ready-for-review); "" on success.
+
+        The un-draft primitive behind ``pr-ready``.  *How* a provider un-drafts
+        is an implementation detail:
+
+        - **gitea** has no native draft flag (<= 1.26): a draft is a WIP title
+          prefix, so this strips the prefix by editing the title.  ``title`` (the
+          current PR title, if the caller already read it) and
+          ``wip_title_prefixes`` (the repo binding) let it strip without a
+          re-fetch; with ``title`` empty it reads the title itself.
+        - **github** has native drafts: this runs ``gh pr ready``.
+        - **azure-devops** has no draft concept exposed here (unsupported).
+
+        Returns "" on success, or a human-readable error string -- including when
+        the PR is **not** a draft (so ``pr-ready`` errors rather than reporting a
+        false success on a no-op).
+        """
         ...
 
     def get_snapshot(

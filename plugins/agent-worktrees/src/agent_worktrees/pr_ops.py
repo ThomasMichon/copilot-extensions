@@ -180,6 +180,7 @@ def create_pr(
     body: str | None = None,
     open_pr: bool | None = None,
     hold: bool = False,
+    draft: bool = False,
     attribution: bool = True,
     dry_run: bool = False,
 ) -> dict:
@@ -218,6 +219,11 @@ def create_pr(
     repo = config.default_repo
     prcfg = repo.pr
     remote = repo.remote
+    # ``--hold`` is retained as a deprecated alias for ``--draft``: the old
+    # "open held with a do-not-merge label" model is retired in favour of
+    # Gitea's native draft state (a WIP-prefixed title), which ``pr-ready``
+    # clears. Both flags mean the same thing now -- open the PR as a draft.
+    want_draft = bool(draft or hold)
     upstream = f"{remote}/{repo.default_branch}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
     wt_branch = f"worktree/{worktree_id}"
@@ -302,7 +308,7 @@ def create_pr(
             **base, "success": True, "dry_run": True,
             "branch": feature_branch, "remote": remote,
             "provider": prcfg.provider, "default_branch": repo.default_branch,
-            "held": bool(hold),
+            "draft": want_draft,
         }
 
     if not git_ops.is_clean(cwd=worktree_path):
@@ -325,7 +331,7 @@ def create_pr(
         return _push_existing_feature(
             worktree_path, feature_branch, remote, repo, prcfg, record, base,
             config=config, worktree_id=worktree_id, title=eff_title, body=body,
-            open_pr=open_pr, hold=hold, attribution=attribution,
+            open_pr=open_pr, draft=want_draft, attribution=attribution,
         )
 
     if head_branch != wt_branch:
@@ -354,7 +360,7 @@ def create_pr(
         return _push_existing_feature(
             worktree_path, feature_branch, remote, repo, prcfg, record, base,
             config=config, worktree_id=worktree_id, title=eff_title, body=body,
-            open_pr=open_pr, hold=hold, attribution=attribution,
+            open_pr=open_pr, draft=want_draft, attribution=attribution,
         )
 
     if not reusing:
@@ -511,7 +517,7 @@ def create_pr(
         "provider": prcfg.provider, "default_branch": repo.default_branch,
         "repo": (target_pr.repo if target_pr else default_pr_repo),
         "pr_count": len(record.prs) if record else 0,
-        "held": bool(hold),
+        "draft": want_draft,
     }
     if reusing:
         # This call iterated an existing *live* PR (re-squash + force-push onto
@@ -530,7 +536,7 @@ def create_pr(
     _finish_auto_open(
         result, config, record, target_pr, title=eff_title, body=body,
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
-        hold=hold, attribution=attribution,
+        draft=want_draft, attribution=attribution,
     )
 
     return result
@@ -546,7 +552,7 @@ def _open_via_provider(
     worktree_id: str,
     head_sha: str,
     *,
-    hold: bool = False,
+    draft: bool = False,
     attribution: bool = True,
 ) -> None:
     """Open the PR through the provider plugin and auto-record it (best-effort)."""
@@ -570,8 +576,8 @@ def _open_via_provider(
     scope = providers.scope_from_create_result(
         result, title=title, body=full_body, prcfg=prcfg, machine=machine,
     )
-    if hold and HOLD_LABEL not in scope.labels:
-        scope.labels = (*scope.labels, HOLD_LABEL)
+    if draft:
+        scope.draft = True
     try:
         provider = providers.get_provider(prcfg.provider)
         token = providers.resolve_token(prcfg)
@@ -583,6 +589,7 @@ def _open_via_provider(
         # manually from the surfaced error.
         result["pr_open_error"] = str(e)
         result["pr_opened"] = False
+        result["draft"] = False  # nothing opened -> no draft was created
         return
 
     target_pr.url = pull.url
@@ -600,6 +607,11 @@ def _open_via_provider(
     result["url"] = pull.url
     result["number"] = pull.number
     result["state"] = pull.state or result.get("state")
+    # Reflect what THIS call actually did: a draft was created only when we asked
+    # the provider to open one. (The caller pre-seeds result["draft"] with the
+    # request intent for the dry-run/no-open paths; here we make it authoritative
+    # for the opened PR so "opened as a DRAFT" can never be reported falsely.)
+    result["draft"] = bool(draft)
     # The PR opened, but a required label (auto-merge / source:<machine>) may
     # have failed to apply. Surface it rather than swallowing -- the merge gate
     # and source attribution depend on these labels.
@@ -618,7 +630,7 @@ def _finish_auto_open(
     worktree_id: str,
     head_sha: str,
     open_pr: bool | None,
-    hold: bool,
+    draft: bool,
     attribution: bool,
 ) -> None:
     """Open the PR (when pending) or surface an already-open PR's number/url.
@@ -638,7 +650,7 @@ def _finish_auto_open(
     if target_pr.number is None:
         _open_via_provider(
             result, config, record, target_pr, title, body, worktree_id,
-            head_sha, hold=hold, attribution=attribution,
+            head_sha, draft=draft, attribution=attribution,
         )
         return
     # The PR is already open on the provider -- report it so the caller trusts
@@ -649,6 +661,10 @@ def _finish_auto_open(
         result["url"] = target_pr.url
     if target_pr.state:
         result["state"] = target_pr.state
+    # This call did not open a PR, so it created no draft -- never let a
+    # re-run's ``--draft`` request masquerade as "opened as a DRAFT". Un-drafting
+    # an already-open PR is pr-ready's job, not create-pr's.
+    result["draft"] = False
 
 
 def _reconcile_active_pr(
@@ -858,7 +874,23 @@ def pr_ready(
     target_repo: str | None = None,
     pr_number: int | None = None,
 ) -> dict:
-    """Release a held PR by removing the merge-only hold label."""
+    """Move a PR out of draft (draft -> ready-for-review).
+
+    ``pr-ready`` is an **un-draft** verb: it clears the native draft state (a
+    WIP-prefixed title on Gitea) so the PR becomes reviewable.  It does NOT grant
+    merge consent -- that is ``pr-merge``'s separate job.
+
+    Errors (``success: False``) when the action does not apply to the PR's
+    current state, so a no-op never masquerades as success:
+
+    * the PR is not in draft (and carries no legacy hold label) -> error;
+    * the un-draft provider call fails -> error.
+
+    Backward-compat: a PR opened under the retired ``--hold`` model carries the
+    legacy ``do-not-merge`` label instead of draft state.  If such a PR is not a
+    draft but does carry that hold label, it is removed (the equivalent
+    transition) and reported as a legacy-hold release.
+    """
     base: dict = {"success": False, "worktree_id": worktree_id}
     record = _load_record_or_none(worktree_id)
     if record is None:
@@ -889,32 +921,70 @@ def pr_ready(
             f"Tracked PR #{pr.number} for '{worktree_id}' has no target repo."
         )}
 
+    api_base = getattr(prcfg, "api_base", "") or ""
+    wip_prefixes = tuple(getattr(prcfg, "wip_title_prefixes", ()) or ())
+
     try:
         from . import providers
 
         provider = providers.get_provider(provider_name)
         token = providers.resolve_token(prcfg)
-        label_error = provider.remove_label(
-            repo, pr.number, HOLD_LABEL,
-            api_base=getattr(prcfg, "api_base", "") or "", token=token,
+        snap = provider.get_snapshot(
+            repo, pr.number, api_base=api_base, token=token,
         )
     except Exception as exc:
-        return {**base, **_pr_to_dict(pr), "repo": repo, "removed": False,
-                "error": str(exc)}
+        return {**base, **_pr_to_dict(pr), "repo": repo,
+                "provider": provider_name, "error": str(exc)}
 
-    result = {
-        **base,
-        **_pr_to_dict(pr),
-        "success": label_error == "",
-        "repo": repo,
-        "provider": provider_name,
-        "removed": label_error == "",
-        "label": HOLD_LABEL,
+    common = {
+        **base, **_pr_to_dict(pr), "repo": repo, "provider": provider_name,
     }
-    if label_error:
-        result["error"] = label_error
-        result["label_error"] = label_error
-    return result
+
+    if snap.draft:
+        # The intended transition: strip the WIP prefix (un-draft).
+        try:
+            err = provider.mark_ready(
+                repo, pr.number, api_base=api_base, token=token,
+                title=snap.title, wip_title_prefixes=wip_prefixes,
+            )
+        except Exception as exc:
+            return {**common, "error": str(exc)}
+        if err:
+            return {**common, "error": err}
+        return {
+            **common, "success": True, "transition": "undraft",
+            "was_draft": True,
+        }
+
+    # Not a draft. Backward-compat: a PR opened under the retired --hold model
+    # carries the legacy do-not-merge hold label; releasing it is the equivalent
+    # transition. Otherwise this verb does not apply -> error (no false success).
+    has_legacy_hold = any(
+        lbl.lower() == HOLD_LABEL for lbl in snap.labels
+    )
+    if has_legacy_hold:
+        try:
+            label_error = provider.remove_label(
+                repo, pr.number, HOLD_LABEL, api_base=api_base, token=token,
+            )
+        except Exception as exc:
+            return {**common, "error": str(exc)}
+        if label_error:
+            return {**common, "error": label_error, "label_error": label_error}
+        return {
+            **common, "success": True, "transition": "release-legacy-hold",
+            "removed": True, "label": HOLD_LABEL,
+        }
+
+    return {
+        **common,
+        "error": (
+            f"PR #{pr.number} in {repo} is not in draft state (and carries no "
+            f"legacy hold label); nothing to un-draft. pr-ready only moves a "
+            f"draft PR to ready-for-review -- it does not grant merge consent "
+            f"(use pr-merge for that)."
+        ),
+    }
 
 
 def pr_status(worktree_id: str, *, all_prs: bool = False,
@@ -1129,7 +1199,7 @@ def _push_existing_feature(
     title: str,
     body: str | None,
     open_pr: bool | None,
-    hold: bool,
+    draft: bool,
     attribution: bool,
 ) -> dict:
     """Re-run helper: push an already-created feature branch and record state.
@@ -1183,10 +1253,11 @@ def _push_existing_feature(
         "provider": prcfg.provider, "default_branch": repo.default_branch,
         "repo": (target.repo if target else ""),
         "pr_count": len(record.prs) if record else 0,
+        "draft": draft,
     }
     _finish_auto_open(
         result, config, record, target, title=title, body=body,
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
-        hold=hold, attribution=attribution,
+        draft=draft, attribution=attribution,
     )
     return result
