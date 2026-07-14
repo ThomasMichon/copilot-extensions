@@ -85,6 +85,54 @@ duplicate is exactly what drifts. All binstubs live in `~/.local/bin/`.
 
 ---
 
+## Visions — the standing north star
+
+This repo carries **visions** under [`visions/`](visions/README.md): the durable
+*what-should-be* for its plugins, services, and shared systems. A vision is
+**pure should-be**, **intent-level** (not a spec), and **revised in place** (Git
+is the history) — it never lists gaps or status.
+
+The construct chain: a **vision** states the target; **efforts are carved from
+its delta vs. reality** (diff the vision against the reality docs/code, file the
+misalignments as **GitHub issues** that cite the vision item, group them into an
+effort); a **doc** records what actually *is*; an **issue** tracks a discrete
+to-do.
+
+- **Route standing intent to a vision.** When you capture the north star for a
+  system/service/tool — what it should ultimately be — put it in `visions/…`,
+  not in an architecture doc's "goals" prose. Keep "what is" (docs) separate
+  from "what should be" (visions).
+- **Visions are a source of new work.** The vision→reality delta is a backlog
+  generator: diffing a vision is a first-class way to find issues and efforts.
+- **Don't edit a vision to record progress.** It changes only when the *intent*
+  changes; delta-closure state lives in the issues/efforts.
+
+See [`visions/README.md`](visions/README.md) for the local conventions
+(organization, issue/effort linkage) and the `envisioning` /
+`carve-vision-effort` skills for the workflow.
+
+### Architecture patterns — how we build it
+
+Between the vision (*what should be*) and the code (*what is*) sits the
+**patterns** layer: [`docs/patterns/`](docs/patterns/README.md) — the prescriptive,
+reusable design conventions for building plugins and plugin services here (plugin
+shapes, numbered **design principles**, binding **design invariants**, and focused
+pattern docs: endpoint discovery, service supervision, à-la-carte independence,
+cross-platform parity). `docs/patterns/` is the **map**; `docs/install-contract.md`
+is the established deploy-contract pattern it links.
+
+**Reconcile an architectural change to both layers.** Before adding or altering
+architecture/behavior: reconcile to the relevant **vision** (close / extend /
+below-altitude) *and* check it against the **patterns** and their invariants. A
+below-altitude change (lint, typo, dependency bump) needs neither; a design change
+owes both. Guide, not gate.
+
+The layered model: **vision** (`visions/`, should-be) → **patterns**
+(`docs/patterns/`, how-we-build) → **architecture** (`docs/architecture.md`,
+as-is) → **contribution** (this file + the harness skills, how-to-land).
+
+---
+
 ## Contribution Rules
 
 ### Branch and Push
