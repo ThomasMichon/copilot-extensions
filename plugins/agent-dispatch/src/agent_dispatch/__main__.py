@@ -533,7 +533,9 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
         return 2
     with _client(args) as c:
         tasks = c.list(repo=None, status=args.status, label=args.label, limit=args.limit)
-    inbox = [t for t in tasks if t.get("target_machine") in (None, machine)]
+    from .queue import machine_matches
+
+    inbox = [t for t in tasks if machine_matches(t.get("target_machine"), machine)]
     return _emit(_enrich(inbox))
 
 
