@@ -612,6 +612,92 @@ def cmd_set_password(args):
     return 1
 
 
+def cmd_set_username(args):
+    if not _ensure_unlocked_service():
+        return 1
+
+    resp = send_command({
+        "action": "set-username",
+        "entry": args.entry,
+        "username": args.username,
+    }, timeout=10.0)
+    if resp and resp.get("ok"):
+        print(resp.get("message", "Username updated"))
+        return 0
+    error = resp.get("error", "unknown") if resp else "service unreachable"
+    print(f"Error: {error}", file=sys.stderr)
+    return 1
+
+
+def cmd_list(args):
+    if not ensure_service():
+        print("Error: could not start vault service", file=sys.stderr)
+        return 1
+
+    request = {"action": "list", "path": args.path or "/"}
+    if args.recursive:
+        request["recursive"] = True
+    if args.flatten:
+        request["flatten"] = True
+    resp = send_command(request, timeout=None)
+    if resp and resp.get("ok"):
+        for entry in resp["entries"]:
+            print(entry)
+        return 0
+    error = resp.get("error", "unknown") if resp else "service unreachable"
+    print(f"Error: {error}", file=sys.stderr)
+    return 1
+
+
+def cmd_show(args):
+    if not ensure_service():
+        print("Error: could not start vault service", file=sys.stderr)
+        return 1
+
+    request = {"action": "show", "entry": args.entry}
+    if args.show_protected:
+        request["show_protected"] = True
+    resp = send_command(request, timeout=None)
+    if resp and resp.get("ok"):
+        print(resp["output"], end="")
+        return 0
+    error = resp.get("error", "unknown") if resp else "service unreachable"
+    print(f"Error: {error}", file=sys.stderr)
+    return 1
+
+
+def cmd_remove(args):
+    if not _ensure_unlocked_service():
+        return 1
+
+    request = {"action": "remove", "entry": args.entry}
+    if args.force:
+        request["force"] = True
+    resp = send_command(request, timeout=10.0)
+    if resp and resp.get("ok"):
+        print(resp.get("message", "Entry removed"))
+        return 0
+    error = resp.get("error", "unknown") if resp else "service unreachable"
+    print(f"Error: {error}", file=sys.stderr)
+    return 1
+
+
+def cmd_move(args):
+    if not _ensure_unlocked_service():
+        return 1
+
+    request = {"action": "move", "entry": args.entry, "dest": args.dest}
+    if args.force:
+        request["force"] = True
+    resp = send_command(request, timeout=10.0)
+    if resp and resp.get("ok"):
+        print(resp.get("message", "Entry moved"))
+        return 0
+    error = resp.get("error", "unknown") if resp else "service unreachable"
+    print(f"Error: {error}", file=sys.stderr)
+    return 1
+
+
 def cmd_import_key(args):
     import base64
 
@@ -814,6 +900,36 @@ def main():
     p.add_argument("entry", help="Entry path")
     p.add_argument("--password", help="New password (prompted if not given)")
     p.set_defaults(func=cmd_set_password)
+
+    p = sub.add_parser("set-username", help="Update entry username")
+    p.add_argument("entry", help="Entry path")
+    p.add_argument("username", help="New username")
+    p.set_defaults(func=cmd_set_username)
+
+    p = sub.add_parser("list", aliases=["ls"], help="List entries under a group")
+    p.add_argument("path", nargs="?", default="/", help="Group path (default: /)")
+    p.add_argument("-R", "--recursive", action="store_true", help="Recurse into subgroups")
+    p.add_argument("-f", "--flatten", action="store_true", help="Flatten to full paths")
+    p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("show", help="Show all fields of an entry")
+    p.add_argument("entry", help="Entry path")
+    p.add_argument("-s", "--show-protected", action="store_true",
+                   help="Reveal protected fields (e.g. password)")
+    p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser("remove", aliases=["rm"], help="Remove an entry")
+    p.add_argument("entry", help="Entry path")
+    p.add_argument("-f", "--force", action="store_true",
+                   help="Allow removing an entry outside the vault group")
+    p.set_defaults(func=cmd_remove)
+
+    p = sub.add_parser("move", aliases=["mv"], help="Move an entry to another group")
+    p.add_argument("entry", help="Entry path")
+    p.add_argument("dest", help="Destination group")
+    p.add_argument("-f", "--force", action="store_true",
+                   help="Allow moving an entry outside the vault group")
+    p.set_defaults(func=cmd_move)
 
     p = sub.add_parser("import-key", help="Import key pair into entry")
     p.add_argument("entry", help="Entry path")

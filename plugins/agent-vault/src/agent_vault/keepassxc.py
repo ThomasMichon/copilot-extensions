@@ -294,3 +294,80 @@ class KeePassXCBackend:
             if tmp_path:
                 with contextlib.suppress(OSError):
                     os.unlink(tmp_path)
+
+    # -- listing & lifecycle -------------------------------------------------
+
+    def list_entries(
+        self,
+        kpdb: str,
+        group: str = "/",
+        *,
+        recursive: bool = False,
+        flatten: bool = False,
+    ) -> list[str] | None:
+        """List entries under a group. Returns None when the vault is locked."""
+        args = ["ls", "-q"]
+        if recursive:
+            args.append("-R")
+        if flatten:
+            args.append("-f")
+        args += [kpdb, group]
+        r = self._run(kpdb, args)
+        if r is None:
+            return None
+        if r.returncode == 0:
+            return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+        return []
+
+    def show_entry(
+        self,
+        kpdb: str,
+        entry_path: str,
+        *,
+        show_protected: bool = False,
+    ) -> str | None:
+        """Show all fields of an entry. Returns raw output, or None on failure."""
+        args = ["show", "-q", "--all"]
+        if show_protected:
+            args.append("-s")
+        args += [kpdb, entry_path]
+        r = self._run(kpdb, args)
+        if r and r.returncode == 0:
+            return r.stdout
+        return None
+
+    def edit_username(
+        self,
+        kpdb: str,
+        entry_path: str,
+        username: str,
+    ) -> tuple[bool, str]:
+        """Update the username of an existing entry. Returns (success, message).
+
+        Unlike a password change, the new username is passed as the ``-u``
+        argument value, so only the master password is fed on stdin.
+        """
+        r = self._run(kpdb, ["edit", "-q", kpdb, entry_path, "-u", username])
+        if r is None:
+            return False, "CLI not available or vault locked"
+        if r.returncode == 0:
+            return True, "Username updated"
+        return False, r.stderr.strip() or "keepassxc-cli edit failed"
+
+    def remove_entry(self, kpdb: str, entry_path: str) -> tuple[bool, str]:
+        """Remove an entry from the database. Returns (success, message)."""
+        r = self._run(kpdb, ["rm", "-q", kpdb, entry_path])
+        if r is None:
+            return False, "CLI not available or vault locked"
+        if r.returncode == 0:
+            return True, "Entry removed"
+        return False, r.stderr.strip() or "keepassxc-cli rm failed"
+
+    def move_entry(self, kpdb: str, entry_path: str, dest_group: str) -> tuple[bool, str]:
+        """Move an entry to a different group. Returns (success, message)."""
+        r = self._run(kpdb, ["mv", "-q", kpdb, entry_path, dest_group])
+        if r is None:
+            return False, "CLI not available or vault locked"
+        if r.returncode == 0:
+            return True, "Entry moved"
+        return False, r.stderr.strip() or "keepassxc-cli mv failed"
