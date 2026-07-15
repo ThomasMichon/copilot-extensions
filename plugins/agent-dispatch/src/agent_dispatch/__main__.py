@@ -41,31 +41,41 @@ def _parse_affinity(pairs: list[str] | None) -> dict[str, str]:
 
 def _cmd_serve(args: argparse.Namespace) -> int:
     from .config import load_config
-    from .remote_dispatch import wsl_coordinator_present
     from .server import serve
-
-    # On a Windows host whose WSL peer owns the coordinator, defer instead of
-    # starting a second one -- avoids the 127.0.0.1:9847 bind collision and a
-    # split-brain across the two loopback stacks (issue #2777). The Windows CLI
-    # still reaches the WSL coordinator via the forwarded 127.0.0.1:9847.
-    if wsl_coordinator_present():
-        print(
-            "agent-dispatch: a WSL agent-dispatch coordinator owns this box; not "
-            "starting a second coordinator on Windows (issue #2777). The CLI "
-            "reaches it via 127.0.0.1:9847 (WSL2 localhost-forwarding).",
-            file=sys.stderr,
-        )
-        return 0
 
     base = load_config()
     cfg = Config(
-        host=args.host or base.host,
+        host=_resolve_serve_host(args, base),
         port=args.port or base.port,
         db_path=args.db or base.db_path,
         token=args.token or base.token,
     )
     serve(cfg)
     return 0
+
+
+def _resolve_serve_host(args: argparse.Namespace, base: Config) -> str:
+    """The host the coordinator binds when ``agent-dispatch serve`` runs.
+
+    Precedence: an explicit ``--host``; then an explicit ``AGENT_DISPATCH_HOST``
+    env override (this is how ``serve-service.ps1`` passes the resolved bind
+    host); then, on Windows, the topology-derived bind host
+    (:func:`netinfo.resolve_bind_host` -- ``127.0.0.1`` on mirrored, the
+    ``vEthernet (WSL)`` IP on NAT, never ``0.0.0.0``/LAN); otherwise the local
+    default. The Windows host now **owns** the coordinator -- it no longer defers
+    to a WSL peer (reverses issue #2777).
+    """
+    import os
+
+    if args.host:
+        return args.host
+    if "AGENT_DISPATCH_HOST" in os.environ:
+        return base.host
+    if sys.platform == "win32":
+        from .netinfo import resolve_bind_host
+
+        return resolve_bind_host()
+    return base.host
 
 
 def _cmd_create(args: argparse.Namespace) -> int:

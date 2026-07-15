@@ -53,8 +53,32 @@ def load_config() -> Config:
 
 
 def client_url() -> str:
-    """The base URL the CLI should talk to (``AGENT_DISPATCH_URL`` overrides)."""
-    return os.environ.get("AGENT_DISPATCH_URL") or load_config().url
+    """The base URL the CLI should talk to.
+
+    Resolution order:
+
+    1. ``AGENT_DISPATCH_URL`` -- explicit operator override.
+    2. On a **WSL guest**, resolve the Windows-owned coordinator dynamically
+       (probe ``127.0.0.1`` for mirrored, then the default gateway for NAT;
+       cached best-effort). A WSL guest depends on the Windows host, which owns
+       the coordinator (Phase 2 of the coordinator-inversion effort).
+    3. Otherwise (standalone Linux, or the Windows host itself) the local
+       coordinator URL, ``http://127.0.0.1:9847``.
+    """
+    override = os.environ.get("AGENT_DISPATCH_URL")
+    if override:
+        return override
+    cfg = load_config()
+    try:
+        from .netinfo import is_wsl, resolve_wsl_client_url
+
+        if is_wsl():
+            return resolve_wsl_client_url(cfg.port)
+    except Exception:
+        # Detection/probe failure must never break the CLI -- fall back to the
+        # local default and let the actual request fail loud if unreachable.
+        return cfg.url
+    return cfg.url
 
 
 def client_token() -> str | None:

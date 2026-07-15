@@ -320,6 +320,53 @@ def test_parser_consume_defer_complete_flag():
     assert b.defer_complete is True
 
 
+# -- serve bind-host resolution (coordinator inversion) ---------------------
+
+
+def _serve_args(**kw):
+    import argparse
+
+    base = dict(host=None, port=None, db=None, token=None)
+    base.update(kw)
+    return argparse.Namespace(**base)
+
+
+def test_resolve_serve_host_explicit_flag_wins(monkeypatch):
+    from agent_dispatch import __main__
+    from agent_dispatch.config import load_config
+
+    monkeypatch.setattr(__main__.sys, "platform", "win32")
+    host = __main__._resolve_serve_host(_serve_args(host="0.0.0.0"), load_config())  # noqa: S104
+    assert host == "0.0.0.0"  # noqa: S104 -- operator explicitly asked for it
+
+
+def test_resolve_serve_host_env_override(monkeypatch):
+    from agent_dispatch import __main__, config
+
+    monkeypatch.setattr(__main__.sys, "platform", "win32")
+    monkeypatch.setenv("AGENT_DISPATCH_HOST", "172.19.240.1")
+    base = config.load_config()  # picks up the env host
+    assert __main__._resolve_serve_host(_serve_args(), base) == "172.19.240.1"
+
+
+def test_resolve_serve_host_windows_resolves_bind(monkeypatch):
+    from agent_dispatch import __main__, config
+
+    monkeypatch.delenv("AGENT_DISPATCH_HOST", raising=False)
+    monkeypatch.setattr(__main__.sys, "platform", "win32")
+    monkeypatch.setattr("agent_dispatch.netinfo.resolve_bind_host", lambda: "172.19.240.9")
+    assert __main__._resolve_serve_host(_serve_args(), config.load_config()) == "172.19.240.9"
+
+
+def test_resolve_serve_host_linux_uses_default(monkeypatch):
+    from agent_dispatch import __main__, config
+
+    monkeypatch.delenv("AGENT_DISPATCH_HOST", raising=False)
+    monkeypatch.setattr(__main__.sys, "platform", "linux")
+    base = config.load_config()
+    assert __main__._resolve_serve_host(_serve_args(), base) == base.host
+
+
 def test_complete_resolves_owner_from_identity(monkeypatch, capsys):
     """`complete <id>` (no owner) resolves owner = machine/worktree from CWD."""
     from agent_dispatch import __main__, identity

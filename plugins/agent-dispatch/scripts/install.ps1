@@ -11,8 +11,11 @@
 
     Creates the runtime at ~/.agent-dispatch/ (venv + package), a
     ~/.local/bin/agent-dispatch.cmd binstub, and -- on its deploy machines --
-    an auto-starting Windows Scheduled Task running the coordinator (loopback
-    127.0.0.1:9847), the analogue of the Linux systemd user unit.
+    an auto-starting Windows Scheduled Task running the FULL coordinator. The
+    always-on Windows host owns the coordinator (Phase 2, issue #2818); it binds
+    adaptively by WSL networking mode (mirrored -> 127.0.0.1; NAT -> the
+    vEthernet(WSL) IP, resolved at startup, never 0.0.0.0/LAN). This reverses the
+    #2777 model where WSL owned the coordinator and Windows was a client.
 
 .PARAMETER Action
     install (default) | update | status | start | stop | uninstall.
@@ -22,7 +25,7 @@
 
 .PARAMETER NoService
     Install/update the client (venv + binstub) only; do NOT install/start the
-    coordinator Scheduled Task (client-only host).
+    coordinator Scheduled Task (a deliberately client-only host).
 
 .PARAMETER Purge
     On uninstall: also delete config, DB, and the env file.
@@ -410,30 +413,10 @@ function Register-PickerPivot {
 
 # -- Coordinator Scheduled Task (default-on on deploy machines) --------------
 
-function Test-WslAgentDispatch {
-    # True if a WSL distro on this Windows host has an agent-dispatch coordinator
-    # installed. On such a box the coordinator MUST live in WSL: a WSL-bound
-    # loopback port is reachable from BOTH Windows (via WSL2 localhost-forwarding)
-    # and WSL, whereas a Windows-bound port is NOT reachable from WSL over
-    # localhost. So the Windows coordinator must not run, or the two collide on
-    # 127.0.0.1:9847 (issue #2777). The Windows CLI still reaches the WSL
-    # coordinator through the default 127.0.0.1:9847 (forwarded), so a Windows
-    # client needs no URL config.
-    if ($env:OS -ne 'Windows_NT') { return $false }
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return $false }
-    try {
-        & wsl.exe -e bash -lc 'test -x "$HOME/.agent-dispatch/.venv/bin/agent-dispatch"' 2>$null
-        return ($LASTEXITCODE -eq 0)
-    } catch {
-        return $false
-    }
-}
-
 function Remove-CoordinatorTask {
     # Returns 'removed' | 'blocked' | 'absent'. Unregister-ScheduledTask may need
-    # elevation (Access denied) for a task in the root folder; when it does, the
-    # leftover task is harmless -- the coordinator defers on Windows when a WSL
-    # peer exists, so 'agent-dispatch serve' just exits cleanly (issue #2777).
+    # elevation (Access denied) for a task in the root folder. Used by the
+    # -NoService client path and by uninstall.
     if (-not (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
         return 'absent'
     }
@@ -446,23 +429,18 @@ function Remove-CoordinatorTask {
 }
 
 function Install-CoordinatorTask {
-    # Decide full-vs-client. Explicit -NoService always wins; otherwise a Windows
-    # box whose WSL peer already runs the coordinator becomes a client so the two
-    # don't collide on 127.0.0.1:9847 (issue #2777).
-    $clientOnly = [bool]$NoService
-    $reason = 'this host is a client only (-NoService)'
-    if (-not $clientOnly -and (Test-WslAgentDispatch)) {
-        $clientOnly = $true
-        $reason = 'the WSL peer owns the coordinator on this box (issue #2777)'
-    }
-    if ($clientOnly) {
-        # Remove a coordinator task left from a prior full install so a host that
-        # became a client stops colliding on the port. Removal may be blocked
-        # without elevation -- that's fine, the coordinator defers on Windows.
+    # Windows OWNS the coordinator (Phase 2, issue #2818): the always-on Windows
+    # host runs the full coordinator and the WSL guest is a client. This reverses
+    # the #2777 model (WSL-owned, Windows client). Explicit -NoService still forces
+    # a client-only host (e.g. a box that intentionally has no coordinator).
+    if ($NoService) {
+        # Remove a coordinator task left from a prior full install so a host asked
+        # to be client-only stops running one. Removal may be blocked without
+        # elevation -- log and continue.
         switch (Remove-CoordinatorTask) {
-            'removed' { Write-Ok   "Removed local coordinator Scheduled Task -- $reason" }
-            'blocked' { Write-Skip "Coordinator task present but not removable without elevation -- harmless: 'serve' defers on Windows when a WSL peer exists ($reason)" }
-            default   { Write-Skip "Coordinator service skipped -- $reason" }
+            'removed' { Write-Ok   'Removed local coordinator Scheduled Task (-NoService: client-only host)' }
+            'blocked' { Write-Skip 'Coordinator task present but not removable without elevation (-NoService) -- run elevated to remove it' }
+            default   { Write-Skip 'Coordinator service skipped (-NoService: client-only host)' }
         }
         return
     }
@@ -476,13 +454,15 @@ function Install-CoordinatorTask {
         $envDefault = @"
 # agent-dispatch coordinator service environment.
 # Edit, then: Start-ScheduledTask -TaskName agent-dispatch
-AGENT_DISPATCH_HOST=127.0.0.1
+# AGENT_DISPATCH_HOST is resolved dynamically at startup by serve-service.ps1
+# (mirrored -> 127.0.0.1; NAT -> the vEthernet(WSL) IP). Uncomment only to pin it.
+# AGENT_DISPATCH_HOST=127.0.0.1
 AGENT_DISPATCH_PORT=$DefaultPort
 # AGENT_DISPATCH_DB=%USERPROFILE%\.agent-dispatch\tasks.db   # default; uncomment to override
 # AGENT_DISPATCH_TOKEN=                                       # set to require bearer auth
 "@
         [System.IO.File]::WriteAllText($envFile, $envDefault, $utf8NoBom)
-        Write-Ok "Service env: $envFile (defaults; edit to expose on the network / add a token)"
+        Write-Ok "Service env: $envFile (defaults; edit to pin the bind host / add a token)"
     } else {
         Write-Skip "Service env already exists: $envFile"
     }
@@ -490,7 +470,9 @@ AGENT_DISPATCH_PORT=$DefaultPort
     $launcher = Join-Path $InstallDir 'serve-service.ps1'
     $launcherBody = @"
 # agent-dispatch coordinator launcher (generated by install.ps1). Do not edit;
-# edit service.env instead. Loads service.env, then runs the coordinator.
+# edit service.env instead. Loads service.env, resolves the bind host per WSL
+# networking mode (mirrored -> 127.0.0.1; NAT -> the dynamic vEthernet(WSL) IP,
+# re-resolved on each (re)start), exports AGENT_DISPATCH_HOST, then runs serve.
 `$ErrorActionPreference = 'Stop'
 `$env:PYTHONUTF8 = '1'
 `$envFile = Join-Path `$PSScriptRoot 'service.env'
@@ -502,6 +484,17 @@ if (Test-Path `$envFile) {
         if (`$kv.Count -eq 2) {
             [Environment]::SetEnvironmentVariable(`$kv[0].Trim(), [Environment]::ExpandEnvironmentVariables(`$kv[1].Trim()), 'Process')
         }
+    }
+}
+# Resolve the bind host unless the operator pinned AGENT_DISPATCH_HOST in service.env.
+if (-not `$env:AGENT_DISPATCH_HOST) {
+    try {
+        `$resolved = & '$VenvPython' -c "from agent_dispatch.netinfo import resolve_bind_host; print(resolve_bind_host())"
+        if (`$LASTEXITCODE -eq 0 -and `$resolved) {
+            `$env:AGENT_DISPATCH_HOST = "`$resolved".Trim()
+        }
+    } catch {
+        Write-Warning "agent-dispatch: bind-host resolution failed (`$_); letting the coordinator resolve at bind"
     }
 }
 & '$VenvPython' -m agent_dispatch serve
@@ -591,6 +584,72 @@ function Add-PortReservation {
     }
 }
 
+# -- Coordinator firewall (Windows, NAT mode only) --------------------------
+
+function Add-CoordinatorFirewallRule {
+    # In NAT mode the coordinator binds the vEthernet(WSL) IP, so inbound WSL
+    # traffic arrives on the vEthernet(WSL) interface. Add an inbound allow rule
+    # SCOPED to that interface (never profile-wide, never the LAN) so a WSL client
+    # can reach the coordinator while the LAN stays isolated. Mirrored mode needs
+    # no rule (shared loopback). Idempotent; needs elevation -- degrades to a
+    # logged SKIP with the one-time command, mirroring Add-PortReservation.
+    if ($env:OS -ne 'Windows_NT') { return }
+    if (-not (Test-Path $VenvPython)) { return }
+
+    # Determine the WSL networking mode from the single source of truth (the
+    # Python detector). Only NAT needs a firewall rule.
+    $mode = ''
+    try {
+        $mode = (& $VenvPython -c "from agent_dispatch.netinfo import get_wsl_networking_mode; print(get_wsl_networking_mode())" 2>$null).Trim()
+    } catch { $mode = '' }
+    if ($mode -ne 'nat') {
+        Write-Skip "Coordinator firewall rule not needed (WSL networking mode: $(if ($mode) { $mode } else { 'unknown' }); rule is NAT-only)"
+        return
+    }
+
+    $port = $DefaultPort
+    if ($env:AGENT_DISPATCH_PORT) {
+        try { $port = [int]$env:AGENT_DISPATCH_PORT } catch { $port = $DefaultPort }
+    }
+    $ruleName = 'agent-dispatch coordinator (WSL)'
+
+    if (-not (Get-Command New-NetFirewallRule -ErrorAction SilentlyContinue)) {
+        Write-Skip 'NetSecurity module unavailable -- cannot add coordinator firewall rule'
+        return
+    }
+
+    # Resolve the vEthernet(WSL) interface alias (exact, else the (WSL*) match).
+    $alias = $null
+    try {
+        $ipObj = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object { $_.InterfaceAlias -like 'vEthernet (WSL*' } |
+            Select-Object -First 1
+        if ($ipObj) { $alias = $ipObj.InterfaceAlias }
+    } catch { $alias = $null }
+    if (-not $alias) {
+        Write-Skip 'Coordinator firewall rule skipped -- no vEthernet(WSL) interface found (WSL networking not up?)'
+        return
+    }
+
+    if (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue) {
+        Write-Skip "Coordinator firewall rule already present ('$ruleName')"
+        return
+    }
+    if (-not (Test-Elevated)) {
+        Write-Skip "Coordinator firewall rule not added -- needs elevation (run once, elevated: New-NetFirewallRule -DisplayName '$ruleName' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $port -InterfaceAlias '$alias')"
+        return
+    }
+    try {
+        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow `
+            -Protocol TCP -LocalPort $port -InterfaceAlias $alias -Profile Any `
+            -Description 'agent-dispatch coordinator -- WSL-only, interface-scoped (issue #2818)' `
+            -ErrorAction Stop | Out-Null
+        Write-Ok "Coordinator firewall rule added ('$ruleName' on '$alias', TCP $port, WSL-only)"
+    } catch {
+        Write-Warn "Could not add coordinator firewall rule: $_"
+    }
+}
+
 # -- Actions ----------------------------------------------------------------
 
 function Invoke-Install {
@@ -598,6 +657,7 @@ function Invoke-Install {
     Install-Runtime
     Add-PortReservation
     Install-CoordinatorTask
+    if (-not $NoService) { Add-CoordinatorFirewallRule }
     Write-Host ''; Write-Host '=== agent-dispatch install complete ===' -ForegroundColor Cyan
 }
 
@@ -607,6 +667,7 @@ function Invoke-Update {
     Install-Runtime
     Add-PortReservation
     Install-CoordinatorTask
+    if (-not $NoService) { Add-CoordinatorFirewallRule }
     Write-Host ''; Write-Host '=== agent-dispatch update complete ===' -ForegroundColor Cyan
 }
 
@@ -652,6 +713,13 @@ function Invoke-Uninstall {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
         Write-Ok 'Coordinator task removed'
+    }
+    if (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue) {
+        $fwRule = 'agent-dispatch coordinator (WSL)'
+        if (Get-NetFirewallRule -DisplayName $fwRule -ErrorAction SilentlyContinue) {
+            Remove-NetFirewallRule -DisplayName $fwRule -ErrorAction SilentlyContinue
+            Write-Ok 'Coordinator firewall rule removed'
+        }
     }
     foreach ($n in @('agent-dispatch.cmd', 'agent-dispatch.ps1', 'agent-dispatch')) {
         $p = Join-Path $LocalBin $n

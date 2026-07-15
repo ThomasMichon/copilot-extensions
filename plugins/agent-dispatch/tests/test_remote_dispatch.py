@@ -118,40 +118,6 @@ def test_dispatch_to_remote_unavailable_without_ssh(monkeypatch):
         )
 
 
-# -- WSL-peer coordinator detection (issue #2777) ----------------------------
-
-
-def test_wsl_coordinator_present_false_off_windows(monkeypatch):
-    monkeypatch.setattr(remote_dispatch.sys, "platform", "linux")
-    assert remote_dispatch.wsl_coordinator_present() is False
-
-
-def test_wsl_coordinator_present_false_without_wsl(monkeypatch):
-    monkeypatch.setattr(remote_dispatch.sys, "platform", "win32")
-    monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: None)
-    assert remote_dispatch.wsl_coordinator_present() is False
-
-
-def test_wsl_coordinator_present_true_when_installed(monkeypatch):
-    monkeypatch.setattr(remote_dispatch.sys, "platform", "win32")
-    monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "C:/Windows/wsl.exe")
-    monkeypatch.setattr(
-        remote_dispatch.subprocess, "run",
-        lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=b"", stderr=b""),
-    )
-    assert remote_dispatch.wsl_coordinator_present() is True
-
-
-def test_wsl_coordinator_present_false_when_absent_in_wsl(monkeypatch):
-    monkeypatch.setattr(remote_dispatch.sys, "platform", "win32")
-    monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "C:/Windows/wsl.exe")
-    monkeypatch.setattr(
-        remote_dispatch.subprocess, "run",
-        lambda *a, **k: types.SimpleNamespace(returncode=1, stdout=b"", stderr=b""),
-    )
-    assert remote_dispatch.wsl_coordinator_present() is False
-
-
 # -- Peer-queue browse (Phase 8 Slice 8c) ------------------------------------
 
 

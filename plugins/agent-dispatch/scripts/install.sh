@@ -8,9 +8,10 @@
 # facility `aperture-labs services agent-dispatch <action>` path both drive it.
 #
 # Runtime lives at ~/.agent-dispatch/ (venv, config, DB). Binstub goes to
-# ~/.local/bin/agent-dispatch. On its deploy machines the coordinator runs as a
-# systemd **user** service (loopback 127.0.0.1:9847) -- a per-host local
-# coordinator, matching agent-bridge's per-host service model.
+# ~/.local/bin/agent-dispatch. A STANDALONE Linux host (e.g. Wheatley) runs the
+# full coordinator as a systemd **user** service (loopback 127.0.0.1:9847). A
+# WSL guest installs CLIENT-ONLY (no service): the always-on Windows host owns
+# the coordinator (Phase 2, issue #2818), reversing the #2777 WSL-owned model.
 #
 # Usage:
 #   bash scripts/install.sh install        # venv + binstub + service + pivot
@@ -269,9 +270,43 @@ _register_pivot() {
 }
 
 # -- Coordinator service (systemd user unit; default-on on deploy machines) --
+
+# True (0) on a WSL guest -- a Linux env hosted by a Windows box. A WSL guest
+# installs CLIENT-ONLY (venv + binstub, no coordinator service): the always-on
+# Windows host owns the coordinator now (Phase 2, issue #2818), reversing the
+# #2777 model. A standalone Linux host (e.g. Wheatley) is NOT WSL and installs
+# the full coordinator. Detect via WSL_DISTRO_NAME or `microsoft` in the kernel
+# osrelease / /proc/version (case-insensitive) -- mirrors netinfo.is_wsl().
+_is_wsl() {
+    [[ -n "${WSL_DISTRO_NAME:-}" ]] && return 0
+    local f
+    for f in /proc/sys/kernel/osrelease /proc/version; do
+        [[ -r "$f" ]] || continue
+        if grep -qi microsoft "$f" 2>/dev/null; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 _install_service() {
     if [[ "$NO_SERVICE" -eq 1 ]]; then
         _skip "Coordinator service skipped (--no-service): this host is a client only"
+        return 0
+    fi
+    if _is_wsl; then
+        # A WSL guest is a client of the Windows-owned coordinator. Never install
+        # a systemd unit here; remove a stale one left from the #2777 (WSL-owned)
+        # model so the two don't split-brain.
+        if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
+            systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
+            systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
+            rm -f "$UNIT_DIR/$SYSTEMD_UNIT"
+            systemctl --user daemon-reload 2>/dev/null || true
+            _ok "WSL guest: removed stale coordinator unit -- the Windows host owns the coordinator (client-only; issue #2818)"
+        else
+            _skip "WSL guest: client-only -- the Windows host owns the coordinator (issue #2818)"
+        fi
         return 0
     fi
     if ! command -v systemctl >/dev/null 2>&1; then
