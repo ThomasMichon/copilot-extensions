@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 9330
+DEFAULT_PORT = 9847
 DEFAULT_DB = Path.home() / ".agent-dispatch" / "tasks.db"
 DEFAULT_SWEEP_INTERVAL = 60.0
 

@@ -12,7 +12,7 @@
     Creates the runtime at ~/.agent-dispatch/ (venv + package), a
     ~/.local/bin/agent-dispatch.cmd binstub, and -- on its deploy machines --
     an auto-starting Windows Scheduled Task running the coordinator (loopback
-    127.0.0.1:9330), the analogue of the Linux systemd user unit.
+    127.0.0.1:9847), the analogue of the Linux systemd user unit.
 
 .PARAMETER Action
     install (default) | update | status | start | stop | uninstall.
@@ -72,6 +72,7 @@ if ($env:OS -eq 'Windows_NT') {
 }
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 $TaskName = 'agent-dispatch'
+$DefaultPort = 9847
 
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
 function Remove-ConsoleTrampolines {
@@ -415,8 +416,8 @@ function Test-WslAgentDispatch {
     # loopback port is reachable from BOTH Windows (via WSL2 localhost-forwarding)
     # and WSL, whereas a Windows-bound port is NOT reachable from WSL over
     # localhost. So the Windows coordinator must not run, or the two collide on
-    # 127.0.0.1:9330 (issue #2777). The Windows CLI still reaches the WSL
-    # coordinator through the default 127.0.0.1:9330 (forwarded), so a Windows
+    # 127.0.0.1:9847 (issue #2777). The Windows CLI still reaches the WSL
+    # coordinator through the default 127.0.0.1:9847 (forwarded), so a Windows
     # client needs no URL config.
     if ($env:OS -ne 'Windows_NT') { return $false }
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return $false }
@@ -447,7 +448,7 @@ function Remove-CoordinatorTask {
 function Install-CoordinatorTask {
     # Decide full-vs-client. Explicit -NoService always wins; otherwise a Windows
     # box whose WSL peer already runs the coordinator becomes a client so the two
-    # don't collide on 127.0.0.1:9330 (issue #2777).
+    # don't collide on 127.0.0.1:9847 (issue #2777).
     $clientOnly = [bool]$NoService
     $reason = 'this host is a client only (-NoService)'
     if (-not $clientOnly -and (Test-WslAgentDispatch)) {
@@ -476,7 +477,7 @@ function Install-CoordinatorTask {
 # agent-dispatch coordinator service environment.
 # Edit, then: Start-ScheduledTask -TaskName agent-dispatch
 AGENT_DISPATCH_HOST=127.0.0.1
-AGENT_DISPATCH_PORT=9330
+AGENT_DISPATCH_PORT=$DefaultPort
 # AGENT_DISPATCH_DB=%USERPROFILE%\.agent-dispatch\tasks.db   # default; uncomment to override
 # AGENT_DISPATCH_TOKEN=                                       # set to require bearer auth
 "@
@@ -530,11 +531,72 @@ if (Test-Path `$envFile) {
     else { Write-Fail "Failed to register Scheduled Task '$TaskName' (run: agent-dispatch serve)" }
 }
 
+# -- Port reservation (Windows) ---------------------------------------------
+
+function Test-Elevated {
+    # True when the current process holds the Administrators role. Windows-only.
+    if ($env:OS -ne 'Windows_NT') { return $false }
+    try {
+        $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object System.Security.Principal.WindowsPrincipal($id)
+        return $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        return $false
+    }
+}
+
+function Test-PortExcluded {
+    # True if $Port falls within any TCP excluded/reserved range that netsh lists
+    # (persistent reservations plus live dynamic Hyper-V/WSL exclusions).
+    param([Parameter(Mandatory)][int]$Port)
+    $out = & netsh.exe int ipv4 show excludedportrange protocol=tcp 2>$null
+    foreach ($line in $out) {
+        if ($line -match '^\s*(\d+)\s+(\d+)') {
+            $start = [int]$Matches[1]
+            $end = [int]$Matches[2]
+            if ($Port -ge $start -and $Port -le $end) { return $true }
+        }
+    }
+    return $false
+}
+
+function Add-PortReservation {
+    # Persistently reserve the coordinator port so the Windows dynamic port
+    # allocator (Hyper-V/WSL/HNS) never steals it -- the durable fix for the
+    # transient WinError 10013 collisions (issue #2818). Idempotent: skips when
+    # the port is already excluded. Needs elevation; degrades to a logged SKIP
+    # (with the one-time command) when not admin.
+    if ($env:OS -ne 'Windows_NT') { return }
+    if (-not (Get-Command netsh.exe -ErrorAction SilentlyContinue)) {
+        Write-Skip 'netsh unavailable -- cannot reserve coordinator port'
+        return
+    }
+    $port = $DefaultPort
+    if ($env:AGENT_DISPATCH_PORT) {
+        try { $port = [int]$env:AGENT_DISPATCH_PORT } catch { $port = $DefaultPort }
+    }
+    if (Test-PortExcluded -Port $port) {
+        Write-Skip "Coordinator port $port already reserved/excluded (netsh)"
+        return
+    }
+    if (-not (Test-Elevated)) {
+        Write-Skip "Coordinator port $port not reserved -- needs elevation (run once, elevated: netsh int ipv4 add excludedportrange protocol=tcp startport=$port numberofports=1)"
+        return
+    }
+    $null = & netsh.exe int ipv4 add excludedportrange protocol=tcp startport=$port numberofports=1 2>&1
+    if (Test-PortExcluded -Port $port) {
+        Write-Ok "Coordinator port $port reserved (netsh excludedportrange)"
+    } else {
+        Write-Warn "Could not reserve coordinator port $port (netsh add failed -- may be held by a live dynamic exclusion; retry after a WSL/Hyper-V restart)"
+    }
+}
+
 # -- Actions ----------------------------------------------------------------
 
 function Invoke-Install {
     Write-Host ''; Write-Host '=== agent-dispatch install ===' -ForegroundColor Cyan; Write-Host ''
     Install-Runtime
+    Add-PortReservation
     Install-CoordinatorTask
     Write-Host ''; Write-Host '=== agent-dispatch install complete ===' -ForegroundColor Cyan
 }
@@ -543,6 +605,7 @@ function Invoke-Update {
     Write-Host ''; Write-Host '=== agent-dispatch update ===' -ForegroundColor Cyan; Write-Host ''
     Invoke-DowngradeGuard
     Install-Runtime
+    Add-PortReservation
     Install-CoordinatorTask
     Write-Host ''; Write-Host '=== agent-dispatch update complete ===' -ForegroundColor Cyan
 }

@@ -23,7 +23,7 @@ alertmanager, which lane) lives in the deployer's config, not here.
 Config (JSON), all keys optional::
 
     {
-      "url": "http://127.0.0.1:9330",   # coordinator (else AGENT_DISPATCH_URL)
+      "url": "http://127.0.0.1:9847",   # coordinator (else AGENT_DISPATCH_URL)
       "default_repo": "example.com/acme/widget",
       "inbound_token": "shared-secret", # require this bearer on inbound hooks
       "pr": {
@@ -160,7 +160,7 @@ def build_app(
     tel_cfg = cfg.get("telemetry") or {}
 
     if client_factory is None:
-        coord_url = cfg.get("url") or os.environ.get("AGENT_DISPATCH_URL") or "http://127.0.0.1:9330"
+        coord_url = cfg.get("url") or os.environ.get("AGENT_DISPATCH_URL") or "http://127.0.0.1:9847"
         coord_token = cfg.get("coordinator_token") or os.environ.get("AGENT_DISPATCH_TOKEN")
 
         def client_factory() -> DispatchClient:  # type: ignore[misc]

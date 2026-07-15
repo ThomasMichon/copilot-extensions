@@ -228,7 +228,7 @@ ruff check .
 Run the per-host coordinator (loopback by default), then drive it with the CLI:
 
 ```bash
-agent-dispatch serve                     # binds 127.0.0.1:9330 (AGENT_DISPATCH_* to override)
+agent-dispatch serve                     # binds 127.0.0.1:9847 (AGENT_DISPATCH_* to override)
 
 # from any agent/producer (AGENT_DISPATCH_URL points at the coordinator):
 agent-dispatch create "Add narration track" --require logger --dedup-key seg42
@@ -300,7 +300,7 @@ Point a Copilot sub-agent (or any MCP client) at it:
     "agent-dispatch": {
       "command": "agent-dispatch",
       "args": ["mcp"],
-      "env": { "AGENT_DISPATCH_URL": "http://127.0.0.1:9330" }
+      "env": { "AGENT_DISPATCH_URL": "http://127.0.0.1:9847" }
     }
   }
 }
@@ -328,7 +328,7 @@ they only differ in how identity is supplied. The coordinator mounts `/mcp`
 automatically when the `mcp` extra is installed (pass `enable_mcp=False` to
 `create_app` to suppress it); if a bearer token is configured it also guards the
 `/mcp` mount. A remote client points at, e.g.,
-`http://<coordinator-host>:9330/mcp` and sets the identity headers per agent.
+`http://<coordinator-host>:9847/mcp` and sets the identity headers per agent.
 
 Configuration (all optional): `AGENT_DISPATCH_HOST`, `AGENT_DISPATCH_PORT`,
 `AGENT_DISPATCH_DB`, `AGENT_DISPATCH_TOKEN` (bearer auth),
