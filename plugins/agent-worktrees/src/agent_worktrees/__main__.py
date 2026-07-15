@@ -449,6 +449,15 @@ def _worktree_to_dict(
     d["interface"] = rec.resolved_interface
     d["origin"] = rec.resolved_origin
     d["picker_hidden"] = rec.is_picker_hidden
+    # worktree-status-core: the agent-asserted disposition overlay so the Picker
+    # can render a follow-up glyph + summary and feed the prune verdict. Absent
+    # summary/status_note_at stay off the dict to keep it lean for un-annotated
+    # worktrees; follow_up is always present (a plain bool the picker reads).
+    d["follow_up"] = rec.follow_up
+    if rec.summary:
+        d["summary"] = rec.summary
+    if rec.status_note_at:
+        d["status_note_at"] = rec.status_note_at
     # #2178: expose the bridge caller-worktree pointer so the Picker can offer
     # "Jump to caller" from a bridge worktree.
     if rec.caller_worktree:
@@ -3452,7 +3461,54 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
 # status
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _cmd_status_write(
+    args: argparse.Namespace, *, summary: str | None, follow_up: bool | None,
+) -> int:
+    """Write mode of `status`: annotate THIS worktree's agent-asserted
+    disposition (summary / follow-up). Resolves the worktree from CWD (or
+    --worktree-id). Orthogonal to git/session state; see the worktree-status-core
+    effort and the agent-fabric vision (disposition-is-asserted-pulse-is-derived).
+    """
+    config = cfg.load_config()
+    worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
+    if not worktree_id:
+        output.err(
+            "Could not determine worktree ID. Run from inside a worktree "
+            "or pass --worktree-id."
+        )
+        return 1
+    worktree_id = _resolve_worktree_id(worktree_id)
+    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    if not yaml_path.exists():
+        output.err(
+            f"Tracking file not found at {yaml_path}. "
+            "Cannot annotate an unknown worktree."
+        )
+        return 1
+    record = tracking.load_record(yaml_path)
+    tracking.set_disposition(record, summary=summary, follow_up=follow_up)
+    flag = "follow-ups pending" if record.follow_up else "resolved"
+    msg = f"[OK] Worktree {worktree_id[-4:]} disposition: {flag}"
+    if record.summary:
+        msg += f" -- {record.summary}"
+    print(msg)
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
+    # worktree-status-core: write mode. When any disposition flag is present,
+    # annotate THIS worktree (from CWD) and return -- leaving the fleet-wide
+    # read path (`status` / `status --json`, no write flags) untouched.
+    _summary = getattr(args, "summary", None)
+    _fu = getattr(args, "follow_up", False)
+    _res = getattr(args, "resolved", False)
+    if _fu and _res:
+        output.err("Pass only one of --follow-up / --resolved.")
+        return 1
+    _follow = True if _fu else (False if _res else None)
+    if _summary is not None or _follow is not None:
+        return _cmd_status_write(args, summary=_summary, follow_up=_follow)
+
     tracking_path = cfg.tracking_dir()
 
     records = tracking.list_records(tracking_path)
@@ -5235,6 +5291,48 @@ def _validate_machine_registry(
 # Ownership marker embedded in generated instruction files
 _INSTRUCTION_MARKER = "<!-- managed by agent-worktrees -->"
 
+# worktree-status-core: static worktree-conduct guidance deployed as a managed
+# custom-instruction so agents keep the Worktree Picker honest about where the
+# operator's attention is owed. Generic (not machine-specific); realizes the
+# agent-fabric vision's disposition-is-asserted-pulse-is-derived behavior.
+_WORKTREE_CONDUCT = """# Worktree status conduct
+
+Keep the Worktree Picker honest about where the operator's attention is owed.
+Only *you* know whether a worktree is truly done or still has follow-ups -- git
+and process state cannot tell. Annotate THIS worktree's disposition with
+`agent-worktrees status`:
+
+- **Finalizing for real?** Make `agent-worktrees finalize` the **last** thing you
+  do -- do not re-open work after it, and do not flag follow-ups. A one-line
+  "all done" (optionally offering more) is fine; the worktree is prune-able.
+- **Stopping with work left?** Run
+  `agent-worktrees status --follow-up --summary "<what's left>"`. Leftover
+  temporary state, or an external-repo change not yet pushed / merged / deployed,
+  **counts as a follow-up**.
+- **Just answered a question?** If nothing consequential started, leave it
+  (it stays `CONVO`). If the conversation began a plan or changed state, flag it:
+  `agent-worktrees status --follow-up --summary "<what's underway>"`.
+- **Direction changed or you learned more?** Periodically re-summarize:
+  `agent-worktrees status --summary "<current focus>"` -- add/keep `--follow-up`
+  while work is owed, or clear it with `--resolved` once nothing is left.
+
+The summary is one line; latest wins. Flag conservatively but honestly: an
+unflagged worktree reads as *resolved and safe to prune*.
+"""
+
+
+def _deploy_worktree_conduct(proj_dir: Path) -> None:
+    """Deploy the static worktree-status conduct instruction (idempotent)."""
+    content = f"{_INSTRUCTION_MARKER}\n{_WORKTREE_CONDUCT}"
+    instr_dir = proj_dir / ".github" / "instructions"
+    instr_dir.mkdir(parents=True, exist_ok=True)
+    path = instr_dir / "worktree-conduct.instructions.md"
+    if path.exists() and path.read_text() == content:
+        output.skipped("worktree-conduct.instructions.md already in sync")
+    else:
+        path.write_text(content)
+        output.changed(f"worktree-conduct.instructions.md -> {path}")
+
 
 def _deploy_copilot_instructions(
     proj_dir: Path, entry: cfg.MachineEntry,
@@ -5273,6 +5371,10 @@ def _deploy_copilot_instructions(
         agents_path.write_text(content)
         output.changed(f"AGENTS.md -> {agents_path}")
 
+    # worktree-status-core: the static worktree-conduct instruction (generic,
+    # not machine-specific) rides the same managed deploy.
+    _deploy_worktree_conduct(proj_dir)
+
     # Clean up stale ssh.instructions.md from previous versions
     ssh_instr_path = instr_dir / "ssh.instructions.md"
     if ssh_instr_path.exists():
@@ -5301,6 +5403,7 @@ def _cleanup_stale_instructions(proj_dir: Path) -> None:
     candidates = [
         proj_dir / ".github" / "instructions" / "machine.instructions.md",
         proj_dir / ".github" / "instructions" / "ssh.instructions.md",
+        proj_dir / ".github" / "instructions" / "worktree-conduct.instructions.md",
         proj_dir / "AGENTS.md",
     ]
     for path in candidates:
@@ -8086,10 +8189,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--title-only", action="store_true")
 
     # status
-    p = sub.add_parser("status", help="Show worktree git status")
+    p = sub.add_parser("status", help="Show worktree git status (read); annotate this worktree's disposition (write)")
     p.add_argument("--json", action="store_true")
     p.add_argument("--mux-details", action="store_true",
                    help="Include mux session attached/detached status (JSON only)")
+    # worktree-status-core: write mode -- annotate THIS worktree's agent-asserted
+    # disposition. Any of these switches the command from the fleet read to a
+    # per-worktree write (resolved from CWD, or --worktree-id).
+    p.add_argument("--summary", default=None,
+                   help="Set this worktree's one-line disposition summary (write mode)")
+    p.add_argument("--follow-up", dest="follow_up", action="store_true",
+                   help="Flag this worktree as having actionable follow-ups (write mode)")
+    p.add_argument("--resolved", action="store_true",
+                   help="Clear the follow-up flag -- this worktree is resolved (write mode)")
+    p.add_argument("--worktree-id", default=None,
+                   help="Target worktree id for write mode (default: inferred from CWD)")
 
     # status-segment (one styled line for a tmux/psmux status bar)
     p = sub.add_parser(

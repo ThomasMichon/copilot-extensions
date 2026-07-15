@@ -142,6 +142,15 @@ class WorktreeRecord:
     # it (agent-bridge's caller_id == the caller's WORKTREE_ID). Lets the Picker
     # "Jump to caller" from a bridge worktree back to the worktree that kicked it.
     caller_worktree: str | None = None
+    # worktree-status-core: the agent-asserted DISPOSITION overlay -- orthogonal
+    # to git/session state (which cannot tell "done" from "finalized-with-
+    # follow-ups"). Set via `agent-worktrees status`; absent (legacy) = the safe
+    # default (not flagged, no summary). Rendered as a Picker overlay + fed to
+    # the prune verdict. The live "pulse" (assistant.intent) is a SEPARATE
+    # sidecar, never stored on this durable record.
+    follow_up: bool = False
+    summary: str = ""
+    status_note_at: str | None = None
 
     @property
     def resolved_interface(self) -> WorktreeInterface:
@@ -411,6 +420,10 @@ def load_record(path: Path) -> WorktreeRecord:
                         if data.get("parent_session") else None),
         caller_worktree=(str(data["caller_worktree"])
                          if data.get("caller_worktree") else None),
+        follow_up=bool(data.get("follow_up", False)),
+        summary=str(data.get("summary", "") or ""),
+        status_note_at=(str(data["status_note_at"])
+                        if data.get("status_note_at") else None),
     )
 
 
@@ -455,6 +468,17 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         content += f"interface: {record.interface}\n"
     if record.origin in ("user", "system", "delegate"):
         content += f"origin: {record.origin}\n"
+
+    # worktree-status-core: the agent-asserted disposition overlay -- emitted
+    # only when explicitly set, so an un-annotated session YAML stays
+    # byte-identical (no churn for the common case).
+    if record.follow_up:
+        content += "follow_up: true\n"
+    if record.summary:
+        safe_summary = record.summary.replace("'", "''")
+        content += f"summary: '{safe_summary}'\n"
+    if record.status_note_at:
+        content += f"status_note_at: {record.status_note_at}\n"
 
     # #1029: originating-session pointer. Emitted only when set, so the
     # common-case session-record YAML stays byte-identical (no churn).
@@ -573,6 +597,28 @@ def update_status(record: WorktreeRecord, new_status: WorktreeStatus) -> None:
     if new_status in ("finalized", "orphaned", "complete", "pushed"):
         if record.completed_at is None:
             record.completed_at = _now_iso()
+    save_record(record)
+
+
+def set_disposition(
+    record: WorktreeRecord,
+    *,
+    summary: str | None = None,
+    follow_up: bool | None = None,
+) -> None:
+    """Set the agent-asserted disposition overlay (summary / follow-up) and save.
+
+    Orthogonal to git/session state -- this records what only the agent knows:
+    whether the worktree is genuinely *resolved* or still has *actionable
+    follow-ups*, plus a one-line summary of what it is/left at. ``summary`` and
+    ``follow_up`` are each applied only when not None, so a caller may update
+    one without disturbing the other. Stamps ``status_note_at``.
+    """
+    if summary is not None:
+        record.summary = summary.replace("\n", " ").strip()
+    if follow_up is not None:
+        record.follow_up = follow_up
+    record.status_note_at = _now_iso()
     save_record(record)
 
 

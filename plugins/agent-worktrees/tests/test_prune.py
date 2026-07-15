@@ -220,3 +220,31 @@ class TestCleanupDisposition:
     def test_active_is_never_cleanable(self):
         d = prune.cleanup_disposition(_rec(prs=[_pr(1, "merged")]), _info(S.ACTIVE))
         assert d.cleanable is False and d.bucket == "active"
+
+    def test_follow_up_downgrades_finalized_to_review(self):
+        # worktree-status-core: an agent-asserted follow-up makes a would-be
+        # SAFE (finalized/clean) worktree REVIEW -- not auto-pruned.
+        rec = _rec(status="finalized")
+        rec.follow_up = True
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is False
+        assert d.bucket == "follow-up"
+        assert "follow-ups" in d.reason
+
+    def test_follow_up_downgrades_merged_pr(self):
+        rec = _rec(status="active", prs=[_pr(21, "merged")])
+        rec.follow_up = True
+        d = prune.cleanup_disposition(rec, _info(S.UNUSED))
+        assert d.cleanable is False and d.bucket == "follow-up"
+
+    def test_follow_up_does_not_override_active(self):
+        # An ACTIVE worktree stays 'active' (already non-cleanable); the flag
+        # doesn't reclassify a live session.
+        rec = _rec(status="finalized")
+        rec.follow_up = True
+        d = prune.cleanup_disposition(rec, _info(S.ACTIVE))
+        assert d.bucket == "active"
+
+    def test_follow_up_no_effect_when_not_flagged(self):
+        d = prune.cleanup_disposition(_rec(status="finalized"), _info(S.COMPLETED))
+        assert d.cleanable is True and d.bucket == "clean"
