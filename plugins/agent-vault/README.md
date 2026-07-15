@@ -104,7 +104,10 @@ Useful commands:
 - `agent-vault import-key ENTRY path/to/key`
 - `agent-vault export-key ENTRY dest_dir key_name`
 - `agent-vault git-credential get|store|erase` (git credential helper)
+- `agent-vault get ENTRY [--refresh] [--cache-only]` (persistent-cache aware)
 - `agent-vault cache-populate [--entry P[:FIELD]] [--manifest F] [--machine M]` (pre-warm the cache)
+- `agent-vault cache-status [--json]` / `agent-vault cache-clear`
+- `agent-vault cache-verify [--entry P[:FIELD]] [--manifest F] [--machine M] [--json]` (exit 2 if any missing)
 
 `remove` and `move` are **scoped to the configured vault group**: an entry
 outside that group is refused unless you pass `-f`/`--force`.
@@ -135,6 +138,38 @@ pass `--prompt` to `agent-vault get`. The CLI cold-starts the service on first
 use; the installer also deploys it as a background service (systemd `--user` unit
 on Linux, a windowless scheduled task on Windows) so `sudo -A` and other
 non-interactive callers work.
+
+## Persistent cache (opt-in)
+
+The service's in-memory cache dies on restart and cannot serve reads while the
+vault is locked. The **persistent cache** is a separate, opt-in tier: a
+Fernet-encrypted file on disk that survives restarts and answers reads *without*
+unlocking the vault — so an unattended job on a locked box can still fetch a
+previously-cached secret.
+
+It is **off by default** (storing secrets on disk is a deliberate tradeoff).
+Switch it on with either env var:
+
+- `AGENT_VAULT_CACHE=1` — enable at the default location
+  (`<config-dir>/agent-vault/cache/`).
+- `AGENT_VAULT_CACHE_DIR=/path` — enable and store the cache there.
+
+Encryption needs the optional `cryptography` dependency
+(`pip install agent-vault[cache]`); without it the cache degrades to a safe
+no-op. The Fernet key sits beside the cache file at `0600` — this is hygiene, not
+a security boundary (physical-access control and full-disk encryption are the
+real barriers).
+
+Once enabled:
+
+- `agent-vault get ENTRY` reads the cache first (tier 0), then the service,
+  writing any live fetch back through to the cache.
+- `--cache-only` reads *only* the cache and never contacts the service (returns
+  non-zero on a miss); `--refresh` bypasses the cache and re-fetches live.
+- `agent-vault cache-populate …` warms both the service and the persistent cache.
+- `agent-vault cache-status` / `cache-clear` inspect and wipe it; `cache-verify`
+  checks a set of entries are present (no unlock) and exits `2` if any are
+  missing — a launch-time gate for "is this box primed while still locked?".
 
 ## SUDO_ASKPASS (Linux / WSL)
 
