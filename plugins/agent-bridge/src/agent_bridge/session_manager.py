@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import logging
 import os
@@ -2234,6 +2235,20 @@ class SessionManager:
 
         # Persist turn skeleton
         self._db.create_turn(session_id, turn_index, prompt, now)
+
+        # Cancel any pending out-of-turn content bracket (#2835) synchronously,
+        # BEFORE this new turn's `running` is written and the prompt task is
+        # created. A due settle timer would otherwise fire between here and the
+        # background task starting, injecting a spurious `idle` into the new
+        # turn. Doing it here (on the loop, with no await before the task is
+        # scheduled) guarantees the cancel wins that race.
+        cancel_ooo = getattr(session.client, "_cancel_out_of_turn", None)
+        if callable(cancel_ooo):
+            # Real clients expose a sync canceller; tolerate a test double that
+            # returns a coroutine by closing it (never a coroutine in prod).
+            _maybe = cancel_ooo()
+            if inspect.iscoroutine(_maybe):
+                _maybe.close()
 
         # Update status
         session.status = SessionStatus.RUNNING

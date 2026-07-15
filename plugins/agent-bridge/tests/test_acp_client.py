@@ -561,3 +561,72 @@ def test_shutdown_cancels_pending_elicitations() -> None:
         assert isinstance(await asyncio.wait_for(task, 1.0), CancelElicitationResponse)
 
     asyncio.run(scenario())
+
+
+def _agent_message(text: str):
+    from acp.schema import AgentMessageChunk
+
+    return AgentMessageChunk(
+        session_update="agent_message_chunk",
+        content=TextContentBlock(type="text", text=text),
+    )
+
+
+def test_in_turn_content_is_not_bracketed() -> None:
+    """Content during a live turn must NOT get a synthetic boundary."""
+    client, events = _client_with_recorder()
+    client._prompt_in_flight = True
+    client._handle_session_update(_agent_message("hello"))
+    assert events == [("agent_message", {"text": "hello"})]
+    assert client._out_of_turn_open is False
+
+
+def test_out_of_turn_content_is_bracketed() -> None:
+    """A post-turn out-of-turn burst is wrapped running -> content -> idle so
+    the durable log always reaches a terminal state (#2835)."""
+    import asyncio
+
+    async def scenario() -> None:
+        client, events = _client_with_recorder()
+        client._out_of_turn_settle_delay = 0.05
+        # Not in a turn, not loading -> out-of-turn content.
+        client._handle_session_update(_agent_message("orphan 1"))
+        client._handle_session_update(_agent_message("orphan 2"))
+
+        # A single opening `running` precedes the burst; no `idle` yet.
+        assert ("session_state_changed", {"status": "running"}) in events
+        assert events[-1] == ("agent_message", {"text": "orphan 2"})
+        assert client._out_of_turn_open is True
+        idle_before = [e for e in events
+                       if e == ("session_state_changed", {"status": "idle"})]
+        assert idle_before == []
+
+        # After quiescence the closing terminal `idle` fires -> log settles.
+        await asyncio.sleep(0.12)
+        assert events[-1] == ("session_state_changed", {"status": "idle"})
+        assert client._out_of_turn_open is False
+        opens = [e for e in events
+                 if e == ("session_state_changed", {"status": "running"})]
+        closes = [e for e in events
+                  if e == ("session_state_changed", {"status": "idle"})]
+        assert len(opens) == 1 and len(closes) == 1  # burst coalesced
+
+    asyncio.run(scenario())
+
+
+def test_new_turn_cancels_pending_out_of_turn_bracket() -> None:
+    """A real turn starting must drop a lingering out-of-turn bracket so its
+    closing idle can't fire mid-turn."""
+    import asyncio
+
+    async def scenario() -> None:
+        client, _ = _client_with_recorder()
+        client._out_of_turn_settle_delay = 5.0
+        client._handle_session_update(_agent_message("orphan"))
+        assert client._out_of_turn_open is True
+        assert client._out_of_turn_settle_handle is not None
+        client._cancel_out_of_turn()  # invoked by send_prompt at turn start
+        assert client._out_of_turn_open is False
+        assert client._out_of_turn_settle_handle is None
+
+    asyncio.run(scenario())

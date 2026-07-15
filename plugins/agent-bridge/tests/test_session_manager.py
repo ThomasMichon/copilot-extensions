@@ -212,6 +212,20 @@ class TestSubmitPrompt:
         assert session.status == SessionStatus.RUNNING
 
     @pytest.mark.asyncio
+    async def test_submit_cancels_out_of_turn_bracket(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        """A new turn cancels any pending out-of-turn content bracket up front
+        (#2835), so a due settle timer can't inject a spurious ``idle`` into the
+        turn. The cancel must run synchronously during submit, before ``running``
+        is written and the prompt task is scheduled."""
+        session = await session_manager.start_session(spawn_target)
+        cancel = MagicMock()
+        session.client._cancel_out_of_turn = cancel
+        await session_manager.submit_prompt(session.session_id, "Hello")
+        cancel.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_submit_persists_user_message_event(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp
     ) -> None:

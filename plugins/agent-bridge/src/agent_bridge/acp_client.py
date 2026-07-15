@@ -400,6 +400,19 @@ class AcpClient:
         # True only while awaiting a prompt turn result. Distinguishes a
         # real mid-turn crash from an idle/just-resumed process exit.
         self._prompt_in_flight = False
+        # Out-of-turn content bracketing (#2835). A copilot child can stream a
+        # second `agent_message` burst AFTER a turn's `prompt()` already
+        # returned (and the session-host wrote the terminal `idle`), leaving the
+        # durable event log ending on a bare content event with no closing
+        # boundary -- which wedges every consumer on "Responding..." forever.
+        # When content arrives while no turn is in flight, we re-bracket it:
+        # emit a synthetic `session_state_changed: running` before the first
+        # such event and, once the out-of-turn burst goes quiescent, a closing
+        # `session_state_changed: idle` -- so the log always settles while the
+        # (real) content is preserved rather than dropped.
+        self._out_of_turn_open = False
+        self._out_of_turn_settle_handle: asyncio.TimerHandle | None = None
+        self._out_of_turn_settle_delay = 2.0
         # True while load_session replays conversation history. The replayed
         # session/update notifications are already persisted, so suppress
         # re-emitting them as fresh events.
@@ -616,6 +629,7 @@ class AcpClient:
         """
         if not self._connection:
             raise RuntimeError("ACP connection not initialized")
+        self._cancel_out_of_turn()
         self._loading_session = True
         self._suppress_replay = suppress_replay
         try:
@@ -639,6 +653,7 @@ class AcpClient:
 
         async with self._prompt_lock:
             self._reset_buffers()
+            self._cancel_out_of_turn()
             self._prompt_in_flight = True
 
             try:
@@ -710,6 +725,10 @@ class AcpClient:
             )
             self._pending_permission_future = None
 
+        # Drop any pending out-of-turn settle timer so it can't fire after
+        # teardown (it would touch a closed session's event log).
+        self._cancel_out_of_turn()
+
         # Cancel any parked ask_user elicitations so the agent's blocked
         # `elicitation/create` calls unwind instead of hanging on teardown.
         for fut in self._pending_elicitations.values():
@@ -750,6 +769,64 @@ class AcpClient:
             except Exception:
                 log.warning("Event callback error for %s", event_type, exc_info=True)
 
+    # -- Out-of-turn content bracketing (#2835) ------------------------------
+
+    def _maybe_open_out_of_turn(self) -> None:
+        """Bracket content that arrives outside a prompt turn.
+
+        Content emitted while no turn is in flight (and not during a load
+        replay) is out-of-turn: the copilot child streamed more after
+        ``prompt()`` already returned. Left bare, the durable log ends on a
+        content event and every consumer stays wedged on "Responding...".
+        Open a synthetic ``running`` boundary before the first such event and
+        (re)arm a quiescence timer that closes it with a terminal ``idle`` once
+        the burst settles, so the log always reaches a terminal state.
+
+        A running event loop is required to schedule the deferred close; in
+        production ``_handle_session_update`` is always driven from the ACP
+        connection's async handler, so the loop is always present. (Without one
+        -- a synchronous unit-test driver -- bracketing is skipped: there is no
+        way to defer the close, and an immediate per-chunk open/close would be
+        noise.)
+        """
+        if self._prompt_in_flight or self._loading_session:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if not self._out_of_turn_open:
+            self._out_of_turn_open = True
+            self._emit("session_state_changed", {"status": "running"})
+        self._arm_out_of_turn_settle(loop)
+
+    def _arm_out_of_turn_settle(self, loop: asyncio.AbstractEventLoop) -> None:
+        """(Re)start the quiescence timer that closes an out-of-turn bracket."""
+        if self._out_of_turn_settle_handle is not None:
+            self._out_of_turn_settle_handle.cancel()
+        self._out_of_turn_settle_handle = loop.call_later(
+            self._out_of_turn_settle_delay, self._settle_out_of_turn,
+        )
+
+    def _settle_out_of_turn(self) -> None:
+        """Emit the closing terminal ``idle`` for an out-of-turn burst."""
+        self._out_of_turn_settle_handle = None
+        if self._out_of_turn_open:
+            self._out_of_turn_open = False
+            self._emit("session_state_changed", {"status": "idle"})
+
+    def _cancel_out_of_turn(self) -> None:
+        """Drop any pending out-of-turn bracket without emitting a boundary.
+
+        Used when a real turn starts: the new turn's own ``running``/terminal
+        events supersede a lingering out-of-turn bracket, so its closing
+        ``idle`` must not fire mid-turn.
+        """
+        if self._out_of_turn_settle_handle is not None:
+            self._out_of_turn_settle_handle.cancel()
+            self._out_of_turn_settle_handle = None
+        self._out_of_turn_open = False
+
     # -- Session update handling ---------------------------------------------
 
     def _handle_session_update(self, update: Any) -> None:
@@ -765,6 +842,7 @@ class AcpClient:
         if isinstance(update, AgentMessageChunk):
             content = update.content
             if isinstance(content, TextContentBlock):
+                self._maybe_open_out_of_turn()
                 self._response_chunks.append(content.text)
                 self._emit("agent_message", {"text": content.text})
 
@@ -784,6 +862,7 @@ class AcpClient:
         elif isinstance(update, AgentThoughtChunk):
             content = update.content
             if isinstance(content, TextContentBlock):
+                self._maybe_open_out_of_turn()
                 self._thought_chunks.append(content.text)
                 self._emit("agent_thought", {"text": content.text})
 
