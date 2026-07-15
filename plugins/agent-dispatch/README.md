@@ -305,10 +305,11 @@ agent-dispatch reservations fail <key>                # release a confirmed-dead
 ```
 
 Each cycle **reconciles** (settles reservations of terminal tasks) then **polls**
-(reserve → embody → record, up to `--max-concurrent`). Auto-recovery of a
-*dead-but-non-terminal* embody and a supervisor-driven lease heartbeat are
-deferred to a liveness-aware slice (see the design doc); until then a dead
-embody's task is *held* and surfaced for `reservations fail`.
+(reserve → embody → record, up to `--max-concurrent`). It also **heartbeats the
+lease of every confirmed-alive worker** so a quiet-but-alive session isn't wrongly
+re-queued (disable with `--no-heartbeat`). Auto-recovery of a *dead*-but-non-terminal
+embody needs confirmed-death detection and is deferred (see the design doc); until
+then a dead embody's task is *held* and surfaced for `reservations fail`.
 
 ## MCP tools (`agent-dispatch mcp`)
 

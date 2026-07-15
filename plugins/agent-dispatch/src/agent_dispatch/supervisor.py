@@ -46,7 +46,38 @@ log = logging.getLogger("agent-dispatch.supervisor")
 #: success) or ``error`` (on failure).
 SpawnFn = Callable[[dict], "tuple[bool, dict]"]
 
+#: A liveness probe: ``(worktree, machine) -> session dict`` when the embodied
+#: session is **confirmed alive**, else ``None`` (dead *or* unresolvable).
+LivenessFn = Callable[[str, "str | None"], "dict | None"]
+
 _TERMINAL = frozenset({Status.COMPLETED, Status.ABANDONED})
+_LEASED = frozenset({Status.CLAIMED, Status.STARTED})
+
+
+def _default_liveness(worktree: str, machine: str | None) -> dict | None:
+    """Resolve an embodied session's liveness via the agent-bridge registry.
+
+    Delegates to :func:`agent_dispatch.tracking.resolve_live_session` (shells the
+    ``agent-bridge`` CLI, cross-machine over SSH when the owner is remote). All
+    failure modes collapse to ``None`` -- so ``None`` means "not confirmed alive",
+    which is why the supervisor only *heartbeats* on a positive result and never
+    treats ``None`` as proof-of-death.
+    """
+    from . import tracking
+
+    return tracking.resolve_live_session(worktree, machine=machine)
+
+
+def _worktree_from_owner(owner: str | None) -> str | None:
+    from . import tracking
+
+    return tracking.worktree_from_owner(owner)
+
+
+def _machine_from_owner(owner: str | None) -> str | None:
+    from . import tracking
+
+    return tracking.machine_from_owner(owner)
 
 
 def make_embody_spawn(
@@ -96,6 +127,8 @@ class Supervisor:
         labels: Sequence[str] | None = None,
         max_concurrent: int = 1,
         supervisor_id: str | None = None,
+        heartbeat: bool = True,
+        liveness_fn: LivenessFn | None = None,
     ):
         self.client = client
         self.spawn_fn = spawn_fn
@@ -103,6 +136,8 @@ class Supervisor:
         self.labels = set(labels) if labels else None
         self.max_concurrent = max(1, int(max_concurrent))
         self.supervisor_id = supervisor_id or f"supervisor-{uuid.uuid4().hex[:8]}"
+        self.heartbeat = heartbeat
+        self.liveness_fn = liveness_fn or _default_liveness
 
     # -- helpers -------------------------------------------------------------
 
@@ -147,13 +182,59 @@ class Supervisor:
                     pass
         return settled
 
+    def hold_live_leases(self) -> int:
+        """Heartbeat the lease of every **confirmed-alive** embodied worker.
+
+        For each ``spawned`` reservation whose task is leased (``claimed``/
+        ``started``), probe the embody session's liveness; when it is *confirmed
+        alive*, send a lease heartbeat on the task's behalf. This keeps a
+        live-but-quiet worker (one not emitting progress) from having its lease
+        expire and being wrongly recovered/re-spawned -- the exact "don't trust
+        the LLM to emit progress to hold its lease" gap.
+
+        Safety: heartbeats fire **only** on a positive liveness result. A ``None``
+        probe (dead *or* unreachable bridge) is never treated as alive *or* as
+        proof-of-death here -- the lease simply rides its natural course, so a
+        genuinely dead worker's lease still expires (its task is then held for
+        recovery), and a transient bridge miss cannot mask a live worker (the
+        worker's own activity still extends its lease). Returns the count held.
+        """
+        held = 0
+        for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
+            worktree = res.get("worktree")
+            try:
+                task = self.client.get(res["task_id"])
+            except DispatchError:
+                continue
+            if task.get("status") not in _LEASED:
+                continue
+            owner = task.get("owner")
+            probe_worktree = worktree or _worktree_from_owner(owner)
+            if not probe_worktree or not owner:
+                continue
+            try:
+                session = self.liveness_fn(probe_worktree, _machine_from_owner(owner))
+            except Exception:  # liveness is best-effort -- never let a probe be fatal
+                session = None
+            if not session:
+                continue  # not confirmed alive -> let the lease ride
+            try:
+                self.client.heartbeat(task["id"], owner)
+                held += 1
+            except DispatchError:
+                pass
+        return held
+
     def poll_once(self, *, now: float | None = None) -> list[str]:
-        """One supervision cycle: reconcile, then spawn eligible tasks up to the cap.
+        """One supervision cycle: reconcile, hold live leases, then spawn eligible
+        tasks up to the cap.
 
         Returns the ids of tasks spawned this cycle.
         """
         now = time.time() if now is None else now
         self.reconcile()
+        if self.heartbeat:
+            self.hold_live_leases()
         active = len(self._active_reservations())
         spawned: list[str] = []
         for task in self._eligible(now):

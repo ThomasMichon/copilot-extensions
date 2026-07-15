@@ -1,9 +1,9 @@
 # agent-dispatch — Embody Spawn Supervisor (design)
 
-Status: **in progress** — the spawn-reservation primitive **and the supervisor
-loop** are built (spawn-at-most-once); the lease heartbeat, dead-embody
-auto-recovery (both need session-liveness detection), backlog-catch-up policy,
-and the authenticated container transport land in follow-up slices.
+Status: **in progress** — the spawn-reservation primitive, the supervisor loop
+(spawn-at-most-once), **and the liveness-gated lease heartbeat** are built;
+dead-embody *auto-recovery* (needs confirmed-death detection), the backlog-catch-up
+policy, and the authenticated container transport land in follow-up slices.
 Public tracker: [ThomasMichon/copilot-extensions#44](https://github.com/ThomasMichon/copilot-extensions/issues/44).
 
 This note is the design of record for turning a **queued task** into **exactly
@@ -122,25 +122,35 @@ agent-dispatch reservations list [--task ID] [--state S]
 agent-dispatch reservations fail|settle <key> [--detail ...]
 ```
 
-### Deliberately deferred (needs embody-session liveness detection)
+### Lease heartbeat (built) — the live-worker safety net
 
-Two capabilities are **intentionally not** in this slice, because doing them
-without liveness detection would reintroduce the double-spawn hazard:
+Each cycle the supervisor also **holds the lease of every confirmed-alive
+embodied worker** (`hold_live_leases`, gated on `--no-heartbeat`). For each
+`spawned` reservation whose task is leased (`claimed`/`started`), it probes the
+embody session's liveness (`tracking.resolve_live_session` → the agent-bridge
+live-session registry, cross-machine over SSH for a remote owner) and, **only on
+a confirmed-alive result**, sends a lease heartbeat on the task's behalf. This
+keeps a live-but-quiet worker (one not emitting progress between phases) from
+having its lease expire and being wrongly re-queued — closing the "don't trust
+the LLM to emit progress to hold its lease" gap.
 
-- **Auto-recovery of a dead-but-non-terminal embody.** If an embody genuinely
-  dies (lease expires, task re-queues, but the task never reaches a terminal
-  state), the supervisor does **not** auto-respawn it — its `spawned` reservation
-  is retained and the task is *held* (surfaced via `reservations list`). An
-  operator confirms the embody is gone and runs `reservations fail <key>` to
-  release it for a fresh attempt. Auto-recovery requires trusting lease-expiry as
-  death, which requires liveness detection.
-- **Supervisor-driven lease heartbeat.** To keep a live-but-quiet embody's lease
-  from expiring (and being wrongly recovered), the supervisor would heartbeat on
-  the worker's behalf — but a naive always-heartbeat would *mask* a dead worker.
-  Safe heartbeating is gated on the same liveness signal.
+The safety hinge: heartbeats fire **only** on a positive liveness result. A
+`None` probe collapses *dead* and *bridge-unreachable* together, so it is treated
+as neither alive (no heartbeat) nor proof-of-death (no recovery). A genuinely
+dead worker therefore stops being heartbeated, its lease expires naturally, and
+its task is *held* (its `spawned` reservation blocks re-spawn) for recovery — a
+transient bridge miss can't mask a live worker, whose own activity still extends
+its lease.
 
-The liveness-aware slice (integrating `agent-worktrees`/`agent-bridge` session
-status) turns lease-expiry into a trustworthy death signal and unlocks both.
+### Deliberately deferred (needs *confirmed-death* detection)
+
+- **Auto-recovery of a dead-but-non-terminal embody.** Auto-releasing a held
+  reservation for a fresh attempt requires distinguishing *confirmed dead* from
+  *bridge-unreachable* — the current liveness probe collapses both to `None`, so
+  auto-recovery on `None` would double-spawn on a transient outage. Until a
+  positive "session is gone" signal (or a consecutive-confirmation + grace
+  scheme) exists, a dead embody's task is held and surfaced via
+  `reservations list` for a manual `reservations fail <key>`.
 
 ## Genericity
 

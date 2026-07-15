@@ -59,6 +59,9 @@ class QueueBackedClient:
     def settle_spawn(self, key, *, detail=None):
         return asdict(self._q.settle_spawn(key, detail=detail))
 
+    def heartbeat(self, task_id, worker_id):
+        return asdict(self._q.heartbeat(task_id, worker_id))
+
 
 @pytest.fixture
 def q(tmp_path):
@@ -191,6 +194,57 @@ def test_not_before_deferral(q, client):
     assert q.latest_reservation(future.id) is None
 
 
+# -- liveness-gated heartbeat ------------------------------------------------
+
+
+def _leased_task_with_spawn(q):
+    """A started task with a recorded ``spawned`` reservation (owner m/wt)."""
+    t = q.create("work")
+    r, _ = q.reserve_spawn(t.id)
+    q.record_spawn(r.key, session_handle="sess", worktree="wt")
+    q.claim_one("m/wt", task_id=t.id, machine="m", worktree="wt")
+    q.start(t.id, "m/wt")
+    return t
+
+
+def test_heartbeat_holds_confirmed_live_lease(q, client):
+    t = _leased_task_with_spawn(q)
+    probes = []
+
+    def alive(worktree, machine):
+        probes.append((worktree, machine))
+        return {"liveness": "alive"}
+
+    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, liveness_fn=alive)
+    # push the lease into the past so the heartbeat visibly extends it
+    before = q.get(t.id).lease_expires_at
+    held = sup.hold_live_leases()
+    assert held == 1
+    assert probes == [("wt", "m")]
+    assert q.get(t.id).lease_expires_at >= before
+
+
+def test_heartbeat_skips_when_not_confirmed_alive(q, client):
+    t = _leased_task_with_spawn(q)
+    lease_before = q.get(t.id).lease_expires_at
+
+    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, liveness_fn=lambda w, m: None)
+    assert sup.hold_live_leases() == 0
+    # a None probe must never be treated as alive -> no heartbeat written
+    assert q.get(t.id).lease_expires_at == lease_before
+
+
+def test_heartbeat_disabled_skips_liveness(q, client):
+    _leased_task_with_spawn(q)
+    probes = []
+    sup = Supervisor(
+        client, spawn_fn=_ok_spawn(), repo=TEST_REPO, heartbeat=False,
+        liveness_fn=lambda w, m: probes.append(1) or {"liveness": "alive"},
+    )
+    sup.poll_once()
+    assert probes == []  # heartbeat disabled -> liveness never probed
+
+
 # -- CLI wiring --------------------------------------------------------------
 
 
@@ -210,6 +264,7 @@ def test_cli_supervise_once(monkeypatch, q, client):
     args = types.SimpleNamespace(
         all_repos=False, repo=None, url=None, token=None, label=None,
         max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
+        no_heartbeat=False,
     )
     assert m._cmd_supervise(args) == 0
     assert spawn.calls == [t.id]
