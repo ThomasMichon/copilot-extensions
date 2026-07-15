@@ -128,6 +128,57 @@ class TestPrComplete:
         assert (wt_path / "new.txt").exists()
         assert _ahead(f"worktree/{wid}", "origin/master", cwd=wt_path) == 1
 
+    def test_reconcile_preserves_post_merge_divergence_net_zero(self, pr_repo):
+        """A post-merge commit that diverges from upstream but nets to the
+        merge-base MUST survive the reconcile (aperture-labs #2854).
+
+        The regression: ``_branch_fully_merged`` enumerates only the paths in
+        ``merge_base..branch``.  A commit that reverts a file back to its
+        merge-base value is *net-zero* on that axis, so the path is skipped and
+        the branch is judged "fully merged" -- and the old hard reset then
+        silently restored upstream's (unwanted) value, dropping the operator's
+        deliberate change.  Rebase-first replays that commit and preserves it.
+        """
+        config, wid, wt_path, _ = pr_repo
+        anchor = Path(config.default_repo.anchor)
+        branch = f"worktree/{wid}"
+        # Shared base carrying config.txt="stable" on upstream (the merge-base).
+        (anchor / "config.txt").write_text("stable\n")
+        _git("add", "-A", cwd=anchor)
+        _git("commit", "-m", "base: config=stable", cwd=anchor)
+        _git("push", "origin", "master", cwd=anchor)
+        # Rebuild the worktree branch from that shared base.
+        _git("fetch", "origin", cwd=wt_path)
+        _git("reset", "--hard", "origin/master", cwd=wt_path)
+        # PR work: add feature.txt, then set config=branch ...
+        (wt_path / "feature.txt").write_text("F\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "PR: add feature", cwd=wt_path)
+        (wt_path / "config.txt").write_text("branch\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "PR: set config=branch", cwd=wt_path)
+        # ... then the deliberate divergence that must survive: put config back
+        # to the base "stable" (net-zero vs merge-base, but != upstream's tip).
+        (wt_path / "config.txt").write_text("stable\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "keep config=stable", cwd=wt_path)
+        # Upstream squash-merges the PR as feature.txt + config=branch.
+        (anchor / "feature.txt").write_text("F\n")
+        (anchor / "config.txt").write_text("branch\n")
+        _git("add", "-A", cwd=anchor)
+        _git("commit", "-m", "squash PR", cwd=anchor)
+        _git("push", "origin", "master", cwd=anchor)
+
+        res = pr_complete.complete_worktree(wid, config)
+
+        assert res["success"] is True, res
+        # The operator's config=stable survives (old code reset it to "branch").
+        assert (wt_path / "config.txt").read_text() == "stable\n", res
+        assert res["action"] == "rebased"
+        assert _ahead(branch, "origin/master", cwd=wt_path) == 1
+        # The merged PR's feature.txt is present (carried by upstream).
+        assert (wt_path / "feature.txt").read_text() == "F\n"
+
     def test_behind_but_unmerged_is_normal_rebase(self, pr_repo):
         """Upstream advanced unrelatedly; the PR is NOT merged -> rebase forward."""
         config, wid, wt_path, _ = pr_repo
