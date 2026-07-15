@@ -975,6 +975,73 @@ class TestWorktreeRoutes:
             resp = client.post(f"/api/v1/worktrees/{wt_id}/restart")
         assert resp.status_code == 502
 
+    def test_restart_invalidates_live_session_registration(
+        self, client, app,
+    ) -> None:
+        """A successful take-over demotes any live registration for the worktree
+        and drops its queued inbox messages (#2906 invalidate-on-take-over)."""
+        import time
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "lambda-core-wsl-20250101-193300-takeover"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        db = app.state.db
+        now = time.time()
+        db.register_live_session(
+            "cli-live", machine="test-agent", cwd=None, worktree_id=wt_id,
+            repo=None, branch=None, pid=None, role=None, now=now,
+        )
+        db.enqueue_live_message("cli-live", "op", "steer", now)
+
+        payload = (
+            '{"worktree_id": "%s", "had_session": true, '
+            '"method": "graceful", "ok": true}' % wt_id
+        )
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ):
+            resp = client.post(f"/api/v1/worktrees/{wt_id}/restart")
+
+        assert resp.status_code == 200
+        assert db.get_live_session("cli-live")["status"] == "expired"
+        assert db.list_pending_live_messages("cli-live") == []
+        assert db.list_fresh_live_sessions(wt_id, now=now) == []
+
+    def test_restart_failure_keeps_live_session(
+        self, client, app,
+    ) -> None:
+        """A restart that reports ``ok:false`` did NOT terminate the CLI, so the
+        live registration must be left intact (no premature invalidation)."""
+        import time
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "lambda-core-wsl-20250101-193400-noop"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        db = app.state.db
+        now = time.time()
+        db.register_live_session(
+            "cli-live", machine="test-agent", cwd=None, worktree_id=wt_id,
+            repo=None, branch=None, pid=None, role=None, now=now,
+        )
+
+        payload = (
+            '{"worktree_id": "%s", "had_session": false, '
+            '"method": "none", "ok": false}' % wt_id
+        )
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ):
+            resp = client.post(f"/api/v1/worktrees/{wt_id}/restart")
+
+        assert resp.status_code == 200
+        assert db.get_live_session("cli-live")["status"] == "live"
+
 
 class TestAcpAliasResolution:
     """Session routes accept the ACP session id as an alias key."""

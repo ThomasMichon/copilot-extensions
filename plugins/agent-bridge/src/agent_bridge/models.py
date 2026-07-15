@@ -329,6 +329,12 @@ class SendMessageRequest(BaseModel):
     kind: str = "prompt"
     wait: bool = False
     wait_timeout: float = 120.0
+    #: Optional freshness assertion (#2906): the session id the caller believes
+    #: is the *current* live registration for the target's worktree. When set,
+    #: the bridge rejects (409) the message if it doesn't match the current live
+    #: session -- so a steer addressed to a rolled/taken-over incarnation fails
+    #: fast instead of durably queuing a wrong-incarnation write.
+    expected_session_id: str | None = None
 
 
 class SendMessageResult(BaseModel):

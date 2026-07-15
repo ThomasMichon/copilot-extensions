@@ -338,18 +338,64 @@ async def post_live_message(
     of sending.
     """
     db = _db(request)
-    if db.get_live_session(session_id) is None:
-        raise HTTPException(status_code=404, detail="live session not found")
+    now = time.time()
 
+    # Freshness lease (#2906): validate the target registration's heartbeat
+    # lease and enqueue *atomically* -- the check + insert run under one write
+    # lock, so a concurrent reaper / take-over invalidation / session roll can't
+    # strand a message on a just-expired registration. Rejects a stale, expired,
+    # or superseded target (409) rather than durably queuing a write that a
+    # later, unrelated incarnation could receive. The race-free enforcement NF's
+    # client-side pre-send freshness guard (#2905) can only approximate.
     after = 0
     if body.wait:
-        store = _store(request)
-        after = store.get_or_create(session_id).latest_id
+        # Capture the represented head WITHOUT creating a store entry -- a
+        # rejected send must not leak a permanent LiveEventStore log for a
+        # stale/absent id. get_or_create is deferred until after the enqueue
+        # succeeds below.
+        existing_log = _store(request).get(session_id)
+        after = existing_log.latest_id if existing_log is not None else 0
 
-    message_id = db.enqueue_live_message(
-        session_id, sender=body.sender, body=body.body, now=time.time(),
-        reply_to=body.reply_to, kind=body.kind,
+    message_id, reason = db.enqueue_live_message_if_fresh(
+        session_id,
+        sender=body.sender,
+        body=body.body,
+        now=now,
+        reply_to=body.reply_to,
+        kind=body.kind,
+        expected_session_id=body.expected_session_id,
     )
+    if reason == "not_found":
+        raise HTTPException(status_code=404, detail="live session not found")
+    if reason == "stale":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"live session {session_id} is no longer fresh (it ended, was "
+                "reaped, or was taken over); refusing delivery"
+            ),
+        )
+    if reason is not None and reason.startswith("superseded:"):
+        current = reason.split(":", 1)[1]
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"live session {session_id} was superseded by {current}; "
+                "refusing delivery"
+            ),
+        )
+    if reason is not None and reason.startswith("expected_mismatch:"):
+        current = reason.split(":", 1)[1]
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"expected live session {body.expected_session_id} is not the "
+                f"current live registration (current is {current or 'none'}); "
+                "refusing delivery"
+            ),
+        )
+    if message_id is None:  # defensive: unreachable when reason is None
+        raise HTTPException(status_code=500, detail="enqueue produced no id")
 
     if not body.wait:
         return SendMessageResult(session_id=session_id, message_id=message_id)
