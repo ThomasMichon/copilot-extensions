@@ -54,7 +54,7 @@ the **queue**; agent-bridge is an optional producer/subscriber alongside it.
 
 Every verb except `serve` is a thin client that talks to a coordinator over
 HTTP. Point the CLI at one with `AGENT_DISPATCH_URL` (defaults to the loopback
-`http://127.0.0.1:9330`); add `AGENT_DISPATCH_TOKEN` if it requires bearer auth.
+`http://127.0.0.1:9847`); add `AGENT_DISPATCH_TOKEN` if it requires bearer auth.
 
 ```bash
 agent-dispatch health          # confirm a coordinator is reachable first

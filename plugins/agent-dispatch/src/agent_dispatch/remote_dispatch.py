@@ -52,10 +52,10 @@ def wsl_coordinator_present() -> bool:
     BOTH envs (Windows via WSL2 localhost-forwarding, WSL natively), whereas a
     Windows-bound port is NOT reachable from WSL over localhost. So a Windows
     ``serve`` must **defer** when a WSL peer exists -- starting a second
-    coordinator would either collide on ``127.0.0.1:9330`` (bind failure) or,
+    coordinator would either collide on ``127.0.0.1:9847`` (bind failure) or,
     if it wins the race, split-brain into two coordinators with two task DBs
     (issue #2777). The Windows CLI still reaches the WSL coordinator via the
-    forwarded ``127.0.0.1:9330``.
+    forwarded ``127.0.0.1:9847``.
 
     Off Windows this is always False (Linux/WSL is the correct coordinator home).
     Best-effort and bounded: a missing/broken ``wsl.exe`` yields False.

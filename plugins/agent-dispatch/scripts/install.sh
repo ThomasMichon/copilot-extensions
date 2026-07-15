@@ -9,7 +9,7 @@
 #
 # Runtime lives at ~/.agent-dispatch/ (venv, config, DB). Binstub goes to
 # ~/.local/bin/agent-dispatch. On its deploy machines the coordinator runs as a
-# systemd **user** service (loopback 127.0.0.1:9330) -- a per-host local
+# systemd **user** service (loopback 127.0.0.1:9847) -- a per-host local
 # coordinator, matching agent-bridge's per-host service model.
 #
 # Usage:
@@ -283,7 +283,7 @@ _install_service() {
         cat > "$ENV_FILE" << 'ENVEOF'
 # agent-dispatch coordinator service environment (edit + `systemctl --user restart agent-dispatch`)
 AGENT_DISPATCH_HOST=127.0.0.1
-AGENT_DISPATCH_PORT=9330
+AGENT_DISPATCH_PORT=9847
 # AGENT_DISPATCH_DB=%h/.agent-dispatch/tasks.db   # default; uncomment to override
 # AGENT_DISPATCH_TOKEN=                            # set to require bearer auth
 ENVEOF
