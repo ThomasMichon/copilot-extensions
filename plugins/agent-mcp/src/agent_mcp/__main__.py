@@ -6,6 +6,7 @@ Subcommands:
   status                        Show prerequisites and available bridges.
   call <bridge> <tool> [args]   One-shot: invoke one upstream tool, print result.
   materialize <bridge>          Project the upstream catalog into a CLI stub fleet.
+  serve                         Resident warmth daemon: keep upstreams warm over a socket.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from pathlib import Path
 
 from . import __version__
 from . import materialize as _materialize
+from . import serve as _serve
 from .bridge import Bridge
 from .client import (
     OneShotSession,
@@ -136,20 +138,55 @@ def _resolve_stub(manifest_path: str, stub: str) -> tuple[str, str]:
     return str(bridge_ref), str(entry["tool"])
 
 
-async def _run_call(cfg: BridgeConfig, tool: str, arguments: dict) -> int:
-    async with OneShotSession(cfg) as sess:
-        result = await sess.call_tool(tool, arguments)
-    text = result_text(result)
-    if result_is_error(result):
+def _emit_call_output(text: str, structured: object | None, is_error: bool,
+                      *, tool: str) -> int:
+    """Shared stdout/stderr/exit handling for a tool result (cold or serve path)."""
+    if is_error:
         sys.stderr.write((text or f"tool '{tool}' reported an error") + "\n")
         return 1
     if text:
         sys.stdout.write(text + ("\n" if not text.endswith("\n") else ""))
-    else:
-        structured = result_structured(result)
-        if structured is not None:
-            sys.stdout.write(json.dumps(structured) + "\n")
+    elif structured is not None:
+        sys.stdout.write(json.dumps(structured) + "\n")
     return 0
+
+
+async def _run_call(cfg: BridgeConfig, tool: str, arguments: dict) -> int:
+    async with OneShotSession(cfg) as sess:
+        result = await sess.call_tool(tool, arguments)
+    return _emit_call_output(result_text(result), result_structured(result),
+                             result_is_error(result), tool=tool)
+
+
+def _try_serve_call(bridge_ref: str, tool: str, arguments: dict,
+                    *, no_serve: bool) -> int | None:
+    """Attempt the call via a running ``agent-mcp serve`` daemon.
+
+    Returns an exit code when the daemon handled the request (success *or* a
+    real upstream/config error), or ``None`` when the daemon is unavailable so
+    the caller falls back to the stateless one-shot cold path.
+    """
+    socket = None if no_serve else _serve.serve_socket_if_available()
+    if socket is None:
+        return None
+    # The daemon's CWD may differ from ours: send an absolute bridge path so it
+    # resolves the same config (a bridge *name* passes through unchanged).
+    ref = bridge_ref
+    try:
+        p = Path(bridge_ref)
+        if p.exists():
+            ref = str(p.resolve())
+    except OSError:
+        pass
+    try:
+        resp = asyncio.run(_serve.call_via_socket(socket, ref, tool, arguments))
+    except OSError:
+        return None  # socket vanished/refused -> fall back to cold path
+    if not resp.get("ok"):
+        print(f"agent-mcp call: {resp.get('error', 'serve error')}", file=sys.stderr)
+        return 1
+    return _emit_call_output(resp.get("content") or "", resp.get("structured"),
+                             bool(resp.get("isError")), tool=tool)
 
 
 def _cmd_call(args: argparse.Namespace) -> int:
@@ -167,13 +204,24 @@ def _cmd_call(args: argparse.Namespace) -> int:
                 return 2
             bridge_ref, tool = args.pos[0], args.pos[1]
             inline = args.pos[2] if len(args.pos) > 2 else None
-        cfg = load_config(bridge_ref)
         arguments = _resolve_arguments(inline, args.request_file, args.arguments)
     except ConfigError as exc:
         print(f"agent-mcp: {exc}", file=sys.stderr)
         return 1
     except json.JSONDecodeError as exc:
         print(f"agent-mcp call: invalid JSON arguments: {exc}", file=sys.stderr)
+        return 1
+
+    # Fast path: a running serve daemon holds the upstream warm. Falls through
+    # to the cold one-shot path when the daemon is absent.
+    served = _try_serve_call(bridge_ref, tool, arguments, no_serve=args.no_serve)
+    if served is not None:
+        return served
+
+    try:
+        cfg = load_config(bridge_ref)
+    except ConfigError as exc:
+        print(f"agent-mcp: {exc}", file=sys.stderr)
         return 1
     try:
         return asyncio.run(_run_call(cfg, tool, arguments))
@@ -224,6 +272,22 @@ def _cmd_materialize(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# serve -- resident warmth daemon
+# ---------------------------------------------------------------------------
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    socket_path = args.socket or str(_serve.default_socket_path())
+    server = _serve.Server(socket_path, idle_timeout=args.idle_timeout)
+    print(f"agent-mcp serve: listening on {socket_path} "
+          f"(idle-timeout {args.idle_timeout:g}s; Ctrl-C to stop)", file=sys.stderr)
+    try:
+        asyncio.run(server.serve_forever())
+    except KeyboardInterrupt:
+        print("agent-mcp serve: stopped", file=sys.stderr)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-mcp", description=__doc__)
     parser.add_argument("--version", action="version", version=f"agent-mcp {__version__}")
@@ -254,7 +318,19 @@ def build_parser() -> argparse.ArgumentParser:
                         help="path to a JSON file holding the arguments object")
     p_call.add_argument("--arguments",
                         help="the arguments object as an inline JSON string")
+    p_call.add_argument("--no-serve", action="store_true",
+                        help="bypass a running 'agent-mcp serve' daemon and use "
+                             "the stateless one-shot path directly")
     p_call.set_defaults(func=_cmd_call)
+
+    p_serve = sub.add_parser(
+        "serve", help="run the resident warmth daemon (keeps upstreams warm)")
+    p_serve.add_argument("--socket", help="unix socket path "
+                                          "(default: $AGENT_MCP_HOME/serve.sock)")
+    p_serve.add_argument("--idle-timeout", type=float, default=300.0,
+                         help="evict a warm session unused this many seconds "
+                              "(default: 300)")
+    p_serve.set_defaults(func=_cmd_serve)
 
     p_mat = sub.add_parser(
         "materialize", help="project an upstream MCP catalog into a CLI stub fleet")
