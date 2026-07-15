@@ -207,6 +207,63 @@ class DispatchClient:
     def recover(self) -> dict:
         return self._unwrap(self._http.post("/recover"))
 
+    # -- spawn reservations --------------------------------------------------
+
+    def reserve_spawn(self, task_id: str, *, reserved_by: str | None = None) -> dict:
+        """Atomically reserve the right to spawn an embody worker for a task.
+
+        Returns ``{"reserved": bool, "reservation": {...}}``. When ``reserved``
+        is ``False`` an active reservation already exists and the caller must
+        **not** spawn.
+        """
+        return self._unwrap(
+            self._http.post(
+                "/spawn-reservations",
+                json={"task_id": task_id, "reserved_by": reserved_by},
+            )
+        )
+
+    def record_spawn(
+        self,
+        key: str,
+        *,
+        session_handle: str | None = None,
+        worktree: str | None = None,
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/spawn-reservations/{key}/spawned",
+                json={"session_handle": session_handle, "worktree": worktree},
+            )
+        )
+
+    def fail_spawn(self, key: str, *, detail: str | None = None) -> dict:
+        return self._unwrap(
+            self._http.post(f"/spawn-reservations/{key}/fail", json={"detail": detail})
+        )
+
+    def settle_spawn(self, key: str, *, detail: str | None = None) -> dict:
+        return self._unwrap(
+            self._http.post(f"/spawn-reservations/{key}/settle", json={"detail": detail})
+        )
+
+    def list_reservations(
+        self,
+        *,
+        task_id: str | None = None,
+        state: str | None = None,
+        limit: int = 200,
+    ) -> list[dict]:
+        params: dict[str, Any] = {"limit": limit}
+        if task_id is not None:
+            params["task_id"] = task_id
+        if state is not None:
+            params["state"] = state
+        return self._unwrap(self._http.get("/spawn-reservations", params=params))
+
+    def get_reservation(self, key: str) -> dict:
+        return self._unwrap(self._http.get(f"/spawn-reservations/{key}"))
+
     def stream_events(self) -> Iterator[dict]:
         """Yield task events from the coordinator's SSE stream (blocking)."""
         with self._http.stream("GET", "/events") as resp:

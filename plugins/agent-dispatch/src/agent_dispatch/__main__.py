@@ -163,9 +163,86 @@ def _dispatch_cross_machine(args: argparse.Namespace, repo: str) -> int:
 
 
 def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
-    """Spawn a worker for a freshly created task (best effort).
+    """Reserve the spawn atomically, then spawn a worker **exactly once**.
 
-    Two backends select *how* the worker is embodied:
+    The spawn is gated on an **atomic spawn reservation** taken from the
+    coordinator before launching anything. This closes the gap between the
+    queue's transactional dedup/claim and the non-transactional spawn: a dedup
+    collision (``create --spawn`` on an existing ``dedup_key``), a racing second
+    ``create --spawn``, or a re-poll can never double-spawn -- exactly one caller
+    wins the reservation and spawns; the rest skip. If no active reservation can
+    be taken (one already exists), this returns without spawning.
+    """
+    task_id = task["id"]
+    reserved_by = f"cli:{uuid.uuid4().hex[:8]}"
+    try:
+        with _client(args) as c:
+            resp = c.reserve_spawn(task_id, reserved_by=reserved_by)
+    except DispatchError as exc:
+        # Fail safe: if we cannot reserve, we do NOT spawn (better to leave the
+        # task queued than risk a second autonomous worker).
+        print(
+            f"agent-dispatch: --spawn skipped (could not reserve spawn: {exc}); "
+            f"task {task_id} left queued for any worker to claim",
+            file=sys.stderr,
+        )
+        return
+    if not resp.get("reserved"):
+        res = resp.get("reservation", {})
+        print(
+            f"agent-dispatch: --spawn skipped -- task {task_id} already has an "
+            f"active spawn ({res.get('key')} is {res.get('state')}); not spawning "
+            "a second worker",
+            file=sys.stderr,
+        )
+        return
+
+    key = resp["reservation"]["key"]
+    spawned = _do_spawn(args, task)
+    try:
+        with _client(args) as c:
+            if spawned is None:
+                c.fail_spawn(key, detail="no spawn mechanism available")
+            else:
+                result, via, handle = spawned
+                if result.returncode != 0:
+                    c.fail_spawn(key, detail=f"{via} exited {result.returncode}")
+                else:
+                    c.record_spawn(
+                        key,
+                        session_handle=handle.get("session"),
+                        worktree=handle.get("worktree"),
+                    )
+    except DispatchError:
+        # Best-effort bookkeeping -- the spawn itself already ran and was
+        # reported; a coordinator hiccup here must not crash `create`.
+        pass
+
+
+def _embody_handle(result) -> dict[str, str | None]:
+    """Best-effort extract the session/worktree handle from ``embody --json``."""
+    handle: dict[str, str | None] = {"session": None, "worktree": None}
+    try:
+        data = json.loads(result.stdout or "{}")
+    except (ValueError, TypeError):
+        return handle
+    if not isinstance(data, dict):
+        return handle
+    launch = data.get("launch") if isinstance(data.get("launch"), dict) else {}
+    handle["worktree"] = (
+        data.get("worktree_id") or data.get("worktree") or launch.get("worktree_id")
+    )
+    handle["session"] = (
+        data.get("session_id") or data.get("session") or launch.get("session")
+    )
+    return handle
+
+
+def _do_spawn(args: argparse.Namespace, task: dict):
+    """Launch a worker for a task (best effort); return ``(result, via, handle)``.
+
+    Returns ``None`` if no spawn mechanism is available (task left queued). Two
+    backends select *how* the worker is embodied:
 
     - ``embody`` -- a **CLI-backed autopilot** session in a fresh parallel
       worktree via ``agent-worktrees embody`` (the "dispatch an agent to do X"
@@ -173,9 +250,6 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
       completion). Falls back to the bridge backend if agent-worktrees is
       absent.
     - ``bridge`` (default) -- a **headless** agent-bridge ACP worker.
-
-    Either way, if no spawn mechanism is available the task is simply left
-    queued for any worker to claim -- never a hard failure.
     """
     backend = getattr(args, "spawn_backend", "bridge")
     coordinator_url = args.url or client_url()
@@ -198,9 +272,9 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
                     f"{task['id']} left queued for any worker to claim",
                     file=sys.stderr,
                 )
-                return
+                return None
             _report_spawn_result(result, task["id"], "agent-worktrees embody")
-            return
+            return result, "agent-worktrees embody", _embody_handle(result)
         # Graceful degrade: no agent-worktrees -> try the headless bridge path.
         print(
             "agent-dispatch: embody backend unavailable (agent-worktrees not on "
@@ -225,8 +299,9 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
             "for any worker to claim",
             file=sys.stderr,
         )
-        return
+        return None
     _report_spawn_result(result, task["id"], "agent-bridge")
+    return result, "agent-bridge", {"session": worker_id, "worktree": None}
 
 
 def _report_spawn_result(result, task_id: str, via: str) -> None:
