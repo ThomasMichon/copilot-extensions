@@ -501,8 +501,14 @@ if (-not `$env:AGENT_DISPATCH_HOST) {
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
 
-    $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-        -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`""
+    # Use conhost --headless to prevent Windows Terminal from capturing the
+    # task's powershell as a visible window/tab when Terminal is the default
+    # terminal app. -WindowStyle Hidden alone is ignored by Windows Terminal, so
+    # a bare `powershell -WindowStyle Hidden` task surfaces a real console window
+    # -- and because the launcher runs the long-lived `-m agent_dispatch serve`
+    # in-process, that window persists for the life of the coordinator.
+    $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
+        -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`""
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     $settings = New-ScheduledTaskSettingsSet `
         -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
