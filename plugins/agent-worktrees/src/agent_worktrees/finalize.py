@@ -564,14 +564,22 @@ def _reconcile_merged_pointers(
                 and git_ops.is_clean(cwd=worktree_path)
                 and _is_content_on_upstream(branch, upstream, cwd=worktree_path)
             ):
-                up_sha = git_ops.git(
-                    "rev-parse", upstream, cwd=worktree_path, check=False
-                ).stdout.strip()
-                if up_sha:
-                    git_ops.git(
-                        "reset", "--hard", up_sha, "--quiet",
-                        cwd=worktree_path, check=False,
-                    )
+                # Prefer a non-destructive rebase: it drops already-merged
+                # commits while PRESERVING any commit that diverges from
+                # upstream -- e.g. a post-merge revert that nets to the
+                # merge-base, the #2854 blind spot the blob check above misses.
+                # Only hard-reset when the rebase cannot proceed (the
+                # squash-merge phantom-conflict); the content is already
+                # confirmed on upstream, so that reset is lossless.
+                if not git_ops.rebase(upstream, cwd=worktree_path):
+                    up_sha = git_ops.git(
+                        "rev-parse", upstream, cwd=worktree_path, check=False
+                    ).stdout.strip()
+                    if up_sha:
+                        git_ops.git(
+                            "reset", "--hard", up_sha, "--quiet",
+                            cwd=worktree_path, check=False,
+                        )
         elif _is_content_on_upstream(branch, upstream, cwd=anchor):
             up_sha = git_ops.git(
                 "rev-parse", upstream, cwd=anchor, check=False

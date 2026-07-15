@@ -11,13 +11,20 @@ existing moves both misbehave here:
 - a plain **rebase** *replays* the local commit onto the new upstream, which can
   hit a phantom conflict when the squash-merge folded/re-ordered the change.
 
-``pr-complete`` instead **detects** that the branch's work is already on upstream
-(patch-id equivalence via ``git cherry``) and **fast-forwards past the
-squash-merge commit** -- hard-resetting the branch to the upstream tip so the now
-redundant local commits simply drop, with **no replay and no conflict**.  When
-the branch instead carries genuinely-new commits (a behind-but-unmerged PR, or
-extra work committed after the PR), it falls back to a **rebase** so that new
-work is preserved on top.  A pre-reset backup ref is written for recoverability.
+``pr-complete`` **rebases the branch forward first** -- a non-destructive replay
+that drops commits already applied upstream (by patch-id) while **preserving any
+genuinely-new commit**, including one authored *after* the merge whose content
+happens to coincide with upstream (the aperture-labs #2854 regression, where a
+blanket hard reset silently discarded such a commit and left ``create-pr``
+reporting "nothing ahead").  Only when that rebase **phantom-conflicts** -- the
+squash-merge case where several branch commits were folded into one upstream
+commit, so a per-commit replay conflicts even though the net content is
+identical -- does it fall back to **fast-forwarding past the squash** by
+hard-resetting to the upstream tip.  That fallback is gated on the branch's work
+being confirmed already on upstream (tree/blob equivalence), so the reset is
+content-lossless -- the #2147 fix, which succeeds where a strict fast-forward
+refuses on ``ahead > 0``.  A pre-reconcile backup ref is written for
+recoverability whichever path runs.
 
 This is distinct from ``finalize`` (worktree-lifecycle cleanup): ``pr-complete``
 lands the worktree *forward* after a merge; a keep-alive worktree runs it and
@@ -147,52 +154,80 @@ def complete_worktree(
                 "head": _short_head(worktree_path),
                 "message": f"{branch} fast-forwarded to {upstream} (was {behind} behind)."}
 
-    # Local commits present -- is every change already on upstream (squash-merged)?
+    # Local commits present. Is every change the branch introduced already on
+    # upstream (a squash-merge folded it)?  Used only to decide the *fallback*
+    # below -- the primary move is a non-destructive rebase.
     fully_merged = _branch_fully_merged(merge_base, branch, upstream, cwd=worktree_path)
 
-    if fully_merged:
-        # The squash-merge already carries every local patch. Fast-forward PAST
-        # the squash commit by hard-resetting to upstream -- drop the now
-        # redundant local commits, no replay, no phantom conflict. This is the
-        # #2147 fix: it succeeds where a strict ff refuses on ahead>0.
-        if dry_run:
+    if dry_run:
+        if fully_merged:
             return {**base, "success": True, "action": "reset-past-squash",
                     "dropped": ahead,
-                    "message": (f"Would reset {branch} to {upstream}, dropping "
-                                f"{ahead} squash-merged commit(s).")}
-        pre = git_ops.git("rev-parse", branch, cwd=worktree_path, check=False).stdout.strip()
-        if pre:
-            git_ops.git("update-ref", BACKUP_REF, pre, cwd=worktree_path, check=False)
-        reset = git_ops.git("reset", "--hard", upstream, cwd=worktree_path, check=False)
-        if reset.returncode != 0:
-            return {**base, "action": "error",
-                    "error": f"Reset of {branch} to {upstream} failed: {reset.stderr.strip()}"}
-        return {**base, "success": True, "action": "reset-past-squash",
-                "dropped": ahead, "backup_ref": BACKUP_REF,
-                "head": _short_head(worktree_path),
-                "message": (f"{branch} fast-forwarded past the squash-merge: "
-                            f"dropped {ahead} redundant local commit(s); HEAD now "
-                            f"{_short_head(worktree_path)} == {upstream}. "
-                            f"(pre-complete state saved at {BACKUP_REF})")}
-
-    # Genuinely-new local commits (behind-but-unmerged, or extra work after the
-    # PR). Rebase forward: already-merged commits drop as already-applied; the
-    # new commits are preserved on top.
-    if dry_run:
+                    "message": (f"Would reconcile {branch} onto {upstream} "
+                                f"(rebase; hard-reset past the squash only if the "
+                                f"replay phantom-conflicts), dropping up to "
+                                f"{ahead} already-merged commit(s).")}
         return {**base, "success": True, "action": "rebased",
                 "message": (f"Would rebase {branch} onto {upstream}, preserving "
                             "new commit(s) not yet upstream.")}
-    if not git_ops.rebase(upstream, cwd=worktree_path):
+
+    # Back up the pre-reconcile tip so any dropped commit stays recoverable,
+    # whichever path is taken below.
+    pre = git_ops.git("rev-parse", branch, cwd=worktree_path, check=False).stdout.strip()
+    if pre:
+        git_ops.git("update-ref", BACKUP_REF, pre, cwd=worktree_path, check=False)
+
+    # PRIMARY: rebase forward. This is non-destructive -- it drops commits that
+    # are already applied upstream (by patch-id) while PRESERVING any commit that
+    # is genuinely new, *including one authored after the merge whose content
+    # happens to coincide with upstream*.  A blanket ``reset --hard upstream``
+    # (the old ``fully_merged`` fast-path) silently discarded such a commit and
+    # left create-pr reporting "nothing ahead" -- aperture-labs #2854.  Only
+    # fall back to the hard reset when the rebase cannot proceed.
+    if git_ops.rebase(upstream, cwd=worktree_path):
+        kept = git_ops._rev_count(f"{upstream}..{branch}", cwd=worktree_path)
+        if kept == 0:
+            # Every local commit was already merged; the rebase dropped them
+            # cleanly (no hard reset needed).  Report as the squash-reconcile.
+            return {**base, "success": True, "action": "reset-past-squash",
+                    "dropped": ahead, "backup_ref": BACKUP_REF,
+                    "head": _short_head(worktree_path),
+                    "message": (f"{branch} reconciled onto {upstream}: all "
+                                f"{ahead} local commit(s) were already merged; "
+                                f"HEAD now {_short_head(worktree_path)} == "
+                                f"{upstream}. (pre-complete state saved at "
+                                f"{BACKUP_REF})")}
+        return {**base, "success": True, "action": "rebased", "kept": kept,
+                "backup_ref": BACKUP_REF,
+                "head": _short_head(worktree_path),
+                "message": (f"{branch} rebased onto {upstream}, preserving "
+                            f"{kept} new commit(s); HEAD now "
+                            f"{_short_head(worktree_path)}.")}
+
+    # The rebase hit a conflict and was aborted (branch unchanged).  When the
+    # branch's work is confirmed already on upstream, the conflict is the
+    # squash-merge phantom-conflict (#2147): several branch commits were folded
+    # into one upstream commit, so a per-commit replay conflicts even though the
+    # net content is identical.  Fast-forward PAST the squash by hard-resetting
+    # to upstream -- content-lossless, because ``fully_merged`` guarantees every
+    # branch change is already present upstream.  Otherwise it is a genuine
+    # conflict the operator must resolve.
+    if not fully_merged:
         return {**base, "action": "error",
                 "error": (f"Rebase of {branch} onto {upstream} hit a conflict and "
                           "was aborted; the branch is unchanged. Resolve by hand "
                           f"(git rebase {upstream}), then retry.")}
-    kept = git_ops._rev_count(f"{upstream}..{branch}", cwd=worktree_path)
-    return {**base, "success": True, "action": "rebased", "kept": kept,
+    reset = git_ops.git("reset", "--hard", upstream, cwd=worktree_path, check=False)
+    if reset.returncode != 0:
+        return {**base, "action": "error",
+                "error": f"Reset of {branch} to {upstream} failed: {reset.stderr.strip()}"}
+    return {**base, "success": True, "action": "reset-past-squash",
+            "dropped": ahead, "backup_ref": BACKUP_REF,
             "head": _short_head(worktree_path),
-            "message": (f"{branch} rebased onto {upstream}"
-                        + (f", preserving {kept} new commit(s)" if kept else "")
-                        + f"; HEAD now {_short_head(worktree_path)}.")}
+            "message": (f"{branch} fast-forwarded past the squash-merge: "
+                        f"dropped {ahead} redundant local commit(s); HEAD now "
+                        f"{_short_head(worktree_path)} == {upstream}. "
+                        f"(pre-complete state saved at {BACKUP_REF})")}
 
 
 def _short_head(cwd: str) -> str:
