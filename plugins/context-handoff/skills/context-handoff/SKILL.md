@@ -84,7 +84,7 @@ back to the paste reply.
   this worktree (payload = the full markdown; **no** session file). It returns a
   baton paste-seed *and* a **deferred cutover seed** on the `HANDOFF_SEED:` line.
 - **agent-dispatch absent →** a **file** in the session state folder; the reply
-  is `Read the handoff at <path> and continue: <topic>.`
+  is `Continue: <topic>. Read the handoff at <path> and continue.`
 
 You don't choose the storage — the tool does; it sits *on top of* agent-dispatch
 when it exists and falls back to the file otherwise. **Prefer the task flow:** if
@@ -161,8 +161,9 @@ The mechanics, for when you must do it by hand (extension not loaded):
     --target-worktree <worktree_id> --target-machine <machine> \
     --source context-handoff \
     --dedup-key "handoff-<sessionId>"
-  # then reply with the resume seed: "You are resuming a handoff (agent-dispatch
-  # task <id>) … run: agent-dispatch consume <id> ; then continue: <topic>."
+  # then reply with the resume seed, which LEADS with the topic so the next
+  # session's title-inference is specific: "Continue: <topic>. You are resuming
+  # a handoff (agent-dispatch task <id>) … run: agent-dispatch consume <id>."
   ```
 
   - **`proposed`** (not `queued`): a handoff is a draft the operator resumes
@@ -177,7 +178,7 @@ The mechanics, for when you must do it by hand (extension not loaded):
 
 - **No coordinator:** write the file to
   `~/.copilot/session-state/<sessionId>/files/<sessionId>-prompt.md` and reply
-  with `Read the handoff at <path> and continue: <topic>.`
+  with `Continue: <topic>. Read the handoff at <path> and continue.`
 
 ---
 
@@ -240,8 +241,9 @@ window, **never** by a spawned background ACP agent unless the operator
 explicitly asks):
 
 1. **agent-dispatch form** (the default when a coordinator is running). The
-   previous session's reply was the resume seed `You are resuming a handoff
-   (agent-dispatch task <id>) … run: agent-dispatch consume <id>`. Resume either by:
+   previous session's reply was the resume seed `Continue: <topic>. You are
+   resuming a handoff (agent-dispatch task <id>) … run: agent-dispatch consume
+   <id>`. Resume either by:
    - running **`/resume-handoff`** (no argument) after `/clear`/`/new` in the
      same worktree — the extension consumes this worktree's pending handoff task
      and **injects its continuation prompt** as your next turn (see below); or
@@ -249,8 +251,8 @@ explicitly asks):
      completed with one command (`agent-dispatch consume <id>`) and tells you to
      continue in place.
 2. **File form** (the fallback when no coordinator was running). The reply was
-   `Read the handoff at <path> and continue: …`; pasted into a new session, it
-   names the file and tells you to read it and continue.
+   `Continue: <topic>. Read the handoff at <path> and continue.`; pasted into a
+   new session, it names the file and tells you to read it and continue.
 
 > **A handoff is in-place: same worktree, new session.** The point of a handoff
 > is to continue *this* work with a fresh context window, so the new session

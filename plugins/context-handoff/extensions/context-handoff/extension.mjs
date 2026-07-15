@@ -614,7 +614,11 @@ const session = await joinSession({
 
         const cwd = state.cwd || process.cwd();
         const title = (args?.title ?? "").toString().trim();
-        const topic = title || "continue this session";
+        // Front-load the seed with the specific action so the successor
+        // session's title-inference (biased toward the START of the prompt)
+        // derives a meaningful title from the topic rather than the generic
+        // handoff boilerplate that follows it.
+        const lead = title ? `Continue: ${title}` : "Continue this session";
 
         // Store the handoff (agent-dispatch task preferred, else session file)
         // and derive both the short reply prompt (the baton paste-seed) and the
@@ -641,18 +645,20 @@ const session = await joinSession({
             //   `completed` means the work is done, not the baton was handed off.
             //
             // Both are single-line ASCII so they ride `copilot -i` intact.
+            // Each LEADS with the specific action (`lead`) so the successor
+            // session's title-inference resolves to the topic, not the generic
+            // "Agent Dispatch Task Handoff" boilerplate.
             seed =
-              `You are resuming a handoff (agent-dispatch task ${taskId}); ` +
-              `continue the prior session's work IN PLACE -- do not restart or ` +
-              `create a new worktree. Load your full brief by running: ` +
-              `agent-dispatch consume ${taskId} ; then continue: ${topic}.`;
+              `${lead}. You are resuming a handoff (agent-dispatch task ` +
+              `${taskId}); continue the prior session's work IN PLACE -- do not ` +
+              `restart or create a new worktree. Load your full brief by ` +
+              `running: agent-dispatch consume ${taskId} .`;
             cutoverSeed =
-              `You are taking over a handoff (agent-dispatch task ${taskId}) IN ` +
-              `PLACE -- do not restart or create a new worktree. Load your brief ` +
-              `and take ownership with: agent-dispatch consume ${taskId} ` +
-              `--defer-complete ; do the work, and ONLY when you reach the ` +
-              `handoff's goal run: agent-dispatch complete ${taskId} . ` +
-              `Continue: ${topic}.`;
+              `${lead}. You are taking over a handoff (agent-dispatch task ` +
+              `${taskId}) IN PLACE -- do not restart or create a new worktree. ` +
+              `Load your brief and take ownership with: agent-dispatch consume ` +
+              `${taskId} --defer-complete ; do the work, and ONLY when you reach ` +
+              `the handoff's goal run: agent-dispatch complete ${taskId} .`;
             storedMsg = (
               `Handoff stored as agent-dispatch task ${taskId} (proposed, label ` +
               `'handoff', pinned to this worktree). No session file was written.\n\n` +
@@ -672,7 +678,7 @@ const session = await joinSession({
 
         if (!seed) {
           const promptPath = saveHandoffPrompt(text, sid);
-          seed = `Read the handoff at ${promptPath} and continue: ${topic}.`;
+          seed = `${lead}. Read the handoff at ${promptPath} and continue.`;
           cutoverSeed = seed;  // no task in file mode: cutover reuses the paste seed
           storedMsg = (
             `Handoff saved to ${promptPath}\n\n` +
