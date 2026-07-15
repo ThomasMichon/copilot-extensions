@@ -439,8 +439,10 @@ agent-mcp call <bridge> <tool> '<arguments-json>'
 ```
 
 Connects to the bridge's upstream, runs the MCP `initialize` handshake, invokes
-one tool, and prints its result — then exits. There is **no per-call daemon**: a
-one-shot connect avoids the resident-server cost while still being a live session.
+one tool, and prints its result — then exits. This is the **stateless cold
+path**; when an `agent-mcp serve` daemon is running (see below), `call`
+transparently routes to it and skips the per-call cold-start instead. Force the
+cold path with `--no-serve` or `AGENT_MCP_NO_SERVE=1`.
 
 - **Arguments** are the tool's **raw MCP `arguments` object** as JSON. Supply it
   inline, via `--arguments '<json>'`, via `--request-file PATH` (a file holding
@@ -490,6 +492,39 @@ list_issues '{"owner":"me","repo":"x"}' | jq '.[].number'
 Re-running `materialize` rebuilds the tree in a temp dir and swaps it in
 atomically, so it doubles as a drift refresh (no partial-write window). The
 bridge's `tools:` allow/deny filter gates which tools are materialized.
+
+### `serve` — the resident warmth tier
+
+```sh
+agent-mcp serve [--socket PATH] [--idle-timeout SECONDS]
+```
+
+`call` (and every materialized stub, unchanged) pays a fresh upstream
+cold-start — spawn the runner + MCP `initialize` — on **every** invocation.
+`serve` runs a resident daemon that keeps one **warm session per bridge** and
+answers `call`/`list` requests over a unix socket (default
+`$AGENT_MCP_HOME/serve.sock`), so repeated calls skip the cold-start entirely.
+
+- **Transparent** — a running `call` auto-detects the socket and routes to it;
+  when the daemon is absent it **falls back to the stateless one-shot path**.
+  So `serve` is an *optional accelerator, never a dependency*. Bypass it with
+  `--no-serve` / `AGENT_MCP_NO_SERVE=1`; point elsewhere with
+  `AGENT_MCP_SERVE_SOCKET`.
+- **Warm pool** — sessions open lazily on first use, are reused, serialized
+  per-bridge, evicted after `--idle-timeout` (default 300s), and reopened if the
+  upstream dies.
+- **No secrets held** — each warm session fetches credentials through the
+  bridge's own auth injector at open time; per-bridge sessions preserve identity
+  separation.
+
+```sh
+agent-mcp serve &                       # start the daemon (e.g. per session/host)
+list_issues '{"owner":"me","repo":"x"}' # now warm: no per-call cold-start
+```
+
+> A **server-launched** upstream inherits the daemon's working directory, so a
+> bridge whose `server.env` uses **relative** paths should make them absolute —
+> the daemon's CWD may differ from where you materialized.
 
 ## Install
 
