@@ -818,6 +818,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             repo=repo,
             labels=args.label or None,
             max_concurrent=args.max_concurrent,
+            heartbeat=not args.no_heartbeat,
         )
         if args.once:
             return _emit({"spawned": sup.poll_once()})
@@ -1217,6 +1218,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--max-concurrent", type=int, default=1,
         help="cap on in-flight spawns (default: 1)",
+    )
+    p.add_argument(
+        "--no-heartbeat", action="store_true",
+        help="don't hold the lease of confirmed-alive embodied workers "
+             "(default: heartbeat live workers so a quiet-but-alive session's "
+             "lease doesn't expire)",
     )
     p.add_argument(
         "--verify-timeout", type=int, default=0,
