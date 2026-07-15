@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-07-14
+- **Last revised:** 2026-07-15
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -53,7 +53,14 @@ lifecycle**, and core **worktree + git** state. It is the foundation every other
 layer builds on. On its own it yields **passive, coarse legibility**: state
 discoverable through declarative hooks and on-demand reads of raw session state —
 an Active / Recent / Completed view of agents, process management, and basic
-remote-shell interop — with **no always-on service required**.
+remote-shell interop — with **no always-on service required**. Owning the
+worktree, it also owns each worktree's **disposition** — whether its work is
+genuinely *resolved and prune-able* or has *actionable follow-ups remaining* —
+which the agent working there **asserts**, because git and process reality alone
+cannot tell a done worktree from a finalized one that still owes follow-ups.
+Alongside that, the ground layer surfaces a **live, passively-derived sense of
+what each agent is currently doing**, needing no cooperation from the agent — the
+same derivation instinct that already separates conversation from idle.
 
 ### agent-bridge — the coordination layer
 Adds **remote agent creation, inspection, and communication** over discoverable
@@ -124,7 +131,15 @@ outcome — so a fleet cooperates through durable artifacts, not just live chatt
 ### legible-live-state
 What every agent is doing is **observable** — from a coarse Active / Recent /
 Completed floor with no service, up to granular live status surfaced into the
-worktree picker when the coordination layer is present.
+worktree picker when the coordination layer is present. Legibility spans two
+complementary registers. A **durable disposition** the agent *asserts* —
+*resolved* vs. *has actionable follow-ups* — so a glance distinguishes a
+prune-able worktree from one still owed attention (a finalized worktree with an
+un-pushed change, an undeployed merge, or leftover temporary state is *not*
+done). And a **live activity pulse** *passively derived* from the agent's own
+intent signals, needing no cooperation, giving a rapid — if coarse — sense of
+current motion. The disposition is high-signal and slow; the pulse is low-signal
+and fast; neither is faked from the other.
 
 ### survivable-work
 An agent's session output is **recoverable and digestible** after the fact —
@@ -173,6 +188,17 @@ saying now) from a **recorded summary outcome** of work done on the fabric's
 behalf. Delegated and handed-off work leaves a durable, queryable result, not
 only a transcript.
 
+### disposition-is-asserted-pulse-is-derived
+A worktree's **disposition** — *resolved* vs. *has actionable follow-ups* — is a
+**deliberate assertion** by the agent that worked it, never inferred from git or
+process state (which cannot tell *done* from *finalized-with-leftovers*). Its
+**live activity pulse**, by contrast, is **passively derived** from the agent's
+own activity with no cooperation required. The two never masquerade as each
+other: an **absent** assertion defaults to the safe, current behavior, and the
+derived pulse — being coarse and sometimes vague — **never** sets the durable
+disposition. Truly finishing a worktree and asserting it *resolved* are the same
+act; leaving a stopping point with work still owed is asserting *follow-ups*.
+
 ## Non-Goals / Boundaries
 
 - **Not the per-host service model.** *How* each layer's runtime is deployed,
@@ -218,3 +244,12 @@ only a transcript.
   reconciling where overlapping cross-layer responsibilities (dedup, liveness,
   identity) should live — generalized here as the standing boundary that keeps
   the layers separate.
+- **2026-07-15** — Extended §Features/`legible-live-state` and added
+  §Behaviors/`disposition-is-asserted-pulse-is-derived`: the two-register model
+  (agent-*asserted* **disposition** vs. passively-*derived* **live activity
+  pulse**), both owned by the ground layer. Mined from operator friction — a
+  worktree picker full of `FINAL` entries that hid which ones still offered
+  follow-ups, and a conversation state that couldn't separate consequential from
+  throwaway. Placed on the ground layer by the *derive-don't-duplicate /
+  single-owning-layer* rule (the delegation layer coordinates over, not copies,
+  it).
