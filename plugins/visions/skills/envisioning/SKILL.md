@@ -113,6 +113,35 @@ Visions change **in place** — this is the core difference from efforts:
   set Status `Superseded` (and point at the replacement). Superseding is not
   archiving — the file stays; Git carries the prior life.
 
+## Cross-repo visions — where the vision lives
+
+A vision is *about* a subject, and that subject often lives in **another** repo.
+Three placement models — pick per the subject; none is mandatory (see
+[`references/visions.md`](references/visions.md) § Cross-repo placement for the
+fuller rationale).
+
+- **Local (default).** The vision lives in *this* repo. Use when the subject is
+  owned here, or the target repo hasn't adopted `visions/`.
+- **Author directly in the target repo.** If the **target repo has adopted
+  `visions/`** and the subject is genuinely *its own* — a tool, service, or
+  product that lives there — you may author the vision **there**, through *that
+  repo's* flow and addendum. A vision about a tool can belong with the tool. Work
+  it as a **good citizen** of the target repo: its conventions win over this
+  repo's.
+- **Hybrid (split public/private).** Keep a **generalized** vision in a
+  **public / portable** repo *and* a **fuller, downstream-private** vision in the
+  control repo that **links to it**. The **public vision is canonical** — it is
+  the north star agents cite and the one the vision→reality delta is derived
+  against; the private vision *elaborates* it with facility-specific intent
+  (private subjects, downstream constraints) and links back. Keep the public
+  artifact **generic** per the repo's public-artifact rule.
+
+Because visions are **revised in place** (no archive), a hybrid's two files each
+evolve in place. Keep the private vision's link to the public canonical one live,
+and never let the private elaboration silently contradict the public intent — when
+the *shared* intent changes, revise the **public** vision (the canonical source),
+then re-elaborate the private one.
+
 ## Adding, changing, and removing (positive vs. negative intent)
 
 A vision is **open-world**: authoritative about what it *states*, and
@@ -323,6 +352,12 @@ expressed through the branch/leaf tree instead of sub-docs.
   the existing thing violates a Non-Goal, no longer fits, or is too complex to grow.
 - ❌ Letting a vision drift to match a half-built reality (a vision is the target,
   not a mirror of current code).
+- ❌ In a **hybrid split**, letting the private, fuller vision become a second
+  source of truth — the **public generalized** vision is canonical and the delta
+  is derived against it; the private one elaborates and links back, never contradicts.
+- ❌ Keeping a vision **here** for a subject genuinely owned by a target repo that
+  has adopted `visions/` — author it there (as a good citizen) or use the hybrid
+  split, rather than reflexively keeping it local.
 - ❌ Trusting a **repo-aware "design from the vision alone"** as a generativity
   measure — an agent that can see reality is contaminated and over-scores. Isolate
   the derivation (strip the vision's reality pointers, deny search/repo/web) and

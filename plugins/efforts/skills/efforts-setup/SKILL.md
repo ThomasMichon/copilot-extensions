@@ -65,6 +65,7 @@ binding doc that it links, e.g. `docs/efforts.md`). Specialize only these:
 | **Section deltas** | renames/additions to the schema | none (use the core) |
 | **Issue linkage** | which tracker; same-repo-only link rule | per the guide |
 | **Effort sources** | where new efforts come from | issues + any plans/roadmaps |
+| **Cross-repo placement** | this repo's stance when an effort touches another repo — host efforts for its own subjects, and prefer local / tracking-only / build-in-target / hybrid | all models available (see `planning-efforts` § Cross-repo efforts) |
 
 Choose **flat** grouping when the repo is itself the primary unit of work;
 choose **by-repo** when the repo coordinates work across many target repos

@@ -1,7 +1,7 @@
 {
   "name": "efforts",
   "description": "Efforts planning system for Copilot CLI -- comprehensive planning folders that represent a stretch of work (premise + plan + validation plan + journal + participant coordination), with a README-as-shared-contract that humans and agents read and write. Ships the planning-efforts workflow skill and an efforts-setup adoption skill.",
-  "version": "0.1.0-dev5",
+  "version": "0.1.0-dev6",
   "author": {
     "name": "Thomas Michon"
   },

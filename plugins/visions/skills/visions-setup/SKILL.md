@@ -64,6 +64,7 @@ binding doc that it links, e.g. `docs/visions.md`). Specialize only these:
 | **Section deltas** | renames/additions to the schema | none (use the core) |
 | **Issue linkage** | which tracker; how a vision cites reality docs | per the guide |
 | **Effort linkage** | how visions feed this repo's efforts (the delta) | per the guide |
+| **Cross-repo placement** | this repo's stance when a vision's subject lives elsewhere — host visions for its own subjects, and prefer local / author-in-target / hybrid | all models available (see `envisioning` § Cross-repo visions) |
 
 **Organization is the primary decision.** The plugin deliberately leaves the
 top-level hierarchy to the repo. Common choices:
