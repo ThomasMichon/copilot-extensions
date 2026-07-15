@@ -1,7 +1,9 @@
 # agent-dispatch — Embody Spawn Supervisor (design)
 
-Status: **in progress** — the spawn-reservation primitive is built; the
-supervisor loop, policy, and transport land in follow-up slices.
+Status: **in progress** — the spawn-reservation primitive **and the supervisor
+loop** are built (spawn-at-most-once); the lease heartbeat, dead-embody
+auto-recovery (both need session-liveness detection), backlog-catch-up policy,
+and the authenticated container transport land in follow-up slices.
 Public tracker: [ThomasMichon/copilot-extensions#44](https://github.com/ThomasMichon/copilot-extensions/issues/44).
 
 This note is the design of record for turning a **queued task** into **exactly
@@ -89,23 +91,56 @@ GET  /spawn-reservations/{key}
 Fail-safe: if the reservation call itself errors, `create --spawn` **does not
 spawn** (better to leave the task queued than risk a second autonomous worker).
 
-## The supervisor loop (planned — follow-up slice)
+## The supervisor loop (built)
 
-The reservation primitive is what makes a safe host-side supervisor possible.
-The loop (not yet built) will:
+The reservation primitive makes a safe host-side supervisor possible. The loop
+(`supervisor.py`, CLI `agent-dispatch supervise`) is built around one hard
+invariant:
 
-- watch for spawn-eligible queued tasks (opt-in per producer/lane),
-- `reserve_spawn` → spawn embody → `record_spawn`,
-- **drive the lease heartbeat** while the embody runs (don't trust the LLM to
-  emit progress to hold its lease),
-- on restart, reconcile every `reserving`/`spawned` reservation against queue
-  state (confirmed live → keep; lost → `fail_spawn` so a fresh attempt spawns),
-- enforce **policy**: bounded concurrency, one active + one catch-up backlog
-  (a missed schedule collapses to one catch-up, never N replays), bounded
-  attempts + a dead-letter state,
-- reach the coordinator over a **narrow, authenticated** bind for containerized
-  producers (a Docker-bridge/scoped-proxy listener — **not** a `0.0.0.0`
-  rebind of the control API), coordinated with the coordinator topology work.
+> **A task is spawned only when a *fresh* spawn reservation is acquired for it.**
+
+Because `reserve_spawn` returns `reserved=False` whenever an *active*
+(`reserving`/`spawned`) reservation already exists, a task that is already being
+spawned — or was spawned and later re-queued (its lease expired while the embody
+is merely **slow**) — is skipped. **Lease expiry is not treated as death**, so a
+slow-but-alive embody is never double-spawned. Each cycle:
+
+1. **reconcile** — settle `spawned` reservations whose task reached a **terminal**
+   state (`completed`/`abandoned`). This is the *only* automatic release, and only
+   for a provably-finished task, so it can never free a still-running spawn.
+2. **poll** — for each eligible queued task (in the lane, due, matching the
+   optional **label opt-in**), up to `--max-concurrent` in-flight: `reserve_spawn`
+   → if reserved, spawn embody → `record_spawn` (or `fail_spawn` on error, which
+   releases a fresh attempt).
+
+CLI:
+
+```
+agent-dispatch supervise [--repo R | --all-repos] [--label L ...] \
+    [--max-concurrent N] [--interval S] [--once]
+agent-dispatch reservations list [--task ID] [--state S]
+agent-dispatch reservations fail|settle <key> [--detail ...]
+```
+
+### Deliberately deferred (needs embody-session liveness detection)
+
+Two capabilities are **intentionally not** in this slice, because doing them
+without liveness detection would reintroduce the double-spawn hazard:
+
+- **Auto-recovery of a dead-but-non-terminal embody.** If an embody genuinely
+  dies (lease expires, task re-queues, but the task never reaches a terminal
+  state), the supervisor does **not** auto-respawn it — its `spawned` reservation
+  is retained and the task is *held* (surfaced via `reservations list`). An
+  operator confirms the embody is gone and runs `reservations fail <key>` to
+  release it for a fresh attempt. Auto-recovery requires trusting lease-expiry as
+  death, which requires liveness detection.
+- **Supervisor-driven lease heartbeat.** To keep a live-but-quiet embody's lease
+  from expiring (and being wrongly recovered), the supervisor would heartbeat on
+  the worker's behalf — but a naive always-heartbeat would *mask* a dead worker.
+  Safe heartbeating is gated on the same liveness signal.
+
+The liveness-aware slice (integrating `agent-worktrees`/`agent-bridge` session
+status) turns lease-expiry into a trustworthy death signal and unlocks both.
 
 ## Genericity
 
