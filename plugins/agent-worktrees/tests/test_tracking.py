@@ -16,6 +16,7 @@ from agent_worktrees.tracking import (
     mark_resumed,
     register_session,
     save_record,
+    set_disposition,
     update_status,
 )
 
@@ -112,6 +113,45 @@ class TestSaveLoadRoundTrip:
         save_record(rec2, path2)
         assert "caller_worktree" not in path2.read_text()
         assert load_record(path2).caller_worktree is None
+
+    def test_disposition_absent_omitted(self, tmp_path: Path):
+        # worktree-status-core: an un-annotated record emits no disposition
+        # lines, so a legacy/common-case YAML stays byte-identical (no churn).
+        rec = self._make_record()
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        txt = path.read_text()
+        assert "follow_up" not in txt
+        assert "summary" not in txt
+        assert "status_note_at" not in txt
+        loaded = load_record(path)
+        assert loaded.follow_up is False
+        assert loaded.summary == ""
+        assert loaded.status_note_at is None
+
+    def test_disposition_round_trip(self, tmp_path: Path):
+        rec = self._make_record(
+            follow_up=True, summary="Phases C/D left; PR open",
+            status_note_at="2026-07-15T10:00:00",
+        )
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        txt = path.read_text()
+        assert "follow_up: true" in txt
+        assert "summary: 'Phases C/D left; PR open'" in txt
+        assert "status_note_at: 2026-07-15T10:00:00" in txt
+        loaded = load_record(path)
+        assert loaded.follow_up is True
+        assert loaded.summary == "Phases C/D left; PR open"
+        # Timestamps reload through YAML's datetime coercion (space form), the
+        # same tolerated round-trip as started_at/completed_at.
+        assert loaded.status_note_at.startswith("2026-07-15")
+
+    def test_disposition_summary_apostrophe(self, tmp_path: Path):
+        rec = self._make_record(summary="don't break on quotes")
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        assert load_record(path).summary == "don't break on quotes"
 
     def test_pr_absent_round_trips_as_none(self, tmp_path: Path):
         rec = self._make_record()
@@ -978,3 +1018,44 @@ class TestOriginInterfaceTaxonomy:
         loaded = load_record(tmp_path / "s1.yaml")
         assert loaded.resolved_interface == "cli"
         assert loaded.resolved_origin == "user"
+
+
+class TestSetDisposition:
+    """worktree-status-core: the set_disposition helper (write path)."""
+
+    def _rec(self, **kw):
+        base = dict(
+            worktree_id="wt-d", branch="b", worktree_path="/tmp/d",
+            repo="r", machine="m", platform="wsl",
+            started_at="2026-07-15T00:00:00", last_resumed_at="2026-07-15T00:00:00",
+            resume_count=0, title="t", status="active", completed_at=None,
+        )
+        base.update(kw)
+        return WorktreeRecord(**base)
+
+    def test_set_follow_up_and_summary(self, tmp_path: Path, monkeypatch):
+        rec = self._rec()
+        p = tmp_path / "wt.yaml"
+        monkeypatch.setattr("agent_worktrees.tracking.save_record",
+                            lambda record, path=None: save_record(record, p))
+        set_disposition(rec, summary="work left", follow_up=True)
+        loaded = load_record(p)
+        assert loaded.follow_up is True
+        assert loaded.summary == "work left"
+        assert loaded.status_note_at  # stamped
+
+    def test_partial_update_preserves_other_field(self, tmp_path: Path, monkeypatch):
+        rec = self._rec(follow_up=True, summary="old")
+        p = tmp_path / "wt.yaml"
+        monkeypatch.setattr("agent_worktrees.tracking.save_record",
+                            lambda record, path=None: save_record(record, p))
+        # summary-only update keeps the follow_up flag
+        set_disposition(rec, summary="new")
+        loaded = load_record(p)
+        assert loaded.summary == "new"
+        assert loaded.follow_up is True
+        # --resolved (follow_up=False) keeps the summary
+        set_disposition(loaded, follow_up=False)
+        again = load_record(p)
+        assert again.follow_up is False
+        assert again.summary == "new"

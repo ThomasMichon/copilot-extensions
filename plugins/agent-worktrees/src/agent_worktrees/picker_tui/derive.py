@@ -118,6 +118,11 @@ def _bucket_from_raw(w):
     b = w.get("cleanup_bucket")
     if b:
         return b
+    # worktree-status-core: on the fallback path (old remote w/o an authoritative
+    # cleanup_bucket), an agent-asserted follow-up downgrades a would-be clean
+    # verdict to the REVIEW-class 'follow-up' bucket. (The authoritative path is
+    # already handled by prune.cleanup_disposition above.)
+    _follow = bool(w.get("follow_up"))
     st = (w.get("state") or "").lower()
     pr = (w.get("pr") or {})
     prst = pr.get("state")
@@ -125,7 +130,7 @@ def _bucket_from_raw(w):
     if not st:
         status = (w.get("status") or "").lower()
         if prst == "merged" or status in ("finalized", "pushed"):
-            return "clean"
+            return "follow-up" if _follow else "clean"
         if prst == "open":
             return "open-pr"
         return "unknown"
@@ -140,7 +145,7 @@ def _bucket_from_raw(w):
     if prst == "open":
         return "open-pr"
     if prst == "merged" or st == "completed":
-        return "clean"
+        return "follow-up" if _follow else "clean"
     if prst == "closed":
         return "closed-unmerged"
     if st == "wip":
@@ -174,6 +179,7 @@ BUCKET_DISPO = {
     "clean": "SAFE",
     "unused": "REVIEW",
     "conversation": "REVIEW",
+    "follow-up": "REVIEW",
     "closed-unmerged": "REVIEW",
     "gone": "REVIEW",
     "dirty": "UNSAFE",
@@ -190,6 +196,7 @@ BUCKET_REASON = {
     "clean": "on default branch",
     "unused": "idle · no commits/turns",
     "conversation": "chat history, no commits",
+    "follow-up": "agent flagged follow-ups",
     "closed-unmerged": "PR closed unmerged",
     "gone": "dir missing",
     "dirty": "uncommitted work",
@@ -229,12 +236,27 @@ def norm(w, machine, env):
     if kind in ("system", "bridge"):
         # Mark managed worktrees distinctly so bridge != system at a glance.
         title = f"[{kind}] {title}"
+    # worktree-status-core: the agent-asserted disposition overlay. A flagged
+    # worktree gets a follow-up glyph prefixed on its title (scannable
+    # regardless of the narrow state column), and its one-line summary rides
+    # after the title. ``state`` stays pure (bucket()/prune key off it); the
+    # not-auto-prune-SAFE behavior comes from the ``follow-up`` cleanup bucket.
+    follow_up = bool(w.get("follow_up"))
+    summary = (w.get("summary") or "").strip()
+    disp_title = title
+    if summary:
+        disp_title = (summary if title == "(untitled)"
+                      else f"{title} — {summary}")
+    if follow_up:
+        disp_title = f"✚ {disp_title}"
     return {
         "id4": w["id"][-4:],
         "machine": machine,
         "env": env,
         "machine_env": f"{machine} {env}",
-        "title": title,
+        "title": disp_title,
+        "follow_up": follow_up,
+        "summary": summary,
         "kind": kind,
         "tracking": w.get("status", ""),
         "state": _state(w),

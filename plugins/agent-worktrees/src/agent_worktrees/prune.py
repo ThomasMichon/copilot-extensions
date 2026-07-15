@@ -153,8 +153,8 @@ class CleanupDisposition:
     """How cleanup should treat a worktree, derived from its verdict."""
 
     cleanable: bool
-    bucket: str   # clean | active | unused | conversation | open-pr |
-    #               closed-unmerged | dirty | wip | unmerged
+    bucket: str   # clean | active | unused | conversation | follow-up |
+    #               open-pr | closed-unmerged | dirty | wip | unmerged
     reason: str
 
 
@@ -183,6 +183,20 @@ def cleanup_disposition(
 
     if info.state == S.ACTIVE:
         return CleanupDisposition(False, "active", v.reason)
+
+    # worktree-status-core: an agent-asserted follow-up overrides a would-be
+    # SAFE verdict. A finalized/merged/completed worktree the agent flagged as
+    # having actionable follow-ups (un-pushed change, undeployed merge, leftover
+    # temp state) is REVIEW -- never auto-pruned SAFE. Only downgrades the
+    # clean/SAFE path; a dirty/wip/open-pr worktree is already non-cleanable, so
+    # the flag adds nothing there.
+    if rec.follow_up and (
+        rec.status == "finalized" or info.state == S.COMPLETED
+        or v.category == "merged"
+    ):
+        return CleanupDisposition(
+            False, "follow-up",
+            f"{v.reason} · agent flagged follow-ups pending")
 
     if rec.status == "finalized" or info.state == S.COMPLETED:
         return CleanupDisposition(True, "clean", v.reason)
