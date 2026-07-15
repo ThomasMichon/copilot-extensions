@@ -60,6 +60,23 @@ class ServerSpec:
     # stdio
     command: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
+    # stdio via an npm package: name the package and let agent-mcp pick the
+    # fastest available runner (bunx -> npx) at spawn time. ``npm_args`` holds
+    # any extra args to pass after the package. ``command`` takes precedence if
+    # both are set. See :mod:`agent_mcp.runner`.
+    npm: str | None = None
+    npm_args: list[str] = field(default_factory=list)
+
+    @property
+    def launch_desc(self) -> str:
+        """A short human description of the upstream launch (for logs/status)."""
+        if self.url:
+            return self.url
+        if self.command:
+            return " ".join(self.command)
+        if self.npm:
+            return " ".join(["npm:" + self.npm, *self.npm_args])
+        return "(unconfigured)"
 
 
 @dataclass
@@ -245,13 +262,32 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
     if not isinstance(raw_server, dict):
         raise ConfigError("config must have a 'server' mapping")
 
+    raw_command = _as_command(raw_server.get("command"))
+    raw_args = [str(a) for a in raw_server.get("args", [])]
+    raw_npm = raw_server.get("npm")
+    npm = str(raw_npm) if raw_npm else None
+
+    # An explicit ``command`` wins and folds ``args`` in (existing behavior). In
+    # ``npm`` mode the command stays empty and ``args`` ride with the package,
+    # resolved to a concrete runner at spawn time (see agent_mcp.runner).
+    if raw_command:
+        command = raw_command + raw_args
+        npm_args: list[str] = []
+        npm = None
+    elif npm:
+        command = []
+        npm_args = raw_args
+    else:
+        command = raw_args  # empty -> stdio validation flags the missing launcher
+        npm_args = []
+
     server = ServerSpec(
         type=str(raw_server.get("type", "http")),
         url=raw_server.get("url"),
-        command=_as_command(raw_server.get("command")) + [
-            str(a) for a in raw_server.get("args", [])
-        ],
+        command=command,
         env={str(k): str(v) for k, v in (raw_server.get("env") or {}).items()},
+        npm=npm,
+        npm_args=npm_args,
     )
 
     # ``auth`` may be a single mapping (one injector) or a list of mappings
@@ -320,8 +356,8 @@ def validate_config(cfg: BridgeConfig) -> list[str]:
         errors.append(f"server.type '{s.type}' must be one of {TRANSPORTS}")
     if s.type == "http" and not s.url:
         errors.append("server.url is required for transport 'http'")
-    if s.type == "stdio" and not s.command:
-        errors.append("server.command is required for transport 'stdio'")
+    if s.type == "stdio" and not s.command and not s.npm:
+        errors.append("server.command or server.npm is required for transport 'stdio'")
 
     # The bridge injects via the transport's native mechanism: header for http,
     # env for stdio. ``inject`` is parsed but the transport ultimately decides, so

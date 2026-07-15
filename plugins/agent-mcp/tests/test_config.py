@@ -62,6 +62,42 @@ def test_stdio_requires_command():
     assert "server.command" in str(exc.value)
 
 
+def test_stdio_npm_declaration():
+    cfg = parse_config({
+        "server": {"type": "stdio", "npm": "gitea-mcp"},
+        "auth": {"kind": "none"},
+    })
+    assert cfg.server.npm == "gitea-mcp"
+    assert cfg.server.command == []
+    assert cfg.server.npm_args == []
+    assert cfg.server.launch_desc == "npm:gitea-mcp"
+
+
+def test_stdio_npm_with_args():
+    cfg = parse_config({
+        "server": {"type": "stdio", "npm": "some-mcp", "args": ["--port", "0"]},
+    })
+    assert cfg.server.npm == "some-mcp"
+    assert cfg.server.npm_args == ["--port", "0"]
+    assert cfg.server.command == []
+
+
+def test_stdio_command_wins_over_npm():
+    # An explicit command takes precedence; args fold into it and npm is ignored.
+    cfg = parse_config({
+        "server": {"type": "stdio", "command": "npx",
+                   "args": ["-y", "x"], "npm": "ignored"},
+    })
+    assert cfg.server.command == ["npx", "-y", "x"]
+    assert cfg.server.npm is None
+
+
+def test_stdio_accepts_npm_without_command():
+    # Validation is satisfied by npm alone (no ConfigError).
+    cfg = parse_config({"server": {"type": "stdio", "npm": "gitea-mcp"}})
+    assert cfg.server.npm == "gitea-mcp"
+
+
 def test_entra_requires_resource_or_scope():
     with pytest.raises(ConfigError):
         parse_config({"server": {"type": "http", "url": "u"}, "auth": {"kind": "entra"}})

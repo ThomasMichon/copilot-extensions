@@ -62,7 +62,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     where = cfg.source_path or args.name
     auth_desc = "+".join(a.kind for a in cfg.auths)
     print(f"OK: {where} -- {cfg.server.type} -> "
-          f"{cfg.server.url or ' '.join(cfg.server.command)} (auth: {auth_desc})")
+          f"{cfg.server.launch_desc} (auth: {auth_desc})")
     return 0
 
 

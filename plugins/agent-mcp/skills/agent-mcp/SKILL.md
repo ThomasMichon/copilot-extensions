@@ -65,6 +65,12 @@ tools: { allow: ["repo_*", "wit_*"], deny: [] }    # optional upstream filter
 
 Validate before wiring: `agent-mcp validate .github/agents/ado.mcp.yaml`.
 
+> **stdio launch — `command` vs `npm`.** A stdio bridge either lists an explicit
+> `server.command` (full control) or names an npm package with `server.npm:
+> <pkg>` and lets agent-mcp pick the fastest **available** runner at spawn
+> (`bunx` → `npx -y`). `npm` mode stays package-manager-neutral (always works via
+> `npx`; uses `bunx` only where present). See the plugin README for details.
+
 **2. Point the sub-agent at it** in `.github/agents/<name>.agent.md`
 front-matter. The MCP server is `agent-mcp` running the bridge over stdio:
 
