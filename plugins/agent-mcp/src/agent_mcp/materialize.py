@@ -59,6 +59,8 @@ def server_name_for(cfg: BridgeConfig, override: str | None = None) -> str:
     if cfg.server.url:
         host = re.sub(r"^https?://", "", cfg.server.url).split("/")[0]
         return sanitize_stub(host) or "server"
+    if cfg.server.npm:
+        return sanitize_stub(Path(cfg.server.npm).stem) or "server"
     if cfg.server.command:
         return sanitize_stub(Path(cfg.server.command[0]).stem) or "server"
     return "server"

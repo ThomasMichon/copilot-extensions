@@ -16,6 +16,7 @@ import logging
 import os
 
 from .._exec import resolve_argv
+from ..runner import resolve_npm_command
 from .base import Transport
 
 log = logging.getLogger("agent-mcp.stdio")
@@ -44,8 +45,12 @@ class StdioTransport(Transport):
         env.update(await self.injector.child_env())
 
         argv = self.cfg.server.command
+        if not argv and self.cfg.server.npm:
+            # ``server.npm`` names a package; pick the fastest available runner
+            # (bunx -> npx) at spawn time. Neutral: never requires bun.
+            argv = resolve_npm_command(self.cfg.server.npm, self.cfg.server.npm_args)
         if not argv:
-            raise ValueError("stdio transport requires server.command")
+            raise ValueError("stdio transport requires server.command or server.npm")
         # Resolve argv[0] so .cmd/.bat shims (e.g. npx.cmd) spawn on Windows --
         # create_subprocess_exec only auto-appends .exe, not PATHEXT.
         argv = resolve_argv(argv)

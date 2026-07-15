@@ -43,8 +43,38 @@ async def test_stdio_roundtrip_and_env_injection():
                          "result": {"name": "echo", "key": "injected"}}]
 
 
-# A stdio MCP child that echoes back a result whose single JSON line is far
-# larger than asyncio's default 64 KiB StreamReader limit -- reproduces the
+async def test_stdio_npm_resolves_runner_at_spawn(monkeypatch):
+    # An npm-mode config has no server.command; the transport must resolve it to
+    # a runner argv at spawn via resolve_npm_command. Patch the resolver to point
+    # at our python child so we can assert the resolved argv actually spawns.
+    import agent_mcp.transports.stdio as stdio_mod
+
+    seen: dict = {}
+
+    def _fake_resolve(package, args=()):
+        seen["package"] = package
+        seen["args"] = list(args)
+        return [sys.executable, "-c", _CHILD]
+
+    monkeypatch.setattr(stdio_mod, "resolve_npm_command", _fake_resolve)
+
+    cfg = parse_config({
+        "server": {"type": "stdio", "npm": "echo-mcp", "args": ["--x"]},
+        "auth": {"kind": "none"},
+    })
+    transport = StdioTransport(cfg, _EnvInjector())
+    received: list[dict] = []
+    transport.on_message(lambda m: received.append(m))
+
+    await transport.start()
+    await transport.send({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+    await transport.end_input()
+    await transport.aclose()
+
+    assert seen == {"package": "echo-mcp", "args": ["--x"]}
+    assert received == [{"jsonrpc": "2.0", "id": 1,
+                         "result": {"name": "echo", "key": "injected"}}]
+
 # dropped-`tools/list` bug where big upstream frames were silently lost.
 _BIG_CHILD = (
     "import sys,json\n"

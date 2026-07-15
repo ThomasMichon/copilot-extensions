@@ -107,7 +107,7 @@ class Bridge:
         threading.Thread(target=_reader, name="agent-mcp-stdin", daemon=True).start()
         log.info("bridge '%s' started (%s -> %s); %d decorator(s)", self.cfg.name,
                  self.cfg.server.type,
-                 self.cfg.server.url or " ".join(self.cfg.server.command),
+                 self.cfg.server.launch_desc,
                  len(pipeline.decorators))
 
         tasks: set[asyncio.Task] = set()

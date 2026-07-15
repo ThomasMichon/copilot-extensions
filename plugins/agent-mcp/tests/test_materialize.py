@@ -98,6 +98,12 @@ def test_server_name_for():
     assert server_name_for(cfg, "custom") == "custom"
 
 
+def test_server_name_for_npm_uses_package():
+    # In npm mode the namespace is the package (e.g. "gitea-mcp"), not the runner.
+    cfg = parse_config({"server": {"type": "stdio", "npm": "gitea-mcp"}})
+    assert server_name_for(cfg) == "gitea-mcp"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink farm")
 def test_write_farm_posix(tmp_path):
     plan = plan_tools(TOOLS)

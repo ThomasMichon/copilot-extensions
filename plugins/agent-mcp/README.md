@@ -105,6 +105,23 @@ auth:
   target_env: API_KEY      # set on the child
 ```
 
+npm example (name the **package**, let agent-mcp pick the fastest **available**
+runner — `bunx` if present, else `npx -y` — instead of hardcoding a launcher):
+
+```yaml
+server:
+  type: stdio
+  npm: "@scope/some-mcp"   # runner chosen at spawn: bunx -> npx -y
+  args: ["--flag"]         # optional, appended after the package
+```
+
+`bunx` reaches the server's `initialize` roughly twice as fast as `npx -y` (npx
+re-walks the cached dependency tree on every spawn) and falls back to its cache
+when the registry is unreachable. **agent-mcp never requires bun** — `npx` is
+always a valid runner, so this stays package-manager-neutral; `bunx` is a
+transparent optimization used only when the host already provides it. Force a
+runner with `AGENT_MCP_NPM_RUNNER=<name>`; use `server.command` for full control.
+
 command example (fetch the token on demand from a vault CLI — never stage it in
 the session env):
 
