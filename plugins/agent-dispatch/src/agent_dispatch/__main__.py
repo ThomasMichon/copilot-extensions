@@ -818,6 +818,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             repo=repo,
             labels=args.label or None,
             max_concurrent=args.max_concurrent,
+            max_attempts=args.max_attempts,
             heartbeat=not args.no_heartbeat,
         )
         if args.once:
@@ -1218,6 +1219,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--max-concurrent", type=int, default=1,
         help="cap on in-flight spawns (default: 1)",
+    )
+    p.add_argument(
+        "--max-attempts", type=int, default=3,
+        help="dead-letter a task after this many failed spawn attempts "
+             "(default: 3; 0 = retry forever)",
     )
     p.add_argument(
         "--no-heartbeat", action="store_true",
