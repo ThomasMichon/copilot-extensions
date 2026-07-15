@@ -107,7 +107,7 @@ def test_spawn_worker_for_uses_embody_backend(monkeypatch):
         spawn_backend="embody", url=None, verify_timeout=0,
         spawn_agent="task-worker", run_async=False,
     )
-    m._spawn_worker_for(args, {"id": "T7"})
+    m._do_spawn(args, {"id": "T7"})
     assert calls["task_id"] == "T7"
 
 
@@ -131,5 +131,5 @@ def test_spawn_worker_for_embody_degrades_to_bridge(monkeypatch):
         spawn_backend="embody", url=None, verify_timeout=0,
         spawn_agent="task-worker", run_async=False,
     )
-    m._spawn_worker_for(args, {"id": "T8"})
+    m._do_spawn(args, {"id": "T8"})
     assert bridge_calls["task_id"] == "T8"

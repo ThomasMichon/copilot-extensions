@@ -282,6 +282,13 @@ The worker is instructed to claim the specific task by id
 PATH, `--spawn` **degrades gracefully** — the task is simply left queued for any
 worker to claim, so agent-dispatch stays usable without a bridge.
 
+`--spawn` is guarded against **double-spawn** by an atomic **spawn reservation**
+taken from the coordinator before anything is launched: a dedup collision
+(`--spawn` on an existing `dedup_key`) or a racing second `--spawn` spawns the
+worker **exactly once**; the rest skip. See
+[`docs/spawn-supervisor.md`](docs/spawn-supervisor.md) for the reservation model
+(the foundation for a future generic embody supervisor).
+
 ## MCP tools (`agent-dispatch mcp`)
 
 For agents that prefer **tools over a CLI**, `agent-dispatch mcp` runs a local

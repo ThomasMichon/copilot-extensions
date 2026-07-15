@@ -148,6 +148,34 @@ class TaskError(RuntimeError):
     """Raised on an illegal state transition or a lease/ownership violation."""
 
 
+class SpawnState:
+    """The lifecycle states of a spawn reservation."""
+
+    #: Reserved; this spawner owns the (task, attempt) spawn but embody has not
+    #: yet been launched (or its handle not yet recorded). A restart reconciles
+    #: a reservation stuck here (spawn confirmed -> ``spawned``/``settled``, or
+    #: lost -> ``failed`` so a fresh attempt can be reserved).
+    RESERVING = "reserving"
+    #: Embody launched; the session/worktree handle is recorded.
+    SPAWNED = "spawned"
+    #: The reserved (task, attempt) reached a terminal outcome and needs no
+    #: further spawning.
+    SETTLED = "settled"
+    #: The spawn failed (or was lost); a fresh attempt may now be reserved.
+    FAILED = "failed"
+
+    #: States in which a reservation still "owns" the task's spawn -- no new
+    #: attempt may be reserved while one of these is outstanding.
+    ACTIVE = frozenset({RESERVING, SPAWNED})
+    #: States a reservation may be released from (a new attempt is allowed).
+    RELEASABLE = frozenset({SETTLED, FAILED})
+
+
+def spawn_key(task_id: str, attempt: int) -> str:
+    """The canonical reservation key for a (task, attempt) spawn."""
+    return f"dispatch-task:{task_id}:{attempt}"
+
+
 @dataclass(frozen=True)
 class Task:
     """A read-only snapshot of a task row."""
@@ -212,6 +240,37 @@ class Task:
             completed_at=row["completed_at"],
             result_ref=row["result_ref"],
             latest_progress=row["latest_progress"],
+        )
+
+
+@dataclass(frozen=True)
+class SpawnReservation:
+    """A read-only snapshot of a spawn-reservation row."""
+
+    key: str
+    task_id: str
+    attempt: int
+    state: str
+    reserved_by: str | None = None
+    session_handle: str | None = None
+    worktree: str | None = None
+    detail: str | None = None
+    reserved_at: float = 0.0
+    updated_at: float = 0.0
+
+    @classmethod
+    def _from_row(cls, row: sqlite3.Row) -> SpawnReservation:
+        return cls(
+            key=row["key"],
+            task_id=row["task_id"],
+            attempt=row["attempt"],
+            state=row["state"],
+            reserved_by=row["reserved_by"],
+            session_handle=row["session_handle"],
+            worktree=row["worktree"],
+            detail=row["detail"],
+            reserved_at=row["reserved_at"],
+            updated_at=row["updated_at"],
         )
 
 
@@ -342,6 +401,36 @@ class TaskQueue:
                 "  updated_at REAL NOT NULL,"
                 "  PRIMARY KEY (machine, worktree)"
                 ")"
+            )
+            # Spawn reservations -- the atomic "exactly one embody spawn per
+            # (task, attempt)" record that closes the gap between the queue's
+            # transactional claim and the non-transactional CLI-side spawn.
+            # Distinct from the execution *claim* (which the embodied worker
+            # makes under its own worktree identity); this row is taken by the
+            # *spawner* (a `create --spawn` CLI, or the supervisor loop) BEFORE
+            # launching embody, so a crash/re-poll/lease-expiry never
+            # double-spawns. See :meth:`reserve_spawn`.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS spawn_reservations ("
+                "  key TEXT PRIMARY KEY,"
+                "  task_id TEXT NOT NULL,"
+                "  attempt INTEGER NOT NULL,"
+                "  state TEXT NOT NULL,"
+                "  reserved_by TEXT,"
+                "  session_handle TEXT,"
+                "  worktree TEXT,"
+                "  detail TEXT,"
+                "  reserved_at REAL NOT NULL,"
+                "  updated_at REAL NOT NULL"
+                ")"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_spawn_res_task "
+                "ON spawn_reservations(task_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_spawn_res_state "
+                "ON spawn_reservations(state)"
             )
 
     # -- helpers -------------------------------------------------------------
@@ -1050,3 +1139,192 @@ class TaskQueue:
                     "ORDER BY updated_at DESC"
                 ).fetchall()
         return [dict(r) for r in rows]
+
+    # -- spawn reservations --------------------------------------------------
+
+    def reserve_spawn(
+        self, task_id: str, *, reserved_by: str | None = None, now: float | None = None
+    ) -> tuple[SpawnReservation, bool]:
+        """Atomically reserve the right to spawn an embody worker for ``task_id``.
+
+        This is the primitive that makes "queued task -> exactly one host embody
+        session" durable and idempotent. It is **distinct from the execution
+        claim**: the claim is taken later by the embodied worker under its own
+        worktree identity; this reservation is taken by the *spawner* (a
+        ``create --spawn`` CLI, or the supervisor loop) *before* launching
+        embody, so a crash / re-poll / lease-expiry between observing a
+        spawn-eligible task and actually spawning it can never double-spawn.
+
+        Semantics (all under one write lock):
+
+        * If an **active** reservation (``reserving``/``spawned``) already exists
+          for the task, return it with ``False`` -- the task is already being
+          spawned; the caller must **not** spawn.
+        * Otherwise mint a fresh reservation. ``attempt`` is ``max(prior
+          attempts) + 1`` (``1`` for the first), keyed
+          ``dispatch-task:<task_id>:<attempt>``, in state ``reserving``. Return
+          it with ``True`` -- the caller owns this spawn.
+
+        A prior ``failed``/``settled`` reservation therefore does not block a
+        retry: the next attempt gets a fresh key.
+        """
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt ASC",
+                (task_id,),
+            ).fetchall()
+            for row in rows:
+                if row["state"] in SpawnState.ACTIVE:
+                    conn.execute("COMMIT")
+                    return SpawnReservation._from_row(row), False
+            attempt = (max(r["attempt"] for r in rows) + 1) if rows else 1
+            key = spawn_key(task_id, attempt)
+            conn.execute(
+                "INSERT INTO spawn_reservations "
+                "(key, task_id, attempt, state, reserved_by, reserved_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (key, task_id, attempt, SpawnState.RESERVING, reserved_by, ts, ts),
+            )
+            row = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE key = ?", (key,)
+            ).fetchone()
+            conn.execute("COMMIT")
+        return SpawnReservation._from_row(row), True
+
+    def _update_reservation(
+        self,
+        key: str,
+        *,
+        to_state: str,
+        allowed_from: frozenset[str],
+        now: float | None = None,
+        session_handle: str | None = None,
+        worktree: str | None = None,
+        detail: str | None = None,
+    ) -> SpawnReservation:
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE key = ?", (key,)
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such reservation: {key}")
+            if row["state"] not in allowed_from:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"reservation {key} is {row['state']!r}, not one of "
+                    f"{sorted(allowed_from)} (cannot -> {to_state!r})"
+                )
+            conn.execute(
+                "UPDATE spawn_reservations SET state = ?, updated_at = ?, "
+                "session_handle = COALESCE(?, session_handle), "
+                "worktree = COALESCE(?, worktree), "
+                "detail = COALESCE(?, detail) WHERE key = ?",
+                (to_state, ts, session_handle, worktree, detail, key),
+            )
+            row = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE key = ?", (key,)
+            ).fetchone()
+            conn.execute("COMMIT")
+        return SpawnReservation._from_row(row)
+
+    def record_spawn(
+        self,
+        key: str,
+        *,
+        session_handle: str | None = None,
+        worktree: str | None = None,
+        now: float | None = None,
+    ) -> SpawnReservation:
+        """Mark a reservation ``spawned`` and record its embody session handle.
+
+        Called right after a successful ``agent-worktrees embody`` launch. The
+        handle is what lets a supervisor restart reconcile (join the reservation
+        to the live session) instead of re-spawning.
+        """
+        return self._update_reservation(
+            key,
+            to_state=SpawnState.SPAWNED,
+            allowed_from=frozenset({SpawnState.RESERVING, SpawnState.SPAWNED}),
+            session_handle=session_handle,
+            worktree=worktree,
+            now=now,
+        )
+
+    def fail_spawn(
+        self, key: str, *, detail: str | None = None, now: float | None = None
+    ) -> SpawnReservation:
+        """Mark a reservation ``failed`` (spawn failed or lost), releasing the
+        task so a fresh attempt may be reserved."""
+        return self._update_reservation(
+            key,
+            to_state=SpawnState.FAILED,
+            allowed_from=SpawnState.ACTIVE,
+            detail=detail,
+            now=now,
+        )
+
+    def settle_spawn(
+        self, key: str, *, detail: str | None = None, now: float | None = None
+    ) -> SpawnReservation:
+        """Mark a reservation ``settled`` (its task reached a terminal outcome)."""
+        return self._update_reservation(
+            key,
+            to_state=SpawnState.SETTLED,
+            allowed_from=SpawnState.ACTIVE,
+            detail=detail,
+            now=now,
+        )
+
+    def get_reservation(self, key: str) -> SpawnReservation | None:
+        """Return one reservation by key, or ``None``."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE key = ?", (key,)
+            ).fetchone()
+        return SpawnReservation._from_row(row) if row else None
+
+    def latest_reservation(self, task_id: str) -> SpawnReservation | None:
+        """Return the highest-attempt reservation for a task, or ``None``."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE task_id = ? "
+                "ORDER BY attempt DESC LIMIT 1",
+                (task_id,),
+            ).fetchone()
+        return SpawnReservation._from_row(row) if row else None
+
+    def list_reservations(
+        self,
+        *,
+        task_id: str | None = None,
+        state: str | Sequence[str] | None = None,
+        limit: int = 200,
+    ) -> list[SpawnReservation]:
+        """List spawn reservations, newest first, optionally filtered by task or
+        state (a single state or a set of states)."""
+        clauses: list[str] = []
+        params: list[object] = []
+        if task_id is not None:
+            clauses.append("task_id = ?")
+            params.append(task_id)
+        if state is not None:
+            states = [state] if isinstance(state, str) else list(state)
+            clauses.append(f"state IN ({','.join('?' * len(states))})")
+            params.extend(states)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(
+                # ``where`` is built only from constant column names + bound '?'
+                # placeholders; every value goes through ``params`` (never
+                # interpolated), so this is not an injection vector.
+                f"SELECT * FROM spawn_reservations {where} "  # noqa: S608
+                "ORDER BY reserved_at DESC LIMIT ?",
+                params,
+            ).fetchall()
+        return [SpawnReservation._from_row(r) for r in rows]

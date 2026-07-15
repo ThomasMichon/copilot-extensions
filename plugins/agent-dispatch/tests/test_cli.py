@@ -71,7 +71,7 @@ def test_spawn_helper_degrades_gracefully(monkeypatch, capsys):
 
     monkeypatch.setattr(bridge, "spawn_worker", boom)
     args = argparse.Namespace(spawn_agent="task-worker", run_async=False, url=None)
-    __main__._spawn_worker_for(args, {"id": "t1"})
+    __main__._do_spawn(args, {"id": "t1"})
     err = capsys.readouterr().err
     assert "--spawn skipped" in err
     assert "t1" in err

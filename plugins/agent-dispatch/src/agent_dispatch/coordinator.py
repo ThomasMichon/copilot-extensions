@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .events import EventBus, sse_format
-from .queue import Task, TaskError, TaskQueue, worker_id_for
+from .queue import SpawnReservation, Task, TaskError, TaskQueue, worker_id_for
 
 log = logging.getLogger("agent-dispatch.coordinator")
 
@@ -108,8 +108,26 @@ class AbandonBody(BaseModel):
     reason: str | None = None
 
 
+class ReserveSpawnBody(BaseModel):
+    task_id: str
+    reserved_by: str | None = None
+
+
+class RecordSpawnBody(BaseModel):
+    session_handle: str | None = None
+    worktree: str | None = None
+
+
+class ReservationDetailBody(BaseModel):
+    detail: str | None = None
+
+
 def _task_dict(task: Task) -> dict:
     return asdict(task)
+
+
+def _reservation_dict(res: SpawnReservation) -> dict:
+    return asdict(res)
 
 
 def _make_auth(token: str | None):
@@ -368,6 +386,74 @@ def create_app(
     @app.post("/recover")
     def recover() -> dict:
         return {"recovered": queue.recover_expired_leases()}
+
+    # -- spawn reservations --------------------------------------------------
+
+    @app.post("/spawn-reservations")
+    def reserve_spawn(body: ReserveSpawnBody) -> dict:
+        """Atomically reserve the right to spawn an embody worker for a task.
+
+        Returns ``{"reserved": bool, "reservation": {...}}``. ``reserved`` is
+        ``False`` when an active reservation already exists (the caller must NOT
+        spawn); ``True`` when this caller now owns a fresh (task, attempt) spawn.
+        """
+        _require(queue.get(body.task_id))
+        reservation, reserved = queue.reserve_spawn(
+            body.task_id, reserved_by=body.reserved_by
+        )
+        result = _reservation_dict(reservation)
+        if reserved:
+            bus.publish({"type": "spawn.reserved", "reservation": result})
+        return {"reserved": reserved, "reservation": result}
+
+    def _reservation_guard(op) -> dict:
+        try:
+            return _reservation_dict(op())
+        except TaskError as exc:
+            msg = str(exc)
+            status = 404 if msg.startswith("no such reservation") else 409
+            raise HTTPException(status_code=status, detail=msg) from exc
+
+    @app.post("/spawn-reservations/{key}/spawned")
+    def record_spawn(key: str, body: RecordSpawnBody) -> dict:
+        result = _reservation_guard(
+            lambda: queue.record_spawn(
+                key, session_handle=body.session_handle, worktree=body.worktree
+            )
+        )
+        bus.publish({"type": "spawn.spawned", "reservation": result})
+        return result
+
+    @app.post("/spawn-reservations/{key}/fail")
+    def fail_spawn(key: str, body: ReservationDetailBody) -> dict:
+        result = _reservation_guard(lambda: queue.fail_spawn(key, detail=body.detail))
+        bus.publish({"type": "spawn.failed", "reservation": result})
+        return result
+
+    @app.post("/spawn-reservations/{key}/settle")
+    def settle_spawn(key: str, body: ReservationDetailBody) -> dict:
+        result = _reservation_guard(lambda: queue.settle_spawn(key, detail=body.detail))
+        bus.publish({"type": "spawn.settled", "reservation": result})
+        return result
+
+    @app.get("/spawn-reservations")
+    def list_reservations(
+        task_id: str | None = None, state: str | None = None, limit: int = 200
+    ) -> list[dict]:
+        states = (
+            [s.strip() for s in state.split(",") if s.strip()] if state else None
+        )
+        return [
+            _reservation_dict(r)
+            for r in queue.list_reservations(task_id=task_id, state=states, limit=limit)
+        ]
+
+    @app.get("/spawn-reservations/{key}")
+    def get_reservation(key: str) -> dict:
+        reservation = queue.get_reservation(key)
+        if reservation is None:
+            raise HTTPException(status_code=404, detail="no such reservation")
+        return _reservation_dict(reservation)
 
     if mcp_app is not None:
         # Mounted last so the coordinator's own routes take precedence.
