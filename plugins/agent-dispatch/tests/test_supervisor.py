@@ -194,6 +194,37 @@ def test_not_before_deferral(q, client):
     assert q.latest_reservation(future.id) is None
 
 
+def test_dead_letter_after_max_attempts(q, client):
+    """A task that keeps failing to spawn is dead-lettered (not retried forever)."""
+    t = q.create("work")
+
+    def always_fail(task):
+        return False, {"error": "boom"}
+
+    sup = Supervisor(
+        client, spawn_fn=always_fail, repo=TEST_REPO, max_concurrent=5, max_attempts=3
+    )
+    # three cycles each burn one attempt (fail_spawn), then it's dead-lettered
+    for _ in range(3):
+        assert sup.poll_once() == []
+    assert len(q.list_reservations(task_id=t.id, state="failed")) == 3
+
+    # a fourth cycle must NOT reserve a 4th attempt
+    assert sup.poll_once() == []
+    assert q.latest_reservation(t.id).attempt == 3  # still only 3 attempts made
+
+
+def test_max_attempts_zero_retries_forever(q, client):
+    t = q.create("work")
+    sup = Supervisor(
+        client, spawn_fn=lambda _t: (False, {"error": "x"}),
+        repo=TEST_REPO, max_concurrent=5, max_attempts=0,
+    )
+    for _ in range(5):
+        sup.poll_once()
+    assert q.latest_reservation(t.id).attempt == 5  # unbounded retries
+
+
 # -- liveness-gated heartbeat ------------------------------------------------
 
 
@@ -264,7 +295,7 @@ def test_cli_supervise_once(monkeypatch, q, client):
     args = types.SimpleNamespace(
         all_repos=False, repo=None, url=None, token=None, label=None,
         max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
-        no_heartbeat=False,
+        no_heartbeat=False, max_attempts=3,
     )
     assert m._cmd_supervise(args) == 0
     assert spawn.calls == [t.id]

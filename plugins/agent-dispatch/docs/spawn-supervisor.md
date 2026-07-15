@@ -111,13 +111,16 @@ slow-but-alive embody is never double-spawned. Each cycle:
 2. **poll** — for each eligible queued task (in the lane, due, matching the
    optional **label opt-in**), up to `--max-concurrent` in-flight: `reserve_spawn`
    → if reserved, spawn embody → `record_spawn` (or `fail_spawn` on error, which
-   releases a fresh attempt).
+   releases a fresh attempt). A task that accumulates `--max-attempts` **failed**
+   spawn attempts is **dead-lettered** — held, no longer auto-retried, its failed
+   history left queryable via `reservations list --state failed` for a human — so
+   a persistently-unspawnable task can't drive a retry storm.
 
 CLI:
 
 ```
 agent-dispatch supervise [--repo R | --all-repos] [--label L ...] \
-    [--max-concurrent N] [--interval S] [--once]
+    [--max-concurrent N] [--max-attempts N] [--no-heartbeat] [--interval S] [--once]
 agent-dispatch reservations list [--task ID] [--state S]
 agent-dispatch reservations fail|settle <key> [--detail ...]
 ```

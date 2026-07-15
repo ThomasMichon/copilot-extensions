@@ -113,9 +113,11 @@ class Supervisor:
     """Reserve -> spawn -> record, with terminal-state reconciliation.
 
     ``max_concurrent`` caps the number of in-flight spawns (``reserving`` +
-    ``spawned`` reservations). ``repo`` scopes the lane; ``labels`` (if given)
-    restricts spawning to queued tasks carrying at least one of them -- the
-    **opt-in** so a supervisor only embodies work explicitly marked for autopilot.
+    ``spawned`` reservations). ``max_attempts`` bounds failed spawn attempts per
+    task before it is **dead-lettered** (held, no longer auto-retried; 0 disables
+    the bound). ``repo`` scopes the lane; ``labels`` (if given) restricts spawning
+    to queued tasks carrying at least one of them -- the **opt-in** so a
+    supervisor only embodies work explicitly marked for autopilot.
     """
 
     def __init__(
@@ -126,6 +128,7 @@ class Supervisor:
         repo: str | None = None,
         labels: Sequence[str] | None = None,
         max_concurrent: int = 1,
+        max_attempts: int = 3,
         supervisor_id: str | None = None,
         heartbeat: bool = True,
         liveness_fn: LivenessFn | None = None,
@@ -135,6 +138,9 @@ class Supervisor:
         self.repo = repo
         self.labels = set(labels) if labels else None
         self.max_concurrent = max(1, int(max_concurrent))
+        #: Bound on failed spawn attempts per task before it is dead-lettered
+        #: (held, no longer auto-retried). 0 disables the bound (retry forever).
+        self.max_attempts = max(0, int(max_attempts))
         self.supervisor_id = supervisor_id or f"supervisor-{uuid.uuid4().hex[:8]}"
         self.heartbeat = heartbeat
         self.liveness_fn = liveness_fn or _default_liveness
@@ -225,6 +231,21 @@ class Supervisor:
                 pass
         return held
 
+    def _dead_lettered(self) -> set[str]:
+        """Task ids that have exhausted their spawn attempts (>= ``max_attempts``
+        failed reservations) and should no longer be auto-retried.
+
+        Held, not lost: the failed reservation history stays queryable
+        (``reservations list --state failed``) and an operator can intervene.
+        Returns an empty set when the bound is disabled (``max_attempts == 0``).
+        """
+        if not self.max_attempts:
+            return set()
+        counts: dict[str, int] = {}
+        for res in self.client.list_reservations(state=SpawnState.FAILED, limit=1000):
+            counts[res["task_id"]] = counts.get(res["task_id"], 0) + 1
+        return {tid for tid, n in counts.items() if n >= self.max_attempts}
+
     def poll_once(self, *, now: float | None = None) -> list[str]:
         """One supervision cycle: reconcile, hold live leases, then spawn eligible
         tasks up to the cap.
@@ -235,11 +256,18 @@ class Supervisor:
         self.reconcile()
         if self.heartbeat:
             self.hold_live_leases()
+        dead_lettered = self._dead_lettered()
         active = len(self._active_reservations())
         spawned: list[str] = []
         for task in self._eligible(now):
             if active >= self.max_concurrent:
                 break
+            if task["id"] in dead_lettered:
+                log.warning(
+                    "task %s dead-lettered (>= %d failed spawn attempts); skipping",
+                    task["id"], self.max_attempts,
+                )
+                continue
             try:
                 resp = self.client.reserve_spawn(task["id"], reserved_by=self.supervisor_id)
             except DispatchError:
