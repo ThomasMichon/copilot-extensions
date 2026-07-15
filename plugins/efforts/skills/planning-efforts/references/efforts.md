@@ -180,6 +180,43 @@ separation is what lets one plugin serve many repos and many executor plugins.
    **Status**, and write a closing Journal entry. Update the active index in
    `efforts/README.md`. Promote any durable "what is" truth into docs.
 
+## Cross-repo placement
+
+An effort frequently touches a repo other than the one it lives in. There are
+**three placement models**; the choice is deliberate, not forced — pick per the
+work.
+
+1. **Local / tracking-only (default).** The effort folder lives in the control
+   repo and *coordinates* work that lands in one or more target repos. The folder
+   tracks; the real changes happen elsewhere. This is the right model when the
+   stretch spans several targets, or the target has not adopted `efforts/`. The
+   binding rule still holds — **only same-repo issues may link the effort's
+   paths** — so a cross-repo issue references the *tracked work*, not a path it
+   can't resolve.
+
+2. **Build directly in the target repo.** When the **target repo has adopted
+   `efforts/`** and the stretch is genuinely *about that repo*, author the effort
+   **in the target**, through that repo's own flow (grouping, tracker, review
+   gate, addendum). An effort about a tool can live with the tool. Treat the
+   target as host: **its conventions outrank the control repo's** while you work
+   there (a good-citizen contribution, not a transplant of this repo's habits).
+
+3. **Hybrid (split public/private).** Keep a **generalized** effort in a
+   **public / portable** repo and a **fuller, downstream-private** effort in the
+   control repo that **links to it**. This buys portability *and* private depth
+   without leaking. The load-bearing rule that keeps it from becoming two sources
+   of truth: **the public generalized effort is canonical** — it is what other
+   agents cite, and the version the plan is reviewed as — while the private effort
+   *elaborates* it (private names, hosts, downstream wiring) and **links back**.
+   Keep the public artifact **generic**, per the repo's public-artifact rule; put
+   anything downstream-private only in the private effort.
+
+**Ordering (all three models):** *propose before you do* — PR the not-yet-done
+plan, let it clear review, make the external changes, then report completion as a
+separate status-only delta. When the effort lives in a **review-gated** repo and
+also drives a **directly-pushed** target, the reviewed intent (the effort/plan
+PR) lands **before** the unreviewed change that realizes it.
+
 ## Adoption & the addendum
 
 The `planning-efforts` skill governs the canonical pattern above. An adopting

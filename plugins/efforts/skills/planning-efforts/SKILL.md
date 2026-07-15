@@ -155,17 +155,42 @@ The README is the shared contract — keep it **ahead of the conversation**. But
   commit is itself opening is a catch-22; record a PR only once it has merged.
   Remark open issues the effort spawned or still blocks on.
 
-### Cross-repo & tracking-only efforts
+### Cross-repo efforts — where the effort folder lives
 
-An effort may coordinate work that lands in **another** repo (the effort folder
-tracks; the real changes happen elsewhere). Same discipline, with one ordering
-rule: **propose before you do.** Reviewers can't meaningfully comment on external
-work that's already committed, so:
+When an effort touches **another** repo, you have three placement models. Pick
+per the work; none is mandatory, and the choice is the operator's/agent's to make
+(see [`references/efforts.md`](references/efforts.md) § Cross-repo placement for
+the fuller rationale).
+
+- **Local / tracking-only (default).** The effort folder lives in *this*
+  (control) repo and coordinates work that lands elsewhere — the folder tracks,
+  the real changes happen in the target. Use when the work spans several targets,
+  or the target repo hasn't adopted `efforts/`.
+- **Build directly in the target repo.** If the **target repo has adopted
+  `efforts/`** and the stretch is genuinely *about that repo*, you may author the
+  effort **there**, through *that repo's* flow — its grouping, tracker, review
+  gate, and addendum — instead of here. An effort about a tool can live with the
+  tool. Work it as a **good citizen** of the target repo: follow its conventions
+  over this repo's.
+- **Hybrid (split public/private).** Keep a **generalized** effort in a
+  **public / portable** repo *and* a **fuller, downstream-private** effort in the
+  control repo that **links to it**. The **public effort is canonical** — it is
+  what other agents cite and what the plan is reviewed as; the private effort
+  *elaborates* it with facility-specific context (private names, hosts, downstream
+  wiring) and links back. Keep the public artifact **generic** — no
+  downstream-private names — per the repo's public-artifact rule.
+
+**One ordering rule holds across all three: propose before you do.** Reviewers
+can't meaningfully comment on external work that's already committed, so:
 
 1. Submit the **proposal** (the not-yet-done plan) to PR first; await review.
 2. Make the external changes once the plan clears.
 3. Report completion as a **separate delta** ("this is now done"), which reviews
    easily because the only change is status.
+
+When a stretch spans a **review-gated** control repo *and* a **directly-pushed**
+target, land the **reviewed intent** (the effort/plan PR) before the unreviewed
+change that realizes it.
 
 ## Resume an effort
 
@@ -199,6 +224,12 @@ work that's already committed, so:
 - ❌ Paraphrasing the premise instead of capturing the **Request** verbatim.
 - ❌ Letting the conversation, not the README, hold effort state.
 - ❌ Cross-repo issues linking this repo's effort paths.
+- ❌ Duplicating the *same* effort in two repos with no canonical source — in a
+  hybrid split, the **public generalized** effort is canonical and the private,
+  fuller one links to it (don't let two copies drift into two sources of truth).
+- ❌ Authoring an effort **here** for work that is genuinely *about a target repo
+  that has adopted `efforts/`* — build it in the target (as a good citizen) or
+  use the hybrid split, rather than reflexively keeping it local.
 - ❌ Naming an effort `feature-*` / `bug-*` / `task-*`.
 - ❌ Putting participant-specific mechanics in the core schema — keep them in
   `## Participants` and the addendum, so the pattern stays portable.

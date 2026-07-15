@@ -276,6 +276,36 @@ works: give each a stable heading or id, so an issue can say "Vision `<subject>`
 There is no "archive" step and no "done" state — a vision persists as long as its
 subject is intended to exist.
 
+## Cross-repo placement
+
+A vision's *subject* often lives in a different repo than the vision does. Three
+placement models — the choice is deliberate, not forced.
+
+1. **Local (default).** The vision lives in *this* repo. Right when the subject is
+   owned here, or the target repo hasn't adopted `visions/`.
+
+2. **Author directly in the target repo.** When the **target repo has adopted
+   `visions/`** and the subject is genuinely *its own* (a tool, service, or
+   product that lives there), author the vision **in the target**, through that
+   repo's flow and addendum. A vision about a tool can belong with the tool.
+   Treat the target as host: **its conventions outrank the control repo's** while
+   you work there (a good-citizen contribution).
+
+3. **Hybrid (split public/private).** Keep a **generalized** vision in a
+   **public / portable** repo and a **fuller, downstream-private** vision in the
+   control repo that **links to it** — portability *and* private depth without
+   leaking. The rule that prevents two-sources-of-truth: **the public generalized
+   vision is canonical** — it is the north star agents cite, and the one the
+   vision→reality delta is derived against — while the private vision *elaborates*
+   it (private subjects, downstream constraints) and **links back**. Keep the
+   public artifact **generic** per the repo's public-artifact rule.
+
+Because visions are **revised in place** (no archive), both files of a hybrid
+evolve in place. When the *shared* intent changes, revise the **public canonical**
+vision first, then re-elaborate the private one; never let the private
+elaboration silently contradict the public intent, and keep the private→public
+link live.
+
 ## Adoption & the addendum
 
 The `envisioning` skill governs the canonical pattern above. An adopting repo
