@@ -16,10 +16,34 @@ standalone on a host without agent-worktrees.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 
 DEFAULT_DRIVER = "agent-dispatch"
+
+
+def parse_handle(result: subprocess.CompletedProcess) -> dict[str, str | None]:
+    """Best-effort extract the session/worktree handle from ``embody --json``.
+
+    Returns ``{"session": ..., "worktree": ...}`` (values may be ``None``). Used
+    to record a spawn reservation's handle so a supervisor restart can reconcile.
+    """
+    handle: dict[str, str | None] = {"session": None, "worktree": None}
+    try:
+        data = json.loads(result.stdout or "{}")
+    except (ValueError, TypeError):
+        return handle
+    if not isinstance(data, dict):
+        return handle
+    launch = data.get("launch") if isinstance(data.get("launch"), dict) else {}
+    handle["worktree"] = (
+        data.get("worktree_id") or data.get("worktree") or launch.get("worktree_id")
+    )
+    handle["session"] = (
+        data.get("session_id") or data.get("session") or launch.get("session")
+    )
+    return handle
 
 
 class EmbodyUnavailable(RuntimeError):

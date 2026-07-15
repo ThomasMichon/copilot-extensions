@@ -286,8 +286,29 @@ worker to claim, so agent-dispatch stays usable without a bridge.
 taken from the coordinator before anything is launched: a dedup collision
 (`--spawn` on an existing `dedup_key`) or a racing second `--spawn` spawns the
 worker **exactly once**; the rest skip. See
-[`docs/spawn-supervisor.md`](docs/spawn-supervisor.md) for the reservation model
-(the foundation for a future generic embody supervisor).
+[`docs/spawn-supervisor.md`](docs/spawn-supervisor.md) for the reservation model.
+
+### Supervising a lane (`agent-dispatch supervise`)
+
+The supervisor turns **queued** tasks into host embody autopilots — **exactly
+once each** — over the same reservation primitive. It's generic (no
+producer-specific logic) and safety-first: a task is spawned only when a *fresh*
+reservation is acquired, so a slow-but-alive embody whose lease expired is never
+double-spawned.
+
+```bash
+agent-dispatch supervise --once                       # one cycle (this repo's lane)
+agent-dispatch supervise --label autopilot            # loop; only spawn opted-in tasks
+agent-dispatch supervise --all-repos --max-concurrent 3
+agent-dispatch reservations list --state spawned      # what's in flight
+agent-dispatch reservations fail <key>                # release a confirmed-dead spawn
+```
+
+Each cycle **reconciles** (settles reservations of terminal tasks) then **polls**
+(reserve → embody → record, up to `--max-concurrent`). Auto-recovery of a
+*dead-but-non-terminal* embody and a supervisor-driven lease heartbeat are
+deferred to a liveness-aware slice (see the design doc); until then a dead
+embody's task is *held* and surfaced for `reservations fail`.
 
 ## MCP tools (`agent-dispatch mcp`)
 

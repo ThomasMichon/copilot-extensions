@@ -221,21 +221,9 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
 
 def _embody_handle(result) -> dict[str, str | None]:
     """Best-effort extract the session/worktree handle from ``embody --json``."""
-    handle: dict[str, str | None] = {"session": None, "worktree": None}
-    try:
-        data = json.loads(result.stdout or "{}")
-    except (ValueError, TypeError):
-        return handle
-    if not isinstance(data, dict):
-        return handle
-    launch = data.get("launch") if isinstance(data.get("launch"), dict) else {}
-    handle["worktree"] = (
-        data.get("worktree_id") or data.get("worktree") or launch.get("worktree_id")
-    )
-    handle["session"] = (
-        data.get("session_id") or data.get("session") or launch.get("session")
-    )
-    return handle
+    from . import embody
+
+    return embody.parse_handle(result)
 
 
 def _do_spawn(args: argparse.Namespace, task: dict):
@@ -809,6 +797,58 @@ def _cmd_webhook(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_supervise(args: argparse.Namespace) -> int:
+    """Run the embody spawn supervisor over the lane (once, or as a loop).
+
+    Turns queued (optionally label-gated) tasks into host embody autopilots,
+    exactly once each, via the atomic spawn reservation. See the ``supervisor``
+    module for the spawn-at-most-once safety model.
+    """
+    from .supervisor import Supervisor, make_embody_spawn
+
+    repo = None if getattr(args, "all_repos", False) else _scope_repo(args)
+    coordinator_url = args.url or client_url()
+    spawn_fn = make_embody_spawn(
+        coordinator_url, verify_timeout=getattr(args, "verify_timeout", 0) or 0
+    )
+    with _client(args) as c:
+        sup = Supervisor(
+            c,
+            spawn_fn=spawn_fn,
+            repo=repo,
+            labels=args.label or None,
+            max_concurrent=args.max_concurrent,
+        )
+        if args.once:
+            return _emit({"spawned": sup.poll_once()})
+
+        def _on_cycle(spawned: list[str]) -> None:
+            if spawned:
+                print(
+                    f"agent-dispatch supervise: spawned {len(spawned)} task(s): "
+                    f"{', '.join(spawned)}",
+                    file=sys.stderr,
+                )
+
+        sup.serve(interval=args.interval, on_cycle=_on_cycle)
+    return 0
+
+
+def _cmd_reservations(args: argparse.Namespace) -> int:
+    """Operator visibility + manual control over spawn reservations."""
+    with _client(args) as c:
+        if args.reservations_command == "list":
+            rows = c.list_reservations(
+                task_id=args.task, state=args.state, limit=args.limit
+            )
+            return _emit(rows)
+        if args.reservations_command == "fail":
+            return _emit(c.fail_spawn(args.key, detail=args.detail))
+        if args.reservations_command == "settle":
+            return _emit(c.settle_spawn(args.key, detail=args.detail))
+    return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-dispatch", description="Agent task queue + coordinator"
@@ -1160,6 +1200,56 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--host", default="127.0.0.1", help="bind host (default: 127.0.0.1)")
     p.add_argument("--port", type=int, default=9331, help="bind port (default: 9331)")
     p.set_defaults(func=_cmd_webhook)
+
+    p = sub.add_parser(
+        "supervise",
+        help="embody spawn supervisor: turn queued (label-gated) tasks into host "
+             "embody autopilots, exactly once each, via atomic spawn reservations",
+    )
+    p.add_argument("--repo", help="lane to supervise (default: the calling repo)")
+    p.add_argument(
+        "--all-repos", action="store_true", help="supervise every lane (no repo scope)"
+    )
+    p.add_argument(
+        "--label", action="append",
+        help="only spawn queued tasks carrying this label (repeatable; opt-in gate)",
+    )
+    p.add_argument(
+        "--max-concurrent", type=int, default=1,
+        help="cap on in-flight spawns (default: 1)",
+    )
+    p.add_argument(
+        "--verify-timeout", type=int, default=0,
+        help="embody: wait up to N seconds for the spawned session (0 = don't wait)",
+    )
+    p.add_argument(
+        "--interval", type=float, default=30.0,
+        help="serve loop poll interval in seconds (default: 30)",
+    )
+    p.add_argument(
+        "--once", action="store_true", help="run a single supervision cycle and exit"
+    )
+    p.set_defaults(func=_cmd_supervise)
+
+    p = sub.add_parser(
+        "reservations", help="inspect / manually control spawn reservations"
+    )
+    res_sub = p.add_subparsers(dest="reservations_command", required=True)
+    rp = res_sub.add_parser("list", help="list spawn reservations")
+    rp.add_argument("--task", help="filter by task id")
+    rp.add_argument("--state", help="filter by state (comma-list ok)")
+    rp.add_argument("--limit", type=int, default=200)
+    rp.set_defaults(func=_cmd_reservations)
+    rp = res_sub.add_parser(
+        "fail", help="mark a reservation failed (releases the task for a fresh attempt)"
+    )
+    rp.add_argument("key")
+    rp.add_argument("--detail")
+    rp.set_defaults(func=_cmd_reservations)
+    rp = res_sub.add_parser("settle", help="mark a reservation settled (attempt over)")
+    rp.add_argument("key")
+    rp.add_argument("--detail")
+    rp.set_defaults(func=_cmd_reservations)
 
     p = sub.add_parser("health", help="check coordinator health")
     p.set_defaults(func=lambda args: _emit(_client(args).health()))
