@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import shlex
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -485,7 +486,9 @@ def _latest_session_for_worktree(mgr: Any, worktree_id: str) -> Any:
 
 
 @router.post("/api/v1/worktrees/{worktree_id}/resume", response_model=SessionInfo)
-async def resume_worktree(worktree_id: str, request: Request) -> SessionInfo:
+async def resume_worktree(
+    worktree_id: str, request: Request, reclaim: bool = False
+) -> SessionInfo:
     """Resume a worktree by ensuring it has a live session.
 
     Worktree-level convenience verb: finds the current (most recent) session
@@ -499,9 +502,41 @@ async def resume_worktree(worktree_id: str, request: Request) -> SessionInfo:
       a fresh session in the same worktree directory, since the worktree
       still exists on disk.  This keeps "open existing worktree" robust.
 
+    **Atomic ownership guard (#2879).** Before resuming, if a *fresh* live
+    interactive Copilot CLI already holds this worktree, refuse to resume it as
+    an OWNED ACP session and return **409** with a structured
+    ``reason: live_cli_holds_worktree`` -- owning it would spawn a second
+    ``copilot`` child on the same worktree and the two would contend (every
+    prompt then returns "Operation cancelled by user"). This is the race-free
+    enforcement of the one-ACP-controller invariant that a consumer's
+    best-effort represent-if-live preflight cannot guarantee (a CLI that
+    registers between the consumer's check and this call still loses the race
+    client-side, but not here). ``reclaim=true`` (take-over) bypasses the guard:
+    the caller has just terminated the interactive CLI and intends to own the
+    freed worktree, so a not-yet-reaped ``live`` row must not block it.
+
     Returns 404 if the worktree has no session at all.
     """
     from .sessions import _session_info
+
+    db = getattr(request.app.state, "db", None)
+    if not reclaim and db is not None:
+        holders = db.list_fresh_live_sessions(worktree_id, now=time.time())
+        if holders:
+            chosen = max(holders, key=lambda r: r.get("updated_at") or 0)
+            log.info(
+                "resume_worktree %s refused: fresh live CLI %s holds it "
+                "(represent read-only)",
+                worktree_id, chosen["session_id"],
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "reason": "live_cli_holds_worktree",
+                    "worktree_id": worktree_id,
+                    "session_id": chosen["session_id"],
+                },
+            )
 
     mgr = getattr(request.app.state, "session_manager", None)
     session = _latest_session_for_worktree(mgr, worktree_id)
@@ -761,10 +796,37 @@ async def restart_worktree_copilot(
             detail=f"Invalid restart JSON for worktree {worktree_id}",
         ) from exc
 
+    method = data.get("method", "unknown")
+    ok = bool(data.get("ok", False))
+
+    # Invalidate-on-take-over (#2906): a successful restart has just terminated
+    # the interactive CLI, so immediately demote any live-session registration
+    # for this worktree and drop its queued inbox messages. This closes the
+    # window where a racing steer could land on the CLI that was just killed,
+    # and ensures the subsequent reclaim resume is never blocked by the atomic
+    # ownership guard (#2879) waiting on a not-yet-heartbeat-reaped row.
+    if ok:
+        db = getattr(request.app.state, "db", None)
+        if db is not None:
+            try:
+                n = db.expire_live_sessions_for_worktree(
+                    worktree_id, now=time.time()
+                )
+                if n:
+                    log.info(
+                        "restart_worktree %s: expired %d live registration(s)",
+                        worktree_id, n,
+                    )
+            except Exception:
+                log.warning(
+                    "restart_worktree %s: live-session invalidation failed",
+                    worktree_id, exc_info=True,
+                )
+
     return {
         "worktree_id": data.get("worktree_id", worktree_id),
         "agent_name": agent_name,
         "had_session": bool(data.get("had_session", False)),
-        "method": data.get("method", "unknown"),
-        "ok": bool(data.get("ok", False)),
+        "method": method,
+        "ok": ok,
     }

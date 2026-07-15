@@ -310,6 +310,31 @@ async def lifespan(app: FastAPI):
             max(30, cfg.idle_reap_sweep_seconds or 300),
         )
 
+    # Live-session lease reaper (#2880/#2906) -- expire live-CLI registrations
+    # whose heartbeat lease has lapsed (a Copilot CLI that exited without a
+    # clean deregister stops re-POSTing) so a dead CLI cannot leave a worktree
+    # permanently un-ownable or accept a racing steer, and drop inbox messages
+    # that can never be delivered to that incarnation. Cheap; always on. Sweeps
+    # at half the lease window so a lapsed row is demoted within ~one window.
+    from .db import LIVE_SESSION_STALE_SECONDS
+
+    async def _live_reap_loop() -> None:
+        interval = max(30.0, LIVE_SESSION_STALE_SECONDS / 2)
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                n = await asyncio.to_thread(
+                    db.reap_stale_live_sessions, now=time.time()
+                )
+                if n:
+                    log.info(
+                        "Live-session reaper expired %d stale registration(s)", n
+                    )
+            except Exception:
+                log.warning("Live-session lease reap failed", exc_info=True)
+
+    live_reap_task = asyncio.create_task(_live_reap_loop())
+
     # Routing-table publish-on-ready -- a normal daemon announces its endpoint
     # to active.json once it is actually listening, so CLI clients discover it
     # via the routing table. A passive cutover instance leaves publish_on_ready
@@ -391,6 +416,11 @@ async def lifespan(app: FastAPI):
         idle_reap_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await idle_reap_task
+
+    # Shutdown: stop the live-session lease reaper (#2880/#2906)
+    live_reap_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await live_reap_task
 
     # Shutdown: stop credential relay
     if relay_server and relay_server.running:

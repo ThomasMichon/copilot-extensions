@@ -23,6 +23,31 @@ SCHEMA_VERSION = 12
 # a briefly-busy event loop.
 LIVE_SESSION_STALE_SECONDS = 120.0
 
+
+def live_session_is_fresh(
+    row: dict[str, Any],
+    now: float,
+    stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
+) -> bool:
+    """Is a live-session registration *fresh* (its heartbeat lease still valid)?
+
+    A registration is fresh when it is still ``status=='live'`` **and** its
+    ``updated_at`` heartbeat falls within the lease window. ``updated_at`` is
+    refreshed on every register/heartbeat and on event-ingest, so a fresh row
+    means the CLI process is still calling home -- the load-bearing liveness
+    signal for the ownership guard (#2879) and the inbox freshness lease
+    (#2906). Note a turn-derived ``liveness=='stalled'`` row is still *fresh*:
+    the process heartbeats even while a turn is silent. Only a missed-heartbeat
+    row (or one explicitly demoted to ``status!='live'`` by the reaper / a
+    take-over) reads as stale.
+    """
+    if (row.get("status") or "live") != "live":
+        return False
+    updated = row.get("updated_at")
+    if not isinstance(updated, (int, float)):
+        return False
+    return updated >= now - stale_seconds
+
 _EVENT_BATCH_MAX = 256
 _EVENT_BATCH_WINDOW_SECS = 0.05
 _EVENT_WRITE_SENTINEL = object()
@@ -703,18 +728,88 @@ class Database:
         self.execute_write(
             "DELETE FROM live_messages WHERE session_id=?", (session_id,)
         )
-        self.execute_write(
-            "DELETE FROM live_sessions WHERE session_id=?", (session_id,)
+
+    def expire_live_sessions_for_worktree(
+        self, worktree_id: str, *, now: float
+    ) -> int:
+        """Immediately demote every ``live`` registration for a worktree and drop
+        its undelivered inbox messages -- the *invalidate-on-take-over* hook
+        (#2906).
+
+        A take-over has just terminated the interactive CLI, so a lingering
+        ``status=='live'`` row must not keep the worktree un-ownable (it would
+        trip the resume guard against the reclaim) nor accept a message that
+        raced control changing hands. Returns how many registrations were
+        demoted. Idempotent: a worktree with no live row is a no-op.
+        """
+        cur = self.execute_write(
+            "UPDATE live_sessions SET status='expired', updated_at=? "
+            "WHERE worktree_id=? AND status='live'",
+            (now, worktree_id),
         )
-        self.execute_write(
-            "DELETE FROM live_messages WHERE session_id=?", (session_id,)
+        n = cur.rowcount
+        if n:
+            self.execute_write(
+                "DELETE FROM live_messages WHERE delivered_at IS NULL "
+                "AND session_id IN ("
+                "SELECT session_id FROM live_sessions "
+                "WHERE worktree_id=? AND status='expired')",
+                (worktree_id,),
+            )
+        return n
+
+    def reap_stale_live_sessions(
+        self, *, now: float, stale_seconds: float = LIVE_SESSION_STALE_SECONDS
+    ) -> int:
+        """Expire live registrations whose heartbeat lease lapsed; drop their
+        undelivered inbox messages (#2880 + #2906).
+
+        A CLI that exited without a clean deregister stops heartbeating; once its
+        ``updated_at`` is older than the lease window it is demoted from ``live``
+        to ``expired`` -- so ``status=='live'`` reliably means the CLI is still
+        calling home, and a dead CLI can never leave a worktree permanently
+        un-ownable. Any message that could no longer be delivered to that
+        incarnation is dropped rather than lurking for an unrelated future
+        session. Returns how many registrations were expired. Idempotent (a
+        re-run finds nothing left to demote). A returning CLI's re-register
+        upsert flips it back to ``live``.
+        """
+        cutoff = now - stale_seconds
+        cur = self.execute_write(
+            "UPDATE live_sessions SET status='expired' "
+            "WHERE status='live' AND updated_at < ?",
+            (cutoff,),
         )
+        n = cur.rowcount
+        if n:
+            self.execute_write(
+                "DELETE FROM live_messages WHERE delivered_at IS NULL "
+                "AND session_id IN ("
+                "SELECT session_id FROM live_sessions "
+                "WHERE status='expired' AND updated_at < ?)",
+                (cutoff,),
+            )
+        return n
 
     def get_live_session(self, session_id: str) -> dict[str, Any] | None:
         rows = self.execute_read(
             "SELECT * FROM live_sessions WHERE session_id=?", (session_id,)
         )
         return dict(rows[0]) if rows else None
+
+    def get_fresh_live_session(
+        self,
+        session_id: str,
+        *,
+        now: float,
+        stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
+    ) -> dict[str, Any] | None:
+        """Like :meth:`get_live_session`, but only when the heartbeat lease is
+        still valid (see :func:`live_session_is_fresh`); else None."""
+        row = self.get_live_session(session_id)
+        if row is None or not live_session_is_fresh(row, now, stale_seconds):
+            return None
+        return row
 
     def list_live_sessions(
         self, worktree_id: str | None = None
@@ -730,6 +825,24 @@ class Database:
                 "SELECT * FROM live_sessions ORDER BY updated_at DESC"
             )
         return [dict(r) for r in rows]
+
+    def list_fresh_live_sessions(
+        self,
+        worktree_id: str | None = None,
+        *,
+        now: float,
+        stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
+    ) -> list[dict[str, Any]]:
+        """Live registrations with a still-valid heartbeat lease (fresh only).
+
+        The load-bearing query for the atomic ownership guard (#2879): a worktree
+        is held by a live CLI only if it has a *fresh* ``live`` registration, so
+        a stale/expired corpse never blocks an owned resume."""
+        return [
+            r
+            for r in self.list_live_sessions(worktree_id)
+            if live_session_is_fresh(r, now, stale_seconds)
+        ]
 
     def resolve_live_session(
         self,
@@ -777,6 +890,33 @@ class Database:
     # the ack (delivered_at) making a redelivery a no-op rather than a double
     # injection.
 
+    def current_live_session_for_worktree(
+        self,
+        worktree_id: str,
+        *,
+        now: float,
+        stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
+    ) -> str | None:
+        """The session id of the **current** live incarnation for a worktree.
+
+        Unlike :meth:`resolve_live_session` (which exact-matches a session id
+        first and ignores ``status``), this is a worktree-only lookup that
+        considers **only fresh ``live`` rows** and orders by ``registered_at``
+        (the immutable per-incarnation start) so a later heartbeat on an older
+        incarnation can't make it re-win "current", and a take-over-expired row
+        (``status!='live'``, even with a bumped ``updated_at``) never counts.
+        This is the load-bearing supersession check for the inbox lease
+        (#2906). Returns None when no fresh live session holds the worktree.
+        """
+        cutoff = now - stale_seconds
+        rows = self.execute_read(
+            "SELECT session_id FROM live_sessions "
+            "WHERE worktree_id=? AND status='live' AND updated_at>=? "
+            "ORDER BY registered_at DESC, updated_at DESC LIMIT 1",
+            (worktree_id, cutoff),
+        )
+        return rows[0]["session_id"] if rows else None
+
     def enqueue_live_message(
         self, session_id: str, sender: str, body: str, now: float,
         reply_to: str | None = None, kind: str = "prompt",
@@ -794,6 +934,88 @@ class Database:
             (session_id, sender, body, reply_to, kind, now),
         )
         return int(cur.lastrowid or 0)
+
+    def enqueue_live_message_if_fresh(
+        self,
+        session_id: str,
+        *,
+        sender: str,
+        body: str,
+        now: float,
+        reply_to: str | None = None,
+        kind: str = "prompt",
+        expected_session_id: str | None = None,
+        stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
+    ) -> tuple[int | None, str | None]:
+        """Atomically lease-check the target registration and enqueue, or reject.
+
+        The freshness lease + supersession check + insert are a **single
+        ``INSERT ... SELECT ... WHERE EXISTS``** statement, so the guard and the
+        write are atomic at the SQLite level -- no other writer (a reaper, a
+        take-over invalidation, a register, or a session roll), **even in a
+        second process sharing the database**, can commit between the check and
+        the insert. This is the race-free enforcement #2906 asks for (NF's
+        client-side pre-send check can only approximate it).
+
+        The guard admits the message only when ``session_id`` is a *fresh live*
+        registration that is also the **current** incarnation for its worktree
+        (the row with the greatest ``registered_at`` among fresh live rows --
+        immune to heartbeat timing), and any ``expected_session_id`` matches it.
+
+        Returns ``(message_id, None)`` on success, or ``(None, reason)`` when
+        rejected. ``reason`` is one of ``not_found`` (map to 404), ``stale``,
+        ``superseded:<sid>``, or ``expected_mismatch:<sid>`` (map to 409). The
+        reason is derived from a follow-up read purely to shape the caller's
+        error message; the accept/reject decision itself is the atomic insert.
+        """
+        cutoff = now - stale_seconds
+        cur = self.execute_write(
+            "INSERT INTO live_messages "
+            "(session_id, sender, body, reply_to, kind, created_at) "
+            "SELECT ?, ?, ?, ?, ?, ? "
+            "WHERE EXISTS ("
+            "  SELECT 1 FROM live_sessions ls "
+            "  WHERE ls.session_id = ? AND ls.status = 'live' "
+            "    AND ls.updated_at >= ? "
+            "    AND ("
+            "      ls.worktree_id IS NULL OR ls.session_id = ("
+            "        SELECT session_id FROM live_sessions "
+            "        WHERE worktree_id = ls.worktree_id AND status = 'live' "
+            "          AND updated_at >= ? "
+            "        ORDER BY registered_at DESC, updated_at DESC LIMIT 1"
+            "      )"
+            "    )"
+            "    AND (? IS NULL OR ? = ls.session_id)"
+            ")",
+            (
+                session_id, sender, body, reply_to, kind, now,
+                session_id, cutoff, cutoff,
+                expected_session_id, expected_session_id,
+            ),
+        )
+        if cur.rowcount == 1:
+            return int(cur.lastrowid or 0), None
+        # Rejected -- derive a reason for the error message (best-effort; the
+        # authoritative decision was the 0-row insert above).
+        row = self.get_live_session(session_id)
+        if row is None:
+            return None, "not_found"
+        if not live_session_is_fresh(row, now, stale_seconds):
+            return None, "stale"
+        worktree_id = row.get("worktree_id")
+        current_sid = session_id
+        if worktree_id:
+            current_sid = (
+                self.current_live_session_for_worktree(
+                    worktree_id, now=now, stale_seconds=stale_seconds
+                )
+                or session_id
+            )
+        if current_sid != session_id:
+            return None, f"superseded:{current_sid}"
+        if expected_session_id is not None and expected_session_id != current_sid:
+            return None, f"expected_mismatch:{current_sid}"
+        return None, "stale"
 
     def list_pending_live_messages(self, session_id: str) -> list[dict[str, Any]]:
         """Undelivered messages for a session, oldest-first (delivery order)."""

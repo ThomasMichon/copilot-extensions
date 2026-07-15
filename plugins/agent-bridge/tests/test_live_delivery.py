@@ -245,3 +245,103 @@ def test_message_kind_defaults_to_prompt_over_route(client: TestClient) -> None:
     )
     listed = client.get("/api/v1/live-sessions/cli-1/messages").json()["messages"]
     assert listed[0]["kind"] == "prompt"
+
+
+# -- Freshness lease on the write path (#2906) ------------------------------
+
+
+def _register_wt(
+    client: TestClient, sid: str, worktree_id: str
+) -> None:
+    assert client.post(
+        "/api/v1/live-sessions",
+        json={"session_id": sid, "worktree_id": worktree_id},
+    ).status_code == 200
+
+
+def test_post_rejects_expired_registration(
+    client: TestClient, tmp_db: Database
+) -> None:
+    _register_wt(client, "cli-1", "wt-a")
+    # simulate the reaper / a take-over demoting the registration
+    tmp_db.expire_live_sessions_for_worktree("wt-a", now=time.time())
+    r = client.post(
+        "/api/v1/live-sessions/cli-1/messages",
+        json={"sender": "op", "body": "steer"},
+    )
+    assert r.status_code == 409
+    assert "no longer fresh" in r.json()["detail"]
+    # nothing was enqueued
+    assert tmp_db.list_pending_live_messages("cli-1") == []
+
+
+def test_post_rejects_stale_heartbeat(
+    client: TestClient, tmp_db: Database
+) -> None:
+    from agent_bridge.db import LIVE_SESSION_STALE_SECONDS
+
+    # register with an old heartbeat so the lease is already lapsed
+    old = time.time() - LIVE_SESSION_STALE_SECONDS - 10
+    tmp_db.register_live_session(
+        "cli-old", machine=None, cwd=None, worktree_id="wt-a", repo=None,
+        branch=None, pid=None, role=None, now=old,
+    )
+    r = client.post(
+        "/api/v1/live-sessions/cli-old/messages",
+        json={"sender": "op", "body": "steer"},
+    )
+    assert r.status_code == 409
+
+
+def test_post_rejects_superseded_incarnation(
+    client: TestClient, tmp_db: Database
+) -> None:
+    now = time.time()
+    # old incarnation for the worktree, then a fresher one supersedes it
+    tmp_db.register_live_session(
+        "cli-old", machine=None, cwd=None, worktree_id="wt-a", repo=None,
+        branch=None, pid=None, role=None, now=now - 5,
+    )
+    _register_wt(client, "cli-new", "wt-a")
+    # cli-old is still within the lease window but no longer current
+    r = client.post(
+        "/api/v1/live-sessions/cli-old/messages",
+        json={"sender": "op", "body": "steer"},
+    )
+    assert r.status_code == 409
+    assert "superseded" in r.json()["detail"]
+    # the current incarnation accepts the message
+    ok = client.post(
+        "/api/v1/live-sessions/cli-new/messages",
+        json={"sender": "op", "body": "steer"},
+    )
+    assert ok.status_code == 200
+
+
+def test_post_expected_session_id_mismatch_rejected(client: TestClient) -> None:
+    _register_wt(client, "cli-1", "wt-a")
+    r = client.post(
+        "/api/v1/live-sessions/cli-1/messages",
+        json={"sender": "op", "body": "steer", "expected_session_id": "cli-other"},
+    )
+    assert r.status_code == 409
+    assert "expected live session" in r.json()["detail"]
+
+
+def test_post_expected_session_id_match_accepted(client: TestClient) -> None:
+    _register_wt(client, "cli-1", "wt-a")
+    r = client.post(
+        "/api/v1/live-sessions/cli-1/messages",
+        json={"sender": "op", "body": "steer", "expected_session_id": "cli-1"},
+    )
+    assert r.status_code == 200
+
+
+def test_post_fresh_registration_still_delivers(client: TestClient) -> None:
+    _register_wt(client, "cli-1", "wt-a")
+    r = client.post(
+        "/api/v1/live-sessions/cli-1/messages",
+        json={"sender": "op", "body": "hi"},
+    )
+    assert r.status_code == 200
+    assert r.json()["message_id"] > 0
