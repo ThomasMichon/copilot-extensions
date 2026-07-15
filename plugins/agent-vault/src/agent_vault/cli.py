@@ -388,6 +388,23 @@ Write-Output $box1.Text
 def cmd_get(args):
     entry = args.entry
     field = args.field or "password"
+    refresh = getattr(args, "refresh", False)
+    cache_only = getattr(args, "cache_only", False)
+
+    from .cache import get_cache
+
+    cache = get_cache()
+
+    # Tier 0: the persistent on-disk cache. Consulted first unless --refresh,
+    # and authoritatively (no daemon contact) when --cache-only.
+    if cache.enabled and not refresh:
+        cached = cache.get(entry, field)
+        if cached is not None:
+            print(cached)
+            return 0
+    if cache_only:
+        print(f"Error: {entry} [{field}] not in cache", file=sys.stderr)
+        return 1
 
     if not ensure_service():
         print("Error: could not start vault service", file=sys.stderr)
@@ -398,7 +415,10 @@ def cmd_get(args):
         request["allow_prompt"] = True
     resp = send_command(request, timeout=None)
     if resp and resp.get("ok"):
-        print(resp["value"])
+        value = resp["value"]
+        if cache.enabled:
+            cache.put(entry, field, value)
+        print(value)
         return 0
 
     error = resp.get("error", "unknown") if resp else "service unreachable"
@@ -873,6 +893,10 @@ def cmd_cache_populate(args):
 
     verb = "Verifying" if args.verify else "Populating"
     print(f"{verb} cache for {len(pairs)} entr{'y' if len(pairs) == 1 else 'ies'}...")
+
+    from .cache import get_cache
+
+    cache = get_cache()
     ok = 0
     missing: list[str] = []
     for entry, field in pairs:
@@ -884,6 +908,10 @@ def cmd_cache_populate(args):
         present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
         if present:
             ok += 1
+            # Warm the persistent cache too, so the value survives daemon
+            # restarts and answers later --cache-only reads.
+            if not args.verify and cache.enabled and resp.get("value") is not None:
+                cache.put(entry, field, resp["value"])
         else:
             missing.append(f"{entry} [{field}]")
 
@@ -896,6 +924,98 @@ def cmd_cache_populate(args):
         for m in missing:
             print(f"  missing: {m}", file=sys.stderr)
     return 1 if fail > 0 else 0
+
+
+def cmd_cache_clear(args):
+    """Wipe the persistent on-disk credential cache."""
+    from .cache import get_cache
+
+    cache = get_cache()
+    if cache.clear():
+        print("Cache cleared.")
+        return 0
+    print("Error: could not clear cache", file=sys.stderr)
+    return 1
+
+
+def cmd_cache_status(args):
+    """Show persistent-cache status (enabled, location, counts, staleness)."""
+    from .cache import get_cache
+
+    status = get_cache().status()
+    if getattr(args, "json", False):
+        print(json.dumps(status, indent=2, sort_keys=True))
+        return 0
+    state = "enabled" if status["enabled"] else "disabled"
+    if not status["available"]:
+        state += " (cryptography unavailable)"
+    print(f"cache: {state}")
+    print(f"dir: {status['cache_dir']}")
+    print(f"entries: {status['entry_count']} ({status['field_count']} field(s))")
+    if status["oldest"]:
+        print(f"oldest: {status['oldest']}")
+    if status["newest"]:
+        print(f"newest: {status['newest']}")
+    return 0
+
+
+def cmd_cache_verify(args):
+    """Check the persistent cache holds a set of entries without unlocking.
+
+    Entries come from ``--entry`` / ``--manifest`` / cache-source extensions,
+    exactly like ``cache-populate``. Exits non-zero (2) if any are missing, so a
+    launch-time gate can confirm an unattended box is primed while still locked.
+    """
+    from .cache import get_cache
+
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(entry: str, field: str) -> None:
+        pair = (entry, field or "password")
+        if pair[0] and pair not in seen:
+            seen.add(pair)
+            pairs.append(pair)
+
+    for entry in (getattr(args, "entry", None) or []):
+        e, sep, f = entry.partition(":")
+        _add(e.strip(), (f.strip() if sep else "password"))
+    if getattr(args, "manifest", None):
+        manifest = Path(args.manifest)
+        if not manifest.exists():
+            print(f"Error: manifest not found: {manifest}", file=sys.stderr)
+            return 1
+        for e, f in _read_cache_manifest(manifest):
+            _add(e, f)
+    from .extensions import get_registry
+
+    for e, f in get_registry().collect_cache_entries(getattr(args, "machine", None)):
+        _add(e, f)
+
+    if not pairs:
+        print("No entries to verify (no --entry, --manifest, or cache-source extension).",
+              file=sys.stderr)
+        return 1
+
+    cache = get_cache()
+    present = 0
+    missing: list[str] = []
+    for entry, field in pairs:
+        if cache.get(entry, field) is not None:
+            present += 1
+        else:
+            missing.append(f"{entry} [{field}]")
+
+    if getattr(args, "json", False):
+        print(json.dumps(
+            {"present": present, "total": len(pairs), "missing": missing},
+            indent=2,
+        ))
+    else:
+        print(f"Cached: {present}/{len(pairs)}")
+        for m in missing:
+            print(f"  missing: {m}", file=sys.stderr)
+    return 2 if missing else 0
 
 
 def cmd_which(args):
@@ -988,6 +1108,10 @@ def main():
     p.add_argument("-p", "--prompt", action="store_true",
                    help="Prompt for the master password if locked "
                         "(default: fail fast and ask you to run 'agent-vault unlock')")
+    p.add_argument("--refresh", action="store_true",
+                   help="Bypass the persistent cache and fetch from the live vault")
+    p.add_argument("--cache-only", action="store_true", dest="cache_only",
+                   help="Read from the persistent cache only; never contact the service")
     p.set_defaults(func=cmd_get)
 
     p = sub.add_parser("has", help="Check if an entry exists")
@@ -1090,6 +1214,23 @@ def main():
     p.add_argument("--verify", action="store_true",
                    help="Only check the entries exist (no fetch/cache)")
     p.set_defaults(func=cmd_cache_populate)
+
+    p = sub.add_parser("cache-clear", help="Wipe the persistent on-disk credential cache")
+    p.set_defaults(func=cmd_cache_clear)
+
+    p = sub.add_parser("cache-status", help="Show persistent cache status")
+    p.add_argument("--json", action="store_true", help="Print JSON")
+    p.set_defaults(func=cmd_cache_status)
+
+    p = sub.add_parser("cache-verify",
+                       help="Check the persistent cache holds a set of entries "
+                            "(no unlock); exit 2 if any missing")
+    p.add_argument("--entry", action="append", metavar="PATH[:FIELD]",
+                   help="An entry to check (repeatable; FIELD defaults to password)")
+    p.add_argument("--manifest", help="File of 'entry | field' lines to check")
+    p.add_argument("--machine", help="Machine hint passed to cache-source extensions")
+    p.add_argument("--json", action="store_true", help="Print JSON")
+    p.set_defaults(func=cmd_cache_verify)
 
     p = sub.add_parser("vault", help="Manage named vaults")
     vault_sub = p.add_subparsers(dest="vault_command")
