@@ -7,7 +7,8 @@ description: >
   multiple worktree/session agents cooperate without racing through
   origin/master or needing an account per agent. Covers the CLI verbs, the
   six-state model, worker identity (machine/worktree), capability + affinity
-  routing, targeting, dedup-before-create, spawning workers via agent-bridge,
+  routing, include/exclude selector matching, targeting, dedup-before-create,
+  atomic create-and-claim, spawning workers via agent-bridge,
   and loopback-vs-remote coordinator config.
   Trigger phrases include:
   - 'agent-dispatch'
@@ -184,7 +185,8 @@ agent-dispatch list --status queued,started  # filter by status (comma-separate 
 ```bash
 agent-dispatch create "Add narration track" \
   --prompt "segment 42 needs a narration pass" \
-  --require logger \                 # hard: only a worker advertising 'logger' can claim
+  --require logger \                 # hard AFFINITY: only a worker advertising 'logger' can claim
+  --exclude machine:flaky-box \      # hard ANTI-AFFINITY: a worker matching this can NOT claim
   --affinity worktree=same \         # soft: bias toward the same worktree, never exclude
   --label media \
   --target-repo copilot-extensions \ # OPTIONAL: the cross-repo *code* target (stays in THIS lane)
@@ -195,6 +197,25 @@ The **lane** (`--repo`) defaults to the calling repo -- omit it inside your
 worktree. `--target-repo` is different: it's metadata naming the *code* a
 cross-repo task touches; the task still lives in **your** lane and a same-lane
 agent does the cross-repo work via `working-cross-repo`.
+
+**Selectors — include (`--require`) and exclude (`--exclude`).** Both take
+tokens over an open namespace; at claim time a worker's identity is folded into
+its advertised set (`machine:<m>`, `worktree:<w>`, `repo:<lane>`) alongside its
+capabilities, so a selector can target or exclude by **capability *or*
+machine/worktree/repo**. A task is claimable only when every `--require` token is
+present in the worker's set **and** no `--exclude` token is. Excludes are hard
+anti-affinity (unlike soft `--affinity`, which only orders). A declining worker
+can **append its own "not me"** on the way back to the queue with
+`agent-dispatch yield <id> --not-me {worktree,machine}` (or `--exclude <token>`);
+because excludes only grow, the candidate set shrinks monotonically to a taker or
+to unclaimable.
+
+**Atomic create-and-claim (`--claim`).** `create … --claim` inserts the task
+**already claimed by your worktree in one transaction** (no queued gap). Combined
+with `--dedup-key`, it is the safe **open-ended self-dispatch** primitive: on a
+collision the existing (already-claimed) row is returned and `claimed_by_me` is
+`false`, so you can tell you lost the race and re-pick. See the **`pick-and-claim`**
+skill for the full sweep-then-claim protocol and the `dedup_key` conventions.
 
 Write the title + prompt to be **self-describing** (see the sweep note above):
 a producer scanning existing tasks should be able to tell yours apart from
