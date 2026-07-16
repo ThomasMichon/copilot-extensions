@@ -1,14 +1,14 @@
 ---
 name: authoring-harness-plugins
 description: >
-  Ship an operator-harness plugin for a repo -- the harness-<repo> standard. A
+  Ship an operator-harness plugin for a repo -- the <repo>-harness standard. A
   payload-only plugin, authored by a repo's owner, that provides the skills to
   work ON that repo (contribute + diagnose), portable to any control repo that
   enables it. Use when a repo should ship its own operator skills instead of
   every consumer hand-writing a per-repo narrative.
   Trigger phrases include:
   - 'harness plugin'
-  - 'harness-<repo>'
+  - '<repo>-harness'
   - 'author a harness plugin'
   - 'ship operator skills for a repo'
   - 'make a harness plugin'
@@ -18,13 +18,13 @@ description: >
 
 # Authoring Harness Plugins
 
-The **`harness-<repo>`** standard: a repo ships its own *operator harness* — a
+The **`<repo>-harness`** standard: a repo ships its own *operator harness* — a
 payload-only Copilot CLI plugin that teaches an agent how to work **on** that
 repo. Instead of every downstream control repo hand-writing a per-repo narrative,
 the repo owner authors the operator skills **once**, versions them with the repo,
 and any consumer adopts them with one `enabledPlugins` line.
 
-The reference implementation is **`harness-copilot-extensions`** in the
+The reference implementation is **`copilot-extensions-harness`** in the
 copilot-extensions repo — read it as the template.
 
 ## When to author one
@@ -37,7 +37,7 @@ keep when the knowledge is reused or safety-critical.
 
 ## Harness plugin vs related-narrative
 
-| | Harness plugin (`harness-<repo>`) | Related narrative |
+| | Harness plugin (`<repo>-harness`) | Related narrative |
 |---|---|---|
 | Authored by | the repo **owner**, once | each **consumer**, per control repo |
 | Ships from | the target repo (marketplace) | the consumer's control repo |
@@ -51,9 +51,27 @@ status). Substance in the plugin; keep the narrative thin.
 
 ## The standard
 
-1. **Name it `harness-<repo>`** — e.g. `harness-copilot-extensions`,
-   `harness-my-service`. The prefix makes the intent and target obvious in a
-   `plugins/` listing and an `enabledPlugins` map.
+1. **Name it `<repo>-harness`** — e.g. `copilot-extensions-harness`,
+   `my-service-harness`. This is the repo-scoped **suffix** family; the token
+   placement carries meaning, so name to the taxonomy:
+
+   | Pattern | Means | Installs where |
+   |---------|-------|----------------|
+   | `agent-<thing>` | adds capability `<thing>` to the **general agent** | broadly (infra) |
+   | `harness-<thing>` | adds capability `<thing>` to the **general harness** | broadly (infra) |
+   | **`<repo>-harness`** | **harness-side** plugin to work ON / **control** `<repo>` from a control plane | the **control harness**, never `<repo>` itself |
+   | `<repo>-agent` | **in-repo** agent capabilities for `<repo>` | `<repo>`'s own venue, never outside it |
+
+   A harness plugin authored here is the **`<repo>-harness`** case: it targets a
+   *specific repo* (not a general capability of the harness), so the repo name
+   leads and `harness` is the suffix. Leading with the repo name also groups a
+   repo's plugins together (`<repo>-agent`, `<repo>-harness`, …) in a `plugins/`
+   listing and an `enabledPlugins` map. Two propagation rules follow from the
+   family:
+   - **Never install a `<repo>-harness` into `<repo>` itself** — it's control-plane
+     side, for an *external* operator of the repo.
+   - **Never install a `<repo>-agent` outside `<repo>` itself** — it's in-context,
+     only meaningful inside that repo's venue.
 2. **Payload-only.** No runtime, no venv — it ships skills. Enabling it is the
    whole install. (See `installing-plugins` for the payload-vs-runtime model.)
 3. **POV-neutral.** Write for *any* adopter, not one control repo. Don't bake in
@@ -67,9 +85,9 @@ status). Substance in the plugin; keep the narrative thin.
 ## Structure
 
 ```
-plugins/harness-<repo>/
+plugins/<repo>-harness/
   plugin.json                                  # payload-only manifest
-  README.md                                    # overview + the harness-<repo> standard note
+  README.md                                    # overview + the <repo>-harness standard note
   skills/
     contributing-to-<repo>/SKILL.md            # how to change + land work in the repo
     diagnosing-<repo>/SKILL.md                 # symptom -> cause -> action for its deployed artifacts
@@ -109,7 +127,7 @@ In the consumer's `.github/copilot/settings.json` (see `installing-plugins`):
   "extraKnownMarketplaces": {
     "<marketplace>": { "source": { "source": "github", "repo": "<owner>/<repo>" } }
   },
-  "enabledPlugins": { "harness-<repo>@<marketplace>": true }
+  "enabledPlugins": { "<repo>-harness@<marketplace>": true }
 }
 ```
 

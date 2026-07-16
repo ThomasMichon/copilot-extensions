@@ -22,8 +22,8 @@ Plugins, one marketplace. Install what you need; they compose.
 | [context-handoff](plugins/context-handoff/) | Extension + skill | Watch the context window via a session extension and, before it fills, compose a continuation prompt so a fresh session can resume the work. Payload-only — no runtime to install. |
 | [agent-dispatch](plugins/agent-dispatch/) | Task queue + coordinator | Coordinate multiple agents through a single-writer leased task queue (atomic claim, capability routing, lease recovery) instead of racing through `origin/master` pushes. Per-host coordinator, CLI, and MCP tools. |
 | [agent-vault](plugins/agent-vault/) | CLI + service | Local KeePassXC-backed secret store — a machine-local service caches the master password with a TTL and auto-prompts on lock; a CLI fetches API keys, SSH keys, and credentials on demand without hardcoding, committing, or env-exporting them. Ships a SUDO_ASKPASS helper for `sudo -A`. |
-| [customizing-copilot](plugins/customizing-copilot/) | Customizing the CLI | Teach an agent how to customize and extend the Copilot CLI — authoring skills, defining sub-agents, registering MCP servers, installing plugins, building a control-harness, reviewing customizations, and authoring `harness-<repo>` plugins. Seven focused skills. Payload-only — no runtime to install. |
-| [harness-copilot-extensions](plugins/harness-copilot-extensions/) | Operator harness | The portable, owner-authored skills to work *on* this suite — **contribute** changes and **diagnose** the deployed runtimes. Enable it in any control repo instead of hand-writing a per-repo narrative. Reference implementation of the `harness-<repo>` standard. Payload-only. |
+| [customizing-copilot](plugins/customizing-copilot/) | Customizing the CLI | Teach an agent how to customize and extend the Copilot CLI — authoring skills, defining sub-agents, registering MCP servers, installing plugins, building a control-harness, reviewing customizations, and authoring `<repo>-harness` plugins. Seven focused skills. Payload-only — no runtime to install. |
+| [copilot-extensions-harness](plugins/copilot-extensions-harness/) | Operator harness | The portable, owner-authored skills to work *on* this suite — **contribute** changes and **diagnose** the deployed runtimes. Enable it in any control repo instead of hand-writing a per-repo narrative. Reference implementation of the `<repo>-harness` standard. Payload-only. |
 | [wsl-setup](plugins/wsl-setup/) | Environment setup | Set up and troubleshoot WSL2 as a reachable, persistent service host — pick the networking mode (NAT + localhostForwarding vs mirrored), diagnose corp-network egress + host↔WSL loopback failures, and keep a distro alive for a hosted listener (e.g. sshd behind a Dev Tunnel). Ships a windowless keepalive helper. |
 
 All support **Windows** and **Linux/WSL** (macOS planned).
@@ -36,7 +36,7 @@ Fourteen plugins, one marketplace. **Eight ship a runtime** (a `uv`-built venv u
 `~/.agent-*` + a `~/.local/bin` binstub, deployed by the plugin's own
 installer); **six are payload-only** — `efforts` (skills), `visions` (skills),
 `context-handoff` (a session extension), `customizing-copilot` (skills),
-`harness-copilot-extensions` (skills), and `wsl-setup` (skills) need no install
+`copilot-extensions-harness` (skills), and `wsl-setup` (skills) need no install
 beyond enabling the plugin.
 Everything installs **from the marketplace** and runs
 **from local install paths** — no git checkout required at runtime.
@@ -51,7 +51,7 @@ flowchart TB
       AN["agent-containers<br/>CLI + container: resolver"]
       AM["agent-mcp<br/>MCP bridge CLI"]
       AL["agent-logger<br/>session-sync + log writer"]
-      PO["efforts · visions · context-handoff<br/>customizing-copilot · harness-copilot-extensions<br/>(payload-only: skills / extension)"]
+      PO["efforts · visions · context-handoff<br/>customizing-copilot · copilot-extensions-harness<br/>(payload-only: skills / extension)"]
     end
     subgraph RT["Local runtimes — ~/.* + ~/.local/bin"]
       RW["~/.agent-worktrees<br/>agent-worktrees"]
@@ -147,7 +147,7 @@ copilot plugin install customizing-copilot@copilot-extensions # optional — how
 Each `copilot plugin install` only vendors the plugin's **payload** (source,
 skills, hooks, extensions). The eight runtime plugins (every plugin except the
 payload-only `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
-`harness-copilot-extensions`, and `wsl-setup`) then need their runtime deployed once — that's Step 2,
+`copilot-extensions-harness`, and `wsl-setup`) then need their runtime deployed once — that's Step 2,
 which runs each installer to build a `uv` venv under `~/.agent-*` and drop a
 binstub in `~/.local/bin`.
 
@@ -406,7 +406,7 @@ Your source repos and their `.worktrees` content are never touched.
 | [installing-plugins](plugins/customizing-copilot/skills/installing-plugins/SKILL.md) | Repo `settings.json` registration, experimental mode, payload-vs-runtime |
 | [building-harnesses](plugins/customizing-copilot/skills/building-harnesses/SKILL.md) | In-session entry to the Control-Harness Runbook (greenfield / brownfield / audit) |
 | [reviewing-customizations](plugins/customizing-copilot/skills/reviewing-customizations/SKILL.md) | Review a harness's skills, sub-agents, `AGENTS.md`, hooks, MCP configs |
-| [authoring-harness-plugins](plugins/customizing-copilot/skills/authoring-harness-plugins/SKILL.md) | The `harness-<repo>` standard: ship operator skills for a repo |
+| [authoring-harness-plugins](plugins/customizing-copilot/skills/authoring-harness-plugins/SKILL.md) | The `<repo>-harness` standard: ship operator skills for a repo |
 
 ### Agent Dispatch
 
@@ -426,9 +426,9 @@ Your source repos and their `.worktrees` content are never touched.
 
 | Document | Description |
 |----------|-------------|
-| [README](plugins/harness-copilot-extensions/README.md) | Operator harness overview + the `harness-<repo>` standard |
-| [contributing-to-copilot-extensions](plugins/harness-copilot-extensions/skills/contributing-to-copilot-extensions/SKILL.md) | Change + land work in a plugin: flow, the mandatory version bump, gates, deploy |
-| [diagnosing-copilot-extensions](plugins/harness-copilot-extensions/skills/diagnosing-copilot-extensions/SKILL.md) | Symptom → cause → action for deployed plugins, key paths, baseline reset |
+| [README](plugins/copilot-extensions-harness/README.md) | Operator harness overview + the `<repo>-harness` standard |
+| [contributing-to-copilot-extensions](plugins/copilot-extensions-harness/skills/contributing-to-copilot-extensions/SKILL.md) | Change + land work in a plugin: flow, the mandatory version bump, gates, deploy |
+| [diagnosing-copilot-extensions](plugins/copilot-extensions-harness/skills/diagnosing-copilot-extensions/SKILL.md) | Symptom → cause → action for deployed plugins, key paths, baseline reset |
 
 ### Contributing
 

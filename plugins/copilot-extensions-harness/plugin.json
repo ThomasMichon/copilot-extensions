@@ -1,0 +1,20 @@
+{
+  "name": "copilot-extensions-harness",
+  "description": "Operator harness for the copilot-extensions repo -- the portable, owner-authored skills to work ON the plugin suite (contribute changes, deploy, and diagnose the deployed runtimes). Any control repo can enable this instead of hand-writing a per-repo narrative. Ships the contributing-to-copilot-extensions and diagnosing-copilot-extensions skills. This is the reference implementation of the <repo>-harness plugin standard.",
+  "version": "0.1.0-dev6",
+  "author": {
+    "name": "Thomas Michon"
+  },
+  "homepage": "https://github.com/ThomasMichon/copilot-extensions",
+  "repository": "https://github.com/ThomasMichon/copilot-extensions",
+  "license": "MIT",
+  "keywords": [
+    "harness",
+    "harness-plugin",
+    "operator-harness",
+    "contributing",
+    "diagnostics",
+    "copilot-extension"
+  ],
+  "skills": "skills/"
+}
