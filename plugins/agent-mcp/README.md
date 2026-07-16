@@ -492,6 +492,13 @@ plane maps its per-host execution policy onto (e.g. `scopes: [shared, <machine>]
 becomes an MCP tool error (`isError: true`) carrying the stderr tail — a failing
 tool yields an error, never a hang.
 
+**Windows arg fidelity.** When spawning the tool the `cli` transport prefers a
+sibling `.ps1` (invoked via `pwsh -NoProfile -File`) over a `.cmd`/`.bat` shim,
+because `cmd.exe` re-parses a batch shim's forwarded arguments and mangles
+metacharacters (`&`, `|`, `%`, `^`, quotes). A `.cmd` is used only as a last
+resort. (The stdio-MCP transports are unaffected — they still launch
+`npx`-style servers, which need stdin streaming a `.ps1` doesn't provide.)
+
 ## MCP → CLI: `call` and `materialize`
 The bridge exposes an upstream MCP *to an MCP client*. The **`call`** and
 **`materialize`** verbs expose it *to the shell* instead — the same upstream, the
