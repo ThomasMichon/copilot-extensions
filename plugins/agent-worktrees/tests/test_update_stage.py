@@ -70,6 +70,15 @@ def _make_marketplace(home: Path, files: dict[str, str]) -> Path:
     return d
 
 
+def _make_runtime_manifest(home: Path, version: str) -> Path:
+    """Write the deployed runtime's deploy-manifest (source.version) under home."""
+    d = home / ".agent-worktrees"
+    d.mkdir(parents=True, exist_ok=True)
+    mf = d / "deploy-manifest.json"
+    mf.write_text(json.dumps({"source": {"version": version}}), encoding="utf-8")
+    return mf
+
+
 def test_discover_marketplace_layout(tmp_path: Path):
     home = tmp_path / "home"
     d = _make_marketplace(home, {"plugin.json": '{"name":"agent-worktrees"}'})
@@ -144,6 +153,38 @@ def test_stage_no_change_when_download_noop(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(us, "_run_copilot_update",
                         lambda: (True, "already at latest"))
     result = us.stage(status=status, lock=lock, home=home)
+    assert result["plugin_changed"] is False
+
+
+def test_stage_detects_venv_drift_when_payload_ahead(tmp_path: Path, monkeypatch):
+    # #2826: the payload already advanced on a prior run (dev2) but the runtime
+    # venv is still dev1. The download is a no-op ("already at latest"), so the
+    # fingerprint never moves -- only the version-drift reconcile catches it.
+    home = tmp_path / "home"
+    _make_marketplace(home, {"plugin.json": '{"version":"dev2"}'})
+    _make_runtime_manifest(home, "dev1")
+    status = tmp_path / "status.json"
+    lock = tmp_path / "lock"
+    monkeypatch.setattr(us, "_run_copilot_update",
+                        lambda: (True, "already at latest"))
+    result = us.stage(status=status, lock=lock, home=home)
+    assert result["venv_drift"] is True
+    assert result["plugin_changed"] is True
+    assert result["plugin_changed_reason"] == "venv-drift"
+    assert result["payload_version"] == "dev2"
+    assert result["deployed_version"] == "dev1"
+
+
+def test_stage_no_drift_when_versions_match(tmp_path: Path, monkeypatch):
+    home = tmp_path / "home"
+    _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
+    _make_runtime_manifest(home, "dev1")
+    status = tmp_path / "status.json"
+    lock = tmp_path / "lock"
+    monkeypatch.setattr(us, "_run_copilot_update",
+                        lambda: (True, "already at latest"))
+    result = us.stage(status=status, lock=lock, home=home)
+    assert result["venv_drift"] is False
     assert result["plugin_changed"] is False
 
 
