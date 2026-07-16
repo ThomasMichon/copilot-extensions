@@ -395,6 +395,7 @@ def _cmd_claim(args: argparse.Namespace) -> int:
             worktree=worktree,
             task_id=args.task,
             lease_seconds=args.lease_seconds,
+            evaluation=getattr(args, "evaluation", False),
         )
     if task is None:
         print("no claimable task", file=sys.stderr)
@@ -1058,6 +1059,13 @@ def build_parser() -> argparse.ArgumentParser:
              "repo. A worker only claims tasks in its own repo's lane.",
     )
     p.add_argument("--lease-seconds", type=int)
+    p.add_argument(
+        "--evaluation", action="store_true",
+        help="claim under the tight EVALUATION lease (a quick accept/reject "
+             "window): a stuck evaluator auto-releases fast, and 'start' then "
+             "extends to the full work lease on commit. Decline with "
+             "'yield --not-me' or 'abandon --duplicate-of'.",
+    )
     p.set_defaults(func=_cmd_claim)
 
     p = sub.add_parser(
