@@ -62,3 +62,26 @@ def test_client_url_degrades_on_resolution_error(monkeypatch):
 def test_config_module_importable():
     assert config_mod.DEFAULT_PORT == 9847
 
+
+
+# -- shared/elected coordinator resolution (cross-machine dispatch) ----------
+
+
+def test_shared_url_unset_is_none(monkeypatch):
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_URL", raising=False)
+    assert config_mod.shared_url() is None
+
+
+def test_shared_url_from_env(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://gateway.example/dispatch")
+    assert config_mod.shared_url() == "https://gateway.example/dispatch"
+
+
+def test_shared_token_is_independent_of_local_token(monkeypatch):
+    # The shared bearer does NOT fall back to AGENT_DISPATCH_TOKEN -- the two
+    # coordinators authenticate separately.
+    monkeypatch.setenv("AGENT_DISPATCH_TOKEN", "local-secret")
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN", raising=False)
+    assert config_mod.shared_token() is None
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN", "shared-secret")
+    assert config_mod.shared_token() == "shared-secret"

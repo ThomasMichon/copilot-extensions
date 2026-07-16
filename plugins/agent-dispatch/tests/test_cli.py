@@ -2,12 +2,52 @@
 
 from __future__ import annotations
 
-from agent_dispatch.__main__ import _parse_affinity, build_parser
+from agent_dispatch.__main__ import _parse_affinity, _resolve_client_target, build_parser
 
 
 def test_parse_affinity():
     assert _parse_affinity(["agent=w1", "worktree=wt-2"]) == {"agent": "w1", "worktree": "wt-2"}
     assert _parse_affinity(None) == {}
+
+
+# -- coordinator target resolution: local vs shared/elected -----------------
+
+
+def _args(argv):
+    return build_parser().parse_args(argv)
+
+
+def test_resolve_target_explicit_url_wins(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://gateway/dispatch")
+    args = _args(["--url", "http://direct:9847", "--shared", "list"])
+    url, _ = _resolve_client_target(args)
+    assert url == "http://direct:9847"  # --url trumps --shared
+
+
+def test_resolve_target_shared_routes_to_shared_coordinator(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://gateway/dispatch")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN", "shared-secret")
+    args = _args(["--shared", "list"])
+    url, token = _resolve_client_target(args)
+    assert url == "https://gateway/dispatch"
+    assert token == "shared-secret"
+
+
+def test_resolve_target_shared_unconfigured_errors_loudly(monkeypatch):
+    import pytest
+
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_URL", raising=False)
+    args = _args(["--shared", "list"])
+    with pytest.raises(SystemExit):
+        _resolve_client_target(args)
+
+
+def test_resolve_target_local_default(monkeypatch):
+    monkeypatch.delenv("AGENT_DISPATCH_URL", raising=False)
+    monkeypatch.setattr("agent_dispatch.netinfo.is_wsl", lambda: False)
+    args = _args(["list"])
+    url, _ = _resolve_client_target(args)
+    assert url == "http://127.0.0.1:9847"
 
 
 def test_parser_create_flags():

@@ -18,7 +18,7 @@ from typing import Any
 
 from . import __version__
 from .client import DispatchClient, DispatchError
-from .config import Config, client_token, client_url
+from .config import Config, client_token, client_url, shared_token, shared_url
 
 
 def _emit(value: Any) -> int:
@@ -27,8 +27,41 @@ def _emit(value: Any) -> int:
     return 0
 
 
+def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
+    """Resolve which coordinator (URL + token) a client command targets.
+
+    Precedence:
+
+    1. An explicit ``--url`` (with ``--token``/``AGENT_DISPATCH_TOKEN``) -- the
+       operator's direct override, always wins.
+    2. ``--shared`` -- route to the **shared/elected coordinator**
+       (``AGENT_DISPATCH_SHARED_URL``; facility: the gateway) for cross-machine
+       dispatch, authenticated with its own ``AGENT_DISPATCH_SHARED_TOKEN``. If no
+       shared coordinator is configured, error loudly rather than silently using
+       the local queue (which would strand a cross-machine task on one host).
+    3. Otherwise the **local** loopback coordinator -- same-machine work, the
+       single-machine default that needs no shared service.
+    """
+    url = getattr(args, "url", None)
+    token = getattr(args, "token", None)
+    if url:
+        return url, (token or client_token())
+    if getattr(args, "shared", False):
+        surl = shared_url()
+        if not surl:
+            print(
+                "no shared coordinator configured -- set AGENT_DISPATCH_SHARED_URL "
+                "(facility: the gateway endpoint) or pass --url",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        return surl, (token or shared_token())
+    return client_url(), (token or client_token())
+
+
 def _client(args: argparse.Namespace) -> DispatchClient:
-    return DispatchClient(args.url or client_url(), token=args.token or client_token())
+    url, token = _resolve_client_target(args)
+    return DispatchClient(url, token=token)
 
 
 def _parse_affinity(pairs: list[str] | None) -> dict[str, str]:
@@ -258,7 +291,7 @@ def _do_spawn(args: argparse.Namespace, task: dict):
     - ``bridge`` (default) -- a **headless** agent-bridge ACP worker.
     """
     backend = getattr(args, "spawn_backend", "bridge")
-    coordinator_url = args.url or client_url()
+    coordinator_url = _resolve_client_target(args)[0]
 
     if backend == "embody":
         from . import embody
@@ -838,10 +871,11 @@ def _cmd_schedule(args: argparse.Namespace) -> int:
     from .producers import schedule
 
     if args.schedule_command == "serve":
+        _url, _token = _resolve_client_target(args)
         schedule.serve(
             args.spec,
-            url=args.url or client_url(),
-            token=args.token or client_token(),
+            url=_url,
+            token=_token,
             interval=args.interval,
         )
         return 0
@@ -876,7 +910,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     from .supervisor import Supervisor, make_embody_spawn
 
     repo = None if getattr(args, "all_repos", False) else _scope_repo(args)
-    coordinator_url = args.url or client_url()
+    coordinator_url = _resolve_client_target(args)[0]
     pool = [h for h in (getattr(args, "pool", "") or "").split(",") if h.strip()]
     capacity_gate = None
     if pool:
@@ -957,6 +991,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--url", help="coordinator base URL (default: AGENT_DISPATCH_URL or config)"
     )
     parser.add_argument("--token", help="bearer token (default: AGENT_DISPATCH_TOKEN)")
+    parser.add_argument(
+        "--shared", action="store_true",
+        help="target the SHARED/elected coordinator (AGENT_DISPATCH_SHARED_URL; "
+             "facility: the gateway) for cross-machine dispatch, instead of this "
+             "host's local coordinator. Authenticated with AGENT_DISPATCH_SHARED_TOKEN.",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("serve", help="run the per-host coordinator")

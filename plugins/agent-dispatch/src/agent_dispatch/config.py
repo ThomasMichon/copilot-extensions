@@ -10,6 +10,14 @@ lone dev box or against a designated coordinator host on a shared network:
   sweeps (server side; ``0`` disables the sweep).
 - ``AGENT_DISPATCH_URL`` -- the coordinator base URL the CLI talks to (defaults to
   ``http://<host>:<port>``); set this to point the CLI at a remote coordinator.
+- ``AGENT_DISPATCH_SHARED_URL`` -- the **shared/elected coordinator** endpoint used
+  for cross-machine dispatch (facility binding: the always-on gateway endpoint).
+  A client keeps its **local** loopback coordinator for same-machine work and
+  reaches this one only when it opts in (``--shared``), so the single-machine /
+  works-with-no-service property is preserved (hybrid topology).
+- ``AGENT_DISPATCH_SHARED_TOKEN`` -- bearer token for the shared coordinator
+  (independent of the local ``AGENT_DISPATCH_TOKEN``; per-client, as the shared
+  endpoint is exposed only through the gateway/secured mesh).
 """
 
 from __future__ import annotations
@@ -98,3 +106,24 @@ def client_url() -> str:
 def client_token() -> str | None:
     """The bearer token the CLI should send, if any."""
     return os.environ.get("AGENT_DISPATCH_TOKEN") or None
+
+
+def shared_url() -> str | None:
+    """The **shared/elected coordinator** base URL for cross-machine dispatch.
+
+    ``AGENT_DISPATCH_SHARED_URL`` (facility binding: the always-on gateway
+    endpoint). ``None`` when no shared coordinator is configured -- the client is
+    then local-only and a ``--shared`` command errors loudly rather than silently
+    falling back to the local queue (which would strand a cross-machine task).
+    """
+    return os.environ.get("AGENT_DISPATCH_SHARED_URL") or None
+
+
+def shared_token() -> str | None:
+    """The bearer token for the shared coordinator, if any.
+
+    Independent of the local ``AGENT_DISPATCH_TOKEN`` (``AGENT_DISPATCH_SHARED_TOKEN``):
+    the two coordinators authenticate separately -- the shared one is exposed only
+    through the gateway/secured mesh atop its own per-client bearer.
+    """
+    return os.environ.get("AGENT_DISPATCH_SHARED_TOKEN") or None
