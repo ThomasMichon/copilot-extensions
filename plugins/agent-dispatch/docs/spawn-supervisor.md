@@ -155,6 +155,31 @@ its lease.
   scheme) exists, a dead embody's task is held and surfaced via
   `reservations list` for a manual `reservations fail <key>`.
 
+## Transport for a containerized producer
+
+A producer running in a **Docker container** (e.g. a scheduled sweep container)
+reaches the host coordinator over `host.docker.internal` (with
+`extra_hosts: host.docker.internal:host-gateway`). Two facts shape the safe bind:
+
+- The coordinator defaults to **loopback** (`127.0.0.1:9847`), which a container
+  **cannot** reach.
+- On Linux, each compose service gets its **own** bridge network with its own
+  host-local gateway (all in `172.16/12`, none LAN-routed), so no *single*
+  host-local IP is reachable from every container. The address reachable from all
+  of them **and** the host is the wildcard `0.0.0.0` — which also exposes the LAN.
+
+So the containerized-producer transport is: **bind `0.0.0.0`, require a bearer
+token, and firewall the port off the LAN** (allow loopback + the Docker bridge
+subnets `172.16.0.0/12`; drop the LAN interfaces). The token is enforced by the
+**bind-safety guard** (`server.check_bind_safety`): binding a wildcard host
+without `AGENT_DISPATCH_TOKEN` is refused outright, so the powerful task-control
+API can never land on the network unauthenticated. (A *specific* host-local bind
+— loopback, a Windows vEthernet(WSL) IP, or one shared Docker bridge gateway — is
+a deliberate non-LAN choice and is not guarded; a future shared-network refinement
+could bind one gateway and drop the firewall requirement.) The producer sends the
+same token as a bearer credential; producer credentials should be **create-only**,
+separate from runner credentials.
+
 ## Genericity
 
 Nothing here is specific to any one producer. The reservation is keyed only by
