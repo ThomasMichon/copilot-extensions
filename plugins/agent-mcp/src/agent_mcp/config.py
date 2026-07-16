@@ -23,8 +23,9 @@ from typing import Any
 
 import yaml
 
-# Transport kinds (mirror MCP server-launch ``type`` values).
-TRANSPORTS = ("http", "stdio")
+# Transport kinds (mirror MCP server-launch ``type`` values, plus ``cli`` --
+# the local CLI->MCP responder that has no upstream MCP at all).
+TRANSPORTS = ("http", "stdio", "cli")
 
 # Auth injector kinds. ``az`` is an alias for ``entra``; ``static`` for ``env``.
 AUTH_KINDS = (
@@ -66,10 +67,19 @@ class ServerSpec:
     # both are set. See :mod:`agent_mcp.runner`.
     npm: str | None = None
     npm_args: list[str] = field(default_factory=list)
+    # cli (CLI->MCP responder): a set of tool sidecar files to expose as MCP
+    # tools, and an optional list of execution scopes this host is allowed to
+    # run. A sidecar whose ``mcp.scope`` is set and not in ``scopes`` is neither
+    # advertised nor runnable (the generic form of the facility execution
+    # policy). ``scopes`` empty => no scope gating.
+    tools_from: list[str] = field(default_factory=list)
+    scopes: list[str] = field(default_factory=list)
 
     @property
     def launch_desc(self) -> str:
         """A short human description of the upstream launch (for logs/status)."""
+        if self.type == "cli":
+            return f"cli:{len(self.tools_from)} sidecar(s)"
         if self.url:
             return self.url
         if self.command:
@@ -288,6 +298,8 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
         env={str(k): str(v) for k, v in (raw_server.get("env") or {}).items()},
         npm=npm,
         npm_args=npm_args,
+        tools_from=[str(p) for p in (raw_server.get("tools_from") or [])],
+        scopes=[str(s) for s in (raw_server.get("scopes") or [])],
     )
 
     # ``auth`` may be a single mapping (one injector) or a list of mappings
@@ -358,6 +370,8 @@ def validate_config(cfg: BridgeConfig) -> list[str]:
         errors.append("server.url is required for transport 'http'")
     if s.type == "stdio" and not s.command and not s.npm:
         errors.append("server.command or server.npm is required for transport 'stdio'")
+    if s.type == "cli" and not s.tools_from:
+        errors.append("server.tools_from is required for transport 'cli'")
 
     # The bridge injects via the transport's native mechanism: header for http,
     # env for stdio. ``inject`` is parsed but the transport ultimately decides, so
