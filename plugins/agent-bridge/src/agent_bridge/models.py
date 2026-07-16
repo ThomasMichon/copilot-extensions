@@ -436,7 +436,15 @@ class PhasedTimeouts(BaseModel):
     )
     session_start: float = Field(
         default=60.0,
-        description="Max seconds for a freshly spawned session to become idle.",
+        description="Max seconds for the ACP handshake (client start/streams + "
+        "initialize) of a freshly spawned session.",
+    )
+    session_new: float = Field(
+        default=180.0,
+        description="Max seconds for the cold ACP session/new call. Distinct "
+        "from (and larger than) session_start because a first session/new on a "
+        "large workspace loads the workspace + skills/instructions and can far "
+        "exceed the fast initialize handshake.",
     )
     command: float = Field(
         default=1800.0,

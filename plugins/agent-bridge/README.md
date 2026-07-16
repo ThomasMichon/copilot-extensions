@@ -72,7 +72,8 @@ hung turn. Configure in `~/.agent-bridge/config.yaml`:
 timeouts:
   codespace_boot: 180   # waiting for a Shutdown codespace to boot
   ssh_connect: 120      # establishing SSH (patient: wake-on-LAN / ProxyJump)
-  session_start: 60     # freshly spawned session to become idle
+  session_start: 60     # ACP handshake (client start + initialize)
+  session_new: 180      # cold ACP session/new (large-workspace + skills load)
   command: 1800         # a single turn/command to complete
 ```
 
@@ -118,7 +119,7 @@ into both the daemon log and the session's event feed — so a failure says
 | 4 | target-auth-env | Auth relay + env on target. Dead relay → **instant fail** (not retryable). |
 | 5 | target-binstub | Binstub / folder present. **Instant fail** if missing. |
 | 6 | worktree | Create/resume worktree. Failures **propagate**, no retries. |
-| 7 | launch-acp | Launch Copilot ACP. Should be fast; bounded by `session_start`, then fail fast. |
+| 7 | launch-acp | Launch Copilot ACP: handshake bounded by `session_start`, the cold `session/new` bounded by the larger `session_new`, then fail fast. |
 
 On failure, a `connect_failed` event carries `{stage, stage_name, retryable,
 message}`. A host agent can surface the connection checkpoints with
