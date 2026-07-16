@@ -1,4 +1,4 @@
-"""Tests for agent_worktrees.tracking — YAML CRUD and session registry."""
+"""Tests for agent_worktrees.tracking â YAML CRUD and session registry."""
 
 from __future__ import annotations
 
@@ -329,7 +329,7 @@ class TestSaveLoadRoundTrip:
 
 
 # ---------------------------------------------------------------------------
-# Session registry — three-state semantics
+# Session registry â three-state semantics
 # ---------------------------------------------------------------------------
 
 class TestSessionsField:
@@ -355,7 +355,7 @@ class TestSessionsField:
         return WorktreeRecord(**defaults)
 
     def test_sessions_none_means_not_indexed(self, tmp_path: Path):
-        """sessions=None (pre-registry) — YAML has no sessions key."""
+        """sessions=None (pre-registry) â YAML has no sessions key."""
         rec = self._make_record(sessions=None)
         path = tmp_path / "wt.yaml"
         save_record(rec, path)
@@ -367,7 +367,7 @@ class TestSessionsField:
         assert loaded.sessions is None
 
     def test_sessions_empty_means_indexed(self, tmp_path: Path):
-        """sessions=[] (indexed, no sessions) — YAML has sessions: []."""
+        """sessions=[] (indexed, no sessions) â YAML has sessions: []."""
         rec = self._make_record(sessions=[])
         path = tmp_path / "wt.yaml"
         save_record(rec, path)
@@ -1059,3 +1059,65 @@ class TestSetDisposition:
         again = load_record(p)
         assert again.follow_up is False
         assert again.summary == "new"
+
+
+class TestForwardCompatContract:
+    """The single-writer cross-layer contract (docs/architecture.md, the
+    "Single-Writer Contract" invariant): a writer that touches ONE field via
+    load_record -> save_record must preserve every OTHER orthogonal overlay
+    untouched. Guards against a higher layer (or a future field) silently
+    clobbering the ground-layer record. Add a field to WorktreeRecord? Extend
+    the ``_full`` fixture below.
+    """
+
+    def _full(self):
+        return WorktreeRecord(
+            worktree_id="lambda-core-win-20260715-abcd",
+            branch="worktree/x", worktree_path="/tmp/x", repo="r",
+            machine="lambda-core", platform="wsl",
+            started_at="2026-07-15T00:00:00", last_resumed_at="2026-07-15T00:00:00",
+            resume_count=2, title="t", status="active", completed_at=None,
+            interface="cli", origin="user",
+            parent_session="sess-1", caller_worktree="lambda-core-win-caller",
+            follow_up=True, summary="work left", status_note_at="2026-07-15T01:00:00",
+        )
+
+    def _assert_overlays_intact(self, r):
+        assert r.interface == "cli"
+        assert r.origin == "user"
+        assert r.parent_session == "sess-1"
+        assert r.caller_worktree == "lambda-core-win-caller"
+        assert r.follow_up is True
+        assert r.summary == "work left"
+        assert r.status_note_at
+
+    def test_naive_load_save_preserves_all_overlays(self, tmp_path: Path):
+        p = tmp_path / "wt.yaml"
+        save_record(self._full(), p)
+        loaded = load_record(p)
+        save_record(loaded, p)
+        self._assert_overlays_intact(load_record(p))
+
+    def test_mark_resumed_preserves_overlays(self, tmp_path: Path, monkeypatch):
+        p = tmp_path / "wt.yaml"
+        save_record(self._full(), p)
+        rec = load_record(p)
+        # mark_resumed saves to the canonical yaml_path (no path arg); redirect
+        # that internal save to the temp file.
+        monkeypatch.setattr("agent_worktrees.tracking.save_record",
+                            lambda record, path=None: save_record(record, p))
+        mark_resumed(rec)
+        reloaded = load_record(p)
+        assert reloaded.resume_count == 3
+        self._assert_overlays_intact(reloaded)
+
+    def test_update_status_preserves_disposition(self, tmp_path: Path):
+        p = tmp_path / "wt.yaml"
+        save_record(self._full(), p)
+        rec = load_record(p)
+        rec.status = "finalized"
+        save_record(rec, p)
+        reloaded = load_record(p)
+        assert reloaded.status == "finalized"
+        assert reloaded.follow_up is True
+        assert reloaded.summary == "work left"

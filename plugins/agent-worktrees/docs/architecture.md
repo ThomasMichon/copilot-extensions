@@ -51,6 +51,41 @@ After full installation and project registration:
   cleanup-worktrees{.cmd}           #   Bulk worktree cleanup
 ```
 
+## The Worktree Record -- Single-Writer Contract (invariant)
+
+The per-worktree tracking YAML (`~/.{project}/worktrees/{id}.yaml`) is the
+**ground-layer state** of the agent fabric (see the `agent-fabric` vision in
+this repo's `visions/`). Two invariants keep the layers composable -- *enhancing,
+never overriding* one another -- as new orthogonal fields accrue on the record
+(the `interface`/`origin` marks, the `follow_up`/`summary` disposition, ...):
+
+1. **Single writer, load-then-save only.** Only **agent-worktrees** writes the
+   record, and only via `tracking.load_record()` -> mutate -> `tracking.save_record()`
+   (or `create_new_record()` for a *brand-new* worktree). `save_record()`
+   serializes **every** field the dataclass carries -- including ones the calling
+   code never set or doesn't know about -- so a writer that only cares about, say,
+   `resume_count` (`mark_resumed`) or `status` (`update_status`) **preserves the
+   disposition and marks untouched**. A writer must **never** rebuild a fresh
+   `WorktreeRecord` over an existing file, nor raw-rewrite the YAML: either would
+   silently drop fields it doesn't model.
+
+2. **Higher layers read, derive, and coordinate -- they do not write it.**
+   agent-bridge (coordination) and agent-dispatch (delegation) reach the record
+   **read-only**, through `agent-worktrees list --json` / `get` / `resolve --json`;
+   they never open the YAML for writing. agent-dispatch keeps its *own* state
+   (`worktree_focus`, `latest_progress`) in its *own* store
+   (`~/.agent-dispatch/tasks.db`) and **derives** cross-layer answers at read time
+   rather than storing a second copy on the record. This is the vision's
+   *derive-don't-duplicate / single-owning-layer* rule made concrete.
+
+**Enforcement.** Any new writer -- in this plugin or a converging higher layer
+(e.g. a future agent-dispatch `status` write-through) -- must go through the
+`load_record -> save_record` path (or, better, the `agent-worktrees status`
+verb), so the round-trip preserves every overlay. A forward-compat guard test
+(`tests/test_tracking.py::TestForwardCompatContract`) asserts that a load->save
+by a writer that touches only one field leaves all other overlays intact; if you
+add a field, extend that test.
+
 ## Session Lifecycle
 
 ```
