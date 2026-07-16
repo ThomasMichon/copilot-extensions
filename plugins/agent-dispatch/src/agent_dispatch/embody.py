@@ -17,6 +17,7 @@ standalone on a host without agent-worktrees.
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import subprocess
 
@@ -134,6 +135,112 @@ def spawn_embodied_worker(
     cmd = [exe, "embody", "--new", "--seed", seed, "--driver", driver, "--json"]
     if verify_timeout:
         cmd += ["--verify-timeout", str(verify_timeout)]
+    return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
+        cmd, check=False, capture_output=True, text=True, timeout=timeout
+    )
+
+
+# -- Fleet dispatch (Model C): a remote body that drives the ORIGIN task -------
+
+
+def fleet_autopilot_worker_prompt(
+    task_id: str, *, origin: str, owner: str, worker_id: str
+) -> str:
+    """Build the autopilot seed for a **fleet-dispatched, remote** embody body.
+
+    Model C: the reservation and the task lease live on the **origin**
+    coordinator (fleet-wide at-most-once), and this body -- running on a *pool*
+    host, not the origin -- drives the origin task's whole lifecycle back over the
+    existing bidirectional SSH mesh, by prefixing every ``agent-dispatch`` verb
+    with ``ssh <origin>``. That runs the verb **on** the origin against its own
+    local coordinator, so there is **no new network bind** on the origin (its
+    control API never leaves loopback).
+
+    Two differences from the local :func:`autopilot_worker_prompt`:
+
+    - **Reach the origin over SSH.** Lifecycle verbs run as
+      ``ssh <origin> agent-dispatch <verb> ...`` (the origin is a facility SSH
+      alias, never a raw IP).
+    - **Carry an explicit owner.** The CWD-based owner resolution can't work over
+      ``ssh <origin>`` (that shell lands in the origin's home dir, not this body's
+      worktree), so the body passes the supervisor-assigned **synthetic owner**
+      (``{owner}``) on every lease-holding verb. It is an opaque lease-holder id,
+      stable for this attempt.
+    """
+    return (
+        f"You are a fleet-dispatched agent-dispatch **autopilot** worker (worker "
+        f"id: {worker_id}), running detached in a fresh parallel worktree on this "
+        f"pool host with tools auto-approved (--allow-all-tools). Your task was "
+        f"scheduled on a DIFFERENT machine -- the origin coordinator on host "
+        f"'{origin}'. Drive the task there by running EVERY agent-dispatch "
+        f"lifecycle verb over SSH against the origin, ALWAYS passing your explicit "
+        f"owner id '{owner}' (your working directory here cannot identify you to "
+        f"the origin, so the owner is not optional). Work the task end-to-end, "
+        f"autonomously, without waiting for a human. Steps: "
+        f"(1) read it: `ssh {origin} agent-dispatch show {task_id}`; "
+        f"(2) claim it: `ssh {origin} agent-dispatch claim --task {task_id} "
+        f"{owner}` (add `--capability <cap>` for each capability the task "
+        f"requires); "
+        f"(3) `ssh {origin} agent-dispatch start {task_id} {owner}`, then carry "
+        f"out the work described in the task's prompt/payload to completion; "
+        f"(4) ONLY once you judge the task's goal genuinely reached, run "
+        f"`ssh {origin} agent-dispatch complete {task_id} {owner} --result-ref "
+        f"<ref>`. Do NOT mark it complete before the goal is met -- completing the "
+        f"task is your explicit signal that the work is done. On a real blocker, "
+        f"`ssh {origin} agent-dispatch yield {task_id} {owner} --note <why>` "
+        f"returns it to the origin's queue for a later cycle. "
+        f"**Report progress as you go** so the operator can watch the fleet at a "
+        f"glance: at each phase boundary (plan settled, implementation done, a PR "
+        f"opened, a blocker hit) run "
+        f"`ssh {origin} agent-dispatch progress {task_id} {owner} --phase <phase> "
+        f"--summary \"<one line toward the goal>\"` (add `--pr <ref>` or "
+        f"`--blocker <why>` when relevant). Keep each summary to a single line -- "
+        f"it is a status beat, not a transcript; emit one only at real "
+        f"transitions, never on a timer."
+    )
+
+
+def spawn_fleet_embodied_worker(
+    host: str,
+    task_id: str,
+    *,
+    origin: str,
+    owner: str,
+    worker_id: str,
+    driver: str = DEFAULT_DRIVER,
+    verify_timeout: int = 0,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess:
+    """Spawn a CLI-backed autopilot body on a **remote pool ``host``** via SSH.
+
+    Runs ``agent-worktrees embody --new --seed "<fleet seed>" ...`` **on**
+    ``host`` (its facility SSH alias) -- creating a fresh detached worktree +
+    Copilot session there, seeded (:func:`fleet_autopilot_worker_prompt`) to drive
+    the ``task_id`` lease back to the ``origin`` coordinator over SSH (Model C).
+    The remote ``embody --json`` handle rides the SSH stdout, so
+    :func:`parse_handle` recovers the worktree/session for the reservation record.
+
+    Raises :class:`EmbodyUnavailable` if ``ssh`` is not on PATH here; a remote
+    host that lacks ``agent-worktrees`` surfaces as a non-zero exit (the caller
+    fails the reservation). The body runs **detached** on ``host``, so an SSH blip
+    after launch never kills a running job.
+    """
+    exe = shutil.which("ssh")
+    if exe is None:
+        raise EmbodyUnavailable("ssh CLI not found on PATH (needed for fleet dispatch)")
+    seed = fleet_autopilot_worker_prompt(
+        task_id, origin=origin, owner=owner, worker_id=worker_id
+    )
+    remote_argv = [
+        "agent-worktrees", "embody", "--new",
+        "--seed", seed, "--driver", driver, "--json",
+    ]
+    if verify_timeout:
+        remote_argv += ["--verify-timeout", str(verify_timeout)]
+    remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
+    # `host` is the facility SSH alias (never a raw IP). BatchMode so a missing key
+    # fails fast instead of hanging on a password prompt.
+    cmd = [exe, "-o", "BatchMode=yes", host.strip().lower(), remote_cmd]
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
         cmd, check=False, capture_output=True, text=True, timeout=timeout
     )

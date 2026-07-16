@@ -841,9 +841,36 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
 
     repo = None if getattr(args, "all_repos", False) else _scope_repo(args)
     coordinator_url = args.url or client_url()
-    spawn_fn = make_embody_spawn(
-        coordinator_url, verify_timeout=getattr(args, "verify_timeout", 0) or 0
-    )
+    pool = [h for h in (getattr(args, "pool", "") or "").split(",") if h.strip()]
+    capacity_gate = None
+    if pool:
+        from . import remote_dispatch
+        from .fleet import FleetSpawner
+
+        origin = getattr(args, "origin", None) or remote_dispatch.local_machine()
+        if not origin:
+            print(
+                "agent-dispatch supervise --pool: could not resolve this machine's "
+                "alias for fleet bodies to report back to; pass --origin <alias>.",
+                file=sys.stderr,
+            )
+            return 2
+        fleet = FleetSpawner(
+            pool,
+            origin=origin,
+            verify_timeout=getattr(args, "verify_timeout", 0) or 0,
+        )
+        spawn_fn = fleet
+        capacity_gate = fleet.can_spawn
+        print(
+            f"agent-dispatch supervise: fleet mode -- pool={','.join(fleet.pool)} "
+            f"origin={origin}",
+            file=sys.stderr,
+        )
+    else:
+        spawn_fn = make_embody_spawn(
+            coordinator_url, verify_timeout=getattr(args, "verify_timeout", 0) or 0
+        )
     with _client(args) as c:
         sup = Supervisor(
             c,
@@ -853,6 +880,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             max_concurrent=args.max_concurrent,
             max_attempts=args.max_attempts,
             heartbeat=not args.no_heartbeat,
+            capacity_gate=capacity_gate,
         )
         if args.once:
             return _emit({"spawned": sup.poll_once()})
@@ -1274,6 +1302,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--once", action="store_true", help="run a single supervision cycle and exit"
+    )
+    p.add_argument(
+        "--pool",
+        help="fleet mode: comma-separated host aliases to dispatch embody bodies "
+             "to (first live host wins). Omit for local spawn on this machine.",
+    )
+    p.add_argument(
+        "--origin",
+        help="fleet mode: this coordinator's own SSH alias, which dispatched "
+             "bodies report their lease back to (default: the resolved local "
+             "machine). Required when the local machine can't be resolved.",
     )
     p.set_defaults(func=_cmd_supervise)
 

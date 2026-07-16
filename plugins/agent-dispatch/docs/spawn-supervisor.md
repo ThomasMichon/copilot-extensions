@@ -1,10 +1,13 @@
 # agent-dispatch — Embody Spawn Supervisor (design)
 
 Status: **in progress** — the spawn-reservation primitive, the supervisor loop
-(spawn-at-most-once), **and the liveness-gated lease heartbeat** are built;
-dead-embody *auto-recovery* (needs confirmed-death detection), the backlog-catch-up
-policy, and the authenticated container transport land in follow-up slices.
-Public tracker: [ThomasMichon/copilot-extensions#44](https://github.com/ThomasMichon/copilot-extensions/issues/44).
+(spawn-at-most-once), the liveness-gated lease heartbeat, **and fleet dispatch (a
+health-gated remote embody pool, Model C)** are built; dead-embody
+*auto-recovery* (needs confirmed-death detection), the backlog-catch-up policy,
+and the authenticated container transport land in follow-up slices.
+Public trackers: [#44](https://github.com/ThomasMichon/copilot-extensions/issues/44)
+(supervisor) · [#49](https://github.com/ThomasMichon/copilot-extensions/issues/49)
+(fleet dispatch).
 
 This note is the design of record for turning a **queued task** into **exactly
 one host-side embody autopilot session**, durably and idempotently. It realizes
@@ -179,6 +182,53 @@ a deliberate non-LAN choice and is not guarded; a future shared-network refineme
 could bind one gateway and drop the firewall requirement.) The producer sends the
 same token as a bearer credential; producer credentials should be **create-only**,
 separate from runner credentials.
+
+## Fleet dispatch: a health-gated remote embody pool (Model C)
+
+The supervisor spawns embody on its **own** machine by default
+(`make_embody_spawn`). **Fleet dispatch** lets one always-on supervisor instead
+fan bodies out across a **pool of capable-but-not-always-on hosts** — the shape a
+containerized, always-on producer needs when the real work should run on
+workstations elsewhere in the mesh. It reuses the supervisor loop and the
+reservation primitive unchanged; only the spawn target and a capacity gate are
+new (`fleet.py`).
+
+Three properties define it:
+
+- **Origin-owned lease (Model C).** The spawn reservation and the task lease stay
+  on the supervisor's (origin's) coordinator, so at-most-once is **fleet-wide**,
+  not per-pool-host. Only the *body* runs remotely; it drives the origin task's
+  lifecycle (`claim`/`start`/`progress`/`complete`) **back to the origin over the
+  existing bidirectional SSH mesh** — `ssh <origin> agent-dispatch <verb> …`,
+  under a supervisor-assigned **synthetic owner** (the body's own worktree can't
+  identify it to the origin). This introduces **no new network bind** on the
+  origin: its control API never leaves loopback. The body runs **detached** on the
+  pool host, so an SSH blip after launch never kills a running job.
+- **Liveness-gated selection.** A pool host is a candidate only when it is
+  reachable over SSH **and** has `agent-worktrees` (a single cheap
+  `command -v agent-worktrees` probe, cached briefly). The first live candidate by
+  policy (config order; a task's `target_machine`, if in the pool, is tried first)
+  is chosen.
+- **Defer, don't fail, when the pool is asleep.** `FleetSpawner.can_spawn` is wired
+  as the supervisor's **`capacity_gate`** — an optional pre-reservation check
+  (default no-op → the local path is unchanged). When no host is live, the task is
+  skipped for the cycle **without a reservation**, so an all-asleep pool never
+  burns spawn attempts toward the dead-letter bound.
+
+CLI:
+
+```
+agent-dispatch supervise --pool host-a,host-b [--origin <alias>] [--label L …]
+```
+
+`--origin` is the supervisor machine's own SSH alias that bodies report back to
+(defaults to the resolved local machine). Omit `--pool` for local spawn.
+
+**Deliberately deferred:** a fleet body uses a *synthetic* owner, so it is not
+auto-joined to the agent-bridge live-session registry the way a local embody is
+(cross-machine liveness still works via the SSH probe); per-host concurrency caps
+(the global `--max-concurrent` still applies); and load-aware selection beyond
+config order.
 
 ## Genericity
 

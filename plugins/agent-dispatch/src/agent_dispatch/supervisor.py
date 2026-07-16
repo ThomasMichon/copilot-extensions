@@ -132,6 +132,7 @@ class Supervisor:
         supervisor_id: str | None = None,
         heartbeat: bool = True,
         liveness_fn: LivenessFn | None = None,
+        capacity_gate: Callable[[dict], bool] | None = None,
     ):
         self.client = client
         self.spawn_fn = spawn_fn
@@ -144,6 +145,13 @@ class Supervisor:
         self.supervisor_id = supervisor_id or f"supervisor-{uuid.uuid4().hex[:8]}"
         self.heartbeat = heartbeat
         self.liveness_fn = liveness_fn or _default_liveness
+        #: Optional pre-reservation capacity gate. When it returns False for a
+        #: task, the task is **skipped this cycle without a reservation** -- so a
+        #: transient "no capacity" (e.g. a fleet pool that is entirely asleep)
+        #: defers the task instead of burning a spawn attempt toward the
+        #: dead-letter bound. Default (None) always admits, preserving the local
+        #: spawn behavior exactly.
+        self.capacity_gate = capacity_gate
 
     # -- helpers -------------------------------------------------------------
 
@@ -267,6 +275,11 @@ class Supervisor:
                     "task %s dead-lettered (>= %d failed spawn attempts); skipping",
                     task["id"], self.max_attempts,
                 )
+                continue
+            if self.capacity_gate is not None and not self.capacity_gate(task):
+                # No capacity for this task right now (e.g. a fleet pool that is
+                # entirely asleep). Defer WITHOUT reserving so no spawn attempt is
+                # burned toward the dead-letter bound -- it is retried next cycle.
                 continue
             try:
                 resp = self.client.reserve_spawn(task["id"], reserved_by=self.supervisor_id)
