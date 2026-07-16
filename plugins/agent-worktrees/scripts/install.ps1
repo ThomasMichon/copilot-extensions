@@ -1780,9 +1780,23 @@ function Ensure-CopilotExperimental {
 }
 
 function Deploy-GitHooksPath {
-    <# Ensure core.hooksPath points to tools/hooks in the anchor repo. #>
+    <# Point core.hooksPath at tools/hooks ONLY for repos that actually ship a
+       tools/hooks dir (the legacy scheme). Repos using the PR-workflow hook
+       facility keep the DEFAULT .git/hooks (where install_hooks writes the
+       shims) -- pointing hooksPath at a missing tools/hooks silently disables
+       them (dotfiles#234). Also self-heal a stale pointer an older installer
+       left behind when the repo no longer ships tools/hooks. #>
     if (-not $RepoDir) { return }
     $current = git --no-pager -C $RepoDir config --local core.hooksPath 2>$null
+    $hasToolsHooks = (Test-Path (Join-Path $RepoDir 'tools\hooks\pre-commit')) -or `
+                     (Test-Path (Join-Path $RepoDir 'tools\hooks\pre-push'))
+    if (-not $hasToolsHooks) {
+        if ($current -eq 'tools/hooks') {
+            git -C $RepoDir config --local --unset core.hooksPath 2>$null
+            Write-ServiceChanged "Cleared stale core.hooksPath (repo ships no tools/hooks; PR-workflow shims use .git/hooks)"
+        }
+        return
+    }
     if ($current -eq 'tools/hooks') {
         Write-ServiceOk "Git hooksPath = tools/hooks"
         return
