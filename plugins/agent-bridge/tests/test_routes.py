@@ -1042,6 +1042,78 @@ class TestWorktreeRoutes:
         assert resp.status_code == 200
         assert db.get_live_session("cli-live")["status"] == "live"
 
+    def test_resume_worktree_no_session_starts_fresh(self, client, app) -> None:
+        """A worktree with no prior bridge session (e.g. just taken over, its
+        interactive Copilot never persisted a session) starts a *fresh* owned
+        session instead of 404-ing (#1683)."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from agent_bridge.transport import SpawnTarget
+
+        wt_id = "lambda-core-wsl-20250101-193500-fresh"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+        # resolver.resolve must yield a real SpawnTarget (replace() needs a
+        # dataclass), not a bare MagicMock.
+        app.state.resolver.resolve = MagicMock(
+            return_value=SpawnTarget(type="local")
+        )
+
+        mgr = app.state.session_manager
+        target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id)
+        fresh = Session("fresh-sess-1", "brisk-vale", target, "test-agent")
+        fresh.status = SessionStatus.IDLE
+        mgr.start_session = AsyncMock(return_value=fresh)
+
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+
+        assert resp.status_code == 200
+        assert resp.json()["session_id"] == "fresh-sess-1"
+        # spawned scoped to the worktree dir + id
+        spawned_target = mgr.start_session.call_args.args[0]
+        assert spawned_target.worktree_id == wt_id
+        assert spawned_target.cwd == f"/wt/{wt_id}"
+        assert mgr.start_session.call_args.kwargs["caller_id"] == wt_id
+
+    def test_resume_worktree_unknown_still_404s(self, client, app) -> None:
+        """A worktree that is not discoverable at all (no session, not on disk)
+        still 404s -- the fresh-start only rescues a *known* worktree (#1683)."""
+        from unittest.mock import AsyncMock
+
+        mgr = app.state.session_manager
+        mgr.start_session = AsyncMock(
+            side_effect=AssertionError("must not start a session for an "
+                                       "unknown worktree")
+        )
+        resp = client.post("/api/v1/worktrees/does-not-exist-anywhere/resume")
+        assert resp.status_code == 404
+
+    def test_resume_worktree_fresh_start_failed_status_502(
+        self, client, app
+    ) -> None:
+        """A fresh start that connects-fails (SessionManager returns a FAILED
+        session rather than raising) surfaces as 502, not a healthy 200 (#1683
+        hardening)."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from agent_bridge.transport import SpawnTarget
+
+        wt_id = "lambda-core-wsl-20250101-193600-failstart"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+        app.state.resolver.resolve = MagicMock(
+            return_value=SpawnTarget(type="local")
+        )
+
+        mgr = app.state.session_manager
+        target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id)
+        failed = Session("failed-sess-1", "dim-fen", target, "test-agent")
+        failed.status = SessionStatus.FAILED
+        mgr.start_session = AsyncMock(return_value=failed)
+
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+        assert resp.status_code == 502
+
 
 class TestAcpAliasResolution:
     """Session routes accept the ACP session id as an alias key."""
