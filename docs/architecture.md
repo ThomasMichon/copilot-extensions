@@ -5,7 +5,7 @@ runtimes, ports, and the credential relay. **Eight ship a runtime** (a `uv`-buil
 venv under `~/.agent-*` plus a `~/.local/bin` binstub, deployed by the plugin's
 own installer); **six are payload-only** — `efforts` (skills), `visions`
 (skills), `context-handoff` (a session extension), `customizing-copilot`
-(skills), `harness-copilot-extensions` (skills), and `wsl-setup` (skills) deploy
+(skills), `copilot-extensions-harness` (skills), and `wsl-setup` (skills) deploy
 entirely from the marketplace payload with no installer. For per-plugin
 internals, follow the links in each section.
 
@@ -32,7 +32,7 @@ internals, follow the links in each section.
 | [visions](../plugins/visions/) | North-star skills (`envisioning`, `visions-setup`) | Marketplace payload (skills + assets) | Loaded on demand when a skill matches; no runtime to install |
 | [context-handoff](../plugins/context-handoff/) | Session **extension** + `/handoff` skill | Marketplace payload (`extensions/context-handoff/extension.mjs`) | Auto-discovered from the enabled plugin's `extensions/` dir; no copy to `~/.copilot/extensions/`, no deploy manifest |
 | [customizing-copilot](../plugins/customizing-copilot/) | Customization skills (authoring skills, sub-agents, MCP servers, plugins, harnesses, review) | Marketplace payload (skills) | Loaded on demand when a CLI-customization prompt matches; no runtime to install |
-| [harness-copilot-extensions](../plugins/harness-copilot-extensions/) | Operator-harness skills (`contributing-to-copilot-extensions`, `diagnosing-copilot-extensions`) | Marketplace payload (skills) | Loaded on demand when a work-on-this-repo prompt matches; no runtime to install |
+| [copilot-extensions-harness](../plugins/copilot-extensions-harness/) | Operator-harness skills (`contributing-to-copilot-extensions`, `diagnosing-copilot-extensions`) | Marketplace payload (skills) | Loaded on demand when a work-on-this-repo prompt matches; no runtime to install |
 | [wsl-setup](../plugins/wsl-setup/) | WSL2 setup / troubleshooting skills | Marketplace payload (skills) | Loaded on demand when a WSL-setup prompt matches; no runtime to install |
 
 Every runtime plugin is itself a **Python package** — its `src/` package plus
@@ -63,7 +63,7 @@ flowchart TB
       AL["agent-logger/<br/>scripts • src"]
       AD["agent-dispatch/<br/>scripts • src"]
       AV["agent-vault/<br/>scripts • src"]
-      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • harness-copilot-extensions/ • wsl-setup/<br/>(payload-only: skills / extension)"]
+      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/<br/>(payload-only: skills / extension)"]
     end
     subgraph RT["Local runtimes"]
       RW["~/.agent-worktrees/<br/>.venv • lib • bin"]
@@ -98,7 +98,7 @@ flowchart TB
 ```
 
 > The `PO` node — `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
-> `harness-copilot-extensions`, and `wsl-setup` — deploys entirely from the
+> `copilot-extensions-harness`, and `wsl-setup` — deploys entirely from the
 > marketplace payload — no installer, no `~/.agent-*` runtime, no binstub.
 
 Key rule: the **agent-codespaces and agent-containers binstubs are owned by

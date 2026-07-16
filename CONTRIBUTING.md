@@ -59,7 +59,7 @@ plugin you changed.
 > bumps `metadata.version`. The per-plugin tables below are concrete examples for
 > the original plugins — the same rule covers agent-logger, agent-dispatch,
 > context-handoff, efforts, visions, customizing-copilot,
-> harness-copilot-extensions, and anything added later.
+> copilot-extensions-harness, and anything added later.
 >
 > **Keep any in-package `__version__` in sync.** A runtime plugin that exposes a
 > Python `__version__` (e.g. `agent-dispatch`'s `src/agent_dispatch/__init__.py`,

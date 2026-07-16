@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, WSL environment setup, and CLI customization",
-    "version": "1.7.4-dev272"
+    "version": "1.7.4-dev273"
   },
   "plugins": [
     {
@@ -65,8 +65,8 @@
     },
     {
       "name": "customizing-copilot",
-      "description": "Customize and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, and authoring harness-<repo> plugins - with the per-skill folder conventions and Agent Skills best practices; ships the authoring-skills, defining-subagents, registering-mcp-servers, installing-plugins, building-harnesses, reviewing-customizations, and authoring-harness-plugins skills",
-      "version": "0.1.0-dev11",
+      "description": "Customize and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, and authoring <repo>-harness plugins - with the per-skill folder conventions and Agent Skills best practices; ships the authoring-skills, defining-subagents, registering-mcp-servers, installing-plugins, building-harnesses, reviewing-customizations, and authoring-harness-plugins skills",
+      "version": "0.1.0-dev12",
       "source": "plugins/customizing-copilot"
     },
     {
@@ -82,10 +82,10 @@
       "source": "plugins/agent-vault"
     },
     {
-      "name": "harness-copilot-extensions",
-      "description": "Operator harness for the copilot-extensions repo - portable, owner-authored skills to work ON the plugin suite (contribute changes and diagnose the deployed runtimes). Any control repo can enable it instead of hand-writing a per-repo narrative. Reference implementation of the harness-<repo> plugin standard; ships the contributing-to-copilot-extensions and diagnosing-copilot-extensions skills.",
-      "version": "0.1.0-dev5",
-      "source": "plugins/harness-copilot-extensions"
+      "name": "copilot-extensions-harness",
+      "description": "Operator harness for the copilot-extensions repo - portable, owner-authored skills to work ON the plugin suite (contribute changes and diagnose the deployed runtimes). Any control repo can enable it instead of hand-writing a per-repo narrative. Reference implementation of the <repo>-harness plugin standard; ships the contributing-to-copilot-extensions and diagnosing-copilot-extensions skills.",
+      "version": "0.1.0-dev6",
+      "source": "plugins/copilot-extensions-harness"
     },
     {
       "name": "wsl-setup",

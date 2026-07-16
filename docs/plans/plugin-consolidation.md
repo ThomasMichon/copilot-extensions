@@ -16,7 +16,7 @@ The suite currently spans a dozen-plus plugins — see the canonical list in
 
 `agent-worktrees`, `agent-bridge`, `agent-codespaces`, `agent-containers`,
 `agent-mcp`, `agent-logger`, `agent-dispatch`, `context-handoff`, `efforts`,
-`visions`, `customizing-copilot`, `harness-copilot-extensions`.
+`visions`, `customizing-copilot`, `copilot-extensions-harness`.
 
 Costs of the current granularity:
 
