@@ -533,6 +533,23 @@ function Resolve-DaemonLogonMode {
     }
 }
 
+function Remove-RegisteredTask {
+    <# Best-effort hard purge of a scheduled task, tolerant of a Task Scheduler
+       store that has desynced from its COM/CIM view. Tries the ScheduledTasks
+       module first, then the schtasks.exe fallback -- which can delete an
+       on-disk task (%WINDIR%\System32\Tasks\<name>) that Unregister-ScheduledTask
+       reported as gone or that Get-ScheduledTask never surfaced. Never throws,
+       so callers can use it unconditionally before a (re)register. #>
+    param([Parameter(Mandatory)][string]$Name)
+
+    try { Unregister-ScheduledTask -TaskName $Name -Confirm:$false -ErrorAction Stop | Out-Null } catch {}
+
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & schtasks.exe /Delete /TN $Name /F *> $null } catch {}
+    $ErrorActionPreference = $prevEAP
+}
+
 function Register-ScheduledTask_ {
     if (-not (Test-Path $VenvPython)) {
         Write-Warn "agent-bridge venv not found -- skipping scheduled task"
@@ -621,42 +638,58 @@ Set-Content -Path `$pidFile -Value `$proc.Id
         -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
         -MultipleInstances IgnoreNew
 
-    # A principal change (interactive <-> S4U) cannot be applied with
-    # Set-ScheduledTask -- unregister and re-register so the logon type sticks.
+    # A principal change (interactive <-> S4U) cannot be applied by
+    # Set-ScheduledTask -- those go through a forced re-register so the logon
+    # type sticks.
     $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     $principalChange = $existing -and (
         ($Script:UseNonInteractive -and ($existing.Principal.LogonType -notin @('S4U', 'Password'))) -or
         (-not $Script:UseNonInteractive -and ($existing.Principal.LogonType -in @('S4U', 'Password')))
     )
-    if ($existing -and -not $principalChange) {
-        if ($principal) {
-            Set-ScheduledTask -TaskName $TaskName `
-                -Action $action -Trigger $trigger -Settings $settings -Principal $principal | Out-Null
+    $canUpdateInPlace = $existing -and -not $principalChange
+
+    $regArgs = @{
+        TaskName    = $TaskName
+        Action      = $action
+        Trigger     = $trigger
+        Settings    = $settings
+        Description = 'Agent-Bridge -- inter-agent communication service on port 9280.'
+    }
+    if ($principal) { $regArgs['Principal'] = $principal }
+
+    # Write the task resiliently. Windows Task Scheduler can desync its COM/CIM
+    # view from the on-disk store: an Unregister may report success yet leave the
+    # task XML, and Get-ScheduledTask may not surface a task whose file still
+    # exists -- after which a plain Register-ScheduledTask throws "Cannot create
+    # a file when that file already exists". So: prefer an in-place Set when only
+    # trigger/action/settings change; otherwise Register -Force (idempotent
+    # overwrite); and on ANY failure, hard-purge the registration and retry
+    # Register -Force once. A scheduled task is only a boot/logon convenience, so
+    # a terminal failure downgrades to a warning instead of aborting the whole
+    # install -- under StrictMode + $ErrorActionPreference='Stop' an unhandled
+    # throw here would take the entire module down as "exited 1" and skip the
+    # remaining install steps (deploy manifest, PATH).
+    try {
+        if ($canUpdateInPlace) {
+            $setArgs = @{ TaskName = $TaskName; Action = $action; Trigger = $trigger; Settings = $settings }
+            if ($principal) { $setArgs['Principal'] = $principal }
+            Set-ScheduledTask @setArgs | Out-Null
+            Write-Ok "Scheduled task updated ($modeLabel)"
         } else {
-            Set-ScheduledTask -TaskName $TaskName `
-                -Action $action -Trigger $trigger -Settings $settings | Out-Null
+            if ($principalChange) { Remove-RegisteredTask $TaskName }
+            Register-ScheduledTask @regArgs -Force | Out-Null
+            Write-Ok "Scheduled task registered ($modeLabel)"
         }
-        Write-Ok "Scheduled task updated ($modeLabel)"
-    } else {
-        if ($principalChange) {
-            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    } catch {
+        Write-Warn "Scheduled task write failed ($($_.Exception.Message.Trim())); purging stale registration and retrying"
+        Remove-RegisteredTask $TaskName
+        try {
+            Register-ScheduledTask @regArgs -Force | Out-Null
+            Write-Ok "Scheduled task registered on retry ($modeLabel)"
+        } catch {
+            Write-Warn "Could not register the '$TaskName' scheduled task: $($_.Exception.Message.Trim())"
+            Write-Warn "agent-bridge is installed, but auto-start ($modeLabel) is not configured -- start it now with 'agent-bridge start', then re-run this installer to retry the task."
         }
-        $regArgs = @{
-            TaskName    = $TaskName
-            Action      = $action
-            Trigger     = $trigger
-            Settings    = $settings
-            Description = 'Agent-Bridge -- inter-agent communication service on port 9280.'
-        }
-        if ($principal) { $regArgs['Principal'] = $principal }
-        # -Force overwrites any existing registration. Without it, a bare
-        # Register-ScheduledTask throws "Cannot create a file when that file
-        # already exists" whenever the task still lingers -- e.g. a principal
-        # change (S4U <-> interactive) where the preceding silent
-        # Unregister-ScheduledTask failed, or a stale task XML left in
-        # %WINDIR%\System32\Tasks that Get-ScheduledTask no longer surfaces.
-        Register-ScheduledTask @regArgs -Force | Out-Null
-        Write-Ok "Scheduled task registered ($modeLabel)"
     }
 }
 
