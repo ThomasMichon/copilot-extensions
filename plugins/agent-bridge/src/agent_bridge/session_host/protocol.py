@@ -123,13 +123,20 @@ async def write_message(
 
 async def read_message(
     reader: asyncio.StreamReader,
-) -> tuple[MsgType, bytes] | None:
+) -> tuple[MsgType | None, bytes] | None:
     """Read one framed message. Returns ``None`` on clean EOF.
 
-    Raises :class:`ProtocolError` on an oversized or malformed frame. A peer
-    that crashes hard (RST) surfaces as EOF/``IncompleteReadError`` and is
-    reported as ``None`` -- a clean disconnect, never an exception the host
-    must crash on.
+    Returns ``(None, payload)`` for a **well-formed message whose type byte this
+    build does not recognize** -- forward-compatibility (#51): a newer peer may
+    send additive control messages (e.g. STATUS/DETACH) a version-skewed
+    host/front has never heard of. The frame is fully consumed and reported as
+    an unknown, so the caller's dispatch simply skips it (its ``if/elif`` on the
+    type matches nothing) rather than dropping the connection. An **oversized or
+    truncated** frame is still a genuine :class:`ProtocolError`.
+
+    A peer that crashes hard (RST) surfaces as EOF/``IncompleteReadError`` and is
+    reported as ``None`` -- a clean disconnect, never an exception the host must
+    crash on.
     """
     try:
         header = await reader.readexactly(4)
@@ -145,7 +152,8 @@ async def read_message(
     except asyncio.IncompleteReadError:
         return None
     try:
-        mtype = MsgType(body[:1])
-    except ValueError as exc:
-        raise ProtocolError(f"unknown message type {body[:1]!r}") from exc
+        mtype: MsgType | None = MsgType(body[:1])
+    except ValueError:
+        # Unknown but well-formed type: skip (forward-compat, #51).
+        mtype = None
     return mtype, body[1:]
