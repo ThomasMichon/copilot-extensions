@@ -283,10 +283,11 @@ def test_yield_resolves_owner_from_identity(monkeypatch):
     seen = {}
 
     class _C:
-        def yield_task(self, task_id, owner, *, note=None):
+        def yield_task(self, task_id, owner, *, note=None, exclude=None):
             seen["task_id"] = task_id
             seen["owner"] = owner
             seen["note"] = note
+            seen["exclude"] = exclude
             return {"id": task_id, "status": "queued", "owner": owner}
 
         def __enter__(self):
@@ -300,7 +301,9 @@ def test_yield_resolves_owner_from_identity(monkeypatch):
 
     args = build_parser().parse_args(["yield", "T5", "--note", "blocked"])
     assert args.func(args) == 0
-    assert seen == {"task_id": "T5", "owner": "lambda-core/wt-7", "note": "blocked"}
+    assert seen == {
+        "task_id": "T5", "owner": "lambda-core/wt-7", "note": "blocked", "exclude": None,
+    }
 
 
 def test_start_without_identity_errors(monkeypatch, capsys):

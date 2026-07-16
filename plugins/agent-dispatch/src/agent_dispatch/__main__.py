@@ -102,6 +102,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
             prompt=args.prompt,
             proposed=args.proposed,
             requires=args.require or [],
+            excludes=args.exclude or [],
             affinity=_parse_affinity(args.affinity),
             labels=args.label or [],
             payload_ref=args.payload_ref,
@@ -425,8 +426,15 @@ def _cmd_yield(args: argparse.Namespace) -> int:
     worker_id = _resolve_owner(args, verb="yield")
     if worker_id is None:
         return 2
+    exclude = args.exclude
+    if not exclude and getattr(args, "not_me", None):
+        machine, worktree = _identity(args)
+        if args.not_me == "worktree" and worktree:
+            exclude = f"worktree:{worktree}"
+        elif args.not_me == "machine" and machine:
+            exclude = f"machine:{machine}"
     with _client(args) as c:
-        return _emit(c.yield_task(args.task_id, worker_id, note=args.note))
+        return _emit(c.yield_task(args.task_id, worker_id, note=args.note, exclude=exclude))
 
 
 def _owner_from_identity(args: argparse.Namespace) -> str | None:
@@ -951,6 +959,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--require", action="append", help="hard capability/identity token (repeatable)"
     )
+    p.add_argument(
+        "--exclude", action="append",
+        help="hard EXCLUSION token -- a worker whose capabilities/identity match "
+             "any exclude is ineligible (anti-affinity; repeatable). E.g. "
+             "'machine:lambda-core', 'worktree:foo', 'agent:reviewer'.",
+    )
     p.add_argument("--affinity", action="append", help="soft preference key=value (repeatable)")
     p.add_argument("--label", action="append", help="free-form label (repeatable)")
     p.add_argument("--payload-ref")
@@ -1053,6 +1067,18 @@ def build_parser() -> argparse.ArgumentParser:
         "worker_id", nargs="?", help="owner id (default: composed from machine/worktree)"
     )
     p.add_argument("--note")
+    p.add_argument(
+        "--not-me", choices=("worktree", "machine"), dest="not_me",
+        help="append a scoped 'not me' EXCLUSION when yielding, so this same "
+             "candidate isn't re-offered the task: 'worktree' (narrowest -- this "
+             "worktree only) or 'machine' (this whole machine). Prefer the "
+             "narrowest scope that is true.",
+    )
+    p.add_argument(
+        "--exclude",
+        help="append an explicit exclusion token when yielding (e.g. "
+             "'agent:reviewer'); overrides --not-me.",
+    )
     p.add_argument("--machine", help="override the resolved machine (targeting identity)")
     p.add_argument("--worktree", help="override the resolved worktree id (targeting identity)")
     p.set_defaults(func=_cmd_yield)

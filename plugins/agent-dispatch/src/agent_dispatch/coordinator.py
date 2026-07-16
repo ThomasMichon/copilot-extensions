@@ -51,6 +51,7 @@ class CreateBody(BaseModel):
     prompt: str = ""
     proposed: bool = False
     requires: list[str] = Field(default_factory=list)
+    excludes: list[str] = Field(default_factory=list)
     affinity: dict[str, str] = Field(default_factory=dict)
     labels: list[str] = Field(default_factory=list)
     payload_ref: str | None = None
@@ -81,6 +82,7 @@ class WorkerBody(BaseModel):
 class YieldBody(BaseModel):
     worker_id: str
     note: str | None = None
+    exclude: str | None = None
 
 
 class CompleteBody(BaseModel):
@@ -328,7 +330,10 @@ def create_app(
     @app.post("/tasks/{task_id}/yield")
     def yield_task(task_id: str, body: YieldBody) -> dict:
         return _guard(
-            lambda: queue.yield_task(task_id, body.worker_id, note=body.note), "task.yielded"
+            lambda: queue.yield_task(
+                task_id, body.worker_id, note=body.note, exclude=body.exclude
+            ),
+            "task.yielded",
         )
 
     @app.post("/tasks/{task_id}/complete")

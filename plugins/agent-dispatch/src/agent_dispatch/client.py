@@ -132,9 +132,15 @@ class DispatchClient:
             self._http.post(f"/tasks/{task_id}/start", json={"worker_id": worker_id})
         )
 
-    def yield_task(self, task_id: str, worker_id: str, *, note: str | None = None) -> dict:
+    def yield_task(
+        self, task_id: str, worker_id: str, *, note: str | None = None,
+        exclude: str | None = None,
+    ) -> dict:
         return self._unwrap(
-            self._http.post(f"/tasks/{task_id}/yield", json={"worker_id": worker_id, "note": note})
+            self._http.post(
+                f"/tasks/{task_id}/yield",
+                json={"worker_id": worker_id, "note": note, "exclude": exclude},
+            )
         )
 
     def complete(self, task_id: str, worker_id: str, *, result_ref: str | None = None) -> dict:
