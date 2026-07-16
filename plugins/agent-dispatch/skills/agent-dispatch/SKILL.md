@@ -69,6 +69,32 @@ agent-dispatch health          # confirm a coordinator is reachable first
 If `health` fails, start/point at a coordinator before anything else -- don't
 retry claims against a dead URL.
 
+### Local + shared: the hybrid (cross-machine) topology
+
+Two coordinators can coexist. Keep your **local** loopback one for same-machine
+work (handoffs, local scheduling), and point at a **shared/elected coordinator**
+only for **cross-machine** dispatch — the queue every machine claims from. A
+client picks per command:
+
+- Set `AGENT_DISPATCH_SHARED_URL` to the shared endpoint (in a facility, the
+  always-on **gateway**; standalone, whichever mesh peer is elected to host it),
+  and `AGENT_DISPATCH_SHARED_TOKEN` for its bearer (independent of the local
+  token — the two authenticate separately).
+- Add `--shared` to any client verb to target it: `agent-dispatch --shared
+  create …`, `agent-dispatch --shared list`, `agent-dispatch --shared claim …`,
+  `agent-dispatch --shared supervise --pool …`. Omit `--shared` for the local
+  coordinator. An explicit `--url` always overrides both.
+- The shared coordinator **binds loopback behind the gateway/secured mesh** and
+  is reached by **client-initiated outbound** calls + bearer — never a raw LAN
+  bind. A tunnel-only machine (reachable outbound only) therefore participates
+  natively: it just calls out like everyone else.
+- `--shared` with no `AGENT_DISPATCH_SHARED_URL` set **errors loudly** rather
+  than silently using the local queue (which would strand a cross-machine task).
+
+Dispatch-for-others and see-and-take-others' both ride this shared queue: enqueue
+with `--shared create --target-machine <m>`, and the target machine runs
+`--shared list` / `--shared claim` to pick up what's addressed to it.
+
 ## Worker identity -- resolved from your CWD
 
 An agent's identity is the **`machine`/`worktree` pair** -- the only durable
@@ -477,12 +503,15 @@ headers. The CLI and MCP tools are interchangeable — use whichever fits.
 |---------|------|
 | `AGENT_DISPATCH_URL` | coordinator base URL the CLI talks to (point at a remote host) |
 | `AGENT_DISPATCH_TOKEN` | bearer token (client sends, server validates) |
+| `AGENT_DISPATCH_SHARED_URL` | shared/elected coordinator endpoint for cross-machine dispatch (facility: the gateway); used only with `--shared` |
+| `AGENT_DISPATCH_SHARED_TOKEN` | bearer for the shared coordinator (independent of `AGENT_DISPATCH_TOKEN`) |
 | `AGENT_DISPATCH_HOST` / `AGENT_DISPATCH_PORT` | where the coordinator binds (server side) |
 | `AGENT_DISPATCH_DB` | SQLite queue file (server side) |
 | `AGENT_DISPATCH_SWEEP_INTERVAL` | auto lease-recovery cadence in seconds (server side; `0` disables) |
 
 All CLI output is JSON on stdout, so verbs compose with `jq` and other tooling.
-Global flags `--url` / `--token` override the env per-invocation.
+Global flags `--url` / `--token` override the env per-invocation; `--shared`
+routes the command at the shared/elected coordinator instead of the local one.
 
 ## Gotchas
 
