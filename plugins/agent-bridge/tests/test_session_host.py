@@ -100,12 +100,16 @@ async def test_oversized_message_raises():
 
 
 @pytest.mark.asyncio
-async def test_unknown_type_raises():
+async def test_unknown_type_skipped():
+    # Forward-compat (#51): a well-formed message whose type this build does not
+    # know is reported as (None, payload) -- consumed and skipped, NOT raised --
+    # so a version-skewed peer's additive control message can't drop the link.
     r = asyncio.StreamReader()
     r.feed_data(proto._U32.pack(1) + b"Z")
     r.feed_eof()
-    with pytest.raises(proto.ProtocolError):
-        await proto.read_message(r)
+    mtype, payload = await proto.read_message(r)
+    assert mtype is None
+    assert payload == b""
 
 
 # --------------------------------------------------------------------------
