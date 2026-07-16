@@ -38,13 +38,10 @@ def _pulse_level(w):
     intent = (w.get("live_intent") or "").strip()
     if not intent:
         return None
-    ts = w.get("live_intent_at")
-    if not ts:
+    dt = _parse_pulse_ts(w.get("live_intent_at"))
+    if dt is None:
         return None
-    try:
-        age = (NOW - _dt.datetime.fromisoformat(ts)).total_seconds()
-    except (ValueError, TypeError):
-        return None
+    age = (NOW - dt).total_seconds()
     if age < 0:
         age = 0
     if age > _PULSE_STALE_SECS:
@@ -52,6 +49,25 @@ def _pulse_level(w):
     if w.get("live_intent_idle") or age > _PULSE_FRESH_SECS:
         return "stale"
     return "fresh"
+
+
+def _parse_pulse_ts(ts):
+    """Parse a pulse timestamp to a *naive local* datetime, or None.
+
+    The live-pulse extension stamps ``new Date().toISOString()`` -- a UTC,
+    tz-aware ``...Z`` value -- so a tz-aware parse is normalized to local naive
+    to be comparable with ``NOW`` (naive local). A naive input (e.g. in tests)
+    is returned as-is. Never raises.
+    """
+    if not ts or not isinstance(ts, str):
+        return None
+    try:
+        dt = _dt.datetime.fromisoformat(ts)
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone().replace(tzinfo=None)
+    return dt
 
 # Canonical git WorktreeState value -> picker display label. Mirrors the
 # PSMux/TMux status segment's _SEGMENT_STYLE labels (COMPLETED renders as FINAL;
