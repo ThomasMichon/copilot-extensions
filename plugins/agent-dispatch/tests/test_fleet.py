@@ -132,6 +132,19 @@ def test_call_success_builds_handle_with_host_and_owner():
     assert rec[0]["origin"] == "orig"
 
 
+def test_selection_cache_is_released_after_successful_spawn():
+    """The per-cycle selection cache is dropped once a task is spawned, so it
+    stays bounded to in-flight selections over a long-running supervisor."""
+    f = fleet.FleetSpawner(
+        ["a"], origin="orig", liveness=lambda h: True, spawn_fn=_fake_spawn()
+    )
+    f.can_spawn({"id": "t1"})  # populates the selection cache
+    assert "t1" in f._selection
+    ok, _ = f({"id": "t1"})
+    assert ok is True
+    assert "t1" not in f._selection  # released after spawn
+
+
 def test_call_no_live_host_defers():
     f = fleet.FleetSpawner(["a"], origin="orig", liveness=lambda h: False)
     ok, handle = f({"id": "t1"})

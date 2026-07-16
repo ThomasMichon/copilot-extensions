@@ -202,5 +202,10 @@ class FleetSpawner:
         handle = embody.parse_handle(result)
         handle["machine"] = host
         handle["owner"] = owner
+        # The reservation now holds this task's state; the per-cycle selection
+        # cache only needs to bridge can_spawn() -> __call__() within one
+        # iteration, so drop it here to keep the cache bounded to in-flight
+        # selections over a long-running supervisor.
+        self._selection.pop(tid, None)
         log.info("fleet-dispatched task %s to %s (owner %s)", tid, host, owner)
         return True, handle
