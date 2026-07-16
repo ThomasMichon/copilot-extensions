@@ -1056,13 +1056,17 @@ class SessionManager:
                 session_cwd = remote_cwd or target.cwd or _default_cwd(target)
                 acp_sid = await asyncio.wait_for(
                     client.new_session(cwd=session_cwd, mcp_servers=mcp_servers),
-                    timeout=self._timeouts.session_start,
+                    timeout=self._timeouts.session_new,
                 )
             except (TimeoutError, asyncio.TimeoutError) as exc:
                 raise ConnectError(
                     ConnectStage.LAUNCH_ACP,
-                    f"Copilot ACP launch (session host) timed out after "
-                    f"{self._timeouts.session_start}s",
+                    f"Copilot ACP launch (session host) timed out "
+                    f"(handshake {self._timeouts.session_start}s / "
+                    f"session/new {self._timeouts.session_new}s). A cold "
+                    f"session/new on a large workspace may need a larger "
+                    f"budget -- raise timeouts.session_new in "
+                    f"~/.agent-bridge/config.yaml and restart the daemon.",
                     retryable=False,
                     cause=exc,
                 ) from exc
@@ -1938,13 +1942,17 @@ class SessionManager:
                             client.new_session(
                                 cwd=session_cwd, mcp_servers=mcp_servers,
                             ),
-                            timeout=self._timeouts.session_start,
+                            timeout=self._timeouts.session_new,
                         )
                     except (TimeoutError, asyncio.TimeoutError) as exc:
                         raise ConnectError(
                             ConnectStage.LAUNCH_ACP,
-                            f"Copilot ACP launch timed out after "
-                            f"{self._timeouts.session_start}s",
+                            f"Copilot ACP launch timed out "
+                            f"(handshake {self._timeouts.session_start}s / "
+                            f"session/new {self._timeouts.session_new}s). A cold "
+                            f"session/new on a large workspace may need a larger "
+                            f"budget -- raise timeouts.session_new in "
+                            f"~/.agent-bridge/config.yaml and restart the daemon.",
                             retryable=False,
                             cause=exc,
                         ) from exc
