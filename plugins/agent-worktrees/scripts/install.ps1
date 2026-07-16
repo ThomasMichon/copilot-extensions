@@ -763,7 +763,7 @@ function Deploy-GlobalBinstub {
        running the global stub while overwriting it with a different-length
        file corrupts cmd.exe's byte-offset read (issue #13). #>
     Ensure-InstallDir $LocalBin
-    foreach ($name in @('agent-worktrees.ps1', 'agent-worktrees.cmd')) {
+    foreach ($name in @('agent-worktrees.ps1', 'agent-worktrees.cmd', 'agent-worktrees')) {
         $src = Join-Path $PluginDir "bin\$name"
         $dst = Join-Path $LocalBin $name
         if (Test-Path $src) {

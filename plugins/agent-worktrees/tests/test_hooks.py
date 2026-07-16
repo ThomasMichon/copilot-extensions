@@ -40,6 +40,28 @@ class TestDetection:
         assert hooks.in_worktree(str(anchor)) is False
 
 
+class TestConfigResolution:
+    """#234 defect 3: resolve PR mode from the anchor's committed in-repo config
+    with no --project / active-project context, as a bare git-hook must."""
+
+    def test_anchor_from_worktree(self, anchor_and_worktree):
+        anchor, wt = anchor_and_worktree
+        assert hooks._anchor_from_cwd(str(wt)).resolve() == anchor.resolve()
+
+    def test_pr_enabled_reads_inrepo_config(self, anchor_and_worktree, monkeypatch):
+        anchor, wt = anchor_and_worktree
+        monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+        # No committed config -> PR mode off (fails open, not raising).
+        assert hooks._pr_enabled(str(wt)) is False
+        # Committed in-repo config with pr.enabled -> resolved via the anchor
+        # from a worktree cwd (and from the anchor itself).
+        cfg_dir = anchor / ".agent-worktrees"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        (cfg_dir / "config.yaml").write_text("pr:\n  enabled: true\n")
+        assert hooks._pr_enabled(str(wt)) is True
+        assert hooks._pr_enabled(str(anchor)) is True
+
+
 class TestPreCommit:
     def test_blocks_default_branch_commit_in_worktree(self, anchor_and_worktree, monkeypatch):
         anchor, wt = anchor_and_worktree
@@ -74,21 +96,21 @@ class TestPrePush:
         anchor, wt = anchor_and_worktree
         monkeypatch.chdir(wt)
         monkeypatch.delenv("AGENT_WORKTREES_PR_PUSH", raising=False)
-        monkeypatch.setattr(hooks, "_pr_enabled", lambda: True)
+        monkeypatch.setattr(hooks, "_pr_enabled", lambda cwd: True)
         assert hooks._pre_push() == 1
 
     def test_allows_when_pr_mode_disabled(self, anchor_and_worktree, monkeypatch):
         anchor, wt = anchor_and_worktree
         monkeypatch.chdir(wt)
         monkeypatch.delenv("AGENT_WORKTREES_PR_PUSH", raising=False)
-        monkeypatch.setattr(hooks, "_pr_enabled", lambda: False)
+        monkeypatch.setattr(hooks, "_pr_enabled", lambda cwd: False)
         assert hooks._pre_push() == 0
 
     def test_allows_anchor_push(self, anchor_and_worktree, monkeypatch):
         anchor, _ = anchor_and_worktree
         monkeypatch.chdir(anchor)
         monkeypatch.delenv("AGENT_WORKTREES_PR_PUSH", raising=False)
-        monkeypatch.setattr(hooks, "_pr_enabled", lambda: True)
+        monkeypatch.setattr(hooks, "_pr_enabled", lambda cwd: True)
         assert hooks._pre_push() == 0
 
 

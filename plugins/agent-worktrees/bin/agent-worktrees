@@ -1,3 +1,15 @@
-#!/usr/bin/env bash
+#!/bin/sh
+# Cross-platform sh-runnable agent-worktrees shim. Lets any POSIX sh -- notably
+# git's bundled sh on Windows, which runs hooks and cannot exec the .cmd/.ps1
+# binstubs -- invoke the CLI. Prefers the POSIX venv console script, then the
+# Windows venv python via -m (the Scripts\agent-worktrees.exe trampoline is
+# stripped by the install contract), then PATH python (#234 defect 2).
 export PYTHONUTF8=1
-exec "$HOME/.agent-worktrees/.venv/bin/agent-worktrees" "$@"
+_awv="$HOME/.agent-worktrees/.venv"
+if [ -x "$_awv/bin/agent-worktrees" ]; then
+  exec "$_awv/bin/agent-worktrees" "$@"
+elif [ -x "$_awv/Scripts/python.exe" ]; then
+  exec "$_awv/Scripts/python.exe" -m agent_worktrees "$@"
+else
+  exec python -m agent_worktrees "$@"
+fi
