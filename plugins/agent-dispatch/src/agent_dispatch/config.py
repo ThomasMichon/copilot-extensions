@@ -23,6 +23,20 @@ DEFAULT_PORT = 9847
 DEFAULT_DB = Path.home() / ".agent-dispatch" / "tasks.db"
 DEFAULT_SWEEP_INTERVAL = 60.0
 
+#: Wildcard bind addresses that expose the coordinator on **every** interface
+#: (including the LAN). Binding one of these without a bearer token would put the
+#: powerful task-control API on the network unauthenticated, so it is guarded
+#: (see :func:`requires_token_bind`). A *specific* host-local IP (loopback, a
+#: Windows vEthernet(WSL) address, a Docker bridge gateway) is the operator's
+#: deliberate choice of a non-LAN interface and is **not** guarded here.
+WILDCARD_BIND_HOSTS = frozenset({"0.0.0.0", "::", "[::]"})  # noqa: S104 -- guarded, not bound blindly
+
+
+def requires_token_bind(host: str) -> bool:
+    """True if binding ``host`` exposes the API on all interfaces (the LAN), so a
+    bearer token must be present before serving."""
+    return (host or "").strip() in WILDCARD_BIND_HOSTS
+
 
 @dataclass(frozen=True)
 class Config:
