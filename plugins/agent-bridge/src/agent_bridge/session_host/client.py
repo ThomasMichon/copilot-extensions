@@ -107,7 +107,7 @@ class SessionHostClient:
     async def detach(self, reapable: bool) -> None:
         """Signal a GRACEFUL disconnect (vs a hard drop) and the child's current
         reapable state, so the host reaps a reapable child promptly instead of
-        after the awkward-disconnect grace window. Best-effort (#51)."""
+        after the unexpected-disconnect grace window. Best-effort (#51)."""
         if self._closed:
             return
         try:

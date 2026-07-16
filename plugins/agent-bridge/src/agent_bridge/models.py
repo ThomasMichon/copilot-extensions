@@ -579,14 +579,14 @@ class ServiceConfig(BaseModel):
         "(#1826). Clamped to a 30s floor. Only meaningful when "
         "session_host_enabled and idle_reap_ttl_seconds are both > 0.",
     )
-    session_host_awkward_reap_seconds: int = Field(
+    session_host_unexpected_reap_seconds: int = Field(
         default=60,
-        description="Session-host self-reap grace after an AWKWARD disconnect "
+        description="Session-host self-reap grace after an UNEXPECTED disconnect "
         "(#51). A Session Host continuously learns whether its child is REAPABLE "
         "(its turn completed with no active background sub-agents) via the "
         "front's STATUS beat. When the front is lost: a GRACEFUL detach (the "
         "front sent DETACH, e.g. a clean stop / drain / redeploy) reaps a "
-        "reapable child promptly; an AWKWARD drop (a bare socket EOF -- a daemon "
+        "reapable child promptly; an UNEXPECTED drop (a bare socket EOF -- a daemon "
         "crash or network loss) instead waits this many seconds before the host "
         "self-reaps the idle child, so a quick reattach still wins. A non-reapable "
         "(mid-turn / active background work) child is never self-reaped -- it "
@@ -594,7 +594,7 @@ class ServiceConfig(BaseModel):
         "resumable from disk + worktree (fresh child + load_session replay), so "
         "freeing the idle child loses nothing; it only reclaims memory much "
         "sooner than the daemon-side idle_reap_ttl_seconds backstop. 0 disables "
-        "the awkward-grace timer (the graceful fast path still acts). Only "
+        "the unexpected-grace timer (the graceful fast path still acts). Only "
         "meaningful when session_host_enabled is True.",
     )
     live_stall_interrupt_after_s: int = Field(
