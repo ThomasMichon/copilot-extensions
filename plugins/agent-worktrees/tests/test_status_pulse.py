@@ -52,6 +52,18 @@ class TestPulseFreshness:
         assert n["live_pulse"] == "fresh"
         assert n["live_intent"] == "Wiring the pulse extension"
 
+    def test_fresh_with_tz_aware_z_timestamp(self):
+        # The live-pulse extension stamps `new Date().toISOString()` -- a UTC
+        # `...Z` (tz-aware) value. It must compare cleanly against NOW (naive
+        # local) and classify as fresh, not silently drop to None.
+        z_iso = (
+            _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=10)
+        ).isoformat().replace("+00:00", "Z")
+        n = derive.norm(
+            _raw(live_intent="from a real session", live_intent_at=z_iso),
+            "lambda-core", "win")
+        assert n["live_pulse"] == "fresh"
+
     def test_stale_when_aged(self):
         old_iso = _iso(derive.NOW - _dt.timedelta(seconds=derive._PULSE_FRESH_SECS + 60))
         n = derive.norm(
