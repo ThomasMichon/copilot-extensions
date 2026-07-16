@@ -63,6 +63,7 @@ class CreateBody(BaseModel):
     origin_ref: str | None = None
     dedup_key: str | None = None
     not_before: float = 0.0
+    claim_as: str | None = None
 
 
 class ClaimBody(BaseModel):

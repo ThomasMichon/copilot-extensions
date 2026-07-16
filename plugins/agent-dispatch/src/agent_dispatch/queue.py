@@ -508,6 +508,7 @@ class TaskQueue:
         origin_ref: str | None = None,
         dedup_key: str | None = None,
         not_before: float = 0.0,
+        claim_as: str | None = None,
         now: float | None = None,
     ) -> Task:
         """Insert a task (default status ``queued``; ``proposed`` for a draft).
@@ -521,6 +522,16 @@ class TaskQueue:
 
         If ``dedup_key`` collides with an existing task, no new row is created
         and the *existing* task is returned (ideation-time duplicate guard).
+
+        ``claim_as`` makes this an **atomic create-and-claim**: a brand-new task
+        is inserted already ``claimed`` by that owner in the *same* transaction,
+        so there is no queued-and-unclaimed gap for another worker to race into.
+        On a ``dedup_key`` collision the existing task is returned **as-is**
+        (never re-claimed) -- so a caller can tell it lost the race by seeing the
+        returned task's ``owner`` is not itself. This is the lazy-carve
+        open-ended-pickup primitive: ``create(dedup_key=<subject>, claim_as=me)``
+        either mints the subject as mine or hands me the row someone else already
+        took.
         """
         if status not in (Status.QUEUED, Status.PROPOSED):
             raise TaskError(f"new task must be 'queued' or 'proposed', not {status!r}")
@@ -571,6 +582,20 @@ class TaskQueue:
                 ),
             )
             self._audit(conn, task_id, ts=ts, from_status=None, to_status=status, note="create")
+            if claim_as and status == Status.QUEUED:
+                # Atomic create-and-claim: flip the just-inserted row to claimed
+                # under the same lock, so there is no unclaimed gap. (No-op for a
+                # 'proposed' draft, which is deliberately unclaimable.)
+                lease = self.lease_seconds
+                conn.execute(
+                    "UPDATE tasks SET status = ?, owner = ?, claimed_at = ?, updated_at = ?,"
+                    " lease_expires_at = ?, attempts = 1 WHERE id = ?",
+                    (Status.CLAIMED, claim_as, ts, ts, ts + lease, task_id),
+                )
+                self._audit(
+                    conn, task_id, ts=ts, from_status=Status.QUEUED,
+                    to_status=Status.CLAIMED, worker=claim_as, note="create-claim",
+                )
             conn.execute("COMMIT")
         return self.get(task_id)  # type: ignore[return-value]
 
