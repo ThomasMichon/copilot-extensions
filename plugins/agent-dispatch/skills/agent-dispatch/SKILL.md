@@ -259,13 +259,16 @@ substantial work* and *change direction*, never on a timer:
 ```bash
 agent-dispatch focus "driving live-session-messaging Phase 8 (multi-machine dispatch)"
 agent-dispatch focus            # show this worktree's current focus
-agent-dispatch focus --list     # every worktree's focus, freshest first
+agent-dispatch focus --list     # every worktree's focus (this machine)
 ```
 
-> `focus` resolves `machine/worktree` from the CWD (no id to type); it is
-> latest-only + hard-capped. It is the operator/task-less analogue of a
-> dispatched worker's `progress` (which is keyed to a task). See AGENTS.md
-> § Worktree Focus for when to post.
+> `focus` resolves `machine/worktree` from the CWD (no id to type). It **is**
+> the worktree record's status-core summary: a focus write forwards through the
+> `agent-worktrees status` verb, and `--list` / show *derive* from
+> `agent-worktrees list --json` — there is no separate focus store
+> (single-owning-layer / derive-don't-duplicate). It is the operator/task-less
+> analogue of a dispatched worker's `progress` (which is keyed to a task). See
+> AGENTS.md § Worktree Focus for when to post.
 
 > **`progress` is a *status beat*, not a chat log.** Emit **one** short line only
 > at real transitions -- a plan settled, implementation done, a PR opened, a

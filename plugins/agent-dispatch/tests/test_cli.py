@@ -467,27 +467,49 @@ def test_parser_focus_positional_and_list():
     assert b.list is True and b.machine == "borealis" and b.focus_text is None
 
 
-def test_focus_sets_resolved_worktree(monkeypatch):
-    from agent_dispatch import __main__, identity
+def test_focus_writes_through_status_core(monkeypatch):
+    # Convergence: `focus <text>` forwards to the worktree record via
+    # aw_set_summary (the `agent-worktrees status` verb), not a parallel store.
+    from agent_dispatch import identity
 
     seen = {}
 
-    class _C:
-        def set_focus(self, machine, worktree, focus):
-            seen.update(machine=machine, worktree=worktree, focus=focus)
-            return {"machine": machine, "worktree": worktree, "focus": focus}
+    def _set_summary(summary):
+        seen["summary"] = summary
+        return True
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_):
-            return None
-
-    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    monkeypatch.setattr(identity, "aw_set_summary", _set_summary)
     monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
     args = build_parser().parse_args(["focus", "driving Phase 8"])
     assert args.func(args) == 0
-    assert seen == {"machine": "lambda-core", "worktree": "wt-7", "focus": "driving Phase 8"}
+    assert seen["summary"] == "driving Phase 8"
+
+
+def test_focus_list_derives_from_records(monkeypatch, capsys):
+    # `focus --list` derives from `agent-worktrees list --json`; a record with
+    # no summary contributes no focus line.
+    from agent_dispatch import identity
+
+    monkeypatch.setattr(identity, "aw_list_records", lambda machine=None: [
+        {"machine": "lambda-core", "id": "wt-7", "summary": "Phase 8",
+         "status_note_at": "2026-07-15T10:00:00"},
+        {"machine": "lambda-core", "id": "wt-8", "summary": ""},
+    ])
+    args = build_parser().parse_args(["focus", "--list"])
+    assert args.func(args) == 0
+    out = capsys.readouterr().out
+    assert "wt-7" in out and "Phase 8" in out
+    assert "wt-8" not in out
+
+
+def test_focus_write_through_failure_errors(monkeypatch, capsys):
+    from agent_dispatch import identity
+
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
+    monkeypatch.setattr(identity, "aw_set_summary", lambda _s: False)
+    args = build_parser().parse_args(["focus", "x"])
+    assert args.func(args) == 2
+    assert "write-through failed" in capsys.readouterr().err
 
 
 def test_focus_without_identity_errors(monkeypatch, capsys):

@@ -79,8 +79,6 @@ def machine_matches(target: str | None, machine: str | None) -> bool:
 
 #: Hard cap on a progress summary -- keeps the beat a line, never a transcript.
 PROGRESS_SUMMARY_MAX = 280
-#: Hard cap on a worktree focus line -- one line, not a transcript.
-FOCUS_MAX = 280
 #: Hard cap on a progress phase label and blocker/pr fields.
 PROGRESS_PHASE_MAX = 40
 _PROGRESS_PR_MAX = 120
@@ -386,20 +384,6 @@ class TaskQueue:
                 "  to_status TEXT,"
                 "  worker TEXT,"
                 "  note TEXT"
-                ")"
-            )
-            # Per-worktree "current focus" -- one latest-only line describing what
-            # a worktree is working on now (operator or agent). Keyed by the
-            # durable machine/worktree identity; independent of any task, so an
-            # operator worktree with no task still surfaces its focus in the
-            # cockpit. Set via `agent-dispatch focus`.
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS worktree_focus ("
-                "  machine TEXT NOT NULL,"
-                "  worktree TEXT NOT NULL,"
-                "  focus TEXT NOT NULL,"
-                "  updated_at REAL NOT NULL,"
-                "  PRIMARY KEY (machine, worktree)"
                 ")"
             )
             # Spawn reservations -- the atomic "exactly one embody spawn per
@@ -1095,49 +1079,6 @@ class TaskQueue:
                 "WHERE task_id = ? ORDER BY id ASC",
                 (task_id,),
             ).fetchall()
-        return [dict(r) for r in rows]
-
-    def set_focus(
-        self, machine: str, worktree: str, focus: str, *, now: float | None = None
-    ) -> dict[str, object]:
-        """Upsert a worktree's latest-only 'current focus' line.
-
-        Keyed by the durable ``machine/worktree`` identity, independent of any
-        task. The focus is hard-capped (:data:`FOCUS_MAX`) so it stays a status
-        line, not a transcript. Returns the stored record.
-        """
-        ts = self._now(now)
-        clipped = (focus or "").strip()[:FOCUS_MAX]
-        with self._connect() as conn:
-            conn.execute(
-                "INSERT INTO worktree_focus (machine, worktree, focus, updated_at) "
-                "VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(machine, worktree) DO UPDATE SET "
-                "focus=excluded.focus, updated_at=excluded.updated_at",
-                (machine, worktree, clipped, ts),
-            )
-        return {
-            "machine": machine, "worktree": worktree,
-            "focus": clipped, "updated_at": ts,
-        }
-
-    def list_focus(
-        self, *, machine: str | None = None
-    ) -> list[dict[str, object]]:
-        """Return worktree focus records (optionally for one machine), freshest
-        first."""
-        with self._connect() as conn:
-            if machine:
-                rows = conn.execute(
-                    "SELECT machine, worktree, focus, updated_at FROM worktree_focus "
-                    "WHERE machine = ? ORDER BY updated_at DESC",
-                    (machine,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT machine, worktree, focus, updated_at FROM worktree_focus "
-                    "ORDER BY updated_at DESC"
-                ).fetchall()
         return [dict(r) for r in rows]
 
     # -- spawn reservations --------------------------------------------------
