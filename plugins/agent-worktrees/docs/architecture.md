@@ -86,6 +86,29 @@ verb), so the round-trip preserves every overlay. A forward-compat guard test
 by a writer that touches only one field leaves all other overlays intact; if you
 add a field, extend that test.
 
+### Two status registers: asserted disposition vs. derived pulse
+
+The status core carries **two complementary registers**, deliberately kept in
+**separate homes** so they can never be faked from each other (the `agent-fabric`
+vision's *disposition-is-asserted / pulse-is-derived* behavior):
+
+1. **Durable disposition (asserted).** The `follow_up` / `summary` overlay on the
+   worktree **record** (above). High-signal, slow-moving: the agent *asserts* it
+   via `agent-worktrees status --follow-up|--resolved`. It is the single-writer
+   YAML, and it is the *only* register that feeds the prune verdict.
+2. **Live pulse (derived).** A per-session **sidecar** (`substatus.json` in the
+   Copilot `session-state/{id}/` dir, beside context-handoff's `context.json`),
+   written by the agent-worktrees **live-pulse extension**
+   (`extensions/agent-worktrees/extension.mjs`) from the ephemeral
+   `assistant.intent` event stream (root agent only). Low-signal, fast-moving,
+   **zero agent effort**. The picker maps it to a worktree by session cwd and
+   renders it as a dim, expiring line; it is dropped once stale.
+
+**The pulse is never written to the record and never sets `follow_up`.** It is a
+read-time display signal only (`sessions.SessionContext.live_intent`), so it
+cannot corrupt the durable disposition or the single-writer contract. A stale or
+idle pulse greys and then disappears; only the asserted disposition persists.
+
 ## Session Lifecycle
 
 ```

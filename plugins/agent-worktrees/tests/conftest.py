@@ -138,6 +138,7 @@ def make_session_dir(
     lock_pid: int | None = None,
     has_events_file: bool = True,
     context_pct: int | None = None,
+    substatus: dict | None = None,
 ) -> Path:
     """Create a mock session directory with workspace.yaml and optional files."""
     sdir = session_state_dir / session_id
@@ -169,6 +170,10 @@ def make_session_dir(
             "utilizationPct": context_pct,
             "updatedAt": updated_at,
         }))
+
+    if substatus is not None:
+        import json
+        (sdir / "substatus.json").write_text(json.dumps(substatus))
 
     return sdir
 

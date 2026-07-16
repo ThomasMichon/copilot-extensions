@@ -17,6 +17,42 @@ import datetime as _dt
 # real clock before normalizing a batch (see ``data_local``).
 NOW = _dt.datetime.now()
 
+# worktree-status-core live pulse: how long an agent-intent pulse stays "fresh"
+# (rendered bright-dim) before it greys to "stale", and when it expires entirely
+# (dropped from the display). A pulse from an idle session is never "fresh" --
+# the turn has ended -- so it renders "stale" until it expires.
+_PULSE_FRESH_SECS = 90
+_PULSE_STALE_SECS = 900
+
+
+def _pulse_level(w):
+    """Classify the live agent-intent pulse: 'fresh', 'stale', or None.
+
+    'fresh'  -- a recent intent from an active turn (bright-dim live line).
+    'stale'  -- the intent has aged, or its session went idle (greyed line).
+    None     -- no pulse, unparseable timestamp, or expired (no line at all).
+
+    The pulse is a *derived* signal (assistant.intent); it is never conflated
+    with the agent-asserted ``follow_up`` disposition.
+    """
+    intent = (w.get("live_intent") or "").strip()
+    if not intent:
+        return None
+    ts = w.get("live_intent_at")
+    if not ts:
+        return None
+    try:
+        age = (NOW - _dt.datetime.fromisoformat(ts)).total_seconds()
+    except (ValueError, TypeError):
+        return None
+    if age < 0:
+        age = 0
+    if age > _PULSE_STALE_SECS:
+        return None
+    if w.get("live_intent_idle") or age > _PULSE_FRESH_SECS:
+        return "stale"
+    return "fresh"
+
 # Canonical git WorktreeState value -> picker display label. Mirrors the
 # PSMux/TMux status segment's _SEGMENT_STYLE labels (COMPLETED renders as FINAL;
 # CONVO is a turns>0 refinement of UNUSED).
@@ -257,6 +293,11 @@ def norm(w, machine, env):
         "title": disp_title,
         "follow_up": follow_up,
         "summary": summary,
+        # worktree-status-core live pulse: the derived agent-intent line + its
+        # freshness ('fresh'/'stale'/None). Rendered dim + expiring by the
+        # engine; never the durable disposition.
+        "live_intent": (w.get("live_intent") or "").strip(),
+        "live_pulse": _pulse_level(w),
         "kind": kind,
         "tracking": w.get("status", ""),
         "state": _state(w),

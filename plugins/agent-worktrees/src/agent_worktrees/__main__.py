@@ -492,6 +492,19 @@ def _worktree_to_dict(
         norm = _normalize_path(rec.worktree_path)
         d["turn_count"] = session_ctx.turn_count.get(norm, 0)
         d["session_count"] = session_ctx.session_count.get(norm, 0)
+        # worktree-status-core: the live activity pulse (derived from the
+        # agent's assistant.intent stream by the live-pulse extension). Emitted
+        # only when present so un-annotated worktrees stay lean; the picker
+        # ages it out (dim -> expired) and NEVER reads it as the durable
+        # follow_up disposition.
+        _intent = session_ctx.live_intent.get(norm)
+        if _intent:
+            d["live_intent"] = _intent
+            _iat = session_ctx.live_intent_at.get(norm)
+            if _iat:
+                d["live_intent_at"] = _iat
+            if session_ctx.live_intent_idle.get(norm):
+                d["live_intent_idle"] = True
         # Overall-summary slot: prefer the persisted title (curated by
         # finalize/PR or captured by the status-updater/deregister hook), but
         # fall back to the live session summary so a worktree whose title has

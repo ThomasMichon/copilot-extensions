@@ -1884,6 +1884,20 @@ class PickerScreen(Widget):
                         vr.text.stylize(C_SEL)
                     elif is_sel:
                         vr.text.stylize(C_SEL_BG)
+                    # worktree-status-core live pulse (#2917): a dim, expiring
+                    # sub-line carrying the agent's current intent, derived from
+                    # the assistant.intent stream. Decorative (no stop) so it is
+                    # never focusable and never affects selection; fresh renders
+                    # dim, stale renders dimmer, expired is dropped upstream.
+                    _pulse = rec.get("live_pulse")
+                    _intent = (rec.get("live_intent") or "").strip()
+                    if _pulse and _intent:
+                        _pstyle = C_DIM if _pulse == "fresh" else "grey30"
+                        pline = Text("      ", style=_pstyle)
+                        pline.append("⟳ ", style=_pstyle)
+                        pline.append(_clip(_intent, max(1, width - 9), "l"),
+                                     style=_pstyle)
+                        add(pline)
                     li += 1
         elif self._kind() == "maintenance":
             add(self.tab_bar(width, sel == ("M", 0)))
