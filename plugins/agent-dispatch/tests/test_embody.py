@@ -29,6 +29,13 @@ def test_autopilot_prompt_mentions_task_verbs_and_deferred_completion():
     # Autopilot + the deferred-completion guarantee (do not complete early).
     assert "autopilot" in prompt.lower()
     assert "not mark it complete before" in prompt.lower()
+    # Contract-net evaluation window (dev55): claim under the tight evaluation
+    # lease, assess, then accept (start) / decline (yield --exclude-self) / retire
+    # (abandon --duplicate-of).
+    assert "agent-dispatch claim --task abc123 --evaluation" in prompt
+    assert "evaluat" in prompt.lower()
+    assert "agent-dispatch yield abc123 --exclude-self worktree" in prompt
+    assert "agent-dispatch abandon abc123 --duplicate-of" in prompt
 
 
 def test_embody_available_false_without_cli(monkeypatch):

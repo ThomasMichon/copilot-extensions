@@ -205,6 +205,64 @@ def test_parser_yield_owner_optional():
     assert b.worker_id == "m/wt"
 
 
+def test_parser_yield_exclude_self_and_deprecated_alias():
+    """`--exclude-self` is the clear name; `--not-me` stays a back-compat alias."""
+    a = build_parser().parse_args(["yield", "t1", "--exclude-self", "worktree"])
+    assert a.exclude_self == "worktree"
+    b = build_parser().parse_args(["yield", "t1", "--not-me", "machine"])
+    assert b.exclude_self == "machine"
+
+
+def test_yield_exclude_self_appends_scoped_exclusion(monkeypatch):
+    """`yield --exclude-self worktree` translates to a worktree-scoped exclusion."""
+    from agent_dispatch import __main__, identity
+
+    seen = {}
+
+    class _C:
+        def yield_task(self, task_id, worker_id, *, note=None, exclude=None):
+            seen.update(task_id=task_id, worker_id=worker_id, note=note, exclude=exclude)
+            return {"id": task_id, "status": "queued"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("lambda-core", "wt-7"))
+
+    args = build_parser().parse_args(["yield", "t1", "--exclude-self", "worktree"])
+    args.func(args)
+    assert seen["exclude"] == "worktree:wt-7"
+
+
+def test_abandon_duplicate_of_implies_permit_and_records_ref(monkeypatch):
+    """`abandon --duplicate-of REF` self-permits and folds the dedup ref into the reason."""
+    from agent_dispatch import __main__
+
+    seen = {}
+
+    class _C:
+        def abandon(self, task_id, *, worker_id=None, permitted=False, reason=None):
+            seen.update(task_id=task_id, worker_id=worker_id, permitted=permitted, reason=reason)
+            return {"id": task_id, "status": "abandoned"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+
+    args = build_parser().parse_args(["abandon", "t1", "--duplicate-of", "pr/42"])
+    args.func(args)
+    assert seen["permitted"] is True
+    assert "duplicate of pr/42" in seen["reason"]
+
+
 def test_parser_progress_owner_optional_and_fields():
     a = build_parser().parse_args(
         ["progress", "t1", "--phase", "impl", "--summary", "did the thing"]

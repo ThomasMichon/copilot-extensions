@@ -69,7 +69,7 @@ what makes your pick *stick uniquely*. Do both — sweep, then claim.
 
 4. **Work it, then close the loop.** `agent-dispatch progress <id> …` at phase
    boundaries; `agent-dispatch complete <id> --result-ref <ref>` when done. If you
-   must drop it: `agent-dispatch yield <id> --not-me worktree` (append a "not me"
+   must drop it: `agent-dispatch yield <id> --exclude-self worktree` (append a "not me"
    so you are not re-offered it), or `abandon --duplicate-of <ref>` if it turns
    out to be a duplicate.
 
