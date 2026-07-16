@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from ..auth.base import AuthInjector
 from ..cli_tools import CliTool, CliToolError, build_argv, load_cli_tools, tool_in_scope
@@ -61,6 +62,29 @@ class CliTransport(Transport):
         if dropped:
             log.info("cli transport: %d tool(s) out of scope %s: %s",
                      len(dropped), cfg.server.scopes, ", ".join(dropped))
+        self._spawn_env: dict[str, str] | None = None
+
+    async def _child_env(self) -> dict[str, str]:
+        """Environment for spawned tools: ``os.environ`` + ``server.env`` + any
+        auth-injected vars (e.g. a vault-sourced token), computed once and cached.
+
+        This lets a ``cli`` bridge **self-source** a credential in the bridge's
+        own process -- where ``vault``/``gh``/``az`` helpers run in a clean
+        context -- and hand it to the tool via its environment, instead of
+        depending on the credential already being present in the session env. A
+        failure to acquire is non-fatal: fall back to the ambient environment so
+        a tool that can source its own credential still runs.
+        """
+        if self._spawn_env is None:
+            env = dict(os.environ)
+            env.update(self.cfg.server.env)
+            try:
+                env.update(await self.injector.child_env())
+            except Exception as exc:
+                log.warning("cli transport: auth injection failed (%s); "
+                            "spawning with ambient environment", exc)
+            self._spawn_env = env
+        return self._spawn_env
 
     async def send(self, msg: dict) -> None:
         method = msg.get("method")
@@ -110,6 +134,7 @@ class CliTransport(Transport):
                 *argv,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=await self._child_env(),
             )
             out_b, err_b = await proc.communicate()
             rc = proc.returncode

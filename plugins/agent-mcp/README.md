@@ -499,6 +499,26 @@ metacharacters (`&`, `|`, `%`, `^`, quotes). A `.cmd` is used only as a last
 resort. (The stdio-MCP transports are unaffected — they still launch
 `npx`-style servers, which need stdin streaming a `.ps1` doesn't provide.)
 
+**Self-sourced credentials.** A `cli` bridge may carry an `auth` block; the
+transport merges the injector's `child_env()` into the spawned tool's
+environment. This lets the bridge **fetch a credential in its own process** (a
+clean context where `vault`/`gh`/`az` helpers work) and hand it to the tool via
+its env — instead of the credential having to be present in the session that
+launched the bridge. The env-first form of the `command` injector uses an
+existing env var when set and only runs the helper otherwise:
+
+```yaml
+server:
+  type: cli
+  tools_from: [tools/vei-search.md]
+auth:
+  kind: command
+  command: [vault, get, "Gateway API Token", password]
+  parse: raw
+  source_env: GATEWAY_TOKEN      # use this env var if already set...
+  target_env: GATEWAY_TOKEN      # ...else run the command; inject either way
+```
+
 ## MCP → CLI: `call` and `materialize`
 The bridge exposes an upstream MCP *to an MCP client*. The **`call`** and
 **`materialize`** verbs expose it *to the shell* instead — the same upstream, the
