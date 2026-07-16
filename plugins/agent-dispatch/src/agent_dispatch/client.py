@@ -109,6 +109,7 @@ class DispatchClient:
         worktree: str | None = None,
         task_id: str | None = None,
         lease_seconds: int | None = None,
+        evaluation: bool = False,
     ) -> dict | None:
         body = {
             "worker_id": worker_id,
@@ -118,6 +119,7 @@ class DispatchClient:
             "capabilities": list(capabilities),
             "task_id": task_id,
             "lease_seconds": lease_seconds,
+            "evaluation": evaluation,
         }
         return self._unwrap(self._http.post("/claim", json=body))
 

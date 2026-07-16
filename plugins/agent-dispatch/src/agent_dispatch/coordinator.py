@@ -74,6 +74,7 @@ class ClaimBody(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
     task_id: str | None = None
     lease_seconds: int | None = None
+    evaluation: bool = False
 
 
 class WorkerBody(BaseModel):
@@ -317,6 +318,7 @@ def create_app(
             worktree=body.worktree,
             task_id=body.task_id,
             lease_seconds=body.lease_seconds,
+            evaluation=body.evaluation,
         )
         if task is None:
             return None

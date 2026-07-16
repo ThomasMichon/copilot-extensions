@@ -39,6 +39,10 @@ from pathlib import Path
 from .payload import PayloadStore, is_blob_ref
 
 DEFAULT_LEASE_SECONDS = 15 * 60
+#: The tighter lease applied to a claim taken in **evaluation** mode -- the
+#: ``claimed`` window is meant to be a quick accept/reject assessment, so a
+#: stuck evaluator auto-releases fast (vs the full work lease a ``start`` grants).
+DEFAULT_EVAL_LEASE_SECONDS = 3 * 60
 #: Payloads whose UTF-8 size exceeds this are spilled to a content-addressed blob
 #: instead of being stored inline in the row.
 DEFAULT_BLOB_THRESHOLD = 4096
@@ -337,11 +341,14 @@ class TaskQueue:
         db_path: str | Path,
         *,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        eval_lease_seconds: int = DEFAULT_EVAL_LEASE_SECONDS,
         payload_dir: str | Path | None = None,
         blob_threshold: int = DEFAULT_BLOB_THRESHOLD,
     ):
         self.db_path = str(db_path)
         self.lease_seconds = lease_seconds
+        #: Tight lease for an evaluation-mode claim (see ``claim_one(evaluation=)``).
+        self.eval_lease_seconds = eval_lease_seconds
         self.blob_threshold = blob_threshold
         # Blobs live in a ``payloads/`` directory beside the queue DB unless the
         # caller overrides it (e.g. a shared blob volume).
@@ -623,6 +630,7 @@ class TaskQueue:
         task_id: str | None = None,
         now: float | None = None,
         lease_seconds: int | None = None,
+        evaluation: bool = False,
     ) -> Task | None:
         """Atomically lease the best eligible ``queued`` task, or ``None``.
 
@@ -659,7 +667,12 @@ class TaskQueue:
             full_caps.add(f"worktree:{worktree}")
         if repo:
             full_caps.add(f"repo:{repo}")
-        lease = self.lease_seconds if lease_seconds is None else lease_seconds
+        if lease_seconds is not None:
+            lease = lease_seconds
+        elif evaluation:
+            lease = self.eval_lease_seconds  # tight evaluation-window lease
+        else:
+            lease = self.lease_seconds
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if task_id is not None:
@@ -764,7 +777,15 @@ class TaskQueue:
         return 0
 
     def start(self, task_id: str, worker_id: str, *, now: float | None = None) -> Task:
-        """Move a ``claimed`` task to ``started`` (owner must match)."""
+        """Move a ``claimed`` task to ``started`` (owner must match).
+
+        Committing to the work **extends the lease to the full work lease** (from
+        whatever the claim granted -- e.g. a tight evaluation-window lease). This
+        only ever *lengthens* a lease, never shortens one, so it is safe for every
+        consumer: a task claimed under a short eval lease that is then started gets
+        the normal work window without waiting for the first heartbeat.
+        """
+        ts = self._now(now)
         return self._transition(
             task_id,
             allowed={Status.CLAIMED},
@@ -773,6 +794,7 @@ class TaskQueue:
             now=now,
             note="start",
             stamp="started_at",
+            extra={"lease_expires_at": ts + self.lease_seconds},
         )
 
     def complete(
