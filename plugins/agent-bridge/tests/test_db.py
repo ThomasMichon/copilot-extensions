@@ -259,7 +259,9 @@ class TestLiveSessionLease:
 
         n = tmp_db.expire_live_sessions_for_worktree("wt-shared", now=now)
         assert n == 1
-        assert tmp_db.get_live_session("cli-a")["status"] == "expired"
+        # Take-over demotes to the terminal `taken-over` state (#2912), not the
+        # reaper's revivable `expired`.
+        assert tmp_db.get_live_session("cli-a")["status"] == "taken-over"
         assert tmp_db.get_live_session("cli-b")["status"] == "live"
         # queued steer against the taken-over session is dropped
         assert tmp_db.list_pending_live_messages("cli-a") == []

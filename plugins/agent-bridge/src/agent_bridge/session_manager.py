@@ -2519,6 +2519,10 @@ class SessionManager:
         session.status = SessionStatus.STOPPED
         now = time.time()
         self._db.update_session_status(session_id, SessionStatus.STOPPED.value, now)
+        # Release the per-worktree ownership reservation (#2912): a stopped
+        # owned session is no longer actively controlling the worktree, so free
+        # it for a live CLI (or a later fresh owner) to claim.
+        self._db.release_worktree_ownership(session_id=session_id)
         if session.event_log:
             session.event_log.append("session_state_changed", {
                 "status": SessionStatus.STOPPED.value,
@@ -2571,6 +2575,8 @@ class SessionManager:
             self._db.update_session_status(
                 session_id, SessionStatus.ENDED.value, time.time()
             )
+        with contextlib.suppress(Exception):
+            self._db.release_worktree_ownership(session_id=session_id)
         with contextlib.suppress(Exception):
             self._db.delete_session(session_id)
         self._sessions.pop(session_id, None)

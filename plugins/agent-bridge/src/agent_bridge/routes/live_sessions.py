@@ -141,7 +141,7 @@ async def register_live_session(
     """
     db = _db(request)
     now = time.time()
-    db.register_live_session(
+    status = db.register_live_session(
         body.session_id,
         machine=body.machine,
         cwd=body.cwd,
@@ -153,6 +153,19 @@ async def register_live_session(
         driven_by=body.driven_by,
         now=now,
     )
+    if status != "live":
+        # Registration refused by an ownership primitive (#2912): either an
+        # active owned-ACP reservation holds the worktree (``reserved``) or this
+        # session id was taken over (``taken-over``). Surfaced as 409 so the
+        # extension knows it must not act as this worktree's live controller.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "reason": status,
+                "session_id": body.session_id,
+                "worktree_id": body.worktree_id,
+            },
+        )
     row = db.get_live_session(body.session_id)
     if row is None:  # pragma: no cover -- write-then-read on the same connection
         raise HTTPException(status_code=500, detail="registration not persisted")

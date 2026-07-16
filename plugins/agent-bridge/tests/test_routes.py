@@ -1006,7 +1006,9 @@ class TestWorktreeRoutes:
             resp = client.post(f"/api/v1/worktrees/{wt_id}/restart")
 
         assert resp.status_code == 200
-        assert db.get_live_session("cli-live")["status"] == "expired"
+        # Take-over demotes the live registration to the terminal `taken-over`
+        # state (#2912) so a killed predecessor cannot revive it.
+        assert db.get_live_session("cli-live")["status"] == "taken-over"
         assert db.list_pending_live_messages("cli-live") == []
         assert db.list_fresh_live_sessions(wt_id, now=now) == []
 

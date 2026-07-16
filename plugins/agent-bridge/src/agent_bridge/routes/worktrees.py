@@ -610,6 +610,15 @@ async def _start_fresh_worktree_session(
                     "(connect/spawn error)"
                 ),
             )
+        # Claim the per-worktree ownership reservation for the fresh owned
+        # session (#2912) so a later live-CLI registration respects it. Under
+        # the per-worktree lock + post-crawl live-holder recheck above, so it
+        # cannot race a live holder here.
+        db = getattr(request.app.state, "db", None)
+        if db is not None:
+            db.reserve_worktree_ownership(
+                worktree_id, fresh.session_id, now=time.time(), reclaim=reclaim
+            )
         return fresh
 
 
@@ -683,6 +692,31 @@ async def resume_worktree(
             status_code=404,
             detail=f"No session found for worktree {worktree_id}",
         )
+
+    # Ownership reservation (#2912): take the per-worktree ACP-ownership
+    # reservation before resuming, so a live-CLI registration must respect it
+    # (registration and ownership cannot both win a worktree). Atomic against a
+    # concurrent register even across processes; ``reclaim`` force-takes it. A
+    # False result means a fresh live CLI claimed the worktree in the race
+    # window -- surface the same read-only 409 the top guard uses.
+    if db is not None:
+        reserved = db.reserve_worktree_ownership(
+            worktree_id, session.session_id, now=time.time(), reclaim=reclaim
+        )
+        if not reserved:
+            log.info(
+                "resume_worktree %s refused: a live CLI raced the ownership "
+                "reservation (represent read-only)",
+                worktree_id,
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "reason": "live_cli_holds_worktree",
+                    "worktree_id": worktree_id,
+                    "session_id": session.session_id,
+                },
+            )
 
     # Already live -- nothing to do, return current state.
     if session.status in (SessionStatus.RUNNING, SessionStatus.IDLE):
