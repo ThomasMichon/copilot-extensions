@@ -63,6 +63,23 @@ class _WorktreeEntry:
     interface: str | None = None
     origin: str | None = None
     picker_hidden: bool = False
+    # worktree-status-core (#2917/#2956): the agent-asserted disposition
+    # (follow_up + summary) and the derived live-intent pulse, surfaced from
+    # ``agent-worktrees list --json`` so the cockpit can render "where attention
+    # is owed" and "what each agent is doing now" -- not just liveness. All
+    # default off/empty so an older agent-worktrees runtime degrades cleanly.
+    # ``summary`` is the single home for the worktree's one-line status: since
+    # Phase 6 it is also what ``agent-dispatch focus`` writes (derive-don't-
+    # duplicate), so the cockpit reads focus/disposition from here, not a
+    # separate focus store. The live pulse is emitted raw (intent + its
+    # timestamp + idle flag); freshness is computed at render time so a cached
+    # value cannot read "fresh" forever.
+    follow_up: bool = False
+    summary: str | None = None
+    status_note_at: str | None = None
+    live_intent: str | None = None
+    live_intent_at: str | None = None
+    live_intent_idle: bool = False
 
     def interactive_cli_state(self) -> str:
         """Classify interactive-CLI ownership from mux liveness.
@@ -102,6 +119,13 @@ class _WorktreeEntry:
             "interface": self.interface,
             "origin": self.origin,
             "picker_hidden": self.picker_hidden,
+            # worktree-status-core (#2956): disposition + derived live pulse.
+            "follow_up": self.follow_up,
+            "summary": self.summary,
+            "status_note_at": self.status_note_at,
+            "live_intent": self.live_intent,
+            "live_intent_at": self.live_intent_at,
+            "live_intent_idle": self.live_intent_idle,
         }
 
 
@@ -388,6 +412,13 @@ def _parse_worktree_list(raw: str, agent_name: str) -> list[_WorktreeEntry]:
             interface=w.get("interface"),
             origin=w.get("origin"),
             picker_hidden=bool(w.get("picker_hidden", False)),
+            # #2956: status core -- disposition + derived live pulse.
+            follow_up=bool(w.get("follow_up", False)),
+            summary=w.get("summary"),
+            status_note_at=w.get("status_note_at"),
+            live_intent=w.get("live_intent"),
+            live_intent_at=w.get("live_intent_at"),
+            live_intent_idle=bool(w.get("live_intent_idle", False)),
         ))
     return entries
 

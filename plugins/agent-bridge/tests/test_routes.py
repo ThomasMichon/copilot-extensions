@@ -757,6 +757,51 @@ class TestWorktreeRoutes:
         assert entries[0].picker_hidden is False
         assert entries[0].to_dict()["picker_hidden"] is False
 
+    def test_parse_worktree_list_reads_status_core(self) -> None:
+        """#2956: _parse_worktree_list threads the status-core disposition
+        (follow_up/summary) + derived live pulse from ``agent-worktrees list
+        --json`` and to_dict re-exposes them for the cockpit."""
+        from agent_bridge.routes import worktrees as wt_routes
+
+        raw = (
+            '{"version": 1, "worktrees": ['
+            '{"id": "f1", "path": "/f1", "branch": "b", "status": "active",'
+            ' "follow_up": true, "summary": "Phase 8 left; PR open",'
+            ' "status_note_at": "2026-07-16 09:00:00",'
+            ' "live_intent": "Wiring the cockpit render",'
+            ' "live_intent_at": "2026-07-16T16:00:00Z", "live_intent_idle": false}]}'
+        )
+        e = wt_routes._parse_worktree_list(raw, "test-agent")[0]
+        assert e.follow_up is True
+        assert e.summary == "Phase 8 left; PR open"
+        assert e.live_intent == "Wiring the cockpit render"
+        assert e.live_intent_at == "2026-07-16T16:00:00Z"
+        assert e.live_intent_idle is False
+        d = e.to_dict()
+        assert d["follow_up"] is True
+        assert d["summary"] == "Phase 8 left; PR open"
+        assert d["status_note_at"] == "2026-07-16 09:00:00"
+        assert d["live_intent"] == "Wiring the cockpit render"
+        assert d["live_intent_at"] == "2026-07-16T16:00:00Z"
+        assert d["live_intent_idle"] is False
+
+    def test_parse_worktree_list_status_core_defaults_when_absent(self) -> None:
+        """Older runtime omits the status-core fields -> disposition unset,
+        pulse absent (the cockpit simply shows no overlay)."""
+        from agent_bridge.routes import worktrees as wt_routes
+
+        raw = ('{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
+               ' "branch": "b", "status": "active"}]}')
+        e = wt_routes._parse_worktree_list(raw, "test-agent")[0]
+        assert e.follow_up is False
+        assert e.summary is None
+        assert e.live_intent is None
+        assert e.live_intent_idle is False
+        d = e.to_dict()
+        assert d["follow_up"] is False
+        assert d["summary"] is None
+        assert d["live_intent"] is None
+
     def test_resume_worktree_with_no_session_404s(self, client) -> None:
         self._seed_worktree("test-agent", "lambda-core-wsl-20250101-160000-empty")
         resp = client.post(
