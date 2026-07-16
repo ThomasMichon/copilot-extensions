@@ -92,6 +92,30 @@ class SessionHostClient:
         """Relay client->agent ACP bytes into the child's stdin."""
         await proto.write_message(self._writer, proto.MsgType.WRITE, data)
 
+    async def send_status(self, reapable: bool) -> None:
+        """Tell the host whether the child is REAPABLE (idle, no active
+        background tasks). Best-effort: a failed send must never disturb the
+        ACP turn flow sharing this socket (#51)."""
+        if self._closed:
+            return
+        try:
+            await proto.write_message(
+                self._writer, proto.MsgType.STATUS, proto.pack_flag(reapable))
+        except (OSError, ConnectionError):
+            pass
+
+    async def detach(self, reapable: bool) -> None:
+        """Signal a GRACEFUL disconnect (vs a hard drop) and the child's current
+        reapable state, so the host reaps a reapable child promptly instead of
+        after the awkward-disconnect grace window. Best-effort (#51)."""
+        if self._closed:
+            return
+        try:
+            await proto.write_message(
+                self._writer, proto.MsgType.DETACH, proto.pack_flag(reapable))
+        except (OSError, ConnectionError):
+            pass
+
     async def terminate(self) -> None:
         """Request the host reap the child (explicit, sanctioned termination)."""
         await proto.write_message(self._writer, proto.MsgType.TERMINATE)

@@ -306,6 +306,150 @@ async def test_host_survives_front_reset():
 
 
 # --------------------------------------------------------------------------
+# front-lost auto-reap (#51)
+# --------------------------------------------------------------------------
+async def _serve_reap(child: _FakeChild, secs: float) -> tuple[SessionHost, int]:
+    host = SessionHost(child, awkward_reap_seconds=secs)
+    port = await host.serve(port=0)
+    return host, port
+
+
+@pytest.mark.asyncio
+async def test_graceful_detach_reaps_reapable_child():
+    """A graceful DETACH with reapable=True reaps the idle child promptly."""
+    child = _FakeChild()
+    host, port = await _serve_reap(child, 60.0)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(True)          # idle, no background work
+        await c1.detach(True)               # graceful disconnect
+        await c1.close()
+        await asyncio.sleep(0.1)
+        assert child.killed is True         # reaped without waiting any grace
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_graceful_detach_keeps_busy_child():
+    """A graceful DETACH while NOT reapable (mid-turn) leaves the child alive."""
+    child = _FakeChild()
+    host, port = await _serve_reap(child, 0.1)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(False)         # a turn is in flight
+        await c1.detach(False)
+        await c1.close()
+        await asyncio.sleep(0.3)            # well past the grace window
+        assert child.killed is False        # never reaped mid-turn
+        # a reattach still reaches the surviving child
+        c2 = await SessionHostClient.connect(port=port)
+        hello = await c2.attach(0)
+        assert hello.child_pid == child.pid
+        await c2.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_awkward_drop_reaps_idle_child_after_grace():
+    """A bare EOF (no DETACH) with last-known reapable reaps after the grace."""
+    child = _FakeChild()
+    host, port = await _serve_reap(child, 0.15)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(True)
+        await asyncio.sleep(0.02)
+        c1._writer.transport.abort()        # awkward: no graceful DETACH
+        await asyncio.sleep(0.05)
+        assert child.killed is False        # still within the grace window
+        await asyncio.sleep(0.25)
+        assert child.killed is True         # reaped once the grace elapsed
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_awkward_drop_keeps_busy_child():
+    """A bare EOF while last-known NOT reapable never self-reaps."""
+    child = _FakeChild()
+    host, port = await _serve_reap(child, 0.1)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(False)
+        c1._writer.transport.abort()
+        await asyncio.sleep(0.3)
+        assert child.killed is False
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_reattach_cancels_awkward_reap_timer():
+    """A reattach before the grace elapses cancels the pending self-reap."""
+    child = _FakeChild()
+    host, port = await _serve_reap(child, 0.2)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(True)
+        c1._writer.transport.abort()        # arms the awkward timer
+        await asyncio.sleep(0.05)
+        c2 = await SessionHostClient.connect(port=port)  # reattach in time
+        await c2.attach(0)
+        await asyncio.sleep(0.3)            # past the original window
+        assert child.killed is False        # timer was cancelled by reattach
+        await c2.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_status_false_supersedes_earlier_reapable():
+    """A later STATUS(False) (a new turn) vetoes reaping on an awkward drop."""
+    child = _FakeChild()
+    host, port = await _serve_reap(child, 0.1)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(True)
+        await c1.send_status(False)         # a fresh turn started
+        c1._writer.transport.abort()
+        await asyncio.sleep(0.3)
+        assert child.killed is False
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_awkward_reap_disabled_when_zero():
+    """awkward_reap_seconds=0 disables the awkward-grace timer entirely."""
+    child = _FakeChild()
+    host, port = await _serve_reap(child, 0.0)
+    try:
+        c1 = await SessionHostClient.connect(port=port)
+        await c1.attach(0)
+        await c1.send_status(True)
+        c1._writer.transport.abort()
+        await asyncio.sleep(0.2)
+        assert child.killed is False        # no timer armed
+        # ...but a graceful DETACH still reaps even with the timer disabled.
+        c2 = await SessionHostClient.connect(port=port)
+        await c2.attach(0)
+        await c2.send_status(True)
+        await c2.detach(True)
+        await c2.close()
+        await asyncio.sleep(0.1)
+        assert child.killed is True
+    finally:
+        await host.close()
+
+
+# --------------------------------------------------------------------------
 # winjob breakaway flags
 # --------------------------------------------------------------------------
 def test_breakaway_flag_composition():

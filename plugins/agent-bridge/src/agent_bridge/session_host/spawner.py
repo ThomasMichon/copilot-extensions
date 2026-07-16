@@ -114,6 +114,12 @@ class LocalSpawner:
 
     boundary = "local"
 
+    def __init__(self, *, awkward_reap_seconds: float = 60.0) -> None:
+        # Bound on how long an idle, front-less child lingers after an awkward
+        # disconnect before the host self-reaps it (#48). Handed to the launched
+        # host process. 0 disables the awkward-grace self-reap.
+        self._awkward_reap_seconds = awkward_reap_seconds
+
     async def spawn(
         self,
         child_argv: list[str],
@@ -125,6 +131,7 @@ class LocalSpawner:
         nonce = new_nonce()
         handle = await asyncio.to_thread(
             launch_session_host, child_argv, cwd=cwd, env=env, nonce=nonce,
+            awkward_reap_seconds=self._awkward_reap_seconds,
         )
         return SpawnedHost(
             local_port=handle.port,

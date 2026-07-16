@@ -389,6 +389,7 @@ class SessionManager:
         graceful_cancel_settle_seconds: float = 45.0,
         idle_reap_ttl_seconds: float = 0.0,
         live_stall_interrupt_after_s: float = 900.0,
+        session_host_awkward_reap_seconds: float = 60.0,
     ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
@@ -413,6 +414,11 @@ class SessionManager:
         # from (and much larger than) the 180s stall so a legitimately long tool
         # call is not aborted. 0 disables the live-stall interrupt entirely.
         self._live_stall_interrupt_after_s = live_stall_interrupt_after_s
+        # Session-host self-reap grace (#51): how long an idle, front-less child
+        # lingers after an *awkward* disconnect before the host reaps itself.
+        # Handed to every LocalSpawner-launched host. 0 disables the timer (the
+        # graceful-detach fast path still reaps a reapable child promptly).
+        self._session_host_awkward_reap_seconds = session_host_awkward_reap_seconds
         self._host_index: Any = None
         # Live remote-boundary forwards (session_id -> LocalForward). Held so a
         # CodeSpace/mesh Session Host's -L/-R forward can be refreshed on
@@ -981,7 +987,9 @@ class SessionManager:
         from .transport import resolve_local_launch
 
         if spawner is None:
-            spawner = LocalSpawner()
+            spawner = LocalSpawner(
+                awkward_reap_seconds=self._session_host_awkward_reap_seconds,
+            )
 
         if remote_child_argv is not None:
             # Remote boundary (CodeSpace/mesh): the child runs on the FAR side,
@@ -1032,6 +1040,9 @@ class SessionManager:
             # Surface a mid-session transport drop (loopback socket down, host +
             # child alive) as ``disconnected`` so the reattach driver fires (P1).
             streams.on_transport_lost = client.mark_transport_lost
+            # Retain the host control channel so the manager can push STATUS
+            # (reapable) / DETACH (graceful) for host self-reap (#51).
+            client.session_host_client = sock
             if permission_callback:
                 client.auto_approve = False
             try:
@@ -1265,6 +1276,9 @@ class SessionManager:
 
             client = AcpClient(on_event=_on_acp_event)
             streams.on_transport_lost = client.mark_transport_lost
+            # Retain the host control channel so the manager can push STATUS
+            # (reapable) / DETACH (graceful) for host self-reap (#51).
+            client.session_host_client = sock
             await asyncio.wait_for(
                 client.start_streams(
                     streams.reader, streams.writer,
@@ -2272,6 +2286,10 @@ class SessionManager:
             self._run_prompt(session, turn_index, prompt)
         )
 
+        # The child is now busy: tell its session host it is NOT reapable so a
+        # front lost mid-turn never self-reaps a running turn (#51).
+        await self._notify_host_reapable(session)
+
         session.touch()
         return turn_index
 
@@ -2324,6 +2342,11 @@ class SessionManager:
                 "status": SessionStatus.IDLE.value,
             })
 
+        # Turn done: refresh the session host's reapable state (idle + no active
+        # background tasks), so a subsequently-lost front can self-reap the idle
+        # child (#51).
+        await self._notify_host_reapable(session)
+
         session.touch()
 
     def _handle_usage_update(
@@ -2375,6 +2398,52 @@ class SessionManager:
                         "message": "Context window usage elevated -- prepare for handoff",
                     })
 
+    def _host_reapable(self, session: Session) -> bool:
+        """Is the child safe to free? True only when its turn has completed and
+        no background sub-agents are still running (#51)."""
+        return (session.status == SessionStatus.IDLE
+                and not session.has_active_background_tasks)
+
+    def _session_host_client(self, session: Session) -> Any:
+        """The session's host control channel, or None if not host-backed."""
+        if session.client is None:
+            return None
+        return getattr(session.client, "session_host_client", None)
+
+    async def _notify_host_reapable(self, session: Session) -> None:
+        """Push the child's current reapable state to its session host, so the
+        host can self-reap it if the front is later lost (#51). No-op for a
+        non-host-backed session; best-effort so it never disturbs a turn."""
+        hc = self._session_host_client(session)
+        if hc is None:
+            return
+        with contextlib.suppress(Exception):
+            await hc.send_status(self._host_reapable(session))
+
+    async def _detach_host(self, session: Session) -> None:
+        """Signal a GRACEFUL detach (+ current reapable state) to the session
+        host before teardown, so an idle host reaps promptly instead of after
+        the awkward-grace window (#51). No-op / best-effort."""
+        hc = self._session_host_client(session)
+        if hc is None:
+            return
+        with contextlib.suppress(Exception):
+            await hc.detach(self._host_reapable(session))
+
+    async def refresh_host_reapable(self) -> None:
+        """Reconcile every host-backed session's reapable state to its host.
+
+        A periodic backstop (called from the heartbeat) beneath the precise
+        turn-boundary STATUS pushes: it catches an initial idle session that has
+        run no turn yet, and background-sub-agent transitions that occur outside
+        a turn boundary -- so the host's ``_last_reapable`` never drifts stale
+        enough to reap a session that is actually busy, or to miss reaping a
+        genuinely idle one (#51). No-op unless Session-Host mode is on."""
+        if not self._session_host_enabled:
+            return
+        for session in list(self._sessions.values()):
+            await self._notify_host_reapable(session)
+
     async def _quiesce_session(self, session: Session) -> None:
         """Best-effort teardown of a session's in-flight prompt + ACP client.
 
@@ -2384,6 +2453,12 @@ class SessionManager:
         mid-turn session -- see the credential-hang showcase report.) Errors
         are logged and swallowed so teardown always completes.
         """
+        # Signal a GRACEFUL detach to the session host BEFORE tearing down the
+        # transport, carrying the child's current reapable state, so an idle
+        # host self-reaps promptly instead of waiting out the awkward-grace
+        # window (#51). Best-effort and pre-cancel: computed from the *current*
+        # status before the in-flight prompt below is cancelled.
+        await self._detach_host(session)
         task = session._prompt_task
         if task and not task.done():
             if session.client:
@@ -2631,4 +2706,5 @@ def session_manager_from_config(db: Database, cfg: ServiceConfig) -> SessionMana
         graceful_cancel_settle_seconds=cfg.graceful_cancel_settle_seconds,
         idle_reap_ttl_seconds=cfg.idle_reap_ttl_seconds,
         live_stall_interrupt_after_s=cfg.live_stall_interrupt_after_s,
+        session_host_awkward_reap_seconds=cfg.session_host_awkward_reap_seconds,
     )

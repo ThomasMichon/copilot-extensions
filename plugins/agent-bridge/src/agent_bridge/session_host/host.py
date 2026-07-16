@@ -63,7 +63,8 @@ class SessionHost:
     retained so a reattaching frontend resumes with no gap and no re-stream.
     """
 
-    def __init__(self, child: ChildProcess, *, nonce: str = "") -> None:
+    def __init__(self, child: ChildProcess, *, nonce: str = "",
+                 awkward_reap_seconds: float = 60.0) -> None:
         self._child = child
         self._nonce = nonce or ""
         self._frames: dict[int, bytes] = {}
@@ -75,6 +76,21 @@ class SessionHost:
         self._server: asyncio.base_events.Server | None = None
         self._reader_task: asyncio.Task | None = None
         self._closing = False
+        # Auto-reap of an idle child once the front is lost (#51). The front
+        # continuously reports whether the child is REAPABLE (its turn completed
+        # with no active background tasks) via STATUS, and signals a *graceful*
+        # disconnect via DETACH. When the front is lost:
+        #   * graceful (DETACH) + reapable -> reap PROMPTLY;
+        #   * awkward (bare EOF) + last-known reapable -> reap after this grace
+        #     window (a reattach cancels it);
+        #   * not reapable (mid-turn / active background work) -> stay alive so a
+        #     reattach can resume the turn -- never reap inadvertently (goal 1).
+        # 0 disables the awkward-grace self-reap (the graceful path still acts).
+        self._awkward_reap_seconds = awkward_reap_seconds
+        self._last_reapable = False
+        self._graceful_detach = False
+        self._reap_timer: asyncio.TimerHandle | None = None
+        self._self_reap_task: asyncio.Task | None = None
 
     # -- introspection (tests / diagnostics) -------------------------------
     @property
@@ -166,6 +182,11 @@ class SessionHost:
             old.closed = True
             with _suppress_close(old.writer):
                 old.writer.close()
+        # A (re)attach cancels any pending awkward-disconnect reap and clears the
+        # graceful-detach latch: the child is watched again, so its lifetime is
+        # once more owned by the front.
+        self._cancel_reap_timer()
+        self._graceful_detach = False
 
         first = await proto.read_message(reader)
         if first is None or first[0] != proto.MsgType.ATTACH:
@@ -203,6 +224,15 @@ class SessionHost:
                     self._on_ack(proto.unpack_u64(payload))
                 elif mtype == proto.MsgType.WRITE:
                     await self._on_write(payload)
+                elif mtype == proto.MsgType.STATUS:
+                    self._last_reapable = proto.unpack_flag(payload)
+                elif mtype == proto.MsgType.DETACH:
+                    # Graceful disconnect: latch it (+ the reapable state it
+                    # carries) and drop the connection. The finally below runs
+                    # the front-lost decision, which reaps promptly if reapable.
+                    self._last_reapable = proto.unpack_flag(payload)
+                    self._graceful_detach = True
+                    break
                 elif mtype == proto.MsgType.TERMINATE:
                     await self._terminate_child()
                     break
@@ -214,6 +244,7 @@ class SessionHost:
                 self._front = None
             with _suppress_close(writer):
                 writer.close()
+            self._on_front_lost()
 
     def _on_ack(self, seq: int) -> None:
         self._ack_cursor = max(self._ack_cursor, seq)
@@ -245,6 +276,72 @@ class SessionHost:
             except (ProcessLookupError, OSError):
                 pass
 
+    # -- front-lost auto-reap (#51) ----------------------------------------
+    def _on_front_lost(self) -> None:
+        """Decide the child's fate when the front connection ends.
+
+        Called from the front handler's ``finally``. Never reaps a non-reapable
+        (mid-turn / active-background-work) child, nor one whose front is still
+        present (a displacing reattach already cleared these); such a child stays
+        alive so a reattach resumes it. Otherwise:
+
+        * a **graceful** detach (DETACH seen) reaps a reapable child at once;
+        * an **awkward** drop (bare EOF) arms a grace-window timer so a quick
+          reattach still wins, and only then reaps.
+        """
+        if self._closing or self._front is not None:
+            return
+        if not self.child_alive or not self._last_reapable:
+            return
+        if self._graceful_detach:
+            self._schedule_self_reap("graceful detach + idle child")
+        elif self._awkward_reap_seconds > 0:
+            self._arm_reap_timer()
+
+    def _arm_reap_timer(self) -> None:
+        self._cancel_reap_timer()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._reap_timer = loop.call_later(
+            self._awkward_reap_seconds, self._on_reap_timer,
+        )
+
+    def _cancel_reap_timer(self) -> None:
+        if self._reap_timer is not None:
+            self._reap_timer.cancel()
+            self._reap_timer = None
+
+    def _on_reap_timer(self) -> None:
+        self._reap_timer = None
+        # Re-check every precondition at fire time: a reattach (front present),
+        # a new turn (reapable cleared), or the child already exiting all veto.
+        if self._closing or self._front is not None:
+            return
+        if not self.child_alive or not self._last_reapable:
+            return
+        self._schedule_self_reap(
+            f"awkward disconnect + idle child ({self._awkward_reap_seconds:.0f}s)"
+        )
+
+    def _schedule_self_reap(self, reason: str) -> None:
+        if self._self_reap_task is not None and not self._self_reap_task.done():
+            return
+        self._self_reap_task = asyncio.create_task(self._self_reap(reason))
+
+    async def _self_reap(self, reason: str) -> None:
+        """Kill the idle child and stop serving so the host process exits.
+
+        The STOPPED session is resumable from persisted state + worktree (a fresh
+        child + ``load_session`` replay), so freeing an idle child here loses
+        nothing -- it only reclaims the ~memory the detached host was pinning.
+        """
+        log.info("Session host self-reaping (child pid=%s): %s",
+                 self._child.pid, reason)
+        await self._terminate_child()
+        await self.close()
+
     # -- lifecycle ---------------------------------------------------------
     async def serve(self, host: str = "127.0.0.1", port: int = 0) -> int:
         """Start serving on loopback. Returns the bound port."""
@@ -261,6 +358,7 @@ class SessionHost:
 
     async def close(self) -> None:
         self._closing = True
+        self._cancel_reap_timer()
         if self._server is not None:
             self._server.close()
         if self._reader_task is not None:

@@ -82,6 +82,7 @@ def launch_session_host(
     state_dir: str | os.PathLike[str] | None = None,
     ready_timeout: float = 30.0,
     nonce: str = "",
+    awkward_reap_seconds: float = 60.0,
 ) -> HostHandle:
     """Spawn a **survivable** Session Host process that owns ``child_argv``.
 
@@ -104,6 +105,7 @@ def launch_session_host(
                  "--port", "0", "--state-file", str(state_file)]
     if cwd:
         host_argv += ["--cwd", cwd]
+    host_argv += ["--awkward-reap-seconds", str(awkward_reap_seconds)]
     host_argv += ["--", *child_argv]
 
     child_env = os.environ.copy()
@@ -222,16 +224,20 @@ async def run_host(
     env: dict[str, str] | None = None,
     ready: asyncio.Event | None = None,
     nonce: str = "",
+    awkward_reap_seconds: float = 60.0,
 ) -> None:
     """Spawn the child, serve the reattachable endpoint, run until closed.
 
     ``nonce`` (or, if empty, the ``AGENT_BRIDGE_SESSION_HOST_NONCE`` env) arms
     connect-auth: the host then refuses any front that does not present it.
+    ``awkward_reap_seconds`` bounds how long an idle, front-less child lingers
+    after an *awkward* disconnect before the host self-reaps it (0 disables).
     """
     apply_host_survival()
     nonce = nonce or os.environ.get(_NONCE_ENV, "")
     child = await _spawn_child(child_argv, cwd, env)
-    host = SessionHost(child, nonce=nonce)
+    host = SessionHost(child, nonce=nonce,
+                       awkward_reap_seconds=awkward_reap_seconds)
     bound_port = await host.serve(port=port)
     if state_file is not None:
         Path(state_file).write_text(json.dumps({
@@ -268,6 +274,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--port", type=int, default=0)
     ap.add_argument("--state-file", default=None)
     ap.add_argument("--cwd", default=None)
+    ap.add_argument("--awkward-reap-seconds", type=float, default=60.0)
     ap.add_argument("child", nargs=argparse.REMAINDER,
                     help="child command after `--` (e.g. -- copilot --acp --stdio)")
     args = ap.parse_args(argv)
@@ -280,7 +287,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         asyncio.run(run_host(child_argv, port=args.port, state_file=args.state_file,
-                             cwd=args.cwd))
+                             cwd=args.cwd,
+                             awkward_reap_seconds=args.awkward_reap_seconds))
     except KeyboardInterrupt:
         return 0
     return 0
