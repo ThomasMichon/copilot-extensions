@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, WSL environment setup, and CLI customization",
-    "version": "1.7.4-dev271"
+    "version": "1.7.4-dev272"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev201",
+      "version": "1.5.3-dev202",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -72,7 +72,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable agent task-queue + per-host coordinator: a single-writer SQLite leased work queue (six-state model, capability-gated atomic claim, affinity routing, lease recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.0-dev46",
+      "version": "0.1.0-dev47",
       "source": "plugins/agent-dispatch"
     },
     {

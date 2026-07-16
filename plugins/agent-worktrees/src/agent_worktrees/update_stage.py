@@ -273,6 +273,36 @@ def stage(
             after = fingerprint(plugin_dir) if ran else before
             plugin_changed = ran and (before != after)
 
+        # Version-drift reconcile (#2826): the fingerprint diff above only
+        # catches a payload change *within this run*. If the marketplace payload
+        # already advanced on a prior run but the runtime venv was never
+        # reinstalled -- an interrupted apply, or launches that went through the
+        # binstub (which stages nothing) -- the venv is left behind
+        # *permanently*: every later stage sees "already at latest", so
+        # ``plugin_changed`` stays False and the stale venv is never reconciled.
+        # Independently compare the deployed runtime version (deploy-manifest,
+        # written by the installer) against the payload version and force an
+        # apply when they diverge, so a lagging venv self-heals on the next boot.
+        venv_drift = False
+        try:
+            from . import reconcile
+
+            payload_ver = reconcile.payload_version(plugin_dir)
+            deployed_ver = reconcile.runtime_deployed_version(
+                "agent-worktrees", home=home
+            )
+            result["payload_version"] = payload_ver
+            result["deployed_version"] = deployed_ver
+            venv_drift = bool(
+                payload_ver and deployed_ver and payload_ver != deployed_ver
+            )
+        except Exception as e:  # never break the launch on a best-effort check
+            result["venv_drift_error"] = str(e)
+        result["venv_drift"] = venv_drift
+        if venv_drift and not plugin_changed:
+            plugin_changed = True
+            result["plugin_changed_reason"] = "venv-drift"
+
         result["plugin_changed"] = plugin_changed
         result["copilot_output"] = copilot_output
 

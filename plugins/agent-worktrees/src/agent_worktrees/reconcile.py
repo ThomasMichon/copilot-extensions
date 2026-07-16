@@ -155,14 +155,14 @@ def manifest_runtime_scope(plugin_dir: Path) -> str | None:
 # Deployed runtime version (local, no network)
 # --------------------------------------------------------------------------
 
-def runtime_dir(name: str) -> Path:
+def runtime_dir(name: str, home: Path | None = None) -> Path:
     """Conventional runtime root for a plugin (``~/.<plugin-name>``)."""
-    return _home() / f".{name}"
+    return (home or _home()) / f".{name}"
 
 
-def runtime_deployed_version(name: str) -> str | None:
+def runtime_deployed_version(name: str, home: Path | None = None) -> str | None:
     """Version recorded in the plugin's runtime deploy manifest, if present."""
-    data = _read_json(runtime_dir(name) / "deploy-manifest.json")
+    data = _read_json(runtime_dir(name, home) / "deploy-manifest.json")
     if not data:
         return None
     src = data.get("source")
