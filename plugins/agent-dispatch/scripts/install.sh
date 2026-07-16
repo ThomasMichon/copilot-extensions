@@ -174,15 +174,32 @@ _ensure_runtime() {
         _skip 'Venv already exists'
     fi
 
-    # The [mcp] extra ships the `agent-dispatch mcp` stdio server dependency.
-    if [[ "$have_uv" -eq 1 ]]; then
-        uv pip install --python "$VENV_PYTHON" "${PLUGIN_DIR}[mcp]" --quiet 2>/dev/null \
-            || { _fail 'Failed to install agent-dispatch package into venv'; exit 1; }
+    # The [mcp] extra ships the `agent-dispatch mcp` stdio server dependency,
+    # which transitively pulls `cryptography` (via `pyjwt[crypto]`). That has no
+    # prebuilt wheel on some platforms (e.g. win-arm64) and needs a Rust + native
+    # toolchain to build from source. Per the plugin-services vision's
+    # `degrade-gracefully` behavior, a build failure of the OPTIONAL MCP server
+    # surface must not abort the whole install: fall back to a base install so
+    # the coordinator CLI still deploys; only `agent-dispatch mcp` stays dark
+    # until the toolchain is present.
+    _pip_install() {  # $1 = package spec
+        if [[ "$have_uv" -eq 1 ]]; then
+            uv pip install --python "$VENV_PYTHON" "$1"
+        else
+            "$VENV_PYTHON" -m pip install "$1"
+        fi
+    }
+    if _pip_install "${PLUGIN_DIR}[mcp]" >/dev/null 2>&1; then
+        _ok 'Package installed: agent-dispatch [mcp]'
     else
-        "$VENV_PYTHON" -m pip install --quiet "${PLUGIN_DIR}[mcp]" 2>/dev/null \
-            || { _fail 'Failed to install agent-dispatch package into venv'; exit 1; }
+        _warn 'Could not install the [mcp] extra (its native deps may not build on this platform) -- falling back to a base install without the MCP server surface'
+        if ! pkg_out="$(_pip_install "$PLUGIN_DIR" 2>&1)"; then
+            _fail 'Failed to install agent-dispatch package into venv'
+            printf '%s\n' "$pkg_out" >&2
+            exit 1
+        fi
+        _ok 'Package installed: agent-dispatch (base -- `agent-dispatch mcp` server unavailable on this platform)'
     fi
-    _ok 'Package installed: agent-dispatch'
 
     cat > "$STUB" << 'STUBEOF'
 #!/usr/bin/env bash

@@ -284,23 +284,44 @@ function Install-Runtime {
         Write-Skip 'Venv already exists'
     }
 
-    # -- install package (uv pip install; [mcp] extra) --
+    # -- install package (uv pip install; [mcp] extra with graceful fallback) --
+    # The [mcp] extra pulls `mcp` -> `pyjwt[crypto]` -> `cryptography`, which has
+    # no prebuilt wheel on some platforms (notably win-arm64) and needs a Rust +
+    # MSVC toolchain to build from source. Per the plugin-services vision's
+    # `degrade-gracefully` behavior, a build failure of the OPTIONAL MCP server
+    # surface must not abort the whole install: fall back to the base package so
+    # the coordinator CLI still deploys; only `agent-dispatch mcp` stays dark
+    # until the toolchain is present.
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     Remove-ConsoleTrampolines -VenvDir $VenvDir
-    if (Get-Command uv -ErrorAction SilentlyContinue) {
-        & uv pip install --python $VenvPython "$($PluginDir)[mcp]" --quiet 2>&1 | Out-Null
+
+    $installPkg = {
+        param([string]$Spec)
+        if (Get-Command uv -ErrorAction SilentlyContinue) {
+            $out = & uv pip install --python $VenvPython $Spec 2>&1 | Out-String
+        } else {
+            $out = & $VenvPython -m pip install $Spec 2>&1 | Out-String
+        }
+        [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
+    }
+
+    $mcpResult = & $installPkg "$($PluginDir)[mcp]"
+    if ($mcpResult.Code -eq 0) {
+        Write-Ok 'Package installed: agent-dispatch [mcp]'
     } else {
-        & $VenvPython -m pip install --quiet "$($PluginDir)[mcp]" 2>&1 | Out-Null
+        Write-Warn 'Could not install the [mcp] extra (its native deps may not build on this platform) -- falling back to a base install without the MCP server surface'
+        $baseResult = & $installPkg "$PluginDir"
+        if ($baseResult.Code -ne 0) {
+            Write-Fail 'Failed to install agent-dispatch package into venv'
+            Write-Host $baseResult.Output
+            $ErrorActionPreference = $prevEAP
+            exit 1
+        }
+        Write-Ok 'Package installed: agent-dispatch (base -- `agent-dispatch mcp` server unavailable on this platform)'
     }
-    $pkgResult = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
-    if ($pkgResult -ne 0) {
-        Write-Fail 'Failed to install agent-dispatch package into venv'
-        exit 1
-    }
     Remove-ConsoleTrampolines -VenvDir $VenvDir
-    Write-Ok 'Package installed: agent-dispatch'
 
     # -- binstub (.cmd on Windows -- see init history; POSIX shell elsewhere) --
     $stubName = 'agent-dispatch'
@@ -519,15 +540,27 @@ if (-not `$env:AGENT_DISPATCH_HOST) {
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-        -Settings $settings -Principal $principal -Force `
-        -Description 'agent-dispatch -- portable agent task-queue coordinator' | Out-Null
-    $regOk = $?
+    # Register-ScheduledTask raises a TERMINATING "Access is denied" on a
+    # non-elevated host, which would abort the whole installer with a non-zero
+    # exit even though the client (venv + binstub + manifest) is already fully
+    # deployed above. Per the plugin-services vision's `degrade-gracefully`
+    # behavior, a client-only host (e.g. a field terminal that is not a
+    # coordinator) must still complete: trap the failure into the existing
+    # non-fatal $regOk path instead of terminating.
+    $regOk = $false
+    try {
+        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+            -Settings $settings -Principal $principal -Force `
+            -Description 'agent-dispatch -- portable agent task-queue coordinator' | Out-Null
+        $regOk = $?
+    } catch {
+        $regOk = $false
+    }
     if ($regOk) { Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue }
     $ErrorActionPreference = $prevEAP
 
     if ($regOk) { Write-Ok "Coordinator service installed + started (Scheduled Task '$TaskName')" }
-    else { Write-Fail "Failed to register Scheduled Task '$TaskName' (run: agent-dispatch serve)" }
+    else { Write-Warn "Coordinator service not registered (needs elevation) -- client is installed; run elevated, or 'agent-dispatch serve' to run the coordinator manually" }
 }
 
 # -- Port reservation (Windows) ---------------------------------------------
