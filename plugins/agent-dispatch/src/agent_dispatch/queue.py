@@ -184,6 +184,11 @@ class Task:
     status: str
     repo: str | None = None
     requires: list[str] = field(default_factory=list)
+    #: Anti-affinity: a hard **exclusion** token set (mirrors ``requires``). A
+    #: worker whose advertised token set (capabilities + identity tokens
+    #: ``machine:``/``worktree:``/``repo:``) intersects ``excludes`` is
+    #: ineligible. Grows monotonically as workers decline with a "not me" token.
+    excludes: list[str] = field(default_factory=list)
     affinity: dict[str, str] = field(default_factory=dict)
     labels: list[str] = field(default_factory=list)
     payload_ref: str | None = None
@@ -217,6 +222,7 @@ class Task:
             status=row["status"],
             repo=row["repo"],
             requires=json.loads(row["requires"] or "[]"),
+            excludes=json.loads(row["excludes"] or "[]"),
             affinity=json.loads(row["affinity"] or "{}"),
             labels=json.loads(row["labels"] or "[]"),
             payload_ref=row["payload_ref"],
@@ -280,6 +286,7 @@ _COLUMNS: dict[str, str] = {
     "status": "TEXT NOT NULL DEFAULT 'queued'",
     "repo": "TEXT",
     "requires": "TEXT NOT NULL DEFAULT '[]'",
+    "excludes": "TEXT NOT NULL DEFAULT '[]'",
     "affinity": "TEXT NOT NULL DEFAULT '{}'",
     "labels": "TEXT NOT NULL DEFAULT '[]'",
     "payload_ref": "TEXT",
@@ -489,6 +496,7 @@ class TaskQueue:
         prompt: str = "",
         status: str = Status.QUEUED,
         requires: Sequence[str] | None = None,
+        excludes: Sequence[str] | None = None,
         affinity: dict[str, str] | None = None,
         labels: Sequence[str] | None = None,
         payload_ref: str | None = None,
@@ -534,10 +542,11 @@ class TaskQueue:
                     conn.execute("COMMIT")
                     return Task._from_row(existing)
             conn.execute(
-                "INSERT INTO tasks (id, title, prompt, status, repo, requires, affinity, labels,"
-                " payload_ref, payload_inline, target_machine, target_worktree, target_repo,"
+                "INSERT INTO tasks (id, title, prompt, status, repo, requires, excludes,"
+                " affinity, labels, payload_ref, payload_inline, target_machine,"
+                " target_worktree, target_repo,"
                 " source, origin_ref, dedup_key, not_before, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     task_id,
                     title,
@@ -545,6 +554,7 @@ class TaskQueue:
                     status,
                     repo,
                     json.dumps(list(requires or [])),
+                    json.dumps(list(excludes or [])),
                     json.dumps(dict(affinity or {})),
                     json.dumps(list(labels or [])),
                     payload_ref,
@@ -611,6 +621,19 @@ class TaskQueue:
         """
         ts = self._now(now)
         caps = set(capabilities)
+        # The worker's FULL advertised token set for selector matching: its
+        # capabilities plus its identity tokens (``machine:``/``worktree:``/
+        # ``repo:``). This is what ``requires`` (affinity) and ``excludes``
+        # (anti-affinity) are matched against, so a selector can target or
+        # exclude by machine/worktree/repo generically -- e.g. a task with
+        # ``excludes=['machine:lambda-core']`` is invisible to that machine.
+        full_caps = set(caps)
+        if machine:
+            full_caps.add(f"machine:{machine}")
+        if worktree:
+            full_caps.add(f"worktree:{worktree}")
+        if repo:
+            full_caps.add(f"repo:{repo}")
         lease = self.lease_seconds if lease_seconds is None else lease_seconds
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -631,8 +654,11 @@ class TaskQueue:
                 if repo is not None and row["repo"] != repo:
                     continue  # lane isolation: never claim another repo's work
                 requires = set(json.loads(row["requires"] or "[]"))
-                if not requires.issubset(caps):
+                if not requires.issubset(full_caps):
                     continue
+                excludes = set(json.loads(row["excludes"] or "[]"))
+                if excludes & full_caps:
+                    continue  # anti-affinity: this worker is excluded (incl. a prior "not me")
                 if not machine_matches(row["target_machine"], machine):
                     continue
                 if row["target_worktree"] is not None and row["target_worktree"] != worktree:
@@ -745,13 +771,36 @@ class TaskQueue:
         )
 
     def yield_task(
-        self, task_id: str, worker_id: str, *, note: str | None = None, now: float | None = None
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        note: str | None = None,
+        exclude: str | None = None,
+        now: float | None = None,
     ) -> Task:
         """Return a held (``claimed``/``started``) task to ``queued`` with updates.
 
         The recoverable-snag path (e.g. a merge conflict): the worker relinquishes
         the lease so the next scheduler cycle re-surfaces the task.
+
+        ``exclude`` is an optional **"not me" anti-affinity token** appended to the
+        task's ``excludes`` on the way back to the queue, so the *same* candidate
+        isn't re-offered the task (a self-declining worker adds e.g.
+        ``worktree:<self>`` -- the narrowest scope -- or a wider ``machine:<m>`` /
+        ``agent:<def>`` when it knows the exclusion generalizes). Because excludes
+        only ever grow, the candidate set shrinks monotonically: the task either
+        finds a taker or becomes unclaimable (surfaced for the operator).
         """
+        extra: dict[str, object] = {
+            "owner": None, "lease_expires_at": None, "claimed_at": None,
+        }
+        if exclude:
+            current = self.get(task_id)
+            existing = list(current.excludes) if current is not None else []
+            if exclude not in existing:
+                existing.append(exclude)
+            extra["excludes"] = json.dumps(existing)
         return self._transition(
             task_id,
             allowed=Status.HELD,
@@ -759,7 +808,7 @@ class TaskQueue:
             worker_id=worker_id,
             now=now,
             note=note or "yield",
-            extra={"owner": None, "lease_expires_at": None, "claimed_at": None},
+            extra=extra,
         )
 
     def abandon(
