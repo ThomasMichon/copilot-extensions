@@ -94,12 +94,47 @@ def _current_branch(cwd: str | Path) -> str | None:
     return None if name in ("", "HEAD") else name
 
 
-def _default_branch(cwd: str | Path) -> str | None:
-    """Best-effort default branch: config first, then origin/HEAD."""
+def _anchor_from_cwd(cwd: str | Path) -> Path | None:
+    """Resolve the repo anchor (main checkout) from *cwd* via git-common-dir.
+
+    Works from a linked worktree or the anchor itself and -- unlike the
+    project-name resolver behind ``load_config()`` -- needs no ``--project`` /
+    ``$WORKTREE_PROJECT`` context, so it is safe from a bare git-hook process
+    where no active project is resolvable (#234 defect 3).
+    """
+    r = git_ops.git("rev-parse", "--git-common-dir", cwd=cwd, check=False)
+    if r.returncode != 0:
+        return None
+    common = Path(r.stdout.strip())
+    if not common.is_absolute():
+        common = (Path(cwd) / common).resolve()
+    # ``common`` is ``<anchor>/.git`` -> the anchor is its parent.
+    return common.parent
+
+
+def _inrepo(cwd: str | Path) -> dict:
+    """Read the repo's committed ``.agent-worktrees/config.yaml`` from *cwd*.
+
+    Resolves the anchor from git-common-dir and reads the in-repo config
+    directly, bypassing the ambient project-discovery ``load_config()`` (which
+    raises "No active project" from a bare hook). Never raises -- returns ``{}``
+    when the anchor or file can't be resolved.
+    """
     try:
-        return cfg.load_config().default_repo.default_branch
+        anchor = _anchor_from_cwd(cwd)
+        if anchor is None:
+            return {}
+        raw = cfg._load_inrepo_config(str(anchor))
+        return raw if isinstance(raw, dict) else {}
     except Exception:
-        pass
+        return {}
+
+
+def _default_branch(cwd: str | Path) -> str | None:
+    """Best-effort default branch: in-repo config first, then origin/HEAD."""
+    db = _inrepo(cwd).get("default_branch")
+    if db:
+        return str(db)
     r = git_ops.git(
         "symbolic-ref", "--short", "refs/remotes/origin/HEAD", cwd=cwd, check=False
     )
@@ -108,9 +143,16 @@ def _default_branch(cwd: str | Path) -> str | None:
     return None
 
 
-def _pr_enabled() -> bool:
+def _pr_enabled(cwd: str | Path) -> bool:
+    """Return True when the repo at *cwd* has PR mode enabled.
+
+    Reads the committed in-repo config directly (see ``_inrepo``) so it works
+    from a bare git-hook, where ``load_config()`` cannot resolve a project
+    (#234 defect 3). Fails open (False) only when the config can't be read.
+    """
     try:
-        return bool(cfg.load_config().default_repo.pr.enabled)
+        raw = _inrepo(cwd)
+        return bool(cfg._parse_pr(raw.get("pr")).enabled)
     except Exception:
         return False
 
@@ -148,7 +190,7 @@ def _pre_push() -> int:
     cwd = os.getcwd()
     if not in_worktree(cwd):
         return 0
-    if not _pr_enabled():
+    if not _pr_enabled(cwd):
         return 0  # direct-push repos: pre-push is a no-op
     _err(
         "BLOCKED: This repository uses pull requests. Do not push directly "

@@ -665,6 +665,16 @@ def _build_env(
     project_dir = str(cfg.project_dir())
     env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] = project_dir
 
+    # Arm the PR-workflow git-hook shims for this launch when the repo uses PR
+    # mode. The shims are inert unless AGENT_WORKTREES_HOOKS=1 is present; scope
+    # it to the launched session env (not a global/user var) so external and
+    # recovery git operations stay unguarded by default (#234 defect 1).
+    try:
+        if cfg.load_config().default_repo.pr.enabled:
+            env["AGENT_WORKTREES_HOOKS"] = "1"
+    except Exception:
+        pass
+
     # Repo-declared session env (below the profile so a profile can override).
     if session_env:
         env.update(session_env)
