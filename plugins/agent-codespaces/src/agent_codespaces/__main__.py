@@ -883,8 +883,13 @@ async def _register_codespace_plugins(
     Best-effort and idempotent: logs a warning on failure but never raises, and
     returns ``[]`` when there is nothing to register.
     """
-    from .codespace_plugins import parse_operator_plugins, resolve_codespace_plugins
+    from .codespace_plugins import (
+        parse_operator_plugins,
+        plugin_names_from_enabled,
+        resolve_codespace_plugins,
+    )
     from .codespace_register import build_register_command, codespace_plugin_dirs
+    from .config import repo_copilot_settings
 
     try:
         # The dispatch path doesn't pass --repo, so resolve the CodeSpace's
@@ -894,13 +899,25 @@ async def _register_codespace_plugins(
         if repo is None:
             repo = _lookup_codespace_repo(name)
 
+        # Repo-scoped config is canonical (NOT the user ~/.copilot/settings.json):
+        # the marketplace registry + harness-plugin enablement come from the
+        # adopted control-plane repo's .github/copilot/settings.json. Keeps
+        # internal marketplace definitions out of user state, and lets the register
+        # step carry whichever marketplaces the selected plugins reference.
+        repo_settings = repo_copilot_settings(getattr(config, "source_paths", []) or [])
+        enabled_names = plugin_names_from_enabled(repo_settings.get("enabledPlugins"))
+
         # Merge the operator-declared globals (codespaces.yaml `codespace_plugins`)
         # with the set swept from installed harness plugins.
         operator_specs = parse_operator_plugins(
             getattr(config, "codespace_plugins", []) or []
         )
-        specs = resolve_codespace_plugins(repo, extra_specs=operator_specs)
-        command = build_register_command(specs)
+        specs = resolve_codespace_plugins(
+            repo, extra_specs=operator_specs, enabled_names=enabled_names
+        )
+        command = build_register_command(
+            specs, marketplaces=repo_settings.get("extraKnownMarketplaces") or {}
+        )
         if not command:
             return []
 

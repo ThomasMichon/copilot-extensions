@@ -11,6 +11,7 @@ from agent_codespaces.codespace_plugins import (
     enabled_plugin_names,
     is_harness_plugin,
     iter_installed_manifests,
+    plugin_names_from_enabled,
     repo_matches,
     resolve_codespace_plugins,
 )
@@ -328,3 +329,38 @@ def test_extra_specs_respect_repo_filter(tmp_path):
         "odsp-microsoft/odsp-web", copilot_home=tmp_path, extra_specs=extra
     )
     assert specs == []
+
+
+# --------------------------------------------------------------------------
+# Repo-scoped enablement (enabled_names override) -- Workstream A
+# --------------------------------------------------------------------------
+
+def test_plugin_names_from_enabled():
+    assert plugin_names_from_enabled({"a@m": True, "b@m": False, "c@m": True}) == {"a", "c"}
+    assert plugin_names_from_enabled({}) == set()
+    assert plugin_names_from_enabled(None) is None
+    assert plugin_names_from_enabled("not-a-dict") is None
+
+
+def test_enabled_names_override_supersedes_user_settings(tmp_path):
+    # A non-harness plugin declares a codespacePlugins entry.
+    _install_plugin(
+        tmp_path, "copilot-extensions", "documenting-packages",
+        codespace_plugins=[{"source": "odsp-web-agent@dev-tmichon"}],
+    )
+    # User settings *enables* the declaring plugin ...
+    _set_enabled(tmp_path, "documenting-packages@copilot-extensions")
+
+    # ... but a repo-scoped enabled_names that omits it wins -> filtered out
+    # (proves the override is consulted instead of user settings.json).
+    specs = resolve_codespace_plugins(
+        "odsp-microsoft/odsp-web", copilot_home=tmp_path, enabled_names=set()
+    )
+    assert specs == []
+
+    # And when the repo-scoped set includes it, the entry is injected.
+    specs = resolve_codespace_plugins(
+        "odsp-microsoft/odsp-web", copilot_home=tmp_path,
+        enabled_names={"documenting-packages"},
+    )
+    assert [s.source for s in specs] == ["odsp-web-agent@dev-tmichon"]
