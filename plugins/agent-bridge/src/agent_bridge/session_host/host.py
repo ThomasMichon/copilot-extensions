@@ -64,7 +64,7 @@ class SessionHost:
     """
 
     def __init__(self, child: ChildProcess, *, nonce: str = "",
-                 awkward_reap_seconds: float = 60.0) -> None:
+                 unexpected_reap_seconds: float = 60.0) -> None:
         self._child = child
         self._nonce = nonce or ""
         self._frames: dict[int, bytes] = {}
@@ -81,12 +81,12 @@ class SessionHost:
         # with no active background tasks) via STATUS, and signals a *graceful*
         # disconnect via DETACH. When the front is lost:
         #   * graceful (DETACH) + reapable -> reap PROMPTLY;
-        #   * awkward (bare EOF) + last-known reapable -> reap after this grace
+        #   * unexpected (bare EOF) + last-known reapable -> reap after this grace
         #     window (a reattach cancels it);
         #   * not reapable (mid-turn / active background work) -> stay alive so a
         #     reattach can resume the turn -- never reap inadvertently (goal 1).
-        # 0 disables the awkward-grace self-reap (the graceful path still acts).
-        self._awkward_reap_seconds = awkward_reap_seconds
+        # 0 disables the unexpected-grace self-reap (the graceful path still acts).
+        self._unexpected_reap_seconds = unexpected_reap_seconds
         self._last_reapable = False
         self._graceful_detach = False
         self._reap_timer: asyncio.TimerHandle | None = None
@@ -182,7 +182,7 @@ class SessionHost:
             old.closed = True
             with _suppress_close(old.writer):
                 old.writer.close()
-        # A (re)attach cancels any pending awkward-disconnect reap and clears the
+        # A (re)attach cancels any pending unexpected-disconnect reap and clears the
         # graceful-detach latch: the child is watched again, so its lifetime is
         # once more owned by the front.
         self._cancel_reap_timer()
@@ -286,7 +286,7 @@ class SessionHost:
         alive so a reattach resumes it. Otherwise:
 
         * a **graceful** detach (DETACH seen) reaps a reapable child at once;
-        * an **awkward** drop (bare EOF) arms a grace-window timer so a quick
+        * an **unexpected** drop (bare EOF) arms a grace-window timer so a quick
           reattach still wins, and only then reaps.
         """
         if self._closing or self._front is not None:
@@ -295,7 +295,7 @@ class SessionHost:
             return
         if self._graceful_detach:
             self._schedule_self_reap("graceful detach + idle child")
-        elif self._awkward_reap_seconds > 0:
+        elif self._unexpected_reap_seconds > 0:
             self._arm_reap_timer()
 
     def _arm_reap_timer(self) -> None:
@@ -305,7 +305,7 @@ class SessionHost:
         except RuntimeError:
             return
         self._reap_timer = loop.call_later(
-            self._awkward_reap_seconds, self._on_reap_timer,
+            self._unexpected_reap_seconds, self._on_reap_timer,
         )
 
     def _cancel_reap_timer(self) -> None:
@@ -322,7 +322,7 @@ class SessionHost:
         if not self.child_alive or not self._last_reapable:
             return
         self._schedule_self_reap(
-            f"awkward disconnect + idle child ({self._awkward_reap_seconds:.0f}s)"
+            f"unexpected disconnect + idle child ({self._unexpected_reap_seconds:.0f}s)"
         )
 
     def _schedule_self_reap(self, reason: str) -> None:

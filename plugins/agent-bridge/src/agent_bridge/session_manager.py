@@ -389,7 +389,7 @@ class SessionManager:
         graceful_cancel_settle_seconds: float = 45.0,
         idle_reap_ttl_seconds: float = 0.0,
         live_stall_interrupt_after_s: float = 900.0,
-        session_host_awkward_reap_seconds: float = 60.0,
+        session_host_unexpected_reap_seconds: float = 60.0,
     ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
@@ -415,10 +415,10 @@ class SessionManager:
         # call is not aborted. 0 disables the live-stall interrupt entirely.
         self._live_stall_interrupt_after_s = live_stall_interrupt_after_s
         # Session-host self-reap grace (#51): how long an idle, front-less child
-        # lingers after an *awkward* disconnect before the host reaps itself.
+        # lingers after an *unexpected* disconnect before the host reaps itself.
         # Handed to every LocalSpawner-launched host. 0 disables the timer (the
         # graceful-detach fast path still reaps a reapable child promptly).
-        self._session_host_awkward_reap_seconds = session_host_awkward_reap_seconds
+        self._session_host_unexpected_reap_seconds = session_host_unexpected_reap_seconds
         self._host_index: Any = None
         # Live remote-boundary forwards (session_id -> LocalForward). Held so a
         # CodeSpace/mesh Session Host's -L/-R forward can be refreshed on
@@ -988,7 +988,7 @@ class SessionManager:
 
         if spawner is None:
             spawner = LocalSpawner(
-                awkward_reap_seconds=self._session_host_awkward_reap_seconds,
+                unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
             )
 
         if remote_child_argv is not None:
@@ -2423,7 +2423,7 @@ class SessionManager:
     async def _detach_host(self, session: Session) -> None:
         """Signal a GRACEFUL detach (+ current reapable state) to the session
         host before teardown, so an idle host reaps promptly instead of after
-        the awkward-grace window (#51). No-op / best-effort."""
+        the unexpected-grace window (#51). No-op / best-effort."""
         hc = self._session_host_client(session)
         if hc is None:
             return
@@ -2455,7 +2455,7 @@ class SessionManager:
         """
         # Signal a GRACEFUL detach to the session host BEFORE tearing down the
         # transport, carrying the child's current reapable state, so an idle
-        # host self-reaps promptly instead of waiting out the awkward-grace
+        # host self-reaps promptly instead of waiting out the unexpected-grace
         # window (#51). Best-effort and pre-cancel: computed from the *current*
         # status before the in-flight prompt below is cancelled.
         await self._detach_host(session)
@@ -2706,5 +2706,5 @@ def session_manager_from_config(db: Database, cfg: ServiceConfig) -> SessionMana
         graceful_cancel_settle_seconds=cfg.graceful_cancel_settle_seconds,
         idle_reap_ttl_seconds=cfg.idle_reap_ttl_seconds,
         live_stall_interrupt_after_s=cfg.live_stall_interrupt_after_s,
-        session_host_awkward_reap_seconds=cfg.session_host_awkward_reap_seconds,
+        session_host_unexpected_reap_seconds=cfg.session_host_unexpected_reap_seconds,
     )

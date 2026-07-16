@@ -45,7 +45,7 @@ class MsgType(bytes, enum.Enum):
     DETACH = b"D"      # payload: u8 reapable(1/0) -- the front is disconnecting
                        # GRACEFULLY (vs a hard drop, which surfaces only as EOF);
                        # lets the host reap a reapable child promptly instead of
-                       # after the awkward-disconnect grace window
+                       # after the unexpected-disconnect grace window
 
     # Host -> Frontend
     HELLO = b"H"       # payload: u64 max_seq + u64 child_pid
