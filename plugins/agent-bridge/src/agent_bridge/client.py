@@ -462,14 +462,31 @@ class BridgeClient:
             "POST", f"/api/v1/sessions/{session_id}/turns", {"prompt": prompt}
         ) or {}
 
-    def stop_session(self, session_id: str, *, force: bool = False) -> None:
+    def stop_session(
+        self, session_id: str, *, force: bool = False, reap_host: bool = False
+    ) -> None:
         """POST /api/v1/sessions/{id}/stop
 
         ``force`` maps to the route's ``?force=true`` — tear down even with
         active background sub-agent tasks (they are killed). See #191.
+
+        ``reap_host`` maps to ``?reap_host=true`` — additionally FREE the
+        Session-Host child immediately instead of only detaching it (the
+        idle-reaper primitive). The session stays STOPPED and resumable via
+        ``load_session`` replay; use it when the caller never reattaches over
+        the bridge and wants the ~280 MB child reclaimed on the spot rather than
+        after the idle-reaper TTL (#2960).
         """
-        params = {"force": "true"} if force else None
-        self._request("POST", f"/api/v1/sessions/{session_id}/stop", params=params)
+        params: dict[str, str] = {}
+        if force:
+            params["force"] = "true"
+        if reap_host:
+            params["reap_host"] = "true"
+        self._request(
+            "POST",
+            f"/api/v1/sessions/{session_id}/stop",
+            params=params or None,
+        )
 
     def resume_session(self, session_id: str) -> dict[str, Any]:
         """POST /api/v1/sessions/{id}/resume"""

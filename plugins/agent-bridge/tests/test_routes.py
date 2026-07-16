@@ -1189,6 +1189,27 @@ class TestBackgroundTaskTeardownGate:
         assert resp.status_code == 204
         assert session.status == SessionStatus.STOPPED
 
+    def test_stop_reap_host_param_plumbs_through(self, client, app) -> None:
+        # #2960: ?reap_host=true must reach mgr.stop_session(reap_host=True) so
+        # a non-reattaching caller (the ID reviewer) frees the child on the spot
+        # rather than after the idle-reaper TTL. Default stays reap_host=False.
+        mgr: SessionManager = app.state.session_manager
+        mgr.stop_session = AsyncMock()
+        resp = client.post("/api/v1/sessions/whatever/stop?reap_host=true")
+        assert resp.status_code == 204
+        mgr.stop_session.assert_awaited_once_with(
+            "whatever", force=False, reap_host=True
+        )
+
+    def test_stop_reap_host_defaults_false(self, client, app) -> None:
+        mgr: SessionManager = app.state.session_manager
+        mgr.stop_session = AsyncMock()
+        resp = client.post("/api/v1/sessions/whatever/stop")
+        assert resp.status_code == 204
+        mgr.stop_session.assert_awaited_once_with(
+            "whatever", force=False, reap_host=False
+        )
+
     def test_force_delete_succeeds_when_busy(self, client, app) -> None:
         self._inject_busy_session(app)
         resp = client.delete("/api/v1/sessions/bg-sess-1?force=true")
