@@ -95,6 +95,17 @@ def _cmd_create(args: argparse.Namespace) -> int:
     payload_inline = args.payload_inline
     if args.payload_file:
         payload_inline = _read_payload_file(args.payload_file)
+    claim_as = None
+    if getattr(args, "claim", False):
+        claim_as = _owner_from_identity(args)
+        if claim_as is None:
+            print(
+                "agent-dispatch create --claim: could not resolve this worktree's "
+                "identity to claim as; run inside a worktree or pass "
+                "--machine/--worktree.",
+                file=sys.stderr,
+            )
+            return 2
     with _client(args) as c:
         task = c.create(
             args.title,
@@ -114,7 +125,13 @@ def _cmd_create(args: argparse.Namespace) -> int:
             origin_ref=args.origin_ref,
             dedup_key=args.dedup_key,
             not_before=args.not_before,
+            claim_as=claim_as,
         )
+    if claim_as is not None:
+        # Signal whether THIS call won the create-and-claim (mine now) or lost the
+        # dedup race (the subject was already taken by someone else).
+        won = task.get("owner") == claim_as and task.get("status") == "claimed"
+        return _emit(_enrich({**task, "claimed_by_me": won}))
     if args.spawn and not args.proposed:
         _spawn_worker_for(args, task)
     return _emit(_enrich(task))
@@ -956,6 +973,14 @@ def build_parser() -> argparse.ArgumentParser:
              "use --target-repo and let the lane agent do it via working-cross-repo.",
     )
     p.add_argument("--proposed", action="store_true", help="create as an unclaimable draft")
+    p.add_argument(
+        "--claim", action="store_true",
+        help="atomically create-AND-claim as this worktree (no queued gap). With "
+             "--dedup-key <subject>, this is the lazy open-ended-pickup primitive: "
+             "either mint the subject as mine, or (on a dedup collision) get back "
+             "the row someone else already took -- see 'claimed_by_me' in the "
+             "output to tell which.",
+    )
     p.add_argument(
         "--require", action="append", help="hard capability/identity token (repeatable)"
     )

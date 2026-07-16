@@ -115,3 +115,36 @@ def test_yield_without_exclude_leaves_excludes_untouched(q):
     q.claim_one("m/wt", machine="m", worktree="wt", task_id=t.id)
     q.yield_task(t.id, "m/wt")  # no exclude
     assert q.get(t.id).excludes == ["machine:x"]
+
+
+# -- atomic create-and-claim (lazy-carve primitive) --------------------------
+
+
+def test_create_claim_mints_task_already_claimed(q):
+    t = q.create("work", claim_as="borealis/wt")
+    assert t.status == Status.CLAIMED
+    assert t.owner == "borealis/wt"
+    assert t.attempts == 1
+    # already claimed -> no other worker can take it (no queued gap)
+    assert q.claim_one("other/wt", machine="other", worktree="wt", task_id=t.id) is None
+
+
+def test_create_claim_dedup_race_returns_winners_row(q):
+    a = q.create("tackle #42", dedup_key="issue:acme/widget#42", claim_as="A/wt")
+    # B picks the same subject: the dedup_key collides -> B gets A's row, NOT claimed by B
+    b = q.create("tackle #42", dedup_key="issue:acme/widget#42", claim_as="B/wt")
+    assert b.id == a.id
+    assert b.owner == "A/wt"  # A won; B can tell it lost (owner != itself)
+    assert b.status == Status.CLAIMED
+
+
+def test_create_claim_is_idempotent_for_the_winner(q):
+    a = q.create("t", dedup_key="issue:acme/widget#7", claim_as="A/wt")
+    again = q.create("t", dedup_key="issue:acme/widget#7", claim_as="A/wt")
+    assert again.id == a.id and again.owner == "A/wt"
+
+
+def test_proposed_is_not_claimed_even_with_claim_as(q):
+    t = q.propose("draft", claim_as="A/wt")
+    assert t.status == Status.PROPOSED
+    assert t.owner is None
