@@ -165,19 +165,6 @@ class DispatchClient:
             self._http.post(f"/tasks/{task_id}/heartbeat", json={"worker_id": worker_id})
         )
 
-    def set_focus(self, machine: str, worktree: str, focus: str) -> dict:
-        return self._unwrap(
-            self._http.post(
-                "/focus",
-                json={"machine": machine, "worktree": worktree, "focus": focus},
-            )
-        )
-
-    def list_focus(self, *, machine: str | None = None) -> list[dict]:
-        params = {"machine": machine} if machine else None
-        resp = self._unwrap(self._http.get("/focus", params=params))
-        return resp.get("focus", []) if resp else []
-
     def progress(
         self,
         task_id: str,

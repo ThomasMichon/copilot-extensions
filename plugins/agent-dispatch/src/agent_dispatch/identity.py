@@ -55,6 +55,66 @@ def resolve_identity() -> tuple[str | None, str | None]:
     return (machine, worktree)
 
 
+def aw_set_summary(summary: str) -> bool:
+    """Write THIS worktree's status-core summary via ``agent-worktrees status``.
+
+    The "focus" register converges onto the worktree record (the single owning
+    layer): a focus write forwards through the ``agent-worktrees status`` verb
+    rather than a parallel focus store, honoring agent-worktrees' single-writer
+    contract (only agent-worktrees writes the record, via load->save). CWD-
+    resolved. Returns True on success, False when agent-worktrees is absent or
+    the write fails (e.g. not inside a worktree).
+    """
+    exe = shutil.which("agent-worktrees")
+    if exe is None:
+        return False
+    try:
+        result = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
+            [exe, "status", "--summary", summary],
+            check=False, capture_output=True, text=True, timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def aw_list_records(machine: str | None = None) -> list[dict]:
+    """Return this machine's worktree records from ``agent-worktrees list --json``.
+
+    Used to *derive* the focus view from the status core instead of a parallel
+    focus table (the vision's derive-don't-duplicate rule). Optionally filtered
+    to one machine. Empty when agent-worktrees is absent or the read fails.
+    """
+    exe = shutil.which("agent-worktrees")
+    if exe is None:
+        return []
+    try:
+        result = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
+            [exe, "list", "--json"],
+            check=False, capture_output=True, text=True, timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if result.returncode != 0:
+        return []
+    import json
+    try:
+        data = json.loads(result.stdout)
+    except (ValueError, TypeError):
+        return []
+    rows = data.get("worktrees", []) if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        return []
+    out: list[dict] = []
+    for w in rows:
+        if not isinstance(w, dict):
+            continue
+        if machine and w.get("machine") != machine:
+            continue
+        out.append(w)
+    return out
+
+
 def canonicalize_remote(url: str | None) -> str | None:
     """Reduce a git remote URL to a device- and protocol-independent lane key.
 

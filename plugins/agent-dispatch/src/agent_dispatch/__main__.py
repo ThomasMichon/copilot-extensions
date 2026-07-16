@@ -491,9 +491,30 @@ def _cmd_progress(args: argparse.Namespace) -> int:
 
 
 def _cmd_focus(args: argparse.Namespace) -> int:
+    # worktree-status-core convergence: a worktree's "focus" IS its status-core
+    # summary on the worktree record (the single owning layer). There is no
+    # parallel focus store -- writes forward through the `agent-worktrees status`
+    # verb (single-writer contract) and reads DERIVE from `agent-worktrees list
+    # --json`. `progress` stays task-scoped; only this worktree-scoped focus
+    # converges.
+    from .identity import aw_list_records, aw_set_summary
+
+    def _focus_row(w: dict) -> dict:
+        return {
+            "machine": w.get("machine"),
+            "worktree": w.get("id"),
+            "focus": (w.get("summary") or "").strip(),
+            "updated_at": w.get("status_note_at"),
+        }
+
     if args.list:
-        with _client(args) as c:
-            return _emit(c.list_focus(machine=args.machine))
+        rows = [
+            _focus_row(w)
+            for w in aw_list_records(machine=args.machine)
+            if (w.get("summary") or "").strip()
+        ]
+        return _emit(rows)
+
     machine, worktree = _identity(args)
     if not machine or not worktree:
         print(
@@ -502,15 +523,27 @@ def _cmd_focus(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+
     if not args.focus_text:
-        with _client(args) as c:
-            mine = [
-                f for f in c.list_focus(machine=machine)
-                if f.get("worktree") == worktree
-            ]
-        return _emit(mine[0] if mine else {})
-    with _client(args) as c:
-        return _emit(c.set_focus(machine, worktree, args.focus_text))
+        # Show this worktree's current focus (its status-core summary).
+        mine = [w for w in aw_list_records(machine=machine)
+                if w.get("id") == worktree]
+        return _emit(_focus_row(mine[0]) if mine and (mine[0].get("summary") or "").strip()
+                     else {})
+
+    # Write-through to the status core (never a parallel store). The write
+    # always targets the CWD worktree via the `agent-worktrees status` verb.
+    if not aw_set_summary(args.focus_text):
+        print(
+            "agent-dispatch: focus write-through failed (agent-worktrees status "
+            "unavailable, or not inside a worktree).",
+            file=sys.stderr,
+        )
+        return 2
+    return _emit({
+        "machine": machine, "worktree": worktree,
+        "focus": args.focus_text.strip(),
+    })
 
 
 def _cmd_complete(args: argparse.Namespace) -> int:
@@ -1046,8 +1079,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "focus",
-        help="set/show this worktree's current focus (cockpit fleet legibility); "
-             "identity auto-resolved from CWD",
+        help="set/show this worktree's current focus (its status-core summary "
+             "on the worktree record); identity auto-resolved from CWD",
     )
     p.add_argument(
         "focus_text", nargs="?",

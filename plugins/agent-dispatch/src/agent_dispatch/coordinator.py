@@ -96,12 +96,6 @@ class ProgressBody(BaseModel):
     pr: str | None = None
 
 
-class FocusBody(BaseModel):
-    machine: str
-    worktree: str
-    focus: str
-
-
 class AbandonBody(BaseModel):
     worker_id: str | None = None
     permitted: bool = False
@@ -370,14 +364,6 @@ def create_app(
             ),
             "task.progress",
         )
-
-    @app.post("/focus")
-    def set_focus(body: FocusBody) -> dict:
-        return queue.set_focus(body.machine, body.worktree, body.focus)
-
-    @app.get("/focus")
-    def list_focus(machine: str | None = None) -> dict:
-        return {"focus": queue.list_focus(machine=machine)}
 
     @app.post("/tasks/{task_id}/detach")
     def detach(task_id: str) -> dict:
