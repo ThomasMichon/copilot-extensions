@@ -22,7 +22,7 @@ import logging
 from ..auth.base import AuthInjector
 from ..cli_tools import CliTool, CliToolError, build_argv, load_cli_tools, tool_in_scope
 from ..config import BridgeConfig
-from .._exec import resolve_argv
+from .._exec import resolve_spawn
 from .base import Transport
 
 log = logging.getLogger("agent-mcp.transport.cli")
@@ -101,7 +101,7 @@ class CliTransport(Transport):
             return _result(msg, _error_content(
                 f"unknown tool: {name!r} (not advertised on this host)"))
         try:
-            argv = resolve_argv(build_argv(tool, arguments))
+            argv = resolve_spawn(build_argv(tool, arguments))
         except CliToolError as exc:
             return _result(msg, _error_content(f"invalid arguments: {exc}"))
 
