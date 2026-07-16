@@ -124,18 +124,12 @@ def iter_installed_manifests(
             yield name, plugin_dir, manifest
 
 
-def enabled_plugin_names(copilot_home: Path | None = None) -> set[str] | None:
-    """Plugin names enabled in the harness user settings, or ``None`` if unknown.
+def plugin_names_from_enabled(ep: Any) -> set[str] | None:
+    """Plugin names from an ``enabledPlugins`` map (keys ``"<name>@<marketplace>"``).
 
-    Reads ``<copilot_home>/settings.json`` ``enabledPlugins`` (keys shaped
-    ``"<name>@<marketplace>"``). Returns ``None`` when the settings file is
-    absent or has no ``enabledPlugins`` map, signalling "cannot determine — do
-    not filter on enablement".
+    Returns ``None`` when ``ep`` is not a dict, signalling "cannot determine --
+    do not filter on enablement". Falsy entries are dropped.
     """
-    data = _read_json((copilot_home or default_copilot_home()) / "settings.json")
-    if not isinstance(data, dict):
-        return None
-    ep = data.get("enabledPlugins")
     if not isinstance(ep, dict):
         return None
     names: set[str] = set()
@@ -144,6 +138,24 @@ def enabled_plugin_names(copilot_home: Path | None = None) -> set[str] | None:
             continue
         names.add(spec.partition("@")[0])
     return names
+
+
+def enabled_plugin_names(copilot_home: Path | None = None) -> set[str] | None:
+    """Plugin names enabled in the harness *user* settings, or ``None`` if unknown.
+
+    Reads ``<copilot_home>/settings.json`` ``enabledPlugins``. Returns ``None``
+    when the settings file is absent or has no ``enabledPlugins`` map, signalling
+    "cannot determine — do not filter on enablement".
+
+    NOTE: this is the legacy *user-settings* source. The dispatch/register path
+    now prefers the **repo-scoped** enablement (``config.repo_copilot_settings``
+    → :func:`plugin_names_from_enabled`); this remains for back-compat and
+    callers that pass an explicit ``enabled_names`` are not affected.
+    """
+    data = _read_json((copilot_home or default_copilot_home()) / "settings.json")
+    if not isinstance(data, dict):
+        return None
+    return plugin_names_from_enabled(data.get("enabledPlugins"))
 
 
 # --------------------------------------------------------------------------
@@ -268,6 +280,7 @@ def resolve_codespace_plugins(
     copilot_home: Path | None = None,
     only_enabled: bool = True,
     extra_specs: Iterable[CodespacePluginSpec] = (),
+    enabled_names: set[str] | None = None,
 ) -> list[CodespacePluginSpec]:
     """Resolve the CodeSpace-scoped plugins to inject into ``workspace_repo``'s CodeSpace.
 
@@ -289,9 +302,16 @@ def resolve_codespace_plugins(
     determined, declarations from plugins that are *not* enabled on the harness
     are ignored (a disabled harness plugin should not inject anything). If the
     enabled set cannot be determined, no enablement filtering is applied.
+    ``enabled_names`` lets the caller supply that set from the **repo-scoped**
+    config (``config.repo_copilot_settings``) instead of the user settings;
+    when ``None`` (the default) the legacy user-settings
+    :func:`enabled_plugin_names` is consulted.
     """
     home = copilot_home or default_copilot_home()
-    enabled = enabled_plugin_names(home) if only_enabled else None
+    if only_enabled:
+        enabled = enabled_names if enabled_names is not None else enabled_plugin_names(home)
+    else:
+        enabled = None
 
     merged: dict[str, CodespacePluginSpec] = {}
     for name, _pdir, manifest in iter_installed_manifests(home):

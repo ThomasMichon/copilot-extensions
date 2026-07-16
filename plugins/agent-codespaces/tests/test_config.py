@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -14,9 +15,36 @@ from agent_codespaces.config import (
     CredentialsConfig,
     load_merged_config,
     load_repo_config,
+    repo_copilot_settings,
     save_adopted_repos,
     validate_config,
 )
+
+
+def test_repo_copilot_settings_merges_marketplaces_and_enablement(tmp_path):
+    repo = tmp_path / "control-plane"
+    settings_dir = repo / ".github" / "copilot"
+    settings_dir.mkdir(parents=True)
+    (settings_dir / "settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "dev-tmichon": {"source": {"source": "git", "url": "u"}},
+        },
+        "enabledPlugins": {"odsp-web-harness@dev-tmichon": True, "off@m": False},
+    }), encoding="utf-8")
+    # settings.local.json overrides enabledPlugins (last-wins within a repo).
+    (settings_dir / "settings.local.json").write_text(json.dumps({
+        "enabledPlugins": {"off@m": True},
+    }), encoding="utf-8")
+
+    merged = repo_copilot_settings([repo])
+    assert "dev-tmichon" in merged["extraKnownMarketplaces"]
+    assert merged["enabledPlugins"]["odsp-web-harness@dev-tmichon"] is True
+    assert merged["enabledPlugins"]["off@m"] is True  # local override wins
+
+
+def test_repo_copilot_settings_missing_is_empty(tmp_path):
+    merged = repo_copilot_settings([tmp_path / "does-not-exist"])
+    assert merged == {"extraKnownMarketplaces": {}, "enabledPlugins": {}}
 
 
 @pytest.fixture

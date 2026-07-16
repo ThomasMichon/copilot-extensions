@@ -9,7 +9,9 @@ adopted repo and merges in memory.
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -439,6 +441,46 @@ def load_repo_config(repo_path: Path) -> dict[str, Any] | None:
 
     with open(config_file) as f:
         return yaml.safe_load(f) or {}
+
+
+def repo_copilot_settings(source_paths: Iterable[Path]) -> dict[str, Any]:
+    """Merge repo-scoped Copilot settings across the adopted control-plane repos.
+
+    Reads ``<repo>/.github/copilot/settings.json`` (and ``settings.local.json``)
+    from each adopted repo path and returns the merged ``extraKnownMarketplaces``
+    and ``enabledPlugins`` maps. This is the **repo-scoped** replacement for
+    reading the harness *user* ``~/.copilot/settings.json`` -- the marketplace
+    registry and plugin enablement are versioned, in-repo config, not per-machine
+    user state. ``extraKnownMarketplaces`` entries union **first-wins** across
+    repos (and across a repo's ``settings.json`` then ``settings.local.json``);
+    ``enabledPlugins`` entries are **last-wins** (a repo's ``settings.local.json``
+    overrides its ``settings.json``). Missing / malformed files are skipped.
+
+    Returns ``{"extraKnownMarketplaces": {...}, "enabledPlugins": {...}}`` (both
+    always present, possibly empty).
+    """
+    ekm: dict[str, Any] = {}
+    ep: dict[str, Any] = {}
+    for base in source_paths:
+        for fname in ("settings.json", "settings.local.json"):
+            path = Path(base) / ".github" / "copilot" / fname
+            try:
+                if not path.is_file():
+                    continue
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            mk = data.get("extraKnownMarketplaces")
+            if isinstance(mk, dict):
+                for k, v in mk.items():
+                    ekm.setdefault(k, v)
+            en = data.get("enabledPlugins")
+            if isinstance(en, dict):
+                for k, v in en.items():
+                    ep[k] = v
+    return {"extraKnownMarketplaces": ekm, "enabledPlugins": ep}
 
 
 def _parse_credential_source(raw: dict[str, Any]) -> CredentialSourceConfig:
