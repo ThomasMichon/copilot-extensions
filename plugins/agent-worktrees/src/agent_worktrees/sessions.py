@@ -43,6 +43,21 @@ class SessionContext:
     context_pct: dict[str, int] = field(default_factory=dict)
     """normalized_path → context-window utilization % of the most-recent session"""
 
+    live_intent: dict[str, str] = field(default_factory=dict)
+    """normalized_path → most-recent session's live agent intent (the pulse).
+
+    Passively derived from the ``assistant.intent`` stream by the agent-worktrees
+    live-pulse extension (sidecar ``substatus.json``); never the agent-asserted
+    disposition.  The picker renders this as a dim, expiring line and NEVER
+    treats it as the durable ``follow_up`` flag.
+    """
+
+    live_intent_at: dict[str, str] = field(default_factory=dict)
+    """normalized_path → ISO timestamp the live intent was last updated."""
+
+    live_intent_idle: dict[str, bool] = field(default_factory=dict)
+    """normalized_path → whether the pulse's session had gone idle at flush."""
+
     _latest_ts: dict[str, str] = field(default_factory=dict)
     """Internal: tracks latest updated_at per path for summary selection."""
 
@@ -81,6 +96,34 @@ def _read_context_pct(entry: Path) -> int | None:
     return None
 
 
+def _read_substatus(entry: Path) -> tuple[str, str, bool] | None:
+    """Read the live agent-intent pulse from a session's ``substatus.json``.
+
+    The agent-worktrees live-pulse extension writes this sidecar from the
+    ``assistant.intent`` event stream (root agent only), which is ephemeral and
+    never lands in ``events.jsonl`` -- so this file is the sole on-disk source.
+    Returns ``(intent, updated_at_iso, idle)`` or None when absent/unreadable.
+    Never raises.  This is the derived pulse register; it is deliberately
+    independent of the agent-asserted ``follow_up`` disposition.
+    """
+    f = entry / "substatus.json"
+    try:
+        if not f.exists():
+            return None
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    intent = data.get("intent")
+    if not isinstance(intent, str) or not intent.strip():
+        return None
+    updated_at = data.get("updatedAt")
+    updated_at = updated_at if isinstance(updated_at, str) else ""
+    idle = bool(data.get("idle"))
+    return intent.strip(), updated_at, idle
+
+
 def _update_activity(
     ctx: SessionContext, norm_path: str, entry: Path, updated_at: str
 ) -> None:
@@ -104,6 +147,18 @@ def _update_activity(
         # Newest session has no context.json -- drop a stale older value
         # rather than misreport an unrelated session's utilization.
         del ctx.context_pct[norm_path]
+    # The live pulse follows the same newest-session-wins rule as context %: a
+    # newer session without a sidecar clears any stale intent from an older one.
+    sub = _read_substatus(entry)
+    if sub is not None:
+        intent, sub_at, idle = sub
+        ctx.live_intent[norm_path] = intent
+        ctx.live_intent_at[norm_path] = sub_at
+        ctx.live_intent_idle[norm_path] = idle
+    else:
+        ctx.live_intent.pop(norm_path, None)
+        ctx.live_intent_at.pop(norm_path, None)
+        ctx.live_intent_idle.pop(norm_path, None)
 
 
 def _session_state_dir() -> Path:
