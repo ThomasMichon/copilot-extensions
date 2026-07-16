@@ -143,10 +143,13 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
 - **proposed** is a holding state for an idea not yet blessed; `approve` moves it
   to **queued**.
 - **claimed -> started** when the worker commits; **claimed -> queued**
-  (`yield`, a decline) if it evaluates and passes.
+  (`yield`, a decline) if it evaluates and passes. The `claimed` window can be
+  taken under a **tight evaluation lease** (`claim --evaluation`) so a stuck
+  evaluator auto-releases fast — see *Evaluate before committing* below.
 - **started -> queued** yields **with a note** on a recoverable snag (merge
   conflict, needs a later cycle); **started -> completed** on success.
-- **abandon requires permission** (`--permit`) -- it's not a unilateral agent
+- **abandon requires permission** (`--permit`, or `--duplicate-of <ref>` which
+  self-permits and records the dedup reference) -- it's not a unilateral agent
   action; it's the discard path for duplicates / dropped priorities.
 - **Lease expiry -> queued** is automatic and internal (bumps `attempts`): a
   dead worker's task resurfaces. The coordinator sweeps expired leases on a timer
@@ -206,7 +209,7 @@ machine/worktree/repo**. A task is claimable only when every `--require` token i
 present in the worker's set **and** no `--exclude` token is. Excludes are hard
 anti-affinity (unlike soft `--affinity`, which only orders). A declining worker
 can **append its own "not me"** on the way back to the queue with
-`agent-dispatch yield <id> --not-me {worktree,machine}` (or `--exclude <token>`);
+`agent-dispatch yield <id> --exclude-self {worktree,machine}` (or `--exclude <token>`);
 because excludes only grow, the candidate set shrinks monotonically to a taker or
 to unclaimable.
 
@@ -308,8 +311,35 @@ agent-dispatch yield <id> <owner> --note "blocked on merge conflict; retry next 
 Discard a duplicate / dropped task (needs permission):
 
 ```bash
-agent-dispatch abandon <id> --worker-id <owner> --permit --reason "duplicate of task X"
+# a duplicate is self-justifying -- --duplicate-of implies permission and
+# records the dedup reference in the audit trail (never a silent drop):
+agent-dispatch abandon <id> --duplicate-of pr/123     # or task-id / issue ref
+# any other discard still asserts permission explicitly:
+agent-dispatch abandon <id> --worker-id <owner> --permit --reason "dropped priority"
 ```
+
+### Evaluate before committing (the contract-net window)
+
+`claim` and `start` are **two steps on purpose** — between them is an
+**evaluation window** where you hold the task exclusively but haven't committed
+to running it. Opt into a *tight-lease* window with `claim --evaluation`: a
+stuck evaluator auto-releases fast (the eval lease is much shorter than the work
+lease), and `start` then extends to the full work lease on commit.
+
+```bash
+agent-dispatch claim --task <id> --evaluation    # win a short exclusive eval window
+# ...assess: dup-check (agent-dispatch list / sweep), feasibility, is-this-for-me...
+agent-dispatch start   <id>                      # ACCEPT -> extends to the full work lease
+agent-dispatch yield   <id> --exclude-self worktree --note "not my capability"  # DECLINE
+agent-dispatch abandon <id> --duplicate-of <ref>                                # DUPLICATE
+```
+
+Three ways out of the window: **accept** (`start`), **decline** (`yield
+--exclude-self` — returns it and appends a scoped "not me" so you aren't
+re-offered it), or **retire** (`abandon --duplicate-of` for a duplicate/obsolete
+task). Dispatched **autopilot** workers (`embody`/fleet seeds) run exactly this
+loop. Default the decline scope to the **narrowest** true one (`worktree`); widen
+to `machine` only when the mismatch is machine-wide.
 
 ### Inspect
 

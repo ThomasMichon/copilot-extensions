@@ -174,6 +174,15 @@ def test_fleet_seed_drives_origin_over_ssh_with_explicit_owner():
     assert "ssh brain agent-dispatch start t42 fleet-t42-abc123" in seed
     assert "ssh brain agent-dispatch complete t42 fleet-t42-abc123 --result-ref" in seed
     assert "ssh brain agent-dispatch progress t42 fleet-t42-abc123" in seed
+    # Contract-net evaluation window (dev55) over the SSH mesh: evaluation claim,
+    # then accept / decline (yield --exclude-self) / retire (abandon --duplicate-of),
+    # all carrying the explicit owner.
+    assert "ssh brain agent-dispatch claim --task t42 fleet-t42-abc123 --evaluation" in seed
+    assert "ssh brain agent-dispatch yield t42 fleet-t42-abc123 --exclude-self machine" in seed
+    assert (
+        "ssh brain agent-dispatch abandon t42 --worker-id fleet-t42-abc123 --duplicate-of"
+        in seed
+    )
 
 
 def test_spawn_fleet_embodied_worker_builds_ssh_embody_argv(monkeypatch):

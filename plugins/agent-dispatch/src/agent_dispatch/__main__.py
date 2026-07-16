@@ -445,11 +445,11 @@ def _cmd_yield(args: argparse.Namespace) -> int:
     if worker_id is None:
         return 2
     exclude = args.exclude
-    if not exclude and getattr(args, "not_me", None):
+    if not exclude and getattr(args, "exclude_self", None):
         machine, worktree = _identity(args)
-        if args.not_me == "worktree" and worktree:
+        if args.exclude_self == "worktree" and worktree:
             exclude = f"worktree:{worktree}"
-        elif args.not_me == "machine" and machine:
+        elif args.exclude_self == "machine" and machine:
             exclude = f"machine:{machine}"
     with _client(args) as c:
         return _emit(c.yield_task(args.task_id, worker_id, note=args.note, exclude=exclude))
@@ -585,10 +585,20 @@ def _cmd_complete(args: argparse.Namespace) -> int:
 
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
+    permitted = args.permit
+    reason = args.reason
+    duplicate_of = getattr(args, "duplicate_of", None)
+    if duplicate_of:
+        # A duplicate is self-justifying: retiring it is permitted, and the
+        # dedup reference is folded into the reason so it lands in the audit
+        # trail (never a silent drop).
+        permitted = True
+        dedup_note = f"duplicate of {duplicate_of}"
+        reason = f"{reason}; {dedup_note}" if reason else dedup_note
     with _client(args) as c:
         return _emit(
             c.abandon(
-                args.task_id, worker_id=args.worker_id, permitted=args.permit, reason=args.reason
+                args.task_id, worker_id=args.worker_id, permitted=permitted, reason=reason
             )
         )
 
@@ -1064,7 +1074,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="claim under the tight EVALUATION lease (a quick accept/reject "
              "window): a stuck evaluator auto-releases fast, and 'start' then "
              "extends to the full work lease on commit. Decline with "
-             "'yield --not-me' or 'abandon --duplicate-of'.",
+             "'yield --exclude-self' or 'abandon --duplicate-of'.",
     )
     p.set_defaults(func=_cmd_claim)
 
@@ -1101,16 +1111,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--note")
     p.add_argument(
-        "--not-me", choices=("worktree", "machine"), dest="not_me",
-        help="append a scoped 'not me' EXCLUSION when yielding, so this same "
+        "--exclude-self", "--not-me", choices=("worktree", "machine"), dest="exclude_self",
+        help="append a scoped self-EXCLUSION when yielding, so this same "
              "candidate isn't re-offered the task: 'worktree' (narrowest -- this "
              "worktree only) or 'machine' (this whole machine). Prefer the "
-             "narrowest scope that is true.",
+             "narrowest scope that is true. (`--not-me` is a deprecated alias.)",
     )
     p.add_argument(
         "--exclude",
         help="append an explicit exclusion token when yielding (e.g. "
-             "'agent:reviewer'); overrides --not-me.",
+             "'agent:reviewer'); overrides --exclude-self.",
     )
     p.add_argument("--machine", help="override the resolved machine (targeting identity)")
     p.add_argument("--worktree", help="override the resolved worktree id (targeting identity)")
@@ -1128,11 +1138,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--result-ref")
     p.set_defaults(func=_cmd_complete)
 
-    p = sub.add_parser("abandon", help="terminally abandon a task (requires --permit)")
+    p = sub.add_parser(
+        "abandon",
+        help="terminally abandon a task (requires --permit or --duplicate-of)",
+    )
     p.add_argument("task_id")
     p.add_argument("--worker-id")
     p.add_argument("--permit", action="store_true", help="assert abandonment is permitted")
     p.add_argument("--reason")
+    p.add_argument(
+        "--duplicate-of", dest="duplicate_of", metavar="REF",
+        help="retire the task as a DUPLICATE of REF (an existing task id, PR, or "
+             "issue). Self-justifying: implies --permit and records the dedup "
+             "reference in the reason, so the decision is never a silent drop.",
+    )
     p.set_defaults(func=_cmd_abandon)
 
     p = sub.add_parser("heartbeat", help="extend the lease on a held task")
