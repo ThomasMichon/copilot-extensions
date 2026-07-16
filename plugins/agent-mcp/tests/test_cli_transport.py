@@ -119,3 +119,43 @@ def test_cli_bridge_tools_filter_composes(tmp_path):
     by_id = {m.get("id"): m for m in out if "id" in m}
     names = [t["name"] for t in by_id[1]["result"]["tools"]]
     assert names == ["keep_me"], proc.stderr
+
+
+# --- auth injection into the spawned tool's environment ----------------------
+
+ENV_ECHO = textwrap.dedent(
+    """
+    import os, sys
+    sys.stdout.write(os.environ.get("MY_TOKEN", "<unset>"))
+    """
+)
+
+
+def test_cli_bridge_injects_auth_into_tool_env(tmp_path):
+    """A cli bridge's auth injector reaches the spawned tool's environment.
+
+    This is how a cli bridge self-sources a credential (e.g. a vault-fetched
+    token) and hands it to the tool, instead of depending on the session env.
+    """
+    mcp = {
+        "name": "whoami",
+        "description": "echo the injected token",
+        "inputSchema": {"type": "object", "properties": {}},
+        "invoke": {"command": sys.executable, "args": ["-c", ENV_ECHO]},
+    }
+    (tmp_path / "whoami.md").write_text(
+        "---\n" + yaml.safe_dump({"mcp": mcp}) + "---\n", encoding="utf-8")
+    cfg = tmp_path / "bridge.yaml"
+    cfg.write_text(json.dumps({
+        "server": {"type": "cli", "tools_from": ["whoami.md"]},
+        # static-value injector -> MY_TOKEN in the child env (no external command)
+        "auth": {"kind": "static", "value": "sekret-123", "target_env": "MY_TOKEN"},
+    }), encoding="utf-8")
+
+    out, proc = _run_bridge(cfg, [
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": {"name": "whoami", "arguments": {}}}),
+    ])
+    by_id = {m.get("id"): m for m in out if "id" in m}
+    assert by_id[1]["result"]["isError"] is False, proc.stderr
+    assert by_id[1]["result"]["content"][0]["text"] == "sekret-123", proc.stderr
