@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 # A live interactive session is kept alive by the extension's 30s heartbeat
 # (HEARTBEAT_MS in extension.mjs). A row whose ``updated_at`` is older than this
@@ -134,6 +134,13 @@ CREATE TABLE IF NOT EXISTS live_messages (
     kind TEXT NOT NULL DEFAULT 'prompt',
     created_at REAL NOT NULL,
     delivered_at REAL
+);
+
+CREATE TABLE IF NOT EXISTS worktree_ownership (
+    worktree_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    reserved_at REAL NOT NULL,
+    updated_at REAL NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
@@ -546,6 +553,27 @@ class Database:
             conn.commit()
             log.info("Schema migrated to version 12: live_sessions.latest_progress")
 
+        if from_version < 13:
+            # v12 -> v13: add the `worktree_ownership` reservation table (#2912).
+            # A persistent, DB-level per-worktree ACP-ownership reservation the
+            # resume verb takes *before* spawning ACP, which a live-session
+            # registration must respect -- so ownership and live-registration
+            # cannot both win a worktree, even across processes (closing the
+            # register-after-check window the #2879 guard only narrows).
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS worktree_ownership (
+                    worktree_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    reserved_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+                """
+            )
+            conn.execute("UPDATE schema_version SET version=?", (13,))
+            conn.commit()
+            log.info("Schema migrated to version 13: worktree_ownership table")
+
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
         conn = self._get_conn()
@@ -667,22 +695,57 @@ class Database:
         role: str | None,
         now: float,
         driven_by: str | None = None,
-    ) -> None:
-        """Insert or refresh a live interactive-session registration (upsert)."""
-        self.execute_write(
+    ) -> str:
+        """Insert or refresh a live interactive-session registration (upsert).
+
+        Atomic, and respects the two #2912 primitives in a single statement (so
+        no register-after-check window, even against a second process):
+
+        * **Ownership reservation** -- a *new* registration for a worktree is
+          refused when a fresh owned-ACP :meth:`reserve_worktree_ownership`
+          reservation holds it (an active owned session already controls the
+          worktree). This is the ``registration must respect the reservation``
+          half of #2912. A reservation whose owning session is no longer active
+          (or absent) does not block.
+        * **Terminal ``taken-over``** -- a heartbeat re-register is refused when
+          the existing row is ``taken-over`` (a killed predecessor cannot
+          resurrect itself via a late heartbeat). Lease-lapsed ``expired`` rows
+          still revive normally.
+
+        Returns the resulting registration status: ``'live'`` on a successful
+        insert/refresh, or a rejection reason -- ``'reserved'`` (an owned ACP
+        reservation holds the worktree) or ``'taken-over'`` (this id was taken
+        over). The route maps a rejection to HTTP 409.
+        """
+        cur = self.execute_write(
             "INSERT INTO live_sessions (session_id, machine, cwd, worktree_id, "
             "repo, branch, pid, role, driven_by, status, registered_at, "
             "updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ?) "
+            "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ? "
+            "WHERE NOT EXISTS ("
+            "  SELECT 1 FROM worktree_ownership wo "
+            "  JOIN sessions s ON s.id = wo.session_id "
+            "  WHERE wo.worktree_id = ? AND ? IS NOT NULL "
+            "    AND s.status IN ('running', 'idle')"
+            ") "
             "ON CONFLICT(session_id) DO UPDATE SET "
             "machine=excluded.machine, cwd=excluded.cwd, "
             "worktree_id=excluded.worktree_id, repo=excluded.repo, "
             "branch=excluded.branch, pid=excluded.pid, role=excluded.role, "
             "driven_by=excluded.driven_by, "
-            "status='live', updated_at=excluded.updated_at",
+            "status='live', updated_at=excluded.updated_at "
+            "WHERE live_sessions.status != 'taken-over'",
             (session_id, machine, cwd, worktree_id, repo, branch, pid, role,
-             driven_by, now, now),
+             driven_by, now, now, worktree_id, worktree_id),
         )
+        if cur.rowcount == 1:
+            return "live"
+        # Rejected -- derive why for the caller's error (the authoritative
+        # decision was the 0-row write above).
+        existing = self.get_live_session(session_id)
+        if existing is not None and (existing.get("status") or "live") == "taken-over":
+            return "taken-over"
+        return "reserved"
 
     def update_live_turn_state(
         self,
@@ -732,18 +795,23 @@ class Database:
     def expire_live_sessions_for_worktree(
         self, worktree_id: str, *, now: float
     ) -> int:
-        """Immediately demote every ``live`` registration for a worktree and drop
-        its undelivered inbox messages -- the *invalidate-on-take-over* hook
-        (#2906).
+        """Immediately demote every ``live`` registration for a worktree to the
+        **terminal ``taken-over``** state and drop its undelivered inbox
+        messages -- the *invalidate-on-take-over* hook (#2906 + #2912).
 
         A take-over has just terminated the interactive CLI, so a lingering
         ``status=='live'`` row must not keep the worktree un-ownable (it would
         trip the resume guard against the reclaim) nor accept a message that
-        raced control changing hands. Returns how many registrations were
-        demoted. Idempotent: a worktree with no live row is a no-op.
+        raced control changing hands. Unlike the reaper's lease-lapse
+        ``expired`` (which a returning CLI's re-register upsert legitimately
+        revives), ``taken-over`` is **terminal**: :meth:`register_live_session`
+        refuses to revive it, so a killed predecessor's in-flight heartbeat can
+        never flip its own row back to ``live`` after take-over (#2912). Returns
+        how many registrations were demoted. Idempotent: a worktree with no live
+        row is a no-op.
         """
         cur = self.execute_write(
-            "UPDATE live_sessions SET status='expired', updated_at=? "
+            "UPDATE live_sessions SET status='taken-over', updated_at=? "
             "WHERE worktree_id=? AND status='live'",
             (now, worktree_id),
         )
@@ -753,7 +821,7 @@ class Database:
                 "DELETE FROM live_messages WHERE delivered_at IS NULL "
                 "AND session_id IN ("
                 "SELECT session_id FROM live_sessions "
-                "WHERE worktree_id=? AND status='expired')",
+                "WHERE worktree_id=? AND status='taken-over')",
                 (worktree_id,),
             )
         return n
@@ -790,6 +858,115 @@ class Database:
                 (cutoff,),
             )
         return n
+
+    # ------------------------------------------------------------------
+    # Per-worktree ACP ownership reservation (#2912)
+    # ------------------------------------------------------------------
+
+    def reserve_worktree_ownership(
+        self,
+        worktree_id: str,
+        session_id: str,
+        *,
+        now: float,
+        reclaim: bool = False,
+        stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
+    ) -> bool:
+        """Atomically claim the per-worktree ACP-ownership reservation (#2912).
+
+        The resume verb takes this **before** spawning ACP so that an owned
+        session and a live-CLI registration cannot both win a worktree even
+        across processes. The claim + the not-held check are a **single**
+        ``INSERT ... SELECT ... WHERE NOT EXISTS ... ON CONFLICT DO UPDATE``
+        statement, so no register / reserve from another writer can slip between
+        the check and the write (the register-after-check window the #2879 guard
+        only narrows).
+
+        A non-``reclaim`` claim succeeds only when **no fresh live CLI** holds
+        the worktree **and** any existing reservation is either ours or owned by
+        a session that is no longer active (running/idle) -- so a stale
+        reservation from a crashed/ended owner is reclaimable but a live owner's
+        is not. ``reclaim=True`` (take-over) force-takes the reservation
+        unconditionally: the caller has just terminated the interactive CLI and
+        intends to own the freed worktree.
+
+        Returns True if the reservation is now held by ``session_id``, False if
+        another party holds it (a fresh live CLI, or another active owner).
+        """
+        if reclaim:
+            self.execute_write(
+                "INSERT INTO worktree_ownership "
+                "(worktree_id, session_id, reserved_at, updated_at) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(worktree_id) DO UPDATE SET "
+                "session_id=excluded.session_id, updated_at=excluded.updated_at",
+                (worktree_id, session_id, now, now),
+            )
+            return True
+        cutoff = now - stale_seconds
+        cur = self.execute_write(
+            "INSERT INTO worktree_ownership "
+            "(worktree_id, session_id, reserved_at, updated_at) "
+            "SELECT ?, ?, ?, ? "
+            "WHERE NOT EXISTS ("
+            "  SELECT 1 FROM live_sessions "
+            "  WHERE worktree_id = ? AND status = 'live' AND updated_at >= ?"
+            ") "
+            "ON CONFLICT(worktree_id) DO UPDATE SET "
+            "session_id=excluded.session_id, updated_at=excluded.updated_at "
+            "WHERE ("
+            "    worktree_ownership.session_id = excluded.session_id "
+            "    OR NOT EXISTS ("
+            "      SELECT 1 FROM sessions s "
+            "      WHERE s.id = worktree_ownership.session_id "
+            "        AND s.status IN ('running', 'idle')"
+            "    )"
+            "  ) AND NOT EXISTS ("
+            "    SELECT 1 FROM live_sessions "
+            "    WHERE worktree_id = ? AND status = 'live' AND updated_at >= ?"
+            "  )",
+            (worktree_id, session_id, now, now,
+             worktree_id, cutoff, worktree_id, cutoff),
+        )
+        if cur.rowcount == 1:
+            return True
+        # 0 rows: either blocked, or the row already names us (a no-op UPDATE
+        # whose WHERE held but changed nothing). Confirm current holder.
+        row = self.get_worktree_ownership(worktree_id)
+        return row is not None and row.get("session_id") == session_id
+
+    def release_worktree_ownership(
+        self, *, worktree_id: str | None = None, session_id: str | None = None
+    ) -> int:
+        """Release an ACP-ownership reservation -- by worktree, by owning
+        session, or both (#2912). Called when an owned session stops/ends so a
+        live CLI can take the freed worktree without waiting on lease staleness.
+        Returns how many reservations were removed."""
+        if worktree_id is not None and session_id is not None:
+            cur = self.execute_write(
+                "DELETE FROM worktree_ownership "
+                "WHERE worktree_id=? AND session_id=?",
+                (worktree_id, session_id),
+            )
+        elif worktree_id is not None:
+            cur = self.execute_write(
+                "DELETE FROM worktree_ownership WHERE worktree_id=?",
+                (worktree_id,),
+            )
+        elif session_id is not None:
+            cur = self.execute_write(
+                "DELETE FROM worktree_ownership WHERE session_id=?",
+                (session_id,),
+            )
+        else:
+            return 0
+        return cur.rowcount
+
+    def get_worktree_ownership(self, worktree_id: str) -> dict[str, Any] | None:
+        rows = self.execute_read(
+            "SELECT * FROM worktree_ownership WHERE worktree_id=?", (worktree_id,)
+        )
+        return dict(rows[0]) if rows else None
 
     def get_live_session(self, session_id: str) -> dict[str, Any] | None:
         rows = self.execute_read(
