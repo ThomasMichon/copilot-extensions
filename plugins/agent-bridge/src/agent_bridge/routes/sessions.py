@@ -557,10 +557,23 @@ async def ack_cursor(
 
 
 @router.post("/{session_id}/stop", status_code=204)
-async def stop_session(session_id: str, request: Request, force: bool = False):
+async def stop_session(
+    session_id: str, request: Request, force: bool = False, reap_host: bool = False
+):
+    """Stop a session, preserving state for resume.
+
+    ``reap_host=true`` additionally FREES the Session-Host child immediately
+    (the same primitive the idle-reaper uses) instead of merely detaching it to
+    keep it reattachable. A caller that never reattaches over the bridge (e.g.
+    the Intelligence Dampener reviewer, which resumes from on-disk session-state
+    + worktree via a fresh child) uses this to reclaim the ~280 MB child on the
+    spot rather than waiting out the idle-reaper TTL -- while the session stays
+    STOPPED and resumable via ``load_session`` replay. Default ``false`` keeps
+    the reattach-friendly behavior for fronts like Neuron Forge.
+    """
     mgr: SessionManager = request.app.state.session_manager
     try:
-        await mgr.stop_session(session_id, force=force)
+        await mgr.stop_session(session_id, force=force, reap_host=reap_host)
     except SessionBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except KeyError:
