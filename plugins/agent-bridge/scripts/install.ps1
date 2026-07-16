@@ -649,7 +649,13 @@ Set-Content -Path `$pidFile -Value `$proc.Id
             Description = 'Agent-Bridge -- inter-agent communication service on port 9280.'
         }
         if ($principal) { $regArgs['Principal'] = $principal }
-        Register-ScheduledTask @regArgs | Out-Null
+        # -Force overwrites any existing registration. Without it, a bare
+        # Register-ScheduledTask throws "Cannot create a file when that file
+        # already exists" whenever the task still lingers -- e.g. a principal
+        # change (S4U <-> interactive) where the preceding silent
+        # Unregister-ScheduledTask failed, or a stale task XML left in
+        # %WINDIR%\System32\Tasks that Get-ScheduledTask no longer surfaces.
+        Register-ScheduledTask @regArgs -Force | Out-Null
         Write-Ok "Scheduled task registered ($modeLabel)"
     }
 }
