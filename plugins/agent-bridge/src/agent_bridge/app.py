@@ -212,6 +212,13 @@ async def lifespan(app: FastAPI):
                     await mgr.recover_disconnected_hosts()
                 except Exception:
                     log.warning("Liveness-driven reattach failed", exc_info=True)
+                # Reconcile each host-backed session's reapable state to its
+                # host so a subsequently-lost front can self-reap an idle child
+                # (#51). Backstop beneath the precise turn-boundary pushes.
+                try:
+                    await mgr.refresh_host_reapable()
+                except Exception:
+                    log.warning("Host reapable-state refresh failed", exc_info=True)
             # Eventual-terminal reconciliation (#2384): heal any session wedged
             # in RUNNING with no live turn (output stopped, no prompt task) so it
             # cannot mirror "Responding..." forever. Runs regardless of host mode;

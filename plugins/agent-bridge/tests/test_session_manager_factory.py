@@ -34,9 +34,11 @@ def test_factory_wires_companion_session_host_params(tmp_db: Database) -> None:
         idle_reap_ttl_seconds=600,
         graceful_cancel_settle_seconds=45,
         live_stall_interrupt_after_s=900,
+        session_host_awkward_reap_seconds=90,
     )
     mgr = session_manager_from_config(tmp_db, cfg)
     assert mgr._session_host_enabled is True
     assert mgr._idle_reap_ttl_seconds == 600
     assert mgr._graceful_cancel_settle_seconds == 45
     assert mgr._live_stall_interrupt_after_s == 900
+    assert mgr._session_host_awkward_reap_seconds == 90

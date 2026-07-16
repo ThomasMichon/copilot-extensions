@@ -182,6 +182,19 @@ torn-down ephemeral venue does **not** silently lose its work: in-flight agents
 are diagnosed and reattached where possible, and session state is recovered and
 compiled for whoever comes next.
 
+### reclaim-idle-process
+A durable agent's **live process is a reclaimable resource, not a permanent
+tenant**. When the fabric's connection to a hosted agent is lost, an agent that
+is **idle** — its turn complete with no work still running on its behalf — has
+its process **freed** rather than left pinning memory indefinitely: promptly when
+the disconnect is **clean**, and within a **bounded grace** when it is **abrupt**
+(so a quick reattach still wins). An agent that is **mid-work** is never reclaimed
+this way — it is kept for reattach (per *recover-not-lose*). Reclaiming an idle
+process **loses nothing**: the agent stays **resumable** from its recovered state,
+so the fabric owns process lifetime by *connection and activity* while the
+consumer need only connect and disconnect. The complement of *recover-not-lose*:
+one keeps *work* from vanishing; this keeps *idle processes* from accumulating.
+
 ### summary-status-is-first-class
 The fabric distinguishes an agent's **in-conversation messages** (what it is
 saying now) from a **recorded summary outcome** of work done on the fabric's

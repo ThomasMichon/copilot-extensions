@@ -39,6 +39,13 @@ class MsgType(bytes, enum.Enum):
     ACK = b"K"         # payload: u64 seq
     WRITE = b"W"       # payload: raw ACP bytes to relay into child stdin
     TERMINATE = b"T"   # payload: empty -- explicit, sanctioned reap
+    STATUS = b"S"      # payload: u8 reapable(1/0) -- latest "idle + no active
+                       # background tasks" signal, so the host can self-reap an
+                       # idle child if the front is lost (#51 auto-reap)
+    DETACH = b"D"      # payload: u8 reapable(1/0) -- the front is disconnecting
+                       # GRACEFULLY (vs a hard drop, which surfaces only as EOF);
+                       # lets the host reap a reapable child promptly instead of
+                       # after the awkward-disconnect grace window
 
     # Host -> Frontend
     HELLO = b"H"       # payload: u64 max_seq + u64 child_pid
@@ -84,6 +91,16 @@ def unpack_attach(payload: bytes) -> tuple[int, bytes]:
 
 def pack_liveness(alive: bool, exit_code: int = 0) -> bytes:
     return (b"\x01" if alive else b"\x00") + _U32.pack(exit_code & 0xFFFFFFFF)
+
+
+def pack_flag(value: bool) -> bytes:
+    """Encode a single boolean (STATUS/DETACH ``reapable``) as one byte."""
+    return b"\x01" if value else b"\x00"
+
+
+def unpack_flag(payload: bytes) -> bool:
+    """Decode a single-byte boolean; a missing/empty payload reads False."""
+    return payload[:1] == b"\x01"
 
 
 def unpack_liveness(payload: bytes) -> tuple[bool, int]:
