@@ -55,7 +55,7 @@ adapt -- at a glance:
 ```yaml
 # .github/agents/ado.mcp.yaml
 server:
-  type: http                       # http | stdio
+  type: http                       # http | stdio | cli
   url: https://mcp.dev.azure.com/your-org
 auth:
   kind: entra                      # entra|az | gh | git-credential | env|static | none
@@ -241,6 +241,26 @@ of speaking JSON-RPC.
   Re-running `materialize` rebuilds the tree atomically (temp dir + swap), so it
   doubles as a drift refresh. The bridge's `tools:` allow/deny filter gates which
   tools are materialized.
+
+## CLI -> MCP: the `cli` server type
+
+The inverse crossing: expose **native CLIs as MCP tools** for an MCP-only
+consumer, with no upstream MCP and no per-tool server. `server.type: cli` lists
+tool **sidecars** (`.md` files with an `mcp:` frontmatter block carrying
+`name`/`description`/`inputSchema` plus an `invoke` argv template); `tools/list`
+is synthesized from them and `tools/call` binds params to an **argv** and spawns
+the CLI (no shell). A sidecar's optional `mcp.scope` tag, matched against
+`server.scopes`, gates which tools a host may advertise/run. See the plugin
+README (§ *CLI -> MCP: the `cli` server type*) for the sidecar schema, argv-binding
+rules, and scope gating.
+
+```yaml
+server:
+  type: cli
+  tools_from: [tools/vei-search.md, tools/vei-status.md]
+  scopes: [shared, lambda-core]
+tools: { allow: ["vei_*"] }
+```
 
 ## Install
 

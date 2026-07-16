@@ -13,7 +13,9 @@ multi-auth bridge packaged as a Copilot CLI plugin.
   single JSON/YAML config file.
 - **`server` block** — the *original upstream launch info*, the same shape as a
   `.mcp.json` / `mcpServers` entry. `server.type` (`http` | `stdio`) selects the
-  transport. Lift an existing server entry in unchanged.
+  transport. Lift an existing server entry in unchanged. A third type, **`cli`**,
+  has no upstream at all — it exposes a set of native CLIs *as* MCP tools (see
+  [CLI → MCP](#cli--mcp-the-cli-server-type)).
 - **Auth injector** — declares *what form of auth to inject*. Token acquisition
   reuses the `credential-relay` host-credential sources (`az_login`, `gh_auth`,
   `git_credential`) — this plugin does not re-implement `az`/`gh`/GCM shell-outs.
@@ -425,8 +427,72 @@ mcp-servers:
 > doesn't reliably stream stdin -- hence the deliberate `.cmd`-only layout.) On
 > Linux/WSL the binstub is the usual bash script.
 
-## MCP → CLI: `call` and `materialize`
+## CLI → MCP: the `cli` server type
 
+The `http`/`stdio` bridges proxy an upstream MCP. The **`cli`** server type is
+the *inverse*: it exposes a curated set of **native CLIs as MCP tools**, for an
+agent (or MCP client) that reaches tools only over MCP and would otherwise need a
+heavyweight per-tool MCP server. There is no upstream and no network — `tools/list`
+is synthesized from tool **sidecars** and each `tools/call` binds the arguments to
+an **argv** and spawns the CLI as a subprocess (no shell — a param value can never
+inject a command).
+
+Each tool is one sidecar Markdown file with an `mcp:` frontmatter block:
+
+```yaml
+---
+mcp:
+  name: vei_search
+  description: Semantic search across the monorepo, logs, and Gitea via VEI.
+  scope: shared                 # optional execution-policy tag (see below)
+  inputSchema:                  # raw MCP inputSchema (same shape materialize plates)
+    type: object
+    properties:
+      query: { type: string, description: Search text }
+      limit: { type: integer, description: Max results }
+    required: [query]
+  invoke:                       # params -> argv (never a shell string)
+    command: vei-search
+    args:
+      - "{query}"                                           # required positional
+      - { flag: "--limit", value: "{limit}", when: limit }  # optional flag
+---
+# vei-search  (human doc body — ignored by the bridge)
+```
+
+The bridge config points at the sidecar set:
+
+```yaml
+server:
+  type: cli
+  tools_from:                   # sidecar paths (relative to this config file)
+    - tools/vei-search.md
+    - tools/vei-status.md
+  scopes: [shared, lambda-core] # optional; gate tools by their mcp.scope tag
+tools: { allow: ["vei_*"] }     # the usual allow/deny filter still applies
+```
+
+**Argv binding rules** (small and unambiguous):
+
+- A **bare string** is a required token (positional/literal); `{name}`
+  placeholders are substituted, and a referenced param that is absent is an error
+  (use the mapping form with `when` for optional args).
+- A **mapping** `{flag?, value?, when?, repeat?}`: `when` skips the entry unless
+  that param is present; `repeat` names a list param and emits `flag`+value per
+  item; `flag` alone is a boolean-as-presence flag; `flag`+`value` (or `value`
+  alone) emit the substituted value as a single argv token.
+
+**Execution-scope gating.** A sidecar may carry `mcp.scope` (a free-form tag). If
+the bridge config lists `server.scopes`, a tool whose `scope` is set and *not* in
+that list is neither advertised nor runnable; an untagged tool is always allowed,
+and an empty `scopes` disables gating. This is the generic mechanism a control
+plane maps its per-host execution policy onto (e.g. `scopes: [shared, <machine>]`).
+
+**Result shaping.** A tool's stdout is returned as text content; a non-zero exit
+becomes an MCP tool error (`isError: true`) carrying the stderr tail — a failing
+tool yields an error, never a hang.
+
+## MCP → CLI: `call` and `materialize`
 The bridge exposes an upstream MCP *to an MCP client*. The **`call`** and
 **`materialize`** verbs expose it *to the shell* instead — the same upstream, the
 same auth + `tools:` filtering, projected as command-line tools for agents (or
