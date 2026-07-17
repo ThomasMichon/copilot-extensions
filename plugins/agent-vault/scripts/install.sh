@@ -175,10 +175,36 @@ _ensure_runtime() {
         _skip 'Venv already exists'
     fi
 
+    # Resolve the vendored endpoint-rendezvous lib across install layouts
+    # (marketplace-vendored inside the plugin, git checkout, common dev path).
+    _er_dir=""
+    for _c in "$PLUGIN_DIR/libs/endpoint-rendezvous" \
+              "$PLUGIN_DIR/../../libs/endpoint-rendezvous" \
+              "$HOME/src/copilot-extensions/libs/endpoint-rendezvous"; do
+        if [[ -f "$_c/pyproject.toml" ]]; then _er_dir="$_c"; break; fi
+    done
+
+    # endpoint-rendezvous (rendezvous/port-mapping endpoint files) must be
+    # installed explicitly before the plugin -- uv pip does not honor
+    # [tool.uv.sources]. --refresh-package busts uv's build cache.
     if [[ "$have_uv" -eq 1 ]]; then
+        if [[ -n "$_er_dir" ]]; then
+            uv pip install --python "$VENV_PYTHON" "$_er_dir" \
+                --reinstall-package agent-endpoint-rendezvous \
+                --refresh-package agent-endpoint-rendezvous --quiet 2>/dev/null \
+                || { _fail 'Failed to install endpoint-rendezvous lib into venv'; exit 1; }
+        elif ! "$VENV_PYTHON" -c 'import endpoint_rendezvous' 2>/dev/null; then
+            _fail 'Cannot locate endpoint-rendezvous library. Reinstall the agent-vault plugin from the marketplace, then rerun this installer.'; exit 1
+        fi
         uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null \
             || { _fail 'Failed to install agent-vault package into venv'; exit 1; }
     else
+        if [[ -n "$_er_dir" ]]; then
+            "$VENV_PYTHON" -m pip install --quiet --force-reinstall "$_er_dir" 2>/dev/null \
+                || { _fail 'Failed to install endpoint-rendezvous lib into venv'; exit 1; }
+        elif ! "$VENV_PYTHON" -c 'import endpoint_rendezvous' 2>/dev/null; then
+            _fail 'Cannot locate endpoint-rendezvous library. Reinstall the agent-vault plugin from the marketplace, then rerun this installer.'; exit 1
+        fi
         "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR" 2>/dev/null \
             || { _fail 'Failed to install agent-vault package into venv'; exit 1; }
     fi

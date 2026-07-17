@@ -23,6 +23,7 @@ from .config import (
     load_config,
     normalize_entry,
     resolve_kpdb,
+    run_dir,
 )
 from .config import (
     tcp_port as configured_tcp_port,
@@ -31,6 +32,11 @@ from .extensions import ActionContext, UnlockContext, get_registry
 from .gcm import git_credential_action
 from .keepassxc import KeePassXCBackend
 from .prompt import prompt_password
+
+try:
+    from endpoint_rendezvous import clear_endpoint, write_endpoint
+except ImportError:  # pragma: no cover - lib is vendored at install time
+    clear_endpoint = write_endpoint = None  # type: ignore[assignment]
 
 # Service inactivity timeout (0 = never, set via --persistent)
 TIMEOUT_SECONDS = int(os.environ.get("VAULT_TIMEOUT", "600"))
@@ -685,9 +691,31 @@ async def handle_client(
             await writer.wait_closed()
 
 
+def advertised_endpoint(
+    *,
+    is_windows: bool,
+    unix_bound: bool,
+    socket_path: str,
+    tcp_bound: bool,
+    tcp_address: str | None,
+) -> tuple[str, str] | None:
+    """Pick the endpoint to advertise for discovery, preferring the OS-native one.
+
+    On a POSIX host the Unix domain socket is the preferred local endpoint; a
+    Windows host advertises its loopback TCP endpoint. Returns ``(transport,
+    address)`` or ``None`` if nothing bound.
+    """
+    if unix_bound and not is_windows:
+        return ("unix", socket_path)
+    if tcp_bound and tcp_address:
+        return ("tcp", tcp_address)
+    return None
+
+
 async def run_server(service: VaultService, tcp_port: int | None = None) -> None:
     servers = []
 
+    unix_bound = False
     if not IS_WINDOWS:
         if os.path.exists(SOCKET_PATH):
             os.unlink(SOCKET_PATH)
@@ -697,9 +725,11 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
         )
         os.chmod(SOCKET_PATH, 0o600)
         servers.append(unix_srv)
+        unix_bound = True
         log.info("Listening on Unix socket %s", SOCKET_PATH)
 
     port = tcp_port or configured_tcp_port()
+    tcp_address: str | None = None
     try:
         tcp_srv = await asyncio.start_server(
             lambda r, w: handle_client(r, w, service),
@@ -707,7 +737,10 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
             port=port,
         )
         servers.append(tcp_srv)
-        log.info("Listening on TCP 127.0.0.1:%d", port)
+        # Read the *actual* bound port so this stays correct if ``port`` is ever 0.
+        bound_port = tcp_srv.sockets[0].getsockname()[1]
+        tcp_address = f"127.0.0.1:{bound_port}"
+        log.info("Listening on TCP %s", tcp_address)
     except OSError as e:
         if IS_WINDOWS or not servers:
             log.error("Could not bind TCP 127.0.0.1:%d (%s); no listeners, exiting", port, e)
@@ -716,6 +749,24 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
 
     with open(PID_FILE, "w") as f:
         f.write(str(os.getpid()))
+
+    # Advertise the endpoint so clients can discover it instead of hardcoding a
+    # constant -- see the endpoint-rendezvous lib and
+    # docs/patterns/local-endpoint-discovery.md. Additive: clients that still use
+    # the fixed socket/port are unaffected.
+    advertised = advertised_endpoint(
+        is_windows=IS_WINDOWS,
+        unix_bound=unix_bound,
+        socket_path=SOCKET_PATH,
+        tcp_bound=tcp_address is not None,
+        tcp_address=tcp_address,
+    )
+    if advertised is not None and write_endpoint is not None:
+        try:
+            path = write_endpoint(run_dir(), advertised[0], advertised[1])
+            log.info("Advertised endpoint %s:%s at %s", advertised[0], advertised[1], path)
+        except OSError as e:
+            log.warning("Could not write rendezvous file (%s); discovery degraded", e)
 
     try:
         while not service._shutdown and not service.is_expired:
@@ -730,6 +781,9 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
 
 
 def cleanup() -> None:
+    if clear_endpoint is not None:
+        with contextlib.suppress(OSError):
+            clear_endpoint(run_dir())
     for path in (SOCKET_PATH, PID_FILE):
         with contextlib.suppress(FileNotFoundError):
             os.unlink(path)
