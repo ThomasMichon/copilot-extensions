@@ -113,3 +113,43 @@ def test_build_decorators_no_legacy_filter_when_inactive():
 def test_empty_decorators_default():
     cfg = _cfg()
     assert cfg.decorators == []
+
+
+def test_gate_valid():
+    cfg = _cfg(decorators=[{
+        "type": "gate",
+        "match_tools": ["get_details"],
+        "preflight": {"tool": "lookup", "args_from": {"id": "$args.recordId"},
+                      "cache": "per-key"},
+        "allow_when": {"path": "isSensitive", "equals": False},
+        "on_deny": "stub",
+    }])
+    assert cfg.decorators[0].type == "gate"
+    assert cfg.decorators[0].options["match_tools"] == ["get_details"]
+
+
+def test_gate_requires_match_tools():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "gate",
+                          "preflight": {"tool": "lookup"},
+                          "allow_when": {"path": "x", "equals": 1}}])
+
+
+def test_gate_requires_preflight_tool():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "gate", "match_tools": ["a"],
+                          "preflight": {}, "allow_when": {"path": "x", "equals": 1}}])
+
+
+def test_gate_requires_allow_when():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "gate", "match_tools": ["a"],
+                          "preflight": {"tool": "lookup"}}])
+
+
+def test_gate_invalid_on_deny_rejected():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "gate", "match_tools": ["a"],
+                          "preflight": {"tool": "lookup"},
+                          "allow_when": {"path": "x", "equals": 1},
+                          "on_deny": "bogus"}])

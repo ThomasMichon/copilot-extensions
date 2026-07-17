@@ -407,6 +407,59 @@ where `fields` is `{"System.Title": …}`) as well as genuine nesting. Ops apply
 `extract → pick → drop` (or `command` alone); multiple rules for a tool chain in
 order. A single inline rule may be written without the `rules:` wrapper.
 
+### `gate` — preflight-conditional tool access
+
+Allow or deny a tool **per-call**, based on a fact that lives in a *different*
+upstream response. When a client calls one of `match_tools`, `gate` first issues a
+**preflight** lookup (keyed off the gated call's own arguments), evaluates a
+boolean **predicate** over the lookup result, and then either lets the real call
+through or returns a policy **stub** / empty **drop** / JSON-RPC **error**. This is
+the structural way to enforce a rule whose signal is *out-of-band* for the gated
+tool itself — something a static `filter`/`transform` can't see.
+
+```yaml
+- type: gate
+  match_tools: [get_details, get_discussion]   # globs; which tools/call to gate
+  preflight:
+    tool: get_record_by_id                     # the out-of-band lookup
+    args_from: { id: "$args.recordId" }        # map preflight args from the gated call
+    cache: per-key                             # cache the lookup per resolved args
+  allow_when:                                  # boolean predicate over the lookup result
+    all:
+      - any:
+          - { path: "tags[*]", in: ["public", "internal"] }
+          - { path: "title", matches: "\\[OK\\]" }
+      - { path: "isSensitive", equals: false }
+  on_deny: stub                                # stub | drop | error
+  stub: { blocked: true, reason: "withheld by policy" }
+```
+
+- **`match_tools`** — globs; only a matching `tools/call` triggers a preflight
+  (everything else, including `tools/list`, passes straight through — the gated
+  tools stay visible).
+- **`preflight`** — one upstream `tools/call`. `args_from` maps each preflight
+  argument from a `$args.<path>` reference into the gated call's arguments
+  (`$args` alone = the whole arguments object); any non-`$args` value is a
+  literal. `cache: per-key` reuses the lookup across tools that gate off the same
+  key (one round-trip per distinct key).
+- **`allow_when`** — a predicate tree of `all` / `any` / `not` combinators over
+  leaf tests `{ path: <p>, <op>: <value> }`. Paths support dotted keys, `[*]`
+  array wildcards, and `[n]` indices. Ops: `in` / `not_in`, `equals` /
+  `not_equals`, `matches` / `not_matches` (regex), `contains`, `exists`. A
+  positive op holds when *any* addressed value matches; its negative twin holds
+  when *none* does (vacuously true if the path is absent).
+- **`on_deny`** — `stub` (return the `stub` payload as the result, default),
+  `drop` (empty result), or `error` (JSON-RPC error). **`on_error`** (`deny`
+  default, or `allow`) decides what happens if the preflight itself fails —
+  **fail-closed** by default, so a policy gate denies when it can't prove the
+  allow condition.
+
+> **Placement.** The preflight reaches the upstream *through the decorators below
+> `gate`*, so put `gate` above any `filter`/`transform` whose output the predicate
+> must not see stripped — or below them if the predicate should read the reshaped
+> result. `gate` never prunes `tools/list`; a gated tool stays advertised and
+> returns the deny action for calls that fail the predicate.
+
 
 
 ## Use from a Copilot agent
@@ -645,7 +698,7 @@ stdin/stdout        Bridge        Decorator pipeline           UpstreamClient   
   `Pipeline` (compose decorators around the upstream core call).
 - `decorators/` — `base` (Decorator + BridgeContext), `_catalog` (catalog
   pagination + JSON-Schema→TS), and the `filter`/`rename`/`defer`/`code-mode`/
-  `storage` decorators.
+  `storage`/`transform`/`gate` decorators.
 - `bridge.py` — stdio framing, per-request dispatch through the pipeline,
   unsolicited-message passthrough.
 - `client.py` — `OneShotSession`: connect + `initialize` + one `tools/list` /
