@@ -1009,6 +1009,25 @@ def prune_worktrees(*, cwd: str | Path) -> None:
     git("worktree", "prune", cwd=cwd, check=False)
 
 
+def list_worktree_paths(*, cwd: str | Path) -> list[Path]:
+    """Return the on-disk paths of every worktree registered on this repo.
+
+    Parses ``git worktree list --porcelain`` -- one ``worktree <path>`` line per
+    registered tree, including the main checkout. Returns ``[]`` if the command
+    fails (e.g. *cwd* is not a git repo). Used by the garbage collector to tell a
+    real, registered worktree from an orphaned on-disk directory left behind by
+    an interrupted/forced removal.
+    """
+    res = git("worktree", "list", "--porcelain", cwd=cwd, check=False)
+    if res.returncode != 0:
+        return []
+    paths: list[Path] = []
+    for line in (res.stdout or "").splitlines():
+        if line.startswith("worktree "):
+            paths.append(Path(line[len("worktree "):].strip()))
+    return paths
+
+
 def is_branch_merged(
     branch: str,
     target: str,
