@@ -169,6 +169,29 @@ auth:
     target_env: SERVICE_API_KEY
 ```
 
+### `server.url` environment substitution (local-first endpoints)
+
+A `server.url` may reference environment variables with shell-style
+`${VAR}` and `${VAR:-default}` syntax, expanded when the config is loaded.
+This gives an `http` bridge the *local-endpoint-discovery* resolution order
+(operator env override -> documented default): one shared config points an
+**on-box** consumer at a host-local endpoint (skipping a gateway round-trip)
+while every other host falls back to the documented default — no per-host
+config file.
+
+```yaml
+server:
+  type: http
+  # On a host where VEI runs locally, set VEI_MCP_URL=http://localhost:8420/mcp/
+  # to reach it directly; everywhere else this resolves to the gateway default.
+  url: ${VEI_MCP_URL:-https://gateway.example:1958/vei-search/mcp/}
+```
+
+`${VAR:-default}` takes the default when `VAR` is **unset or empty** (matching
+POSIX `:-` semantics). A bare `${VAR}` with no fallback that is unset/empty is a
+hard error at load — fail loud with the offending name rather than silently
+build an empty endpoint. Substitution applies to `server.url` only.
+
 ## Decorator stack
 
 Beyond transport + auth, a bridge can apply an ordered **decorator stack** — MCP

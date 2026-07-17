@@ -239,3 +239,64 @@ def test_load_named_from_home(tmp_path, monkeypatch):
 
 def test_bridges_dir_default_location():
     assert BRIDGES_DIR.name == "bridges"
+
+
+# --- server.url environment substitution (${VAR} / ${VAR:-default}) ----------
+# Gives an http bridge the local-endpoint-discovery resolution order: an
+# operator env override wins, else the documented default. Lets one shared
+# config point on-box consumers at a host-local endpoint while everyone else
+# falls back to the gateway URL.
+
+
+def test_url_env_override_wins(monkeypatch):
+    monkeypatch.setenv("VEI_MCP_URL", "http://localhost:8420/mcp/")
+    cfg = parse_config(_http_doc(server={
+        "type": "http",
+        "url": "${VEI_MCP_URL:-https://gateway/vei-search/mcp/}",
+    }))
+    assert cfg.server.url == "http://localhost:8420/mcp/"
+
+
+def test_url_env_falls_back_to_default_when_unset(monkeypatch):
+    monkeypatch.delenv("VEI_MCP_URL", raising=False)
+    cfg = parse_config(_http_doc(server={
+        "type": "http",
+        "url": "${VEI_MCP_URL:-https://gateway/vei-search/mcp/}",
+    }))
+    assert cfg.server.url == "https://gateway/vei-search/mcp/"
+
+
+def test_url_env_empty_treated_as_unset(monkeypatch):
+    # ``:-`` semantics: an empty variable takes the default.
+    monkeypatch.setenv("VEI_MCP_URL", "")
+    cfg = parse_config(_http_doc(server={
+        "type": "http",
+        "url": "${VEI_MCP_URL:-https://gateway/vei-search/mcp/}",
+    }))
+    assert cfg.server.url == "https://gateway/vei-search/mcp/"
+
+
+def test_url_bare_ref_expands_when_set(monkeypatch):
+    monkeypatch.setenv("MCP_ENDPOINT", "https://host/mcp/")
+    cfg = parse_config(_http_doc(server={"type": "http", "url": "${MCP_ENDPOINT}"}))
+    assert cfg.server.url == "https://host/mcp/"
+
+
+def test_url_bare_ref_unset_no_default_is_error(monkeypatch):
+    monkeypatch.delenv("MCP_ENDPOINT", raising=False)
+    with pytest.raises(ConfigError):
+        parse_config(_http_doc(server={"type": "http", "url": "${MCP_ENDPOINT}"}))
+
+
+def test_url_without_env_ref_is_unchanged():
+    cfg = parse_config(_http_doc(server={"type": "http", "url": "https://plain/mcp/"}))
+    assert cfg.server.url == "https://plain/mcp/"
+
+
+def test_url_default_may_contain_colons_and_slashes(monkeypatch):
+    monkeypatch.delenv("VEI_MCP_URL", raising=False)
+    cfg = parse_config(_http_doc(server={
+        "type": "http",
+        "url": "${VEI_MCP_URL:-https://lambda-core.facility.michon.ski:1958/vei-search/mcp/}",
+    }))
+    assert cfg.server.url == "https://lambda-core.facility.michon.ski:1958/vei-search/mcp/"
