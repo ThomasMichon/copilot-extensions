@@ -117,6 +117,29 @@ bridge import, no resolver — agents invoke its binstub directly.
 | **9280** (Windows) / **9281** (Linux/WSL) | agent-bridge | HTTP API the CLI talks to. Platform-split avoids a WSL2/Windows TCP collision. Use `agent-bridge status` to read the active port. |
 | **9857** | agent-codespaces credential relay | TCP server the CodeSpace reaches over an SSH reverse tunnel (`-R 9857`) to fetch git/GitHub/Azure credentials. Starts with the bridge service. |
 
+## Agent plugins vs harness plugins — and two senses of "harness"
+
+The word **harness** lands in two unrelated places; keep them apart:
+
+1. **A harness _plugin_** — a payload-only `<repo>-harness` plugin whose skills
+   teach an agent how to work *on one specific repo* (contribute, deploy,
+   diagnose). `copilot-extensions-harness` is the reference implementation:
+   enable it in a control repo instead of hand-writing a per-repo narrative.
+   Authoring one is the **`authoring-harness-plugins`** skill's job.
+2. **A control-_harness_ repo** — *your own* control-plane repo (a dotfiles-style
+   hub) that drives Copilot sessions across many repos and machines. Building one
+   is the **`building-harnesses`** skill + the
+   [harness runbook](harness-runbook.md); its config lives in
+   [§ The control-harness repo](#the-control-harness-repo) below.
+
+Neither is an **agent / runtime plugin** — the `agent-*` plugins
+(agent-worktrees, agent-bridge, agent-mcp, …) that actually *do* work: isolate
+worktrees, bridge messages, wrap MCP servers. In the patterns vocabulary those
+are **runtime CLI** or **runtime service** shapes, whereas both a
+`<repo>-harness` plugin and the planning/authoring plugins (efforts, visions,
+customizing-copilot) are **payload-only**. The full taxonomy is
+[docs/patterns § Plugin shapes](patterns/README.md#plugin-shapes).
+
 ## The control-harness repo
 
 A teammate's own repo (a dotfiles-style hub, `my-control-harness` in examples)
