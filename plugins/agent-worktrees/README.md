@@ -77,6 +77,7 @@ adoption, and session launch.
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Install, adopt a repo, launch sessions |
+| [Worktree Lifecycle & Change Management](docs/worktree-lifecycle.md) | The full landing flow — states, direct-push and PR mode, held/follow-up and serial-vs-parallel PRs |
 | [Architecture](docs/architecture.md) | Plugin/runtime layers, installed layout, session lifecycle |
 | [CLI Reference](docs/cli-reference.md) | Commands, installer actions, config format |
 
