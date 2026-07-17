@@ -17,6 +17,7 @@ from .base import BridgeContext, Decorator
 from .code_mode import CodeModeDecorator
 from .defer import DeferDecorator
 from .filter import FilterDecorator
+from .gate import GateDecorator
 from .rename import RenameDecorator
 from .storage import StorageDecorator
 from .transform import TransformDecorator
@@ -37,6 +38,7 @@ REGISTRY: dict[str, type[Decorator]] = {
     CodeModeDecorator.type: CodeModeDecorator,
     StorageDecorator.type: StorageDecorator,
     TransformDecorator.type: TransformDecorator,
+    GateDecorator.type: GateDecorator,
 }
 
 

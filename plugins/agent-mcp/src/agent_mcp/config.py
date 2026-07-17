@@ -42,7 +42,7 @@ PARSE_MODES = ("keyvalue", "raw")
 
 # Decorator types in the ``decorators:`` stack. Kept in sync with the registry in
 # ``agent_mcp.decorators`` (a test asserts they match) to avoid a circular import.
-DECORATOR_TYPES = ("filter", "rename", "defer", "code-mode", "storage", "transform")
+DECORATOR_TYPES = ("filter", "rename", "defer", "code-mode", "storage", "transform", "gate")
 
 BRIDGES_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp")) / "bridges"
 
@@ -469,6 +469,35 @@ def _validate_decorators(decorators: list[DecoratorSpec]) -> list[str]:
             errors.extend(_validate_storage_rules(opts.get("rules"), label))
         if d.type == "transform":
             errors.extend(_validate_transform_rules(opts, label))
+        if d.type == "gate":
+            errors.extend(_validate_gate(opts, label))
+    return errors
+
+
+def _validate_gate(opts: dict, label: str) -> list[str]:
+    """Validate a gate decorator (match_tools + preflight + allow_when + actions)."""
+    errors: list[str] = []
+    match_tools = opts.get("match_tools")
+    if not match_tools or not isinstance(match_tools, list):
+        errors.append(f"{label}: gate requires a non-empty 'match_tools' list")
+    preflight = opts.get("preflight")
+    if not isinstance(preflight, dict) or not preflight.get("tool"):
+        errors.append(f"{label}: gate requires 'preflight' with a 'tool'")
+    else:
+        args_from = preflight.get("args_from")
+        if args_from is not None and not isinstance(args_from, dict):
+            errors.append(f"{label}.preflight.args_from must be a mapping")
+        cache = preflight.get("cache")
+        if cache is not None and cache not in ("per-key", "none"):
+            errors.append(f"{label}.preflight.cache '{cache}' must be per-key|none")
+    if not isinstance(opts.get("allow_when"), dict):
+        errors.append(f"{label}: gate requires an 'allow_when' predicate mapping")
+    on_deny = opts.get("on_deny", "stub")
+    if on_deny not in ("stub", "drop", "error"):
+        errors.append(f"{label}.on_deny '{on_deny}' must be stub|drop|error")
+    on_error = opts.get("on_error", "deny")
+    if on_error not in ("deny", "allow"):
+        errors.append(f"{label}.on_error '{on_error}' must be deny|allow")
     return errors
 
 

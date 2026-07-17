@@ -180,6 +180,7 @@ decorators:
 | `code-mode` | Expose a `run_code` tool with a generated TypeScript `Tools` interface; snippets run in Node and chain tool calls. Adds `find_tool` for typed signatures on big catalogs. Needs Node on `PATH`. |
 | `storage` | Externalize large outputs to `mcpstream://…` handles; rehydrate handle inputs; `read_stream` fetches them. **Field-level `rules:`** target specific tool input/output JSON paths, attach a summary (count + schema + head, or a command), and rewrite a stream-mode input param's schema to a URL. |
 | `transform` | Reshape tool results per tool: `extract`/`pick`/`drop` dotted paths (literal-dotted keys like ADO `fields.System.Title` supported) or a `command` (jq-style) filter. |
+| `gate` | Allow/deny a tool **per-call** by a **preflight** upstream lookup + boolean predicate (`all`/`any`/`not`; `in`/`matches`/`equals`/`contains`/`exists` over `[*]`/dotted paths). Deny → `stub`/`drop`/`error`; fail-closed on preflight error. For rules whose signal is out-of-band for the gated tool. |
 
 Decorators compose because each calls *through* the ones below it. Recommended
 order: `defer`/`code-mode` outermost, then `rename`, then `filter`, with
