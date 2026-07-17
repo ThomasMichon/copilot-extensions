@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-07-16
+- **Last revised:** 2026-07-17
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -92,6 +92,17 @@ All service-bearing plugins share one deploy/update/version footprint (the
 install contract), so a user — or an automated fleet — reasons about, audits, and
 upgrades every plugin service the same way.
 
+### install-adopt-boundary
+Two lifecycle verbs, two scopes, never crossed. **Install/update** touches only
+**machine-local** content — it deploys and updates a plugin's own runtime and
+local config, and may migrate that config's *schema*, but it never changes the
+user's chosen *behaviors* and never alters a **repo** (its committed config or its
+git hooks). **Register/adopt** is the only verb that mutates a repo: it takes the
+user's preferences and wires the repo up — writing repo and machine-local config
+and injecting/validating in-repo git hooks. Because you only *adopt* a repo you
+own, that mutating power is confined to owned repos by construction; a repo you
+merely contribute to is never adopted, so its git is never touched.
+
 ## Behaviors
 
 ### collision-free-endpoints
@@ -140,6 +151,12 @@ adds **zero new listening ports** to the machine.
 When a service cannot claim or reach its endpoint, it surfaces the **real,
 literal cause** (what actually blocked the address) rather than masking it or
 silently degrading — so the failure is diagnosable instead of mysterious.
+
+### install-leaves-repos-unaltered
+Running install or update never changes a repo: no commit, no edit to the repo's
+committed config, no git-hook injection. At most it migrates machine-local config
+schema and *warns* about a stale or deprecated repo convention it observes. Any
+repo-altering effect appears only after an explicit adopt / re-adopt.
 
 ## Non-Goals / Boundaries
 

@@ -93,6 +93,13 @@ core of the principles above; a reviewer checks a change against these.
   `~/.copilot/installed-plugins/…` or a runtime dir is forbidden.
 - **A version bump ships the change.** Every plugin change bumps its version in the
   same commit (see `CONTRIBUTING.md`); an un-bumped push is silently ignored.
+- **Repo mutation is an adopt-only power.** `install`/`update` act on
+  **machine-local** state only — they may migrate local config *schema* and *warn*
+  on a stale/deprecated repo convention, but never alter a repo's committed config
+  or inject its git hooks, and never change user *behaviors*. Only `register`/`adopt`
+  mutates a repo (taking user preferences); since you adopt only repos you own, the
+  power is confined to owned repos by construction. (Serves *Vision plugin-services
+  §Features/install-adopt-boundary*.)
 
 ## Patterns
 
@@ -104,6 +111,7 @@ the exemplars, and the vision it serves):
 | [local-endpoint-discovery](local-endpoint-discovery.md) | How a service exposes a discoverable, collision-free, local-first endpoint — the anti-static-port pattern, incl. the rendezvous / port-mapping file |
 | [service-transport](service-transport.md) | Which channel a service exposes — the transport ladder (stdio → OS-native socket/pipe → OS-assigned loopback → tunnel) and the named-pipe/UDS reality |
 | [service-lifecycle-supervision](service-lifecycle-supervision.md) | Platform-native always-on supervision (Windows Scheduled Task / systemd user unit) and its lifecycle verbs |
+| [install-vs-adopt-boundary](install-vs-adopt-boundary.md) | Which lifecycle verb may mutate what — `install`/`update` is machine-local (schema-migrate + warn), `register`/`adopt` is the only repo-mutating verb (repo config + git hooks), and ownership falls out of adoption |
 | [a-la-carte-independence](a-la-carte-independence.md) | Standalone-first plugins that compose gracefully, incl. the resolver-import pattern |
 | [cross-platform-parity](cross-platform-parity.md) | One behavior across Windows and Linux/WSL: shells, UTF-8, the WSL/Windows boundary, binstubs |
 
