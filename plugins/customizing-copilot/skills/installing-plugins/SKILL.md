@@ -62,6 +62,18 @@ across machines.
 A repo's `.github/copilot/settings.json` is merged with the user
 `~/.copilot/settings.json`; `enabledPlugins` may live in either.
 
+> **Session extensions vs. skills/payload — a scoping caveat.** Repo-scoped
+> `enabledPlugins` reliably governs a plugin's **payload** — its skills, hooks,
+> and agents — for sessions in that repo. A plugin's **session extension** (an
+> `extensions/<name>/extension.mjs` the plugin contributes) is activated from the
+> **user-level** enabled set — `~/.copilot/settings.json` `enabledPlugins` plus
+> the persisted install state — which the extension loader currently reads
+> *without* merging the repo's `.github/copilot/settings.json`. So a plugin whose
+> value depends on a **session extension loading** should be enabled at the
+> **user level** (or installed globally), not via repo-scoped `enabledPlugins`
+> alone. Skills/payload are unaffected; repo-scoped activation of *session
+> extensions* is a known limitation.
+
 ## Alternative: global install
 
 Install into the user profile instead (handy for a machine with no single
