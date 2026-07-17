@@ -51,6 +51,36 @@ worktree-class repo's anchor directly is a bug.
 > Legacy mapping: the old `type: project` becomes `worktree`, and
 > `type: repo` becomes `reference`. Both still load.
 
+### Class is *not* role, locus, or delegate
+
+`class` is one of **three orthogonal axes** that describe a repo. They are easy
+to conflate — a phrase like "worktree / owner / delegate" wrongly mixes all
+three into one list — so keep them straight:
+
+| Axis | Field · home | Answers | Values |
+|------|--------------|---------|--------|
+| **class** | `class` · repos registry (this skill) | *How is the checkout edited?* | `reference` \| `singleton` \| `worktree` |
+| **role** | `role` · `related.yaml` ([`agent-worktrees-related`](../agent-worktrees-related/SKILL.md)) | *What is this repo to another repo?* | `product` \| `dependency` \| `consumer` \| `tooling` \| `docs` \| `sibling` |
+| **locus + delegate** | `locus` / `delegate` · `related.yaml` | *Where does work happen, and who is handed it?* | locus `local` \| `machine:<k>` \| `codespace` \| `container`; delegate `agent-bridge` \| `agent-codespaces` \| `agent-containers` \| `none` |
+
+The two words that most often get mistaken for classes are **not** classes:
+
+- **"owner" / "direct-push, no PR"** is a *landing policy*, not a class. A repo
+  you own is typically `class: worktree` (still edited via isolated worktrees)
+  with PR mode **off**, so `finalize` pushes straight to the default branch; a
+  repo you *contribute* to is the same class with PR mode **on**. Class governs
+  *edit isolation*; the `pr:` config governs *how work lands* — see
+  [worktree-lifecycle.md § Landing the change](../../docs/worktree-lifecycle.md#3-landing-the-change).
+- **"delegate"** is the *locus/handoff* axis (`delegate.via` in `related.yaml`) —
+  hand the work to another machine / CodeSpace / container's agent — orthogonal
+  to how the checkout is classed.
+
+A single repo is described by all three axes at once. Example: `copilot-extensions`
+is **class** `worktree` (edit in isolated worktrees), **role** `tooling` (what it
+is to a control repo), **locus** `local` + **delegate** `none` (worked in place),
+under an owner / direct-push **landing policy** (no PR). "worktree", "tooling",
+and "owner" are three different answers, not one field.
+
 ## Editing a Worktree-Class Repo (Collision-Free)
 
 For repos classed **worktree** (the default for any repo you contribute
