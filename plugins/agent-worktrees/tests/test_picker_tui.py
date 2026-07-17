@@ -179,18 +179,21 @@ def test_clean_dialog_live_filter_preview():
             scr._activate()                       # open the Clean dialog
             assert scr.cleanup is not None
             sel_ids = scr._cleanup_union()
-            assert sel_ids                        # default "Merged" bucket on
+            assert sel_ids                        # bulk default: safe buckets on
             dm = dim_map(scr)
             for id4, dim in dm.items():
                 assert dim == (id4 not in sel_ids)   # in-set bright, rest dimmed
-            # Toggling the "Unused" bucket widens the previewed set live.
+            # The bulk Clean button defaults to the full safe cleanable set
+            # (merged + unused + conversation), so toggling a bucket OFF narrows
+            # the previewed set live.
             before = set(scr._cleanup_union())
             ui = next(i for i, o in enumerate(scr.cleanup["opts"])
                       if o["label"] == "Unused")
+            assert scr.cleanup["opts"][ui]["on"]  # on by default in the bulk path
             scr.cleanup["idx"] = ui
-            scr._key_scopedlg("space")
+            scr._key_scopedlg("space")            # toggle Unused OFF
             after = set(scr._cleanup_union())
-            assert after > before
+            assert after < before
             dm2 = dim_map(scr)
             for id4, dim in dm2.items():
                 assert dim == (id4 not in after)
@@ -1422,6 +1425,37 @@ def test_cleanup_dialog_buckets_and_sync_eligibility():
             assert rows["cl00"]["dispo_level"] == "SAFE"
             assert rows["ac00"]["dispo_level"] == "UNSAFE"
             assert rows["op00"]["dispo_level"] == ""      # open PR: healthy
+
+    asyncio.run(run())
+
+
+def test_bulk_clean_defaults_to_safe_set_selection_stays_conservative():
+    """The bulk Clean button (no selection) pre-checks the full *safe* cleanable
+    set -- Merged & finalized + Unused + Conversation-only -- so one Confirm
+    sweeps every prunable worktree. An explicit selection stays conservative:
+    only the already-merged bucket is pre-checked."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:  # noqa: F841
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+
+            # Bulk path (ids=None): the safe buckets default ON, so the
+            # pre-checked union is the whole safe cleanable set.
+            scr._open_cleanup()
+            on = {o["label"] for o in scr.cleanup["opts"] if o["on"]}
+            assert on == {"Merged & finalized", "Unused", "Conversation-only"}
+            assert scr._cleanup_union() == {"cl00", "el00", "un00", "cv00"}
+
+            # Explicit selection: only the already-merged bucket is pre-checked
+            # (the operator already hand-picked the scope).
+            scr.cleanup = None
+            scr._open_cleanup(ids={"cl00", "un00", "cv00"})
+            on2 = {o["label"] for o in scr.cleanup["opts"] if o["on"]}
+            assert on2 == {"Merged & finalized"}
+            assert scr._cleanup_union() == {"cl00"}
 
     asyncio.run(run())
 
