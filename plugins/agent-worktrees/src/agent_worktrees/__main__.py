@@ -4861,6 +4861,87 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_gc_orphans(report: dict, dry_run: bool) -> None:
+    """Human-facing summary of the orphan-directory sweep."""
+    removed = report.get("removed", [])
+    skipped = report.get("skipped", [])
+    print()
+    print("🧹 Orphan directories -- on disk, not a git worktree, not tracked")
+    if not report.get("scanned"):
+        print("  none found.")
+        return
+    verb = "would remove" if dry_run else "removed"
+    for item in removed:
+        print(f"  ✓ {verb}: {item['path']}  ({item['reason']})")
+    for item in skipped:
+        output.warn(f"  skipped: {item['path']}  ({item['reason']})")
+    print()
+    if dry_run:
+        print(f"{len(removed)} orphan dir(s) would be removed, "
+              f"{len(skipped)} skipped.")
+    else:
+        output.ok(f"Removed {len(removed)} orphan dir(s); "
+                  f"{len(skipped)} skipped.")
+
+
+def cmd_gc(args: argparse.Namespace) -> int:
+    """Garbage-collect this project's worktrees on this machine.
+
+    One command, two sweeps, then a prune:
+
+      1. **Tracked reap** -- the same prune-safety verdict as ``cleanup``
+         (finalized/merged/clean; ``--include-unused`` / ``--include-conversations``
+         widen it). Never touches a dirty / ahead / follow-up / active / system
+         worktree. ``--dry-run`` lists without removing.
+      2. **Orphan-directory sweep** -- removes *effectively-empty* on-disk
+         directories under the worktree roots that are neither a registered git
+         worktree nor a tracking record (leftovers from interrupted/forced
+         removals), with a locked-directory retry/skip; a leftover holding real
+         files is reported, never auto-deleted.
+      3. ``git worktree prune`` to drop stale registrations.
+
+    Idempotent: a second run right after the first finds nothing to do. System
+    worktrees are cleanup-exempt (reaped by their owning daemon); a first-class
+    system-worktree GC follows once their typing (#1069) is in place.
+
+    ``--json`` reports the orphan sweep (machine-readable); the tracked reap runs
+    in text mode.
+    """
+    from . import gc as gc_mod
+
+    config = cfg.load_config()
+    repo = config.default_repo
+    records = tracking.list_records(cfg.tracking_dir())
+    dry = getattr(args, "dry_run", False)
+    json_mode = getattr(args, "json", False)
+
+    # 1. Tracked reap -- reuse the cleanup verdict machinery (one fetch, full
+    #    safety). Skipped in --json mode (its output is text) and --orphans-only.
+    if not json_mode and not getattr(args, "orphans_only", False):
+        cmd_cleanup(argparse.Namespace(
+            clean=not dry, worktree_id=None, force=False, json=False,
+            include_unused=getattr(args, "include_unused", False),
+            include_conversations=getattr(args, "include_conversations", False),
+            reconcile_prs=getattr(args, "reconcile_prs", False),
+            max_age_days=getattr(args, "max_age_days", 7),
+        ))
+
+    # 2. Orphan-directory sweep (the GC-specific capability).
+    orphans = gc_mod.sweep_orphans(repo, records, dry_run=dry)
+
+    # 3. Prune stale worktree registrations.
+    if not dry:
+        git_ops.prune_worktrees(cwd=repo.anchor)
+
+    if json_mode:
+        print(json.dumps(
+            {"dry_run": dry, "repo": config.repo_name, "orphans": orphans},
+            indent=2))
+        return 0
+    _print_gc_orphans(orphans, dry)
+    return 0
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # sync (fast-forward worktrees to the default branch)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -8387,6 +8468,29 @@ def build_parser() -> argparse.ArgumentParser:
                         "requires network + provider credentials")
     p.add_argument("--max-age-days", type=int, default=7)
 
+    # gc (garbage-collect worktrees: tracked reap + orphan-directory sweep)
+    p = sub.add_parser(
+        "gc",
+        help="Garbage-collect worktrees: tracked reap (cleanup verdict) + "
+             "on-disk orphan-directory sweep + git worktree prune")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Report what would be removed without removing anything")
+    p.add_argument("--json", action="store_true",
+                   help="Emit the orphan-sweep report as JSON (the tracked reap "
+                        "runs in text mode)")
+    p.add_argument("--orphans-only", action="store_true",
+                   help="Only sweep orphan directories; skip the tracked reap")
+    p.add_argument("--include-unused", action="store_true",
+                   help="Also reap truly-empty tracked worktrees (no commits, "
+                        "zero conversation turns)")
+    p.add_argument("--include-conversations", action="store_true",
+                   help="Also reap conversation-only worktrees (no commits but "
+                        "the session held turns); implies --include-unused")
+    p.add_argument("--reconcile-prs", action="store_true",
+                   help="Refresh tracked PR state from the provider before "
+                        "deciding (heals stale 'open' PRs merged externally)")
+    p.add_argument("--max-age-days", type=int, default=7)
+
     # reap-sessions (GC orphaned tmux/psmux sessions -- issue #713)
     p = sub.add_parser(
         "reap-sessions",
@@ -9068,6 +9172,7 @@ COMMAND_MAP = {
     "create": cmd_create,
     "remove-system": cmd_remove_system,
     "cleanup": cmd_cleanup,
+    "gc": cmd_gc,
     "reap-sessions": cmd_reap_sessions,
     "restart": cmd_restart,
     "sync": cmd_sync,
