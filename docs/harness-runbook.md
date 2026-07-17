@@ -160,6 +160,33 @@ after the table. You will encode the choice in
 
 ---
 
+## Setup & adoption skills (index)
+
+Each capability ships a trigger-discoverable **setup skill**. They split along the
+[install-vs-adopt boundary](patterns/install-vs-adopt-boundary.md): **install/update**
+skills touch only **machine-local** runtime state, while **adopt/scaffold** skills
+write into **the repo**. This is the single lookup for "which skill sets up what";
+the phases below invoke them in order.
+
+| Skill | Scope | What it does |
+|-------|-------|--------------|
+| `copilot-extensions-setup` | install · machine-local | Deploy/refresh the **agent-worktrees + agent-bridge** runtimes (venv + binstub + service) after a payload update |
+| `agent-vault-setup` | install · machine-local | Install/update the **agent-vault** runtime + the `vault-askpass` SUDO_ASKPASS helper |
+| `session-sync-setup` | install · machine-local | Deploy **agent-logger**'s `session-sync` task/timer and its target |
+| `codespaces-setup` | adopt · repo | Create `codespaces.yaml`, adopt repos, configure credential-relay sources |
+| `containers-fleet` | adopt · repo | Configure the `containers.yaml` fleet defaults for **agent-containers** |
+| `efforts-setup` | scaffold · repo | Scaffold `efforts/` + this repo's efforts addendum (Phase 7) |
+| `visions-setup` | scaffold · repo | Scaffold `visions/` + this repo's visions addendum (Phase 7) |
+| `create-setup-script` | scaffold · repo | Generate an ACP-safe `tools/setup/setup.{ps1,sh}` (Phase 1) |
+| `context-handoff-setup` | verify · no install | Troubleshoot the context-handoff **extension** (it needs no install — just the plugin enabled + experimental mode on) |
+
+> Payload-only plugins (`efforts`, `visions`, `context-handoff`,
+> `customizing-copilot`, `harness-*`, `wsl-setup`) have **no runtime to install** —
+> their "setup" is enabling the plugin, then scaffolding/adoption where applicable.
+> Only the runtime plugins carry an install/update setup skill.
+
+---
+
 ## Phase 0 — Prerequisites
 
 **Opinionated.** Every harness assumes these.
