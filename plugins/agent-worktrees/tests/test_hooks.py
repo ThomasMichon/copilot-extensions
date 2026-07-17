@@ -169,3 +169,48 @@ class TestInstallHooks:
         assert (hdir / "pre-commit.local").exists()
         assert "custom" in (hdir / "pre-commit.local").read_text()
         assert hooks._SHIM_MARKER in (hdir / "pre-commit").read_text()
+
+
+class TestHooksPathReconciliation:
+    """core.hooksPath cleanup is an adopt (mutation) concern; detection is
+    read-only for install/update warn (Phase 6, effort declarative-worktree-launch)."""
+
+    def test_stale_none_when_unset(self, anchor_and_worktree):
+        anchor, _ = anchor_and_worktree
+        assert hooks.stale_hooks_path(anchor) is None
+
+    def test_stale_detected_when_shadowing(self, anchor_and_worktree):
+        anchor, _ = anchor_and_worktree
+        _git("config", "core.hooksPath", "tools/hooks", cwd=anchor)
+        assert hooks.stale_hooks_path(anchor) == "tools/hooks"
+
+    def test_not_stale_when_points_at_managed_dir(self, anchor_and_worktree):
+        anchor, _ = anchor_and_worktree
+        managed = hooks.hooks_dir_for(anchor)
+        _git("config", "core.hooksPath", str(managed), cwd=anchor)
+        assert hooks.stale_hooks_path(anchor) is None
+
+    def test_clear_unsets_and_returns_value(self, anchor_and_worktree):
+        anchor, _ = anchor_and_worktree
+        _git("config", "core.hooksPath", "tools/hooks", cwd=anchor)
+        assert hooks.clear_stale_hooks_path(anchor) == "tools/hooks"
+        # Now unset -> git honors .git/hooks again, nothing left to clear.
+        assert hooks._local_hooks_path(anchor) is None
+        assert hooks.clear_stale_hooks_path(anchor) is None
+
+    def test_clear_noop_when_nothing_stale(self, anchor_and_worktree):
+        anchor, _ = anchor_and_worktree
+        assert hooks.clear_stale_hooks_path(anchor) is None
+
+    def test_hook_health_fresh_then_armed_then_stale(self, anchor_and_worktree):
+        anchor, _ = anchor_and_worktree
+        # Fresh: no shims, no stale hooksPath.
+        assert hooks.hook_health(anchor) == (False, None)
+        # Armed: shims present.
+        hooks.install_hooks(anchor)
+        assert hooks.hook_health(anchor) == (True, None)
+        # A shadowing core.hooksPath is reported even with shims present.
+        _git("config", "core.hooksPath", "tools/hooks", cwd=anchor)
+        present, stale = hooks.hook_health(anchor)
+        assert present is True
+        assert stale == "tools/hooks"

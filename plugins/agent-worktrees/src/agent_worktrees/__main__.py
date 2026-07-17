@@ -5627,20 +5627,31 @@ def cmd_install(args: argparse.Namespace) -> int:
     # Deploy manifest (shared runtime)
     inst.write_deploy_manifest(repo_dir, machine)
 
-    # Install PR-workflow git hook shims into the anchor's shared hooks dir.
-    # Gated on PR mode so deploying to a direct-push repo never touches its
-    # hooks. Inert unless AGENT_WORKTREES_HOOKS=1 even when installed.
+    # PR-workflow git hooks are an ADOPT concern (register), NOT install.
+    # install/update are machine-local and read-only w.r.t. the repo's git: if
+    # PR mode is on but the managed shims are missing or a stale core.hooksPath
+    # shadows them, WARN -- never inject or mutate repo git here. Arming (and
+    # clearing a stale core.hooksPath) happens on adopt: run '<repo> register'
+    # or 'agent-worktrees hook install'.
     try:
         cfg_for_hooks = cfg.load_config(config_path)
         if cfg_for_hooks.default_repo.pr.enabled:
             from . import hooks as _hooks
-            installed_hooks = _hooks.install_hooks(repo_dir)
-            if installed_hooks:
-                output.ok(
-                    f"PR-workflow git hooks installed ({', '.join(installed_hooks)})"
+            present, stale = _hooks.hook_health(repo_dir)
+            if not present:
+                output.warn(
+                    "PR mode is enabled but the PR-workflow git hooks are not "
+                    "installed. Re-adopt the repo ('agent-worktrees register') "
+                    "or run 'agent-worktrees hook install' to arm them."
+                )
+            if stale:
+                output.warn(
+                    f"core.hooksPath is set to '{stale}', which shadows the "
+                    "managed .git/hooks shims -- the PR-workflow guard will not "
+                    "run. Re-adopt ('agent-worktrees register') to clear it."
                 )
     except Exception as e:
-        output.warn(f"Could not install git hooks: {e}")
+        output.warn(f"Could not check git-hook health: {e}")
 
     print()
     output.ok("Installation complete")
@@ -5896,6 +5907,29 @@ def cmd_register(args: argparse.Namespace) -> int:
         wsl_distro=wsl_distro,
         wsl_path=wsl_path,
     )
+
+    # PR-workflow git hooks -- an ADOPT concern. Adopting a repo (which you own)
+    # is the one flow permitted to mutate its git: clear a stale core.hooksPath
+    # that would shadow the managed shims, then inject/refresh them into the
+    # shared .git/hooks. Gated on PR mode so adopting a direct-push repo never
+    # touches its hooks; inert at runtime unless AGENT_WORKTREES_HOOKS=1.
+    try:
+        cfg_for_hooks = cfg.load_config(config_path)
+        if cfg_for_hooks.default_repo.pr.enabled:
+            from . import hooks as _hooks
+            cleared = _hooks.clear_stale_hooks_path(repo_dir)
+            if cleared:
+                output.changed(
+                    f"Cleared stale core.hooksPath ('{cleared}') that shadowed "
+                    "the managed .git/hooks shims"
+                )
+            installed_hooks = _hooks.install_hooks(repo_dir)
+            if installed_hooks:
+                output.ok(
+                    f"PR-workflow git hooks installed ({', '.join(installed_hooks)})"
+                )
+    except Exception as e:
+        output.warn(f"Could not install git hooks: {e}")
 
     # Refresh Windows Terminal profiles if installed via install.ps1
     if plat == "windows":
