@@ -86,6 +86,9 @@ agent-worktrees register my-project
 my-project    # opens the worktree picker
 ```
 
+The bare binstub opens **[the Worktree Picker](picker.md)** — select or create a
+worktree and it launches the session for you.
+
 ## Choosing an Anchor Repo
 
 The **anchor repo** is the main checkout that worktrees branch from.
@@ -201,6 +204,7 @@ Use the `worktree` skill during a Copilot session for guided sign-off.
 ## Next Steps
 
 - **Customize sessions** -- create a setup script for your repo
+- **Learn the Picker** -- see [The Worktree Picker](picker.md) for the launcher UI
 - **Add custom instructions** -- put an `AGENTS.md` in your repo root
   for Copilot CLI context
 - **Manage services** -- if your repo has services with `service.yaml`
