@@ -49,6 +49,54 @@ beyond the host is an explicit, deliberate act, never the default.
 **Fail loud.** If the endpoint can't be claimed, report the *literal* cause (what
 actually holds the address), not a masked "service unavailable."
 
+## The rendezvous file (a.k.a. port-mapping file)
+
+The **rendezvous file** is the discovery seam: a small, well-known, machine-local
+file a service **writes when it binds** and every client **reads to find it**. It
+is the durable, cross-tool convention that replaces a hardcoded constant — the
+same shape the wider ecosystem calls a "port-mapping" or "lock/endpoint" file
+(e.g. a dev server's `.port`, a browser's `DevToolsActivePort`).
+
+**Location — a name derived from identity, not a searched-for guess.** The file
+lives at a fixed *relative* path inside the service's own runtime dir, so any
+client computes the path from the service name with no lookup:
+
+```
+~/.agent-<x>/run/endpoint.json
+```
+
+**Contents — the transport, not just a port.** Record enough that a client can
+*connect* and *trust it's current*, and keep every value ASCII/JSON-parseable:
+
+```json
+{
+  "schema": 1,
+  "transport": "unix" | "pipe" | "tcp",
+  "endpoint": "/home/u/.agent-x/run/x.sock" | "\\\\.\\pipe\\agent-x" | "127.0.0.1:52731",
+  "pid": 48213,
+  "started_at": "2026-07-16T22:41:09Z"
+}
+```
+
+- `transport` names the mechanism (see [service-transport](service-transport.md))
+  so a client picks the right connector instead of assuming TCP.
+- `endpoint` is the concrete address for that transport.
+- `pid` + `started_at` let a client detect a **stale** file (no such process, or
+  the socket no longer accepts) and fail loud rather than dial a ghost.
+
+**Write/read discipline.**
+
+- **Write atomically, on every bind.** Write a temp file in the same dir and
+  `rename()` it over the target, so a reader never sees a half-written record.
+  Rewrite it each start (the port/PID change); the newest bind wins.
+- **Own the cleanup, tolerate the crash.** Remove the file on graceful shutdown;
+  a client must still treat a *present-but-stale* file (dead `pid`, refused
+  connection) as "not running," because a crash skips cleanup.
+- **Never require a central registry.** Each service owns *its own* file under
+  *its own* runtime dir. There is no shared directory a service must register
+  with — discovery stays peer-wise and à-la-carte (no single coordinator to
+  install or keep alive).
+
 ## Rationale
 
 Endpoints become collision-free **by construction** rather than by a human
@@ -66,5 +114,7 @@ needed.
 
 ## See Also
 
+- Transport choice (which channel to expose in the first place):
+  [service-transport](service-transport.md)
 - Intent: [`visions/plugin-services/`](../../visions/plugin-services/README.md)
 - Hub: [`docs/patterns/`](README.md) · Reality: [`architecture.md`](../architecture.md) (ports table)
