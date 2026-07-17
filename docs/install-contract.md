@@ -41,6 +41,41 @@ dir — that bypasses the venv sync, binstub/SAC handling, `_build_info.py`
 stamping, manifest, and service restart (see "What NOT to Do" in
 `CONTRIBUTING.md`).
 
+### What the marketplace vendors (copied vs loaded)
+
+`copilot plugin update` copies the **entire git-tracked plugin folder** — the
+`source:` path in `.github/plugin/marketplace.json` — into
+`~/.copilot/installed-plugins/copilot-extensions/<name>/`, **not** just the
+skill/agent subfolders. Everything committed under the plugin dir travels:
+`skills/`, `src/`, `scripts/`, `docs/`, `tests/`, `bin/`, `extensions/`,
+`plugin.json`, `pyproject.toml`, `README.md`, … The **only** exclusions are the
+gitignored build/cache artifacts (`.venv/`, `build/`, `uv.lock`,
+`.pytest_cache/`, `.ruff_cache/`). (Verify on any machine: compare a plugin's
+repo folder to its installed dir — a runtime plugin's `docs/` and `tests/` are
+present in the install even though neither is needed to run it.)
+
+Two consequences worth separating:
+
+- **Copied ≠ loaded.** The whole tree lands on disk, but `plugin.json` governs
+  what the CLI **loads into a session**: the declared `skills` paths, `hooks`,
+  and any auto-discovered `extensions/`. A plugin's `docs/` (and `tests/`) ride
+  along in the payload but are **reference material** — read by an agent or user
+  who navigates to them (in a checkout or at the install path), not injected into
+  session context. The runtime-operative content an agent actually loads is the
+  plugin's `skills/`.
+- **A plugin carries its own copy; version-bump by where the file lives.** Each
+  payload is vendored **independently and self-contained** — a plugin must not
+  reference another plugin's files or a repo-root path at runtime; put anything it
+  needs inside its own folder. It follows that:
+  - a file **inside a plugin folder** (including that plugin's `docs/`) **ships in
+    its payload**, so changing it **requires that plugin's version bump** (the
+    marketplace detects updates by version — an unbumped change is silently
+    skipped);
+  - a **repo-root `docs/`** file (this contract, `harness-runbook.md`,
+    `architecture.md`, `plans/`) is **not** part of any plugin payload — it is
+    fetched by URL or read in a checkout — so changing it needs **no** version
+    bump.
+
 ### Automatic reconciliation at launch (`runtimeScope`)
 
 `agent-worktrees` closes this gap automatically for **repo-adopted** plugins.

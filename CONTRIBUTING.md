@@ -29,6 +29,11 @@ MAJOR.MINOR.PATCH[-devN]
 
 - **Patch** bumps (`1.0.1 -> 1.0.2`) — bug fixes, small improvements,
   new skills/docs that don't change runtime behavior.
+  > Only a change **inside a plugin folder** (its `src/`, `skills/`, or its own
+  > `docs/`) ships in that plugin's payload and needs a bump. A **repo-root**
+  > `docs/` change (this repo's `docs/`, `CONTRIBUTING.md`, `README.md`) is not
+  > vendored into any plugin and needs **no** bump — see
+  > [install-contract.md § What the marketplace vendors](docs/install-contract.md#what-the-marketplace-vendors-copied-vs-loaded).
 - **Minor** bumps (`1.0.x -> 1.1.0`) — new features, behavioral changes,
   new CLI subcommands. **Only when the maintainer decides.**
 - **Major** bumps (`1.x -> 2.0`) — breaking changes. **Only when the
