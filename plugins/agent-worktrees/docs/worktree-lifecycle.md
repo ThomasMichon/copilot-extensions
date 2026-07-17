@@ -219,6 +219,8 @@ When in doubt, just `create` a fresh worktree and continue there.
 - [Getting Started](getting-started.md) — install, register, first session.
 - [The Worktree Picker](picker.md) — the interactive launcher the lifecycle
   starts from (screen, navigation, resume/create/clean/sync).
+- [Multiplexed Sessions](mux.md) — why a launched session runs in tmux/psmux
+  (persistence, detach/rejoin) and when to skip the mux.
 - [CLI Reference](cli-reference.md) — every subcommand and flag.
 - [Configuration Reference](config-reference.md) — the `pr:` block
   (`enabled` / `required` / `provider` / `strategy` / `automerge_label` /
