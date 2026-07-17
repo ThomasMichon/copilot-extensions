@@ -82,6 +82,12 @@ core of the principles above; a reviewer checks a change against these.
   mismatch can silently break. (Serves *§Behaviors/endpoint-discovered-not-assumed*.)
 - **Local-first exposure.** A service is machine-local by default; reaching beyond
   the host is an explicit opt-in. (Serves *§Behaviors/local-first-exposure*.)
+- **Minimal network exposure.** A service prefers a transport that opens no
+  network port at all (OS-native socket/pipe) over a loopback TCP port, *even one
+  bound to `127.0.0.1`*; when a port is unavoidable it is OS-assigned and
+  discovered, never fixed; a boundary is crossed by an opt-in tunnel over an
+  already-trusted transport, never a new inbound port. (Serves
+  *§Behaviors/minimal-network-exposure*.)
 - **Deploy through the pipeline, never edit the deployed copy.** Source lives in
   the repo; changes reach a runtime only via the installer + version bump. Editing
   `~/.copilot/installed-plugins/…` or a runtime dir is forbidden.
@@ -95,7 +101,8 @@ the exemplars, and the vision it serves):
 
 | Pattern | Concern |
 |---------|---------|
-| [local-endpoint-discovery](local-endpoint-discovery.md) | How a service exposes a discoverable, collision-free, local-first endpoint — the anti-static-port pattern |
+| [local-endpoint-discovery](local-endpoint-discovery.md) | How a service exposes a discoverable, collision-free, local-first endpoint — the anti-static-port pattern, incl. the rendezvous / port-mapping file |
+| [service-transport](service-transport.md) | Which channel a service exposes — the transport ladder (stdio → OS-native socket/pipe → OS-assigned loopback → tunnel) and the named-pipe/UDS reality |
 | [service-lifecycle-supervision](service-lifecycle-supervision.md) | Platform-native always-on supervision (Windows Scheduled Task / systemd user unit) and its lifecycle verbs |
 | [a-la-carte-independence](a-la-carte-independence.md) | Standalone-first plugins that compose gracefully, incl. the resolver-import pattern |
 | [cross-platform-parity](cross-platform-parity.md) | One behavior across Windows and Linux/WSL: shells, UTF-8, the WSL/Windows boundary, binstubs |

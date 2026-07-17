@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-07-13
+- **Last revised:** 2026-07-16
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -123,6 +123,19 @@ A service is machine-local by default — reachable by processes on the same hos
 and no wider. Exposing a service beyond the local machine is an explicit,
 opt-in act, never the default posture.
 
+### minimal-network-exposure
+A service prefers a transport that opens **no network port at all** — an
+OS-native local endpoint (a Unix domain socket or a named pipe, in a namespace
+the service owns) — over binding a loopback TCP port, *even one bound only to
+`127.0.0.1`*. A network port is a last resort, not a default: when one is
+genuinely required, it is an **OS-assigned ephemeral** port advertised through
+discovery, never a fixed or well-known one. Crossing a host or trust boundary —
+including the shared-loopback boundary between a host and its WSL guest — is done
+by an explicit, opt-in **tunnel layered over an already-trusted transport**, so
+the only surface a service ever exposes beyond its own namespace is the one the
+operator deliberately chose. The steady-state ideal is that starting a service
+adds **zero new listening ports** to the machine.
+
 ### fail-loud-on-endpoint-error
 When a service cannot claim or reach its endpoint, it surfaces the **real,
 literal cause** (what actually blocked the address) rather than masking it or
@@ -170,3 +183,13 @@ silently degrading — so the failure is diagnosable instead of mysterious.
   coordinator proved the "fixed port, deconflicted by hand" approach brittle.
   The vision generalizes the fix — *discoverable, collision-free, standalone
   local endpoints* — rather than pinning any one mechanism.
+- **2026-07-16** — Extended with the **minimal-network-exposure** behavior.
+  Sharpens the earlier local-first posture from "don't expose *beyond* the host
+  by default" to "prefer to open **no network port at all**, even on loopback."
+  Motivated by loopback-TCP binds colliding with, or being phantom-reserved by,
+  standard OS components (Hyper-V/WinNAT excluded-port ranges, the WSL mirrored-
+  networking shared `127.0.0.1`) — a class of failure a port *reservation* can't
+  escape but an OS-native local endpoint sidesteps entirely. Sanctions
+  tunnel-over-trusted-transport as the opt-in boundary-crossing mechanism,
+  consistent with the standing non-goal that no such tunnel is ever *required*.
+  Realized by the `service-transport` and `local-endpoint-discovery` patterns.
