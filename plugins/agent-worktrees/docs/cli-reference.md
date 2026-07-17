@@ -68,6 +68,11 @@ continue to work unchanged.
 
 ## Session Lifecycle
 
+> The end-to-end narrative — states, the two landing paths, held/follow-up and
+> serial-vs-parallel PRs — is in
+> [Worktree Lifecycle & Change Management](worktree-lifecycle.md). This table is
+> the verb catalog.
+
 | Subcommand | Description |
 |------------|-------------|
 | `resolve` | Interactive picker -- select or create a worktree, emit JSON launch plan. `--new` creates + launches a **muxed interactive** session (refused without a TTY) |
@@ -82,6 +87,31 @@ continue to work unchanged.
 | `status-updater` | Background loop that keeps a session's `@aw_ctx`/`@aw_seg` status vars fresh **off the paint path** (no per-render binstub spawn) |
 | `list` | List worktrees from tracking records |
 | `handoff` | Manage handoff prompt state on a worktree |
+
+## Pull-request workflow
+
+The `pr-*` family drives PR-gated landing (config `pr.enabled` / `pr.required` —
+see [config-reference.md § PR workflow](config-reference.md)). `push-changes`
+then targets the *feature* branch, never the default branch. The verbs are
+self-describing: `pr-status` prints the active `flow:` profile, and `pr-merge`
+refuses (naming the reason) on a repo where no consent label is bound. Full
+narrative in [worktree-lifecycle.md § Landing the change](worktree-lifecycle.md).
+
+| Subcommand | Description |
+|------------|-------------|
+| `create-pr` (alias `pr-create`) | Squash the worktree's commits, publish the PR head branch, and open the PR. Flags: `--title`, `--body`/`--body-file`, `--draft` (open not-ready-for-review), `--new` (force a fresh head branch for a parallel PR), `--no-open` (push only), `--hold` (deprecated alias for `--draft`) |
+| `pr-ready` | Move a draft PR **out of draft** — request review |
+| `set-pr` | Record PR metadata (`--url`, `--number`) when the PR was opened out of band by a provider sub-agent |
+| `pr-status` | Show tracked PR metadata + live verdict / conflict / merge state; prints the `flow:` profile and flags pull-forward once merged |
+| `pr-watch` | Block until the PR moves (`wait <repo> <pr> [--until …]`) and wake the caller with a race-proof cursor; `cursor <repo> <pr>` prints the current baseline |
+| `pr-merge` | Signal **merge consent** on an approved PR (applies the bound `automerge_label`); the review gate merges when satisfied. `--all` / `--loop` for sweeps |
+| `pr-complete` | Reconcile the worktree after its PR merged — fast-forward past the squash-merge (or rebase), dropping the local commits the squash already absorbed |
+| `pr` | Namespace grouping the `pr-*` verbs |
+
+`get pr-profile` / `get pr-required` / `get pr-provider` report the repo's PR
+disposition (`direct` | `pr-human-merge` | `pr-agent-merge`) so you know which
+verbs apply before signing off.
+
 
 
 ## Status bar segment (tmux / psmux)

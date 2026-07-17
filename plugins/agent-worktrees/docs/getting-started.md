@@ -167,6 +167,11 @@ This overrides both the repo convention and the built-in default.
 
 ## Session Lifecycle
 
+> **Full guide:** [Worktree Lifecycle & Change Management](worktree-lifecycle.md)
+> is the canonical walkthrough — states, both landing paths (direct-push and
+> PR), held/follow-up PRs, and serial-vs-parallel. This section is the short
+> version.
+
 ```
 my-project                      # launch picker
   → Create new worktree         # branch from default branch
@@ -203,6 +208,8 @@ Use the `worktree` skill during a Copilot session for guided sign-off.
 - **Multiple machines** -- add a `machines.yaml` to your repo for
   per-machine configuration
 - **Architecture** -- see [Architecture](architecture.md) for internals
+- **Lifecycle & PRs** -- see [Worktree Lifecycle & Change Management](worktree-lifecycle.md)
+  for the full landing flow (direct-push and PR mode)
 - **CLI reference** -- see [CLI Reference](cli-reference.md) for commands
 - **Configuration** -- see [Configuration Reference](config-reference.md) for
   every config option (per-repo keys, PR workflow, in-repo overlay, profiles)
