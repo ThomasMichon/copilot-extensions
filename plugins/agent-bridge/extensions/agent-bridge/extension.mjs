@@ -34,19 +34,6 @@ const FLUSH_MS = 1_000; // drain the represented-event queue to the bridge every
 const MAX_QUEUE = 1_000; // bounded buffer; drop OLDEST on overflow (honest reduced fidelity)
 const FLUSH_BATCH = 250; // max events POSTed per flush
 const INBOX_POLL_MS = 2_000; // poll the bridge for messages to deliver every 2s
-// Progress nudge (Phase 7 Slice 7c): OPT-IN. Gently prompt an OPERATOR-driven
-// session to post a one-line status beat for the cockpit. **Default OFF** --
-// enable per session with AGENT_BRIDGE_PROGRESS_NUDGE=1 (or on/true/yes). A
-// per-session injected turn proved too noisy in aggregate across a fleet of
-// operator sessions, so it no longer fires unless the operator asks for it. Never
-// fires for an agent-driven session (it reports via `agent-dispatch progress`).
-const NUDGE_CHECK_MS = 120_000; // evaluate whether to nudge every ~2 min
-const NUDGE_MIN_INTERVAL_MS = 1_800_000; // at most one nudge per ~30 min (gentle)
-const NUDGE_QUIET_MS = 8_000; // only nudge when the session has been quiet this long
-const NUDGE_MIN_TURNS = 3; // require >= this many completed turns since last nudge
-const NUDGE_DEFAULT_ON = /^(1|true|on|yes)$/i.test(
-  process.env.AGENT_BRIDGE_PROGRESS_NUDGE || "",
-);
 // Delivery (Phase 2 write path) is SEAMLESS by default. This is a
 // single-operator, multi-agent mesh: the operator owns every agent and the
 // transport (localhost bind + operator-secured SSH + local bearer token), so a
@@ -89,11 +76,6 @@ const state = {
   deliveryEnabled: DELIVERY_DEFAULT_ON, // /peer MUTE toggle (delivery on by default)
   delivering: false, // guard against overlapping inbox drains
   lastEventAt: 0, // advanced by the observe-only event handler
-  turnsSinceNudge: 0, // completed turns since the last progress nudge (7c)
-  lastNudgeAt: 0, // when we last injected a progress nudge
-  nudgeTimer: null, // progress-nudge interval handle
-  nudgeEnabled: NUDGE_DEFAULT_ON, // operator-session progress nudge (7c)
-  nudging: false, // guard against overlapping nudges
 };
 
 function extLog(msg) {
@@ -354,58 +336,6 @@ async function pollInbox() {
   }
 }
 
-// Render the progress-nudge as a <system_reminder> so the agent parses it as
-// authoritative structure (same convention as delivered peer messages). It is
-// deliberately soft: report ONLY if something noteworthy changed, keep it one
-// line, and never interrupt or re-plan the current work -- this is a cockpit
-// heartbeat, not a task.
-function renderProgressNudge(sessionId) {
-  return (
-    "<system_reminder>\n" +
-    "[agent-bridge] Fleet legibility: if you've made meaningful progress " +
-    "since your last update, post a ONE-LINE status so the operator can see " +
-    "it at a glance in the cockpit -- run:\n" +
-    `  agent-bridge live-sessions progress --handle ${sessionId} ` +
-    '--summary "<what you are doing / just did>" [--phase <phase>]\n' +
-    "Keep it to a single line (a status beat, not a summary). If nothing " +
-    "noteworthy has changed, skip it. Do NOT interrupt or re-plan your " +
-    "current work; this is just a heartbeat for the cockpit.\n" +
-    "</system_reminder>"
-  );
-}
-
-// Gently nudge an OPERATOR-driven session to post a progress beat (7c). Fires on
-// the nudge timer, off the CLI event loop. Skips agent-driven sessions (they
-// report via `agent-dispatch progress`), a muted/unregistered session, and any
-// session that has done no work since the last nudge -- so an idle session is
-// never nagged. Best-effort and serialized.
-async function maybeNudgeProgress() {
-  if (state.nudging) return;
-  if (!state.nudgeEnabled) return;
-  if (!state.sessionId || !state.registered) return;
-  // Only operator-launched sessions; an agent-driven one self-reports.
-  if (state.meta && state.meta.driven_by) return;
-  if (state.turnsSinceNudge < NUDGE_MIN_TURNS) return;
-  const now = Date.now();
-  // At most one nudge per interval, and only when the session has gone briefly
-  // quiet (not mid-stream) so we never inject into active output.
-  if (now - state.lastNudgeAt < NUDGE_MIN_INTERVAL_MS) return;
-  if (now - state.lastEventAt < NUDGE_QUIET_MS) return;
-  state.nudging = true;
-  try {
-    await session.send({
-      prompt: renderProgressNudge(state.sessionId),
-      displayPrompt: "Progress nudge (agent-bridge cockpit)",
-    });
-    state.turnsSinceNudge = 0;
-    state.lastNudgeAt = Date.now();
-  } catch (e) {
-    extLog(`progress nudge failed: ${e.message}`);
-  } finally {
-    state.nudging = false;
-  }
-}
-
 // --- Extension ---
 const session = await joinSession({
   // This extension registers no tools, so no permission request is ever routed
@@ -468,10 +398,6 @@ session.on((event) => {
         state.pendingEvents.splice(0, state.pendingEvents.length - MAX_QUEUE);
       }
     }
-    // 7c: count completed turns so the progress nudge only fires after real work.
-    if (type === "assistant.turn_end") {
-      state.turnsSinceNudge += 1;
-    }
   } catch {
     /* never throw out of an event handler */
   }
@@ -510,14 +436,6 @@ try {
       pollInbox().catch(() => {});
     }, INBOX_POLL_MS);
     if (state.inboxPoll.unref) state.inboxPoll.unref();
-    // Progress nudge (Phase 7 7c): gently prompt an operator-driven session to
-    // post a one-line status beat, off the event loop, unref'd, best-effort.
-    // Seed lastNudgeAt so the first nudge waits a full interval.
-    state.lastNudgeAt = Date.now();
-    state.nudgeTimer = setInterval(() => {
-      maybeNudgeProgress().catch(() => {});
-    }, NUDGE_CHECK_MS);
-    if (state.nudgeTimer.unref) state.nudgeTimer.unref();
   }
 } catch (e) {
   extLog(`init error (degrading, session unaffected): ${e.message}`);
@@ -537,10 +455,6 @@ function shutdown() {
     if (state.inboxPoll) {
       clearInterval(state.inboxPoll);
       state.inboxPoll = null;
-    }
-    if (state.nudgeTimer) {
-      clearInterval(state.nudgeTimer);
-      state.nudgeTimer = null;
     }
     // One best-effort final drain so the tail's last events aren't lost, then
     // deregister (staleness reaping is the real backstop for either failing).
