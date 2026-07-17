@@ -217,6 +217,8 @@ When in doubt, just `create` a fresh worktree and continue there.
 ## See also
 
 - [Getting Started](getting-started.md) — install, register, first session.
+- [The Worktree Picker](picker.md) — the interactive launcher the lifecycle
+  starts from (screen, navigation, resume/create/clean/sync).
 - [CLI Reference](cli-reference.md) — every subcommand and flag.
 - [Configuration Reference](config-reference.md) — the `pr:` block
   (`enabled` / `required` / `provider` / `strategy` / `automerge_label` /
