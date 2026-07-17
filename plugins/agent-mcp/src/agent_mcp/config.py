@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -223,6 +224,44 @@ def _as_command(value: Any) -> list[str]:
     raise ConfigError("server.command must be a string or a list")
 
 
+# ``${VAR}`` or ``${VAR:-default}`` -- the two shell-style forms we expand in a
+# bridge ``url``. ``VAR`` is a POSIX-ish identifier; the optional ``:-default``
+# runs to the closing brace (so a default may itself contain ``:`` and ``/``,
+# e.g. a full URL).
+_ENV_REF = re.compile(r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::-(?P<default>[^}]*))?\}")
+
+
+def _expand_env(value: str) -> str:
+    """Expand ``${VAR}`` / ``${VAR:-default}`` references against the process
+    environment.
+
+    This gives a bridge ``url`` the local-endpoint-discovery resolution order
+    (operator env override -> documented default): one shared config can be
+    written as ``url: ${VEI_MCP_URL:-https://gateway/vei-search/mcp/}`` so an
+    on-box consumer that sets ``VEI_MCP_URL`` reaches a host-local endpoint
+    (skipping a gateway round-trip) while every other host falls back to the
+    documented default with no per-host config. Matches ``:-`` semantics (an
+    *unset or empty* variable takes the default). A bare ``${VAR}`` that is
+    unset/empty with no fallback is a hard error -- fail loud with the offending
+    name rather than silently producing an empty endpoint.
+    """
+
+    def _sub(m: "re.Match[str]") -> str:
+        name = m.group("name")
+        env_val = os.environ.get(name)
+        if env_val:  # set and non-empty wins
+            return env_val
+        default = m.group("default")
+        if default is not None:
+            return default
+        raise ConfigError(
+            f"environment variable ${{{name}}} referenced in config is unset or "
+            f"empty and has no ${{{name}:-default}} fallback"
+        )
+
+    return _ENV_REF.sub(_sub, value)
+
+
 def _parse_auth_spec(raw_auth: dict[str, Any]) -> AuthSpec:
     """Build one :class:`AuthSpec` from a parsed ``auth`` mapping."""
     if not isinstance(raw_auth, dict):
@@ -291,9 +330,12 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
         command = raw_args  # empty -> stdio validation flags the missing launcher
         npm_args = []
 
+    raw_url = raw_server.get("url")
+    url = _expand_env(str(raw_url)) if raw_url is not None else None
+
     server = ServerSpec(
         type=str(raw_server.get("type", "http")),
-        url=raw_server.get("url"),
+        url=url,
         command=command,
         env={str(k): str(v) for k, v in (raw_server.get("env") or {}).items()},
         npm=npm,
