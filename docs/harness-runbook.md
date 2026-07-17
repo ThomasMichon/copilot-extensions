@@ -257,7 +257,9 @@ and product code is untouched.
 
 **Opinionated:** register plugins **at repo scope**, not globally. It pins the
 set to the repo, keeps machines consistent, and lets the launcher keep payloads
-and runtimes fresh automatically. (Skill: **`installing-plugins`**.)
+and runtimes fresh automatically. (Skill: **`installing-plugins`**.) This is your
+first **in-repo** config file; for the full in-repo-vs-machine-local map see
+[Configuration](configuration.md).
 
 Write `.github/copilot/settings.json`, declaring the marketplace and the
 [tiered set](#recommended-plugin-set) the operator chose:

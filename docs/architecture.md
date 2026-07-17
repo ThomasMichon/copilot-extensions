@@ -143,7 +143,9 @@ customizing-copilot) are **payload-only**. The full taxonomy is
 ## The control-harness repo
 
 A teammate's own repo (a dotfiles-style hub, `my-control-harness` in examples)
-is the single source of truth the mesh plugins read from.
+is the single source of truth the mesh plugins read from. Where each config file
+belongs — in the repo (committed) vs machine-local (`~/`) — is laid out in
+[Configuration — In the Repo vs On the Machine](configuration.md).
 
 ```mermaid
 flowchart LR
