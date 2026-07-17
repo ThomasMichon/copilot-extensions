@@ -304,12 +304,23 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
 
 
 def bearer_guard_middleware(token: str):
-    """A Starlette middleware factory that 401s the MCP mount without the token."""
+    """A Starlette middleware factory that 401s the MCP mount without the token.
+
+    Mirrors the coordinator's HTTP-API loopback exemption: a loopback peer (this
+    host's own processes) is trusted and skips the bearer, while any non-loopback
+    caller (a container via the docker bridge, or the LAN) must present it. See
+    ``coordinator.is_loopback_client`` for why a loopback peer IP is trustworthy.
+    """
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.responses import JSONResponse
 
+    from .coordinator import is_loopback_client
+
     class _Guard(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
+            client = request.client
+            if client is not None and is_loopback_client(client.host):
+                return await call_next(request)
             auth = request.headers.get("authorization", "")
             if auth != f"Bearer {token}":
                 return JSONResponse({"detail": "invalid or missing bearer token"}, status_code=401)
