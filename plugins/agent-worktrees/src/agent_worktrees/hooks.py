@@ -267,6 +267,97 @@ def _make_executable(path: Path) -> None:
         pass
 
 
+# --- core.hooksPath reconciliation (adopt-owned) ----------------------------
+#
+# Git honors a set ``core.hooksPath`` *over* the default ``.git/hooks``. When a
+# repo carries a stale repo-local ``core.hooksPath`` -- e.g. a retired in-repo
+# hooks dir -- git runs that directory and silently ignores the managed
+# ``.git/hooks`` shims, so the PR-workflow guard never fires. Clearing it is a
+# *mutation* of the repo's git config, so it belongs to the adopt/register flow;
+# install/update may only *detect* it (read-only warn).
+
+def _managed_shim_present(hooks_dir: Path | None) -> bool:
+    """True if *hooks_dir* holds the managed (by-marker) pre-commit shim."""
+    if hooks_dir is None:
+        return False
+    try:
+        target = hooks_dir / "pre-commit"
+        return target.exists() and _SHIM_MARKER in target.read_text(
+            encoding="utf-8", errors="replace"
+        )
+    except OSError:
+        return False
+
+
+def _local_hooks_path(anchor: str | Path) -> str | None:
+    """Return the repo-*local* ``core.hooksPath`` value, or None if unset.
+
+    Reads ``--local`` only: a ``core.hooksPath`` set at global/system scope is a
+    machine-wide user choice this flow must not touch.
+    """
+    r = git_ops.git(
+        "config", "--local", "--get", "core.hooksPath", cwd=anchor, check=False
+    )
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip() or None
+
+
+def stale_hooks_path(anchor: str | Path) -> str | None:
+    """Return a repo-local ``core.hooksPath`` that *shadows* the managed shims.
+
+    Stale means: set locally and not resolving to the shared ``.git/hooks`` dir
+    where :func:`install_hooks` places the shims -- so git would run the other
+    directory and the PR-workflow guard would never fire. Read-only (no
+    mutation): returns the stale value, or None when unset or already pointing
+    at the managed hooks dir.
+    """
+    val = _local_hooks_path(anchor)
+    if val is None:
+        return None
+    managed = hooks_dir_for(anchor)
+    if managed is None:
+        return None
+    p = Path(val)
+    if not p.is_absolute():
+        p = Path(anchor) / p
+    try:
+        return None if p.resolve() == managed.resolve() else val
+    except OSError:
+        return val
+
+
+def clear_stale_hooks_path(anchor: str | Path) -> str | None:
+    """Unset a stale repo-local ``core.hooksPath`` so git honors ``.git/hooks``.
+
+    Mutation -- **adopt/register only**. Returns the cleared value, or None when
+    there was nothing stale to clear.
+    """
+    val = stale_hooks_path(anchor)
+    if val is None:
+        return None
+    git_ops.git(
+        "config", "--local", "--unset", "core.hooksPath", cwd=anchor, check=False
+    )
+    return val
+
+
+def hook_health(anchor: str | Path) -> tuple[bool, str | None]:
+    """Read-only PR-workflow-hook health for *anchor* (install/update warn).
+
+    Returns ``(shims_present, stale_hooks_path)``:
+
+    * ``shims_present`` -- the managed ``pre-commit`` shim is installed in the
+      shared ``.git/hooks``.
+    * ``stale_hooks_path`` -- a repo-local ``core.hooksPath`` shadowing the
+      shims, or None.
+
+    Never mutates -- callers (install/update) only warn; arming/clearing is an
+    adopt (register) concern.
+    """
+    return _managed_shim_present(hooks_dir_for(anchor)), stale_hooks_path(anchor)
+
+
 def _cmd_install(argv: list[str]) -> int:
     """`agent-worktrees hook install [--anchor PATH]` -- install shims."""
     anchor: str | None = None
