@@ -29,6 +29,17 @@ PID_FILE = os.environ.get(PID_ENV) or (
 LOG_FILE_LINUX = Path("/tmp") / "agent-vault-service.log"
 LOG_FILE_WIN = Path(os.environ.get("TEMP", "C:/Temp")) / "agent-vault-service.log"
 LOG_FILE = Path(os.environ.get(LOG_ENV) or (LOG_FILE_WIN if IS_WINDOWS else LOG_FILE_LINUX))
+
+# Directory holding the service's discovery state (the rendezvous / endpoint file).
+# Honors an override so a branded/side-by-side deployment keeps its own namespace.
+RUN_DIR_ENV = "AGENT_VAULT_RUN_DIR"
+
+
+def run_dir() -> Path:
+    """Return the service runtime dir that holds the rendezvous (endpoint) file."""
+    return Path(os.environ.get(RUN_DIR_ENV) or (Path.home() / ".agent-vault" / "run"))
+
+
 CONFIG_ENV = "AGENT_VAULT_CONFIG"
 REPO_CONFIG_NAME = ".agent-vault.json"
 
