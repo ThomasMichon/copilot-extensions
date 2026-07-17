@@ -222,6 +222,39 @@ def test_bearer_auth_enforced(tmp_path):
     assert api.get("/health", headers={"Authorization": "Bearer wrong"}).status_code == 401
 
 
+def test_loopback_client_exempt_from_token(tmp_path):
+    # A caller on the loopback interface (this host's own CLI / embody autopilots)
+    # is trusted and needs NO bearer, even when a token is configured for the
+    # wildcard-bind / container path.
+    app = create_app(TaskQueue(tmp_path / "t.db"), token="secret")
+    for peer in ("127.0.0.1", "127.0.0.5", "::1"):
+        api = TestClient(app, client=(peer, 51000))
+        assert api.get("/health").status_code == 200, f"{peer} should be exempt"
+
+
+def test_nonloopback_client_still_requires_token(tmp_path):
+    # A container reaching in over the docker bridge (or any LAN host) is NOT
+    # loopback, so the bearer is enforced.
+    app = create_app(TaskQueue(tmp_path / "t.db"), token="secret")
+    api = TestClient(app, client=("172.21.0.5", 51000))  # a CAB-bridge-like peer
+    assert api.get("/health").status_code == 401
+    ok = api.get("/health", headers={"Authorization": "Bearer secret"})
+    assert ok.status_code == 200
+
+
+def test_is_loopback_client_helper():
+    from agent_dispatch.coordinator import is_loopback_client
+
+    assert is_loopback_client("127.0.0.1")
+    assert is_loopback_client("127.0.0.5")
+    assert is_loopback_client("::1")
+    assert not is_loopback_client("172.21.0.1")  # docker bridge gateway
+    assert not is_loopback_client("192.168.0.50")  # LAN
+    assert not is_loopback_client("testclient")  # non-IP peer (TestClient default)
+    assert not is_loopback_client(None)
+    assert not is_loopback_client("")
+
+
 # -- the DispatchClient against the app -------------------------------------
 
 
