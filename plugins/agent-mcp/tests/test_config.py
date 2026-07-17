@@ -241,62 +241,92 @@ def test_bridges_dir_default_location():
     assert BRIDGES_DIR.name == "bridges"
 
 
-# --- server.url environment substitution (${VAR} / ${VAR:-default}) ----------
-# Gives an http bridge the local-endpoint-discovery resolution order: an
-# operator env override wins, else the documented default. Lets one shared
-# config point on-box consumers at a host-local endpoint while everyone else
-# falls back to the gateway URL.
+# --- machine-local config overlays (~/.agent-mcp/overrides/<id>.yaml) ---------
+# By-convention, env-free per-host override: a deep-merge onto the committed
+# config at load time. Keyed by an explicit top-level ``id`` or the file stem
+# with a trailing ``.mcp`` stripped. Mappings merge; scalars/lists replace.
 
 
-def test_url_env_override_wins(monkeypatch):
-    monkeypatch.setenv("VEI_MCP_URL", "http://localhost:8420/mcp/")
-    cfg = parse_config(_http_doc(server={
-        "type": "http",
-        "url": "${VEI_MCP_URL:-https://gateway/vei-search/mcp/}",
-    }))
+def _write(path, mapping):
+    import json as _json
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps(mapping), encoding="utf-8")
+
+
+def test_overlay_replaces_url(tmp_path, monkeypatch):
+    monkeypatch.setattr("agent_mcp.config.OVERRIDES_DIR", tmp_path / "overrides")
+    cfg_path = tmp_path / "vei.mcp.yaml"
+    _write(cfg_path, {"server": {"type": "http", "url": "https://gateway/vei/mcp/"}})
+    _write(tmp_path / "overrides" / "vei.json",
+           {"server": {"url": "http://localhost:8420/mcp/"}})
+    cfg = load_config(str(cfg_path))
+    # url overridden, sibling server.type preserved by the recursive merge
     assert cfg.server.url == "http://localhost:8420/mcp/"
+    assert cfg.server.type == "http"
 
 
-def test_url_env_falls_back_to_default_when_unset(monkeypatch):
-    monkeypatch.delenv("VEI_MCP_URL", raising=False)
-    cfg = parse_config(_http_doc(server={
-        "type": "http",
-        "url": "${VEI_MCP_URL:-https://gateway/vei-search/mcp/}",
-    }))
-    assert cfg.server.url == "https://gateway/vei-search/mcp/"
+def test_overlay_absent_is_noop(tmp_path, monkeypatch):
+    monkeypatch.setattr("agent_mcp.config.OVERRIDES_DIR", tmp_path / "overrides")
+    cfg_path = tmp_path / "vei.mcp.yaml"
+    _write(cfg_path, {"server": {"type": "http", "url": "https://gateway/vei/mcp/"}})
+    cfg = load_config(str(cfg_path))
+    assert cfg.server.url == "https://gateway/vei/mcp/"
 
 
-def test_url_env_empty_treated_as_unset(monkeypatch):
-    # ``:-`` semantics: an empty variable takes the default.
-    monkeypatch.setenv("VEI_MCP_URL", "")
-    cfg = parse_config(_http_doc(server={
-        "type": "http",
-        "url": "${VEI_MCP_URL:-https://gateway/vei-search/mcp/}",
-    }))
-    assert cfg.server.url == "https://gateway/vei-search/mcp/"
+def test_overlay_keyed_by_explicit_id(tmp_path, monkeypatch):
+    monkeypatch.setattr("agent_mcp.config.OVERRIDES_DIR", tmp_path / "overrides")
+    cfg_path = tmp_path / "anything.yaml"
+    _write(cfg_path, {"id": "vei", "server": {"type": "http", "url": "https://g/mcp/"}})
+    _write(tmp_path / "overrides" / "vei.json", {"server": {"url": "http://local/mcp/"}})
+    cfg = load_config(str(cfg_path))
+    assert cfg.server.url == "http://local/mcp/"
 
 
-def test_url_bare_ref_expands_when_set(monkeypatch):
-    monkeypatch.setenv("MCP_ENDPOINT", "https://host/mcp/")
-    cfg = parse_config(_http_doc(server={"type": "http", "url": "${MCP_ENDPOINT}"}))
-    assert cfg.server.url == "https://host/mcp/"
+def test_overlay_stem_strips_dot_mcp(tmp_path, monkeypatch):
+    # ``vei.mcp.yaml`` keys on ``vei`` (the ``.mcp`` infix is stripped).
+    monkeypatch.setattr("agent_mcp.config.OVERRIDES_DIR", tmp_path / "overrides")
+    cfg_path = tmp_path / "vei.mcp.yaml"
+    _write(cfg_path, {"server": {"type": "http", "url": "https://g/mcp/"}})
+    _write(tmp_path / "overrides" / "vei.yaml", {"server": {"url": "http://local/mcp/"}})
+    cfg = load_config(str(cfg_path))
+    assert cfg.server.url == "http://local/mcp/"
 
 
-def test_url_bare_ref_unset_no_default_is_error(monkeypatch):
-    monkeypatch.delenv("MCP_ENDPOINT", raising=False)
-    with pytest.raises(ConfigError):
-        parse_config(_http_doc(server={"type": "http", "url": "${MCP_ENDPOINT}"}))
+def test_overlay_overrides_auth_field(tmp_path, monkeypatch):
+    monkeypatch.setattr("agent_mcp.config.OVERRIDES_DIR", tmp_path / "overrides")
+    cfg_path = tmp_path / "svc.mcp.yaml"
+    _write(cfg_path, {
+        "server": {"type": "http", "url": "https://gateway/mcp/"},
+        "auth": {"kind": "command",
+                 "command": ["vault", "get", "Gateway Token", "password"],
+                 "parse": "raw", "header": "Authorization"},
+    })
+    # On-box: no auth needed against the local endpoint.
+    _write(tmp_path / "overrides" / "svc.json",
+           {"server": {"url": "http://localhost:8420/mcp/"}, "auth": {"kind": "none"}})
+    cfg = load_config(str(cfg_path))
+    assert cfg.server.url == "http://localhost:8420/mcp/"
+    assert cfg.auth.normalized_kind == "none"
 
 
-def test_url_without_env_ref_is_unchanged():
-    cfg = parse_config(_http_doc(server={"type": "http", "url": "https://plain/mcp/"}))
-    assert cfg.server.url == "https://plain/mcp/"
+def test_overlay_replaces_list_wholesale(tmp_path, monkeypatch):
+    monkeypatch.setattr("agent_mcp.config.OVERRIDES_DIR", tmp_path / "overrides")
+    cfg_path = tmp_path / "svc.mcp.yaml"
+    _write(cfg_path, {
+        "server": {"type": "http", "url": "https://g/mcp/"},
+        "tools": {"allow": ["vei_*", "gitea_*"]},
+    })
+    _write(tmp_path / "overrides" / "svc.json", {"tools": {"allow": ["vei_*"]}})
+    cfg = load_config(str(cfg_path))
+    assert cfg.tools.allow == ["vei_*"]  # replaced, not concatenated
 
 
-def test_url_default_may_contain_colons_and_slashes(monkeypatch):
-    monkeypatch.delenv("VEI_MCP_URL", raising=False)
-    cfg = parse_config(_http_doc(server={
-        "type": "http",
-        "url": "${VEI_MCP_URL:-https://lambda-core.facility.michon.ski:1958/vei-search/mcp/}",
-    }))
-    assert cfg.server.url == "https://lambda-core.facility.michon.ski:1958/vei-search/mcp/"
+def test_deep_merge_semantics():
+    from agent_mcp.config import _deep_merge
+    base = {"a": {"b": 1, "c": 2}, "list": [1, 2], "scalar": "x"}
+    overlay = {"a": {"c": 3, "d": 4}, "list": [9], "scalar": "y"}
+    assert _deep_merge(base, overlay) == {
+        "a": {"b": 1, "c": 3, "d": 4},  # nested map merged
+        "list": [9],                    # list replaced
+        "scalar": "y",                  # scalar replaced
+    }

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -46,6 +45,16 @@ PARSE_MODES = ("keyvalue", "raw")
 DECORATOR_TYPES = ("filter", "rename", "defer", "code-mode", "storage", "transform", "gate")
 
 BRIDGES_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp")) / "bridges"
+
+# Machine-local config overlays. A bridge config keyed ``id`` (or, absent that,
+# its filename stem with a trailing ``.mcp`` stripped) may be overridden per-host
+# by a file ``~/.agent-mcp/overrides/<id>.{yaml,yml,json}`` that is deep-merged
+# over the committed config at load time. This is the *by-convention*,
+# **env-free** way to vary any field (a local endpoint URL, a token/vault-entry
+# name, headers) on one machine without editing the shared config or exporting
+# an environment variable. Mappings merge recursively; scalars and lists in the
+# overlay replace the base.
+OVERRIDES_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp")) / "overrides"
 
 
 class ConfigError(ValueError):
@@ -224,44 +233,6 @@ def _as_command(value: Any) -> list[str]:
     raise ConfigError("server.command must be a string or a list")
 
 
-# ``${VAR}`` or ``${VAR:-default}`` -- the two shell-style forms we expand in a
-# bridge ``url``. ``VAR`` is a POSIX-ish identifier; the optional ``:-default``
-# runs to the closing brace (so a default may itself contain ``:`` and ``/``,
-# e.g. a full URL).
-_ENV_REF = re.compile(r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::-(?P<default>[^}]*))?\}")
-
-
-def _expand_env(value: str) -> str:
-    """Expand ``${VAR}`` / ``${VAR:-default}`` references against the process
-    environment.
-
-    This gives a bridge ``url`` the local-endpoint-discovery resolution order
-    (operator env override -> documented default): one shared config can be
-    written as ``url: ${VEI_MCP_URL:-https://gateway/vei-search/mcp/}`` so an
-    on-box consumer that sets ``VEI_MCP_URL`` reaches a host-local endpoint
-    (skipping a gateway round-trip) while every other host falls back to the
-    documented default with no per-host config. Matches ``:-`` semantics (an
-    *unset or empty* variable takes the default). A bare ``${VAR}`` that is
-    unset/empty with no fallback is a hard error -- fail loud with the offending
-    name rather than silently producing an empty endpoint.
-    """
-
-    def _sub(m: "re.Match[str]") -> str:
-        name = m.group("name")
-        env_val = os.environ.get(name)
-        if env_val:  # set and non-empty wins
-            return env_val
-        default = m.group("default")
-        if default is not None:
-            return default
-        raise ConfigError(
-            f"environment variable ${{{name}}} referenced in config is unset or "
-            f"empty and has no ${{{name}:-default}} fallback"
-        )
-
-    return _ENV_REF.sub(_sub, value)
-
-
 def _parse_auth_spec(raw_auth: dict[str, Any]) -> AuthSpec:
     """Build one :class:`AuthSpec` from a parsed ``auth`` mapping."""
     if not isinstance(raw_auth, dict):
@@ -330,12 +301,9 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
         command = raw_args  # empty -> stdio validation flags the missing launcher
         npm_args = []
 
-    raw_url = raw_server.get("url")
-    url = _expand_env(str(raw_url)) if raw_url is not None else None
-
     server = ServerSpec(
         type=str(raw_server.get("type", "http")),
-        url=url,
+        url=raw_server.get("url"),
         command=command,
         env={str(k): str(v) for k, v in (raw_server.get("env") or {}).items()},
         npm=npm,
@@ -389,10 +357,59 @@ def parse_config(data: dict[str, Any], *, name: str | None = None,
     return cfg
 
 
+def _deep_merge(base: Any, overlay: Any) -> Any:
+    """Merge ``overlay`` onto ``base``.
+
+    Two mappings merge recursively (keys present only in ``base`` survive; keys
+    in ``overlay`` win). Any non-mapping value in ``overlay`` -- a scalar, a
+    list, or a type that differs from ``base`` -- **replaces** the base value
+    wholesale (lists are replaced, not concatenated, so an override fully
+    restates e.g. a ``tools.allow`` list rather than appending to it).
+    """
+    if isinstance(base, dict) and isinstance(overlay, dict):
+        merged = dict(base)
+        for key, val in overlay.items():
+            merged[key] = _deep_merge(merged[key], val) if key in merged else val
+        return merged
+    return overlay
+
+
+def _overlay_id(data: dict[str, Any], path: Path) -> str:
+    """The overlay key for a config: an explicit top-level ``id``, else the file
+    stem with a trailing ``.mcp`` stripped (``vei.mcp.yaml`` -> ``vei``)."""
+    explicit = data.get("id")
+    if explicit:
+        return str(explicit)
+    stem = path.stem
+    if stem.endswith(".mcp"):
+        stem = stem[: -len(".mcp")]
+    return stem
+
+
+def _apply_overlay(data: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Deep-merge a machine-local overlay onto ``data`` if one exists.
+
+    Looks for ``~/.agent-mcp/overrides/<id>.{yaml,yml,json}`` (see
+    ``OVERRIDES_DIR``); when found, its contents are merged over the committed
+    config so a single host can vary any field without editing the shared file
+    or exporting an environment variable. No overlay file -> ``data`` unchanged.
+    """
+    oid = _overlay_id(data, path)
+    if not oid:
+        return data
+    for ext in (".yaml", ".yml", ".json"):
+        opath = OVERRIDES_DIR / f"{oid}{ext}"
+        if opath.exists():
+            overlay = _read_file(opath)
+            return _deep_merge(data, overlay)
+    return data
+
+
 def load_config(name_or_path: str) -> BridgeConfig:
-    """Resolve, read, parse, and validate a bridge config."""
+    """Resolve, read, apply any machine-local overlay, parse, and validate."""
     path = resolve_config_path(name_or_path)
     data = _read_file(path)
+    data = _apply_overlay(data, path)
     name = path.stem
     return parse_config(data, name=name, source_path=path)
 
