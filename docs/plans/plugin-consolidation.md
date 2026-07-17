@@ -15,8 +15,9 @@ The suite currently spans a dozen-plus plugins — see the canonical list in
 [the README](../../README.md) / `.github/plugin/marketplace.json`; roughly:
 
 `agent-worktrees`, `agent-bridge`, `agent-codespaces`, `agent-containers`,
-`agent-mcp`, `agent-logger`, `agent-dispatch`, `context-handoff`, `efforts`,
-`visions`, `customizing-copilot`, `copilot-extensions-harness`.
+`agent-mcp`, `agent-logger`, `agent-dispatch`, `agent-vault`, `context-handoff`,
+`efforts`, `visions`, `customizing-copilot`, `copilot-extensions-harness`,
+`wsl-setup`.
 
 Costs of the current granularity:
 
@@ -47,18 +48,18 @@ The runbook references **capabilities** (worktrees, bridge, efforts, visions,
 review, MCP delegation), not a fixed plugin count. So the phases survive
 repackaging unchanged. The **"Recommended plugin set" table is the single seam**
 to update if packaging changes — nothing else in the runbook hardcodes the
-eleven.
+fourteen.
 
 ## Options
 
 ### Option A — Status quo, better curated (lowest risk)
 
-Keep eleven plugins; lean on the runbook's tiers and the `building-harnesses`
+Keep fourteen plugins; lean on the runbook's tiers and the `building-harnesses`
 skill to *curate* what a harness enables. No packaging change; the awkwardness is
 managed by guidance, not structure.
 
 - **Pro:** zero migration; preserves all independence benefits.
-- **Con:** the eleven-entry management overhead remains real.
+- **Con:** the fourteen-entry management overhead remains real.
 
 ### Option B — Group by lifecycle into a few "meta" plugins
 
@@ -73,7 +74,7 @@ Collapse along the **payload-vs-runtime** grain, which is the honest boundary:
 - Leave `agent-mcp` and `agent-dispatch` standalone (genuinely independent,
   optional).
 
-- **Pro:** collapses eleven → ~4–5; the grouping matches real coupling and the
+- **Pro:** collapses fourteen → ~4–5; the grouping matches real coupling and the
   payload/runtime contract.
 - **Con:** loses per-capability enable/disable granularity *within* a group
   (you can't take `visions` without `efforts`); bigger payloads; a migration

@@ -115,9 +115,12 @@ Never impose a default on these. Detect the operator's existing choice, or ask.
 
 ## Recommended plugin set
 
-The suite is **eleven plugins**. That is a lot to manage, and you should treat
-this section as the **curated master list** — enable the tier the harness
-actually needs, not all eleven by reflex. You will encode the choice in
+The suite is **fourteen plugins** — more than any single harness needs at once.
+Treat this section as the **curated recommendation**, not the full catalog:
+enable the tier the harness actually needs, not all fourteen by reflex. The
+table below covers the twelve a general harness draws from; the remaining two
+(`copilot-extensions-harness`, `wsl-setup`) are special-purpose — see the note
+after the table. You will encode the choice in
 `.github/copilot/settings.json` in [Phase 2](#phase-2--register-repo-scoped-plugins).
 
 | Plugin | Tier | Enable when |
@@ -133,10 +136,18 @@ actually needs, not all eleven by reflex. You will encode the choice in
 | `agent-codespaces` | **Optional** | Execution substrate includes GitHub Codespaces. |
 | `agent-containers` | **Optional** | Execution substrate includes local Docker dev containers. |
 | `agent-dispatch` | **Optional** | Multiple agents must coordinate through an atomic task queue. |
+| `agent-vault` | **Optional** | The harness fetches secrets (API keys, SSH keys, credentials) from a local KeePassXC-backed store instead of hardcoding, committing, or env-exporting them. |
 
 **Minimum viable harness:** `agent-worktrees` + `customizing-copilot`.
 **Recommended default:** add `efforts`, `visions`, `agent-bridge`,
 `context-handoff`. Everything else is opt-in by substrate/need.
+
+> **The two not tiered above are special-purpose, not general-harness picks.**
+> `copilot-extensions-harness` is the operator harness for working *on* this
+> suite itself — enable it in a control repo that contributes to
+> copilot-extensions (it is the reference implementation of the `<repo>-harness`
+> standard). `wsl-setup` ships WSL2 provisioning/troubleshooting skills — enable
+> it when a harness must stand up or debug a WSL host. Both are payload-only.
 
 > **On consolidation.** Managing many plugins is awkward; this runbook is the
 > single place to curate the set. Keep the tiers above as the recommendation and
