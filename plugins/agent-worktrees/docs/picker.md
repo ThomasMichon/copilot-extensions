@@ -34,7 +34,8 @@ post-exit checks                   # ⑤ detect completion; finalize if pushed
 Running the bare binstub always opens the Picker. To **skip** it and drive
 worktrees programmatically, use `agent-worktrees create [--json]` (no launch) or
 `agent-worktrees resolve --new` (create + launch a muxed session) — see
-[cli-reference.md](cli-reference.md).
+[cli-reference.md](cli-reference.md). Why sessions run in a multiplexer at all
+(and when to skip it) is covered in [Multiplexed Sessions](mux.md).
 
 ### ① Freshness done for you at launch
 
@@ -169,6 +170,8 @@ Full key reference: [config-reference.md](config-reference.md).
 - [Getting Started](getting-started.md) — install, register, first launch.
 - [Worktree Lifecycle & Change Management](worktree-lifecycle.md) — states and
   the landing flow the Picker feeds into.
+- [Multiplexed Sessions](mux.md) — why the launched session runs in a mux, and
+  detach/rejoin.
 - [CLI Reference](cli-reference.md) — `resolve` / `create` / `--new` and the
   non-interactive verbs.
 - [Architecture § Picker Pivot Registry](architecture.md#picker-pivot-registry-cross-plugin)
