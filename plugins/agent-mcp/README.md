@@ -169,28 +169,49 @@ auth:
     target_env: SERVICE_API_KEY
 ```
 
-### `server.url` environment substitution (local-first endpoints)
+### Machine-local overlays (per-host override, no env vars)
 
-A `server.url` may reference environment variables with shell-style
-`${VAR}` and `${VAR:-default}` syntax, expanded when the config is loaded.
-This gives an `http` bridge the *local-endpoint-discovery* resolution order
-(operator env override -> documented default): one shared config points an
-**on-box** consumer at a host-local endpoint (skipping a gateway round-trip)
-while every other host falls back to the documented default — no per-host
-config file.
+Any committed config can be overridden **per machine** by a deep-merged overlay
+file — the by-convention way to vary a field on one host (a local endpoint URL, a
+token / vault-entry name, headers) **without editing the shared config or
+exporting an environment variable**. Drop a file at:
 
-```yaml
-server:
-  type: http
-  # On a host where VEI runs locally, set VEI_MCP_URL=http://localhost:8420/mcp/
-  # to reach it directly; everywhere else this resolves to the gateway default.
-  url: ${VEI_MCP_URL:-https://gateway.example:1958/vei-search/mcp/}
+```
+~/.agent-mcp/overrides/<id>.{yaml,yml,json}
 ```
 
-`${VAR:-default}` takes the default when `VAR` is **unset or empty** (matching
-POSIX `:-` semantics). A bare `${VAR}` with no fallback that is unset/empty is a
-hard error at load — fail loud with the offending name rather than silently
-build an empty endpoint. Substitution applies to `server.url` only.
+`<id>` is the config's explicit top-level `id:`, or — absent that — its filename
+stem with a trailing `.mcp` stripped (`vei.mcp.yaml` → `vei`). At load time the
+overlay is deep-merged over the committed config: **mappings merge recursively;
+scalars and lists in the overlay replace** the base (a list is restated, not
+appended). This applies to every config field, not just the URL.
+
+Example — the committed config holds the honest gateway default:
+
+```yaml
+# .github/agents/vei.mcp.yaml   (committed, shared across machines)
+server:
+  type: http
+  url: https://gateway.example:1958/vei-search/mcp/
+auth:
+  kind: command
+  command: ["vault", "get", "Gateway API Token", "password"]
+  parse: raw
+  header: Authorization
+tools: { allow: ["vei_*"] }
+```
+
+On the host where the service runs locally, an overlay points it at the on-box
+endpoint (and drops the now-unneeded gateway auth) — no other host is affected,
+and nothing is exported:
+
+```yaml
+# ~/.agent-mcp/overrides/vei.yaml   (this machine only)
+server:
+  url: http://localhost:8420/mcp/
+auth:
+  kind: none
+```
 
 ## Decorator stack
 

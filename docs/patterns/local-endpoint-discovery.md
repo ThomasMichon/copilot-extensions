@@ -39,9 +39,16 @@ service" into a coordination problem.
    service's own runtime state** (an endpoint file under `~/.agent-<x>/`). No
    fixed constant to collide.
 3. **Resolve, in the client, from the service — not a hardcoded constant.**
-   Resolution order: an explicit operator override (env) → the service's
-   advertised runtime endpoint → a documented default. A service that moved or
-   rebound is still reached with no client edit.
+   Resolution order: an explicit operator override → the service's advertised
+   runtime endpoint → a documented default. A service that moved or rebound is
+   still reached with no client edit. **Prefer a by-convention, machine-local
+   override *file* over an environment variable** for that first tier — a file
+   under the tool's own home (e.g. `~/.agent-<x>/overrides/<id>.{yaml,json}`,
+   deep-merged over the committed config) needs no export in the launch/setup
+   flow, is legible and editable in place, survives across sessions, and can
+   restate *any* field rather than one endpoint string. An env override remains
+   an acceptable fallback where a file is impractical, but it is not the
+   preferred surface.
 
 **Local-first, opt-in wider.** Default to machine-local reach; exposing a service
 beyond the host is an explicit, deliberate act, never the default.
