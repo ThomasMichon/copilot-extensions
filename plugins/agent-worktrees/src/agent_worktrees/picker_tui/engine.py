@@ -3988,9 +3988,19 @@ class PickerScreen(Widget):
             "{} {}".format(*self.cur_machine()[:2])
 
     def _open_cleanup(self, ids=None):
-        scope = self._scope_label() if ids is None else f"{len(ids)} selected"
+        # With no explicit selection (the bulk "Clean" button), default the
+        # checkboxes to the full *safe* cleanable set -- Merged & finalized +
+        # Unused + Conversation-only -- so one Confirm sweeps every worktree the
+        # safety model already deems prunable. Unsafe work never reaches a
+        # cleanable bucket (dirty / ahead / follow-up / active are classified
+        # UNSAFE and are not offered here), and the reap re-checks each worktree,
+        # so the broader default stays behind the beyond-clean confirm gate. An
+        # explicit selection stays conservative -- only the already-merged bucket
+        # is pre-checked -- since the operator already hand-picked the scope.
+        bulk = ids is None
+        scope = self._scope_label() if bulk else f"{len(ids)} selected"
         rows = self.cleanup_rows()
-        if ids is not None:
+        if not bulk:
             rows = [w for w in rows if w["id4"] in ids]
         clean = {w["id4"] for w in rows if w["cleanup_bucket"] == "clean"}
         unused = {w["id4"] for w in rows if w["cleanup_bucket"] == "unused"}
@@ -4004,9 +4014,9 @@ class PickerScreen(Widget):
             "opts": [
                 {"label": "Merged & finalized", "on": True, "ids": clean,
                  "hint": f"work is on the default branch · {len(clean)}"},
-                {"label": "Unused", "on": False, "ids": unused,
+                {"label": "Unused", "on": bulk, "ids": unused,
                  "hint": f"no commits, no conversation · {len(unused)}"},
-                {"label": "Conversation-only", "on": False, "ids": convo,
+                {"label": "Conversation-only", "on": bulk, "ids": convo,
                  "hint": f"no commits, but the session has chat history "
                          f"· {len(convo)}"},
                 {"label": "All eligible", "on": False, "ids": all_eligible,
