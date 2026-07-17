@@ -37,6 +37,13 @@ summary, doc), **locus** (where to work), and **delegate** (how to hand off).
 Checkout paths, class, and remote still resolve from the global registry --
 never restate them here.
 
+> **Role / locus / delegate here are *not* the registry `class`.** The registry's
+> `class` (`reference` / `singleton` / `worktree`) is the **editing model** — a
+> third, orthogonal axis. Don't collapse "worktree / owner / delegate" into one
+> taxonomy: `worktree` is a class, "owner" is a landing policy, and `delegate` is
+> a locus/handoff. See
+> [`agent-worktrees-repos` § Class is not role, locus, or delegate](../agent-worktrees-repos/SKILL.md).
+
 > To actually *work* on a related repo as a good citizen (honor class, locus,
 > and delegation), use the **`working-cross-repo`** skill, which builds on
 > `related resolve`.
