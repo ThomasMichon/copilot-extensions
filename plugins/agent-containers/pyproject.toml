@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-containers"
-version = "0.1.2-dev17"
+version = "0.1.2-dev18"
 description = "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver"
 readme = "README.md"
 license = "MIT"
@@ -15,12 +15,15 @@ authors = [
 dependencies = [
     "pyyaml>=6.0",
     "agent-credential-relay",
+    "agent-config-migrate",
 ]
 
 [tool.uv.sources]
 # credential-relay framework + host-credential sources (module ``credential_relay``).
 # Vendored locally; resolved from the path, never an index.
 agent-credential-relay = { path = "libs/credential-relay" }
+# config schema versioning + migration (module ``config_migrate``).
+agent-config-migrate = { path = "libs/config-migrate" }
 
 [project.scripts]
 agent-containers = "agent_containers.__main__:main"

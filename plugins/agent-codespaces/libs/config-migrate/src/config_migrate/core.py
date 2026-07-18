@@ -228,6 +228,13 @@ def migrate_file(
         )
 
     raw_text = path.read_text(encoding="utf-8")
+    # Strip a leading UTF-8 BOM: some editors (notably on Windows) prepend one to
+    # user-authored YAML. Left in place, the textual baseline stamp would insert
+    # the marker *before* the BOM, stranding it mid-file and corrupting the next
+    # parse. On a rewrite we always emit clean UTF-8 (no BOM); on a no-op we do
+    # not touch the file, so a BOM'd-but-current file is left exactly as-is.
+    if raw_text.startswith("\ufeff"):
+        raw_text = raw_text[1:]
     try:
         parsed = yaml.safe_load(raw_text)
     except yaml.YAMLError as exc:

@@ -54,6 +54,11 @@ $CredRelayDir = Join-Path $PluginDir 'libs\credential-relay'
 if (-not (Test-Path (Join-Path $CredRelayDir 'pyproject.toml'))) {
     $CredRelayDir = Join-Path (Split-Path -Parent (Split-Path -Parent $PluginDir)) 'libs\credential-relay'
 }
+# config-migrate dir (vendored like credential-relay): plugin-vendored or repo-root.
+$CfgMigrateDir = Join-Path $PluginDir 'libs\config-migrate'
+if (-not (Test-Path (Join-Path $CfgMigrateDir 'pyproject.toml'))) {
+    $CfgMigrateDir = Join-Path (Split-Path -Parent (Split-Path -Parent $PluginDir)) 'libs\config-migrate'
+}
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
@@ -240,6 +245,13 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
         $ErrorActionPreference = $prevEAP
         exit 1
     }
+    if (Test-Path (Join-Path $CfgMigrateDir 'pyproject.toml')) {
+        & uv pip install --python $VenvPython --reinstall-package agent-config-migrate "$CfgMigrateDir" --quiet 2>&1 | Out-Null
+    } else {
+        Write-Fail "config-migrate source not found at $CfgMigrateDir"
+        $ErrorActionPreference = $prevEAP
+        exit 1
+    }
     & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
 } else {
     & $VenvPython -m pip install --quiet "$PluginDir" 2>&1 | Out-Null
@@ -330,6 +342,15 @@ $tmp = "$manifestPath.tmp"
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
 Move-Item -Force -Path $tmp -Destination $manifestPath
 Write-Ok "Deploy manifest written (source: $kind)"
+
+# -- Machine-local config schema migration (idempotent + atomic; never touches
+# a repo/cwd containers.yaml -- that is an adopt concern). Non-fatal. --
+try {
+    $env:PYTHONUTF8 = '1'
+    & $VenvPython -m agent_containers config-migrate 2>&1 | ForEach-Object { Write-Host "  $_" }
+} catch {
+    Write-Step "Config migration skipped: $_"
+}
 
 # -- 6. Verify ----------------------------------------------------------
 

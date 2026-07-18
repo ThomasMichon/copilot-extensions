@@ -160,6 +160,23 @@ def test_migrate_file_baseline_stamp_summary_wording(tmp_path):
     assert res.summary().endswith("stamped v1")
 
 
+def test_migrate_file_strips_leading_bom(tmp_path):
+    reg = _baseline_reg()
+    p = tmp_path / "config.yaml"
+    # A BOM-prefixed, unmarked file (as some Windows editors save).
+    p.write_bytes("\ufeff# header\nfoo: bar\n".encode("utf-8"))
+    res = migrate_file(p, "aw/config", reg)
+    assert res.changed
+    text = p.read_text(encoding="utf-8")
+    assert not text.startswith("\ufeff")  # BOM removed on rewrite
+    assert "# header" in text and f"{SCHEMA_VERSION_KEY}: 1" in text
+    # And it is idempotent: a second run over the (now BOM-free) file is a no-op
+    # and does not corrupt it.
+    again = migrate_file(p, "aw/config", reg)
+    assert not again.changed
+    assert yaml.safe_load(p.read_text(encoding="utf-8"))["foo"] == "bar"
+
+
 def test_migrate_file_idempotent_second_run(tmp_path):
     reg = _baseline_reg()
     p = tmp_path / "config.yaml"
