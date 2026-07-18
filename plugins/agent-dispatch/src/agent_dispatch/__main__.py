@@ -107,8 +107,64 @@ def _resolve_serve_host(args: argparse.Namespace, base: Config) -> str:
     if sys.platform == "win32":
         from .netinfo import resolve_bind_host
 
-        return resolve_bind_host()
+        return _resolve_bind_host_resilient(resolve_bind_host)
     return base.host
+
+
+def _resolve_bind_host_resilient(
+    resolver,
+    *,
+    retries: int | None = None,
+    delay: float | None = None,
+    sleep=None,
+    log=None,
+):
+    """Resolve the Windows bind host, tolerating a logon-before-WSL race (#2889).
+
+    On **NAT**, the coordinator's Scheduled Task fires ``-AtLogOn`` but WSL/HNS
+    (which owns the ``vEthernet (WSL)`` adapter the coordinator must bind) starts
+    slightly *after* logon. At that instant the adapter has no IPv4 yet, so
+    :func:`netinfo.resolve_bind_host` **raises** ``RuntimeError`` (it refuses to
+    fall back to ``0.0.0.0``/LAN). Without a retry the ``serve`` process crashes
+    with no listener -- the exact #2889 symptom (a *manual* serve run later,
+    once WSL is up, binds fine). Retry with a bounded wait so the coordinator
+    self-heals once WSL networking comes up. **mirrored** resolves on the first
+    try (no raise), so this is a no-op there.
+
+    Tunable via ``AGENT_DISPATCH_BIND_RETRIES`` (default 20) and
+    ``AGENT_DISPATCH_BIND_RETRY_DELAY`` seconds (default 3) -- ~60s of grace.
+    ``sleep``/``log`` are injectable for tests. On exhaustion the last error is
+    re-raised so the failure is loud and shows up in the launcher log.
+    """
+    import os
+    import time
+
+    if retries is None:
+        retries = int(os.environ.get("AGENT_DISPATCH_BIND_RETRIES", "20"))
+    if delay is None:
+        delay = float(os.environ.get("AGENT_DISPATCH_BIND_RETRY_DELAY", "3"))
+    if sleep is None:
+        sleep = time.sleep
+    if log is None:
+        def log(msg: str) -> None:
+            print(msg, file=sys.stderr, flush=True)
+
+    retries = max(1, retries)
+    last_err: RuntimeError | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            return resolver()
+        except RuntimeError as exc:
+            last_err = exc
+            log(
+                "agent-dispatch: bind host not resolvable yet "
+                f"(attempt {attempt}/{retries}): {exc}"
+            )
+            if attempt < retries:
+                sleep(delay)
+    # Every attempt raised RuntimeError; re-raise the last so the failure is loud
+    # and lands in the launcher log rather than silently binding nothing.
+    raise last_err  # type: ignore[misc]  # loop ran >=1 time, so last_err is set
 
 
 def _cmd_create(args: argparse.Namespace) -> int:

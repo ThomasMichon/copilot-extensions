@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from agent_dispatch.__main__ import _parse_affinity, _resolve_client_target, build_parser
+from agent_dispatch.__main__ import (
+    _parse_affinity,
+    _resolve_bind_host_resilient,
+    _resolve_client_target,
+    build_parser,
+)
 
 
 def test_parse_affinity():
@@ -728,3 +733,74 @@ def test_peer_browse_surfaces_actionable_diagnosis_on_127(monkeypatch, capsys):
     assert "not installed" in err
     # The raw remote line is not dumped verbatim.
     assert "command not found" not in err
+
+
+# -- bind-host resolution retry (NAT logon-before-WSL race, #2889) -----------
+
+
+def test_bind_host_resilient_returns_first_success():
+    calls = []
+
+    def resolver():
+        calls.append(1)
+        return "127.0.0.1"
+
+    slept = []
+    got = _resolve_bind_host_resilient(
+        resolver, retries=5, delay=0.01, sleep=slept.append, log=lambda m: None
+    )
+    assert got == "127.0.0.1"
+    assert len(calls) == 1          # mirrored resolves immediately
+    assert slept == []              # no retry, no sleep
+
+
+def test_bind_host_resilient_retries_until_adapter_ready():
+    # Simulate NAT: the vEthernet(WSL) adapter is not up for the first 2 tries
+    # (resolve_bind_host raises), then it comes up and resolves.
+    attempts = {"n": 0}
+
+    def resolver():
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise RuntimeError("vEthernet (WSL) has no IPv4 yet")
+        return "172.19.240.1"
+
+    slept = []
+    logs = []
+    got = _resolve_bind_host_resilient(
+        resolver, retries=10, delay=0.01, sleep=slept.append, log=logs.append
+    )
+    assert got == "172.19.240.1"
+    assert attempts["n"] == 3
+    assert len(slept) == 2          # slept between the 2 failed attempts
+    assert len(logs) == 2           # each failed attempt logged
+
+
+def test_bind_host_resilient_reraises_after_exhaustion():
+    import pytest
+
+    def resolver():
+        raise RuntimeError("vEthernet (WSL) never came up")
+
+    slept = []
+    with pytest.raises(RuntimeError, match="never came up"):
+        _resolve_bind_host_resilient(
+            resolver, retries=3, delay=0.01, sleep=slept.append, log=lambda m: None
+        )
+    assert len(slept) == 2          # sleeps between the 3 attempts, not after the last
+
+
+def test_bind_host_resilient_reads_env_defaults(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_BIND_RETRIES", "2")
+    monkeypatch.setenv("AGENT_DISPATCH_BIND_RETRY_DELAY", "0")
+    attempts = {"n": 0}
+
+    def resolver():
+        attempts["n"] += 1
+        raise RuntimeError("still down")
+
+    import pytest
+
+    with pytest.raises(RuntimeError):
+        _resolve_bind_host_resilient(resolver, sleep=lambda s: None, log=lambda m: None)
+    assert attempts["n"] == 2       # honored AGENT_DISPATCH_BIND_RETRIES=2
