@@ -1078,6 +1078,52 @@ def _cmd_sessions(args: argparse.Namespace) -> None:
             print(f"    Liveness: {live}")
 
 
+def _read_prompt_from_file(path: str) -> str:
+    """Read a prompt from *path*, or from stdin when *path* is ``-``.
+
+    Lets callers pass multi-line prompts without them transiting the shell's
+    argv, where embedded quotes/newlines get mangled -- notably PowerShell
+    word-splitting a prompt at the first embedded double-quote (see #250).
+    """
+    if path == "-":
+        return sys.stdin.read()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    except OSError as exc:
+        print(f"[FAIL] --prompt-file: cannot read {path}: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _resolve_prompt(args: argparse.Namespace, *, required: bool) -> str | None:
+    """Resolve the effective prompt from the positional arg or ``--prompt-file``.
+
+    The positional prompt and ``--prompt-file`` are mutually exclusive. When
+    *required* and neither is supplied, exit with guidance.
+    """
+    positional = getattr(args, "prompt", None)
+    prompt_file = getattr(args, "prompt_file", None)
+    if positional is not None and prompt_file:
+        print(
+            "[FAIL] Pass the prompt either as the positional argument or via "
+            "--prompt-file, not both.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if prompt_file:
+        return _read_prompt_from_file(prompt_file)
+    if positional is not None:
+        return positional
+    if required:
+        print(
+            "[FAIL] No prompt given. Provide it as the positional argument or "
+            "via --prompt-file <path> (or --prompt-file - to read stdin).",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return None
+
+
 def _cmd_send(args: argparse.Namespace) -> None:
     """Send a prompt to an agent or existing session.
 
@@ -1102,7 +1148,7 @@ def _cmd_send(args: argparse.Namespace) -> None:
 
     client = _get_client()
     target = args.target
-    prompt = args.prompt
+    prompt = _resolve_prompt(args, required=True)
 
     # Interactive-CLI target -> deliver via the live-session message queue
     # (attributed + answerable envelope), not the ACP turn path. This is how a
@@ -1561,7 +1607,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
 
-    prompt = getattr(args, "prompt", None)
+    prompt = _resolve_prompt(args, required=False)
     if not prompt:
         ident = _connection_identity(client, session_id)
         if args.json:
@@ -2407,7 +2453,8 @@ def _cmd_config_validate(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
-def main(argv: list[str] | None = None) -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """Build the top-level argument parser (extracted so it is unit-testable)."""
     parser = argparse.ArgumentParser(
         prog="agent-bridge",
         description="Persistent inter-agent communication service",
@@ -2664,7 +2711,19 @@ def main(argv: list[str] | None = None) -> None:
         help="Agent name, session ID, or a live session's worktree handle "
              "(a worktree handle resolves to whichever session is live now)",
     )
-    send_p.add_argument("prompt", help="Prompt text to send")
+    send_p.add_argument(
+        "prompt", nargs="?", default=None,
+        help="Prompt text to send (omit and use --prompt-file for multi-line "
+             "prompts that shouldn't transit the shell's argv)",
+    )
+    send_p.add_argument(
+        "--prompt-file", dest="prompt_file", default=None, metavar="PATH",
+        help="Read the prompt from PATH (or '-' for stdin) instead of the "
+             "positional argument. Use this for multi-line prompts to avoid "
+             "shell argv mangling (e.g. PowerShell word-splitting a prompt at "
+             "the first embedded double-quote). Mutually exclusive with the "
+             "positional prompt.",
+    )
     send_p.add_argument(
         "--sender", "--from", dest="sender", default=None,
         help="Attribution label when the target is a live interactive session "
@@ -2731,6 +2790,14 @@ def main(argv: list[str] | None = None) -> None:
     create_p.add_argument(
         "prompt", nargs="?", default=None,
         help="Optional first prompt to send to the new session",
+    )
+    create_p.add_argument(
+        "--prompt-file", dest="prompt_file", default=None, metavar="PATH",
+        help="Read the first prompt from PATH (or '-' for stdin) instead of the "
+             "positional argument. Use this for multi-line prompts to avoid "
+             "shell argv mangling (e.g. PowerShell word-splitting a prompt at "
+             "the first embedded double-quote). Mutually exclusive with the "
+             "positional prompt.",
     )
     create_p.add_argument(
         "--no-wait", action="store_true",
@@ -2861,6 +2928,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     config_validate_p.set_defaults(func=_cmd_config_validate)
 
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = build_parser()
     args = parser.parse_args(argv)
 
     logging.basicConfig(

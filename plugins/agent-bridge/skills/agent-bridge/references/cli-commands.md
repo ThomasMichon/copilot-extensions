@@ -51,6 +51,12 @@ agent-bridge send <session-id> "follow-up prompt"
 # Fire-and-forget (don't wait for response)
 agent-bridge send <agent-name> "do this" --no-wait
 
+# Multi-line / quote-heavy prompt: read it from a file (or '-' for stdin) so it
+# never transits the shell's argv (avoids PowerShell mangling a prompt at the
+# first embedded double-quote). Mutually exclusive with the positional prompt.
+agent-bridge send <agent-name> --prompt-file ./dispatch.md
+Get-Content ./dispatch.md | agent-bridge send <agent-name> --prompt-file -
+
 # Deliver INTO a live interactive session (human-attached), attributed and
 # answerable -- routes to the message queue, not an ACP turn. The receiver
 # replies with `agent-bridge send <reply-to> "..."`.
@@ -83,6 +89,10 @@ agent-bridge create <agent-name>
 
 # ...and send a first prompt in one step
 agent-bridge create <agent-name> "your first prompt"
+
+# ...or read the first prompt from a file (or '-' for stdin) -- robust for
+# multi-line / quote-heavy dispatch prompts (no argv mangling)
+agent-bridge create <agent-name> --prompt-file ./dispatch.md --no-wait
 ```
 
 `create` always spawns a fresh session, bypassing caller reuse. For agents
