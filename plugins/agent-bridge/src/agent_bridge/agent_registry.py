@@ -1539,12 +1539,30 @@ class AgentResolver:
             auth_hooks=auth_hook_dicts,
         )
 
+    def _is_local_loopback_agent(self, config: AgentConfig) -> bool:
+        """True when this agent dispatches via local loopback rather than SSH.
+
+        A control-plane agent derived from topology carries ``host`` = the
+        machine key plus an ``ssh_environment``; when that host is the *local*
+        machine and the env matches our platform, ``resolve()`` short-circuits
+        to a local spawn (see the loopback branch there). Such an agent must
+        not be advertised as a remote SSH target -- doing so mislabels a
+        reachable local agent as an unreachable SSH one once the inter-machine
+        SSH mesh is retired (``ssh.ready: false``). See issue #168.
+        """
+        return bool(
+            config.host
+            and self._local_machine
+            and config.host == self._local_machine.key
+            and config.ssh_environment == self._local_platform
+        )
+
     def _agent_to_dict(self, config: AgentConfig) -> dict[str, Any]:
         """Convert an AgentConfig to API-ready dict."""
         spawnable = not config.managed
         if config.spawn_command:
             target_type = "command"
-        elif config.host:
+        elif config.host and not self._is_local_loopback_agent(config):
             target_type = "ssh"
         else:
             target_type = "local"
