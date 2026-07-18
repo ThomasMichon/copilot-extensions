@@ -370,6 +370,11 @@ def main(argv: list[str] | None = None) -> int:
     # --- version ---
     sub.add_parser("version", help="Show version")
 
+    sub.add_parser(
+        "config-migrate",
+        help="Migrate machine-local config schema (adopted-repos.yaml); idempotent",
+    )
+
     args = parser.parse_args(argv)
 
     # Logging setup
@@ -418,6 +423,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_status()
         if args.command == "version":
             return _cmd_version()
+        if args.command == "config-migrate":
+            return _cmd_config_migrate()
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
@@ -2278,6 +2285,24 @@ def _cmd_version() -> int:
         print(f"agent-codespaces {ver} ({commit})")
     except ImportError:
         print("agent-codespaces 0.1.0-dev2")
+    return 0
+
+
+def _cmd_config_migrate() -> int:
+    """Migrate machine-local config schema (adopted-repos.yaml) in place.
+
+    Idempotent + atomic; machine-local only (never touches repo-committed
+    ``codespaces.yaml`` -- that is an adopt concern). Safe no-op when the
+    vendored ``config_migrate`` library is absent. Invoked once from the
+    installer's install/update flow.
+    """
+    from . import config_migrations
+
+    if not config_migrations.available():
+        print("config-migrate: migration library unavailable; skipping")
+        return 0
+    results = config_migrations.run_migrations()
+    print(config_migrations.summarize(results))
     return 0
 
 
