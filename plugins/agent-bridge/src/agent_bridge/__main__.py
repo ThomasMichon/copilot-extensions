@@ -2448,6 +2448,21 @@ def _cmd_config_validate(args: argparse.Namespace) -> None:
     sys.exit(1)
 
 
+def _cmd_config_migrate(args: argparse.Namespace) -> None:
+    """Migrate the machine-local config.yaml schema in place (idempotent + atomic).
+
+    Machine-local only (never touches repo config); safe no-op when the vendored
+    ``config_migrate`` library is absent. Invoked once from the installer's
+    install/update flow, and available on demand.
+    """
+    from . import config_migrations
+
+    if not config_migrations.available():
+        print("config-migrate: migration library unavailable; skipping")
+        return
+    print(config_migrations.summarize(config_migrations.run_migrations()))
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -2927,6 +2942,11 @@ def build_parser() -> argparse.ArgumentParser:
         "validate", help="Validate current configuration",
     )
     config_validate_p.set_defaults(func=_cmd_config_validate)
+
+    config_migrate_p = config_sub.add_parser(
+        "migrate", help="Migrate machine-local config.yaml schema (idempotent)",
+    )
+    config_migrate_p.set_defaults(func=_cmd_config_migrate)
 
     return parser
 

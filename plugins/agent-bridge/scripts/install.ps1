@@ -157,6 +157,8 @@ function Resolve-SshManager { return (Resolve-VendoredLib -LibName 'ssh-manager'
 function Resolve-CredentialRelay { return (Resolve-VendoredLib -LibName 'credential-relay') }
 # zero-downtime cutover primitives (module ``zdd``), extracted from this plugin.
 function Resolve-Zdd { return (Resolve-VendoredLib -LibName 'zdd') }
+# config schema versioning + migration (module ``config_migrate``).
+function Resolve-ConfigMigrate { return (Resolve-VendoredLib -LibName 'config-migrate') }
 
 # Check if ssh-manager is already importable in the venv.
 function Test-SshManagerInstalled {
@@ -176,6 +178,13 @@ function Test-CredentialRelayInstalled {
 function Test-ZddInstalled {
     if (-not (Test-Path $VenvPython)) { return $false }
     & $VenvPython -c 'from zdd.cutover import CutoverOrchestrator' 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
+# Check if config-migrate is already importable in the venv.
+function Test-ConfigMigrateInstalled {
+    if (-not (Test-Path $VenvPython)) { return $false }
+    & $VenvPython -c 'from config_migrate import migrate_file' 2>$null
     return $LASTEXITCODE -eq 0
 }
 
@@ -851,6 +860,21 @@ function Invoke-Install {
     } else {
         throw 'Cannot locate zdd library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
     }
+    # config-migrate (config schema versioning + migration).
+    $CfgMigrateDir = Resolve-ConfigMigrate
+    if ($CfgMigrateDir) {
+        $cmOut = & uv pip install --python $VenvPython "$CfgMigrateDir" --reinstall-package agent-config-migrate --refresh-package agent-config-migrate --quiet 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Fail "config-migrate install failed (exit $LASTEXITCODE)"
+            if ($cmOut) { Write-Host ($cmOut | Out-String) }
+            throw 'config-migrate install failed'
+        }
+    } elseif (Test-ConfigMigrateInstalled) {
+        Write-Step 'config-migrate already installed in venv (marketplace layout)'
+    } else {
+        throw 'Cannot locate config-migrate library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
+    }
     $bridgeOut = & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1
     $installResult = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
@@ -879,6 +903,9 @@ function Invoke-Install {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         & $VenvPython -c "from agent_bridge.config import load_config, write_default_config; write_default_config(load_config())" 2>$null
+        # Machine-local config schema migration (idempotent + atomic). Non-fatal.
+        $env:PYTHONUTF8 = '1'
+        & $VenvPython -m agent_bridge config migrate 2>&1 | ForEach-Object { Write-Host "  $_" }
         $ErrorActionPreference = $prevEAP
     }
 
@@ -1343,6 +1370,21 @@ function Invoke-Update {
         } else {
             throw 'Cannot locate zdd library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
         }
+        # config-migrate: force-reinstall so a local code change propagates.
+        $CfgMigrateDir = Resolve-ConfigMigrate
+        if ($CfgMigrateDir) {
+            $cmOut = & uv pip install --python $VenvPython --reinstall-package agent-config-migrate --refresh-package agent-config-migrate `
+                "$CfgMigrateDir" --quiet 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                $ErrorActionPreference = $prevEAP
+                if ($cmOut) { Write-Host ($cmOut | Out-String) }
+                throw "config-migrate update failed (exit $LASTEXITCODE)"
+            }
+        } elseif (Test-ConfigMigrateInstalled) {
+            Write-Step 'config-migrate already installed in venv (marketplace layout)'
+        } else {
+            throw 'Cannot locate config-migrate library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
+        }
         $bridgeOut = & uv pip install --python $VenvPython --reinstall-package agent-bridge `
             "$PluginDir" --quiet 2>&1
         $updateResult = $LASTEXITCODE
@@ -1357,6 +1399,13 @@ function Invoke-Update {
         # while we can still roll back -- rather than starting a broken service.
         if (-not (Test-RuntimeHealthy $VenvPython)) {
             throw 'Post-install verification failed (agent_bridge / uvicorn / credential_relay not importable)'
+        }
+        # Machine-local config schema migration (idempotent + atomic). Non-fatal.
+        try {
+            $env:PYTHONUTF8 = '1'
+            & $VenvPython -m agent_bridge config migrate 2>&1 | ForEach-Object { Write-Host "  $_" }
+        } catch {
+            Write-Step "Config migration skipped: $_"
         }
         Write-Ok 'Package updated'
     }

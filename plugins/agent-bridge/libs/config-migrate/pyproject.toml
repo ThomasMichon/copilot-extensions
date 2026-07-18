@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Distribution name is namespaced (agent-config-migrate, not the squattable
+# "config-migrate") to prevent dependency-confusion; the import module stays
+# ``config_migrate``. Mirrors agent-ssh-manager / agent-zdd.
+name = "agent-config-migrate"
+version = "0.1.0-dev2"
+description = "By-convention YAML config schema versioning + scripted migration for Copilot CLI plugins"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+# YAML read/write is the only non-stdlib need (migrate_file). migrate_doc /
+# the registry are pure-stdlib.
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use `assert` (pytest) and hardcoded fixtures.
+"tests/**" = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
