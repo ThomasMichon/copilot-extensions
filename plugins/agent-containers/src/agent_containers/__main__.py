@@ -85,6 +85,11 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("version", help="Show version")
 
+    sub.add_parser(
+        "config-migrate",
+        help="Migrate machine-local config schema (~/.agent-containers/containers.yaml)",
+    )
+
     args = parser.parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -114,6 +119,14 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_bridge(args)
         if args.command == "version":
             print(f"agent-containers {__version__}")
+            return 0
+        if args.command == "config-migrate":
+            from . import config_migrations
+
+            if not config_migrations.available():
+                print("config-migrate: migration library unavailable; skipping")
+                return 0
+            print(config_migrations.summarize(config_migrations.run_migrations()))
             return 0
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)

@@ -237,6 +237,13 @@ def load_config() -> ContainersConfig:
         log.warning("Failed to read %s: %s", path, exc)
         return config
 
+    # Lazy schema migration (in memory, never persists / never raises) so a
+    # still-old config reads at the current shape before install/update rewrites
+    # the machine-local copy. A repo/cwd copy is only migrated in memory here.
+    from . import config_migrations
+
+    data = config_migrations.migrate_loaded(data)
+
     config.exec_user = data.get("exec_user", config.exec_user)
     config.workspace_folder = data.get("workspace_folder", config.workspace_folder)
     config.acp_command = data.get("acp_command", config.acp_command)

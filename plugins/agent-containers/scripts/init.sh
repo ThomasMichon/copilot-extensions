@@ -41,6 +41,11 @@ CRED_RELAY_DIR="$PLUGIN_DIR/libs/credential-relay"
 if [[ ! -f "$CRED_RELAY_DIR/pyproject.toml" ]]; then
     CRED_RELAY_DIR="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/credential-relay"
 fi
+# config-migrate dir (vendored like credential-relay): plugin-vendored or repo-root.
+CFG_MIGRATE_DIR="$PLUGIN_DIR/libs/config-migrate"
+if [[ ! -f "$CFG_MIGRATE_DIR/pyproject.toml" ]]; then
+    CFG_MIGRATE_DIR="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/config-migrate"
+fi
 
 echo ''
 echo '=== agent-containers init ==='
@@ -111,6 +116,14 @@ if [[ "$HAVE_UV" -eq 1 ]]; then
     fi
     if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-credential-relay "$CRED_RELAY_DIR" --quiet 2>/dev/null; then
         _fail 'credential-relay install failed'
+        exit 1
+    fi
+    if [[ ! -f "$CFG_MIGRATE_DIR/pyproject.toml" ]]; then
+        _fail "config-migrate source not found at $CFG_MIGRATE_DIR"
+        exit 1
+    fi
+    if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-config-migrate "$CFG_MIGRATE_DIR" --quiet 2>/dev/null; then
+        _fail 'config-migrate install failed'
         exit 1
     fi
     if ! uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
@@ -187,6 +200,14 @@ cat > "$TMP" << EOF
 EOF
 mv -f "$TMP" "$MANIFEST_PATH"
 _ok "Deploy manifest written (source: $KIND)"
+
+# -- Machine-local config schema migration (idempotent + atomic; never touches
+# a repo/cwd containers.yaml -- that is an adopt concern). Non-fatal. --
+if PYTHONUTF8=1 "$VENV_PYTHON" -m agent_containers config-migrate 2>/dev/null; then
+    :
+else
+    _step 'Config migration skipped'
+fi
 
 # -- 6. Verify ---------------------------------------------------------
 echo ''

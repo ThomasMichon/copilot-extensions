@@ -43,7 +43,7 @@ from .registry import (
 )
 from .runner import ManagedFile, run
 
-__version__ = "0.1.0-dev1"
+__version__ = "0.1.0-dev2"
 
 __all__ = [
     "SCHEMA_VERSION_KEY",
