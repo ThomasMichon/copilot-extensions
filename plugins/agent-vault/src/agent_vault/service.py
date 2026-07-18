@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .config import (
     DEFAULT_TCP_PORT,
+    ENDPOINT_ENV,
     IS_WINDOWS,
     LOG_FILE,
     PID_FILE,
@@ -32,8 +33,13 @@ from .extensions import ActionContext, UnlockContext, get_registry
 from .gcm import git_credential_action
 from .keepassxc import KeePassXCBackend
 from .prompt import prompt_password
-
-from .rendezvous import clear_endpoint, write_endpoint
+from .rendezvous import (
+    EndpointUnavailable,
+    clear_endpoint,
+    connect_probe,
+    resolve,
+    write_endpoint,
+)
 
 # Service inactivity timeout (0 = never, set via --persistent)
 TIMEOUT_SECONDS = int(os.environ.get("VAULT_TIMEOUT", "600"))
@@ -785,33 +791,14 @@ def cleanup() -> None:
             os.unlink(path)
 
 
-def send_command(request: dict) -> dict | None:
-    """Send a command to a running service (client helper)."""
-    if not IS_WINDOWS:
-        import socket as sock_mod
-
-        try:
-            s = sock_mod.socket(sock_mod.AF_UNIX, sock_mod.SOCK_STREAM)
-            s.connect(SOCKET_PATH)
-            s.settimeout(5.0)
-            s.sendall((json.dumps(request) + "\n").encode())
-            buf = b""
-            while b"\n" not in buf:
-                chunk = s.recv(4096)
-                if not chunk:
-                    break
-                buf += chunk
-            s.close()
-            return json.loads(buf.decode().strip())
-        except Exception:
-            pass
-
+def _dial_unix(request: dict, path: str, timeout: float = 5.0) -> dict | None:
+    """Send a command over a Unix socket at ``path``; ``None`` on any failure."""
     import socket as sock_mod
 
     try:
-        s = sock_mod.socket(sock_mod.AF_INET, sock_mod.SOCK_STREAM)
-        s.settimeout(5.0)
-        s.connect(("127.0.0.1", configured_tcp_port()))
+        s = sock_mod.socket(sock_mod.AF_UNIX, sock_mod.SOCK_STREAM)
+        s.connect(path)
+        s.settimeout(timeout)
         s.sendall((json.dumps(request) + "\n").encode())
         buf = b""
         while b"\n" not in buf:
@@ -823,6 +810,63 @@ def send_command(request: dict) -> dict | None:
         return json.loads(buf.decode().strip())
     except Exception:
         return None
+
+
+def _dial_tcp(request: dict, host: str, port: int, timeout: float = 5.0) -> dict | None:
+    """Send a command over TCP to ``host:port``; ``None`` on any failure."""
+    import socket as sock_mod
+
+    try:
+        s = sock_mod.socket(sock_mod.AF_INET, sock_mod.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((host, port))
+        s.sendall((json.dumps(request) + "\n").encode())
+        buf = b""
+        while b"\n" not in buf:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+        s.close()
+        return json.loads(buf.decode().strip())
+    except Exception:
+        return None
+
+
+def send_command(request: dict) -> dict | None:
+    """Send a command to a running service (client helper).
+
+    Discovery-first: dial the endpoint advertised in the rendezvous file
+    (``AGENT_VAULT_ENDPOINT`` override -> local rendezvous file), falling back to
+    exactly today's fixed socket/port when nothing is advertised.
+    """
+    override = os.environ.get(ENDPOINT_ENV)
+    try:
+        ep = resolve(run_dir(), override=override, probe=connect_probe)
+    except EndpointUnavailable:
+        ep = None
+    if ep is not None:
+        if ep.transport == "unix" and not IS_WINDOWS:
+            result = _dial_unix(request, ep.address)
+            if result is not None:
+                return result
+        elif ep.transport == "tcp":
+            try:
+                d_host, d_port = ep.tcp_host_port
+            except ValueError:
+                d_host = d_port = None
+            if d_host is not None:
+                result = _dial_tcp(request, d_host, d_port)
+                if result is not None:
+                    return result
+
+    # Legacy fallback -- exactly today's logic.
+    if not IS_WINDOWS:
+        result = _dial_unix(request, SOCKET_PATH)
+        if result is not None:
+            return result
+
+    return _dial_tcp(request, "127.0.0.1", configured_tcp_port())
 
 
 def is_process_alive(pid: int) -> bool:

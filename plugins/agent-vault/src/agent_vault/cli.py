@@ -9,7 +9,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import config
+from . import config, rendezvous
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
 from .prompt import prompt_password as gui_prompt_password
 
@@ -34,15 +34,17 @@ IS_WSL = _detect_wsl()
 # ---------------------------------------------------------------------------
 
 
-def _send_socket(request: dict, timeout: float | None = 5.0) -> dict | None:
-    """Try sending a command via Unix socket."""
+def _send_socket(
+    request: dict, timeout: float | None = 5.0, path: str = SOCKET_PATH
+) -> dict | None:
+    """Try sending a command via Unix socket (``path`` defaults to ``SOCKET_PATH``)."""
     import socket as _sock
 
     connect_timeout = 5.0
     try:
         s = _sock.socket(_sock.AF_UNIX, _sock.SOCK_STREAM)
         s.settimeout(connect_timeout)
-        s.connect(SOCKET_PATH)
+        s.connect(path)
         s.settimeout(timeout)
         s.sendall((json.dumps(request) + "\n").encode())
         buf = b""
@@ -80,6 +82,77 @@ def _send_tcp(request: dict, host: str, port: int, timeout: float | None) -> dic
         return None
 
 
+def _windows_run_dirs() -> list[Path]:
+    """Candidate Windows-side agent-vault runtime dirs, seen from WSL via ``/mnt/c``.
+
+    A WSL guest has no local daemon; it reaches the Windows-hosted vault. The
+    Windows daemon advertises its endpoint under ``%USERPROFILE%\\.agent-vault\\run``,
+    visible from WSL at ``/mnt/c/Users/<user>/.agent-vault/run``. Honors an
+    explicit ``AGENT_VAULT_WINDOWS_RUN_DIR`` override; otherwise globs the mounted
+    Windows profiles (skipping system profiles), newest ``endpoint.json`` first.
+    """
+    override = os.environ.get("AGENT_VAULT_WINDOWS_RUN_DIR")
+    if override:
+        return [Path(override)]
+    mount = os.environ.get("AGENT_VAULT_WINDOWS_MOUNT", "/mnt/c")
+    users = Path(mount) / "Users"
+    skip = {"public", "default", "default user", "all users"}
+    candidates: list[tuple[float, Path]] = []
+    try:
+        for profile in users.iterdir():
+            if profile.name.lower() in skip:
+                continue
+            ep = profile / ".agent-vault" / "run" / "endpoint.json"
+            try:
+                mtime = ep.stat().st_mtime
+            except OSError:
+                continue
+            candidates.append((mtime, ep.parent))
+    except OSError:
+        return []
+    candidates.sort(reverse=True)  # newest advertised endpoint wins
+    return [d for _, d in candidates]
+
+
+def _read_windows_endpoint() -> "rendezvous.Endpoint | None":
+    """Read the Windows-side rendezvous file from WSL; ``None`` if none found.
+
+    The recorded ``pid`` is a *Windows* pid, meaningless to a Linux
+    ``pid_alive`` check, so staleness here is left to the actual send (which
+    fails fast and falls through to the legacy dial). The endpoint is re-tagged
+    ``source="windows"`` so the caller keeps the resolved cross-boundary host.
+    """
+    from dataclasses import replace
+
+    for run in _windows_run_dirs():
+        ep = rendezvous.read_endpoint(run)
+        if ep is not None:
+            return replace(ep, source="windows")
+    return None
+
+
+def _discover_endpoint(context: ResolvedVault) -> "rendezvous.Endpoint | None":
+    """Discover the daemon endpoint via the rendezvous ladder, or ``None``.
+
+    Ladder: explicit ``AGENT_VAULT_ENDPOINT`` override -> the local rendezvous
+    file (a daemon on this host) -> (WSL only) the Windows-side rendezvous file.
+    Returns ``None`` when nothing is discovered so the caller falls back to
+    exactly today's legacy dial (UDS->TCP / fixed port).
+    """
+    override = os.environ.get(config.ENDPOINT_ENV)
+    try:
+        return rendezvous.resolve(
+            config.run_dir(),
+            override=override,
+            probe=rendezvous.connect_probe,
+        )
+    except rendezvous.EndpointUnavailable:
+        pass
+    if IS_WSL:
+        return _read_windows_endpoint()
+    return None
+
+
 def send_command(request: dict, timeout: float | None = 5.0) -> dict | None:
     """Send a JSON command to the vault service."""
     context = config.resolve_context()
@@ -97,6 +170,29 @@ def send_command(request: dict, timeout: float | None = 5.0) -> dict | None:
 
     host = os.environ.get("AGENT_VAULT_HOST", "127.0.0.1")
     port = context.port
+
+    # Discovery-first (backwards-compatible): resolve the daemon's *actual*
+    # endpoint from the rendezvous file, falling back to today's fixed
+    # socket/port when nothing is advertised. A discovered TCP port also feeds
+    # the extension transports (e.g. the WSL->Windows interop relay), so a
+    # dynamic/discovered port is honored end to end.
+    discovered = _discover_endpoint(context)
+    discovered_unix: str | None = None
+    if discovered is not None:
+        if discovered.transport == "unix":
+            discovered_unix = discovered.address
+        elif discovered.transport == "tcp":
+            try:
+                d_host, d_port = discovered.tcp_host_port
+                port = d_port
+                # A locally-advertised file carries the real host; the WSL
+                # Windows-side file advertises 127.0.0.1, so keep the resolved
+                # host to cross the boundary.
+                if discovered.source != "windows":
+                    host = d_host
+            except ValueError:
+                discovered = None
+
     ext_ctx = TransportContext(
         kpdb=context.kpdb,
         group=context.group,
@@ -110,14 +206,22 @@ def send_command(request: dict, timeout: float | None = 5.0) -> dict | None:
     if result is not None:
         return result
 
-    if not IS_WINDOWS and context.sources.get("port") == "default":
+    # A discovered Unix socket (native, possibly non-default path) is dialed
+    # ahead of the legacy fixed socket.
+    if discovered_unix is not None and not IS_WINDOWS:
+        result = _send_socket(request, timeout, path=discovered_unix)
+        if result is not None:
+            return _tag(result, "discovered-unix")
+
+    if discovered_unix is None and not IS_WINDOWS and context.sources.get("port") == "default":
         result = _send_socket(request, timeout)
         if result is not None:
             return _tag(result, "unix-socket")
 
     result = _send_tcp(request, host, port, timeout)
     if result is not None:
-        return _tag(result, "tcp")
+        is_disc_tcp = discovered is not None and discovered.transport == "tcp"
+        return _tag(result, "discovered-tcp" if is_disc_tcp else "tcp")
 
     return get_registry().try_transports(request, timeout, ext_ctx)
 

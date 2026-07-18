@@ -34,6 +34,12 @@ LOG_FILE = Path(os.environ.get(LOG_ENV) or (LOG_FILE_WIN if IS_WINDOWS else LOG_
 # Honors an override so a branded/side-by-side deployment keeps its own namespace.
 RUN_DIR_ENV = "AGENT_VAULT_RUN_DIR"
 
+# Explicit client-side endpoint override (top of the discovery ladder). A
+# ``"<transport>:<address>"`` spec (e.g. ``tcp:127.0.0.1:52731`` or
+# ``unix:/tmp/agent-vault.sock``) that a client dials before consulting the
+# rendezvous file or the legacy fixed port.
+ENDPOINT_ENV = "AGENT_VAULT_ENDPOINT"
+
 
 def run_dir() -> Path:
     """Return the service runtime dir that holds the rendezvous (endpoint) file."""
