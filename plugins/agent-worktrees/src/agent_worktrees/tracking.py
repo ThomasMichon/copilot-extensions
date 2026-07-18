@@ -427,6 +427,36 @@ def load_record(path: Path) -> WorktreeRecord:
     )
 
 
+def resolve_worktree_path(worktree_id: str, worktree_root: str) -> str:
+    """Return the authoritative on-disk path for ``worktree_id``.
+
+    The tracking record's recorded ``worktree_path`` is the source of truth:
+    it stays correct even when the default worktree layout changes (e.g. a
+    worktree created under the older ``<srcroot>/.worktrees/<project>/`` scheme
+    remains reachable after the default moved to ``<anchor>.worktrees/``).
+
+    Resolution order (#3026):
+      1. the tracking record's ``worktree_path``, when the record exists and
+         that path is present and exists on disk;
+      2. otherwise the ``worktree_root / worktree_id`` derivation -- the
+         fallback for untracked worktrees or a record missing the path.
+
+    The derivation is returned as-is when nothing better is found, so callers'
+    existing "path not found" checks still fire for a genuinely-absent worktree.
+    """
+    record_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    if record_path.exists():
+        try:
+            record = load_record(record_path)
+        except Exception:
+            record = None
+        if record and record.worktree_path:
+            recorded = Path(record.worktree_path)
+            if recorded.exists():
+                return str(recorded)
+    return str(Path(worktree_root) / worktree_id)
+
+
 def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
     """Write a worktree tracking record to YAML (atomic)."""
     if path is None:

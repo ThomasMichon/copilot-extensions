@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import git_ops, output
+from . import git_ops, output, tracking
 from .config import Config
 
 
@@ -40,7 +40,7 @@ def sync_forward(worktree_id: str, config: Config, *, dry_run: bool = False) -> 
     repo = config.default_repo
     remote = repo.remote
     upstream = f"{remote}/{repo.default_branch}"
-    worktree_path = str(Path(repo.worktree_root) / worktree_id)
+    worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
 
     if not Path(worktree_path).exists():
         output.err(f"Worktree path not found: {worktree_path}")
@@ -155,7 +155,7 @@ def manage_feature_branch(
     remote = repo.remote
     feature = _feature_ref(name)
     remote_feature = f"{remote}/{feature}"
-    worktree_path = str(Path(repo.worktree_root) / worktree_id)
+    worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
 
     if not Path(worktree_path).exists():
         output.err(f"Worktree path not found: {worktree_path}")
@@ -269,7 +269,7 @@ def merge_to_feature(
     remote = repo.remote
     feature = _feature_ref(name)
     remote_feature = f"{remote}/{feature}"
-    worktree_path = str(Path(repo.worktree_root) / worktree_id)
+    worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
 
     if not Path(worktree_path).exists():
         output.err(f"Worktree path not found: {worktree_path}")

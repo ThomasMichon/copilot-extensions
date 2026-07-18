@@ -15,6 +15,7 @@ from agent_worktrees.tracking import (
     load_record,
     mark_resumed,
     register_session,
+    resolve_worktree_path,
     save_record,
     set_disposition,
     update_status,
@@ -1121,3 +1122,77 @@ class TestForwardCompatContract:
         assert reloaded.status == "finalized"
         assert reloaded.follow_up is True
         assert reloaded.summary == "work left"
+
+# ---------------------------------------------------------------------------
+# resolve_worktree_path -- authoritative path from the tracking record (#3026)
+# ---------------------------------------------------------------------------
+
+class TestResolveWorktreePath:
+    """create-pr / push-changes / finalize / pr-complete must resolve a
+    worktree's path from its tracking record's ``worktree_path`` (correct across
+    layout changes) and only fall back to the ``worktree_root / id`` derivation
+    when no usable record exists (#3026)."""
+
+    def _record(self, worktree_id: str, worktree_path: str) -> WorktreeRecord:
+        return WorktreeRecord(
+            worktree_id=worktree_id,
+            branch=f"worktree/{worktree_id}",
+            worktree_path=worktree_path,
+            repo="test-repo",
+            machine="test-machine",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=None,
+        )
+
+    def test_prefers_recorded_path_over_derivation(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        # Old-layout worktree that lives somewhere other than worktree_root/id.
+        actual = tmp_path / "old-layout" / "aperture-labs" / "wt-xyz"
+        actual.mkdir(parents=True)
+        worktree_root = str(tmp_path / "new-layout.worktrees")  # derivation misses
+        save_record(self._record("wt-xyz", str(actual)),
+                    tmp_tracking_dir / "wt-xyz.yaml")
+
+        assert resolve_worktree_path("wt-xyz", worktree_root) == str(actual)
+
+    def test_falls_back_to_derivation_without_record(
+        self, tmp_path: Path, monkeypatch_config
+    ):
+        worktree_root = str(tmp_path / "roots")
+        assert (
+            resolve_worktree_path("untracked", worktree_root)
+            == str(Path(worktree_root) / "untracked")
+        )
+
+    def test_falls_back_when_recorded_path_missing_on_disk(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        # A record whose recorded path no longer exists must NOT be returned --
+        # callers' "path not found" checks should still fire on the derivation.
+        save_record(self._record("wt-missing", str(tmp_path / "gone")),
+                    tmp_tracking_dir / "wt-missing.yaml")
+        worktree_root = str(tmp_path / "roots")
+
+        assert (
+            resolve_worktree_path("wt-missing", worktree_root)
+            == str(Path(worktree_root) / "wt-missing")
+        )
+
+    def test_falls_back_when_record_has_empty_path(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        save_record(self._record("wt-empty", ""),
+                    tmp_tracking_dir / "wt-empty.yaml")
+        worktree_root = str(tmp_path / "roots")
+
+        assert (
+            resolve_worktree_path("wt-empty", worktree_root)
+            == str(Path(worktree_root) / "wt-empty")
+        )

@@ -225,7 +225,7 @@ def create_pr(
     # clears. Both flags mean the same thing now -- open the PR as a draft.
     want_draft = bool(draft or hold)
     upstream = f"{remote}/{repo.default_branch}"
-    worktree_path = str(Path(repo.worktree_root) / worktree_id)
+    worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
     wt_branch = f"worktree/{worktree_id}"
 
     base: dict = {"success": False, "worktree_id": worktree_id}
