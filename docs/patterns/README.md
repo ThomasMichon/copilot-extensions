@@ -100,6 +100,15 @@ core of the principles above; a reviewer checks a change against these.
   mutates a repo (taking user preferences); since you adopt only repos you own, the
   power is confined to owned repos by construction. (Serves *Vision plugin-services
   §Features/install-adopt-boundary*.)
+- **Config schema is backward-migratable within a bounded window.** A machine-local
+  config's schema evolves by **migrate-by-rewrite** (an explicit `schema_version` +
+  ordered `vN -> vN+1` migrators applied on read and persisted on install/update),
+  never by an unbounded legacy-tolerant loader. The `vN -> vN+1` chain stays
+  unbroken for at least the last version or two, **enforced by checked-in
+  prior-version fixtures** that must migrate to current and load — so accidental
+  backward-incompatibility cannot land, and a breaking change is a deliberate,
+  fixture-updating act. (Serves *Vision plugin-services §Behaviors/install-leaves-repos-unaltered*;
+  see [`config-schema-migration.md`](config-schema-migration.md).)
 - **Primitives below, orchestration above.** A lower fabric layer exposes a
   **mechanism** (e.g. "launch a session in a worktree"); the **policy** that
   composes it into a workflow (e.g. a handoff: continuation + claimable delegation
@@ -119,6 +128,7 @@ the exemplars, and the vision it serves):
 | [service-transport](service-transport.md) | Which channel a service exposes — the transport ladder (stdio → OS-native socket/pipe → OS-assigned loopback → tunnel) and the named-pipe/UDS reality |
 | [service-lifecycle-supervision](service-lifecycle-supervision.md) | Platform-native always-on supervision (Windows Scheduled Task / systemd user unit) and its lifecycle verbs |
 | [install-vs-adopt-boundary](install-vs-adopt-boundary.md) | Which lifecycle verb may mutate what — `install`/`update` is machine-local (schema-migrate + warn), `register`/`adopt` is the only repo-mutating verb (repo config + git hooks), and ownership falls out of adoption |
+| [config-schema-migration](config-schema-migration.md) | How a machine-local YAML config gains an explicit `schema_version` + scripted `vN -> vN+1` migrate-by-rewrite (the vendored `config-migrate` primitive), applied lazily on read + eagerly on install/update, with a fixture-guarded backward-compat window |
 | [a-la-carte-independence](a-la-carte-independence.md) | Standalone-first plugins that compose gracefully, incl. the resolver-import pattern |
 | [cross-platform-parity](cross-platform-parity.md) | One behavior across Windows and Linux/WSL: shells, UTF-8, the WSL/Windows boundary, binstubs |
 
