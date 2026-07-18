@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-07-15
+- **Last revised:** 2026-07-17
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -127,6 +127,11 @@ running or parked — so a duplicate is a deliberate choice, not an accident.
 Work can be **stashed** for later pickup, **handed off** between agents, or
 **delegated** to a spun-off agent, with a shared record of the task and its
 outcome — so a fleet cooperates through durable artifacts, not just live chatter.
+The **launch** underneath (spin a session in a worktree) is a ground-layer
+**primitive**; the **orchestration** of a handoff — composing the continuation,
+minting the claimable delegation record, cutting a successor over, verifying it,
+and retiring the predecessor — belongs to the layers **above** the primitive,
+never baked into the ground layer.
 
 ### legible-live-state
 What every agent is doing is **observable** — from a coarse Active / Recent /
@@ -211,6 +216,16 @@ other: an **absent** assertion defaults to the safe, current behavior, and the
 derived pulse — being coarse and sometimes vague — **never** sets the durable
 disposition. Truly finishing a worktree and asserting it *resolved* are the same
 act; leaving a stopping point with work still owed is asserting *follow-ups*.
+
+### handoff-orchestrated-above-primitives
+Session **launch** is a ground-layer **primitive** — "spin a Copilot session in
+worktree `<id>`." The **handoff** built on it — compose the continuation, mint a
+**claimable delegation record** (so a coordinator or the next session picks it
+up), cut a successor over, **verify it came up**, and retire the predecessor — is
+**orchestrated by the layers above** (the handoff extension driving the delegation
+layer), never absorbed into the ground layer. The ground layer offers the
+**mechanism**; a higher layer owns the **policy** — and a mux-less environment
+degrades to the same claimable record, not to a silent no-op.
 
 ## Non-Goals / Boundaries
 
