@@ -908,9 +908,13 @@ def read_projects_registry() -> dict:
     try:
         import yaml
 
+        from . import config_migrations
+
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return {"projects": {}}
+        # Lazy schema migration (in memory, never persists / never raises).
+        data = config_migrations.migrate_loaded(data, config_migrations.SCHEMA_PROJECTS)
         if "projects" not in data or not isinstance(data["projects"], dict):
             data["projects"] = {}
         return data

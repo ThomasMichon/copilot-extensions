@@ -129,9 +129,14 @@ def read_registry() -> ReposRegistry:
         return ReposRegistry()
 
     try:
+        from . import config_migrations
+
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return ReposRegistry()
+
+        # Lazy schema migration (in memory, never persists / never raises).
+        data = config_migrations.migrate_loaded(data, config_migrations.SCHEMA_REPOS)
 
         srcroot = data.get("srcroot", {})
         if not isinstance(srcroot, dict):

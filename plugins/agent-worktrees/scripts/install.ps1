@@ -487,6 +487,21 @@ function Deploy-Package {
     Get-ChildItem (Join-Path $scriptsDir 'agent-worktrees.exe.old-*') -ErrorAction SilentlyContinue |
         ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
 
+    # Vendored config-schema-migration lib (agent-config-migrate / module
+    # config_migrate). Install it first so the package dependency resolves from
+    # the local path on every deploy. It lives inside the plugin folder, so the
+    # path is identical in the git-checkout and marketplace layouts.
+    $cfgMigrateDir = Join-Path $PluginDir 'libs\config-migrate'
+    if (Test-Path (Join-Path $cfgMigrateDir 'pyproject.toml')) {
+        $libOut = & uv pip install --python $VenvPython --reinstall-package agent-config-migrate "$cfgMigrateDir" --quiet 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            Write-ServiceErr "config-migrate library install failed (exit $LASTEXITCODE)"
+            if ($libOut.Trim()) { Write-ServiceErr ("uv: " + $libOut.Trim()) }
+            $ErrorActionPreference = $prevEAP
+            return $false
+        }
+    }
+
     $installOut = & uv pip install --python $VenvPython --reinstall-package agent-worktrees "$PluginDir" --quiet 2>&1 | Out-String
     $rc = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
@@ -1946,6 +1961,16 @@ switch ($Action) {
             }
         }
 
+        # Machine-local config schema migration (idempotent + atomic; never
+        # touches repo-committed config -- that is an adopt concern). Stamps or
+        # upgrades ~/.agent-worktrees/{config,repos,projects}.yaml. Non-fatal.
+        try {
+            $env:PYTHONUTF8 = '1'
+            & $VenvPython -m agent_worktrees config-migrate 2>&1 | ForEach-Object { Write-Host "  $_" }
+        } catch {
+            Write-ServiceWarn "Config migration skipped: $_"
+        }
+
         Write-V3Manifest
 
         Write-Host ""
@@ -2230,6 +2255,16 @@ switch ($Action) {
                     Write-ServiceWarn "Instruction file deployment skipped: $_"
                 }
             }
+        }
+
+        # Machine-local config schema migration (idempotent + atomic; never
+        # touches repo-committed config -- that is an adopt concern). Stamps or
+        # upgrades ~/.agent-worktrees/{config,repos,projects}.yaml. Non-fatal.
+        try {
+            $env:PYTHONUTF8 = '1'
+            & $VenvPython -m agent_worktrees config-migrate 2>&1 | ForEach-Object { Write-Host "  $_" }
+        } catch {
+            Write-ServiceWarn "Config migration skipped: $_"
         }
 
         Write-V3Manifest

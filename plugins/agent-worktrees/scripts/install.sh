@@ -295,6 +295,20 @@ deploy_package() {
         return 1
     fi
 
+    # Vendored config-schema-migration lib (agent-config-migrate / module
+    # config_migrate). Install it first so the package's dependency is satisfied
+    # from the local path on every deploy (install and update). It lives inside
+    # the plugin folder, so the path is identical in the git-checkout and
+    # marketplace layouts.
+    local cfg_migrate_dir="$PLUGIN_DIR/libs/config-migrate"
+    if [[ -f "$cfg_migrate_dir/pyproject.toml" ]]; then
+        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-config-migrate \
+                "$cfg_migrate_dir" --quiet; then
+            err "config-migrate library install failed"
+            return 1
+        fi
+    fi
+
     if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-worktrees "$PLUGIN_DIR" --quiet; then
         err "Package install failed"
         return 1
@@ -1183,6 +1197,12 @@ case "$ACTION" in
             fi
         fi
 
+        # Machine-local config schema migration (idempotent + atomic; never
+        # touches repo-committed config -- that is an adopt concern). Stamps or
+        # upgrades ~/.agent-worktrees/{config,repos,projects}.yaml. Non-fatal.
+        PYTHONUTF8=1 "$VENV_PYTHON" -m agent_worktrees config-migrate 2>&1 \
+            | sed 's/^/  /' || warn "Config migration skipped"
+
         write_deploy_manifest
 
         echo ""
@@ -1426,6 +1446,12 @@ case "$ACTION" in
                     | sed 's/^/  /' || warn "Instruction file deployment skipped"
             fi
         fi
+
+        # Machine-local config schema migration (idempotent + atomic; never
+        # touches repo-committed config -- that is an adopt concern). Stamps or
+        # upgrades ~/.agent-worktrees/{config,repos,projects}.yaml. Non-fatal.
+        PYTHONUTF8=1 "$VENV_PYTHON" -m agent_worktrees config-migrate 2>&1 \
+            | sed 's/^/  /' || warn "Config migration skipped"
 
         write_deploy_manifest
 
