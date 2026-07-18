@@ -421,7 +421,24 @@ async def test_status_false_supersedes_earlier_reapable():
         c1 = await SessionHostClient.connect(port=port)
         await c1.attach(0)
         await c1.send_status(True)
+        # Confirm the host has processed STATUS(True) (reader is caught up)...
+        for _ in range(200):
+            if host._last_reapable is True:
+                break
+            await asyncio.sleep(0.005)
+        assert host._last_reapable is True
         await c1.send_status(False)         # a fresh turn started
+        # ...then confirm the flip back to False. Only once the host has
+        # OBSERVED STATUS(False) is the veto real. Without this, transport.abort()
+        # can RST away the not-yet-read STATUS(False) (Windows-prone), leaving
+        # _last_reapable stale at True so the grace timer reaps -- racing the very
+        # thing under test. (A one-shot poll on `is False` is not enough: it also
+        # matches the *initial* False before either STATUS is processed.)
+        for _ in range(200):
+            if host._last_reapable is False:
+                break
+            await asyncio.sleep(0.005)
+        assert host._last_reapable is False
         c1._writer.transport.abort()
         await asyncio.sleep(0.3)
         assert child.killed is False
