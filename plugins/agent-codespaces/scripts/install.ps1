@@ -73,6 +73,11 @@ $CredRelayDir    = Join-Path $PluginDir 'libs\credential-relay'
 if (-not (Test-Path (Join-Path $CredRelayDir 'pyproject.toml'))) {
     $CredRelayDir = Join-Path $RepoRoot 'libs\credential-relay'
 }
+# config-migrate dir (vendored like ssh-manager): plugin-vendored or repo-root.
+$CfgMigrateDir   = Join-Path $PluginDir 'libs\config-migrate'
+if (-not (Test-Path (Join-Path $CfgMigrateDir 'pyproject.toml'))) {
+    $CfgMigrateDir = Join-Path $RepoRoot 'libs\config-migrate'
+}
 
 $DeploySourcePaths = @('plugins/agent-codespaces/')
 $InstallerRelPath  = 'plugins/agent-codespaces/scripts/install.ps1'
@@ -201,6 +206,10 @@ function Install-PackageInto {
         Write-ServiceErr "credential-relay source not found at $CredRelayDir"
         return $false
     }
+    if (-not (Test-Path (Join-Path $CfgMigrateDir 'pyproject.toml'))) {
+        Write-ServiceErr "config-migrate source not found at $CfgMigrateDir"
+        return $false
+    }
     # Pre-strip: rename any locked console-script trampoline aside so uv can write
     # a fresh one (Windows denies overwriting an in-use .exe -- os error 5; the
     # stale binstub or a live `agent-codespaces ssh` session may hold it open).
@@ -217,6 +226,12 @@ function Install-PackageInto {
     if ($LASTEXITCODE -ne 0) {
         $ErrorActionPreference = $prevEAP
         Write-ServiceErr "credential-relay install failed"
+        return $false
+    }
+    & uv pip install --python $Python --reinstall-package agent-config-migrate "$CfgMigrateDir" --quiet 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        $ErrorActionPreference = $prevEAP
+        Write-ServiceErr "config-migrate install failed"
         return $false
     }
     & uv pip install --python $Python --reinstall-package agent-codespaces "$PluginDir" --quiet 2>&1 | Out-Null
@@ -397,6 +412,15 @@ function Invoke-Install {
 
     # Deploy binstub
     Deploy-Binstub
+
+    # Machine-local config schema migration (idempotent + atomic; never touches
+    # repo-committed codespaces.yaml -- that is an adopt concern). Non-fatal.
+    try {
+        $env:PYTHONUTF8 = '1'
+        & $VenvPython -m agent_codespaces config-migrate 2>&1 | ForEach-Object { Write-Host "  $_" }
+    } catch {
+        Write-ServiceWarn "Config migration skipped: $_"
+    }
 
     # Write manifest
     Write-DeployManifest
@@ -608,6 +632,15 @@ function Invoke-Update {
 
     # Re-deploy binstub
     Deploy-Binstub
+
+    # Machine-local config schema migration (idempotent + atomic; never touches
+    # repo-committed codespaces.yaml -- that is an adopt concern). Non-fatal.
+    try {
+        $env:PYTHONUTF8 = '1'
+        & $VenvPython -m agent_codespaces config-migrate 2>&1 | ForEach-Object { Write-Host "  $_" }
+    } catch {
+        Write-ServiceWarn "Config migration skipped: $_"
+    }
 
     # Update manifest
     Write-DeployManifest

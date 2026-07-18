@@ -410,6 +410,13 @@ def load_adopted_repos() -> list[AdoptedRepo]:
     with open(ADOPTED_REPOS_FILE) as f:
         data = yaml.safe_load(f) or {}
 
+    # Lazy schema migration (in memory, never persists / never raises) so a
+    # still-old manifest loads at the current shape before install/update
+    # rewrites it.
+    from . import config_migrations
+
+    data = config_migrations.migrate_loaded(data)
+
     repos = []
     for entry in data.get("repos", []):
         repos.append(AdoptedRepo(
@@ -422,14 +429,19 @@ def load_adopted_repos() -> list[AdoptedRepo]:
 def save_adopted_repos(repos: list[AdoptedRepo]) -> None:
     """Write the adoption manifest to the runtime directory."""
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    from . import config_migrations
+
+    # Stamp the current schema version so the marker round-trips through a
+    # normal save (rather than being dropped on the next reserialize).
     data = {
+        "schema_version": config_migrations.current_version(),
         "repos": [
             {"path": str(r.path), "adopted_at": r.adopted_at}
             for r in repos
-        ]
+        ],
     }
     with open(ADOPTED_REPOS_FILE, "w") as f:
-        yaml.safe_dump(data, f, default_flow_style=False)
+        yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
 
 
 def load_repo_config(repo_path: Path) -> dict[str, Any] | None:

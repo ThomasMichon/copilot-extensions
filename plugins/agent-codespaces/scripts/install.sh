@@ -57,6 +57,11 @@ CRED_RELAY_DIR="$PLUGIN_DIR/libs/credential-relay"
 if [[ ! -f "$CRED_RELAY_DIR/pyproject.toml" ]]; then
     CRED_RELAY_DIR="$REPO_ROOT/libs/credential-relay"
 fi
+# config-migrate dir (vendored like ssh-manager): plugin-vendored or repo-root.
+CFG_MIGRATE_DIR="$PLUGIN_DIR/libs/config-migrate"
+if [[ ! -f "$CFG_MIGRATE_DIR/pyproject.toml" ]]; then
+    CFG_MIGRATE_DIR="$REPO_ROOT/libs/config-migrate"
+fi
 
 DEPLOY_SOURCE_PATHS=("plugins/agent-codespaces/")
 INSTALLER_REL_PATH="plugins/agent-codespaces/scripts/install.sh"
@@ -110,10 +115,16 @@ _install_package_into() {
         _fail "credential-relay source not found at $CRED_RELAY_DIR"
         return 1
     fi
+    if [[ ! -f "$CFG_MIGRATE_DIR/pyproject.toml" ]]; then
+        _fail "config-migrate source not found at $CFG_MIGRATE_DIR"
+        return 1
+    fi
     uv pip install --python "$py" --reinstall-package agent-ssh-manager "$SSH_MGR_DIR" --quiet || {
         _fail "ssh-manager install failed"; return 1; }
     uv pip install --python "$py" --reinstall-package agent-credential-relay "$CRED_RELAY_DIR" --quiet || {
         _fail "credential-relay install failed"; return 1; }
+    uv pip install --python "$py" --reinstall-package agent-config-migrate "$CFG_MIGRATE_DIR" --quiet || {
+        _fail "config-migrate install failed"; return 1; }
     uv pip install --python "$py" --reinstall-package agent-codespaces "$PLUGIN_DIR" --quiet || {
         _fail "agent-codespaces install failed"; return 1; }
 }
@@ -238,6 +249,11 @@ do_install() {
 
     # Deploy binstub
     deploy_binstub
+
+    # Machine-local config schema migration (idempotent + atomic; never touches
+    # repo-committed codespaces.yaml -- that is an adopt concern). Non-fatal.
+    PYTHONUTF8=1 "$VENV_PYTHON" -m agent_codespaces config-migrate 2>&1 \
+        | sed 's/^/  /' || _warn "Config migration skipped"
 
     # Write manifest
     write_deploy_manifest
@@ -398,6 +414,11 @@ do_update() {
 
     # Re-deploy binstub
     deploy_binstub
+
+    # Machine-local config schema migration (idempotent + atomic; never touches
+    # repo-committed codespaces.yaml -- that is an adopt concern). Non-fatal.
+    PYTHONUTF8=1 "$VENV_PYTHON" -m agent_codespaces config-migrate 2>&1 \
+        | sed 's/^/  /' || _warn "Config migration skipped"
 
     # Update manifest
     write_deploy_manifest

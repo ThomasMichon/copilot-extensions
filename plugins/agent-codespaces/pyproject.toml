@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-codespaces"
-version = "0.3.4-dev57"
+version = "0.3.4-dev58"
 description = "GitHub Codespaces lifecycle management, SSH transport, and credential relay"
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,7 @@ dependencies = [
     "pyyaml>=6.0",
     "agent-ssh-manager",
     "agent-credential-relay",
+    "agent-config-migrate",
 ]
 
 [tool.uv.sources]
@@ -26,6 +27,8 @@ dependencies = [
 agent-ssh-manager = { path = "libs/ssh-manager" }
 # credential-relay framework + host-credential sources (module ``credential_relay``).
 agent-credential-relay = { path = "libs/credential-relay" }
+# config schema versioning + migration (module ``config_migrate``).
+agent-config-migrate = { path = "libs/config-migrate" }
 
 [project.scripts]
 agent-codespaces = "agent_codespaces.__main__:main"
