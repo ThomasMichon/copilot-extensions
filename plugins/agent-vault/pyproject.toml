@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-vault"
-version = "0.1.0-dev14"
+version = "0.1.0-dev15"
 description = "Local KeePassXC-backed secret store for Copilot CLI agents."
 readme = "README.md"
 license = "MIT"
@@ -12,16 +12,7 @@ requires-python = ">=3.10"
 authors = [
     { name = "Thomas Michon" }
 ]
-dependencies = [
-    "agent-endpoint-rendezvous",
-]
-
-[tool.uv.sources]
-# Resolve the vendored lib from the local path, never an index. The distribution
-# is named agent-endpoint-rendezvous (anti-squatting); the import module stays
-# ``endpoint_rendezvous``. Installers uv-pip-install libs/endpoint-rendezvous
-# explicitly before the plugin (uv pip does not honor tool.uv.sources).
-agent-endpoint-rendezvous = { path = "libs/endpoint-rendezvous" }
+dependencies = []
 
 [project.optional-dependencies]
 # The persistent on-disk credential cache (opt-in) encrypts entries with Fernet.

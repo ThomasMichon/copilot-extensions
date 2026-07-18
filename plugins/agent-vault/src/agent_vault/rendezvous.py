@@ -1,3 +1,7 @@
+# Vendored from libs/endpoint-rendezvous (the canonical shared module). Kept
+# in-package -- not a distribution dependency -- so agent-vault installs as a
+# self-contained git dependency (the facility vault pip-installs it that way)
+# with no external package to resolve. Sync changes from the canonical source.
 """Rendezvous (port-mapping) files for discoverable, collision-free local endpoints.
 
 A *service-bearing* Copilot CLI plugin needs its clients -- its own CLI, sibling
