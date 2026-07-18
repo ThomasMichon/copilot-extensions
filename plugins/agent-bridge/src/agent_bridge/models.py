@@ -502,6 +502,11 @@ class TopologyProfile(BaseModel):
 class ServiceConfig(BaseModel):
     """Root config loaded from ~/.agent-bridge/config.yaml."""
 
+    # Schema version marker for the config-migrate framework. A real field (not
+    # an ignored extra) so it round-trips through model_dump / save_config. Keep
+    # in sync with agent_bridge.config_migrations.CONFIG_VERSION.
+    schema_version: int = 1
+
     port: int = Field(default_factory=default_port)
     bind: str = "127.0.0.1"
     db_path: str = "~/.agent-bridge/sessions.db"

@@ -31,6 +31,12 @@ def load_config() -> ServiceConfig:
     if cfg_path.exists():
         try:
             data = yaml.safe_load(cfg_path.read_text()) or {}
+            # Lazy schema migration (in memory, never persists / never raises) so
+            # a still-old config.yaml loads at the current shape before an
+            # install/update has rewritten it on disk.
+            from . import config_migrations
+
+            data = config_migrations.migrate_loaded(data)
             return ServiceConfig(**data)
         except Exception:
             log.warning("Failed to parse %s, using defaults", cfg_path)

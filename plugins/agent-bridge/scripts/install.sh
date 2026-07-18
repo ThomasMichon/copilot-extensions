@@ -203,6 +203,8 @@ _resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }
 _resolve_credential_relay() { _resolve_vendored_lib credential-relay; }
 # zero-downtime cutover primitives (module ``zdd``), extracted from this plugin.
 _resolve_zdd() { _resolve_vendored_lib zdd; }
+# config schema versioning + migration (module ``config_migrate``).
+_resolve_config_migrate() { _resolve_vendored_lib config-migrate; }
 
 # Check if ssh-manager is already importable in the venv.
 # Returns 0 if the key symbols can be imported successfully.
@@ -221,6 +223,12 @@ _credential_relay_installed() {
 _zdd_installed() {
     [[ -x "$VENV_DIR/bin/python" ]] || return 1
     "$VENV_DIR/bin/python" -c 'from zdd.cutover import CutoverOrchestrator' 2>/dev/null
+}
+
+# Check if config-migrate is already importable in the venv.
+_config_migrate_installed() {
+    [[ -x "$VENV_DIR/bin/python" ]] || return 1
+    "$VENV_DIR/bin/python" -c 'from config_migrate import migrate_file' 2>/dev/null
 }
 
 # Install sibling plugin packages (e.g. agent-codespaces) into the bridge venv.
@@ -492,14 +500,32 @@ do_install() {
         _fail "Cannot locate zdd library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         exit 1
     fi
+    # config-migrate (config schema versioning + migration).
+    local cfg_migrate_dir
+    if cfg_migrate_dir="$(_resolve_config_migrate)"; then
+        if ! uv pip install --python "$VENV_DIR/bin/python" "$cfg_migrate_dir" --quiet; then
+            _fail "config-migrate install failed"
+            exit 1
+        fi
+    elif _config_migrate_installed; then
+        _step "config-migrate already installed in venv (marketplace layout)"
+    else
+        _fail "Cannot locate config-migrate library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
+        exit 1
+    fi
     if ! uv pip install --python "$VENV_DIR/bin/python" "$PLUGIN_DIR" --quiet; then
         _fail "Package install failed"
         exit 1
     fi
     _ok "Package installed"
 
-    # Install sibling plugins (e.g. agent-codespaces for codespace: namespace)
-    _install_sibling_plugins
+    # Machine-local config schema migration (idempotent + atomic; never touches
+    # repo config). Non-fatal.
+    if PYTHONUTF8=1 "$VENV_DIR/bin/python" -m agent_bridge config migrate 2>/dev/null; then
+        :
+    else
+        _step "Config migration skipped"
+    fi
 
     # Create binstub
     cat > "$BINSTUB" << 'STUB'
@@ -879,6 +905,20 @@ _update_core() {
         _fail "Cannot locate zdd library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         return 1
     fi
+    # config-migrate: force-reinstall so a local code change propagates.
+    local cfg_migrate_dir
+    if cfg_migrate_dir="$(_resolve_config_migrate)"; then
+        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-config-migrate \
+                "$cfg_migrate_dir" --quiet; then
+            _fail "config-migrate update failed"
+            return 1
+        fi
+    elif _config_migrate_installed; then
+        _step "config-migrate already installed in venv (marketplace layout)"
+    else
+        _fail "Cannot locate config-migrate library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
+        return 1
+    fi
     if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package update failed"
@@ -891,6 +931,12 @@ _update_core() {
     if ! _runtime_healthy; then
         _fail "Post-install verification failed (agent_bridge / uvicorn / credential_relay not importable)"
         return 1
+    fi
+    # Machine-local config schema migration (idempotent + atomic). Non-fatal.
+    if PYTHONUTF8=1 "$VENV_DIR/bin/python" -m agent_bridge config migrate 2>/dev/null; then
+        :
+    else
+        _step "Config migration skipped"
     fi
     _ok "Package updated"
     return 0
