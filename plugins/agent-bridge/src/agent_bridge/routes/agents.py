@@ -34,7 +34,11 @@ async def get_agent(agent_name: str, request: Request):
         "icon": config.icon,
         "managed": config.managed,
         "spawnable": not config.managed,
-        "target_type": "local" if not config.host else "ssh",
+        "target_type": (
+            "local"
+            if (not config.host or resolver._is_local_loopback_agent(config))
+            else "ssh"
+        ),
         "host": config.host or "",
         "ssh_user": config.ssh_user,
         "ssh_environment": config.ssh_environment,

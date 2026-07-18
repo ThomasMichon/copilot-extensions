@@ -401,6 +401,65 @@ class TestAgentResolver:
         assert target.host is None
         assert target.project == "my-project"
 
+    def test_agent_dict_loopback_reports_local(self):
+        """A local-loopback control-plane agent must report target_type=local.
+
+        Even though it carries host+ssh_environment and the machine is
+        ssh_ready=false, it dispatches via loopback -- so the roster must not
+        advertise it as an unreachable SSH target (issue #168).
+        """
+        agents = parse_agent_registry({
+            "local-cp": {
+                "host": "laptop",  # ssh_ready=false in SAMPLE_MACHINES_DATA
+                "ssh_environment": "windows",
+                "project": "my-project",
+            },
+        })
+        from unittest.mock import patch
+        local_machine = self.machines["laptop"]
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local_machine, "windows"),
+        ):
+            resolver = AgentResolver(agents, self.machines)
+            assert resolver._is_local_loopback_agent(agents["local-cp"]) is True
+            d = resolver._agent_to_dict(agents["local-cp"])
+        assert d["target_type"] == "local"
+        assert d["host"] == "laptop"  # host preserved for provenance
+
+    def test_agent_dict_remote_reports_ssh(self):
+        """A control-plane agent on a *different* machine still reports ssh."""
+        from unittest.mock import patch
+        local_machine = self.machines["laptop"]
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local_machine, "windows"),
+        ):
+            resolver = AgentResolver(self.agents, self.machines)
+            cfg = self.agents["remote-agent"]  # host=server-a
+            assert resolver._is_local_loopback_agent(cfg) is False
+            d = resolver._agent_to_dict(cfg)
+        assert d["target_type"] == "ssh"
+
+    def test_agent_dict_local_cross_platform_reports_ssh(self):
+        """Local machine but a *different* platform env is a real SSH hop."""
+        agents = parse_agent_registry({
+            "cross-env": {
+                "host": "workstation",
+                "ssh_environment": "windows",
+                "project": "my-project",
+            },
+        })
+        from unittest.mock import patch
+        local_machine = self.machines["workstation"]
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local_machine, "wsl"),  # local platform wsl, agent env windows
+        ):
+            resolver = AgentResolver(agents, self.machines)
+            d = resolver._agent_to_dict(agents["cross-env"])
+        assert d["target_type"] == "ssh"
+
 
 class TestLoadAgentRegistry:
 
