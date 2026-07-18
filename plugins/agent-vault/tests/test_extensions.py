@@ -42,9 +42,13 @@ def registry():
 @pytest.fixture
 def clean_env(monkeypatch, tmp_path):
     """Neutralize ambient vault configuration so resolve_context is deterministic."""
-    for var in ("KPDB", "AGENT_VAULT", "VAULT_GROUP", "AGENT_VAULT_PORT"):
+    for var in ("KPDB", "AGENT_VAULT", "VAULT_GROUP", "AGENT_VAULT_PORT", "AGENT_VAULT_ENDPOINT"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("AGENT_VAULT_CONFIG", str(tmp_path / "no-config.json"))
+    # Isolate endpoint discovery from the real machine's runtime dir, so tests
+    # never read a live/deployed rendezvous file (which would tag transports
+    # "discovered-*"). The dir is intentionally left empty/absent.
+    monkeypatch.setenv("AGENT_VAULT_RUN_DIR", str(tmp_path / "run"))
     return tmp_path
 
 
