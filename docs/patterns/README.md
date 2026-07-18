@@ -100,6 +100,13 @@ core of the principles above; a reviewer checks a change against these.
   mutates a repo (taking user preferences); since you adopt only repos you own, the
   power is confined to owned repos by construction. (Serves *Vision plugin-services
   §Features/install-adopt-boundary*.)
+- **Primitives below, orchestration above.** A lower fabric layer exposes a
+  **mechanism** (e.g. "launch a session in a worktree"); the **policy** that
+  composes it into a workflow (e.g. a handoff: continuation + claimable delegation
+  record + successor cutover + verify + retire) lives in a **higher** layer — never
+  baked into the primitive's owner. A layer must not draw a higher layer's
+  orchestration concern inward. (Serves *Vision agent-fabric
+  §Behaviors/handoff-orchestrated-above-primitives*.)
 
 ## Patterns
 
