@@ -122,7 +122,7 @@ def push_changes(
     """
     repo = config.default_repo
     anchor = repo.anchor
-    worktree_path = str(Path(repo.worktree_root) / worktree_id)
+    worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
     branch = f"worktree/{worktree_id}"
     upstream = f"{repo.remote}/{repo.default_branch}"
     lock_path = Path(repo.worktree_root) / ".finalize.lock"
@@ -615,7 +615,7 @@ def _push_changes_pr(
     upstream = f"{remote}/{repo.default_branch}"
     wt_branch = f"worktree/{worktree_id}"
     feature = record.pr.branch
-    worktree_path = str(Path(repo.worktree_root) / worktree_id)
+    worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
     lock_path = Path(repo.worktree_root) / ".finalize.lock"
 
     if not Path(worktree_path).exists():
@@ -964,7 +964,7 @@ def validate_and_finalize(
     """
     repo = config.default_repo
     anchor = repo.anchor
-    worktree_path = str(Path(repo.worktree_root) / worktree_id)
+    worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
     branch = f"worktree/{worktree_id}"
     upstream = f"{repo.remote}/{repo.default_branch}"
     lock_path = Path(repo.worktree_root) / ".finalize.lock"

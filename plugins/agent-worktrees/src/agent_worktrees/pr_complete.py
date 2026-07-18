@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import git_ops
+from . import git_ops, tracking
 from .config import Config
 
 BACKUP_REF = "refs/pre-complete-backup"
@@ -101,7 +101,7 @@ def complete_worktree(
     repo = config.default_repo
     remote = repo.remote
     upstream = f"{remote}/{repo.default_branch}"
-    worktree_path = str(Path(repo.worktree_root) / worktree_id)
+    worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
     base: dict = {"success": False, "worktree_id": worktree_id, "upstream": upstream}
 
     if not Path(worktree_path).exists():
