@@ -8,6 +8,7 @@ never trusted for identity when the directory is authoritative.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import types
 from pathlib import Path
@@ -147,6 +148,31 @@ def test_worktree_id_none_at_anchor(adopted_repo, monkeypatch):
     monkeypatch.chdir(anchor)
     # The anchor is not under worktree_root -> no worktree id.
     assert m._infer_worktree_id(None, conf) is None
+
+
+def test_worktree_id_resolves_under_foreign_worktree_root(adopted_repo, monkeypatch):
+    """Regression for copilot-extensions#59: a real, git-registered worktree must
+    resolve from its CWD even when the config's ``worktree_root`` points somewhere
+    else entirely (the state left behind by a worktree-root layout migration).
+
+    The legacy single-root scan returned None here; git-based identity does not.
+    """
+    _anchor, _wt_root, wt_path, wt_id, conf = adopted_repo
+    # Point worktree_root at a bogus, unrelated location the worktree is NOT under.
+    foreign = conf.default_repo.anchor + ".SOMEWHERE_ELSE.worktrees"
+    bad_conf = dataclasses.replace(
+        conf,
+        repos={
+            conf.repo_name: dataclasses.replace(
+                conf.default_repo, worktree_root=foreign
+            )
+        },
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: bad_conf)
+    monkeypatch.chdir(wt_path)
+    # Legacy root scan would fail (cwd not under foreign root); git identity wins.
+    assert m._infer_worktree_id_from_worktree_root(bad_conf, Path(wt_path)) is None
+    assert m._infer_worktree_id(None, bad_conf) == wt_id
 
 
 def test_project_override_yields_no_worktree_id_at_anchor(adopted_repo, monkeypatch):
