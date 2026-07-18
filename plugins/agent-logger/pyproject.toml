@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-logger"
-version = "0.1.1-dev12"
+version = "0.1.1-dev13"
 description = "Reusable Copilot CLI session logging -- segmenter, log writer, session-sync, and orchestrator"
 readme = "README.md"
 license = "MIT"
@@ -14,7 +14,13 @@ authors = [
 ]
 dependencies = [
     "pyyaml>=6.0",
+    "agent-config-migrate",
 ]
+
+[tool.uv.sources]
+# config schema versioning + migration (module ``config_migrate``); vendored
+# locally, resolved from the path, never an index.
+agent-config-migrate = { path = "libs/config-migrate" }
 
 [project.scripts]
 agent-logger = "agent_logger.__main__:main"

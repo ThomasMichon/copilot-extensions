@@ -305,6 +305,20 @@ function Install-Package {
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+    # Vendored config-schema-migration lib (agent-config-migrate / module
+    # config_migrate): plugin-vendored (marketplace) or repo-root (git checkout).
+    $cfgMigrateDir = Join-Path $PluginDir 'libs\config-migrate'
+    if (-not (Test-Path (Join-Path $cfgMigrateDir 'pyproject.toml'))) {
+        $cfgMigrateDir = Join-Path (Split-Path -Parent (Split-Path -Parent $PluginDir)) 'libs\config-migrate'
+    }
+    if (Test-Path (Join-Path $cfgMigrateDir 'pyproject.toml')) {
+        & uv pip install --python $VenvPython --reinstall-package agent-config-migrate "$cfgMigrateDir" --quiet 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Fail "config-migrate library install failed"
+            exit 1
+        }
+    }
     $out = & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1
     $result = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
@@ -322,6 +336,14 @@ function Install-Package {
     # Binstubs: .ps1 primary + .cmd fallback that invoke `python -m`
     # (never the SAC-blocked console-script trampolines).
     Write-Binstubs -PythonExe $VenvPython
+
+    # Machine-local config schema migration (idempotent + atomic). Non-fatal.
+    try {
+        $env:PYTHONUTF8 = '1'
+        & $VenvPython -m agent_logger config-migrate 2>&1 | ForEach-Object { Write-Host "  $_" }
+    } catch {
+        Write-Warn "config migration skipped: $_"
+    }
 
     # Record the deploy footprint (source: local vs marketplace).
     Write-DeployManifest

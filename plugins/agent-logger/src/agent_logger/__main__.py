@@ -36,6 +36,17 @@ def _cmd_config(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_config_migrate(_args: argparse.Namespace) -> int:
+    """Migrate the machine-local config.yaml schema in place (idempotent + atomic)."""
+    from agent_logger import config_migrations
+
+    if not config_migrations.available():
+        print("config-migrate: migration library unavailable; skipping")
+        return 0
+    print(config_migrations.summarize(config_migrations.run_migrations()))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-logger", description=__doc__)
     parser.add_argument("-V", "--version", action="store_true", help="print version and exit")
@@ -46,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_config = sub.add_parser("config", help="show resolved configuration")
     p_config.set_defaults(func=_cmd_config)
+
+    p_migrate = sub.add_parser(
+        "config-migrate", help="migrate machine-local config.yaml schema (idempotent)"
+    )
+    p_migrate.set_defaults(func=_cmd_config_migrate)
 
     return parser
 
