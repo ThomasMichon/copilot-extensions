@@ -348,49 +348,8 @@ function Install-Runtime {
 
     Write-Step 'Installing agent-vault package...'
     Remove-ConsoleTrampolines -VenvDir $VenvDir
-
-    # Resolve the vendored endpoint-rendezvous lib across install layouts
-    # (marketplace-vendored inside the plugin, git checkout, common dev path).
-    function Resolve-VendoredLib {
-        param([Parameter(Mandatory)][string]$LibName)
-        foreach ($c in @(
-            (Join-Path $PluginDir "libs\$LibName"),
-            (Join-Path $PluginDir "..\..\libs\$LibName"),
-            (Join-Path $env:USERPROFILE "src\copilot-extensions\libs\$LibName")
-        )) {
-            if (Test-Path (Join-Path $c 'pyproject.toml')) { return (Resolve-Path $c).Path }
-        }
-        return $null
-    }
-
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    # endpoint-rendezvous (rendezvous/port-mapping endpoint files). Install the
-    # vendored lib explicitly before the plugin -- uv pip does not honor
-    # [tool.uv.sources]. --refresh-package busts uv's build cache so a same-version
-    # source change still lands in the venv.
-    $ErDir = Resolve-VendoredLib -LibName 'endpoint-rendezvous'
-    if ($ErDir) {
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
-            $erOut = & uv pip install --python $VenvPython "$ErDir" --reinstall-package agent-endpoint-rendezvous --refresh-package agent-endpoint-rendezvous --quiet 2>&1
-        } else {
-            $erOut = & $VenvPython -m pip install --quiet --force-reinstall "$ErDir" 2>&1
-        }
-        if ($LASTEXITCODE -ne 0) {
-            Write-Fail "endpoint-rendezvous install failed (exit $LASTEXITCODE)"
-            if ($erOut) { Write-Host ($erOut | Out-String) }
-            $ErrorActionPreference = $prevEAP
-            exit 1
-        }
-    } else {
-        & $VenvPython -c 'import endpoint_rendezvous' 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            $ErrorActionPreference = $prevEAP
-            Write-Fail 'Cannot locate endpoint-rendezvous library. Reinstall the agent-vault plugin from the marketplace (copilot plugin install agent-vault@copilot-extensions), then rerun this installer.'
-            exit 1
-        }
-    }
-
     if (Get-Command uv -ErrorAction SilentlyContinue) {
         $pkgOut = & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1
     } else {

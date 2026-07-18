@@ -33,10 +33,7 @@ from .gcm import git_credential_action
 from .keepassxc import KeePassXCBackend
 from .prompt import prompt_password
 
-try:
-    from endpoint_rendezvous import clear_endpoint, write_endpoint
-except ImportError:  # pragma: no cover - lib is vendored at install time
-    clear_endpoint = write_endpoint = None  # type: ignore[assignment]
+from .rendezvous import clear_endpoint, write_endpoint
 
 # Service inactivity timeout (0 = never, set via --persistent)
 TIMEOUT_SECONDS = int(os.environ.get("VAULT_TIMEOUT", "600"))
@@ -761,7 +758,7 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
         tcp_bound=tcp_address is not None,
         tcp_address=tcp_address,
     )
-    if advertised is not None and write_endpoint is not None:
+    if advertised is not None:
         try:
             path = write_endpoint(run_dir(), advertised[0], advertised[1])
             log.info("Advertised endpoint %s:%s at %s", advertised[0], advertised[1], path)
@@ -781,9 +778,8 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
 
 
 def cleanup() -> None:
-    if clear_endpoint is not None:
-        with contextlib.suppress(OSError):
-            clear_endpoint(run_dir())
+    with contextlib.suppress(OSError):
+        clear_endpoint(run_dir())
     for path in (SOCKET_PATH, PID_FILE):
         with contextlib.suppress(FileNotFoundError):
             os.unlink(path)
