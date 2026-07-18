@@ -2747,14 +2747,51 @@ def _infer_worktree_id(
     return _infer_worktree_id_from_cwd(config)
 
 
-def _infer_worktree_id_from_cwd(
-    config: cfg.Config | None = None,
-) -> str | None:
-    """Derive worktree ID from the current working directory.
+def _worktree_id_from_git(cwd: Path) -> str | None:
+    """Return the git-internal worktree name if CWD is inside a *linked*
+    worktree, else None.
 
-    If the CWD sits directly inside ``worktree_root``, the first path component
-    under that root is the worktree ID.  Validated against the tracking
-    directory to avoid false positives.
+    Git has no notion of a shared "worktree root": ``git worktree add <path>``
+    places a worktree at an arbitrary folder and records its admin data at
+    ``<main-repo>/.git/worktrees/<name>/``. From anywhere inside a linked
+    worktree, ``git rev-parse --git-dir`` therefore resolves to
+    ``<main-repo>/.git/worktrees/<name>`` -- and ``<name>`` is exactly the
+    agent-worktrees ID (we name the git worktree after the ID). The *main*
+    worktree's git-dir is plain ``.git`` (no ``worktrees/`` parent), which
+    yields no id. This is layout-independent, so it survives a ``worktree_root``
+    change (copilot-extensions#59).
+    """
+    try:
+        result = git_ops.git(
+            "rev-parse", "--git-dir", cwd=str(cwd), check=False, timeout=10
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    git_dir = (result.stdout or "").strip()
+    if not git_dir:
+        return None
+    p = Path(git_dir)
+    if not p.is_absolute():
+        p = (cwd / p).resolve()
+    # A linked worktree's git-dir is ``.../.git/worktrees/<name>``.
+    if p.parent.name == "worktrees" and p.name and p.name != "worktrees":
+        return p.name
+    return None
+
+
+def _infer_worktree_id_from_worktree_root(
+    config: cfg.Config | None, cwd: Path
+) -> str | None:
+    """Legacy fallback: derive the ID from the first path component under the
+    configured ``worktree_root``.
+
+    Superseded by git-based + tracked-path resolution in
+    :func:`_infer_worktree_id_from_cwd`; retained only as a last resort. This
+    single-root assumption is exactly what copilot-extensions#59 fixed (it
+    silently failed for worktrees created under a *previous* ``worktree_root``
+    layout), so do not rely on it as the primary path.
     """
     try:
         if config is None:
@@ -2763,7 +2800,6 @@ def _infer_worktree_id_from_cwd(
     except Exception:
         return None
 
-    cwd = Path.cwd().resolve()
     try:
         rel = cwd.relative_to(wt_root)
     except ValueError:
@@ -2786,6 +2822,51 @@ def _infer_worktree_id_from_cwd(
         return candidate
 
     return None
+
+
+def _infer_worktree_id_from_cwd(
+    config: cfg.Config | None = None,
+) -> str | None:
+    """Derive the worktree ID from the current working directory.
+
+    Identity is resolved the way git itself resolves a linked worktree --
+    **independent of any configured ``worktree_root``**. Because git records a
+    worktree at an arbitrary path (there is no shared "root" in git's model),
+    the current worktree is identifiable from anywhere inside it, regardless of
+    where it lives on disk. This keeps inference correct across a
+    ``worktree_root`` layout change: worktrees created under an older root are
+    still resolved (copilot-extensions#59).
+
+    Resolution order (each root-independent; the legacy single-root scan is
+    only a last resort):
+      1. **git's own identity** -- ``git rev-parse --git-dir`` under a linked
+         worktree is ``.../.git/worktrees/<name>``; ``<name>`` is the tracking
+         ID. Authoritative even when the tracking YAML is briefly absent.
+      2. **tracked-path match** -- match CWD against each record's recorded
+         ``worktree_path`` (:func:`tracking.find_worktree_id_by_cwd`,
+         deepest-match wins).
+      3. **legacy ``worktree_root`` prefix scan** -- the pre-fix single-root
+         assumption, kept only for safety.
+    """
+    cwd = Path.cwd().resolve()
+    tdir = cfg.tracking_dir()
+
+    # 1. Ask git. A linked worktree's git-dir names the worktree directly.
+    git_id = _worktree_id_from_git(cwd)
+    if git_id:
+        if (tdir / f"{git_id}.yaml").exists():
+            return git_id
+        # Tracking YAML briefly missing: prefer a path match if one exists,
+        # else trust git's authoritative identity.
+        return tracking.find_worktree_id_by_cwd(str(cwd)) or git_id
+
+    # 2. Match CWD against recorded worktree paths (root-independent).
+    path_id = tracking.find_worktree_id_by_cwd(str(cwd))
+    if path_id:
+        return path_id
+
+    # 3. Legacy single-root scan (last resort; the #59 failure mode).
+    return _infer_worktree_id_from_worktree_root(config, cwd)
 
 
 def _resolve_worktree_id(raw_id: str) -> str:
