@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import tarfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from agent_codespaces import sessions
@@ -103,6 +104,46 @@ def test_push_via_session_sync_missing_cli():
         ok, detail = sessions._push_via_session_sync(Path("."), ".codespaces/x", verbose=False)
     assert ok is False
     assert "session-sync" in detail
+
+
+def test_push_via_session_sync_stale_cli_gives_upgrade_hint():
+    """#246: a deployed agent-logger predating `session-sync push` fails with an
+    argparse 'invalid choice' error. The push helper must translate that into an
+    actionable 'upgrade agent-logger' message, not surface the raw argparse dump."""
+    stale_err = (
+        "usage: session-sync [-h] {run,status,doctor} ...\n"
+        "session-sync: error: argument command: invalid choice: 'push' "
+        "(choose from run, status, doctor)"
+    )
+    completed = SimpleNamespace(returncode=2, stdout="", stderr=stale_err)
+    with patch.object(sessions, "find_session_sync", return_value="session-sync"), \
+            patch.object(sessions.subprocess, "run", return_value=completed):
+        ok, detail = sessions._push_via_session_sync(Path("."), ".codespaces/x", verbose=False)
+    assert ok is False
+    assert "stale" in detail
+    assert "agent-logger" in detail.lower()
+    assert "install" in detail.lower()
+    assert "agent-worktrees update" in detail
+
+
+def test_push_via_session_sync_other_error_passes_through():
+    """A non-skew push failure keeps its raw message (no false upgrade hint)."""
+    completed = SimpleNamespace(
+        returncode=1, stdout="", stderr="session-sync: push failed: target unreachable"
+    )
+    with patch.object(sessions, "find_session_sync", return_value="session-sync"), \
+            patch.object(sessions.subprocess, "run", return_value=completed):
+        ok, detail = sessions._push_via_session_sync(Path("."), ".codespaces/x", verbose=False)
+    assert ok is False
+    assert "stale" not in detail
+    assert "target unreachable" in detail
+
+
+def test_is_stale_session_sync_detection():
+    assert sessions._is_stale_session_sync("invalid choice: 'push' (choose from run, status)")
+    assert sessions._is_stale_session_sync("ERROR: invalid choice: 'PUSH'")  # case-insensitive
+    assert not sessions._is_stale_session_sync("some other error")
+    assert not sessions._is_stale_session_sync("")
 
 
 def test_sync_never_raises_on_ssh_config_runtimeerror(monkeypatch):

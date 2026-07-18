@@ -236,15 +236,38 @@ and long sessions can drop.
 
 ### 1. Deliver the prompt intact
 
-On **Windows**, the `.cmd` shim forwards args via `%*`, which re-tokenizes a
-multi-line prompt and can deliver it **garbled** to the agent (silent
-non-compliance — the agent acts on a partial instruction). Pass the prompt so it
-survives by calling the venv module directly, so PowerShell preserves argv:
+A multi-line prompt passed **on the command line** can be mangled before the
+agent ever sees it (silent non-compliance — the agent acts on a partial
+instruction). Two failure modes on Windows:
+
+- The `.cmd`/`.ps1` shim forwards args via `%*`/`$args`, which re-tokenizes a
+  multi-line prompt.
+- Even calling the venv module directly with a here-string, PowerShell's
+  native-argument construction **breaks at the first embedded double-quote**
+  (`"`) in the prompt: the quote closes the wrapping and the remainder
+  word-splits into stray argv tokens (you get `unrecognized arguments: …`).
+
+**Most robust — pass the prompt via `--prompt-file` so it never transits argv.**
+Write the prompt to a file (or pipe it on stdin) and hand `send`/`create` a path;
+`-` reads stdin. Quotes, newlines, em-dashes, backticks — all preserved verbatim:
+
+```powershell
+# From a file:
+Set-Content -Path $env:TEMP\dispatch.md -Value $prompt -Encoding UTF8
+agent-bridge create --no-wait <agent> --prompt-file $env:TEMP\dispatch.md
+
+# ...or straight from stdin:
+$prompt | agent-bridge create --no-wait <agent> --prompt-file -
+```
+
+If you must pass the prompt inline, call the venv module directly with a
+single-quoted here-string **and keep the body free of embedded double-quotes**
+(use single quotes inside), so PowerShell preserves argv:
 
 ```powershell
 $pyb = "$env:USERPROFILE\.agent-bridge\venv\Scripts\python.exe"
 & $pyb -m agent_bridge create --no-wait <agent> @'
-<your full multi-line prompt>
+<your full multi-line prompt — single quotes only, no embedded " >
 '@
 ```
 

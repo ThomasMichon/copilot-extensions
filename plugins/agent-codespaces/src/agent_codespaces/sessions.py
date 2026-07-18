@@ -133,6 +133,18 @@ def _stage_and_push(tar_bytes: bytes, name: str, *, verbose: bool) -> dict:
         return {"ok": ok, "session_count": count, "detail": detail}
 
 
+def _is_stale_session_sync(stderr: str) -> bool:
+    """True when session-sync rejected the ``push`` subcommand.
+
+    Indicates the deployed agent-logger predates ``session-sync push`` -- a
+    version skew where agent-codespaces (which calls ``push``) is newer than the
+    installed agent-logger. The CLI prints e.g.
+    ``argument command: invalid choice: 'push' (choose from run, status, doctor)``.
+    See dotfiles#246.
+    """
+    return "invalid choice: 'push'" in (stderr or "").lower()
+
+
 def _push_via_session_sync(staging: Path, machine_label: str, *, verbose: bool) -> tuple[bool, str]:
     """Shell out to ``session-sync push`` (agent-logger) to land *staging* in
     the configured hub target under *machine_label*."""
@@ -147,6 +159,15 @@ def _push_via_session_sync(staging: Path, machine_label: str, *, verbose: bool) 
     out = (proc.stdout or "").strip()
     if proc.returncode != 0:
         err = (proc.stderr or out).strip()
+        if _is_stale_session_sync(err):
+            return False, (
+                "deployed session-sync is stale (no 'push' subcommand) -- "
+                "agent-logger is older than agent-codespaces. Upgrade it to "
+                "restore session recovery: run the agent-logger installer "
+                "(plugins/agent-logger/scripts/install.ps1 install on Windows, "
+                "install.sh install on Linux/WSL) or `agent-worktrees update`. "
+                f"[session-sync: {err}]"
+            )
         return False, f"session-sync push failed: {err}"
     return True, out
 
