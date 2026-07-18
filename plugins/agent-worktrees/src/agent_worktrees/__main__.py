@@ -8610,6 +8610,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--worktree-path", default=None)
     p.add_argument("--default-branch", default="origin/master")
 
+    # config-migrate (machine-local config schema versioning)
+    p = sub.add_parser(
+        "config-migrate",
+        help="Migrate machine-local config schemas in ~/.agent-worktrees/ (idempotent)",
+    )
+    p.add_argument("--quiet", action="store_true", help="Suppress per-file output")
+
     # install
     p = sub.add_parser("install", help="Deploy worktree manager (shared runtime + project)")
     p.add_argument("--force", action="store_true")
@@ -9184,6 +9191,29 @@ def cmd_anchor_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_config_migrate(args: argparse.Namespace) -> int:
+    """Migrate machine-local config schemas in place (install/update eager path).
+
+    Stamps/upgrades the ``schema_version`` on ``~/.agent-worktrees/{config,repos,
+    projects}.yaml``. Idempotent and atomic per file; machine-local only (never
+    touches repo-committed config -- that is an ``adopt`` concern). A per-file
+    problem (malformed YAML, a file newer than this build) is reported, not
+    fatal. Safe no-op when the vendored ``config_migrate`` library is absent.
+    """
+    from . import config, config_migrations
+
+    quiet = getattr(args, "quiet", False)
+    if not config_migrations.available():
+        if not quiet:
+            output.warn("config-migrate: migration library unavailable; skipping")
+        return 0
+
+    results = config_migrations.run_migrations(config.install_dir())
+    if not quiet:
+        print(config_migrations.summarize(results))
+    return 0
+
+
 COMMAND_MAP = {
     "resolve": cmd_resolve,
     "post-exit": cmd_post_exit,
@@ -9213,6 +9243,7 @@ COMMAND_MAP = {
     "profiles": cmd_profiles,
     "picker": cmd_picker,
     "validate": cmd_validate,
+    "config-migrate": cmd_config_migrate,
     "install": cmd_install,
     "register": cmd_register,
     "unregister": cmd_uninstall,
@@ -9401,6 +9432,7 @@ def _git_toplevel(path: Path) -> Path | None:
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "install", "register", "hook",
     "picker", "reap-sessions", "status-updater", "restart", "register-session",
+    "config-migrate",
 }
 
 

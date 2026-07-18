@@ -21,6 +21,8 @@ from typing import Any
 
 import yaml
 
+from . import config_migrations
+
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 
@@ -564,8 +566,13 @@ def load_config(path: Path | None = None) -> Config:
     if path is None:
         path = default_config_path()
 
-    # Tier 1 (lowest): global machine-wide defaults.
-    global_raw = _load_yaml_safe(global_config_path())
+    # Tier 1 (lowest): global machine-wide defaults. Lazily migrate the parsed
+    # doc to the current schema in memory (never persists here; never raises) so
+    # a still-old ~/.agent-worktrees/config.yaml loads correctly before an
+    # install/update has rewritten it.
+    global_raw = config_migrations.migrate_loaded(
+        _load_yaml_safe(global_config_path()), config_migrations.SCHEMA_CONFIG
+    )
     # Tier 3 (highest): machine-local. Optional -- absent is fine. Service
     # config-drop-ins (``<config-dir>/config.d/*.yaml``) form a base UNDER the
     # machine-local ``config.yaml`` (so an explicit config.yaml still wins),
