@@ -114,6 +114,15 @@ install_package() {
     fi
     chg "created venv at ${VENV}"
   fi
+  # Vendored config-schema-migration lib (agent-config-migrate / module
+  # config_migrate): plugin-vendored (marketplace) or repo-root (git checkout).
+  local cfg_migrate_dir="${PLUGIN_DIR}/libs/config-migrate"
+  if [ ! -f "${cfg_migrate_dir}/pyproject.toml" ]; then
+    cfg_migrate_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/config-migrate"
+  fi
+  if [ -f "${cfg_migrate_dir}/pyproject.toml" ]; then
+    uv pip install --python "${VENV}/bin/python" --reinstall-package agent-config-migrate "${cfg_migrate_dir}" --quiet
+  fi
   uv pip install --python "${VENV}/bin/python" "${PLUGIN_DIR}" --quiet
   ok "installed agent-logger package"
 
@@ -125,6 +134,13 @@ install_package() {
     ln -sf "${VENV}/bin/${name}" "${LOCAL_BIN}/${name}"
   done
   ok "linked binstubs into ${LOCAL_BIN}"
+
+  # Machine-local config schema migration (idempotent + atomic). Non-fatal.
+  if PYTHONUTF8=1 "${VENV}/bin/agent-logger" config-migrate 2>/dev/null; then
+    :
+  else
+    warn "config migration skipped"
+  fi
 }
 
 write_units() {

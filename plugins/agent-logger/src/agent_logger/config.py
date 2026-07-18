@@ -115,7 +115,14 @@ def _load_user_config(path: Path) -> dict[str, Any]:
     if yaml is None:  # pragma: no cover
         raise RuntimeError("pyyaml is required to read config.yaml")
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    # Lazy schema migration (in memory, never persists / never raises) so a
+    # still-old config reads at the current shape before install/update rewrites
+    # the machine-local file.
+    from . import config_migrations
+
+    return config_migrations.migrate_loaded(data)
 
 
 class Config:
