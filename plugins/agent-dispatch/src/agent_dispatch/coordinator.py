@@ -11,12 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import ipaddress
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
@@ -129,42 +128,11 @@ def _reservation_dict(res: SpawnReservation) -> dict:
     return asdict(res)
 
 
-def is_loopback_client(host: str | None) -> bool:
-    """True if ``host`` is a loopback address (``127.0.0.0/8`` or ``::1``).
-
-    The peer IP uvicorn records in ``request.client.host`` is the real TCP source
-    (agent-dispatch does not trust ``X-Forwarded-For``), and the kernel only routes
-    a loopback source address over the loopback interface -- a container on the
-    docker bridge, or any LAN host, cannot forge a ``127.0.0.1``/``::1`` peer. So a
-    loopback peer is a trustworthy signal that the caller is a process on this host
-    (the CLI, an embody/handoff autopilot), which is exempt from the bearer token.
-    """
-    if not host:
-        return False
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
-
-
 def _make_auth(token: str | None):
     bearer = HTTPBearer(auto_error=False)
 
-    def check(
-        request: Request,
-        creds: HTTPAuthorizationCredentials | None = Depends(bearer),  # noqa: B008
-    ) -> None:
+    def check(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> None:  # noqa: B008
         if token is None:
-            return
-        # Loopback exemption: trusted local callers (this host's own CLI and the
-        # embody/handoff autopilots it spawns) reach the coordinator over loopback
-        # and are NOT required to present the token. The bearer is enforced only
-        # for non-loopback callers -- containers via the docker bridge, and the
-        # LAN -- so a wildcard (0.0.0.0) bind can serve a container without
-        # breaking the local task machinery, while the firewall still keeps the
-        # authenticated surface off the LAN.
-        client = request.client
-        if client is not None and is_loopback_client(client.host):
             return
         if creds is None or creds.credentials != token:
             raise HTTPException(status_code=401, detail="invalid or missing bearer token")

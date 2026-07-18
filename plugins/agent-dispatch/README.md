@@ -364,27 +364,3 @@ Configuration (all optional): `AGENT_DISPATCH_HOST`, `AGENT_DISPATCH_PORT`,
 `AGENT_DISPATCH_SWEEP_INTERVAL` (auto lease-recovery cadence in seconds; `0`
 disables), and `AGENT_DISPATCH_URL` (the base URL the CLI talks to -- point it at
 a remote coordinator on a shared network).
-
-### Auth, bind safety, and the loopback exemption
-
-The coordinator is a powerful task-control surface, so exposing it beyond
-loopback is guarded:
-
-- **Bind-safety guard.** Binding a **wildcard** host (`0.0.0.0`/`::`) *without* a
-  bearer token is refused outright (`UnsafeBindError`) -- the API can never land
-  on the LAN unauthenticated. A **specific host-local** bind (loopback, a docker
-  bridge gateway, a WSL vEthernet IP) is unaffected.
-- **Bearer token (`AGENT_DISPATCH_TOKEN`).** When set, non-loopback callers must
-  present `Authorization: Bearer <token>` on both the REST API and the `/mcp`
-  mount.
-- **Loopback exemption.** A caller on the **loopback** interface
-  (`127.0.0.0/8`/`::1`) -- this host's own CLI and the embody/handoff autopilots
-  it spawns -- is trusted and needs **no** token, even when one is configured.
-  The token is enforced only for **non-loopback** callers (a container reaching
-  in over the docker bridge, or the LAN). This lets a single host serve both its
-  local task machinery *and* a container over a `0.0.0.0` bind without
-  distributing the token to every local process. The peer IP is the real TCP
-  source (forwarded headers are not trusted) and a loopback source only routes
-  over the loopback interface, so a bridge/LAN caller cannot forge it. Pair the
-  wildcard bind with a host firewall (allow loopback + the docker subnet, drop
-  the LAN) for defense in depth.
