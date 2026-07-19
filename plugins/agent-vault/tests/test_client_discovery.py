@@ -7,15 +7,17 @@ exactly today's fixed socket/port when nothing is advertised.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import socket
 import sys
 import threading
+import uuid
 
 import pytest
 
-from agent_vault import cli, config, rendezvous, service
+from agent_vault import cli, config, rendezvous, service, winpipe
 from agent_vault import extensions as ext
 from agent_vault.extensions import ExtensionRegistry
 
@@ -278,6 +280,99 @@ def test_service_send_command_legacy_when_no_file(run_dir, monkeypatch):
     server = _EchoServer({"ok": True})
     try:
         monkeypatch.setenv("AGENT_VAULT_PORT", str(server.port))
+        result = service.send_command({"action": "ping"})
+    finally:
+        server.close()
+    assert result is not None
+    assert result["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Named-pipe discovery (Stage C, Windows only)
+# ---------------------------------------------------------------------------
+
+
+class _PipeEcho:
+    """Proactor-loop named-pipe server in a thread; echoes a canned reply."""
+
+    def __init__(self, pipe_path, response):
+        self.pipe_path = pipe_path
+        self.response = response
+        self.loop = None
+        self._ready = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+        if not self._ready.wait(5):
+            raise RuntimeError("pipe server did not start")
+
+    def _run(self):
+        self.loop = asyncio.ProactorEventLoop()
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_until_complete(self._start())
+        self.loop.run_forever()
+
+    async def _start(self):
+        async def handle(reader, writer):
+            try:
+                await reader.readline()
+                writer.write((json.dumps(self.response) + "\n").encode())
+                await writer.drain()
+            finally:
+                writer.close()
+
+        self.servers = await winpipe.start_pipe_server(self.pipe_path, handle)
+        self._ready.set()
+
+    def close(self):
+        if self.loop is not None:
+            def _shutdown():
+                for s in getattr(self, "servers", []):
+                    with contextlib.suppress(Exception):
+                        s.close()
+                self.loop.stop()
+
+            self.loop.call_soon_threadsafe(_shutdown)
+            self.thread.join(timeout=3)
+            with contextlib.suppress(Exception):
+                self.loop.close()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="named pipes are Windows-only")
+def test_send_command_discovers_pipe(run_dir, monkeypatch, empty_registry):
+    pipe = rf"\\.\pipe\agent-vault-test-{uuid.uuid4().hex}"
+    server = _PipeEcho(pipe, {"ok": True, "value": "pong"})
+    try:
+        rendezvous.write_endpoint(run_dir, "pipe", pipe)
+        result = cli.send_command({"action": "ping"})
+    finally:
+        server.close()
+    assert result is not None
+    assert result["ok"] is True
+    assert result["_transport"] == "discovered-pipe"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="named pipes are Windows-only")
+def test_send_command_pipe_falls_back_to_tcp(run_dir, monkeypatch, empty_registry):
+    """A discovered pipe with no server falls through to the legacy TCP dial."""
+    dead_pipe = rf"\\.\pipe\agent-vault-dead-{uuid.uuid4().hex}"
+    rendezvous.write_endpoint(run_dir, "pipe", dead_pipe)
+    server = _EchoServer({"ok": True})
+    try:
+        monkeypatch.setenv("AGENT_VAULT_PORT", str(server.port))
+        result = cli.send_command({"action": "ping"})
+    finally:
+        server.close()
+    assert result is not None
+    # Pipe dial failed -> legacy TCP served it.
+    assert result["_transport"] == "tcp"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="named pipes are Windows-only")
+def test_service_send_command_discovers_pipe(run_dir, monkeypatch):
+    pipe = rf"\\.\pipe\agent-vault-svc-{uuid.uuid4().hex}"
+    server = _PipeEcho(pipe, {"ok": True})
+    try:
+        rendezvous.write_endpoint(run_dir, "pipe", pipe)
         result = service.send_command({"action": "ping"})
     finally:
         server.close()
