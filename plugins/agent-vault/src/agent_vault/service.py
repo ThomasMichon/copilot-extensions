@@ -20,6 +20,7 @@ from .config import (
     IS_WINDOWS,
     LOG_FILE,
     PID_FILE,
+    PIPE_PATH,
     SOCKET_PATH,
     load_config,
     normalize_entry,
@@ -40,6 +41,7 @@ from .rendezvous import (
     resolve,
     write_endpoint,
 )
+from .winpipe import pipe_send, start_pipe_server
 
 # Service inactivity timeout (0 = never, set via --persistent)
 TIMEOUT_SECONDS = int(os.environ.get("VAULT_TIMEOUT", "600"))
@@ -699,17 +701,22 @@ def advertised_endpoint(
     is_windows: bool,
     unix_bound: bool,
     socket_path: str,
+    pipe_bound: bool = False,
+    pipe_address: str | None = None,
     tcp_bound: bool,
     tcp_address: str | None,
 ) -> tuple[str, str] | None:
     """Pick the endpoint to advertise for discovery, preferring the OS-native one.
 
-    On a POSIX host the Unix domain socket is the preferred local endpoint; a
-    Windows host advertises its loopback TCP endpoint. Returns ``(transport,
-    address)`` or ``None`` if nothing bound.
+    Rung order (``docs/patterns/service-transport.md``): a POSIX host advertises
+    its **Unix domain socket**; a Windows host advertises its **named pipe** when
+    bound, else falls back to its loopback **TCP** endpoint. Returns
+    ``(transport, address)`` or ``None`` if nothing bound.
     """
     if unix_bound and not is_windows:
         return ("unix", socket_path)
+    if pipe_bound and pipe_address and is_windows:
+        return ("pipe", pipe_address)
     if tcp_bound and tcp_address:
         return ("tcp", tcp_address)
     return None
@@ -753,6 +760,23 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
     with open(PID_FILE, "w") as f:
         f.write(str(os.getpid()))
 
+    # Windows rung 2: bind a named pipe *alongside* TCP (additive). The pipe is
+    # the preferred, port-free local endpoint; TCP stays as the legacy + WSL/
+    # fallback path until Stage D retires it. Any pipe failure degrades cleanly to
+    # TCP-only, so this can never make the daemon less reachable than today.
+    pipe_servers: list = []
+    pipe_bound = False
+    if IS_WINDOWS:
+        try:
+            pipe_servers = await start_pipe_server(
+                PIPE_PATH, lambda r, w: handle_client(r, w, service)
+            )
+            pipe_bound = bool(pipe_servers)
+            if pipe_bound:
+                log.info("Listening on named pipe %s", PIPE_PATH)
+        except Exception as e:  # pipe is best-effort; TCP still serves
+            log.warning("Could not bind named pipe %s (%s); TCP only", PIPE_PATH, e)
+
     # Advertise the endpoint so clients can discover it instead of hardcoding a
     # constant -- see the endpoint-rendezvous lib and
     # docs/patterns/local-endpoint-discovery.md. Additive: clients that still use
@@ -761,6 +785,8 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
         is_windows=IS_WINDOWS,
         unix_bound=unix_bound,
         socket_path=SOCKET_PATH,
+        pipe_bound=pipe_bound,
+        pipe_address=PIPE_PATH if pipe_bound else None,
         tcp_bound=tcp_address is not None,
         tcp_address=tcp_address,
     )
@@ -780,6 +806,10 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
         for srv in servers:
             srv.close()
             await srv.wait_closed()
+        # Pipe servers expose close() but not wait_closed().
+        for psrv in pipe_servers:
+            with contextlib.suppress(Exception):
+                psrv.close()
         cleanup()
 
 
@@ -846,7 +876,11 @@ def send_command(request: dict) -> dict | None:
     except EndpointUnavailable:
         ep = None
     if ep is not None:
-        if ep.transport == "unix" and not IS_WINDOWS:
+        if ep.transport == "pipe" and IS_WINDOWS:
+            result = pipe_send(ep.address, request)
+            if result is not None:
+                return result
+        elif ep.transport == "unix" and not IS_WINDOWS:
             result = _dial_unix(request, ep.address)
             if result is not None:
                 return result

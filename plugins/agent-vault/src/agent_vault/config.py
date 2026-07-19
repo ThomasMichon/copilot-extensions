@@ -21,6 +21,12 @@ LOG_ENV = "AGENT_VAULT_LOG"
 
 DEFAULT_SOCKET_PATH = "/tmp/agent-vault-service.sock"
 SOCKET_PATH = os.environ.get(SOCKET_ENV) or DEFAULT_SOCKET_PATH
+
+# Windows named-pipe endpoint (rung 2 on Windows). Honors an override so a
+# branded/side-by-side deployment keeps its own pipe namespace.
+PIPE_ENV = "AGENT_VAULT_PIPE"
+DEFAULT_PIPE_PATH = r"\\.\pipe\agent-vault"
+PIPE_PATH = os.environ.get(PIPE_ENV) or DEFAULT_PIPE_PATH
 PID_FILE_LINUX = "/tmp/agent-vault-service.pid"
 PID_FILE_WIN = Path(os.environ.get("TEMP", "C:/Temp")) / "agent-vault-service.pid"
 PID_FILE = os.environ.get(PID_ENV) or (

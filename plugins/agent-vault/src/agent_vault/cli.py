@@ -12,6 +12,7 @@ from pathlib import Path
 from . import config, rendezvous
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
 from .prompt import prompt_password as gui_prompt_password
+from .winpipe import pipe_send
 
 
 def _detect_wsl() -> bool:
@@ -178,9 +179,12 @@ def send_command(request: dict, timeout: float | None = 5.0) -> dict | None:
     # dynamic/discovered port is honored end to end.
     discovered = _discover_endpoint(context)
     discovered_unix: str | None = None
+    discovered_pipe: str | None = None
     if discovered is not None:
         if discovered.transport == "unix":
             discovered_unix = discovered.address
+        elif discovered.transport == "pipe":
+            discovered_pipe = discovered.address
         elif discovered.transport == "tcp":
             try:
                 d_host, d_port = discovered.tcp_host_port
@@ -205,6 +209,13 @@ def send_command(request: dict, timeout: float | None = 5.0) -> dict | None:
     result = get_registry().try_transports(request, timeout, ext_ctx, before_builtin=True)
     if result is not None:
         return result
+
+    # A discovered Windows named pipe (rung 2) is dialed ahead of TCP; any pipe
+    # failure falls through to the legacy TCP path below.
+    if discovered_pipe is not None and IS_WINDOWS:
+        result = pipe_send(discovered_pipe, request, timeout)
+        if result is not None:
+            return _tag(result, "discovered-pipe")
 
     # A discovered Unix socket (native, possibly non-default path) is dialed
     # ahead of the legacy fixed socket.
@@ -574,6 +585,9 @@ def _vault_status_label(cli_state: str) -> str:
 _TRANSPORT_LABELS = {
     "unix-socket": "unix socket",
     "tcp": "local TCP",
+    "discovered-pipe": "named pipe (discovered)",
+    "discovered-unix": "unix socket (discovered)",
+    "discovered-tcp": "local TCP (discovered)",
 }
 
 
