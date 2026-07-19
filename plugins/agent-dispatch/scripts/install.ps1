@@ -544,7 +544,13 @@ try {
     Out-File -FilePath `$logFile -Append -Encoding utf8
 # Tee every stream (stdout/stderr/warning/info) to the log while still writing
 # through, so the retry lines from serve's bind-host resolution are captured.
-& '$VenvPython' -m agent_dispatch serve *>> `$logFile
+# serve logs via uvicorn to STDERR; under `$ErrorActionPreference = 'Stop'`
+# PowerShell wraps a native command's stderr as a terminating NativeCommandError
+# and would kill the long-lived coordinator on its very first log line (observed
+# on Lambda-Core: task launched, banner written, no listener). Drop to
+# 'Continue' for the serve invocation so stderr is captured, never fatal.
+`$ErrorActionPreference = 'Continue'
+& '$VenvPython' -m agent_dispatch serve 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
 
