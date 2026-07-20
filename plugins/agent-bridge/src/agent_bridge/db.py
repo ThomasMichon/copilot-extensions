@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import sqlite3
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,43 @@ SCHEMA_VERSION = 13
 # a briefly-busy event loop.
 LIVE_SESSION_STALE_SECONDS = 120.0
 
+#: Grace window after which a dead live-session row (``expired`` or terminal
+#: ``taken-over``) is purged from the registry, bounding the "graveyard" of
+#: dead registrations that ``list`` and consumers (Neuron Forge) would
+#: otherwise surface indefinitely (#3144). Comfortably longer than the lease so
+#: a just-ended row survives a while for debugging (via ``include_dead``) before
+#: it self-cleans; consumers don't see it regardless (the default list hides
+#: dead rows). ``wedged`` rows are never purged -- their process is alive.
+LIVE_SESSION_PURGE_SECONDS = 3600.0
+
+
+def local_pid_alive(pid: Any) -> bool | None:
+    """Best-effort *local* liveness probe for a live-session's CLI ``pid``.
+
+    Returns ``True`` if a process with that pid exists, ``False`` if it provably
+    does not, and ``None`` when liveness cannot be determined -- on Windows
+    (no safe signal-probe) or for a missing/invalid pid -- in which case the
+    caller must fall back to the heartbeat lease.
+
+    The ``live_sessions`` registry is **per-machine**: the bundled extension
+    registers only with its *local* bridge (#1485), and cross-machine reach is
+    bridge-to-bridge forwarding (the peer records the row on *its* host), so a
+    stored pid is always a pid on *this* machine -- a local probe is valid.
+    """
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    if os.name == "nt":  # no safe os.kill(pid, 0) probe on Windows; lease-only
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists but owned by another user -- still alive
+    except OSError:
+        return None
+    return True
+
 
 def live_session_is_fresh(
     row: dict[str, Any],
@@ -37,9 +76,10 @@ def live_session_is_fresh(
     means the CLI process is still calling home -- the load-bearing liveness
     signal for the ownership guard (#2879) and the inbox freshness lease
     (#2906). Note a turn-derived ``liveness=='stalled'`` row is still *fresh*:
-    the process heartbeats even while a turn is silent. Only a missed-heartbeat
-    row (or one explicitly demoted to ``status!='live'`` by the reaper / a
-    take-over) reads as stale.
+    the process heartbeats even while a turn is silent. A missed-heartbeat row,
+    a ``wedged`` row (process alive but the extension stopped heartbeating,
+    #3145), or one demoted to ``status!='live'`` by the reaper / a take-over,
+    all read as *not* fresh.
     """
     if (row.get("status") or "live") != "live":
         return False
@@ -827,37 +867,135 @@ class Database:
         return n
 
     def reap_stale_live_sessions(
-        self, *, now: float, stale_seconds: float = LIVE_SESSION_STALE_SECONDS
+        self,
+        *,
+        now: float,
+        stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
+        purge_seconds: float = LIVE_SESSION_PURGE_SECONDS,
+        pid_alive: Callable[[Any], bool | None] = local_pid_alive,
     ) -> int:
-        """Expire live registrations whose heartbeat lease lapsed; drop their
-        undelivered inbox messages (#2880 + #2906).
+        """Reconcile lapsed live-session leases against real process liveness,
+        then purge long-dead rows (#2880, #3144, #3145).
 
-        A CLI that exited without a clean deregister stops heartbeating; once its
-        ``updated_at`` is older than the lease window it is demoted from ``live``
-        to ``expired`` -- so ``status=='live'`` reliably means the CLI is still
-        calling home, and a dead CLI can never leave a worktree permanently
-        un-ownable. Any message that could no longer be delivered to that
-        incarnation is dropped rather than lurking for an unrelated future
-        session. Returns how many registrations were expired. Idempotent (a
-        re-run finds nothing left to demote). A returning CLI's re-register
-        upsert flips it back to ``live``.
+        Three idempotent phases, run every sweep:
+
+        1. **PID reconcile.** A lapsed heartbeat lease does *not* prove the CLI
+           exited: the process can be alive while its extension stopped
+           heartbeating (a wedged session / stalled event loop). For every row
+           whose lease has lapsed (or that is already ``wedged``) we probe its
+           pid:
+
+           - **provably gone** -> ``expired`` (a dead CLI must never keep a
+             worktree un-ownable, #2880), and its undelivered inbox messages are
+             dropped so they can't reach a wrong future incarnation (#2906);
+           - **still alive** -> ``wedged`` -- a distinct state that keeps the
+             session legible and reclaimable to consumers (Neuron Forge can
+             offer a read + explicit reclaim instead of pretending it is gone
+             and forcing a blind take-over, #3145) while still reading as *not
+             fresh* for the ownership/steer guards (``live_session_is_fresh``
+             excludes it);
+           - **undeterminable** (Windows / bad pid) -> lease fallback: demote a
+             lapsed ``live`` row to ``expired`` exactly as before (#2880); leave
+             an existing ``wedged`` row alone (can't confirm its death).
+
+           A returning CLI's re-register upsert flips ``expired``/``wedged`` back
+           to ``live``.
+
+        2. **Purge.** ``expired`` and terminal ``taken-over`` rows whose
+           ``updated_at`` is older than the purge grace window are DELETEd (with
+           any leftover inbox messages), so the registry self-cleans instead of
+           accumulating a graveyard that ``list`` and consumers surface (#3144).
+           ``wedged`` rows are never purged -- their process is alive.
+
+        Returns the number of registrations demoted *out of* ``live`` this sweep
+        (expired + wedged). Idempotent: a re-run with nothing lapsed does no
+        work.
         """
         cutoff = now - stale_seconds
-        cur = self.execute_write(
-            "UPDATE live_sessions SET status='expired' "
-            "WHERE status='live' AND updated_at < ?",
+        # Phase 1 -- scan lapsed-live rows AND existing wedged rows (a wedged
+        # row whose process later exits must still progress to expired/purge).
+        scan = self.execute_read(
+            "SELECT session_id, pid, status FROM live_sessions "
+            "WHERE (status='live' AND updated_at < ?) OR status='wedged'",
             (cutoff,),
         )
-        n = cur.rowcount
-        if n:
-            self.execute_write(
-                "DELETE FROM live_messages WHERE delivered_at IS NULL "
-                "AND session_id IN ("
-                "SELECT session_id FROM live_sessions "
-                "WHERE status='expired' AND updated_at < ?)",
-                (cutoff,),
+        expire_from_live: list[str] = []
+        wedge_from_live: list[str] = []
+        expire_from_wedged: list[str] = []
+        for row in scan:
+            alive = pid_alive(row["pid"])
+            if row["status"] == "live":
+                if alive is True:
+                    wedge_from_live.append(row["session_id"])
+                else:  # gone or undeterminable -> lease fallback
+                    expire_from_live.append(row["session_id"])
+            else:  # already wedged
+                if alive is False:
+                    expire_from_wedged.append(row["session_id"])
+
+        demoted = 0
+
+        def _in(ids: list[str]) -> str:
+            return ",".join("?" * len(ids))
+
+        # live -> expired (re-check the lease in the WHERE so a row revived by a
+        # heartbeat between the SELECT and this UPDATE is not wrongly demoted).
+        if expire_from_live:
+            cur = self.execute_write(
+                f"UPDATE live_sessions SET status='expired' "
+                f"WHERE session_id IN ({_in(expire_from_live)}) "
+                f"AND status='live' AND updated_at < ?",
+                (*expire_from_live, cutoff),
             )
-        return n
+            demoted += cur.rowcount
+            self.execute_write(
+                f"DELETE FROM live_messages WHERE delivered_at IS NULL "
+                f"AND session_id IN ({_in(expire_from_live)})",
+                tuple(expire_from_live),
+            )
+        # live -> wedged (same lease re-check guard).
+        if wedge_from_live:
+            cur = self.execute_write(
+                f"UPDATE live_sessions SET status='wedged' "
+                f"WHERE session_id IN ({_in(wedge_from_live)}) "
+                f"AND status='live' AND updated_at < ?",
+                (*wedge_from_live, cutoff),
+            )
+            demoted += cur.rowcount
+        # wedged -> expired (process confirmed gone). Guarded on status='wedged'
+        # so a row revived to 'live' since the scan is left untouched.
+        if expire_from_wedged:
+            self.execute_write(
+                f"UPDATE live_sessions SET status='expired', updated_at=? "
+                f"WHERE session_id IN ({_in(expire_from_wedged)}) "
+                f"AND status='wedged'",
+                (now, *expire_from_wedged),
+            )
+            self.execute_write(
+                f"DELETE FROM live_messages WHERE delivered_at IS NULL "
+                f"AND session_id IN ({_in(expire_from_wedged)})",
+                tuple(expire_from_wedged),
+            )
+
+        # Phase 2 -- purge long-dead rows (expired / taken-over) past the grace
+        # window, so the registry does not accumulate a graveyard (#3144).
+        purge_cutoff = now - purge_seconds
+        dead = self.execute_read(
+            "SELECT session_id FROM live_sessions "
+            "WHERE status IN ('expired', 'taken-over') AND updated_at < ?",
+            (purge_cutoff,),
+        )
+        if dead:
+            dead_ids = [r["session_id"] for r in dead]
+            self.execute_write(
+                f"DELETE FROM live_messages WHERE session_id IN ({_in(dead_ids)})",
+                tuple(dead_ids),
+            )
+            self.execute_write(
+                f"DELETE FROM live_sessions WHERE session_id IN ({_in(dead_ids)})",
+                tuple(dead_ids),
+            )
+        return demoted
 
     # ------------------------------------------------------------------
     # Per-worktree ACP ownership reservation (#2912)
@@ -989,18 +1127,32 @@ class Database:
         return row
 
     def list_live_sessions(
-        self, worktree_id: str | None = None
+        self, worktree_id: str | None = None, *, include_dead: bool = False
     ) -> list[dict[str, Any]]:
+        """List live-session registrations, optionally scoped to a worktree.
+
+        By default this **hides dead rows** -- terminal ``expired`` and
+        ``taken-over`` registrations -- so ``list`` and consumers (Neuron Forge)
+        see only sessions that still matter: ``live`` (fresh) and ``wedged``
+        (process alive but heartbeat-stalled, #3145). Dead rows self-clean via
+        the reaper's purge (#3144); pass ``include_dead=True`` to see them for
+        debugging.
+        """
+        dead_clause = (
+            "" if include_dead else "status NOT IN ('expired', 'taken-over')"
+        )
+        clauses = []
+        params: list[Any] = []
         if worktree_id:
-            rows = self.execute_read(
-                "SELECT * FROM live_sessions WHERE worktree_id=? "
-                "ORDER BY updated_at DESC",
-                (worktree_id,),
-            )
-        else:
-            rows = self.execute_read(
-                "SELECT * FROM live_sessions ORDER BY updated_at DESC"
-            )
+            clauses.append("worktree_id=?")
+            params.append(worktree_id)
+        if dead_clause:
+            clauses.append(dead_clause)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = self.execute_read(
+            f"SELECT * FROM live_sessions{where} ORDER BY updated_at DESC",
+            tuple(params),
+        )
         return [dict(r) for r in rows]
 
     def list_fresh_live_sessions(

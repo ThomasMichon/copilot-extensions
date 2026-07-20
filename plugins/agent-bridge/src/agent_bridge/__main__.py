@@ -819,7 +819,8 @@ def _cmd_live_sessions(args: argparse.Namespace) -> None:
     # default: list
     try:
         sessions = client.list_live_sessions(
-            worktree_id=getattr(args, "worktree_id", None)
+            worktree_id=getattr(args, "worktree_id", None),
+            include_dead=getattr(args, "include_dead", False),
         )
     except BridgeClientError as exc:
         if exc.status == 404:
@@ -2627,6 +2628,12 @@ def build_parser() -> argparse.ArgumentParser:
         "list", help="List registered live interactive CLI sessions"
     )
     live_list_p.add_argument("--worktree-id", help="Filter by worktree id")
+    live_list_p.add_argument(
+        "--all",
+        dest="include_dead",
+        action="store_true",
+        help="include dead (expired / taken-over) rows, normally hidden",
+    )
     live_list_p.set_defaults(func=_cmd_live_sessions)
     live_resolve_p = live_sub.add_parser(
         "resolve",

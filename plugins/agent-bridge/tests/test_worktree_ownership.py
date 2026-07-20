@@ -76,12 +76,16 @@ class TestTakenOverTerminalState:
         """Lease-lapse `expired` (distinct from take-over) revives normally."""
         now = time.time()
         _register(tmp_db, "cli-1", "wt-A", now)
-        # Force the lease to lapse, then reap -> status 'expired'.
-        reaped = tmp_db.reap_stale_live_sessions(now=now + 10_000)
+        # Lapse the lease (past the 120s window, within the purge grace so the
+        # expired row survives to be revived); the CLI's process is gone, so
+        # reap -> expired (a live process would reconcile to 'wedged', #3145).
+        reaped = tmp_db.reap_stale_live_sessions(
+            now=now + 200, pid_alive=lambda _p: False
+        )
         assert reaped == 1
         assert tmp_db.get_live_session("cli-1")["status"] == "expired"
         # A returning CLI (same id) revives from expired.
-        assert _register(tmp_db, "cli-1", "wt-A", now + 10_001) == "live"
+        assert _register(tmp_db, "cli-1", "wt-A", now + 201) == "live"
         assert tmp_db.get_live_session("cli-1")["status"] == "live"
 
 
