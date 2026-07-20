@@ -93,6 +93,13 @@ files in this repo.**
   phase**, cutting upfront context (the trade is an extra read on demand). Link out
   *and* back; no orphan sub-docs. This is the same *decompose-liberally* bias docs
   and visions follow.
+- **Split a large journal by date.** The Journal is append-only — the one section
+  that grows without bound. When it (inline or an extracted `journal.md`) nears the
+  ~800-line soft cap, break it into dated files
+  `efforts/active/<slug>/journal/<YYYY>/MM.DD <title>.md` (one per day / notable
+  entry, mirroring the archive's date scheme) and keep `journal.md` (or the README
+  Journal section) as a **thin chronological index** linking them newest-first. Link
+  out *and* back; no orphan entries.
 - **Be validation-driven:** every effort carries an implementation plan *and* a
   validation/test plan. An effort may *start* as a pure reproduction — a
   failing validation captured first, fix to follow.

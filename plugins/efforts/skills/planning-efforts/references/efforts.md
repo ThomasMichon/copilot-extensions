@@ -47,7 +47,10 @@ efforts/
 ├── active/                # in-flight efforts
 │   └── <slug>/
 │       ├── README.md      # the effort's shared contract (a lean map)
-│       └── <phase>.md     # optional sub-docs: large phases/slices extracted out
+│       ├── <phase>.md     # optional sub-docs: large phases/slices extracted out
+│       └── journal/       # optional: a large journal split into dated files
+│           └── <YYYY>/
+│               └── MM.DD <title>.md   # one file per day (or per notable entry)
 └── <YYYY>/...             # archived efforts, dated by completion
 ```
 
@@ -59,6 +62,14 @@ efforts/
   leave the Plan a checklist item with a one-line summary and a link. The agent
   reads a sub-doc only when working that phase — upfront context stays small, at
   the cost of an extra read on demand. Link out *and* back; no orphan sub-docs.
+- **Split a large journal by date.** The Journal is append-only, so it is the
+  one section that grows without bound. When it (as an inline README section or
+  an extracted `journal.md`) approaches the ~800-line soft cap, break it into
+  dated files: `<slug>/journal/<YYYY>/MM.DD <title>.md`, one per day (or per
+  notable entry), mirroring the archive's date scheme. Leave `journal.md` (or
+  the README Journal section) as a **thin chronological index** that links each
+  dated file newest-first — so a resuming agent skims the index and opens only
+  the day it needs. Link out *and* back; no orphan entries.
 - **Grouping (a binding — set by the addendum):**
   - *flat* — `efforts/active/<slug>/` (default; for a repo that is itself the
     primary unit of work).

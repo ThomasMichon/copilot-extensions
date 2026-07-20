@@ -110,7 +110,14 @@ _Pending._
 <!-- Dated, append-only running log. The record of what actually happened:
      decisions, blockers, dispatches to participants, milestones, and the
      closing archive entry. Pick newest-first or oldest-first and stay
-     consistent. -->
+     consistent.
+
+     WHEN THIS GROWS: the Journal is append-only, so it is the section most
+     likely to bloat the README. When it (here, or an extracted journal.md)
+     nears ~800 lines, split it into dated files
+     efforts/active/<slug>/journal/<YYYY>/MM.DD <title>.md (one per day/entry)
+     and leave this section (or journal.md) as a thin index linking them
+     newest-first. -->
 
 ### <YYYY-MM-DD> — Kickoff
 - Effort created, premise captured.
