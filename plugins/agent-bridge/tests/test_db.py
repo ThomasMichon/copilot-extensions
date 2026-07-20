@@ -188,11 +188,11 @@ class TestLiveSessionLease:
     (#2879 / #2880 / #2906)."""
 
     def _register(
-        self, db: Database, sid: str, wt: str, now: float
+        self, db: Database, sid: str, wt: str, now: float, *, pid: int | None = None
     ) -> None:
         db.register_live_session(
             sid, machine="m", cwd=None, worktree_id=wt, repo=None,
-            branch=None, pid=None, role=None, now=now,
+            branch=None, pid=pid, role=None, now=now,
         )
 
     def test_is_fresh_predicate(self, tmp_db: Database) -> None:
@@ -275,6 +275,151 @@ class TestLiveSessionLease:
         tmp_db.deregister_live_session("cli-a")
         assert tmp_db.get_live_session("cli-a") is None
         assert tmp_db.list_pending_live_messages("cli-a") == []
+
+    # -- PID reconcile: a lapsed lease is not proof the CLI exited (#3145) ----
+
+    def test_reap_marks_wedged_when_process_alive(self, tmp_db: Database) -> None:
+        """A lapsed-lease row whose process is still alive is demoted to the
+        distinct ``wedged`` state (not ``expired``), and its undelivered steer
+        is *kept* -- the session may recover and deliver it."""
+        now = 10_000.0
+        self._register(tmp_db, "cli-wedged", "wt-a", now - 1000, pid=4242)
+        tmp_db.enqueue_live_message("cli-wedged", "op", "steer", now - 1000)
+
+        demoted = tmp_db.reap_stale_live_sessions(now=now, pid_alive=lambda _p: True)
+        assert demoted == 1
+        row = tmp_db.get_live_session("cli-wedged")
+        assert row["status"] == "wedged"
+        # wedged is NOT fresh: the ownership/steer guards still exclude it
+        from agent_bridge.db import live_session_is_fresh
+        assert not live_session_is_fresh(row, now)
+        # message retained (process alive -> may still deliver)
+        assert len(tmp_db.list_pending_live_messages("cli-wedged")) == 1
+
+    def test_reap_expires_when_process_gone(self, tmp_db: Database) -> None:
+        """A lapsed-lease row whose process is provably gone is expired and its
+        undelivered steer dropped -- the #2880 behavior, now pid-confirmed."""
+        now = 10_000.0
+        self._register(tmp_db, "cli-dead", "wt-a", now - 1000, pid=4242)
+        tmp_db.enqueue_live_message("cli-dead", "op", "steer", now - 1000)
+
+        demoted = tmp_db.reap_stale_live_sessions(now=now, pid_alive=lambda _p: False)
+        assert demoted == 1
+        assert tmp_db.get_live_session("cli-dead")["status"] == "expired"
+        assert tmp_db.list_pending_live_messages("cli-dead") == []
+
+    def test_reap_lease_fallback_when_pid_undeterminable(self, tmp_db: Database) -> None:
+        """When liveness can't be determined (None -- Windows / bad pid), a
+        lapsed ``live`` row falls back to lease-only expiry (unchanged #2880)."""
+        now = 10_000.0
+        self._register(tmp_db, "cli-x", "wt-a", now - 1000, pid=None)
+        demoted = tmp_db.reap_stale_live_sessions(now=now, pid_alive=lambda _p: None)
+        assert demoted == 1
+        assert tmp_db.get_live_session("cli-x")["status"] == "expired"
+
+    def test_wedged_progresses_to_expired_when_process_dies(
+        self, tmp_db: Database
+    ) -> None:
+        """A ``wedged`` row is re-probed on later sweeps: once its process
+        exits it advances to ``expired`` (so it can eventually be purged)."""
+        now = 10_000.0
+        self._register(tmp_db, "cli-w", "wt-a", now - 1000, pid=4242)
+        tmp_db.reap_stale_live_sessions(now=now, pid_alive=lambda _p: True)
+        assert tmp_db.get_live_session("cli-w")["status"] == "wedged"
+        # next sweep, process is gone
+        tmp_db.reap_stale_live_sessions(now=now + 60, pid_alive=lambda _p: False)
+        assert tmp_db.get_live_session("cli-w")["status"] == "expired"
+
+    def test_wedged_revives_on_reregister(self, tmp_db: Database) -> None:
+        """A returning CLI's heartbeat upsert flips a ``wedged`` row back to
+        ``live`` (wedged is revivable, unlike terminal ``taken-over``)."""
+        now = 10_000.0
+        self._register(tmp_db, "cli-w", "wt-a", now - 1000, pid=4242)
+        tmp_db.reap_stale_live_sessions(now=now, pid_alive=lambda _p: True)
+        assert tmp_db.get_live_session("cli-w")["status"] == "wedged"
+        self._register(tmp_db, "cli-w", "wt-a", now, pid=4242)
+        assert tmp_db.get_live_session("cli-w")["status"] == "live"
+        assert tmp_db.get_fresh_live_session("cli-w", now=now) is not None
+
+    def test_reap_revived_row_not_wrongly_demoted(self, tmp_db: Database) -> None:
+        """The demote UPDATE re-checks the lease, so a row whose heartbeat
+        arrived just before the write is not demoted on a stale pid verdict."""
+        now = 10_000.0
+        # fresh row (heartbeat at `now`) -- pid probe says gone, but the lease
+        # is valid, so the lease re-check in the UPDATE must protect it.
+        self._register(tmp_db, "cli-fresh", "wt-a", now, pid=4242)
+        demoted = tmp_db.reap_stale_live_sessions(now=now, pid_alive=lambda _p: False)
+        assert demoted == 0
+        assert tmp_db.get_live_session("cli-fresh")["status"] == "live"
+
+    # -- Purge: bound the graveyard of dead registrations (#3144) ------------
+
+    def test_reap_purges_dead_rows_past_grace(self, tmp_db: Database) -> None:
+        """``expired`` rows older than the purge grace window are DELETEd; a
+        recently-expired row is kept briefly for legibility."""
+        now = 10_000.0
+        # long-dead: stale beyond the purge window -> expired then purged, same
+        # sweep (its updated_at stays at the old heartbeat time).
+        self._register(tmp_db, "cli-old", "wt-a", now - 5000, pid=None)
+        # recently-ended: stale past the lease but within the purge window.
+        self._register(tmp_db, "cli-recent", "wt-b", now - 200, pid=None)
+        tmp_db.enqueue_live_message("cli-old", "op", "steer", now - 5000)
+
+        tmp_db.reap_stale_live_sessions(
+            now=now, pid_alive=lambda _p: None, purge_seconds=900.0
+        )
+        # long-dead row is gone entirely (row + messages)
+        assert tmp_db.get_live_session("cli-old") is None
+        assert tmp_db.list_pending_live_messages("cli-old") == []
+        # recently-ended row survives as expired (kept for the grace window)
+        assert tmp_db.get_live_session("cli-recent")["status"] == "expired"
+        # a later sweep, once it too passes the grace window, purges it
+        tmp_db.reap_stale_live_sessions(
+            now=now + 900, pid_alive=lambda _p: None, purge_seconds=900.0
+        )
+        assert tmp_db.get_live_session("cli-recent") is None
+
+    def test_reap_never_purges_wedged(self, tmp_db: Database) -> None:
+        """A ``wedged`` row (process alive) is never purged, however old its
+        last heartbeat."""
+        now = 10_000.0
+        self._register(tmp_db, "cli-w", "wt-a", now - 100_000, pid=4242)
+        tmp_db.reap_stale_live_sessions(
+            now=now, pid_alive=lambda _p: True, purge_seconds=900.0
+        )
+        assert tmp_db.get_live_session("cli-w")["status"] == "wedged"
+
+    def test_list_hides_dead_shows_live_and_wedged(self, tmp_db: Database) -> None:
+        """``list_live_sessions`` hides expired/taken-over by default but shows
+        live + wedged; ``include_dead`` reveals everything."""
+        now = 10_000.0
+        self._register(tmp_db, "cli-live", "wt-a", now, pid=None)
+        self._register(tmp_db, "cli-wedged", "wt-b", now - 1000, pid=4242)
+        self._register(tmp_db, "cli-exp", "wt-c", now - 200, pid=None)
+        # wedged via alive probe; cli-exp expired via lease fallback (kept, <grace)
+        tmp_db.reap_stale_live_sessions(
+            now=now,
+            pid_alive=lambda _p: True if _p == 4242 else None,
+            purge_seconds=900.0,
+        )
+        default_ids = {r["session_id"] for r in tmp_db.list_live_sessions()}
+        assert default_ids == {"cli-live", "cli-wedged"}
+        all_ids = {r["session_id"] for r in tmp_db.list_live_sessions(include_dead=True)}
+        assert all_ids == {"cli-live", "cli-wedged", "cli-exp"}
+
+    def test_local_pid_alive_probe(self) -> None:
+        """The default local probe: own pid alive, an unused high pid gone,
+        a bad pid undeterminable. (POSIX only; Windows returns None.)"""
+        import os
+
+        from agent_bridge.db import local_pid_alive
+
+        assert local_pid_alive(-1) is None
+        assert local_pid_alive(None) is None
+        if os.name != "nt":
+            assert local_pid_alive(os.getpid()) is True
+            # PID 2**31-1 is effectively never allocated
+            assert local_pid_alive(2**31 - 1) is False
 
 
 class TestLiveMessageAtomicEnqueue:

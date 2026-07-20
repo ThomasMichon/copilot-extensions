@@ -254,6 +254,34 @@ def test_route_register_list_get_deregister(client: TestClient) -> None:
     assert client.delete("/api/v1/live-sessions/cli-1").status_code == 200
 
 
+def test_route_list_hides_dead_by_default(
+    client: TestClient, tmp_db: Database
+) -> None:
+    """GET /live-sessions hides expired/taken-over rows by default (#3144) and
+    surfaces wedged ones (#3145); ?include_dead=true reveals the dead rows."""
+    for sid, wt in (("live-1", "wt-a"), ("wedge-1", "wt-b"), ("dead-1", "wt-c")):
+        client.post(
+            "/api/v1/live-sessions",
+            json={"session_id": sid, "machine": "m", "worktree_id": wt},
+        )
+    # Model the three post-reconcile states directly.
+    tmp_db.execute_write("UPDATE live_sessions SET status='wedged' WHERE session_id='wedge-1'")
+    tmp_db.execute_write("UPDATE live_sessions SET status='expired' WHERE session_id='dead-1'")
+
+    default_ids = {
+        s["session_id"]
+        for s in client.get("/api/v1/live-sessions").json()["live_sessions"]
+    }
+    assert default_ids == {"live-1", "wedge-1"}
+    all_ids = {
+        s["session_id"]
+        for s in client.get(
+            "/api/v1/live-sessions", params={"include_dead": "true"}
+        ).json()["live_sessions"]
+    }
+    assert all_ids == {"live-1", "wedge-1", "dead-1"}
+
+
 def test_route_resolve_by_handle(client: TestClient) -> None:
     # A worktree handle resolves to its live session; /resolve is matched before
     # the /{session_id} path param (no collision).

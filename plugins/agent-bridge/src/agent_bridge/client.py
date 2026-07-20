@@ -337,15 +337,23 @@ class BridgeClient:
             raise
 
     def list_live_sessions(
-        self, *, worktree_id: str | None = None
+        self, *, worktree_id: str | None = None, include_dead: bool = False
     ) -> list[dict[str, Any]]:
         """GET /api/v1/live-sessions (optionally ?worktree_id=...).
 
         Returns the registered live interactive-CLI sessions -- the registry
-        that feeds task-coordination tracking of a CLI-embodied task.
+        that feeds task-coordination tracking of a CLI-embodied task. Terminal
+        ``expired`` / ``taken-over`` rows are hidden unless ``include_dead`` is
+        set (#3144); ``wedged`` sessions are shown (#3145).
         """
-        params = {"worktree_id": worktree_id} if worktree_id else None
-        resp = self._request("GET", "/api/v1/live-sessions", params=params)
+        params: dict[str, Any] = {}
+        if worktree_id:
+            params["worktree_id"] = worktree_id
+        if include_dead:
+            params["include_dead"] = "true"
+        resp = self._request(
+            "GET", "/api/v1/live-sessions", params=params or None
+        )
         return resp.get("live_sessions", []) if resp else []
 
     def record_live_progress(

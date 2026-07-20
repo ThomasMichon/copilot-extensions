@@ -318,11 +318,14 @@ async def lifespan(app: FastAPI):
         )
 
     # Live-session lease reaper (#2880/#2906) -- expire live-CLI registrations
-    # whose heartbeat lease has lapsed (a Copilot CLI that exited without a
-    # clean deregister stops re-POSTing) so a dead CLI cannot leave a worktree
-    # permanently un-ownable or accept a racing steer, and drop inbox messages
-    # that can never be delivered to that incarnation. Cheap; always on. Sweeps
-    # at half the lease window so a lapsed row is demoted within ~one window.
+    # whose heartbeat lease has lapsed. A lapsed lease is reconciled against the
+    # CLI's real process liveness: a gone process is expired (a dead CLI cannot
+    # leave a worktree un-ownable or accept a racing steer) and its inbox
+    # messages dropped; a still-alive process (extension stopped heartbeating --
+    # a wedged session) is marked ``wedged`` so it stays legible/reclaimable
+    # instead of vanishing (#3145). Long-dead rows are then purged so the
+    # registry does not accumulate a graveyard (#3144). Cheap; always on. Sweeps
+    # at half the lease window so a lapsed row is reconciled within ~one window.
     from .db import LIVE_SESSION_STALE_SECONDS
 
     async def _live_reap_loop() -> None:
@@ -335,7 +338,8 @@ async def lifespan(app: FastAPI):
                 )
                 if n:
                     log.info(
-                        "Live-session reaper expired %d stale registration(s)", n
+                        "Live-session reaper demoted %d lapsed registration(s) "
+                        "(expired/wedged)", n
                     )
             except Exception:
                 log.warning("Live-session lease reap failed", exc_info=True)

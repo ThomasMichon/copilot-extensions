@@ -174,11 +174,18 @@ async def register_live_session(
 
 @router.get("", response_model=LiveSessionListResponse)
 async def list_live_sessions(
-    request: Request, worktree_id: str | None = None
+    request: Request,
+    worktree_id: str | None = None,
+    include_dead: bool = False,
 ) -> LiveSessionListResponse:
-    """List registered live interactive CLI sessions (optionally by worktree)."""
+    """List registered live interactive CLI sessions (optionally by worktree).
+
+    Hides terminal ``expired`` / ``taken-over`` rows by default (they self-clean
+    via the reaper's purge, #3144); pass ``?include_dead=true`` to see them.
+    ``wedged`` sessions (process alive, heartbeat stalled, #3145) are shown.
+    """
     db = _db(request)
-    rows = db.list_live_sessions(worktree_id=worktree_id)
+    rows = db.list_live_sessions(worktree_id=worktree_id, include_dead=include_dead)
     return LiveSessionListResponse(live_sessions=[_to_info(r) for r in rows])
 
 
