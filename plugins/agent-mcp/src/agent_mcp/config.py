@@ -46,6 +46,27 @@ DECORATOR_TYPES = ("filter", "rename", "defer", "code-mode", "storage", "transfo
 
 BRIDGES_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp")) / "bridges"
 
+# Plugin-shipped bridge configs. A Copilot CLI plugin may ship its bridge config
+# *inside the plugin* (``<plugin>/agents/<name>.mcp.yaml``) instead of requiring a
+# copy under ``~/.agent-mcp/bridges/``. Plugins install to the deterministic tree
+# ``<copilot-home>/installed-plugins/<marketplace>/<plugin>/``, so a bare bridge
+# name resolves against ``.../installed-plugins/*/*/{agents,mcp}/<name>.{yaml,yml,json}``.
+# This lets a plugin-shipped sub-agent run ``agent-mcp bridge <name>`` with **no**
+# user-space install step (the spawned MCP's cwd is the session repo, not the
+# plugin, so a plugin-relative ``--config`` path can't work). The user-space
+# ``bridges/`` dir still wins first, so a local file remains an explicit override.
+#
+# Roots are the ``;``/``:``-separated ``AGENT_MCP_PLUGIN_ROOTS`` if set, else the
+# well-known ``<copilot-home>/installed-plugins`` (``$COPILOT_HOME`` or ``~/.copilot``).
+def _plugin_roots() -> list[Path]:
+    raw = os.environ.get("AGENT_MCP_PLUGIN_ROOTS")
+    if raw:
+        # Split on the platform path separator (``;`` on Windows, ``:`` on POSIX)
+        # so a Windows drive-letter colon (``C:\...``) is not mistaken for one.
+        return [Path(p).expanduser() for p in raw.split(os.pathsep) if p.strip()]
+    home = Path(os.environ.get("COPILOT_HOME", Path.home() / ".copilot"))
+    return [home / "installed-plugins"]
+
 # Machine-local config overlays. A bridge config keyed ``id`` (or, absent that,
 # its filename stem with a trailing ``.mcp`` stripped) may be overridden per-host
 # by a file ``~/.agent-mcp/overrides/<id>.{yaml,yml,json}`` that is deep-merged
@@ -203,11 +224,74 @@ def _read_file(path: Path) -> dict[str, Any]:
     return data
 
 
+def _find_plugin_bridge(name: str) -> Path | None:
+    """Find a plugin-shipped bridge config named ``name``.
+
+    Searches every plugin root (see ``_plugin_roots``) for
+    ``<marketplace>/<plugin>/{agents,mcp}/<name>.{yaml,yml,json}``. Returns the
+    single match, or ``None`` if there is none. Raises ``ConfigError`` if two or
+    more **distinct** files match (ambiguous bridge name across plugins) so the
+    collision surfaces instead of silently picking one.
+    """
+    matches: list[Path] = []
+    for root in _plugin_roots():
+        if not root.is_dir():
+            continue
+        for sub in ("agents", "mcp"):
+            for ext in (".yaml", ".yml", ".json"):
+                # Match both ``<name>.<ext>`` and the ``.mcp`` infix convention
+                # ``<name>.mcp.<ext>`` (e.g. a plugin ships ``ado.mcp.yaml`` for
+                # bridge name ``ado``).
+                matches.extend(sorted(root.glob(f"*/*/{sub}/{name}{ext}")))
+                matches.extend(sorted(root.glob(f"*/*/{sub}/{name}.mcp{ext}")))
+    # De-duplicate by resolved path (a root may be listed twice, symlinks, etc.).
+    seen: dict[Path, Path] = {}
+    for p in matches:
+        seen.setdefault(p.resolve(), p)
+    uniq = list(seen.values())
+    if not uniq:
+        return None
+    if len(uniq) > 1:
+        listing = ", ".join(str(p) for p in uniq)
+        raise ConfigError(
+            f"ambiguous bridge name '{name}': found in multiple plugins ({listing}). "
+            f"Rename one, or pass an explicit --config path."
+        )
+    return uniq[0]
+
+
+def discover_plugin_bridges() -> dict[str, Path]:
+    """Map every plugin-shipped bridge name to its config path (for ``status``).
+
+    Later matches do not override earlier ones, so a name appearing in two plugins
+    keeps the first found; ``resolve_config_path`` is where an actual ambiguous
+    *lookup* raises. Returns ``{}`` when no plugin roots exist.
+    """
+    found: dict[str, Path] = {}
+    for root in _plugin_roots():
+        if not root.is_dir():
+            continue
+        for sub in ("agents", "mcp"):
+            for ext in (".yaml", ".yml", ".json"):
+                for p in sorted(root.glob(f"*/*/{sub}/*{ext}")):
+                    stem = p.name[: -len(ext)]
+                    if stem.endswith(".mcp"):   # ``ado.mcp.yaml`` -> bridge ``ado``
+                        stem = stem[: -len(".mcp")]
+                    found.setdefault(stem, p)
+    return found
+
+
 def resolve_config_path(name_or_path: str) -> Path:
     """Resolve a ``--config`` value or a bare bridge name to a file path.
 
     A value containing a path separator or an explicit extension is treated as a
-    path; otherwise it is looked up under ``~/.agent-mcp/bridges/<name>.{yaml,yml,json}``.
+    path. A bare name resolves in order:
+
+    1. ``~/.agent-mcp/bridges/<name>.{yaml,yml,json}`` (user-space; explicit
+       override wins first);
+    2. a **plugin-shipped** config
+       ``<copilot-home>/installed-plugins/*/*/{agents,mcp}/<name>.{yaml,yml,json}``
+       (so a plugin can ship its bridge in-tree with no user-space install).
     """
     candidate = Path(name_or_path).expanduser()
     if candidate.suffix or os.sep in name_or_path or "/" in name_or_path:
@@ -216,8 +300,13 @@ def resolve_config_path(name_or_path: str) -> Path:
         p = BRIDGES_DIR / f"{name_or_path}{ext}"
         if p.exists():
             return p
+    plugin_hit = _find_plugin_bridge(name_or_path)
+    if plugin_hit is not None:
+        return plugin_hit
+    roots = ", ".join(str(r) for r in _plugin_roots())
     raise ConfigError(
         f"no bridge named '{name_or_path}' under {BRIDGES_DIR} "
+        f"or any plugin ({roots}) "
         f"(looked for {name_or_path}.yaml/.yml/.json)"
     )
 
