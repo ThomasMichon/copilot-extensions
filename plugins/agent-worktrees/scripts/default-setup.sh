@@ -20,6 +20,7 @@ MACHINE="${HOSTNAME:-$(hostname)}"
 RECOVERY=false
 SETUP_HOOK=""
 SESSION_PATH=""
+ENV_SCRIPT=""
 COPILOT_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -28,6 +29,7 @@ while [[ $# -gt 0 ]]; do
         --recovery)     RECOVERY=true; shift ;;
         --setup-hook)   SETUP_HOOK="$2"; shift 2 ;;
         --session-path) SESSION_PATH="$2"; shift 2 ;;
+        --env-script)   ENV_SCRIPT="$2"; shift 2 ;;
         *)              COPILOT_ARGS+=("$1"); shift ;;
     esac
 done
@@ -43,6 +45,23 @@ say() { if $STDIO; then echo "$@" >&2; else echo "$@"; fi; }
 # -- Session PATH prepend (generic; repo-provided dirs) -------------------
 if [[ -n "$SESSION_PATH" ]]; then
     export PATH="${SESSION_PATH}:${PATH}"
+fi
+
+# -- Enlistment env priming (repo env_script) -----------------------------
+# Source the repo's env-priming script so the vars it exports reach the Copilot
+# exec below (UNLIKE the setup hook, which runs as a child and loses its env).
+# `set -a` auto-exports; the script's own stdout is redirected to stderr to keep
+# the ACP channel clean. Runs even in recovery -- the build env is always needed.
+if [[ -n "$ENV_SCRIPT" ]]; then
+    if [[ -f "$ENV_SCRIPT" ]]; then
+        say "  Env:      $ENV_SCRIPT"
+        set -a
+        # shellcheck disable=SC1090
+        . "$ENV_SCRIPT" >/dev/null 2>&1 || echo "  WARN: env_script exited non-zero; continuing." >&2
+        set +a
+    else
+        echo "  WARN: env_script not found: $ENV_SCRIPT" >&2
+    fi
 fi
 
 # -- Environment ----------------------------------------------------------

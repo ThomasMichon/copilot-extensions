@@ -208,6 +208,78 @@ def test_repo_session_env_passthrough_on_bad_placeholder():
 
 
 # ---------------------------------------------------------------------------
+# env_script: capture a repo env-priming script's environment for the exec.
+# See the agent-worktrees-env-script feature (declarative enlistment priming).
+# ---------------------------------------------------------------------------
+
+def _env_config(
+    *,
+    env_script: dict[str, str] | None = None,
+    setup_hook: dict[str, str] | None = None,
+    platform_name: str = "linux",
+) -> cfg.Config:
+    """A repo with NO launch template plus an env_script (+ optional hook)."""
+    return cfg.Config(
+        srcroot="/s", machine="dev6", platform=platform_name, repo_name="ext",
+        repos={"ext": cfg.RepoConfig(
+            anchor="/a", worktree_root="/w",
+            launch={},
+            env_script=env_script or {},
+            setup_hook=setup_hook or {},
+        )},
+    )
+
+
+def test_env_script_config_parsing():
+    data = {"env_script": {"windows": "otools\\bin\\OpenEnlistment.bat", "linux": "  "}}
+    repo = cfg._build_repo_config(data, "/a", "/w")
+    assert repo.env_script["windows"].endswith("OpenEnlistment.bat")
+    assert "linux" not in repo.env_script  # blank ignored
+
+
+def test_env_script_windows_builds_default_setup_with_flag(monkeypatch):
+    """env_script (no hook) routes to default-setup.ps1 with -EnvScript, resolved
+    against the anchor."""
+    monkeypatch.setattr(m.platform, "system", lambda: "Windows")
+    cfg_ = _env_config(env_script={"windows": "otools\\bin\\OpenEnlistment.bat"},
+                       platform_name="windows")
+    cmd = m._build_launch_cmd(cfg_, _args([]), "/a")
+    assert any("default-setup.ps1" in c for c in cmd)
+    assert "-EnvScript" in cmd
+    env_arg = cmd[cmd.index("-EnvScript") + 1]
+    assert env_arg.endswith("OpenEnlistment.bat")
+    assert "otools" in env_arg  # resolved relative to anchor
+
+
+def test_env_script_linux_builds_default_setup_with_flag(monkeypatch):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    cfg_ = _env_config(env_script={"linux": "tools/prime.sh"}, platform_name="linux")
+    cmd = m._build_launch_cmd(cfg_, _args([]), "/a")
+    assert cmd[0] == "bash"
+    assert "default-setup.sh" in cmd[1]
+    assert "--env-script" in cmd
+    assert cmd[cmd.index("--env-script") + 1].endswith("prime.sh")
+
+
+def test_env_script_absolute_path_preserved(monkeypatch):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    cfg_ = _env_config(env_script={"linux": "/opt/prime.sh"}, platform_name="linux")
+    cmd = m._build_launch_cmd(cfg_, _args([]), "/a")
+    assert cmd[cmd.index("--env-script") + 1] == "/opt/prime.sh"
+
+
+def test_env_script_with_setup_hook_passes_both(monkeypatch):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    cfg_ = _env_config(
+        env_script={"linux": "tools/prime.sh"},
+        setup_hook={"linux": "tools/setup/hook.sh"},
+        platform_name="linux",
+    )
+    cmd = m._build_launch_cmd(cfg_, _args([]), "/a")
+    assert "--setup-hook" in cmd and "--env-script" in cmd
+
+
+# ---------------------------------------------------------------------------
 # The shipped launcher scripts must understand the normalized-launch contract.
 # ---------------------------------------------------------------------------
 
@@ -218,6 +290,9 @@ def test_default_setup_sh_supports_hook_and_session_path():
     text = open(os.path.join(_SCRIPTS_DIR, "default-setup.sh"), encoding="utf-8").read()
     assert "--setup-hook" in text
     assert "--session-path" in text
+    assert "--env-script" in text
+    # env_script is sourced with auto-export so its vars reach the exec
+    assert "set -a" in text
     # hook is skipped in recovery
     assert 'RECOVERY" != true' in text
     # PATH is prepended, and Copilot is exec'd (launcher owns the exec)
@@ -232,6 +307,9 @@ def test_default_setup_ps1_supports_hook_and_session_path():
     text = open(os.path.join(_SCRIPTS_DIR, "default-setup.ps1"), encoding="utf-8").read()
     assert "$SetupHook" in text
     assert "$SessionPath" in text
+    assert "$EnvScript" in text
+    # env_script's captured environment is imported into the launcher process
+    assert "SetEnvironmentVariable" in text
     assert "-not $Recovery" in text  # hook skipped in recovery
     assert "$env:PATH" in text
     assert "copilot @CopilotArgs" in text

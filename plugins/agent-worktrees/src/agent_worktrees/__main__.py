@@ -776,6 +776,16 @@ def _build_launch_cmd(
         ]
         session_path_arg = os.pathsep.join(session_dirs) if session_dirs else ""
         hook_path = repo.setup_hook.get(plat_key)
+        # env_script: resolve like setup_hook, but its captured environment is
+        # applied to the Copilot exec (see RepoConfig.env_script). Present ->
+        # force the normalized default-setup launcher (never legacy) so
+        # -EnvScript / --env-script is honored.
+        env_script_path = repo.env_script.get(plat_key)
+        resolved_env_script = ""
+        if env_script_path:
+            resolved_env_script = env_script_path.format(**variables)
+            if not os.path.isabs(resolved_env_script):
+                resolved_env_script = str(Path(anchor) / resolved_env_script)
         is_windows = platform.system() == "Windows"
 
         if hook_path:
@@ -792,6 +802,8 @@ def _build_launch_cmd(
                 ]
                 if session_path_arg:
                     cmd += ["-SessionPath", session_path_arg]
+                if resolved_env_script:
+                    cmd += ["-EnvScript", resolved_env_script]
                 if recovery:
                     cmd.append("-Recovery")
             else:
@@ -802,11 +814,13 @@ def _build_launch_cmd(
                 ]
                 if session_path_arg:
                     cmd += ["--session-path", session_path_arg]
+                if resolved_env_script:
+                    cmd += ["--env-script", resolved_env_script]
                 if recovery:
                     cmd.append("--recovery")
         elif is_windows:
             setup_path = str(Path(anchor) / "tools" / "setup" / "setup.ps1")
-            legacy = Path(setup_path).is_file()
+            legacy = Path(setup_path).is_file() and not resolved_env_script
             if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.ps1")
             cmd = [
@@ -818,16 +832,20 @@ def _build_launch_cmd(
             # through to Copilot as bogus args).
             if session_path_arg and not legacy:
                 cmd += ["-SessionPath", session_path_arg]
+            if resolved_env_script:
+                cmd += ["-EnvScript", resolved_env_script]
             if recovery:
                 cmd.append("-Recovery")
         else:
             setup_path = str(Path(anchor) / "tools" / "setup" / "setup.sh")
-            legacy = Path(setup_path).is_file()
+            legacy = Path(setup_path).is_file() and not resolved_env_script
             if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.sh")
             cmd = ["bash", setup_path, "--machine", config.machine]
             if session_path_arg and not legacy:
                 cmd += ["--session-path", session_path_arg]
+            if resolved_env_script:
+                cmd += ["--env-script", resolved_env_script]
             if recovery:
                 cmd.append("--recovery")
 

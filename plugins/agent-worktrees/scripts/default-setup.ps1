@@ -27,6 +27,13 @@ param(
     [string]$SetupHook,
     # OS-path-separator-joined directories to prepend to PATH before launch.
     [string]$SessionPath,
+    # Path to an optional repo environment-priming script (.bat/.cmd/.ps1).
+    # UNLIKE -SetupHook (a child process whose env is discarded), this script's
+    # resulting environment is captured and imported into THIS process so the
+    # Copilot launched below inherits it (e.g. an Office/SPO OpenEnlistment.bat
+    # that sets build vars + PATH). Runs even in -Recovery -- the build env is
+    # always needed.
+    [string]$EnvScript,
     [Parameter(ValueFromRemainingArguments)]
     [string[]]$CopilotArgs
 )
@@ -57,6 +64,30 @@ if ($SessionPath) {
     $dirs = $SessionPath.Split([IO.Path]::PathSeparator) | Where-Object { $_ }
     if ($dirs) {
         $env:PATH = ($dirs -join [IO.Path]::PathSeparator) + [IO.Path]::PathSeparator + $env:PATH
+    }
+}
+
+# ── Enlistment env priming (repo env_script) ─────────────────────────────
+# Run the repo's env-priming script in a child cmd, snapshot the resulting
+# environment, and import it into THIS process so the Copilot exec below
+# inherits the build environment. This is the whole point of env_script vs a
+# setup hook (whose child-process env would be lost). Runs even in recovery.
+# The script's own output is silenced (`>nul 2>&1`); only the `set` dump is
+# captured, so nothing leaks onto the ACP stdout channel.
+if ($EnvScript) {
+    if (Test-Path -LiteralPath $EnvScript) {
+        Write-Host "  Env:      $EnvScript" -ForegroundColor DarkGray
+        $captured = & cmd.exe /c "call `"$EnvScript`" >nul 2>&1 && set" 2>$null
+        foreach ($line in $captured) {
+            $eq = $line.IndexOf('=')
+            if ($eq -gt 0) {
+                $name = $line.Substring(0, $eq)
+                $value = $line.Substring($eq + 1)
+                [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+            }
+        }
+    } else {
+        Write-Warning "env_script not found: $EnvScript"
     }
 }
 
