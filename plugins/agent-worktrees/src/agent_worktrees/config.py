@@ -199,6 +199,23 @@ class RepoConfig:
     execs Copilot. The hook does repo-specific work (vault, MCP) and returns; it
     does NOT launch Copilot itself. Declaring it opts the repo into the
     normalized launch flow (inverting the legacy ``setup.ps1``-as-launch)."""
+    env_script: dict[str, str] = field(default_factory=dict)
+    """Optional repo **environment-priming script**, keyed by platform
+    ("windows" / "linux"). The value is a path to a shell/batch script (relative
+    to ``anchor`` unless absolute) that the normalized launcher runs and whose
+    *resulting environment is captured and applied to the Copilot exec*. This is
+    the crucial difference from ``setup_hook``: a setup hook runs as a **child
+    process** so its env is discarded, whereas ``env_script`` is sourced/called
+    in the launcher's own shell (Windows: ``call <script>`` then snapshot ``set``;
+    POSIX: ``source`` with ``set -a``) so the vars it exports reach Copilot. It
+    exists for **Windows enlistment-style repos** whose build tooling only works
+    inside an environment a setup script establishes dynamically (e.g. an
+    Office/SPO ``OpenEnlistment.bat`` that sets OTOOLS/VC++/SDK vars + PATH). A
+    plain ``copilot`` in such a repo can read code but cannot build; declaring
+    ``env_script`` makes the base-repo agent build-ready with no hand-authored
+    launch wrapper. Runs on every launch **including recovery** (the build env is
+    always needed) and opts the repo into the normalized launcher (like
+    ``setup_hook``); it is ignored when an explicit ``launch`` template is set."""
     session_path: dict[str, list[str]] = field(default_factory=dict)
     """Optional directories the normalized launcher prepends to ``PATH`` before
     launch, keyed by platform. Each entry is templated (``{work_dir}``,
@@ -789,6 +806,11 @@ def _build_repo_config(
         if isinstance(hook_path, str) and hook_path.strip():
             setup_hook[plat_key] = hook_path.strip()
 
+    env_script: dict[str, str] = {}
+    for plat_key, script_path in (data.get("env_script") or {}).items():
+        if isinstance(script_path, str) and script_path.strip():
+            env_script[plat_key] = script_path.strip()
+
     session_path: dict[str, list[str]] = {}
     for plat_key, dir_list in (data.get("session_path") or {}).items():
         if isinstance(dir_list, list):
@@ -827,6 +849,7 @@ def _build_repo_config(
         launch=launch,
         launch_recovery=launch_recovery,
         setup_hook=setup_hook,
+        env_script=env_script,
         session_path=session_path,
         session_env=session_env,
         validate_paths=validate_paths,
