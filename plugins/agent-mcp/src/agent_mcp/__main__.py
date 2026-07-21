@@ -30,7 +30,13 @@ from .client import (
     result_structured,
     result_text,
 )
-from .config import BRIDGES_DIR, BridgeConfig, ConfigError, load_config
+from .config import (
+    BRIDGES_DIR,
+    BridgeConfig,
+    ConfigError,
+    discover_plugin_bridges,
+    load_config,
+)
 
 
 def _configure_logging(level: str) -> None:
@@ -87,6 +93,11 @@ def _cmd_status(_args: argparse.Namespace) -> int:
             print("  (no bridge config files)")
     else:
         print("  (directory does not exist yet)")
+    plugin_bridges = discover_plugin_bridges()
+    if plugin_bridges:
+        print("plugin-shipped bridges:")
+        for name, path in sorted(plugin_bridges.items()):
+            print(f"  - {name} ({path})")
     return 0
 
 

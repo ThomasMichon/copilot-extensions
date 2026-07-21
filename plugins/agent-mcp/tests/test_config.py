@@ -241,6 +241,65 @@ def test_bridges_dir_default_location():
     assert BRIDGES_DIR.name == "bridges"
 
 
+# --- plugin-shipped bridge resolution (installed-plugins/*/*/agents) ----------
+# A plugin may ship its bridge config in-tree; a bare bridge name resolves against
+# ``<root>/*/*/{agents,mcp}/<name>.{yaml,yml,json}`` (with the ``.mcp`` infix), so
+# no user-space copy under ~/.agent-mcp/bridges is needed.
+
+
+def _make_plugin_bridge(root, marketplace, plugin, filename, doc=None):
+    d = root / marketplace / plugin / "agents"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / filename
+    p.write_text(json.dumps(doc or _http_doc()), encoding="utf-8")
+    return p
+
+
+def test_resolve_plugin_bridge(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_MCP_PLUGIN_ROOTS", str(tmp_path))
+    p = _make_plugin_bridge(tmp_path, "dev-tmichon", "ado-data", "ado.mcp.yaml")
+    # File uses the ``.mcp`` infix; the bridge name is the bare ``ado``.
+    assert resolve_config_path("ado") == p
+    cfg = load_config("ado")
+    assert cfg.server.url == "https://mcp.example/org"
+
+
+def test_resolve_plugin_bridge_no_infix(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_MCP_PLUGIN_ROOTS", str(tmp_path))
+    p = _make_plugin_bridge(tmp_path, "mkt", "plug", "vei.yaml")
+    assert resolve_config_path("vei") == p
+
+
+def test_user_bridge_wins_over_plugin(tmp_path, monkeypatch):
+    # User-space bridges/ takes precedence over a plugin-shipped one.
+    bridges = tmp_path / "bridges"
+    bridges.mkdir()
+    (bridges / "ado.json").write_text(json.dumps(_http_doc()), encoding="utf-8")
+    monkeypatch.setattr("agent_mcp.config.BRIDGES_DIR", bridges)
+    plugins = tmp_path / "plugins"
+    monkeypatch.setenv("AGENT_MCP_PLUGIN_ROOTS", str(plugins))
+    _make_plugin_bridge(plugins, "mkt", "plug", "ado.mcp.yaml")
+    assert resolve_config_path("ado") == bridges / "ado.json"
+
+
+def test_ambiguous_plugin_bridge_raises(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_MCP_PLUGIN_ROOTS", str(tmp_path))
+    _make_plugin_bridge(tmp_path, "mkt-a", "plug-a", "dup.mcp.yaml")
+    _make_plugin_bridge(tmp_path, "mkt-b", "plug-b", "dup.mcp.yaml")
+    with pytest.raises(ConfigError) as exc:
+        resolve_config_path("dup")
+    assert "ambiguous" in str(exc.value).lower()
+
+
+def test_discover_plugin_bridges(tmp_path, monkeypatch):
+    from agent_mcp.config import discover_plugin_bridges
+    monkeypatch.setenv("AGENT_MCP_PLUGIN_ROOTS", str(tmp_path))
+    _make_plugin_bridge(tmp_path, "dev-tmichon", "ado-data", "ado.mcp.yaml")
+    _make_plugin_bridge(tmp_path, "dev-tmichon", "incident-management", "icm.mcp.yaml")
+    found = discover_plugin_bridges()
+    assert set(found) == {"ado", "icm"}
+
+
 # --- machine-local config overlays (~/.agent-mcp/overrides/<id>.yaml) ---------
 # By-convention, env-free per-host override: a deep-merge onto the committed
 # config at load time. Keyed by an explicit top-level ``id`` or the file stem
