@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ThomasMichon/copilot-extensions/plugins/agent-ssh/contract/registry-record.schema.json",
+  "title": "agent-ssh normalized machine registry record",
+  "description": "The normalized shape every consuming registry maps onto. The core renders `Host <name>` blocks from these. A transport's own config schema MAY extend this (e.g. add proxy_command_binary). PUBLIC contract.",
+  "type": "object",
+  "properties": {
+    "transport": {
+      "type": "string",
+      "description": "Dispatch key: which transport module carries these machines (e.g. 'cloudflare', 'dtssh', 'direct'). Selects the module.yaml + the fragment the records land in."
+    },
+    "topology": {
+      "type": "string",
+      "enum": ["per-machine", "jumpbox"],
+      "default": "per-machine"
+    },
+    "proxy_command_binary": {
+      "type": "string",
+      "description": "Optional override of the transport's proxy_binary_default (e.g. 'cloudflared.exe' for WSL->Windows interop)."
+    },
+    "gate": {
+      "type": "object",
+      "description": "topology=jumpbox only: the single fronting host the others ProxyJump through.",
+      "properties": {
+        "name":          { "type": "string" },
+        "hostname":      { "type": "string" },
+        "user":          { "type": "string" },
+        "identity_file": { "type": "string" },
+        "options":       { "type": "object" }
+      },
+      "required": ["name"]
+    },
+    "machines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name":          { "type": "string", "description": "Host alias consumers reach by name: `ssh <name>`." },
+          "hostname":      { "type": "string", "description": "Transport-resolved reachable hostname (INJECTED by the consuming registry)." },
+          "user":          { "type": "string" },
+          "port":          { "type": ["integer", "string"] },
+          "identity_file": { "type": "string" },
+          "via":           { "type": "string", "enum": ["direct", "jumpbox"], "default": "direct" },
+          "options": {
+            "type": "object",
+            "description": "Verbatim SSH option passthrough (StrictHostKeyChecking, IdentitiesOnly, RemoteForward, MACs, ...).",
+            "additionalProperties": { "type": ["string", "number", "boolean"] }
+          }
+        },
+        "required": ["name"]
+      }
+    }
+  },
+  "required": ["transport", "machines"]
+}

@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, WSL environment setup, and CLI customization",
-    "version": "1.7.4-dev286"
+    "version": "1.7.4-dev287"
   },
   "plugins": [
     {
@@ -38,6 +38,12 @@
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate)",
       "version": "0.2.0-dev17",
       "source": "plugins/agent-mcp"
+    },
+    {
+      "name": "agent-ssh",
+      "description": "SSH connectivity layer for the agent fabric: emit and verify machine-name SSH profiles from a normalized registry, and define the public transport-provider contract for pluggable direct or tunnel transports.",
+      "version": "0.1.0-dev1",
+      "source": "plugins/agent-ssh"
     },
     {
       "name": "agent-logger",

@@ -1,7 +1,7 @@
 # Architecture Overview
 
-How the fourteen copilot-extensions plugins fit together — install topology,
-runtimes, ports, and the credential relay. **Eight ship a runtime** (a `uv`-built
+How the fifteen copilot-extensions plugins fit together — install topology,
+runtimes, ports, and the credential relay. **Nine ship a runtime** (a `uv`-built
 venv under `~/.agent-*` plus a `~/.local/bin` binstub, deployed by the plugin's
 own installer); **six are payload-only** — `efforts` (skills), `visions`
 (skills), `context-handoff` (a session extension), `customizing-copilot`
@@ -20,6 +20,7 @@ internals, follow the links in each section.
 | [agent-codespaces](../plugins/agent-codespaces/) | CLI + credential relay | `~/.agent-codespaces/` | `~/.local/bin/agent-codespaces` | On-demand CLI; relay + `codespace:` resolver run inside the agent-bridge service process |
 | [agent-containers](../plugins/agent-containers/) | CLI + `container:` resolver | `~/.agent-containers/` | `~/.local/bin/agent-containers` | On-demand CLI; `container:` resolver runs inside the agent-bridge service process |
 | [agent-mcp](../plugins/agent-mcp/) | Standalone MCP bridge (stdio) | `~/.agent-mcp/` | `~/.local/bin/agent-mcp` | Spawned per-call by an agent's `mcp-servers` entry; no bridge integration |
+| [agent-ssh](../plugins/agent-ssh/) | SSH profile emitter + verifier | `~/.agent-ssh/` | `~/.local/bin/agent-ssh` | On-demand CLI; owns the transport-provider contract for SSH profile modules |
 | [agent-logger](../plugins/agent-logger/) | Session-logging CLI + writer agent + sync task | `~/.agent-logger/` | `~/.local/bin/agent-logger` | On-demand CLI + a scheduled `session-sync` (Windows task / Linux systemd timer) |
 | [agent-dispatch](../plugins/agent-dispatch/) | Task-queue engine + per-host coordinator + CLI/MCP | `~/.agent-dispatch/` | `~/.local/bin/agent-dispatch` | On-demand CLI + optional always-on coordinator (Windows task / Linux systemd unit) |
 | [agent-vault](../plugins/agent-vault/) | Local secret store: CLI + vault service | `~/.agent-vault/` | `~/.local/bin/agent-vault` | On-demand CLI + a persistent vault daemon (Windows scheduled task / Linux systemd user unit); ships a `vault-askpass` SUDO_ASKPASS helper |
@@ -60,6 +61,7 @@ flowchart TB
       AC["agent-codespaces/<br/>scripts • src"]
       AN["agent-containers/<br/>scripts • src"]
       AM["agent-mcp/<br/>scripts • src"]
+      AS["agent-ssh/<br/>scripts • src • contract"]
       AL["agent-logger/<br/>scripts • src"]
       AD["agent-dispatch/<br/>scripts • src"]
       AV["agent-vault/<br/>scripts • src"]
@@ -71,16 +73,18 @@ flowchart TB
       RC["~/.agent-codespaces/<br/>.venv • lib"]
       RN["~/.agent-containers/<br/>.venv • leases.json"]
       RM["~/.agent-mcp/<br/>.venv • deploy-manifest.json"]
+      RS["~/.agent-ssh/<br/>.venv • deploy-manifest.json"]
       RL["~/.agent-logger/<br/>.venv • digests • sync task"]
       RD["~/.agent-dispatch/<br/>.venv • queue db • coordinator"]
       RV["~/.agent-vault/<br/>.venv • secret store service"]
     end
-    BIN["~/.local/bin/<br/>agent-worktrees • agent-bridge • agent-codespaces • agent-containers • agent-mcp • agent-logger • agent-dispatch • agent-vault"]
+    BIN["~/.local/bin/<br/>agent-worktrees • agent-bridge • agent-codespaces • agent-containers • agent-mcp • agent-ssh • agent-logger • agent-dispatch • agent-vault"]
     MP --> AW --> RW
     MP --> AB --> RB
     MP --> AC --> RC
     MP --> AN --> RN
     MP --> AM --> RM
+    MP --> AS --> RS
     MP --> AL --> RL
     MP --> AD --> RD
     MP --> AV --> RV

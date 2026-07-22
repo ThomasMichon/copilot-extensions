@@ -16,6 +16,7 @@ Plugins, one marketplace. Install what you need; they compose.
 | [agent-codespaces](plugins/agent-codespaces/) | CLI + relay | Create/manage GitHub Codespaces, address them as bridge agents (`codespace:<name>`), and forward git/GitHub/Azure credentials into them. |
 | [agent-containers](plugins/agent-containers/) | CLI + resolver | Manage a fleet of local Docker dev containers, borrow/release them per effort, and address them as bridge agents (`container:<name>`). |
 | [agent-mcp](plugins/agent-mcp/) | MCP bridge | Wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP and inject host credentials (Entra/`az`, `gh`, git-credential, env). Standalone — used directly from an agent's `mcp-servers` config. |
+| [agent-ssh](plugins/agent-ssh/) | SSH connectivity CLI | Emit and verify machine-name SSH profiles from a normalized registry, and define the public transport-provider contract for direct or tunnel transports. |
 | [efforts](plugins/efforts/) | Planning skills | Plan a stretch of work as an **effort** — a folder with a README-as-shared-contract (premise + plan + journal) that humans and agents coordinate through. The executor plugins above bind its participant seam. |
 | [visions](plugins/visions/) | Planning skills | Keep a persistent **vision** — a north-star statement of what a system should ultimately be — and derive efforts from the delta between vision and reality. Payload-only — no runtime to install. |
 | [agent-logger](plugins/agent-logger/) | Session logging | Turn raw Copilot sessions into structured Markdown logs — a segmenter, a voice-neutral log-writer agent, and a `session-sync` step that pushes session data to a configurable target (local / OneDrive / SSH / ingest). Personality is injected by the host, never built in. |
@@ -32,7 +33,7 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 
 ## Architecture at a glance
 
-Fourteen plugins, one marketplace. **Eight ship a runtime** (a `uv`-built venv under
+Fifteen plugins, one marketplace. **Nine ship a runtime** (a `uv`-built venv under
 `~/.agent-*` + a `~/.local/bin` binstub, deployed by the plugin's own
 installer); **six are payload-only** — `efforts` (skills), `visions` (skills),
 `context-handoff` (a session extension), `customizing-copilot` (skills),
@@ -50,6 +51,7 @@ flowchart TB
       AC["agent-codespaces<br/>CLI + credential relay"]
       AN["agent-containers<br/>CLI + container: resolver"]
       AM["agent-mcp<br/>MCP bridge CLI"]
+      AS["agent-ssh<br/>SSH profile CLI"]
       AL["agent-logger<br/>session-sync + log writer"]
       PO["efforts · visions · context-handoff<br/>customizing-copilot · copilot-extensions-harness<br/>(payload-only: skills / extension)"]
     end
@@ -59,6 +61,7 @@ flowchart TB
       RC["~/.agent-codespaces<br/>agent-codespaces"]
       RN["~/.agent-containers<br/>agent-containers"]
       RM["~/.agent-mcp<br/>agent-mcp"]
+      RS["~/.agent-ssh<br/>agent-ssh"]
       RL["~/.agent-logger<br/>session-sync task + digests"]
     end
     MP -->|copilot plugin install| AW
@@ -66,6 +69,7 @@ flowchart TB
     MP -->|copilot plugin install| AC
     MP -->|copilot plugin install| AN
     MP -->|copilot plugin install| AM
+    MP -->|copilot plugin install| AS
     MP -->|copilot plugin install| AL
     MP -->|copilot plugin install| PO
     AW -->|init.ps1 / init.sh| RW
@@ -73,6 +77,7 @@ flowchart TB
     AC -->|init.ps1 / init.sh| RC
     AN -->|init.ps1 / init.sh| RN
     AM -->|init.ps1 / init.sh| RM
+    AS -->|install.ps1 / install.sh| RS
     AL -->|install.ps1 / install.sh| RL
     AC -.->|codespace resolver + relay| RB
     AN -.->|container resolver| RB
@@ -145,7 +150,7 @@ copilot plugin install customizing-copilot@copilot-extensions # optional — how
 ```
 
 Each `copilot plugin install` only vendors the plugin's **payload** (source,
-skills, hooks, extensions). The eight runtime plugins (every plugin except the
+skills, hooks, extensions). The nine runtime plugins (every plugin except the
 payload-only `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
 `copilot-extensions-harness`, and `wsl-setup`) then need their runtime deployed once — that's Step 2,
 which runs each installer to build a `uv` venv under `~/.agent-*` and drop a
@@ -176,6 +181,7 @@ Verify:
 agent-worktrees --version
 agent-bridge version && agent-bridge status
 agent-codespaces version
+agent-ssh version
 ```
 
 ### 3. Adopt your control-harness repo

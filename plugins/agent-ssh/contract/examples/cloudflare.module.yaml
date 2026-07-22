@@ -1,0 +1,26 @@
+# EXEMPLAR ONLY (public, placeholder). The REAL Cloudflare transport module
+# lives in a provider-owned plugin, not here -- this file exists so the
+# upstream contract has a worked tunnel example and the core's rendering of a
+# `proxy_command` recipe can be tested. It carries NO provider-specific values.
+module: cloudflare
+kind: transport
+summary: Zero-inbound reachability via a Cloudflare Tunnel + Zero Trust Access.
+proxy_command: "{proxy_binary} access ssh --hostname {hostname}"
+proxy_binary_default: cloudflared
+produces:
+  ssh_profile: true
+  keyed_by: machine-name
+inbound_ports: none          # cloudflared is outbound-only: the tunnel-first default
+topology:
+  default: per-machine
+  supported: [per-machine, jumpbox]
+capabilities:
+  install-client: true
+  emit-profile: true
+  verify: true
+  provision-server: false    # operator provisions the CF server side for now
+config_schema: schema/config.schema.json
+entrypoints:
+  install-client:
+    posix: scripts/install-client.sh
+    windows: scripts/install-client.ps1
