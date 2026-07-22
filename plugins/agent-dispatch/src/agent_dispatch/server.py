@@ -6,9 +6,10 @@ import logging
 import sys
 from pathlib import Path
 
-from .config import Config, load_config, requires_token_bind
+from .config import Config, load_config, requires_token_bind, run_dir
 from .coordinator import create_app
 from .queue import TaskQueue
+from .rendezvous import clear_endpoint, write_endpoint
 
 log = logging.getLogger("agent-dispatch.server")
 
@@ -44,6 +45,20 @@ def build_app(cfg: Config | None = None):
     return create_app(queue, token=cfg.token, sweep_interval=cfg.sweep_interval)
 
 
+def advertise_endpoint(cfg: Config):
+    """Write the rendezvous file advertising the coordinator's bound endpoint.
+
+    Additive discovery: clients resolve the coordinator here instead of assuming
+    the fixed port (they still fall back to it). Best-effort -- a write failure
+    only degrades discovery, never the server. Returns the file path or ``None``.
+    """
+    try:
+        return write_endpoint(run_dir(), "tcp", f"{cfg.host}:{cfg.port}")
+    except OSError as exc:
+        log.warning("could not write rendezvous file (%s); discovery degraded", exc)
+        return None
+
+
 def serve(cfg: Config | None = None) -> None:
     """Bind and serve the coordinator (blocking)."""
     import uvicorn
@@ -61,4 +76,11 @@ def serve(cfg: Config | None = None) -> None:
             "Docker bridge subnets only)",
             cfg.host,
         )
-    uvicorn.run(build_app(cfg), host=cfg.host, port=cfg.port, log_level="info")
+    # Advertise the bound endpoint for discovery (see the endpoint-rendezvous lib
+    # and docs/patterns/local-endpoint-discovery.md). Additive: un-updated clients
+    # still reach the fixed port.
+    advertise_endpoint(cfg)
+    try:
+        uvicorn.run(build_app(cfg), host=cfg.host, port=cfg.port, log_level="info")
+    finally:
+        clear_endpoint(run_dir())

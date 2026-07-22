@@ -31,6 +31,18 @@ DEFAULT_PORT = 9847
 DEFAULT_DB = Path.home() / ".agent-dispatch" / "tasks.db"
 DEFAULT_SWEEP_INTERVAL = 60.0
 
+# Discovery: the coordinator advertises its bound endpoint in a rendezvous file
+# under this runtime dir; clients resolve it there (env override -> file -> the
+# legacy fixed port). Honors overrides so a branded/side-by-side deployment keeps
+# its own namespace. See docs/patterns/local-endpoint-discovery.md.
+RUN_DIR_ENV = "AGENT_DISPATCH_RUN_DIR"
+ENDPOINT_ENV = "AGENT_DISPATCH_ENDPOINT"
+
+
+def run_dir() -> Path:
+    """The runtime dir that holds the rendezvous (endpoint) file."""
+    return Path(os.environ.get(RUN_DIR_ENV) or (Path.home() / ".agent-dispatch" / "run"))
+
 #: Wildcard bind addresses that expose the coordinator on **every** interface
 #: (including the LAN). Binding one of these without a bearer token would put the
 #: powerful task-control API on the network unauthenticated, so it is guarded
@@ -74,6 +86,78 @@ def load_config() -> Config:
     )
 
 
+def _windows_run_dirs() -> list[Path]:
+    """Candidate Windows-side agent-dispatch runtime dirs, seen from WSL via ``/mnt/c``.
+
+    A WSL guest has no local coordinator; the Windows host owns it and advertises
+    its endpoint under ``%USERPROFILE%\\.agent-dispatch\\run``, visible from WSL at
+    ``/mnt/c/Users/<user>/.agent-dispatch/run``. Honors ``AGENT_DISPATCH_WINDOWS_RUN_DIR``;
+    else globs the mounted Windows profiles (skipping system profiles), newest
+    ``endpoint.json`` first.
+    """
+    override = os.environ.get("AGENT_DISPATCH_WINDOWS_RUN_DIR")
+    if override:
+        return [Path(override)]
+    mount = os.environ.get("AGENT_DISPATCH_WINDOWS_MOUNT", "/mnt/c")
+    users = Path(mount) / "Users"
+    skip = {"public", "default", "default user", "all users"}
+    candidates: list[tuple[float, Path]] = []
+    try:
+        for profile in users.iterdir():
+            if profile.name.lower() in skip:
+                continue
+            ep = profile / ".agent-dispatch" / "run" / "endpoint.json"
+            try:
+                mtime = ep.stat().st_mtime
+            except OSError:
+                continue
+            candidates.append((mtime, ep.parent))
+    except OSError:
+        return []
+    candidates.sort(reverse=True)
+    return [d for _, d in candidates]
+
+
+def _discovered_wsl_port(default_port: int) -> int:
+    """The coordinator port a WSL client should use: the ``AGENT_DISPATCH_ENDPOINT``
+    override, else the Windows-side rendezvous file, else ``default_port``. The host
+    is resolved separately by ``netinfo`` (mirrored -> 127.0.0.1, NAT -> gateway)."""
+    from . import rendezvous
+
+    override = os.environ.get(ENDPOINT_ENV)
+    if override:
+        try:
+            ep = rendezvous.Endpoint.parse(override)
+            if ep.transport == "tcp":
+                return ep.tcp_host_port[1]
+        except ValueError:
+            pass
+    for d in _windows_run_dirs():
+        ep = rendezvous.read_endpoint(d)
+        if ep is not None and ep.transport == "tcp":
+            try:
+                return ep.tcp_host_port[1]
+            except ValueError:
+                continue
+    return default_port
+
+
+def _discover_local_endpoint():
+    """The coordinator endpoint from the local discovery ladder, or ``None``.
+
+    ``AGENT_DISPATCH_ENDPOINT`` override -> the local rendezvous file (this host's
+    coordinator). Returns ``None`` when nothing is discovered so the caller uses
+    the fixed default.
+    """
+    from . import rendezvous
+
+    override = os.environ.get(ENDPOINT_ENV)
+    try:
+        return rendezvous.resolve(run_dir(), override=override, probe=rendezvous.connect_probe)
+    except rendezvous.EndpointUnavailable:
+        return None
+
+
 def client_url() -> str:
     """The base URL the CLI should talk to.
 
@@ -82,10 +166,12 @@ def client_url() -> str:
     1. ``AGENT_DISPATCH_URL`` -- explicit operator override.
     2. On a **WSL guest**, resolve the Windows-owned coordinator dynamically
        (probe ``127.0.0.1`` for mirrored, then the default gateway for NAT;
-       cached best-effort). A WSL guest depends on the Windows host, which owns
-       the coordinator (Phase 2 of the coordinator-inversion effort).
-    3. Otherwise (standalone Linux, or the Windows host itself) the local
-       coordinator URL, ``http://127.0.0.1:9847``.
+       cached best-effort), taking the **port from the rendezvous file** (the
+       Windows-side ``endpoint.json``) when present, else the fixed default. A WSL
+       guest depends on the Windows host, which owns the coordinator.
+    3. Otherwise (standalone Linux, or the Windows host itself), the **discovered**
+       local endpoint (``AGENT_DISPATCH_ENDPOINT`` -> rendezvous file), falling
+       back to the fixed ``http://127.0.0.1:9847``.
     """
     override = os.environ.get("AGENT_DISPATCH_URL")
     if override:
@@ -95,10 +181,14 @@ def client_url() -> str:
         from .netinfo import is_wsl, resolve_wsl_client_url
 
         if is_wsl():
-            return resolve_wsl_client_url(cfg.port)
+            return resolve_wsl_client_url(_discovered_wsl_port(cfg.port))
+        ep = _discover_local_endpoint()
+        if ep is not None and ep.transport == "tcp":
+            host, port = ep.tcp_host_port
+            return f"http://{host}:{port}"
     except Exception:
-        # Detection/probe failure must never break the CLI -- fall back to the
-        # local default and let the actual request fail loud if unreachable.
+        # Detection/probe/discovery failure must never break the CLI -- fall back
+        # to the local default and let the actual request fail loud if unreachable.
         return cfg.url
     return cfg.url
 
