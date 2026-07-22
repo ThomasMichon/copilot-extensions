@@ -53,6 +53,7 @@ import os
 import platform
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -1342,6 +1343,16 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         # (new_picker: false) or the AGENT_WORKTREES_LEGACY_PICKER rollback env;
         # Windows-over-SSH auto-falls-back (_new_picker_blocked_by_ssh).
         from . import picker_tui
+
+        # Fail-safe (interactive picker only): if this machine has no self-entry
+        # in the anchor's (possibly stale) machines.yaml, fast-forward the
+        # anchor *before* the picker parses it -- otherwise the picker can't
+        # identify this machine and crashes. The pull-forward that adds the
+        # entry otherwise runs only *after* a successful resolve (the ``update``
+        # path), so a stale anchor could never self-heal. See
+        # ``_heal_stale_anchor_if_self_missing``.
+        config = _heal_stale_anchor_if_self_missing(config)
+        repo = config.default_repo
         if picker_tui.new_picker_enabled(config) and not _new_picker_blocked_by_ssh():
             return _run_new_picker(config, args)
 
@@ -6385,6 +6396,57 @@ def _fast_forward_project_anchors() -> None:
             output.info(f"{anchor}: {ff.reason} -- left untouched")
         else:
             output.info(f"{anchor}: not synced ({ff.reason})")
+
+
+def _self_entry_present(config: cfg.Config) -> bool:
+    """Whether this machine has a self-entry in the anchor's machines.yaml.
+
+    Best-effort: if the registry can't be read (missing/malformed) we return
+    ``True`` so the heal (and its network fetch) never fires on an unrelated I/O
+    error -- only a genuinely absent self-entry should trigger a pull-forward.
+    """
+    try:
+        entries = cfg.load_machines_yaml(config.default_repo.anchor)
+    except Exception:
+        return True
+    if not entries:
+        return True
+    return cfg.find_machine_entry(entries, socket.gethostname()) is not None
+
+
+def _heal_stale_anchor_if_self_missing(config: cfg.Config) -> cfg.Config:
+    """Break the launch catch-22 for a stale anchor missing this machine.
+
+    The interactive picker parses the anchor's ``machines.yaml`` to identify
+    this machine. If the anchor checkout is stale and predates this machine's
+    onboarding there is no self-entry and the picker crashes -- yet the anchor
+    fast-forward that would add the entry otherwise runs only *after* a
+    successful resolve (the ``update`` path). That is a catch-22: the config can
+    never self-heal because the crash aborts the launch before the pull-forward.
+
+    Fail-safe: when this machine's self-entry is missing, best-effort
+    fast-forward the project anchor(s) *before* the picker reads the registry,
+    then reload config so the picker sees the fresh roster. Strictly a
+    fast-forward of a clean, on-default, behind anchor (see
+    ``_fast_forward_project_anchors``); any failure (offline, dirty, ahead, or a
+    still-absent entry afterward) is non-fatal -- the defensive local-source
+    fallback in ``picker_tui.data_ssh._build_sources`` keeps the picker from
+    crashing even if the entry never materializes.
+
+    Returns the (possibly reloaded) config.
+    """
+    try:
+        if _self_entry_present(config):
+            return config
+        output.info(
+            "This machine is not in machines.yaml -- fast-forwarding the "
+            "anchor before the picker (stale-config self-heal)."
+        )
+        _fast_forward_project_anchors()
+        return cfg.load_config()
+    except Exception as exc:  # never break the launch
+        output.warn(f"Anchor self-heal skipped: {exc}")
+        return config
 
 
 def _update_modules(
