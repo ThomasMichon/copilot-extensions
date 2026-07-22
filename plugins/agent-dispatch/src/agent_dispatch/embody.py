@@ -24,6 +24,35 @@ import subprocess
 DEFAULT_DRIVER = "agent-dispatch"
 
 
+def project_for_task(task: dict) -> str | None:
+    """Resolve a task's lane to a local **project name** for embody's ``--project``.
+
+    A supervisor / fleet spawner runs CWD-neutral (its working directory is a
+    service runtime dir or an SSH login CWD, not the repo), so it must name the
+    project explicitly rather than rely on git-like CWD discovery -- see the
+    ``project-scoped-invocation`` pattern. Preference: the registry's
+    authoritative reverse-mapping of the canonical lane
+    (``identity.name_for_repo``); failing that, the lane's final path segment
+    (``…/tmichon/aperture-labs`` -> ``aperture-labs``) as a best effort. Returns
+    ``None`` only when the task has no lane at all -- the spawn then falls back to
+    CWD discovery, which surfaces the misconfiguration loudly for a CWD-neutral
+    caller rather than silently embodying the wrong project.
+    """
+    repo = task.get("repo")
+    if not repo:
+        return None
+    try:
+        from .identity import name_for_repo
+
+        name = name_for_repo(repo)
+    except Exception:  # identity resolution is best-effort -- never fatal here
+        name = None
+    if name:
+        return name
+    tail = repo.rstrip("/").rsplit("/", 1)[-1]
+    return tail or None
+
+
 def parse_handle(result: subprocess.CompletedProcess) -> dict[str, str | None]:
     """Best-effort extract the session/worktree handle from ``embody --json``.
 
@@ -129,17 +158,24 @@ def spawn_embodied_worker(
     coordinator_url: str,
     worker_id: str,
     driver: str = DEFAULT_DRIVER,
+    project: str | None = None,
     verify_timeout: int = 0,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
     """Spawn a CLI-backed autopilot worker via ``agent-worktrees embody``.
 
-    Runs ``agent-worktrees embody --new --seed "<autopilot seed>" --driver
-    <driver> --json`` -- creating a fresh parallel worktree and a detached
-    mux+Copilot session seeded to claim + execute ``task_id`` autonomously. The
-    ``--driver`` label stamps the "driven by <agent>" banner so the session is
-    legible in Neuron Forge. Raises :class:`EmbodyUnavailable` if the
-    ``agent-worktrees`` CLI is not on PATH; the caller degrades from there.
+    Runs ``agent-worktrees [--project <project>] embody --new --seed "<autopilot
+    seed>" --driver <driver> --json`` -- creating a fresh parallel worktree and a
+    detached mux+Copilot session seeded to claim + execute ``task_id``
+    autonomously. The ``--driver`` label stamps the "driven by <agent>" banner so
+    the session is legible in Neuron Forge. Raises :class:`EmbodyUnavailable` if
+    the ``agent-worktrees`` CLI is not on PATH; the caller degrades from there.
+
+    ``project`` names the target project explicitly (the agent-worktrees
+    ``--project`` global). It is **required in practice for a CWD-neutral caller**
+    (a service/daemon whose working directory is not inside the repo): without it,
+    embody falls back to git-like discovery from CWD and fails with "Could not
+    resolve a project for 'embody'". See the ``project-scoped-invocation`` pattern.
 
     ``verify_timeout`` (seconds) optionally makes embody wait for the mux
     session to come up before returning (0 = don't wait).
@@ -150,7 +186,13 @@ def spawn_embodied_worker(
     seed = autopilot_worker_prompt(
         task_id, coordinator_url=coordinator_url, worker_id=worker_id
     )
-    cmd = [exe, "embody", "--new", "--seed", seed, "--driver", driver, "--json"]
+    cmd = [exe]
+    if project:
+        # `--project` is an agent-worktrees GLOBAL option -- it precedes the
+        # `embody` subcommand. It lets a CWD-neutral caller name the target
+        # project instead of relying on git-like CWD discovery.
+        cmd += ["--project", project]
+    cmd += ["embody", "--new", "--seed", seed, "--driver", driver, "--json"]
     if verify_timeout:
         cmd += ["--verify-timeout", str(verify_timeout)]
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
@@ -244,17 +286,24 @@ def spawn_fleet_embodied_worker(
     owner: str,
     worker_id: str,
     driver: str = DEFAULT_DRIVER,
+    project: str | None = None,
     verify_timeout: int = 0,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
     """Spawn a CLI-backed autopilot body on a **remote pool ``host``** via SSH.
 
-    Runs ``agent-worktrees embody --new --seed "<fleet seed>" ...`` **on**
-    ``host`` (its facility SSH alias) -- creating a fresh detached worktree +
-    Copilot session there, seeded (:func:`fleet_autopilot_worker_prompt`) to drive
-    the ``task_id`` lease back to the ``origin`` coordinator over SSH (Model C).
-    The remote ``embody --json`` handle rides the SSH stdout, so
-    :func:`parse_handle` recovers the worktree/session for the reservation record.
+    Runs ``agent-worktrees [--project <project>] embody --new --seed "<fleet
+    seed>" ...`` **on** ``host`` (its facility SSH alias) -- creating a fresh
+    detached worktree + Copilot session there, seeded
+    (:func:`fleet_autopilot_worker_prompt`) to drive the ``task_id`` lease back to
+    the ``origin`` coordinator over SSH (Model C). The remote ``embody --json``
+    handle rides the SSH stdout, so :func:`parse_handle` recovers the
+    worktree/session for the reservation record.
+
+    ``project`` names the target project explicitly (the ``--project`` global) --
+    required in practice because the remote SSH command runs in the login CWD, not
+    inside the repo, so git-like discovery would fail. See the
+    ``project-scoped-invocation`` pattern.
 
     Raises :class:`EmbodyUnavailable` if ``ssh`` is not on PATH here; a remote
     host that lacks ``agent-worktrees`` surfaces as a non-zero exit (the caller
@@ -267,8 +316,11 @@ def spawn_fleet_embodied_worker(
     seed = fleet_autopilot_worker_prompt(
         task_id, origin=origin, owner=owner, worker_id=worker_id
     )
-    remote_argv = [
-        "agent-worktrees", "embody", "--new",
+    remote_argv = ["agent-worktrees"]
+    if project:
+        remote_argv += ["--project", project]
+    remote_argv += [
+        "embody", "--new",
         "--seed", seed, "--driver", driver, "--json",
     ]
     if verify_timeout:

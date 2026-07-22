@@ -1,7 +1,7 @@
 {
   "name": "agent-dispatch",
   "description": "Portable agent task-queue + per-host coordinator. A single-writer, WAL-mode SQLite leased work queue with a six-state model (proposed/queued/claimed/started/completed/abandoned), capability-gated atomic claim, affinity routing, and lease recovery -- so full-auto agents coordinate without origin/master push latency or a dedicated account per agent. Tasks are graduated context-handoffs (prompt + Markdown payload).",
-  "version": "0.1.0-dev61",
+  "version": "0.1.0-dev62",
   "runtimeScope": "machine-gated",
   "author": {
     "name": "Thomas Michon"

@@ -33,10 +33,11 @@ def _fake_spawn(record: list | None = None, *, ok: bool = True, rc: int = 0):
     """A fake `spawn_fleet_embodied_worker` returning a CompletedProcess-like."""
     import subprocess
 
-    def spawn(host, task_id, *, origin, owner, worker_id, driver, verify_timeout=0):
+    def spawn(host, task_id, *, origin, owner, worker_id, driver, project=None, verify_timeout=0):
         if record is not None:
             record.append(
-                {"host": host, "task_id": task_id, "origin": origin, "owner": owner}
+                {"host": host, "task_id": task_id, "origin": origin, "owner": owner,
+                 "project": project}
             )
         stdout = '{"worktree_id": "wt-x", "session_id": "sess-x"}' if ok else ""
         return subprocess.CompletedProcess(
@@ -120,7 +121,7 @@ def test_call_success_builds_handle_with_host_and_owner():
         liveness=lambda h: h == "b",
         spawn_fn=_fake_spawn(rec),
     )
-    ok, handle = f({"id": "t1"})
+    ok, handle = f({"id": "t1", "repo": "gitea.example/org/widgets"})
     assert ok is True
     assert handle["machine"] == "b"
     assert handle["worktree"] == "wt-x"
@@ -130,6 +131,8 @@ def test_call_success_builds_handle_with_host_and_owner():
     assert rec[0]["owner"] == handle["owner"]
     assert rec[0]["host"] == "b"
     assert rec[0]["origin"] == "orig"
+    # the task's lane was resolved to a project name for the CWD-neutral body
+    assert rec[0]["project"] == "widgets"
 
 
 def test_selection_cache_is_released_after_successful_spawn():
