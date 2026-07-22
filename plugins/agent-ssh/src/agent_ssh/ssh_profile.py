@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -181,6 +182,7 @@ def write_fragment(
 ) -> Path:
     config_d = config_d or (_ssh_dir() / "config.d")
     config_d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _chmod(config_d, 0o700)  # mkdir(mode=) is a no-op for ACLs on Windows
     frag = config_d / fragment_name(module["module"])
     tmp = frag.with_suffix(".conf.tmp")
     tmp.write_text(render_fragment(cfg, module), encoding="utf-8")
@@ -191,6 +193,29 @@ def write_fragment(
 
 
 def _chmod(path: Path, mode: int) -> None:
+    """Harden *path* to owner-only.
+
+    On POSIX this is ``os.chmod(mode)``. On Windows ``os.chmod`` does NOT touch
+    ACLs -- the file keeps an inherited ``OWNER RIGHTS`` (S-1-3-4) ACE that
+    Windows OpenSSH rejects with *"Bad owner or permissions"*, so it refuses the
+    ``Include`` and every ``ssh <machine>`` using this fragment fails. Reset
+    inheritance and grant only the current user via ``icacls`` instead.
+    """
+    if os.name == "nt":
+        user = os.environ.get("USERNAME")
+        if not user:
+            return
+        dom = os.environ.get("USERDOMAIN")
+        principal = f"{dom}\\{user}" if dom else user
+        # Directories need (OI)(CI) so children inherit the user-only ACL.
+        grant = f"{principal}:(OI)(CI)F" if path.is_dir() else f"{principal}:F"
+        subprocess.run(
+            ["icacls", str(path), "/inheritance:r", "/grant:r", grant],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return
     try:
         os.chmod(path, mode)
     except (OSError, NotImplementedError):
