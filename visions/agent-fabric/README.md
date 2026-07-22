@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-07-17
+- **Last revised:** 2026-07-21
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -118,6 +118,18 @@ container agent are all reachable through **one** creation / inspection /
 communication contract. Where an agent runs is a venue detail, not a different
 interface.
 
+### address-any-project
+Every layer of the fabric is invocable against an **explicitly named project**,
+not only the one implied by the current directory. A single per-project entry
+point — the `<repo>` binstub — is a uniform dispatcher across the whole stack:
+`<repo> <layer> …` reaches *any* layer scoped to that project (worktrees,
+coordination, delegation, a venue provider, the vault) with the same muscle
+memory. So a caller with **no project-anchored working directory** — a long-lived
+service, a daemon, a script operating across several repos — can still drive any
+layer against a specific project, and a human addresses the whole fleet through
+one consistent `<repo> <layer> …` shape rather than a different convention per
+tool.
+
 ### discover-before-duplicate
 Before an agent spins up work on a target, the fabric can answer **"is someone
 already on this?"** — is an agent or worktree already covering this repo/target,
@@ -180,6 +192,18 @@ never wholly blind, even with no daemon up.
 Adding, moving, or losing a venue (a CodeSpace, a container, another machine)
 does not change how its agents are addressed: a venue provider makes its agents
 reachable by the fabric's one coordination contract.
+
+### project-addressed-not-cwd-bound
+A layer resolves its **target project** from an explicit name (`--project`, or
+the per-project binstub that supplies it) with the *same* result as being
+CWD-anchored inside that project. Git-like discovery from the working directory
+is a convenience for a human standing in a repo — **not** the only path. A
+neutral working directory is therefore never a barrier: a service embodying work
+for another repo, or a script operating across several, **names** the project
+instead of having to `cd` somewhere to be understood. The seam this abolishes: a
+long-lived daemon whose working directory is its own runtime dir (not any repo)
+cannot resolve *which* project to act on, and dies at the exact moment it tries
+to delegate real work.
 
 ### recover-not-lose
 A dropped connection to a remote agent is **not** treated as a dead agent, and a
@@ -281,3 +305,13 @@ degrades to the same claimable record, not to a silent no-op.
   throwaway. Placed on the ground layer by the *derive-don't-duplicate /
   single-owning-layer* rule (the delegation layer coordinates over, not copies,
   it).
+- **2026-07-21** — Added §Features/`address-any-project` and
+  §Behaviors/`project-addressed-not-cwd-bound`: a project is a first-class,
+  **CWD-independent** address across *every* layer, and the per-project `<repo>`
+  binstub is a uniform `<repo> <layer> …` dispatcher over the whole agent-*
+  stack. Mined from a concrete seam — the agent-dispatch **embody supervisor**,
+  running as a service whose working directory is its own runtime dir, could not
+  resolve *which* project to embody a queued task for (`Could not resolve a
+  project for 'embody'`) because embody discovered its project only from CWD.
+  The fix (name the project via `--project`) generalized into the standing intent
+  that no fabric layer should be reachable *only* by standing inside a repo.

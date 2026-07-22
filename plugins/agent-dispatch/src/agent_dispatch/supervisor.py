@@ -87,6 +87,13 @@ def make_embody_spawn(
 
     Degrades cleanly: if the ``agent-worktrees`` CLI is absent, the spawn reports
     failure (the supervisor fails the reservation, leaving the task queued).
+
+    The supervisor runs CWD-neutral (a service whose working directory is its own
+    runtime dir, not any repo), so the spawn **names the target project
+    explicitly** -- derived from the task's lane -- via embody's ``--project``
+    global, rather than relying on git-like CWD discovery (which would fail with
+    "Could not resolve a project for 'embody'"). See the
+    ``project-scoped-invocation`` pattern.
     """
     from . import embody
 
@@ -98,6 +105,7 @@ def make_embody_spawn(
                 coordinator_url=coordinator_url,
                 worker_id=worker_id,
                 driver=driver,
+                project=embody.project_for_task(task),
                 verify_timeout=verify_timeout,
             )
         except embody.EmbodyUnavailable as exc:

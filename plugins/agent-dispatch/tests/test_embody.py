@@ -95,6 +95,87 @@ def test_spawn_embodied_worker_passes_verify_timeout(monkeypatch):
     assert cmd[cmd.index("--verify-timeout") + 1] == "30"
 
 
+def test_spawn_embodied_worker_threads_project_as_global(monkeypatch):
+    """--project is an agent-worktrees GLOBAL option, so it must precede the
+    `embody` subcommand -- letting a CWD-neutral caller name the project."""
+    captured = {}
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/agent-worktrees")
+    monkeypatch.setattr(
+        embody.subprocess, "run",
+        lambda cmd, **kw: (captured.__setitem__("cmd", cmd)
+                           or types.SimpleNamespace(returncode=0, stdout="{}", stderr="")),
+    )
+    embody.spawn_embodied_worker(
+        "t", coordinator_url="http://c", worker_id="w", project="aperture-labs",
+    )
+    cmd = captured["cmd"]
+    # [exe, "--project", "aperture-labs", "embody", ...] -- project BEFORE embody.
+    assert cmd[:4] == [
+        "/usr/bin/agent-worktrees", "--project", "aperture-labs", "embody",
+    ]
+    assert cmd.index("--project") < cmd.index("embody")
+
+
+def test_spawn_embodied_worker_omits_project_when_none(monkeypatch):
+    """No --project (back-compat): the command is unchanged from CWD-discovery."""
+    captured = {}
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/agent-worktrees")
+    monkeypatch.setattr(
+        embody.subprocess, "run",
+        lambda cmd, **kw: (captured.__setitem__("cmd", cmd)
+                           or types.SimpleNamespace(returncode=0, stdout="{}", stderr="")),
+    )
+    embody.spawn_embodied_worker("t", coordinator_url="http://c", worker_id="w")
+    cmd = captured["cmd"]
+    assert "--project" not in cmd
+    assert cmd[:2] == ["/usr/bin/agent-worktrees", "embody"]
+
+
+def test_project_for_task_prefers_registry_name(monkeypatch):
+    """The authoritative lane->name registry mapping wins when known."""
+    monkeypatch.setattr(
+        "agent_dispatch.identity.name_for_repo",
+        lambda canonical: "aperture-labs" if "aperture-labs" in (canonical or "") else None,
+    )
+    task = {"repo": "gitea.michon.ski/tmichon/aperture-labs"}
+    assert embody.project_for_task(task) == "aperture-labs"
+
+
+def test_project_for_task_falls_back_to_lane_tail(monkeypatch):
+    """Unknown-to-registry lane -> last path segment as best effort."""
+    monkeypatch.setattr(
+        "agent_dispatch.identity.name_for_repo", lambda _canonical: None
+    )
+    assert embody.project_for_task(
+        {"repo": "gitea.example/org/some-repo/"}
+    ) == "some-repo"
+
+
+def test_project_for_task_none_without_lane():
+    assert embody.project_for_task({}) is None
+    assert embody.project_for_task({"repo": ""}) is None
+
+
+def test_fleet_spawn_threads_project_before_embody(monkeypatch):
+    """The remote SSH body also runs CWD-neutral, so --project must ride the
+    remote argv, before `embody`."""
+    captured = {}
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        embody.subprocess, "run",
+        lambda cmd, **kw: (captured.__setitem__("cmd", cmd)
+                           or types.SimpleNamespace(returncode=0, stdout="{}", stderr="")),
+    )
+    embody.spawn_fleet_embodied_worker(
+        "borealis", "t", origin="wheatley", owner="fleet-t-abc",
+        worker_id="fleet-t-abc", project="aperture-labs",
+    )
+    # cmd == [ssh, -o, BatchMode=yes, host, "<remote_cmd string>"]
+    remote_cmd = captured["cmd"][-1]
+    assert "--project aperture-labs embody" in remote_cmd
+    assert remote_cmd.index("--project") < remote_cmd.index("embody")
+
+
 def test_spawn_worker_for_uses_embody_backend(monkeypatch):
     """`create --spawn --spawn-backend embody` routes to the embody backend."""
     from agent_dispatch import __main__ as m

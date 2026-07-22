@@ -192,6 +192,7 @@ class FleetSpawner:
                 owner=owner,
                 worker_id=owner,
                 driver=self.driver,
+                project=embody.project_for_task(task),
                 verify_timeout=self.verify_timeout,
             )
         except embody.EmbodyUnavailable as exc:
