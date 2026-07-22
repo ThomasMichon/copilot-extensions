@@ -95,6 +95,15 @@ adding connectivity is installing a module rather than rewiring the core:
 A registry entry **names** which transport carries a machine; the layers above
 address the machine the same way regardless.
 
+A module conforms to a stable **transport-provider contract** — the core owns the
+contract (and SSH-profile creation + validation); a module supplies only its
+transport-specific pieces. Because of that, **modules need not live in this
+plugin**: a transport may be shipped by a separate provider plugin — even from a
+different marketplace, maintained by a different owner — that registers against the
+contract. Each module writes **only its own** managed profile fragment, so several
+transports **coexist on one client** (a machine reached over one transport, its
+peer over another) without any module owning the whole SSH config.
+
 ### Firewall posture (tunnel-first)
 Open and verify **only** what a chosen transport actually requires, with a
 standing **tunnel-first** recommendation: prefer a zero-inbound tunnel over
@@ -122,7 +131,17 @@ mesh by declaration rather than by a manual, per-box ritual.
 Reachability is delivered by **interchangeable transport modules** (direct,
 tunnel-based providers, real-user interactive reach) behind one contract. Adding
 or swapping a transport is installing a module; the core and the layers above are
-unchanged.
+unchanged. A module may even be an **out-of-repo provider plugin** — a different
+owner, a different marketplace — that registers against the contract; the core need
+not ship every transport.
+
+### transport-provider-contract
+The core's durable **product** is the **transport-provider contract** plus
+SSH-profile **creation + validation**; a concrete transport is a **conforming
+provider**. This lets the set of transports grow — and be owned and shipped
+**independently** — without changing the core or its consumers, while every provider
+still yields the same machine-name-keyed profile behind the one reachability
+contract.
 
 ### tunnel-first-connectivity
 The layer **recommends and defaults to** zero-inbound tunnel transports, and
@@ -210,6 +229,11 @@ layer's.)
   *accounts* per agent. It **does** own the SSH **key lifecycle** (mint / store /
   distribute), but leans on the fabric's **trust layer** for secret *storage*
   rather than inventing its own vault.
+- **Not required to ship every transport in-repo.** The core owns the
+  transport-provider **contract** and SSH-profile creation + validation; concrete
+  transports may live in **separate provider plugins** — audience-appropriate
+  marketplaces, independent owners — that register against the contract. The core is
+  not the sole home of transport implementations.
 - **Not a general VPN / mesh-networking product.** It wires **SSH** reachability
   specifically, delegating the underlying tunnel technology to interchangeable
   transport modules — it is not a replacement for a network fabric.
@@ -257,3 +281,11 @@ layer's.)
   concept. Added `mint · store · distribute` key-material ownership, preferring
   the trust layer for secret storage with a durable operator-owned fallback.
   Mined from operator clarification.
+- **2026-07-22** — Made the **transport-provider extension point** explicit: the
+  core owns the contract + SSH-profile creation/validation, and transports may be
+  **out-of-repo provider plugins** (different owners/marketplaces) registering
+  against it — added §Features/`transport-provider-contract`, extended
+  `pluggable-transport-modules`, the Transport-modules concept, and a Non-Goal.
+  Mined from the operator's multi-part split (upstream core + a per-audience
+  transport plugin each) and validated against a staged draft proving fragment
+  coexistence on one client.
