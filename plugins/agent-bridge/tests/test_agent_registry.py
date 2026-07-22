@@ -1690,3 +1690,22 @@ class TestRepoRemoteThreading:
         r.register_namespace_resolver(pr)
         await r.resolve_async("dev.tmichon@cs2:mycs")
         assert pr.seen == {"name": "mycs", "repo": "dev.tmichon"}
+
+
+def test_detect_local_machine_via_hostname_field(monkeypatch):
+    """A machine keyed by a friendly name self-detects via its `hostname:` field
+    (the box's COMPUTERNAME differs from the machines.yaml key)."""
+    from agent_bridge.agent_registry import _detect_local_machine
+    machines = parse_machines_yaml({
+        "machines": {
+            "tmichon-augloop1": {
+                "display_name": "augloop1",
+                "hostname": "cpc-tmich-oixui",
+                "environment": "Windows 11",
+            },
+        }
+    })
+    monkeypatch.setattr("socket.gethostname", lambda: "CPC-tmich-OIXUI")
+    machine, _platform = _detect_local_machine(machines)
+    assert machine is not None
+    assert machine.key == "tmichon-augloop1"
