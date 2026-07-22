@@ -9,6 +9,7 @@ connection.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -594,8 +595,24 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
                     f"$env:{k} = '{v.replace(chr(39), chr(39) * 2)}'; "
                     for k, v in target.env.items()
                 )
-                return f"{prefix}{binstub_cmd}"
-            return binstub_cmd
+                pwsh_script = f"{prefix}{binstub_cmd}"
+            else:
+                pwsh_script = binstub_cmd
+            # The Windows OpenSSH sshd DefaultShell on these dev boxes is
+            # ``cmd.exe`` (the OpenSSH default), NOT PowerShell -- so a bare
+            # pwsh-syntax command string would be handed to cmd.exe, which
+            # cannot parse ``$env:K = 'v'`` assignments and does not strip the
+            # quoted ``'--'`` ACP separator. The launch aborts before Copilot
+            # starts and the ACP client sees closed stdio ("Connection closed"
+            # at stage LAUNCH_ACP, #985 follow-up). Invoke PowerShell
+            # *explicitly* via ``-EncodedCommand`` (base64 UTF-16LE): this is
+            # quoting-proof and independent of the remote DefaultShell -- it
+            # runs correctly whether sshd hands the line to cmd.exe or pwsh.
+            exe = "powershell" if shell == "powershell" else "pwsh"
+            encoded = base64.b64encode(
+                pwsh_script.encode("utf-16-le")
+            ).decode("ascii")
+            return f"{exe} -NoProfile -EncodedCommand {encoded}"
         # Prepend env exports (e.g. auth hook vars) so they're available
         # to the binstub and all child processes in the SSH session
         if target.env:
