@@ -36,6 +36,17 @@ liveness — so that "SSH is assumed" becomes "SSH is **provisioned, verified, a
 maintained**." Where existing SSH profiles are already good, agent-ssh
 **augments** them; it never fights a working setup.
 
+The layer's **product** is a set of **SSH profiles keyed by machine name** — the
+interface the rest of the fabric already speaks. The ground and coordination
+layers (and an operator's own machine-aware tooling and skills) *consume* a
+machine's profile **by name** to reach it; agent-ssh is the *producer* that makes
+those profiles exist, wires each to the right transport, and keeps it honest. So
+long as a machine's profile exists and is truthful, the consumers already work —
+agent-ssh's job is to **guarantee that precondition**, not to re-plumb the
+consumers. (This is exactly why a machine-name-aware SSH *skill* and this
+provisioning *plugin* are two halves of one concept: one consumes the profiles,
+the other produces them.)
+
 ## Concepts & Components
 
 agent-ssh sits **beneath** the fabric's cross-machine capabilities as their
@@ -53,9 +64,20 @@ layers *derive* routing from it rather than keeping a second copy.
 
 ### SSH substrate (OpenSSH)
 Install and manage the OpenSSH **server** and **client** on each machine to a
-known-good baseline; own **key** material and **host-key pinning**; and keep each
+known-good baseline; own **key material** (lifecycle below) and **host-key
+pinning**; and keep each
 machine's `~/.ssh/config` mesh entries **derived from the registry**, not
 hand-maintained. This is the common floor every transport module rides on.
+
+### Key lifecycle (mint · store · distribute)
+The layer owns the **full lifecycle of SSH key material** — **minting** client
+and host keys, **storing** them securely, and **distributing** the public
+keys / host-key pins the mesh needs so a freshly-adopted machine trusts and is
+trusted by its peers. Storage and distribution **prefer the fabric's trust
+layer** where present, **falling back to a durable, operator-owned store** so key
+material survives a machine rebuild and propagates without manual copy-paste.
+Private keys stay under their owner's control; only public halves and host-key
+pins are distributed.
 
 ### Transport modules (pluggable, à la carte)
 *How* a client actually reaches a host is a **module**, chosen per machine, so
@@ -116,7 +138,17 @@ layers never route on a stale "reachable" claim.
 ### derived-ssh-config
 Each machine's SSH client configuration (host aliases, transport wiring, host-key
 pinning) is **derived from the registry**, not hand-edited — so the mesh's wiring
-has a single declarative source and stays consistent across machines.
+has a single declarative source and stays consistent across machines. These
+**per-machine profiles, keyed by machine name, are the contract** the fabric's
+consumers rely on: producing and maintaining them so a machine is reachable
+**by its name** is agent-ssh's core deliverable.
+
+### managed-key-lifecycle
+SSH key material is **minted, stored, and distributed** by the layer, not
+hand-managed: adopting a machine provisions its keys and propagates the public
+keys / host-key pins the mesh needs, with **secure storage** (the trust layer,
+or a durable fallback) so keys survive rebuilds and reach every machine that
+needs them — while private halves never leave their owner's control.
 
 ### augments-existing-profiles
 Where a working SSH profile already exists, agent-ssh **detects and augments**
@@ -149,9 +181,11 @@ firewall port is a deliberate, justified exception — never the default path.
 
 ### derive-dont-duplicate
 The registry is the **single owning store** of the mesh's reachability. Higher
-layers (coordination, dispatch, venue providers) **read and route over** it;
-they do not persist a competing copy of who-is-reachable-how. This is the
-fabric's *derive-don't-duplicate* rule applied to transport.
+layers (coordination, dispatch, venue providers) **read and route over** it —
+reaching a machine through its **derived per-machine profile, by name** — and do
+not persist a competing copy of who-is-reachable-how, nor re-derive connectivity
+themselves. This is the fabric's *derive-don't-duplicate* rule applied to
+transport.
 
 ### uses-real-identity
 Reach is established under the operator's **real identity** and existing identity
@@ -172,8 +206,10 @@ layer's.)
   wires **machine-to-machine SSH reachability**, the substrate a machine venue
   may in turn ride on.
 - **Not an account-per-agent or identity provider.** It authenticates the
-  operator's real identity through an existing IdP; it does not mint SSH accounts
-  per agent, and credential provision beyond SSO is the trust layer's job.
+  operator's real identity through an existing IdP; it does not mint SSH
+  *accounts* per agent. It **does** own the SSH **key lifecycle** (mint / store /
+  distribute), but leans on the fabric's **trust layer** for secret *storage*
+  rather than inventing its own vault.
 - **Not a general VPN / mesh-networking product.** It wires **SSH** reachability
   specifically, delegating the underlying tunnel technology to interchangeable
   transport modules — it is not a replacement for a network fabric.
@@ -213,3 +249,11 @@ layer's.)
   a leaf beneath agent-fabric by the *derive-don't-duplicate / single-owning-layer*
   rule: the registry is the one owning store of mesh reachability, over which the
   coordination, dispatch, and venue layers route.
+- **2026-07-22** — Sharpened the **producer/consumer seam** and added the **key
+  lifecycle**. Made explicit that the layer's *product* is **SSH profiles keyed
+  by machine name** — the interface consumers (the ground/coordination layers and
+  a machine-name-aware SSH *skill*) already speak — so a machine-aware *skill*
+  (consumer) and this provisioning *plugin* (producer) are two halves of one
+  concept. Added `mint · store · distribute` key-material ownership, preferring
+  the trust layer for secret storage with a durable operator-owned fallback.
+  Mined from operator clarification.
