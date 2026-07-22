@@ -221,6 +221,34 @@ def test_copilot_false_machine_is_skipped(monkeypatch):
     assert ("NAS", "Linux") not in by
 
 
+def test_absent_local_machine_still_gets_local_source(monkeypatch):
+    """Defensive fail-safe: when this machine is entirely absent from
+    machines.yaml (a stale or freshly-provisioned anchor whose self-entry
+    hasn't landed yet), ``_build_sources`` still yields exactly one local
+    source, so the picker always has a 'this host' tab and never crashes."""
+    entries = {
+        "wheatley": _entry(
+            "wheatley", "Wheatley",
+            [cfg.SSHEnvironment(name="linux", alias="wheatley", shell="bash")],
+            ssh_ready=True),
+    }
+    _install_roster(
+        monkeypatch, entries, machine="ghosthost",
+        local_id=("ghosthost", "windows"))
+    # Pin the hostname-based fallback identity so the assertion is deterministic.
+    monkeypatch.setattr(data_ssh.data_local, "LOCAL", ("ghosthost", "Win"))
+
+    sources = data_ssh._build_sources()
+    local_sources = [s for s in sources if s.local]
+    assert len(local_sources) == 1
+    local = local_sources[0]
+    assert (local.machine, local.env) == ("ghosthost", "Win")
+    assert local.argv is None
+    assert local.ready is True
+    # The remote roster entry is unaffected.
+    assert ("Wheatley", "Linux") in _by_key(sources)
+
+
 # ── #1421 continuous background poll: LiveLoader.repoll_silent ────────────────
 
 def _ready_loader(monkeypatch, records):

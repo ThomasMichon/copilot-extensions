@@ -182,6 +182,16 @@ def _build_sources():
         if is_local_machine and not local_env_added:
             out.append(Source(m.display_name, local_elabel, None, local=True,
                               ready=True))
+
+    # Defensive fail-safe: guarantee a local source even when this machine is
+    # entirely absent from machines.yaml (a freshly-provisioned box whose
+    # self-entry hasn't reached the anchor yet, or a stale anchor checkout).
+    # Without a local source the engine has no "this host" tab and the picker
+    # crashes. The picker runs *here*, so a hostname-based local tab (from
+    # ``data_local.LOCAL``) is always the correct, safe fallback.
+    if not any(s.local for s in out):
+        out.append(Source(data_local.LOCAL[0], data_local.LOCAL[1], None,
+                          local=True, ready=True))
     return out
 
 

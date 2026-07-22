@@ -136,3 +136,112 @@ def test_no_config_is_non_fatal(monkeypatch):
     monkeypatch.setattr(cfg, "load_config", _boom)
     # Must not raise.
     m._fast_forward_project_anchors()
+
+
+# ── stale-anchor self-heal (catch-22 break) ─────────────────────────────────
+# The interactive picker parses the anchor's machines.yaml to identify this
+# machine; a stale anchor missing the self-entry crashes it, yet the anchor
+# fast-forward that adds the entry otherwise runs only *after* a successful
+# resolve. ``_heal_stale_anchor_if_self_missing`` breaks that loop by
+# fast-forwarding the anchor first, but only when the self-entry is absent.
+
+
+def _write_machines(repo: Path, keys: list[str]) -> None:
+    lines = ["machines:"]
+    for k in keys:
+        lines += [f"  {k}:", f"    display_name: {k}", "    environment: Test"]
+    (repo / "machines.yaml").write_text("\n".join(lines) + "\n")
+
+
+def _make_origin_anchor(tmp_path: Path, base_keys: list[str]) -> tuple[Path, Path]:
+    """(seed, anchor) sharing an origin; base commit carries machines(base_keys)."""
+    origin_bare = tmp_path / "origin.git"
+    _git("init", "--bare", "-b", "master", str(origin_bare), cwd=tmp_path)
+
+    seed = tmp_path / "seed"
+    _git("clone", str(origin_bare), str(seed), cwd=tmp_path)
+    _git("config", "user.email", "t@example.com", cwd=seed)
+    _git("config", "user.name", "Test", cwd=seed)
+    (seed / "base.txt").write_text("v1")
+    _write_machines(seed, base_keys)
+    _git("add", "-A", cwd=seed)
+    _git("commit", "-m", "base", cwd=seed)
+    _git("push", "origin", "master", cwd=seed)
+
+    anchor = tmp_path / "anchor"
+    _git("clone", str(origin_bare), str(anchor), cwd=tmp_path)
+    _git("config", "user.email", "t@example.com", cwd=anchor)
+    _git("config", "user.name", "Test", cwd=anchor)
+    return seed, anchor
+
+
+def test_self_missing_triggers_anchor_heal(tmp_path, monkeypatch):
+    # Anchor knows only 'otherbox'; origin advances to add this host + a marker.
+    seed, anchor = _make_origin_anchor(tmp_path, ["otherbox"])
+    _write_machines(seed, ["otherbox", "testbox"])
+    (seed / "next.txt").write_text("more")
+    _git("add", "-A", cwd=seed)
+    _git("commit", "-m", "add testbox", cwd=seed)
+    _git("push", "origin", "master", cwd=seed)
+
+    _install_config(monkeypatch, anchor)
+    monkeypatch.setattr(m.socket, "gethostname", lambda: "testbox")
+
+    # Precondition: the stale anchor lacks this machine's self-entry.
+    assert cfg.find_machine_entry(cfg.load_machines_yaml(anchor), "testbox") is None
+
+    m._heal_stale_anchor_if_self_missing(cfg.load_config())
+
+    # The anchor was fast-forwarded, so the self-entry now resolves.
+    assert (anchor / "next.txt").exists()
+    assert cfg.find_machine_entry(
+        cfg.load_machines_yaml(anchor), "testbox") is not None
+
+
+def test_self_present_skips_heal(tmp_path, monkeypatch):
+    # This host is already in the anchor's machines.yaml -> no heal, no ff even
+    # though origin has advanced (the marker must NOT be pulled in).
+    seed, anchor = _make_origin_anchor(tmp_path, ["otherbox", "testbox"])
+    (seed / "next.txt").write_text("more")
+    _git("add", "-A", cwd=seed)
+    _git("commit", "-m", "unrelated advance", cwd=seed)
+    _git("push", "origin", "master", cwd=seed)
+
+    _install_config(monkeypatch, anchor)
+    monkeypatch.setattr(m.socket, "gethostname", lambda: "testbox")
+
+    m._heal_stale_anchor_if_self_missing(cfg.load_config())
+
+    assert not (anchor / "next.txt").exists()
+
+
+def test_heal_non_fatal_when_ff_raises(tmp_path, monkeypatch):
+    _seed, anchor = _make_origin_anchor(tmp_path, ["otherbox"])
+    _install_config(monkeypatch, anchor)
+    monkeypatch.setattr(m.socket, "gethostname", lambda: "testbox")
+
+    def _boom() -> None:
+        raise RuntimeError("ff failed")
+
+    monkeypatch.setattr(m, "_fast_forward_project_anchors", _boom)
+
+    config = cfg.load_config()
+    # Must not raise, and returns the original config unchanged.
+    assert m._heal_stale_anchor_if_self_missing(config) is config
+
+
+def test_unreadable_registry_does_not_trigger_heal(tmp_path, monkeypatch):
+    # A missing/malformed machines.yaml is treated as "present" so an unrelated
+    # I/O error never fires the pull-forward (and its network fetch).
+    _seed, anchor = _make_origin_anchor(tmp_path, ["otherbox"])
+    (anchor / "machines.yaml").unlink()
+    _install_config(monkeypatch, anchor)
+    monkeypatch.setattr(m.socket, "gethostname", lambda: "testbox")
+
+    called = {"ff": 0}
+    monkeypatch.setattr(
+        m, "_fast_forward_project_anchors",
+        lambda: called.__setitem__("ff", called["ff"] + 1))
+
+    m._heal_stale_anchor_if_self_missing(cfg.load_config())
+    assert called["ff"] == 0
