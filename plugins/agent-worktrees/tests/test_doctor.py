@@ -320,3 +320,134 @@ def test_wsl_state_ignored_off_windows(home: Path, monkeypatch):
     findings = doctor.diagnose(plat="linux")
     assert not [f for f in findings if f.kind.startswith("wsl_")]
     assert called["n"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Overlay reconciliation -- per-project ~/.<project>/config.yaml
+# ---------------------------------------------------------------------------
+
+def _write_global(home: Path, **kw) -> None:
+    (home / ".agent-worktrees" / "config.yaml").write_text(
+        yaml.safe_dump(kw), encoding="utf-8"
+    )
+
+
+def _overlay(home: Path, cfg_dir: Path, text: str) -> Path:
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    p = cfg_dir / "config.yaml"
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+def _adopted(home: Path, repo_dir: Path, cfg_dir: Path, **extra) -> None:
+    _write_repos(home, f"""
+repos:
+  proj:
+    class: worktree
+    linux: {repo_dir}
+    default_branch: main
+""")
+    proj = {"anchor": str(repo_dir), "config_dir": str(cfg_dir),
+            "default_branch": "main", "expose_agent": True}
+    proj.update(extra)
+    _write_projects(home, {"proj": proj})
+
+
+def test_overlay_redundant_keys_detected_and_stripped(home: Path):
+    repo_dir = home / "src" / "proj"; repo_dir.mkdir(parents=True)
+    cfg_dir = home / ".proj"
+    _write_global(home, srcroot=str(home / "src"), machine="dev6",
+                  platform="linux")
+    _adopted(home, repo_dir, cfg_dir, base_repo=True)
+    _overlay(home, cfg_dir, f"""# keep me
+srcroot: {home / "src"}
+machine: dev6
+platform: linux
+repo_name: proj
+repos:
+  proj:
+    anchor: {repo_dir}
+    default_branch: main
+    base_repo: true
+    env_script:
+      linux: tools/prime.sh
+""")
+    kinds = _kinds(doctor.diagnose(plat="linux"))
+    assert "overlay_redundant_toplevel" in kinds
+    assert "overlay_redundant_anchor" in kinds
+    assert "overlay_redundant_branch" in kinds
+    assert "overlay_redundant_base_repo" in kinds
+
+    doctor.reconcile(fix=True, plat="linux")
+    remaining = (cfg_dir / "config.yaml").read_text(encoding="utf-8")
+    assert "srcroot" not in remaining
+    assert "anchor" not in remaining
+    assert "default_branch" not in remaining
+    assert "base_repo" not in remaining
+    # Preserved: comment, repo_name, and the SPO-specific env_script.
+    assert "# keep me" in remaining
+    assert "env_script" in remaining and "tools/prime.sh" in remaining
+
+
+def test_overlay_conflicting_anchor_is_report_only(home: Path):
+    repo_dir = home / "src" / "proj"; repo_dir.mkdir(parents=True)
+    cfg_dir = home / ".proj"
+    _write_global(home, srcroot=str(home / "src"), machine="dev6",
+                  platform="linux")
+    _adopted(home, repo_dir, cfg_dir)
+    _overlay(home, cfg_dir, f"""repos:
+  proj:
+    anchor: {home / "elsewhere" / "proj"}
+""")
+    findings = doctor.diagnose(plat="linux")
+    conflict = [f for f in findings if f.kind == "overlay_conflicting_anchor"]
+    assert conflict and not conflict[0].fixable
+    # A report-only conflict must NOT be stripped by --fix.
+    doctor.reconcile(fix=True, plat="linux")
+    assert "anchor" in (cfg_dir / "config.yaml").read_text(encoding="utf-8")
+
+
+def test_overlay_conflicting_srcroot_stripped(home: Path):
+    repo_dir = home / "src" / "proj"; repo_dir.mkdir(parents=True)
+    cfg_dir = home / ".proj"
+    _write_global(home, srcroot=str(home / "src"), machine="dev6",
+                  platform="linux")
+    _adopted(home, repo_dir, cfg_dir)
+    _overlay(home, cfg_dir, f"""srcroot: {home / "other"}
+repos:
+  proj: {{}}
+""")
+    findings = doctor.diagnose(plat="linux")
+    conf = [f for f in findings if f.kind == "overlay_conflicting_srcroot"]
+    assert conf and conf[0].fixable
+    doctor.reconcile(fix=True, plat="linux")
+    assert "srcroot" not in (cfg_dir / "config.yaml").read_text(encoding="utf-8")
+
+
+def test_branch_drift_between_registries_fixed(home: Path):
+    repo_dir = home / "src" / "proj"; repo_dir.mkdir(parents=True)
+    _write_repos(home, f"""
+repos:
+  proj:
+    class: worktree
+    linux: {repo_dir}
+    default_branch: main
+""")
+    _write_projects(home, {"proj": {
+        "anchor": str(repo_dir), "expose_agent": True,
+        "default_branch": "master",  # drifted from repos.yaml 'main'
+    }})
+    findings = doctor.diagnose(plat="linux")
+    assert "branch_drift" in _kinds(findings)
+    doctor.reconcile(fix=True, plat="linux")
+    projs = doctor._read_projects()
+    assert projs["proj"]["default_branch"] == "main"  # aligned to repos.yaml
+
+
+def test_overlay_absent_is_noop(home: Path):
+    repo_dir = home / "src" / "proj"; repo_dir.mkdir(parents=True)
+    cfg_dir = home / ".proj"  # no config.yaml written
+    _write_global(home, srcroot=str(home / "src"))
+    _adopted(home, repo_dir, cfg_dir)
+    kinds = _kinds(doctor.diagnose(plat="linux"))
+    assert not any(k.startswith("overlay_") for k in kinds)
