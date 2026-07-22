@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -66,3 +69,26 @@ def test_cloudflare_recipe_direct_recipe_and_coexistence() -> None:
     ]
     assert include_lines == [ssh_profile.ROOT_INCLUDE]
     assert peer.read_text(encoding="utf-8") == "Host peer\n    HostName peer.example.com\n"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL hardening")
+def test_chmod_windows_removes_owner_rights() -> None:
+    """On Windows, _chmod must set a user-only ACL with NO OWNER RIGHTS ACE.
+
+    An inherited OWNER RIGHTS (S-1-3-4) ACE makes Windows OpenSSH reject the
+    file ("Bad owner or permissions") and refuse the Include, so every
+    ssh <machine> using an agent-ssh fragment fails. Regression guard for that.
+    """
+    scratch = _reset_scratch()
+    frag = scratch / "50-agent-ssh-dtssh.conf"
+    frag.write_text("Host x\n", encoding="utf-8")
+
+    ssh_profile._chmod(frag, 0o600)
+
+    acl = subprocess.run(
+        ["icacls", str(frag)], capture_output=True, text=True
+    ).stdout
+    assert "S-1-3-4" not in acl  # OWNER RIGHTS SID
+    assert "OWNER RIGHTS" not in acl
+    user = os.environ.get("USERNAME", "")
+    assert user and user in acl  # only the current user is granted
