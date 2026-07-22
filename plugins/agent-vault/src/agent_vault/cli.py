@@ -430,19 +430,26 @@ def auto_unlock() -> bool:
     displayed. (Unlock-source providers -- e.g. an operator-held value -- are
     consulted daemon-side before any prompt.) When there is no GUI *and* no
     controlling terminal, it returns ``False`` rather than stalling.
+
+    The controlling-terminal prompt is preferred over the service-side GUI: the
+    latter is a blocking dialog (a ``powershell.exe`` WinForms prompt on WSL, a
+    ``zenity``/``kdialog`` dialog on Linux) that *hangs* -- and holds the daemon's
+    prompt lock -- when it cannot be displayed (headless / SSH / remote desktop).
+    If the operator typed ``unlock`` at a terminal, that terminal is where to
+    reach them, so we prompt inline there directly and never risk that stall.
     """
     if os.environ.get("VAULT_UNLOCK_TERMINAL"):
         return _terminal_unlock_local()
+    # Reach the operator where they are: a controlling terminal wins over the
+    # (blocking) service-side GUI. This inline unlock sends the password directly,
+    # so it never touches the daemon's prompt path or its prompt lock.
+    if _has_controlling_tty():
+        return _terminal_unlock_local()
     if IS_WSL:
-        # Let the service resolve providers and prompt on a GUI if one is
-        # reachable; on a headless/SSH host it returns without unlocking, so fall
-        # back to an inline terminal prompt when we have a controlling TTY.
+        # No controlling terminal, but a Windows-side GUI may still reach the
+        # operator; let the service resolve providers and prompt there.
         print("[agent-vault] Requesting password via vault service...", file=sys.stderr)
-        if _server_prompted_unlock():
-            return True
-        if _has_controlling_tty():
-            return _terminal_unlock_local()
-        return False
+        return _server_prompted_unlock()
     pw = prompt_password()
     if pw:
         resp = send_command({"action": "unlock", "password": pw}, timeout=15.0)
@@ -450,9 +457,6 @@ def auto_unlock() -> bool:
             return True
         if resp:
             print(f"Unlock failed: {resp.get('error', 'unknown')}", file=sys.stderr)
-    # No GUI prompt available (or it failed/cancelled) -> inline terminal fallback.
-    if _has_controlling_tty():
-        return _terminal_unlock_local()
     return False
 
 
