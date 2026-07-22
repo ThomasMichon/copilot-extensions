@@ -16,6 +16,10 @@ worktree-pinned tasks, ...). That makes a handful of invariants load-bearing:
 
 These tests read ``install.sh`` as text and assert the safe shape so a refactor
 cannot silently remove the guard.
+
+The Windows installer (``install.ps1``) carries the *same* supervisor as a
+Scheduled Task (``agent-dispatch-supervisor``) -- cross-platform-parity -- so the
+same invariants are guarded there too (see ``TestWindowsSupervisorInstall``).
 """
 
 from __future__ import annotations
@@ -23,10 +27,15 @@ from __future__ import annotations
 from pathlib import Path
 
 INSTALL_SH = Path(__file__).resolve().parent.parent / "scripts" / "install.sh"
+INSTALL_PS1 = Path(__file__).resolve().parent.parent / "scripts" / "install.ps1"
 
 
 def _text() -> str:
     return INSTALL_SH.read_text(encoding="utf-8")
+
+
+def _ps1_text() -> str:
+    return INSTALL_PS1.read_text(encoding="utf-8")
 
 
 def test_install_sh_exists():
@@ -102,3 +111,71 @@ def test_supervisor_gated_off_on_wsl_and_client_hosts():
         "the supervisor install must skip WSL / client-only hosts"
     )
     assert "NO_SUPERVISOR" in body, "must honor --no-supervisor"
+
+
+# -- Windows (install.ps1) parity --------------------------------------------
+
+
+class TestWindowsSupervisorInstall:
+    """The Windows installer carries the same label-gated supervisor as a
+    Scheduled Task (``agent-dispatch-supervisor``). Same invariants, PowerShell."""
+
+    def test_install_ps1_exists(self):
+        assert INSTALL_PS1.is_file(), f"missing {INSTALL_PS1}"
+
+    def test_supervisor_task_name_and_functions_defined(self):
+        text = _ps1_text()
+        assert "$SupervisorTaskName = 'agent-dispatch-supervisor'" in text
+        assert "function Install-SupervisorTask" in text
+        assert "function Remove-SupervisorTask" in text
+        assert "function Test-SupervisorLabelsConfigured" in text
+
+    def test_supervise_invocation_is_all_repos_scoped(self):
+        text = _ps1_text()
+        assert "'supervise', '--all-repos'" in text, (
+            "the Windows supervisor launcher must run `supervise --all-repos` so "
+            "it does not silently filter every task out (the lane gotcha)"
+        )
+
+    def test_launcher_refuses_label_less_run(self):
+        text = _ps1_text()
+        # The launcher guards on an empty label set and exits EX_CONFIG (78).
+        assert "if (-not `$haveLabel)" in text
+        assert "exit 78" in text, (
+            "the Windows launcher must exit non-zero (EX_CONFIG) rather than "
+            "embody everything when no opt-in label is configured"
+        )
+
+    def test_task_enabled_only_when_labels_configured(self):
+        text = _ps1_text()
+        idx = text.index("function Install-SupervisorTask")
+        body = text[idx:]
+        gate = body.index("if (Test-SupervisorLabelsConfigured)")
+        start = body.index("Start-ScheduledTask -TaskName $SupervisorTaskName")
+        disable = body.index("Disable-ScheduledTask -TaskName $SupervisorTaskName")
+        # enable/start in the positive branch (after the gate); disable in the
+        # inert (no-label) else branch (after start).
+        assert gate < start < disable, (
+            "enable/start must be gated by Test-SupervisorLabelsConfigured, with "
+            "Disable-ScheduledTask in the inert (no-label) branch"
+        )
+
+    def test_shipped_env_defaults_to_no_labels(self):
+        text = _ps1_text()
+        assert "AGENT_DISPATCH_SUPERVISE_LABELS=\n" in text, (
+            "supervisor.env must default AGENT_DISPATCH_SUPERVISE_LABELS to empty"
+        )
+
+    def test_supervisor_gated_off_on_client_hosts(self):
+        text = _ps1_text()
+        idx = text.index("function Install-SupervisorTask")
+        body = text[idx : text.index("\n}\n", idx)]
+        assert "$NoSupervisor" in body and "$NoService" in body, (
+            "the supervisor install must skip client-only / -NoSupervisor hosts"
+        )
+
+    def test_supervisor_wired_into_actions(self):
+        text = _ps1_text()
+        # install + update call Install-SupervisorTask; uninstall removes it.
+        assert text.count("Install-SupervisorTask") >= 3  # def + install + update
+        assert "Unregister-ScheduledTask -TaskName $SupervisorTaskName" in text
