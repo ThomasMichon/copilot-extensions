@@ -164,6 +164,7 @@ def _build_sources():
             continue
         is_local_machine = (
             key.lower() == local_key
+            or (getattr(m, "hostname", "") or "").lower() == local_key
             or key.lower() == config_machine
             or (m.alias and m.alias.lower() == config_machine)
         )
