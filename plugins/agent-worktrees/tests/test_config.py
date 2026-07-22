@@ -758,3 +758,95 @@ class TestFindMachineEntry:
     def test_no_match_returns_none(self):
         assert cfg.find_machine_entry(self._entries(), "other") is None
 
+
+# ---------------------------------------------------------------------------
+# Registry fallback for adoption facts (minimal-overlay support)
+# ---------------------------------------------------------------------------
+
+def test_adoption_defaults_resolved_from_registries(monkeypatch):
+    """default_branch from repos.yaml, base_repo from projects.yaml."""
+    from agent_worktrees import installer
+    from agent_worktrees import repos as repos_mod
+
+    entry = repos_mod.RepoEntry(
+        name="proj", repo_class="worktree", default_branch="main",
+        paths={"linux": "/a"},
+    )
+    monkeypatch.setattr(
+        repos_mod, "read_registry",
+        lambda: repos_mod.ReposRegistry(repos={"proj": entry}),
+    )
+    monkeypatch.setattr(
+        installer, "read_projects_registry",
+        lambda: {"projects": {"proj": {"base_repo": True}}},
+    )
+    out = cfg._resolve_adoption_defaults_from_registry("proj", "linux")
+    assert out == {"default_branch": "main", "base_repo": True}
+
+
+def test_load_config_fills_branch_and_base_repo_from_registry(
+    tmp_path: Path, monkeypatch
+):
+    """A minimal overlay (no anchor/branch/base_repo) still resolves them from
+    the registries -- so restating them in the overlay is redundant."""
+    from agent_worktrees import installer
+    from agent_worktrees import repos as repos_mod
+
+    anchor = tmp_path / "proj"
+    anchor.mkdir()
+    entry = repos_mod.RepoEntry(
+        name="proj", repo_class="worktree", default_branch="main",
+        paths={"linux": str(anchor)},
+    )
+    monkeypatch.setattr(
+        repos_mod, "read_registry",
+        lambda: repos_mod.ReposRegistry(repos={"proj": entry}),
+    )
+    monkeypatch.setattr(
+        installer, "read_projects_registry",
+        lambda: {"projects": {"proj": {"base_repo": True}}},
+    )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
+
+    ml = tmp_path / "ml.yaml"
+    ml.write_text(
+        "repo_name: proj\nrepos:\n  proj:\n    env_script:\n      linux: p.sh\n",
+        encoding="utf-8",
+    )
+    c = cfg.load_config(ml)
+    repo = c.default_repo
+    assert repo.anchor == str(anchor)      # from registry
+    assert repo.default_branch == "main"   # registry fallback (not "master")
+    assert repo.base_repo is True          # projects.yaml fallback
+
+
+def test_overlay_branch_overrides_registry_fallback(
+    tmp_path: Path, monkeypatch
+):
+    """An explicit overlay default_branch still wins over the registry."""
+    from agent_worktrees import installer
+    from agent_worktrees import repos as repos_mod
+
+    anchor = tmp_path / "proj"
+    anchor.mkdir()
+    entry = repos_mod.RepoEntry(
+        name="proj", repo_class="worktree", default_branch="main",
+        paths={"linux": str(anchor)},
+    )
+    monkeypatch.setattr(
+        repos_mod, "read_registry",
+        lambda: repos_mod.ReposRegistry(repos={"proj": entry}),
+    )
+    monkeypatch.setattr(
+        installer, "read_projects_registry", lambda: {"projects": {}},
+    )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
+
+    ml = tmp_path / "ml.yaml"
+    ml.write_text(
+        "repo_name: proj\nrepos:\n  proj:\n    default_branch: develop\n",
+        encoding="utf-8",
+    )
+    c = cfg.load_config(ml)
+    assert c.default_repo.default_branch == "develop"  # overlay wins
+

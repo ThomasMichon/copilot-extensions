@@ -40,11 +40,37 @@ Reconciliation rules:
    recommend ``agent-worktrees register <name>``.
 7. ``stale_path`` -- an entry whose path for this platform is missing on disk.
    **Report only**; recommend re-cloning or removing.
+8. ``branch_drift`` -- ``repos.yaml`` and ``projects.yaml`` disagree on
+   ``default_branch``.  Fix: align ``projects.yaml`` to ``repos.yaml`` (identity
+   is the source of truth).
+
+It also reconciles each adopted project's **machine-local overlay**
+(``~/.<project>/config.yaml``) against the registries + global config, so the
+overlay stays minimal (it should carry only what the registries can't supply --
+e.g. ``env_script``).  ``config.load_config`` falls back to the registries for
+``anchor`` (repos.yaml), ``default_branch`` (repos.yaml), ``base_repo``
+(projects.yaml), and ``srcroot``/``machine``/``platform`` (global config), so an
+overlay that restates any of these is redundant:
+
+* ``overlay_redundant_toplevel`` / ``overlay_conflicting_srcroot`` -- top-level
+  ``srcroot``/``machine``/``platform`` equal to (or, for the inert srcroot,
+  differing from) global config.  Fix: strip the key from the overlay.
+* ``overlay_redundant_anchor`` / ``overlay_redundant_branch`` /
+  ``overlay_redundant_base_repo`` -- a per-repo key restating the registry
+  value.  Fix: strip it (registry is the single source of truth).
+* ``overlay_conflicting_anchor`` / ``overlay_conflicting_branch`` /
+  ``overlay_conflicting_base_repo`` -- a per-repo key that **differs** from the
+  registry (the overlay wins at launch).  **Report only** -- the operator must
+  decide which side is right.
+
+Overlay ``--fix`` edits ``~/.<project>/config.yaml`` in place, removing only the
+redundant single-line scalar keys (comments and other keys are preserved).
 """
 
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -63,6 +89,12 @@ _AUTOFIXABLE = {
     "agent_mismatch",
     "name_collision",
     "wsl_state_stale",
+    "branch_drift",
+    "overlay_redundant_anchor",
+    "overlay_redundant_toplevel",
+    "overlay_redundant_branch",
+    "overlay_redundant_base_repo",
+    "overlay_conflicting_srcroot",
 }
 
 
@@ -158,6 +190,210 @@ def _wsl_install_present(distro: str | None) -> bool | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return cp.returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# Overlay reconciliation helpers -- the per-project machine-local config
+# (``~/.<project>/config.yaml``) vs the registries + global config.
+# ---------------------------------------------------------------------------
+
+def _read_global_config() -> dict:
+    """Machine-wide ``~/.agent-worktrees/config.yaml`` (srcroot/machine/platform)."""
+    path = Path.home() / ".agent-worktrees" / "config.yaml"
+    if not path.exists():
+        return {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _overlay_path(config_dir: str | None) -> Path | None:
+    """Resolve a project's overlay ``config.yaml`` from its ``config_dir``."""
+    if not config_dir:
+        return None
+    return Path(os.path.expanduser(config_dir)) / "config.yaml"
+
+
+def _read_overlay(path: Path | None) -> dict:
+    if not path or not path.exists():
+        return {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _strip_overlay_keys(
+    path: Path, top_keys: set[str], repo_name: str, repo_keys: set[str]
+) -> bool:
+    """Surgically remove redundant scalar keys from an overlay, preserving
+    comments and every other line. Removes top-level ``top_keys`` (col 0) and,
+    inside the ``  <repo_name>:`` block, the 4-space ``repo_keys``. Only
+    single-line scalars are targeted, so line removal is safe. Returns True if
+    anything changed."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    except Exception:
+        return False
+    top_re = re.compile(r"^([A-Za-z0-9_]+)\s*:")
+    repo_hdr_re = re.compile(r"^  ([A-Za-z0-9._-]+)\s*:\s*$")
+    repo_key_re = re.compile(r"^    ([A-Za-z0-9_]+)\s*:")
+    out: list[str] = []
+    in_block = False
+    changed = False
+    for line in lines:
+        m = top_re.match(line)
+        if m:
+            in_block = False  # left any repo block at a col-0 key
+            if m.group(1) in top_keys:
+                changed = True
+                continue
+        mh = repo_hdr_re.match(line)
+        if mh:
+            in_block = mh.group(1) == repo_name
+            out.append(line)
+            continue
+        if in_block:
+            mk = repo_key_re.match(line)
+            if mk and mk.group(1) in repo_keys:
+                changed = True
+                continue
+        out.append(line)
+    if changed:
+        path.write_text("".join(out), encoding="utf-8")
+    return changed
+
+
+def _overlay_findings(
+    projects: dict[str, dict],
+    registry: "repos.ReposRegistry",
+    plat: str,
+    fix: bool,
+) -> list[Finding]:
+    """Reconcile each adopted project's machine-local overlay against the
+    registries + global config: flag keys that redundantly restate a
+    registry/global value (fixable: strip) or conflict with it (report-only for
+    anchor/branch/base_repo; strip for the inert srcroot case)."""
+    findings: list[Finding] = []
+    gcfg = _read_global_config()
+    for pname in sorted(projects):
+        proj = projects[pname]
+        opath = _overlay_path(proj.get("config_dir"))
+        overlay = _read_overlay(opath)
+        if not overlay:
+            continue
+
+        strip_top: set[str] = set()
+        strip_repo: set[str] = set()
+
+        # --- top-level srcroot/machine/platform vs global config ------------
+        for key in ("srcroot", "machine", "platform"):
+            if key not in overlay:
+                continue
+            oval, gval = overlay.get(key), gcfg.get(key)
+            if gval is None:
+                continue
+            if key == "srcroot":
+                equal = _norm(str(oval)) == _norm(str(gval))
+            else:
+                equal = str(oval) == str(gval)
+            if equal:
+                findings.append(Finding(
+                    repo=pname, kind="overlay_redundant_toplevel",
+                    severity=SEV_WARNING,
+                    detail=f"overlay '{key}: {oval}' just restates global config",
+                    fixable=True, fix_detail=f"remove overlay top-level '{key}'",
+                ))
+                strip_top.add(key)
+            elif key == "srcroot":
+                # A conflicting overlay srcroot is inert (only feeds `get
+                # src-dir`) and misleading -- strip it to inherit the global.
+                findings.append(Finding(
+                    repo=pname, kind="overlay_conflicting_srcroot",
+                    severity=SEV_WARNING,
+                    detail=(f"overlay 'srcroot: {oval}' conflicts with global "
+                            f"'{gval}' (inert; only feeds 'get src-dir')"),
+                    fixable=True, fix_detail="remove overlay 'srcroot'",
+                ))
+                strip_top.add("srcroot")
+
+        # --- per-repo anchor / default_branch / base_repo vs registries -----
+        repo_over = (overlay.get("repos") or {}).get(pname) or {}
+        if isinstance(repo_over, dict):
+            entry = registry.repos.get(pname)
+            reg_path = entry.paths.get(plat) if entry else None
+            if "anchor" in repo_over and reg_path:
+                if _norm(str(repo_over["anchor"])) == _norm(str(reg_path)):
+                    findings.append(Finding(
+                        repo=pname, kind="overlay_redundant_anchor",
+                        severity=SEV_WARNING,
+                        detail=f"overlay anchor restates repos.yaml path {reg_path}",
+                        fixable=True, fix_detail="remove overlay 'anchor'",
+                    ))
+                    strip_repo.add("anchor")
+                else:
+                    findings.append(Finding(
+                        repo=pname, kind="overlay_conflicting_anchor",
+                        severity=SEV_WARNING,
+                        detail=(f"overlay anchor {repo_over['anchor']} != repos.yaml "
+                                f"path {reg_path} ({plat}); overlay wins at launch"),
+                        fixable=False,
+                        fix_detail="align repos.yaml or remove the overlay anchor",
+                    ))
+
+            reg_branch = (entry.default_branch if entry else "") or str(
+                proj.get("default_branch") or ""
+            )
+            if "default_branch" in repo_over and reg_branch:
+                if str(repo_over["default_branch"]) == reg_branch:
+                    findings.append(Finding(
+                        repo=pname, kind="overlay_redundant_branch",
+                        severity=SEV_WARNING,
+                        detail=(f"overlay default_branch restates registry "
+                                f"'{reg_branch}' (now sourced from the registry)"),
+                        fixable=True, fix_detail="remove overlay 'default_branch'",
+                    ))
+                    strip_repo.add("default_branch")
+                else:
+                    findings.append(Finding(
+                        repo=pname, kind="overlay_conflicting_branch",
+                        severity=SEV_WARNING,
+                        detail=(f"overlay default_branch '{repo_over['default_branch']}'"
+                                f" != registry '{reg_branch}'; overlay wins at launch"),
+                        fixable=False,
+                        fix_detail="align the registry or remove the overlay key",
+                    ))
+
+            proj_base = proj.get("base_repo")
+            if "base_repo" in repo_over and proj_base is not None:
+                if bool(repo_over["base_repo"]) == bool(proj_base):
+                    findings.append(Finding(
+                        repo=pname, kind="overlay_redundant_base_repo",
+                        severity=SEV_WARNING,
+                        detail=("overlay base_repo restates projects.yaml "
+                                f"'{bool(proj_base)}' (now sourced from the registry)"),
+                        fixable=True, fix_detail="remove overlay 'base_repo'",
+                    ))
+                    strip_repo.add("base_repo")
+                else:
+                    findings.append(Finding(
+                        repo=pname, kind="overlay_conflicting_base_repo",
+                        severity=SEV_WARNING,
+                        detail=(f"overlay base_repo {bool(repo_over['base_repo'])} != "
+                                f"projects.yaml {bool(proj_base)}; overlay wins at launch"),
+                        fixable=False,
+                        fix_detail="align projects.yaml or remove the overlay key",
+                    ))
+
+        if fix and (strip_top or strip_repo) and opath is not None:
+            if _strip_overlay_keys(opath, strip_top, pname, strip_repo):
+                for f in findings:
+                    if f.repo == pname and f.kind in _AUTOFIXABLE and not f.fixed:
+                        f.fixed = True
+    return findings
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +525,22 @@ def reconcile(fix: bool = False, plat: str | None = None) -> list[Finding]:
                 f.fixed = True
             findings.append(f)
 
+        # default_branch drift: repos.yaml (identity SoT) vs projects.yaml.
+        if branch and entry.default_branch and entry.default_branch != branch:
+            f = Finding(
+                repo=pname, kind="branch_drift", severity=SEV_WARNING,
+                detail=(f"repos.yaml default_branch '{entry.default_branch}' != "
+                        f"projects.yaml '{branch}'"),
+                fixable=True,
+                fix_detail=(f"set projects.yaml default_branch = "
+                            f"{entry.default_branch}"),
+            )
+            if fix:
+                proj["default_branch"] = entry.default_branch
+                dirty_projects = True
+                f.fixed = True
+            findings.append(f)
+
     # --- WSL adoption state: promote a stale 'bootstrap' marker -------------
     # The ``wsl.state`` marker lives on the Windows host that owns the WSL
     # environment.  A Windows-side install/adopt always re-registers with
@@ -351,6 +603,9 @@ def reconcile(fix: bool = False, plat: str | None = None) -> list[Finding]:
                 fixable=False,
                 fix_detail=f"re-clone or remove with: repos remove {name}",
             ))
+
+    # --- per-project overlay reconciliation (redundant/conflicting keys) ----
+    findings.extend(_overlay_findings(projects, registry, plat, fix))
 
     if fix and dirty_repos:
         repos.write_registry(registry)

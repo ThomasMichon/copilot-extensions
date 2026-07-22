@@ -659,6 +659,17 @@ def load_config(path: Path | None = None) -> Config:
         # srcroot/machine/platform/profiles -- never per-repo settings.)
         merged = _deep_merge(inrepo_settings, machine_repo)
 
+        # Fall back to the registries for adoption facts that _build_repo_config
+        # would otherwise read ONLY from the overlay/in-repo (default_branch,
+        # base_repo). This lets a machine-local overlay stay minimal -- it need
+        # not restate a value the registry already owns. Overlay/in-repo still
+        # win (setdefault only fills absent keys). ``repos doctor`` flags an
+        # overlay that redundantly restates these.
+        for _k, _v in _resolve_adoption_defaults_from_registry(
+            name, platform
+        ).items():
+            merged.setdefault(_k, _v)
+
         repos[name] = _build_repo_config(merged, anchor, str(worktree_root))
 
     if not repos:
@@ -780,6 +791,42 @@ def _resolve_anchor_from_registry(name: str, platform: str) -> str | None:
         return entry.local_path(platform) or None
     except Exception:
         return None
+
+
+def _resolve_adoption_defaults_from_registry(
+    name: str, platform: str
+) -> dict[str, Any]:
+    """Registry fallbacks for adoption facts ``load_config`` otherwise reads
+    ONLY from the overlay/in-repo, so a minimal overlay need not restate them.
+
+    * ``default_branch`` -- from ``repos.yaml`` (identity registry), else
+      ``projects.yaml`` (adoption registry).
+    * ``base_repo`` -- from ``projects.yaml`` (its authoritative home).
+
+    Only keys with a usable registry value are returned; the caller fills them
+    with ``setdefault`` so overlay/in-repo settings still win. Never raises.
+    """
+    out: dict[str, Any] = {}
+    try:
+        from . import repos as repos_mod
+
+        entry = repos_mod.read_registry().repos.get(name)
+        if entry is not None and entry.default_branch:
+            out["default_branch"] = entry.default_branch
+    except Exception:
+        pass
+    try:
+        from . import installer
+
+        proj = (installer.read_projects_registry().get("projects") or {}).get(name)
+        if isinstance(proj, dict):
+            if "default_branch" not in out and proj.get("default_branch"):
+                out["default_branch"] = str(proj["default_branch"])
+            if proj.get("base_repo") is not None:
+                out["base_repo"] = bool(proj["base_repo"])
+    except Exception:
+        pass
+    return out
 
 
 def _build_repo_config(

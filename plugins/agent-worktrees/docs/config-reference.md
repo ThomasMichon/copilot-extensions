@@ -58,6 +58,16 @@ repos:
     # default_branch / remote / pr / ... may live in-repo instead (below)
 ```
 
+> **Keep the overlay minimal — don't restate registry-owned facts.**
+> `load_config` falls back to the registries/global for `anchor` (repos.yaml),
+> `default_branch` (repos.yaml), `base_repo` (projects.yaml), and
+> `srcroot`/`machine`/`platform` (global config). So an overlay that repeats any
+> of these is **redundant** — a second copy that must be kept in sync. Set a key
+> here only to **override** the registry value on this machine. `agent-worktrees
+> repos doctor` flags redundant/conflicting overlay keys and `--fix` strips the
+> redundant ones (comments preserved). A base-repo enlistment overlay typically
+> shrinks to just `repo_name` + the `env_script` it alone provides.
+
 It may *also* carry the machine-wide fields below (they then override the global
 config), but the slim form above is preferred:
 
