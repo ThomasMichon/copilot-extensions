@@ -57,6 +57,10 @@ class MachineConfig:
     key: str
     display_name: str
     environment: str = ""
+    # Raw OS hostname (COMPUTERNAME) when it differs from ``key`` -- lets a
+    # machine be keyed by a stable friendly name while self-detecting on a box
+    # whose COMPUTERNAME can't be renamed. Empty means ``key`` is the hostname.
+    hostname: str = ""
     role: str = ""
     field_terminal: bool = False
     ssh_environments: list[SshEnvironment] = field(default_factory=list)
@@ -140,6 +144,7 @@ def parse_machines_yaml(data: dict[str, Any]) -> dict[str, MachineConfig]:
             key=key,
             display_name=mdata.get("display_name", key),
             environment=mdata.get("environment", ""),
+            hostname=mdata.get("hostname", ""),
             role=mdata.get("role", ""),
             field_terminal=bool(mdata.get("field_terminal", False)),
             ssh_environments=ssh_envs,

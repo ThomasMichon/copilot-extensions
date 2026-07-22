@@ -755,8 +755,66 @@ class TestFindMachineEntry:
         }
         assert cfg.find_machine_entry(e, "mybox") is not None
 
+    def test_decoupled_key_and_hostname(self):
+        # A machine keyed by a friendly name declares its raw COMPUTERNAME via
+        # `hostname:`; it must be findable by key, alias, hostname, or display_name.
+        e = {
+            "tmichon-augloop1": cfg.MachineEntry(
+                key="tmichon-augloop1", display_name="augloop1",
+                environment="Windows 11", alias="augloop1",
+                hostname="cpc-tmich-oixui",
+            ),
+        }
+        assert cfg.find_machine_entry(e, "tmichon-augloop1") is not None   # key
+        assert cfg.find_machine_entry(e, "augloop1") is not None           # alias/display
+        assert cfg.find_machine_entry(e, "cpc-tmich-oixui") is not None    # hostname field
+        assert cfg.find_machine_entry(e, "CPC-tmich-OIXUI") is not None    # hostname, case-insensitive
+
     def test_no_match_returns_none(self):
         assert cfg.find_machine_entry(self._entries(), "other") is None
+
+
+# ---------------------------------------------------------------------------
+# detect_machine -- COMPUTERNAME resolves via key, the hostname field, or alias
+# ---------------------------------------------------------------------------
+
+class TestDetectMachine:
+    def _write(self, tmp_path: Path, body: str) -> Path:
+        (tmp_path / "machines.yaml").write_text(body, encoding="utf-8")
+        return tmp_path
+
+    def test_detect_via_hostname_field(self, tmp_path: Path, monkeypatch):
+        # Key is the friendly name; COMPUTERNAME is declared via `hostname:`.
+        self._write(tmp_path, (
+            "machines:\n"
+            "  tmichon-augloop1:\n"
+            "    display_name: augloop1\n"
+            "    alias: augloop1\n"
+            "    hostname: cpc-tmich-oixui\n"
+            "    environment: Windows 11\n"
+        ))
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "CPC-tmich-OIXUI")
+        assert cfg.detect_machine(tmp_path) == "augloop1"
+
+    def test_detect_via_key(self, tmp_path: Path, monkeypatch):
+        self._write(tmp_path, (
+            "machines:\n"
+            "  tmichon-dev6:\n"
+            "    display_name: dev6\n"
+            "    environment: Windows 11\n"
+        ))
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "tmichon-dev6")
+        assert cfg.detect_machine(tmp_path) == "tmichon-dev6"
+
+    def test_detect_falls_back_to_raw_hostname(self, tmp_path: Path, monkeypatch):
+        self._write(tmp_path, (
+            "machines:\n"
+            "  tmichon-dev6:\n"
+            "    display_name: dev6\n"
+            "    environment: Windows 11\n"
+        ))
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "unknown-box")
+        assert cfg.detect_machine(tmp_path) == "unknown-box"
 
 
 # ---------------------------------------------------------------------------

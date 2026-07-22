@@ -310,6 +310,11 @@ class MachineEntry:
     display_name: str
     environment: str
     alias: str = ""
+    # Raw OS hostname (COMPUTERNAME) when it differs from ``key``. Lets a machine
+    # be keyed by a stable friendly name (e.g. ``tmichon-augloop1``) while the box
+    # reports a different, unrenameable COMPUTERNAME (e.g. ``cpc-tmich-oixui``).
+    # Empty means ``key`` is the hostname (the common case).
+    hostname: str = ""
     role: str = ""
     ssh_environments: list[SSHEnvironment] = field(default_factory=list)
     ssh_ready: bool = False
@@ -349,6 +354,7 @@ def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
             display_name=data.get("display_name", key),
             environment=data.get("environment", ""),
             alias=data.get("alias", ""),
+            hostname=data.get("hostname", ""),
             role=data.get("role", ""),
             ssh_environments=ssh_envs,
             ssh_ready=bool(ssh_block.get("ready", False)),
@@ -369,11 +375,13 @@ def machine_name(entry: MachineEntry) -> str:
 def find_machine_entry(
     entries: dict[str, MachineEntry], name: str,
 ) -> MachineEntry | None:
-    """Look up a machine by key or alias (case-insensitive).
+    """Look up a machine by key, alias, ``hostname`` field, or display_name
+    (case-insensitive).
 
-    Hostnames are case-insensitive, so match keys and aliases without regard
-    to case (Windows reports COMPUTERNAME in mixed case but tooling often
-    lowercases it). Returns None if no entry matches.
+    Hostnames are case-insensitive, so match without regard to case (Windows
+    reports COMPUTERNAME in mixed case but tooling often lowercases it). Matching
+    the explicit ``hostname`` field lets a machine keyed by a friendly name still
+    be found by its raw COMPUTERNAME. Returns None if no entry matches.
     """
     if name in entries:
         return entries[name]
@@ -383,6 +391,10 @@ def find_machine_entry(
             return entry
         if entry.alias and entry.alias.lower() == name_lower:
             return entry
+        if entry.hostname and entry.hostname.lower() == name_lower:
+            return entry
+        if entry.display_name and entry.display_name.lower() == name_lower:
+            return entry
     return None
 
 
@@ -390,9 +402,9 @@ def detect_machine(repo_dir: str | Path | None = None) -> str:
     """Auto-detect machine name from hostname.
 
     If *repo_dir* is provided, reads ``machines.yaml`` and matches
-    the hostname against machine keys and aliases (exact match).
-    Returns the canonical name (alias if set, otherwise key).
-    Falls back to the raw hostname if no registry is available.
+    the COMPUTERNAME against machine keys, the explicit ``hostname`` field, and
+    aliases (exact match). Returns the canonical name (alias if set, otherwise
+    key). Falls back to the raw hostname if no registry is available.
     """
     hostname = socket.gethostname().lower()
 
@@ -402,6 +414,10 @@ def detect_machine(repo_dir: str | Path | None = None) -> str:
             # Exact match on key (real hostname) first -- case-insensitive
             for key, entry in entries.items():
                 if hostname == key.lower():
+                    return machine_name(entry)
+            # Then the explicit ``hostname`` field (key decoupled from COMPUTERNAME)
+            for entry in entries.values():
+                if entry.hostname and hostname == entry.hostname.lower():
                     return machine_name(entry)
             # Then check aliases
             for entry in entries.values():
