@@ -421,14 +421,19 @@ def _detect_local_machine(
     hostname = socket.gethostname().lower()
     platform = _detect_platform()
 
-    # Try exact key match first, then check aliases
+    # Try exact key match first
     machine = machines.get(hostname)
     if machine:
         return machine, platform
 
-    # Try case-insensitive key match
+    # Then a case-insensitive key match, then the explicit ``hostname`` field
+    # (a machine keyed by a friendly name declares its raw COMPUTERNAME via
+    # ``hostname:`` so it still self-detects on the box).
     for key, mc in machines.items():
         if key.lower() == hostname:
+            return mc, platform
+    for mc in machines.values():
+        if getattr(mc, "hostname", "") and mc.hostname.lower() == hostname:
             return mc, platform
 
     return None, platform
