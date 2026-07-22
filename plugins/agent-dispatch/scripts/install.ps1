@@ -17,6 +17,16 @@
     vEthernet(WSL) IP, resolved at startup, never 0.0.0.0/LAN). This reverses the
     #2777 model where WSL owned the coordinator and Windows was a client.
 
+    On a coordinator host it ALSO installs the embody SUPERVISOR
+    (Scheduled Task 'agent-dispatch-supervisor'), which runs
+    `agent-dispatch supervise --all-repos` so dispatched, LABELED tasks are
+    turned into host embody autopilots unattended -- the Windows peer of the
+    Linux systemd supervisor unit (cross-platform-parity). It is label-gated
+    for safety (a label-less supervisor would embody every queued task): the
+    task is enabled only when AGENT_DISPATCH_SUPERVISE_LABELS is set in
+    supervisor.env; with none set the task is registered but left DISABLED
+    (inert), and the generated launcher hard-refuses a label-less run (#2869).
+
 .PARAMETER Action
     install (default) | update | status | start | stop | uninstall.
 
@@ -25,7 +35,12 @@
 
 .PARAMETER NoService
     Install/update the client (venv + binstub) only; do NOT install/start the
-    coordinator Scheduled Task (a deliberately client-only host).
+    coordinator Scheduled Task (a deliberately client-only host). Also skips the
+    embody supervisor (it needs a local coordinator).
+
+.PARAMETER NoSupervisor
+    Install everything EXCEPT the embody supervisor Scheduled Task (the
+    coordinator still installs on an eligible host).
 
 .PARAMETER Purge
     On uninstall: also delete config, DB, and the env file.
@@ -40,6 +55,7 @@ param(
     [string]$Action = 'install',
     [string]$InstallDir,
     [switch]$NoService,
+    [switch]$NoSupervisor,
     [switch]$Purge,
     [switch]$Force
 )
@@ -75,6 +91,7 @@ if ($env:OS -eq 'Windows_NT') {
 }
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 $TaskName = 'agent-dispatch'
+$SupervisorTaskName = 'agent-dispatch-supervisor'
 $DefaultPort = 9847
 
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
@@ -595,6 +612,193 @@ try {
     else { Write-Warn "Coordinator service not registered (needs elevation) -- client is installed; run elevated, or 'agent-dispatch serve' to run the coordinator manually" }
 }
 
+# -- Embody supervisor Scheduled Task (Windows; label-gated) ----------------
+#
+# The Windows peer of the Linux systemd supervisor unit (cross-platform-parity).
+# Runs `agent-dispatch supervise --all-repos`, turning queued LABELED tasks into
+# host embody autopilots. `--all-repos` avoids the lane-scoping gotcha (a short
+# `--repo owner/name` filters every task out), which makes the label opt-in the
+# ONLY thing between the supervisor and embodying *every* queued task -- so the
+# task is enabled only when supervisor.env sets AGENT_DISPATCH_SUPERVISE_LABELS.
+# See #2869.
+
+function Test-SupervisorLabelsConfigured {
+    # True when supervisor.env declares a non-empty AGENT_DISPATCH_SUPERVISE_LABELS.
+    $envFile = Join-Path $InstallDir 'supervisor.env'
+    if (-not (Test-Path $envFile)) { return $false }
+    foreach ($line in Get-Content $envFile) {
+        if ($line -match '^\s*AGENT_DISPATCH_SUPERVISE_LABELS\s*=\s*(.+?)\s*$') {
+            $val = $Matches[1].Trim().Trim('"').Trim("'")
+            $val = ($val -replace '[\s,]', '')
+            if ($val -ne '') { return $true }
+        }
+    }
+    return $false
+}
+
+function Remove-SupervisorTask {
+    # Returns 'removed' | 'blocked' | 'absent'. Mirrors Remove-CoordinatorTask.
+    if (-not (Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue)) {
+        return 'absent'
+    }
+    Stop-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $SupervisorTaskName -Confirm:$false -ErrorAction SilentlyContinue
+    if (Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue) {
+        return 'blocked'
+    }
+    return 'removed'
+}
+
+function Install-SupervisorTask {
+    # Install only where the full coordinator lives (a client-only host has no
+    # local coordinator for the supervisor to talk to). -NoSupervisor opts a full
+    # host out; -NoService (client-only) skips it too. Remove a stale task in
+    # either case so a host that became client-only stops supervising.
+    if ($NoSupervisor -or $NoService) {
+        switch (Remove-SupervisorTask) {
+            'removed' { Write-Ok   'Removed embody supervisor task (client-only / -NoSupervisor)' }
+            'blocked' { Write-Skip 'Supervisor task present but not removable without elevation -- run elevated to remove it' }
+            default   { Write-Skip 'Embody supervisor skipped (client-only / -NoSupervisor)' }
+        }
+        return
+    }
+    if ($env:OS -ne 'Windows_NT') { return }
+    if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
+        Write-Skip 'ScheduledTasks module unavailable -- run "agent-dispatch supervise --all-repos --label <L>" manually'
+        return
+    }
+
+    $envFile = Join-Path $InstallDir 'supervisor.env'
+    if (-not (Test-Path $envFile)) {
+        $envDefault = @"
+# agent-dispatch embody supervisor environment.
+# Edit, then: Start-ScheduledTask -TaskName agent-dispatch-supervisor
+#
+# SAFETY: the supervisor turns queued tasks into AUTONOMOUS embody sessions. It
+# runs with --all-repos, so it is GATED by an explicit label opt-in: only queued
+# tasks carrying one of these labels are embodied. With NO labels set, the task
+# is left DISABLED -- a label-less supervisor would embody EVERY queued task
+# (handoffs, interactive worktree-pinned tasks, ...), which is unsafe.
+#
+# Opt-in labels, comma- or space-separated (REQUIRED to enable the task):
+AGENT_DISPATCH_SUPERVISE_LABELS=
+# Poll interval, seconds (default 30):
+AGENT_DISPATCH_SUPERVISE_INTERVAL=30
+# Max concurrent in-flight embodies (default 1 = max-one-active):
+AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT=1
+# Max failed spawn attempts before a task is dead-lettered (default 3; 0=disable):
+AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3
+# Extra raw flags appended to the invocation (advanced; e.g. fleet mode:
+#   --pool host-a,host-b --origin lambda-core):
+AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=
+"@
+        [System.IO.File]::WriteAllText($envFile, $envDefault, $utf8NoBom)
+        Write-Ok "Supervisor env: $envFile (no labels -> task stays inert; add a label to enable)"
+    } else {
+        Write-Skip "Supervisor env already exists: $envFile"
+    }
+
+    # Launcher: loads supervisor.env, builds the supervise argv (labels -> repeated
+    # --label flags), and hard-refuses a label-less run (defense-in-depth: the
+    # registration below leaves it disabled without labels, but a hand-enable must
+    # not embody everything). supervise logs to STDERR, so -- as with the
+    # coordinator launcher -- drop to 'Continue' for the invocation so native
+    # stderr is captured, not a terminating NativeCommandError.
+    $launcher = Join-Path $InstallDir 'supervise-service.ps1'
+    $launcherBody = @"
+# agent-dispatch embody supervisor launcher (generated by install.ps1; #2869).
+# Do not edit; edit supervisor.env instead.
+`$ErrorActionPreference = 'Stop'
+`$env:PYTHONUTF8 = '1'
+`$envFile = Join-Path `$PSScriptRoot 'supervisor.env'
+`$labels = ''
+`$interval = '30'
+`$maxConcurrent = '1'
+`$maxAttempts = '3'
+`$extra = ''
+if (Test-Path `$envFile) {
+    foreach (`$line in Get-Content `$envFile) {
+        `$t = `$line.Trim()
+        if (`$t -eq '' -or `$t.StartsWith('#')) { continue }
+        `$kv = `$t -split '=', 2
+        if (`$kv.Count -ne 2) { continue }
+        `$k = `$kv[0].Trim(); `$v = `$kv[1].Trim()
+        switch (`$k) {
+            'AGENT_DISPATCH_SUPERVISE_LABELS'         { `$labels = `$v }
+            'AGENT_DISPATCH_SUPERVISE_INTERVAL'       { if (`$v) { `$interval = `$v } }
+            'AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT' { if (`$v) { `$maxConcurrent = `$v } }
+            'AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS'   { if (`$v) { `$maxAttempts = `$v } }
+            'AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS'     { `$extra = `$v }
+        }
+    }
+}
+`$argsList = @('supervise', '--all-repos', '--interval', `$interval,
+    '--max-concurrent', `$maxConcurrent, '--max-attempts', `$maxAttempts)
+`$haveLabel = `$false
+foreach (`$l in (`$labels -split '[\s,]+')) {
+    if (`$l) { `$argsList += @('--label', `$l); `$haveLabel = `$true }
+}
+if (-not `$haveLabel) {
+    Write-Error 'agent-dispatch-supervisor: refusing to run with no opt-in label. A label-less supervisor would embody EVERY queued task. Set AGENT_DISPATCH_SUPERVISE_LABELS in supervisor.env.'
+    exit 78  # EX_CONFIG
+}
+if (`$extra) { `$argsList += (`$extra -split '\s+') }
+`$logFile = Join-Path `$PSScriptRoot 'supervise-service.log'
+try {
+    if ((Test-Path `$logFile) -and ((Get-Item `$logFile).Length -gt 1MB)) {
+        Move-Item -Force `$logFile "`$logFile.1"
+    }
+} catch { }
+"[`$(Get-Date -Format o)] agent-dispatch supervisor launch (labels=`$labels interval=`$interval)" |
+    Out-File -FilePath `$logFile -Append -Encoding utf8
+`$ErrorActionPreference = 'Continue'
+& '$VenvPython' -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+"@
+    [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
+
+    $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
+        -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`""
+    $trigger = New-ScheduledTaskTrigger -AtLogOn
+    $settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
+
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $regOk = $false
+    try {
+        Register-ScheduledTask -TaskName $SupervisorTaskName -Action $action -Trigger $trigger `
+            -Settings $settings -Principal $principal -Force `
+            -Description 'agent-dispatch -- embody spawn supervisor (labeled queued tasks -> host embody autopilots)' | Out-Null
+        $regOk = $?
+    } catch {
+        $regOk = $false
+    }
+    if (-not $regOk) {
+        $ErrorActionPreference = $prevEAP
+        Write-Warn "Embody supervisor not registered (needs elevation) -- coordinator is installed; run elevated to add it"
+        return
+    }
+
+    if (Test-SupervisorLabelsConfigured) {
+        Enable-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue | Out-Null
+        Start-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
+        $ErrorActionPreference = $prevEAP
+        Write-Ok "Embody supervisor installed + started (Scheduled Task '$SupervisorTaskName')"
+    } else {
+        # No opt-in label -> leave the task registered but DISABLED (inert), the
+        # Windows analogue of an installed-but-not-enabled systemd unit.
+        Disable-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue | Out-Null
+        $ErrorActionPreference = $prevEAP
+        Write-Ok "Embody supervisor installed (INERT: no opt-in label; task disabled). To enable: set"
+        Write-Step "AGENT_DISPATCH_SUPERVISE_LABELS in $envFile, then re-run update"
+        Write-Step "(or: Enable-ScheduledTask -TaskName $SupervisorTaskName; Start-ScheduledTask -TaskName $SupervisorTaskName)"
+    }
+}
+
 # -- Port reservation (Windows) ---------------------------------------------
 
 function Test-Elevated {
@@ -729,6 +933,7 @@ function Invoke-Install {
     Add-PortReservation
     Install-CoordinatorTask
     if (-not $NoService) { Add-CoordinatorFirewallRule }
+    Install-SupervisorTask
     Write-Host ''; Write-Host '=== agent-dispatch install complete ===' -ForegroundColor Cyan
 }
 
@@ -739,6 +944,7 @@ function Invoke-Update {
     Add-PortReservation
     Install-CoordinatorTask
     if (-not $NoService) { Add-CoordinatorFirewallRule }
+    Install-SupervisorTask
     Write-Host ''; Write-Host '=== agent-dispatch update complete ===' -ForegroundColor Cyan
 }
 
@@ -748,9 +954,20 @@ function Invoke-Start {
     }
     Start-ScheduledTask -TaskName $TaskName
     Write-Ok 'Coordinator started'
+    # Start the supervisor too, but only if it is enabled (label-gated). A
+    # disabled/inert supervisor is left alone.
+    $sup = Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
+    if ($sup -and $sup.State -ne 'Disabled') {
+        Start-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
+        Write-Ok 'Embody supervisor started'
+    }
 }
 
 function Invoke-Stop {
+    if (Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue) {
+        Stop-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
+        Write-Ok 'Embody supervisor stopped'
+    }
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         Write-Ok 'Coordinator stopped'
@@ -776,10 +993,25 @@ function Invoke-Status {
     } else {
         Write-Skip 'No coordinator task (client-only host)'
     }
+    $sup = Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
+    if ($sup) {
+        if (Test-SupervisorLabelsConfigured) {
+            Write-Ok "Embody supervisor task: $($sup.State)"
+        } else {
+            Write-Ok "Embody supervisor task: $($sup.State) (INERT: no opt-in label set)"
+        }
+    } else {
+        Write-Skip 'No embody supervisor task (client-only host, -NoSupervisor, or unavailable)'
+    }
 }
 
 function Invoke-Uninstall {
     Write-Host ''; Write-Host '=== agent-dispatch uninstall ===' -ForegroundColor Cyan; Write-Host ''
+    if (Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue) {
+        Stop-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $SupervisorTaskName -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Ok 'Embody supervisor task removed'
+    }
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
