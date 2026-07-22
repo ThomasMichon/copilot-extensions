@@ -1,0 +1,21 @@
+# EXEMPLAR: `direct` transport module (contract reference).
+# Plain SSH to a routable address, only where inbound is permitted. It ships NO
+# proxy_command recipe -> the core emits plain `Host` blocks with no ProxyCommand.
+# This exemplar validates that the contract renders a recipe-less transport. A
+# real `direct` transport would be its own plugin.
+module: direct
+kind: transport
+summary: Plain SSH to a routable address (no tunnel).
+produces:
+  ssh_profile: true
+  keyed_by: machine-name
+inbound_ports: some          # a direct/listening transport is the deliberate exception
+topology:
+  default: per-machine
+  supported: [per-machine]
+capabilities:
+  install-client: false      # OpenSSH client is the common floor; nothing extra
+  emit-profile: true
+  verify: true
+  provision-server: false
+# no proxy_command: direct dials the host itself.

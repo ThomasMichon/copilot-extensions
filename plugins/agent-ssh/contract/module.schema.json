@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ThomasMichon/copilot-extensions/plugins/agent-ssh/contract/module.schema.json",
+  "title": "agent-ssh transport-provider contract",
+  "description": "The contract every transport module registers against. A transport is its OWN plugin (in its audience's marketplace) that ships a module.yaml conforming to this schema. agent-ssh's generic core consumes it to emit name-keyed SSH profiles. PUBLIC contract; transport instances (Cloudflare, dtssh) live in their own repos.",
+  "type": "object",
+  "properties": {
+    "module": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Transport name. Namespaces the drop-in fragment (~/.ssh/config.d/50-agent-ssh-<module>.conf) and the registry `transport:` dispatch key."
+    },
+    "kind": { "const": "transport" },
+    "summary": { "type": "string" },
+    "proxy_command": {
+      "type": "string",
+      "description": "OPTIONAL recipe: the ProxyCommand template used to dial a host. Placeholders: {hostname} {name} {user} {port} {proxy_binary}. Omit for a plain-SSH transport (e.g. `direct`). This is the ONLY transport-specific rendering the core needs."
+    },
+    "proxy_binary_default": {
+      "type": "string",
+      "description": "Default binary substituted into {proxy_binary} when the registry does not override `proxy_command_binary` (e.g. 'cloudflared'). Transport-owned; never hardcoded in the core."
+    },
+    "produces": {
+      "type": "object",
+      "properties": {
+        "ssh_profile": { "const": true },
+        "keyed_by": { "const": "machine-name" }
+      },
+      "required": ["ssh_profile", "keyed_by"]
+    },
+    "inbound_ports": {
+      "type": "string",
+      "enum": ["none", "some"],
+      "description": "Firewall posture. 'none' => zero-inbound tunnel (preferred, tunnel-first default). 'some' => a deliberately-chosen direct/listening transport."
+    },
+    "topology": {
+      "type": "object",
+      "properties": {
+        "default": { "type": "string", "enum": ["per-machine", "jumpbox"] },
+        "supported": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["per-machine", "jumpbox"] }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "description": "Which lifecycle verbs the transport implements. emit-profile + verify are satisfied by the core; install-client and provision-server are transport-owned.",
+      "properties": {
+        "install-client":   { "type": "boolean" },
+        "emit-profile":     { "type": "boolean" },
+        "verify":           { "type": "boolean" },
+        "provision-server": { "type": "boolean" }
+      }
+    },
+    "config_schema": {
+      "type": "string",
+      "description": "Path (within the transport plugin) to the transport's own config schema, extending contract/registry-record.schema.json."
+    },
+    "entrypoints": {
+      "type": "object",
+      "description": "Transport-owned scripts the core shells to for verbs the core does not itself implement (install-client, provision-server). Dual posix/windows per cross-platform-parity.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "posix":   { "type": "string" },
+          "windows": { "type": "string" }
+        }
+      }
+    }
+  },
+  "required": ["module", "kind", "produces", "inbound_ports"]
+}
