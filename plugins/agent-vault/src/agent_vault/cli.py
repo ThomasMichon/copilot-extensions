@@ -367,6 +367,26 @@ def _read_password_from_tty(prompt: str) -> str | None:
         os.close(fd)
 
 
+def _has_controlling_tty() -> bool:
+    """Whether an interactive controlling terminal is available for a prompt.
+
+    On POSIX this checks that ``/dev/tty`` can be opened -- it works even when
+    stdin is piped, as long as the process has a controlling terminal (e.g. an
+    interactive SSH session). On Windows it falls back to ``sys.stdin.isatty()``.
+    Used to decide whether the inline-terminal unlock fallback can reach the
+    operator, so a headless/agent caller fails fast instead of printing a
+    "no terminal" error.
+    """
+    if os.name == "nt":
+        return sys.stdin.isatty()
+    try:
+        fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+    except OSError:
+        return False
+    os.close(fd)
+    return True
+
+
 def _server_prompted_unlock() -> bool:
     """Ask the vault service to prompt for the password on its own GUI."""
     resp = send_command({"action": "unlock", "prompt": True}, timeout=None)
@@ -402,20 +422,37 @@ def _terminal_unlock_local() -> bool:
 
 
 def auto_unlock() -> bool:
-    """Prompt and send master password to unlock CLI backend."""
+    """Acquire the master password and unlock the CLI backend.
+
+    Prefers the richest prompt available and always falls back to an inline
+    terminal prompt when a controlling terminal is present -- so a bare ``unlock``
+    reaches the operator even on a headless/SSH host where no GUI dialog can be
+    displayed. (Unlock-source providers -- e.g. an operator-held value -- are
+    consulted daemon-side before any prompt.) When there is no GUI *and* no
+    controlling terminal, it returns ``False`` rather than stalling.
+    """
     if os.environ.get("VAULT_UNLOCK_TERMINAL"):
         return _terminal_unlock_local()
     if IS_WSL:
+        # Let the service resolve providers and prompt on a GUI if one is
+        # reachable; on a headless/SSH host it returns without unlocking, so fall
+        # back to an inline terminal prompt when we have a controlling TTY.
         print("[agent-vault] Requesting password via vault service...", file=sys.stderr)
-        return _server_prompted_unlock()
-    pw = prompt_password()
-    if not pw:
+        if _server_prompted_unlock():
+            return True
+        if _has_controlling_tty():
+            return _terminal_unlock_local()
         return False
-    resp = send_command({"action": "unlock", "password": pw}, timeout=15.0)
-    if resp and resp.get("ok"):
-        return True
-    if resp:
-        print(f"Unlock failed: {resp.get('error', 'unknown')}", file=sys.stderr)
+    pw = prompt_password()
+    if pw:
+        resp = send_command({"action": "unlock", "password": pw}, timeout=15.0)
+        if resp and resp.get("ok"):
+            return True
+        if resp:
+            print(f"Unlock failed: {resp.get('error', 'unknown')}", file=sys.stderr)
+    # No GUI prompt available (or it failed/cancelled) -> inline terminal fallback.
+    if _has_controlling_tty():
+        return _terminal_unlock_local()
     return False
 
 
