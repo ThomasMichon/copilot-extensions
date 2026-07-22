@@ -72,6 +72,21 @@ agent already up and running to cover this worktree or repo?"*. The live state i
 surfaces is rich enough to bring **granular, live status into the worktree
 picker**.
 
+### agent-ssh — the connectivity layer
+Owns the **SSH mesh** the fabric's cross-machine reach rides on. It
+**provisions and maintains** the transport (OpenSSH substrate, keys, host-key
+pinning), **adopts** machines into a declared mesh, stands up a **pluggable
+transport module** per machine (direct, a tunnel-based provider, or real-user
+interactive reach), manages a **tunnel-first firewall posture**, and keeps each
+machine's advertised **reachability honest** by verifying it against the live
+path. Where the coordination layer and the venue providers assume they can reach
+another machine, this layer is what makes that assumption *true* — turning "SSH
+is borrowed" into "SSH is provisioned, verified, and maintained." Per
+*derive-don't-duplicate*, its machine registry is the **single owning store** of
+mesh reachability, which the layers above route **over** rather than copy. A
+per-plugin child vision refines it at
+[`visions/plugins/agent-ssh/`](../plugins/agent-ssh/README.md).
+
 ### agent-dispatch — the delegation layer
 Adds **task management and role assignment**: a **shared, transactional store**
 of task definitions, plus a place for an agent to report **summary status** —
@@ -280,8 +295,10 @@ degrades to the same claimable record, not to a silent no-op.
 - Sibling vision: [plugin-services](../plugin-services/README.md) — the per-host
   service model the fabric's layers deploy as (it defers cross-host agent reach
   to this fabric).
-- Child visions: none yet (per-plugin leaves will live under
-  `visions/plugins/<name>/` — e.g. a future `visions/plugins/agent-bridge/`).
+- Child visions: [agent-ssh](../plugins/agent-ssh/README.md) — the connectivity /
+  transport layer the fabric's cross-machine reach rides on. Further per-plugin
+  leaves live under `visions/plugins/<name>/` as authored (e.g. a future
+  `visions/plugins/agent-bridge/`).
 - Reality docs: [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/`.
