@@ -125,6 +125,35 @@ def _pwsh_remote(cmd: str) -> str:
     return f"pwsh -NoProfile -EncodedCommand {enc}"
 
 
+def _drop_classify_arg(argv: list[str]) -> list[str]:
+    """Return *argv* with ``--classify`` removed from the remote command.
+
+    The classify-unsupported retry (see :func:`_fetch`) must strip ``--classify``
+    from an already-built remote argv. That is a plain substring in the
+    ``bash -lc '<cmd>'`` form, but for the Windows ``pwsh -NoProfile
+    -EncodedCommand <base64>`` form the flag lives *inside* the base64 blob, so a
+    naive ``str.replace`` is a no-op -- the retry would resend the identical
+    command and fail again on an older remote. For the encoded form we decode,
+    drop the flag, and re-encode so the fallback actually takes effect."""
+    marker = "-EncodedCommand "
+    out: list[str] = []
+    for a in argv:
+        if marker in a:
+            head, b64 = a.rsplit(marker, 1)
+            try:
+                decoded = base64.b64decode(b64).decode("utf-16-le")
+                decoded = decoded.replace(" --classify", "")
+                b64 = base64.b64encode(
+                    decoded.encode("utf-16-le")).decode("ascii")
+                a = head + marker + b64
+            except Exception:
+                a = a.replace(" --classify", "")
+        else:
+            a = a.replace(" --classify", "")
+        out.append(a)
+    return out
+
+
 def _argv_for(shell: str, alias: str, project: str, *, classify: bool,
               reconcile: bool = False):
     """Remote list argv for a machine/env: pwsh on Windows, bash elsewhere."""
@@ -502,8 +531,9 @@ def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None):
     proc = runner(use_argv, source.timeout)
     if proc.returncode != 0 and _is_classify_unsupported(proc.stderr):
         # Older remote: drop --classify and retry (rows will lack canonical
-        # state but still load).
-        retry = [a.replace(" --classify", "") for a in use_argv]
+        # state but still load). Encoding-aware so the pwsh/-EncodedCommand
+        # form is stripped too, not just the plain bash form.
+        retry = _drop_classify_arg(use_argv)
         use_argv = retry
         # Persist the fallback only for the source's own default argv, not for a
         # transient override (e.g. the reconcile pass).
