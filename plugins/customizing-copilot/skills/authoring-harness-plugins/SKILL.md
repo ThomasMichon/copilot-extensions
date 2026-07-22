@@ -134,3 +134,41 @@ In the consumer's `.github/copilot/settings.json` (see `installing-plugins`):
 Then any local `repo-<repo>` redirect skill and related-narrative can slim to a
 pointer at the plugin — the operator substance now lives with the repo it
 describes.
+
+## Overlap & precedence (multiple marketplaces enabled)
+
+Once a consumer enables several marketplaces (copilot-extensions, a team catalog,
+a repo's own `/.ai`), two skills can answer the same request. **Copilot has no
+precedence setting** — every enabled marketplace exposes the same root
+`marketplace.json`, and enabled skills are surfaced to the model by their
+**description/trigger**; the model selects by match. So you can't *declare* "my
+skill wins." You engineer it, with four levers:
+
+1. **Narrow, specific triggers beat broad ones.** Write each skill's
+   `description` + trigger phrases to the *exact* task, and add explicit
+   **disambiguation** — "use this for X; **not** for Y (use Z)". A precise match
+   is chosen over a vague "ALWAYS invoke on all changes" skill, and the negative
+   clause tells the model when to defer. Broad, imperative triggers ("ALWAYS
+   invoke on ANY edit") are an anti-pattern: they shadow narrower peers — don't
+   author them, and be wary of enabling plugins that do.
+2. **Your `enabledPlugins` set is the real precedence knob.** The surest way a
+   competing skill doesn't win is to **not enable it** — or to enable it only
+   where it's wanted. Curate deliberately; don't blanket-enable a broad-trigger
+   catalog globally.
+3. **Scope by settings layer.** Settings compose additively across **user → repo →
+   workspace** (`~/.copilot/settings.json`, a repo's `.github/copilot/settings.json`,
+   a workspace file). Keep your always-on harness skills at **user** scope so
+   they're present everywhere; enable a broad or repo-specific tool **narrowly**
+   (repo/workspace) so it's only in play where it belongs. Narrow-trigger +
+   narrow-enable *is* the precedence mechanism.
+4. **Name-prefixing keeps identities unambiguous.** A plugin is addressed as
+   `<plugin>@<marketplace>`, and an aggregating catalog may prefix names (e.g. a
+   synced team catalog surfaces `<catalog>-<name>`). Enable the specific prefixed
+   plugin you want so there's no ambiguous bare name.
+
+**Don't encode precedence as per-skill "prefer me" notes.** A line in a skill
+body that says "prefer this over the other plugin's skill for now" is a smell —
+the model doesn't read one skill while choosing another, so the note never fires
+at selection time. Fix overlap at the source instead: tighten your triggers
+(lever 1) and curate what's enabled (levers 2–3). If two of your *own* skills
+overlap, split or merge them so each has a clean, non-colliding trigger.
