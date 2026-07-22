@@ -7,6 +7,14 @@
 # the agent-worktrees plugin reconciler (runtimeScope: machine-gated) and the
 # facility `aperture-labs services agent-dispatch <action>` path both drive it.
 #
+# On a standalone Linux deploy host it ALSO installs the **embody supervisor**
+# (`agent-dispatch-supervisor.service`), a second systemd user unit that runs
+# `agent-dispatch supervise --all-repos` as a serve loop so dispatched, LABELED
+# tasks are turned into host embody autopilots unattended. The supervisor is
+# **label-gated for safety** -- a label-less supervisor would embody every queued
+# task -- so it is enabled only when `AGENT_DISPATCH_SUPERVISE_LABELS` is set in
+# `supervisor.env`; with none set the unit is installed but left inert (#2869).
+#
 # Runtime lives at ~/.agent-dispatch/ (venv, config, DB). Binstub goes to
 # ~/.local/bin/agent-dispatch. A STANDALONE Linux host (e.g. Wheatley) runs the
 # full coordinator as a systemd **user** service (loopback 127.0.0.1:9847). A
@@ -23,6 +31,8 @@
 # Options:
 #   --no-service       Install/update the client (venv + binstub) but do NOT
 #                      install/start the coordinator service (client-only host).
+#   --no-supervisor    Install everything EXCEPT the embody supervisor unit
+#                      (the coordinator still installs on an eligible host).
 #   --purge            On uninstall: also delete config, DB, and env file.
 #   --force            On update: bypass the downgrade guard (deliberate
 #                      rollback). Env: AGENT_DISPATCH_ALLOW_DOWNGRADE=1.
@@ -46,6 +56,7 @@ ACTION="${1:-status}"
 shift || true
 
 NO_SERVICE=0
+NO_SUPERVISOR=0
 PURGE=0
 INSTALL_DIR=""
 FORCE="${AGENT_DISPATCH_ALLOW_DOWNGRADE:-0}"
@@ -53,6 +64,7 @@ FORCE="${AGENT_DISPATCH_ALLOW_DOWNGRADE:-0}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --no-service) NO_SERVICE=1; shift ;;
+        --no-supervisor) NO_SUPERVISOR=1; shift ;;
         --purge) PURGE=1; shift ;;
         --force) FORCE=1; shift ;;
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
@@ -66,8 +78,11 @@ LOCAL_BIN="$HOME/.local/bin"
 VENV_PYTHON="$VENV_DIR/bin/python"
 STUB="$LOCAL_BIN/agent-dispatch"
 SYSTEMD_UNIT="agent-dispatch.service"
+SUPERVISOR_UNIT="agent-dispatch-supervisor.service"
 UNIT_DIR="$HOME/.config/systemd/user"
 ENV_FILE="$INSTALL_DIR/service.env"
+SUPERVISOR_ENV_FILE="$INSTALL_DIR/supervisor.env"
+SUPERVISOR_LAUNCHER="$INSTALL_DIR/supervise-service.sh"
 
 # === install-contract:v3 source-kind -- keep byte-identical across plugins ===
 _source_kind() {
@@ -370,13 +385,172 @@ EOF
     fi
 }
 
+# -- Embody supervisor service (systemd user unit; label-gated) --------------
+#
+# The supervisor turns queued, LABELED tasks into host embody autopilots via
+# `agent-dispatch supervise --all-repos`. Running with `--all-repos` avoids the
+# lane-scoping gotcha (a short `--repo owner/name` form silently filters every
+# task out), but that makes the label opt-in the ONLY thing standing between the
+# supervisor and embodying *every* queued task -- so the service is enabled only
+# when at least one label is configured in supervisor.env. See #2869.
+
+# True (0) when supervisor.env declares a non-empty AGENT_DISPATCH_SUPERVISE_LABELS.
+_supervisor_labels_configured() {
+    [[ -f "$SUPERVISOR_ENV_FILE" ]] || return 1
+    local v
+    v="$(sed -n 's/^[[:space:]]*AGENT_DISPATCH_SUPERVISE_LABELS[[:space:]]*=//p' \
+        "$SUPERVISOR_ENV_FILE" | tail -n1)"
+    v="${v//\"/}"; v="${v//\'/}"
+    v="$(printf '%s' "$v" | tr -d '[:space:],')"
+    [[ -n "$v" ]]
+}
+
+_remove_supervisor_unit() {
+    if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SUPERVISOR_UNIT" ]]; then
+        systemctl --user stop "$SUPERVISOR_UNIT" 2>/dev/null || true
+        systemctl --user disable "$SUPERVISOR_UNIT" 2>/dev/null || true
+        rm -f "$UNIT_DIR/$SUPERVISOR_UNIT"
+        systemctl --user daemon-reload 2>/dev/null || true
+    fi
+    rm -f "$SUPERVISOR_LAUNCHER"
+}
+
+_install_supervisor_service() {
+    if [[ "$NO_SUPERVISOR" -eq 1 ]]; then
+        _remove_supervisor_unit
+        _skip "Embody supervisor skipped (--no-supervisor)"
+        return 0
+    fi
+    # The supervisor spawns embody autopilots on THIS host. Install it only where
+    # we install the full coordinator (a standalone Linux deploy host); a WSL
+    # guest / client-only host does not host the supervisor by default. Remove a
+    # stale unit if this host became client-only.
+    if [[ "$NO_SERVICE" -eq 1 ]] || _is_wsl; then
+        _remove_supervisor_unit
+        _skip "Embody supervisor skipped (client-only / WSL host)"
+        return 0
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+        _skip "systemd not available -- run 'agent-dispatch supervise --all-repos --label <L>' manually"
+        return 0
+    fi
+    mkdir -p "$UNIT_DIR"
+
+    if [[ ! -f "$SUPERVISOR_ENV_FILE" ]]; then
+        cat > "$SUPERVISOR_ENV_FILE" << 'ENVEOF'
+# agent-dispatch embody supervisor environment
+# (edit + `systemctl --user restart agent-dispatch-supervisor`)
+#
+# SAFETY: the supervisor turns queued tasks into AUTONOMOUS embody sessions. It
+# runs with --all-repos, so it is GATED by an explicit label opt-in: only queued
+# tasks carrying one of these labels are embodied. With NO labels set, the
+# service is left DISABLED -- a label-less supervisor would embody EVERY queued
+# task (handoffs, interactive worktree-pinned tasks, ...), which is unsafe.
+#
+# Opt-in labels, comma- or space-separated (REQUIRED to enable the service):
+AGENT_DISPATCH_SUPERVISE_LABELS=
+# Poll interval, seconds (default 30):
+AGENT_DISPATCH_SUPERVISE_INTERVAL=30
+# Max concurrent in-flight embodies (default 1 = max-one-active):
+AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT=1
+# Max failed spawn attempts before a task is dead-lettered (default 3; 0=disable):
+AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3
+# Extra raw flags appended to the invocation (advanced; e.g. fleet mode:
+#   --pool host-a,host-b --origin wheatley):
+AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=
+ENVEOF
+        _ok "Supervisor env: $SUPERVISOR_ENV_FILE (no labels -> service stays inert; add a label to enable)"
+    else
+        _skip "Supervisor env already exists: $SUPERVISOR_ENV_FILE"
+    fi
+
+    # Launcher: builds the supervise argv from the env (labels -> repeated
+    # --label flags) and execs the serve loop. A defense-in-depth guard refuses
+    # to run label-less (the install below won't enable it, but a hand-enable
+    # must not embody everything).
+    cat > "$SUPERVISOR_LAUNCHER" << LAUNCHEOF
+#!/usr/bin/env bash
+# agent-dispatch embody supervisor launcher -- GENERATED by install.sh (#2869).
+# Do not edit; edit supervisor.env instead.
+set -euo pipefail
+export PYTHONUTF8=1
+
+labels="\${AGENT_DISPATCH_SUPERVISE_LABELS:-}"
+interval="\${AGENT_DISPATCH_SUPERVISE_INTERVAL:-30}"
+max_concurrent="\${AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT:-1}"
+max_attempts="\${AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS:-3}"
+extra="\${AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS:-}"
+
+args=(supervise --all-repos --interval "\$interval" \\
+      --max-concurrent "\$max_concurrent" --max-attempts "\$max_attempts")
+
+labels="\${labels//,/ }"
+have_label=0
+for l in \$labels; do
+    [[ -n "\$l" ]] || continue
+    args+=(--label "\$l")
+    have_label=1
+done
+if [[ "\$have_label" -eq 0 ]]; then
+    echo "agent-dispatch-supervisor: refusing to run with no opt-in label." >&2
+    echo "  A label-less supervisor would embody EVERY queued task." >&2
+    echo "  Set AGENT_DISPATCH_SUPERVISE_LABELS in $SUPERVISOR_ENV_FILE." >&2
+    exit 78  # EX_CONFIG
+fi
+
+# shellcheck disable=SC2206
+[[ -n "\$extra" ]] && args+=(\$extra)
+
+exec "$VENV_PYTHON" -m agent_dispatch "\${args[@]}"
+LAUNCHEOF
+    chmod +x "$SUPERVISOR_LAUNCHER"
+
+    cat > "$UNIT_DIR/$SUPERVISOR_UNIT" << EOF
+[Unit]
+Description=agent-dispatch -- embody spawn supervisor (labeled queued tasks -> host embody autopilots)
+After=network.target $SYSTEMD_UNIT
+Wants=$SYSTEMD_UNIT
+
+[Service]
+Type=simple
+EnvironmentFile=-$SUPERVISOR_ENV_FILE
+Environment=PYTHONUTF8=1
+ExecStart=$SUPERVISOR_LAUNCHER
+Restart=on-failure
+RestartSec=10
+WorkingDirectory=$INSTALL_DIR
+
+[Install]
+WantedBy=default.target
+EOF
+    systemctl --user daemon-reload 2>/dev/null || true
+
+    if _supervisor_labels_configured; then
+        systemctl --user enable "$SUPERVISOR_UNIT" 2>/dev/null || true
+        systemctl --user restart "$SUPERVISOR_UNIT" 2>/dev/null || true
+        if systemctl --user is-active "$SUPERVISOR_UNIT" &>/dev/null; then
+            _ok "Embody supervisor installed + started ($SUPERVISOR_UNIT)"
+        else
+            _warn "Embody supervisor installed but not active -- check: systemctl --user status agent-dispatch-supervisor"
+        fi
+    else
+        systemctl --user stop "$SUPERVISOR_UNIT" 2>/dev/null || true
+        systemctl --user disable "$SUPERVISOR_UNIT" 2>/dev/null || true
+        _ok "Embody supervisor installed (INERT: no opt-in label). To enable: set"
+        _step "AGENT_DISPATCH_SUPERVISE_LABELS in $SUPERVISOR_ENV_FILE, then re-run update"
+        _step "(or: systemctl --user enable --now $SUPERVISOR_UNIT)"
+    fi
+}
+
 # -- Actions ----------------------------------------------------------------
 do_install() {
     echo ''; echo '=== agent-dispatch install ==='; echo ''
     _ensure_runtime
     _install_service
+    _install_supervisor_service
     echo ''; echo '=== agent-dispatch install complete ==='
     echo '  Coordinator: systemctl --user status agent-dispatch'
+    echo '  Supervisor:  systemctl --user status agent-dispatch-supervisor'
 }
 
 do_update() {
@@ -384,6 +558,7 @@ do_update() {
     _downgrade_guard
     _ensure_runtime
     _install_service
+    _install_supervisor_service
     echo ''; echo '=== agent-dispatch update complete ==='
 }
 
@@ -396,10 +571,24 @@ do_start() {
     systemctl --user start "$SYSTEMD_UNIT"
     systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null \
         && _ok "Coordinator started" || { _fail "Failed to start coordinator"; exit 1; }
+    # Start the supervisor too, but only if it is enabled (label-gated). An
+    # inert/disabled supervisor is left alone.
+    if [[ -f "$UNIT_DIR/$SUPERVISOR_UNIT" ]] \
+       && systemctl --user is-enabled "$SUPERVISOR_UNIT" &>/dev/null; then
+        systemctl --user start "$SUPERVISOR_UNIT" 2>/dev/null || true
+        systemctl --user is-active "$SUPERVISOR_UNIT" &>/dev/null \
+            && _ok "Embody supervisor started" \
+            || _warn "Embody supervisor did not start -- check: systemctl --user status agent-dispatch-supervisor"
+    fi
 }
 
 do_stop() {
     command -v systemctl >/dev/null 2>&1 || { _fail 'systemd not available'; exit 1; }
+    if [[ -f "$UNIT_DIR/$SUPERVISOR_UNIT" ]] \
+       && systemctl --user is-active "$SUPERVISOR_UNIT" &>/dev/null; then
+        systemctl --user stop "$SUPERVISOR_UNIT" 2>/dev/null || true
+        _ok "Embody supervisor stopped"
+    fi
     if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
         systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
         _ok "Coordinator stopped"
@@ -425,11 +614,25 @@ do_status() {
     else
         _skip "No coordinator service unit (client-only host, or systemd unavailable)"
     fi
+    if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SUPERVISOR_UNIT" ]]; then
+        local sstate senabled
+        sstate=$(systemctl --user is-active "$SUPERVISOR_UNIT" 2>/dev/null || echo inactive)
+        senabled=$(systemctl --user is-enabled "$SUPERVISOR_UNIT" 2>/dev/null || echo disabled)
+        if _supervisor_labels_configured; then
+            _ok "Embody supervisor service: $sstate ($senabled)"
+        else
+            _ok "Embody supervisor service: $sstate ($senabled -- INERT: no opt-in label set)"
+        fi
+    else
+        _skip "No embody supervisor unit (client-only host, --no-supervisor, or systemd unavailable)"
+    fi
 }
 
 do_uninstall() {
     echo ''; echo '=== agent-dispatch uninstall ==='; echo ''
     if command -v systemctl >/dev/null 2>&1; then
+        _remove_supervisor_unit
+        _ok "Embody supervisor service removed"
         systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
         systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
         rm -f "$UNIT_DIR/$SYSTEMD_UNIT"
