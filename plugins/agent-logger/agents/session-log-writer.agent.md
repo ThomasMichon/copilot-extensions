@@ -127,12 +127,16 @@ repository context, or a summary that reads like a function call.
 
 - `read-session-digest <session-id> context` -- metadata, checkpoints,
   stats, segment inventory.
-- `read-session-digest <session-id> list` then
-  `read-session-digest <session-id> segment <N>` for each segment.
-- For multiple standalone sessions, dispatch **explore** sub-agents to
-  summarize segments in parallel (output contract: workstreams, files
-  changed, key commands, failures/workarounds, decisions, follow-ups; no
-  prose intro, no personality).
+- **Always** summarize a session's segments through an **explore** sub-agent
+  -- never read a session's raw segments directly into this agent's own
+  context. Dispatch **one explore sub-agent per session** (in parallel across
+  sessions); each runs `read-session-digest <session-id> list` then
+  `read-session-digest <session-id> segment <N>` for every segment and returns
+  a summary (output contract: workstreams, files changed, key commands,
+  failures/workarounds, decisions, follow-ups; no prose intro, no
+  personality). Aggregate those summaries here. This holds a single large
+  session -- and a whole multi-session day -- within a bounded context budget,
+  since raw segment bulk stays in the sub-agents.
 
 #### Operator notes
 
