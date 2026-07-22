@@ -395,6 +395,51 @@ def test_wrap_remote_pwsh_uses_encoded_command():
     assert b[-1] == "bash -lc 'dotfiles cleanup --json'"
 
 
+def test_classify_fallback_is_encoding_aware(monkeypatch):
+    """The classify-unsupported retry must strip --classify from a pwsh
+    -EncodedCommand argv too (the flag lives inside the base64 blob, so a plain
+    str.replace would be a no-op and the retry would resend the same command)."""
+    import base64
+
+    argv = data_ssh._argv_for("pwsh", "tmichon-cloud1", "dotfiles", classify=True)
+
+    # Direct: decode -> drop --classify -> re-encode, still EncodedCommand.
+    stripped = data_ssh._drop_classify_arg(argv)
+    remote = stripped[-1]
+    assert remote.startswith("pwsh -NoProfile -EncodedCommand ")
+    dec = base64.b64decode(
+        remote.split("-EncodedCommand ", 1)[1]).decode("utf-16-le")
+    assert "--classify" not in dec
+    assert dec == "dotfiles list --json --mux-details --include-other-platforms"
+
+    # End-to-end via _fetch: the first call errors as classify-unsupported; the
+    # retry (decoded, no --classify) succeeds and use_classify is persisted off.
+    calls = []
+
+    class _Proc:
+        def __init__(self, rc, stdout="", stderr=""):
+            self.returncode = rc
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(a, timeout):
+        calls.append(list(a))
+        d = base64.b64decode(
+            a[-1].split("-EncodedCommand ", 1)[1]).decode("utf-16-le")
+        if "--classify" in d:
+            return _Proc(2, stderr="error: unrecognized arguments: --classify")
+        return _Proc(0, stdout='{"worktrees": []}')
+
+    monkeypatch.setattr(data_ssh, "_run", fake_run)
+    src = data_ssh.Source("Cloud1", "Win", argv, ready=True)
+    assert data_ssh._fetch(src) == []
+    assert len(calls) == 2
+    d1 = base64.b64decode(
+        calls[1][-1].split("-EncodedCommand ", 1)[1]).decode("utf-16-le")
+    assert "--classify" not in d1
+    assert src.use_classify is False
+
+
 def test_reconcile_remote_prs_runs_reconcile_argv_and_swaps(monkeypatch):
     loader, src = _ready_loader(monkeypatch, ["old"])
     seen = {"argv": None, "n": 0}
