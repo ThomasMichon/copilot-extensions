@@ -24,6 +24,7 @@ without it, so older remotes still load (their rows just lack canonical state).
 """
 from __future__ import annotations
 
+import base64
 import datetime as _dt
 import json
 import os
@@ -109,12 +110,27 @@ def _list_args(shell: str, *, classify: bool, reconcile: bool = False) -> str:
     return args
 
 
+def _pwsh_remote(cmd: str) -> str:
+    """Remote pwsh invocation that survives the remote sshd's default shell.
+
+    Uses ``-EncodedCommand`` (base64 of UTF-16LE) instead of ``-Command '<cmd>'``.
+    A plain single-quoted ``-Command`` is mangled when the remote sshd's default
+    shell is **cmd.exe** (e.g. a dtssh Windows host, where DefaultShell is unset):
+    cmd.exe passes the quotes through and pwsh evaluates the single-quoted text as
+    a *string literal* -- echoing it instead of running it, so the picker gets a
+    non-JSON line back and the machine shows as failed. EncodedCommand carries no
+    shell-special characters, so it executes correctly regardless of the remote
+    default shell (cmd.exe or pwsh)."""
+    enc = base64.b64encode(cmd.encode("utf-16-le")).decode("ascii")
+    return f"pwsh -NoProfile -EncodedCommand {enc}"
+
+
 def _argv_for(shell: str, alias: str, project: str, *, classify: bool,
               reconcile: bool = False):
     """Remote list argv for a machine/env: pwsh on Windows, bash elsewhere."""
     cmd = f"{project} {_list_args(shell, classify=classify, reconcile=reconcile)}"
     if shell == "pwsh":
-        return ["ssh", alias, f"pwsh -NoProfile -Command '{cmd}'"]
+        return ["ssh", alias, _pwsh_remote(cmd)]
     return ["ssh", alias, f"bash -lc '{cmd}'"]
 
 
@@ -198,7 +214,7 @@ def _build_sources():
 def _wrap_remote(shell: str, alias: str, inner: str):
     """SSH argv that runs *inner* under the right login shell on *alias*."""
     if shell == "pwsh":
-        return ["ssh", alias, f"pwsh -NoProfile -Command '{inner}'"]
+        return ["ssh", alias, _pwsh_remote(inner)]
     return ["ssh", alias, f"bash -lc '{inner}'"]
 
 

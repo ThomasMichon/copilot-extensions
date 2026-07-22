@@ -331,6 +331,43 @@ def test_argv_for_without_reconcile_omits_flag():
     assert "--reconcile-prs" not in argv[-1]
 
 
+def test_argv_for_pwsh_uses_encoded_command():
+    """Windows remotes must use -EncodedCommand, not -Command '<cmd>'.
+
+    Under a dtssh Windows sshd (default shell cmd.exe), a single-quoted
+    ``-Command`` is echoed as a string literal instead of executed, so the
+    picker gets non-JSON back and the machine shows as failed. -EncodedCommand
+    is immune to the remote shell's quote handling.
+    """
+    import base64
+
+    argv = data_ssh._argv_for("pwsh", "tmichon-dev6", "dotfiles", classify=True)
+    assert argv[0] == "ssh"
+    assert argv[1] == "tmichon-dev6"
+    remote = argv[-1]
+    assert remote.startswith("pwsh -NoProfile -EncodedCommand ")
+    assert "-Command '" not in remote
+    enc = remote.split("-EncodedCommand ", 1)[1]
+    decoded = base64.b64decode(enc).decode("utf-16-le")
+    # Windows/pwsh targets also pull the machine's other-platform (WSL) worktrees.
+    assert decoded == (
+        "dotfiles list --json --classify --mux-details --include-other-platforms"
+    )
+
+
+def test_wrap_remote_pwsh_uses_encoded_command():
+    import base64
+
+    argv = data_ssh._wrap_remote("pwsh", "tmichon-cloud1", "dotfiles cleanup --json")
+    remote = argv[-1]
+    assert remote.startswith("pwsh -NoProfile -EncodedCommand ")
+    enc = remote.split("-EncodedCommand ", 1)[1]
+    assert base64.b64decode(enc).decode("utf-16-le") == "dotfiles cleanup --json"
+    # bash path stays a plain -lc invocation
+    b = data_ssh._wrap_remote("bash", "wheatley", "dotfiles cleanup --json")
+    assert b[-1] == "bash -lc 'dotfiles cleanup --json'"
+
+
 def test_reconcile_remote_prs_runs_reconcile_argv_and_swaps(monkeypatch):
     loader, src = _ready_loader(monkeypatch, ["old"])
     seen = {"argv": None, "n": 0}

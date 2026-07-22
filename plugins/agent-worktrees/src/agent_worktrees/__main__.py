@@ -8942,6 +8942,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Only print if issues are found")
     sp.add_argument("--strict", action="store_true",
                     help="Exit nonzero if anchor is not clean")
+    sp.add_argument("--fetch", action="store_true",
+                    help="Refresh the upstream ref before the behind-count "
+                         "(slower; unneeded post pre-launch fetch)")
     sp.add_argument("--repo-path", default=None,
                     help="Path inside a repo (defaults to cwd)")
 
@@ -9330,9 +9333,10 @@ def cmd_anchor_check(args: argparse.Namespace) -> int:
     use_json = getattr(args, "json", False)
     quiet = getattr(args, "quiet", False)
     strict = getattr(args, "strict", False)
+    fetch = getattr(args, "fetch", False)
 
     try:
-        report = anchor_hygiene.check_anchor(repo_path)
+        report = anchor_hygiene.check_anchor(repo_path, fetch=fetch)
     except Exception as e:
         if use_json:
             json.dump({"version": 1, "error": str(e)}, sys.stdout)
