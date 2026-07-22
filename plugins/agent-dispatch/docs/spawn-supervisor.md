@@ -230,6 +230,41 @@ auto-joined to the agent-bridge live-session registry the way a local embody is
 (the global `--max-concurrent` still applies); and load-aware selection beyond
 config order.
 
+## Running as a persistent service (the always-on last mile)
+
+`agent-dispatch supervise` is only useful when something keeps it running: a
+dispatched task queues forever until a supervise cycle observes it. On a
+standalone Linux deploy host the plugin installer (`scripts/install.sh`)
+therefore installs a **second systemd user unit**, `agent-dispatch-supervisor.service`,
+alongside the coordinator unit — same `install|update|status|start|stop|uninstall`
+verbs — so the serve loop runs unattended and restart-safe (`Restart=on-failure`).
+
+It is just the existing `Supervisor.serve` loop hosted persistently, so the
+spawn-reservation guarantee (one embody per (task, attempt), across restarts and
+multiple loops) is unchanged.
+
+**Safety: the service is label-gated.** The unit runs `supervise --all-repos` —
+`--all-repos` avoids the lane-scoping gotcha where a short `--repo owner/name`
+form silently filters *every* task out — which makes the **label opt-in the only
+thing between the supervisor and embodying every queued task** (handoffs,
+interactive worktree-pinned tasks, …). So the service is **enabled only when at
+least one label is configured**; with none set the unit is installed but left
+inert. Configuration lives in `~/.agent-dispatch/supervisor.env`:
+
+```
+AGENT_DISPATCH_SUPERVISE_LABELS=            # comma/space list; REQUIRED to enable
+AGENT_DISPATCH_SUPERVISE_INTERVAL=30        # poll seconds
+AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT=1   # max-one-active by default
+AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3     # dead-letter after N failed spawns
+AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=        # advanced, e.g. --pool a,b --origin host
+```
+
+A generated launcher (`supervise-service.sh`) turns the label list into repeated
+`--label` flags and **hard-refuses to run label-less** (a defense-in-depth guard,
+in case the unit is hand-enabled). The supervisor installs only on a full
+coordinator host — a WSL guest / client-only host (`--no-service`) is skipped, and
+`--no-supervisor` opts a full host out.
+
 ## Genericity
 
 Nothing here is specific to any one producer. The reservation is keyed only by
