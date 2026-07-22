@@ -25,12 +25,13 @@ def _install_roster(monkeypatch, entries, *, machine, local_id):
     monkeypatch.setattr(data_ssh, "_project", lambda: "proj")
 
 
-def _entry(key, display, envs, *, ssh_ready=True, copilot=True, alias=""):
+def _entry(key, display, envs, *, ssh_ready=True, copilot=True, alias="", hostname=""):
     return cfg.MachineEntry(
         key=key,
         display_name=display,
         environment="",
         alias=alias,
+        hostname=hostname,
         ssh_environments=envs,
         ssh_ready=ssh_ready,
         copilot=copilot,
@@ -39,6 +40,32 @@ def _entry(key, display, envs, *, ssh_ready=True, copilot=True, alias=""):
 
 def _by_key(sources):
     return {(s.machine, s.env): s for s in sources}
+
+
+def test_local_machine_matched_by_hostname_field(monkeypatch):
+    """A re-keyed machine (friendly key + explicit ``hostname:`` COMPUTERNAME) is
+    recognized as local via its hostname field -- so it becomes the in-process
+    local tab and NO duplicate raw-COMPUTERNAME source leaks in."""
+    entries = {
+        "tmichon-augloop1": _entry(
+            "tmichon-augloop1", "augloop1",
+            [cfg.SSHEnvironment(name="windows", alias="tmichon-augloop1",
+                                shell="pwsh")],
+            ssh_ready=True, alias="augloop1", hostname="cpc-tmich-oixui"),
+    }
+    _install_roster(
+        monkeypatch, entries, machine="",                 # config.machine unset
+        local_id=("cpc-tmich-oixui", "windows"))          # raw COMPUTERNAME
+
+    sources = data_ssh._build_sources()
+    assert len(sources) == 1
+    local = sources[0]
+    assert local.machine == "augloop1"    # display_name, not the raw COMPUTERNAME
+    assert local.env == "Win"
+    assert local.local is True
+    assert local.argv is None             # in-process, not an SSH-to-self source
+    # No raw-hostname fallback tab leaked in.
+    assert not any(s.machine.lower() == "cpc-tmich-oixui" for s in sources)
 
 
 def test_local_machine_needs_no_ssh_profile(monkeypatch):

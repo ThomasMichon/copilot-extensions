@@ -87,6 +87,7 @@ def local_host():
     for m, name, elabel in _copilot_envs():
         is_local_machine = (
             m.key.lower() == host_key
+            or (getattr(m, "hostname", "") or "").lower() == host_key
             or m.key.lower() == config_machine
             or (getattr(m, "alias", "") or "").lower() == config_machine
         )
