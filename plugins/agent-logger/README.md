@@ -26,9 +26,10 @@ session-to-log pipeline out of any single bespoke service:
 
 ## Design principles
 
-- **Personality- and layout-neutral.** Voices, output path templates, and
-  machine naming are configuration, not hard-coded. The plugin ships **no
-  persona** — a host repo injects a closing remark via the manifest seam.
+- **Personality- and layout-neutral.** Voices, output path templates,
+  repo-local Markdown skeletons, and machine naming are configuration, not
+  hard-coded. The plugin ships **no persona** — a host repo injects a closing
+  remark via the manifest seam.
 - **Local state stays local.** The runtime home (`~/.agent-logger/`, or
   `$AGENT_LOGGER_HOME`) holds digests (and, once the orchestrator ships, a
   SQLite state DB). It must never be a cloud-synced folder.
@@ -52,8 +53,10 @@ Soon*.
 
 ## Configuration
 
-Layered: built-in defaults → `$AGENT_LOGGER_HOME/config.yaml` →
-`AGENT_LOGGER_*` environment overrides. Inspect the resolved config with:
+Layered: built-in defaults → `$AGENT_LOGGER_HOME/config.yaml` → repo-local
+organization config (`.agent-logger.yaml` / `.agent-logger.yml` /
+`.config/agent-logger.yaml` / `.config/agent-logger.yml`, `log:` block only)
+→ `AGENT_LOGGER_*` environment overrides. Inspect the resolved config with:
 
 ```
 agent-logger config

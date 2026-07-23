@@ -3,6 +3,10 @@
 # Canonical, copy-pasteable example showing every sync target. Pick ONE with
 # `sync.target` and keep the matching block under `sync.targets`. Field docs:
 # the session-sync-setup SKILL.md. Verify with `session-sync doctor`.
+#
+# Repositories that need their own log tree/format should commit a repo-local
+# `.agent-logger.yaml` with a `log:` block instead of putting repo-specific
+# layout here. Machine-local config remains the place for sync targets.
 
 sync:
   target: local                 # local | onedrive | ssh | ssh-tunnel | ingest
@@ -35,3 +39,11 @@ sync:
       url: rsync://hub.example.com/sessions       # or host::module/path
       password_file: ~/.agent-logger/rsync.pass   # optional
       notify_url: https://hub.example.com/api/notify?machine={machine}  # optional
+
+# Optional global fallback for repos with no repo-local .agent-logger.yaml.
+log:
+  root: null
+  path_template: "{year}/{month}/{day} {hhmmss} {title}.md"
+  timezone: null
+  note_marker: "SESSION NOTE:"
+  template: null

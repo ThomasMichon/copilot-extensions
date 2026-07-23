@@ -14,6 +14,10 @@
     }
   ],
   "output_root": "<logs root>",
+  "log_path_template": "<agent-logger config template>",
+  "timezone": null,
+  "note_marker": "SESSION NOTE:",
+  "log_template": null,
   "narration_style": null,
   "exemplars": null,
   "closing_remark": null

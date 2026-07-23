@@ -8,7 +8,11 @@
       "session_path": "<session_dir>"
     }
   ],
-  "output_root": "<repo logs root, e.g. logs>",
+  "output_root": "<prep.output_root>",
+  "log_path_template": "<prep.log_path_template>",
+  "timezone": "<prep.timezone>",
+  "note_marker": "<prep.note_marker>",
+  "log_template": "<prep.log_template>",
   "narration_style": null,
   "exemplars": null,
   "closing_remark": null

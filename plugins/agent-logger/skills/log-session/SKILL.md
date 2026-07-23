@@ -26,10 +26,10 @@ is the interactive, single-session entry point to the
 ### 1. Prepare
 
 Run the prep tool to detect machine, generate a cutoff, render the output
-path, and create the log directory:
+path, layer any repo-local organization config, and create the log directory:
 
 ```
-prepare-session-log --title "<Title>" --session "<Session ID>"
+prepare-session-log --json --title "<Title>" --session "<Session ID>"
 ```
 
 `prepare-session-log` is deployed as a binstub in `~/.local/bin` by the
@@ -39,15 +39,49 @@ the deployed venv interpreter instead:
 
 ```
 # POSIX
-~/.agent-logger/.venv/bin/python -m agent_logger.segmenter.prepare_log --title "<Title>" --session "<Session ID>"
+~/.agent-logger/.venv/bin/python -m agent_logger.segmenter.prepare_log --json --title "<Title>" --session "<Session ID>"
 # Windows
-~/.agent-logger/.venv/Scripts/python.exe -m agent_logger.segmenter.prepare_log --title "<Title>" --session "<Session ID>"
+~/.agent-logger/.venv/Scripts/python.exe -m agent_logger.segmenter.prepare_log --json --title "<Title>" --session "<Session ID>"
 ```
 
 Pass the session ID from the session context (omit `--session` to
 auto-detect the most recently active session for the current project). The
 tool prints `machine`, `session_id`, `session_dir`, `cutoff`, `log_path`,
-and `digest_dir`.
+`digest_dir`, `output_root`, `log_path_template`, `timezone`, `note_marker`,
+and (when configured) `log_template`.
+
+`prepare-session-log` discovers repo-local organization config by convention
+from the current repository root: `.agent-logger.yaml`, `.agent-logger.yml`,
+`.config/agent-logger.yaml`, or `.config/agent-logger.yml`. Only the `log:`
+block is honored. A repo that wants its own tree/format can set, for example:
+
+```yaml
+log:
+  root: .
+  path_template: "logs/{year}/{month}.{day} {title}.md"
+  template: |
+    # {title}
+
+    **Date:** {date}
+    **Branch(es):** {branches}
+    **PR(s):** {prs}
+
+    ## Summary
+
+    {summary}
+
+    ## Key Changes
+
+    {key_changes}
+
+    ## Commits
+
+    {commits}
+
+    ## Open Items
+
+    {open_items}
+```
 
 ### 2. Build a one-session manifest
 
@@ -61,17 +95,22 @@ example: [`references/manifest.json`](references/manifest.json)):
   "sessions": [
     { "session_id": "<session_id>", "machine": "<machine>", "session_path": "<session_dir>" }
   ],
-  "output_root": "<repo logs root, e.g. logs>",
+  "output_root": "<prep.output_root>",
+  "log_path_template": "<prep.log_path_template>",
+  "timezone": "<prep.timezone>",
+  "note_marker": "<prep.note_marker>",
+  "log_template": "<prep.log_template>",
   "narration_style": null,
   "exemplars": null,
   "closing_remark": null
 }
 ```
 
-Set `output_root` to where logs should land (the host's convention; default
-to the project's `logs/` directory). Leave the voice fields
-(`narration_style`, `exemplars`, `closing_remark`) null unless a wrapping
-host skill instructs otherwise.
+Use the prep output verbatim for the organization fields. `log_template` may
+be `null`; when non-null it is the repo's requested Markdown structure and the
+writer must preserve it. Leave the voice fields (`narration_style`,
+`exemplars`, `closing_remark`) null unless a wrapping host skill instructs
+otherwise.
 
 ### 3. Delegate
 

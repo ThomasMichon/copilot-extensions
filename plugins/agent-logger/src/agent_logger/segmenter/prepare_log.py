@@ -6,10 +6,10 @@ ensures the target directory exists, and prints structured info for the
 calling agent.
 
 Log path structure:
-    logs/YYYY/{machine}/MM/DD HHMMSS Title.md
+    rendered from agent-logger config (optionally repo-local .agent-logger.yaml)
 
 Usage:
-    python tools/copilot/prepare-session-log.py [--title TITLE] [--session ID]
+    prepare-session-log [--title TITLE] [--session ID] [--json]
 
 Prints YAML-style key: value pairs to stdout for easy parsing.
 """
@@ -123,6 +123,7 @@ def main() -> None:
     parser.add_argument("--session", default="current", help="Session UUID or 'current'")
     parser.add_argument("--log-root", default=None, help="Root dir for logs (default: config/CWD)")
     parser.add_argument("--machine", default=None, help="Override auto-detected machine name")
+    parser.add_argument("--json", action="store_true", help="Print all values as JSON")
     args = parser.parse_args()
 
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -186,6 +187,30 @@ def main() -> None:
     # Session start time (best-effort from first event)
     start_time = _read_start_time(session_dir)
 
+    result = {
+        "machine": machine,
+        "environment": "WSL" if is_wsl else None,
+        "session_id": session_id,
+        "session_dir": str(session_dir),
+        "cutoff": cutoff,
+        "date": date_str,
+        "start_time": start_time,
+        "log_dir": str(log_dir),
+        "log_filename": log_filename,
+        "log_path": str(log_path),
+        "digest_dir": str(digest_dir),
+        "output_root": str(log_root),
+        "log_path_template": cfg.log_path_template,
+        "timezone": cfg.log_timezone,
+        "note_marker": cfg.note_marker,
+        "log_template": cfg.log_template,
+        "repo_config_path": str(cfg.repo_config_path) if cfg.repo_config_path else None,
+    }
+
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return
+
     # Output
     print(f"machine: {machine}")
     if is_wsl:
@@ -200,6 +225,15 @@ def main() -> None:
     print(f"log_filename: {log_filename}")
     print(f"log_path: {log_path}")
     print(f"digest_dir: {digest_dir}")
+    print(f"output_root: {log_root}")
+    print(f"log_path_template: {cfg.log_path_template}")
+    if cfg.log_timezone:
+        print(f"timezone: {cfg.log_timezone}")
+    print(f"note_marker: {cfg.note_marker}")
+    if cfg.repo_config_path:
+        print(f"repo_config_path: {cfg.repo_config_path}")
+    if cfg.log_template:
+        print("log_template: <configured; use --json to read>")
 
 
 if __name__ == "__main__":

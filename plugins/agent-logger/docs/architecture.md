@@ -28,7 +28,8 @@ chunks. Three console scripts:
   (`~/.agent-logger/session-digests/`) and/or an output dir.
 - `read-session-digest` — read collated context / segments / manifests back.
 - `prepare-session-log` — detect machine, generate a cutoff, and render a
-  log path from a configurable template.
+  log path from a configurable template, including any repo-local
+  organization config discovered from the current git root.
 
 All machine/path/voice coupling is configuration — there is no facility
 hostname, NAS path, or persona baked in.
@@ -77,9 +78,15 @@ plugin never contains a persona.
 ## Configuration
 
 Layered: built-in defaults → `$AGENT_LOGGER_HOME/config.yaml`
-(default `~/.agent-logger/config.yaml`) → `AGENT_LOGGER_*` env overrides.
-Inspect with `agent-logger config`. The home dir is **local-only** — never
-place it inside a cloud-synced folder.
+(default `~/.agent-logger/config.yaml`) → repo-local organization config →
+`AGENT_LOGGER_*` env overrides. Inspect with `agent-logger config`. The home
+dir is **local-only** — never place it inside a cloud-synced folder.
+
+Repo-local config is discovered at the current git root from
+`.agent-logger.yaml`, `.agent-logger.yml`, `.config/agent-logger.yaml`, or
+`.config/agent-logger.yml`. Only the `log:` block is honored there, so a repo
+can own `root`, `path_template`, and an optional Markdown `template` without
+changing machine-local session-sync targets.
 
 ## Deployment topologies
 

@@ -3,10 +3,26 @@ revision = 3
 requires-python = ">=3.10"
 
 [[package]]
+name = "agent-config-migrate"
+version = "0.1.0.dev2"
+source = { directory = "libs/config-migrate" }
+dependencies = [
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "agent-logger"
-version = "0.1.1.dev12"
+version = "0.1.1.dev15"
 source = { editable = "." }
 dependencies = [
+    { name = "agent-config-migrate" },
     { name = "pyyaml" },
 ]
 
@@ -17,6 +33,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agent-config-migrate", directory = "libs/config-migrate" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
