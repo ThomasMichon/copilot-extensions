@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import types
 
+import pytest
+
 from agent_worktrees import config as cfg
 from agent_worktrees.picker_tui import data_ssh
 
@@ -545,3 +547,92 @@ def test_machine_key_map_empty_on_unreadable_roster(monkeypatch):
     monkeypatch.setattr(data_ssh.cfg, "load_machines_yaml", _boom)
     assert data_ssh.machine_key_map() == {}
     assert data_ssh.machine_key("Anything") == "Anything"
+
+
+# ── SSH resolution diagnostics: picker-ssh.log enumeration ───────────────────
+
+def test_remote_cmd_str_decodes_encoded_command():
+    """The Windows remote form is logged decoded, not as opaque base64."""
+    argv = data_ssh._argv_for("pwsh", "tmichon-cloud1", "dotfiles", classify=True)
+    rendered = data_ssh._remote_cmd_str(argv)
+    assert "(decoded) dotfiles list --json" in rendered
+    assert "--include-other-platforms" in rendered
+    # bash form is passed through verbatim (nothing to decode).
+    bash = data_ssh._argv_for("bash", "host", "dotfiles", classify=True)
+    assert data_ssh._remote_cmd_str(bash).endswith(
+        "bash -lc 'dotfiles list --json --classify --mux-details'")
+
+
+def test_fetch_raises_remote_fetch_error_with_detail(monkeypatch):
+    """A nonzero remote exit surfaces returncode + stderr + argv for logging."""
+    class _Proc:
+        def __init__(self, rc, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = rc, stdout, stderr
+
+    argv = ["ssh", "host", "dotfiles list --json"]
+    monkeypatch.setattr(
+        data_ssh, "_run",
+        lambda a, timeout: _Proc(255, stderr="ssh: Could not resolve hostname"))
+    src = data_ssh.Source("Box", "Win", argv, ready=True, alias="host")
+    with pytest.raises(data_ssh._RemoteFetchError) as ei:
+        data_ssh._fetch(src)
+    exc = ei.value
+    assert exc.returncode == 255
+    assert "Could not resolve hostname" in exc.stderr
+    assert exc.argv == argv
+
+
+def test_fetch_raises_remote_fetch_error_on_unparseable_output(monkeypatch):
+    class _Proc:
+        def __init__(self, rc, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = rc, stdout, stderr
+
+    monkeypatch.setattr(
+        data_ssh, "_run", lambda a, timeout: _Proc(0, stdout="not json at all"))
+    src = data_ssh.Source("Box", "Win", ["ssh", "h", "x"], ready=True)
+    with pytest.raises(data_ssh._RemoteFetchError) as ei:
+        data_ssh._fetch(src)
+    assert "unparseable output" in str(ei.value)
+
+
+def test_log_load_header_enumerates_roster_with_skip_reasons(monkeypatch, tmp_path):
+    logf = tmp_path / "picker-ssh.log"
+    monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: logf)
+    sources = [
+        data_ssh.Source("book2", "Win", None, local=True, ready=True),
+        data_ssh.Source("dev6", "Win", ["ssh", "d", "x"], ready=True,
+                        alias="tmichon-dev6"),
+        data_ssh.Source("cloud1", "Win", None, ready=False, alias="",
+                        shell="pwsh"),
+        data_ssh.Source("augloop1", "Win", None, ready=False,
+                        alias="tmichon-augloop1", shell="pwsh"),
+    ]
+    loader = data_ssh.LiveLoader(sources)
+    loader._log_load_header()
+    text = logf.read_text(encoding="utf-8")
+    assert "1 remote to resolve, 1 local, 2 skipped" in text
+    assert "LOCAL   book2/Win" in text
+    assert "RESOLVE dev6/Win alias=tmichon-dev6" in text
+    assert "SKIP    cloud1/Win (no SSH alias/profile)" in text
+    assert "SKIP    augloop1/Win (machine not ssh.ready in machines.yaml)" in text
+
+
+def test_load_one_failure_logs_reason(monkeypatch, tmp_path):
+    logf = tmp_path / "picker-ssh.log"
+    monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: logf)
+
+    def boom(source, runner=None):
+        raise data_ssh._RemoteFetchError(
+            "exit 1", returncode=1, stderr="boom-detail",
+            argv=["ssh", "dev6", "cmd"])
+
+    monkeypatch.setattr(data_ssh, "_fetch", boom)
+    src = data_ssh.Source("dev6", "Win", ["ssh", "dev6", "cmd"], ready=True,
+                          alias="tmichon-dev6")
+    loader = data_ssh.LiveLoader([src])
+    loader._load_one(src)
+    assert loader.state("dev6", "Win") == "failed"
+    text = logf.read_text(encoding="utf-8")
+    assert "dev6/Win [load]" in text
+    assert "exit=1 alias=tmichon-dev6" in text
+    assert "stderr| boom-detail" in text
