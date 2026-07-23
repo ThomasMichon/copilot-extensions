@@ -463,6 +463,40 @@ if ($noMux) {
 }
 
 $psmuxCmd = Get-Command psmux -ErrorAction SilentlyContinue
+
+# Resolve psmux to a *launchable* executable path. WinGet installs psmux as a
+# 0-byte App Execution Alias reparse stub at
+# %LOCALAPPDATA%\Microsoft\WinGet\Links\psmux.exe. PowerShell 7.4.x cannot
+# launch such stubs from its native-command path: every `& psmux ...` raises a
+# *terminating* error ("Program 'psmux.exe' failed to run: StandardOutputEncoding
+# is only supported when standard output is redirected") regardless of TTY or
+# stream redirection. Launching the real target under
+# %LOCALAPPDATA%\Microsoft\WinGet\Packages\...\psmux.exe sidesteps the bug on
+# every pwsh version (pwsh >=7.5 launches the stub fine too). All psmux calls
+# below go through $script:AwPsmuxBin so both the launcher and the dot-sourced
+# session-options helper use the resolved path.
+function Resolve-AwPsmuxBin {
+    param($Cmd)
+    if (-not $Cmd) { return 'psmux' }
+    $src = $Cmd.Source
+    try {
+        $item = Get-Item -LiteralPath $src -ErrorAction Stop
+        $isReparse = [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+        if ($isReparse -or $item.Length -eq 0) {
+            $pkgRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
+            $real = Get-ChildItem -LiteralPath $pkgRoot -Recurse -Filter 'psmux.exe' `
+                -ErrorAction SilentlyContinue |
+                Select-Object -First 1 -ExpandProperty FullName
+            if ($real) { return $real }
+        }
+    } catch {}
+    return $src
+}
+$script:AwPsmuxBin = Resolve-AwPsmuxBin $psmuxCmd
+if ($psmuxCmd -and $script:AwPsmuxBin -ne $psmuxCmd.Source) {
+    Write-SetupLog "psmux: resolved WinGet reparse stub to real exe: $($script:AwPsmuxBin)"
+}
+
 # Detect nested invocation: if we're already inside a psmux/tmux session,
 # we must NOT call attach-session — doing so steals the parent's terminal.
 $nested = [bool]$env:TMUX
@@ -474,19 +508,19 @@ function Reset-SshConptyViewport {
     if ($env:SSH_CONNECTION) { [Console]::Write("`e[2J`e[H") }
 }
 
-# Smart App Control (or another Application Control / WDAC policy) can block
-# an unsigned psmux.exe from executing even though Get-Command resolves it on
-# PATH. A blocked launch raises a *terminating* error
-# (ResourceUnavailable: "Program 'psmux.exe' failed to run...") rather than a
+# Smart App Control / WDAC can block an unsigned psmux.exe, and PowerShell
+# 7.4.x cannot launch a WinGet reparse-stub psmux (resolved above). Either way
+# a blocked/unlaunchable psmux raises a *terminating* error rather than a
 # non-zero exit code, so the normal $LASTEXITCODE fallbacks never fire. Probe
-# once with a harmless has-session call; if psmux cannot actually run, drop to
-# a direct (un-multiplexed) launch instead of crashing the session.
+# once with a harmless has-session call against the resolved binary; if psmux
+# still cannot run, drop to a direct (un-multiplexed) launch instead of
+# crashing the session.
 if (-not $noMux -and $psmuxCmd) {
     try {
-        $null = & psmux has-session -t '__aw_probe__' 2>&1
+        $null = & $script:AwPsmuxBin has-session -t '__aw_probe__' 2>&1
     } catch {
-        Write-Warning "psmux is installed but cannot run ($($_.Exception.Message.Split([Environment]::NewLine)[0].Trim())). Launching directly without a multiplexer."
-        Write-SetupLog "psmux blocked/unavailable, falling back to direct launch: $($_.Exception.Message)" 'WARN'
+        Write-Warning "psmux cannot be launched ($($_.Exception.Message.Split([Environment]::NewLine)[0].Trim())). Launching directly without a multiplexer."
+        Write-SetupLog "psmux unavailable (launch probe failed), falling back to direct launch: $($_.Exception.Message)" 'WARN'
         $psmuxCmd = $null
     }
 }
@@ -551,7 +585,7 @@ if (-not $noMux -and $psmuxCmd) {
 
     # If a psmux session already exists for this worktree, join it.
     # Note: psmux does not support tmux's "=" exact-match prefix on -t.
-    $null = & psmux has-session -t $sessName 2>&1
+    $null = & $script:AwPsmuxBin has-session -t $sessName 2>&1
     if ($LASTEXITCODE -eq 0) {
         if ($nested) {
             Write-Host "Session already exists: $sessName (open a new terminal to join)"
@@ -574,13 +608,13 @@ if (-not $noMux -and $psmuxCmd) {
         # worktrees onto one session). Set-PsmuxLastSession must be the final
         # psmux-affecting action before attach.
         Set-PsmuxLastSession $sessName
-        & psmux attach-session -t $sessName
+        & $script:AwPsmuxBin attach-session -t $sessName
         if ($LASTEXITCODE -eq 0) {
             exit 0
         }
         # Join failed — kill the stale session so we can recreate it
         Write-Warning "Failed to join psmux session — killing stale session."
-        & psmux kill-session -t $sessName 2>&1 | Out-Null
+        & $script:AwPsmuxBin kill-session -t $sessName 2>&1 | Out-Null
     }
 
     # Build -e flags for env propagation into the psmux server.
@@ -617,7 +651,7 @@ if (-not $noMux -and $psmuxCmd) {
     $savedTmux = $env:TMUX; $env:TMUX = $null
     $savedTmuxPane = $env:TMUX_PANE; $env:TMUX_PANE = $null
     try {
-        & psmux new-session -d -s $sessName -c $plan.work_dir @envFlags @cmd
+        & $script:AwPsmuxBin new-session -d -s $sessName -c $plan.work_dir @envFlags @cmd
     } finally {
         $env:PSMUX_SESSION = $savedPsmuxSession
         $env:TMUX = $savedTmux
@@ -638,7 +672,7 @@ if (-not $noMux -and $psmuxCmd) {
         Reset-SshConptyViewport
         Set-PsmuxLastSession $sessName
         try {
-            & psmux attach-session -t $sessName
+            & $script:AwPsmuxBin attach-session -t $sessName
         } catch [System.Management.Automation.PipelineStoppedException] {
             Write-SetupLog "psmux attach interrupted (Ctrl+C)"
         }
@@ -646,7 +680,7 @@ if (-not $noMux -and $psmuxCmd) {
         # We're back — either the user detached or the session ended.
         # Only run post-exit if the session is truly gone.
         Write-SetupLog "psmux attach returned, checking session state"
-        $null = & psmux has-session -t $sessName 2>&1
+        $null = & $script:AwPsmuxBin has-session -t $sessName 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-SetupLog "psmux session gone, running post-exit checks"
 

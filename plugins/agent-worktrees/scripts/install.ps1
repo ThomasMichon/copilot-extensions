@@ -1046,6 +1046,29 @@ function Ensure-PsmuxSshSafe {
     if ($env:Path -notlike "*$realDir*") { $env:Path = "$realDir;$env:Path" }
 }
 
+function Resolve-AwPsmuxBin {
+    <# WinGet installs psmux as a 0-byte App Execution Alias reparse stub under
+       %LOCALAPPDATA%\Microsoft\WinGet\Links\psmux.exe that PowerShell 7.4.x
+       cannot launch -- a native `& psmux ...` throws a terminating error
+       ("StandardOutputEncoding is only supported when standard output is
+       redirected"). Resolve the stub to the real
+       ...\WinGet\Packages\...\psmux.exe so native launches work on any pwsh
+       version (pwsh >=7.5 launches the stub fine too). #>
+    param($Cmd)
+    if (-not $Cmd) { return 'psmux' }
+    $src = $Cmd.Source
+    try {
+        $item = Get-Item -LiteralPath $src -ErrorAction Stop
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -eq 0) {
+            $real = Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
+                -Recurse -Filter 'psmux.exe' -ErrorAction SilentlyContinue |
+                Select-Object -First 1 -ExpandProperty FullName
+            if ($real) { return $real }
+        }
+    } catch {}
+    return $src
+}
+
 function Ensure-Psmux {
     <# Install psmux 3.3.5 (pinned) when absent; if 3.3.6 is present -- the
        version with the `attach-session -t` regression (psmux#408, which makes
@@ -1069,10 +1092,11 @@ function Ensure-Psmux {
         Ensure-PsmuxSshSafe
         return
     }
-    $psmuxVer = (& psmux --help 2>&1 | Select-Object -First 1) -replace '.*psmux v([0-9.]+).*', '$1'
+    $muxBin = Resolve-AwPsmuxBin (Get-Command psmux -ErrorAction SilentlyContinue)
+    $psmuxVer = (& $muxBin --help 2>&1 | Select-Object -First 1) -replace '.*psmux v([0-9.]+).*', '$1'
     if ($psmuxVer -eq '3.3.6') {
         $liveSessions = @()
-        try { $liveSessions = @(& psmux ls 2>$null | Where-Object { $_ -match '\S' }) } catch {}
+        try { $liveSessions = @(& $muxBin ls 2>$null | Where-Object { $_ -match '\S' }) } catch {}
         if ($liveSessions.Count -gt 0) {
             Write-ServiceWarn "psmux 3.3.6 has the attach -t regression (psmux#408); the launcher works around it. $($liveSessions.Count) live session(s) present -- not downgrading now (it would kill them). Close all worktree sessions and re-run 'update' to auto-pin 3.3.5."
         } else {
@@ -1080,7 +1104,7 @@ function Ensure-Psmux {
             & winget install --id marlocarlo.psmux --version 3.3.5 --uninstall-previous --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
             # Block winget from auto-upgrading back into the 3.3.6 regression.
             & winget pin add --id marlocarlo.psmux --version 3.3.5 2>&1 | Out-Null
-            $newVer = (& psmux --help 2>&1 | Select-Object -First 1) -replace '.*psmux v([0-9.]+).*', '$1'
+            $newVer = (& $muxBin --help 2>&1 | Select-Object -First 1) -replace '.*psmux v([0-9.]+).*', '$1'
             if ($newVer -eq '3.3.5') {
                 Write-ServiceOk "psmux pinned to 3.3.5 (regression-free)"
             } else {
