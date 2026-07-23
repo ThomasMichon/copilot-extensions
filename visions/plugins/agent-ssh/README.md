@@ -69,15 +69,20 @@ pinning**; and keep each
 machine's `~/.ssh/config` mesh entries **derived from the registry**, not
 hand-maintained. This is the common floor every transport module rides on.
 
-### Key lifecycle (mint · store · distribute)
-The layer owns the **full lifecycle of SSH key material** — **minting** client
-and host keys, **storing** them securely, and **distributing** the public
-keys / host-key pins the mesh needs so a freshly-adopted machine trusts and is
-trusted by its peers. Storage and distribution **prefer the fabric's trust
-layer** where present, **falling back to a durable, operator-owned store** so key
-material survives a machine rebuild and propagates without manual copy-paste.
-Private keys stay under their owner's control; only public halves and host-key
-pins are distributed.
+### Key lifecycle (mint · pin)
+The layer **mints** each machine's client and host keys and **pins host keys**,
+so a freshly-adopted machine trusts and is trusted by its peers without manual
+`ssh-keygen` or `known_hosts` editing. It does **not** need to *store* or
+*distribute* key material through an external vault: the transports it rides on
+carry their **own identity** — an IdP-authenticated tunnel, where the connection
+is already gated by the operator's real identity — so the client key is
+provisioned and the host key pinned **in-band over that authenticated channel**
+at adoption/discovery time. There is no out-of-band public-key / host-key
+distribution to propagate, so the layer takes **no dependency on the fabric's
+trust layer** for the SSH mesh. Private keys always stay under their owner's
+control. *(A hypothetical raw-OpenSSH-over-IP transport carrying no identity of
+its own would reintroduce a key-distribution need; the meshes this layer targets
+don't use one.)*
 
 ### Transport modules (pluggable, à la carte)
 *How* a client actually reaches a host is a **module**, chosen per machine, so
@@ -202,11 +207,13 @@ consumers rely on: producing and maintaining them so a machine is reachable
 **by its name** is agent-ssh's core deliverable.
 
 ### managed-key-lifecycle
-SSH key material is **minted, stored, and distributed** by the layer, not
-hand-managed: adopting a machine provisions its keys and propagates the public
-keys / host-key pins the mesh needs, with **secure storage** (the trust layer,
-or a durable fallback) so keys survive rebuilds and reach every machine that
-needs them — while private halves never leave their owner's control.
+SSH key material is **minted and host-key-pinned** by the layer, not
+hand-managed: adopting a machine provisions its key and pins the peer host keys
+it needs. Because the transports carry their **own identity** (an
+IdP-authenticated tunnel), keys are provisioned and pinned **in-band** over the
+authenticated channel — there is no out-of-band key store or distribution to
+maintain, and **no dependency on the fabric's trust layer** for the SSH mesh.
+Private halves never leave their owner's control.
 
 ### augments-existing-profiles
 Where a working SSH profile already exists, agent-ssh **detects and augments**
@@ -286,9 +293,11 @@ layer's.)
   may in turn ride on.
 - **Not an account-per-agent or identity provider.** It authenticates the
   operator's real identity through an existing IdP; it does not mint SSH
-  *accounts* per agent. It **does** own the SSH **key lifecycle** (mint / store /
-  distribute), but leans on the fabric's **trust layer** for secret *storage*
-  rather than inventing its own vault.
+  *accounts* per agent. It **mints and pins** the SSH key material a machine
+  needs, but takes **no dependency on the fabric's trust layer / a key vault** for
+  the SSH mesh: the transports it rides carry their own identity, so keys are
+  provisioned and pinned **in-band** over the authenticated tunnel — there is no
+  out-of-band key store to distribute.
 - **Not required to ship every transport in-repo.** The core owns the
   transport-provider **contract** and SSH-profile creation + validation; concrete
   transports may live in **separate provider plugins** — audience-appropriate
@@ -363,3 +372,12 @@ layer's.)
   existing `derive-dont-duplicate` rule from reachability to repo-locations, and
   `declared-mesh-adoption` with a discover-then-adopt path. Confirmed design
   posture (wrap existing connectivity; live-query locations; report-then-adopt).
+- **2026-07-22** — **Dropped key store/distribute (and the trust-layer/vault
+  dependency) from the SSH mesh; kept mint · pin.** Reframed the key lifecycle:
+  identity-carrying transports (an IdP-authenticated tunnel) already gate the
+  connection by the operator's real identity and provision + pin keys **in-band**
+  over that authenticated channel, so there is no out-of-band public-key /
+  host-key distribution to store or propagate. The layer therefore owns
+  **minting + host-key pinning** but takes **no dependency on the fabric's trust
+  layer** for the SSH mesh. Supersedes the earlier `mint · store · distribute`
+  framing. Mined from operator decision.
