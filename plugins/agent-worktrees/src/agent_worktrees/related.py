@@ -26,20 +26,20 @@ Design intent (so we never duplicate the registry):
 
 Schema (``<anchor>/.agent-worktrees/related.yaml``)::
 
-    primary: odsp-web
+    primary: example-web
     related:
-      odsp-web:
+      example-web:
         role: product
         summary: "Primary product monorepo we ship changes to."
-        doc: related/odsp-web.md
+        doc: related/example-web.md
         locus:
           preferred: codespace          # local | machine:<key> | codespace
-          codespace: { repo: org/odsp-web-codespaces,
+          codespace: { repo: org/example-web-codespaces,
                        machine: largePremiumLinux256gb, location: EastUs }
         delegate: { via: agent-codespaces }
         plugins:                        # related-repo plugins agent-bridge side-loads
-          - { source: odsp-web-codespace@dev-tmichon }
-          - { source: some-plugin@dev-tmichon, enable: false }
+          - { source: example-web-codespace@example-marketplace }
+          - { source: some-plugin@example-marketplace, enable: false }
       copilot-extensions:
         role: tooling
         summary: "Source of the plugins this control plane drives."
@@ -105,7 +105,7 @@ class Locus:
       ``machines`` restricts where it can be used (e.g. ``[dev6]``).
 
     ``workspace_folder`` records the checkout path the venue lands in (e.g.
-    ``/workspaces/odsp-web``), which often differs from the venue ``repo`` name.
+    ``/workspaces/example-web``), which often differs from the venue ``repo`` name.
     """
 
     preferred: str = ""
@@ -613,7 +613,7 @@ def machine_matches(key: str, current: str) -> bool:
     """Loosely match a locus machine key against the current machine name.
 
     Locus keys are short (``dev6``); the detected machine is often the full
-    hostname (``tmichon-dev6``).  A key matches when it equals the current
+    hostname (``host-dev6``).  A key matches when it equals the current
     name, is its ``-``-suffix, or equals its last ``-``-segment
     (case-insensitive).
     """

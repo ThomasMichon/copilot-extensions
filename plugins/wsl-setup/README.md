@@ -40,7 +40,7 @@ wiring Windows Terminal profiles, use `agent-worktrees`'
 agent-worktrees, ready the environment with wsl-setup.
 
 To expose a WSL-hosted SSH server through a Dev Tunnel in an Entra-compliant way,
-pair this with the **`devtunnel-ssh`** plugin (dev-tmichon marketplace): wsl-setup
+pair this with the **`devtunnel-ssh`** plugin (example-marketplace marketplace): wsl-setup
 readies the WSL environment and the `localhost:PORT` hop; devtunnel-ssh sets up
 sshd + the tunnel and targets WSL as the host.
 

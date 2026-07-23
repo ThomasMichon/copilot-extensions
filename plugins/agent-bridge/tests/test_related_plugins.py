@@ -16,18 +16,18 @@ def _write_related(anchor: Path, body: str) -> None:
 
 
 _RELATED = """\
-primary: odsp-web
+primary: example-web
 related:
-  odsp-web:
+  example-web:
     role: product
     locus:
       preferred: codespace
-      codespace: { repo: odsp-microsoft/odsp-web-codespaces, workspace_folder: /workspaces/odsp-web }
-      container: { repo: odsp-microsoft/odsp-web-codespaces, machines: [dev6] }
+      codespace: { repo: example-org/example-web-codespaces, workspace_folder: /workspaces/example-web }
+      container: { repo: example-org/example-web-codespaces, machines: [dev6] }
     delegate: { via: agent-codespaces }
     plugins:
-      - { source: odsp-web-codespace@dev-tmichon }
-      - { source: extra@dev-tmichon, enable: false }
+      - { source: example-web-codespace@example-marketplace }
+      - { source: extra@example-marketplace, enable: false }
   no-plugins:
     locus:
       codespace: { repo: org/other-codespaces }
@@ -37,21 +37,21 @@ related:
 def test_match_by_codespace_repo(tmp_path: Path):
     _write_related(tmp_path, _RELATED)
     refs = rp.related_plugins_for_repo(
-        "odsp-microsoft/odsp-web-codespaces", anchors=[tmp_path]
+        "example-org/example-web-codespaces", anchors=[tmp_path]
     )
     assert refs == [
-        PluginRef("odsp-web-codespace@dev-tmichon", enable=True),
-        PluginRef("extra@dev-tmichon", enable=False),
+        PluginRef("example-web-codespace@example-marketplace", enable=True),
+        PluginRef("extra@example-marketplace", enable=False),
     ]
 
 
 def test_match_is_case_insensitive(tmp_path: Path):
     _write_related(tmp_path, _RELATED)
     refs = rp.related_plugins_for_repo(
-        "ODSP-Microsoft/ODSP-Web-Codespaces", anchors=[tmp_path]
+        "Example-Org/Example-Web-Codespaces", anchors=[tmp_path]
     )
     assert [r.source for r in refs] == [
-        "odsp-web-codespace@dev-tmichon", "extra@dev-tmichon",
+        "example-web-codespace@example-marketplace", "extra@example-marketplace",
     ]
 
 
@@ -106,23 +106,23 @@ def test_harness_plugins_are_never_propagated(tmp_path: Path):
     _write_related(
         tmp_path,
         "related:\n"
-        "  odsp-web:\n"
+        "  example-web:\n"
         "    locus:\n"
-        "      codespace: { repo: org/odsp-web-codespaces }\n"
+        "      codespace: { repo: org/example-web-codespaces }\n"
         "    plugins:\n"
-        "      - odsp-web-harness@dev-tmichon\n"        # harness -> dropped
-        "      - { source: odsp-web-harness-extra@m }\n"  # harness-* -> dropped
-        "      - odsp-web-agent@dev-tmichon\n",          # in-context -> kept
+        "      - example-web-harness@example-marketplace\n"        # harness -> dropped
+        "      - { source: example-web-harness-extra@m }\n"  # harness-* -> dropped
+        "      - example-web-agent@example-marketplace\n",          # in-context -> kept
     )
-    refs = rp.related_plugins_for_repo("org/odsp-web-codespaces", anchors=[tmp_path])
-    assert [r.source for r in refs] == ["odsp-web-agent@dev-tmichon"]
+    refs = rp.related_plugins_for_repo("org/example-web-codespaces", anchors=[tmp_path])
+    assert [r.source for r in refs] == ["example-web-agent@example-marketplace"]
 
 
 def test_is_harness_plugin():
-    assert rp.is_harness_plugin("odsp-web-harness@dev-tmichon") is True
-    assert rp.is_harness_plugin("odsp-web-harness-status@m") is True
-    assert rp.is_harness_plugin("odsp-web-agent@m") is False
-    assert rp.is_harness_plugin("odsp-web-agent-development@m") is False
+    assert rp.is_harness_plugin("example-web-harness@example-marketplace") is True
+    assert rp.is_harness_plugin("example-web-harness-status@m") is True
+    assert rp.is_harness_plugin("example-web-agent@m") is False
+    assert rp.is_harness_plugin("example-web-agent-development@m") is False
     assert rp.is_harness_plugin("agent-bridge@copilot-extensions") is False
 
 

@@ -670,7 +670,7 @@ def remote_slug(remote: str, *, cwd: str | Path) -> str | None:
     ``.git``), so it works for both https and ssh forms and for self-hosted
     hosts with a path prefix, e.g.:
 
-        https://host/gitea/tmichon/aperture-labs.git -> tmichon/aperture-labs
+        https://host/gitea/example-user/aperture-labs.git -> example-user/aperture-labs
         git@github.com:owner/repo.git                -> owner/repo
         https://{org}.visualstudio.com/{proj}/_git/{repo} -> {proj}/{repo}
 

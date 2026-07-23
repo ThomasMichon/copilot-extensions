@@ -311,7 +311,7 @@ class MachineEntry:
     environment: str
     alias: str = ""
     # Raw OS hostname (COMPUTERNAME) when it differs from ``key``. Lets a machine
-    # be keyed by a stable friendly name (e.g. ``tmichon-augloop1``) while the box
+    # be keyed by a stable friendly name (e.g. ``host-augloop1``) while the box
     # reports a different, unrenameable COMPUTERNAME (e.g. ``cpc-tmich-oixui``).
     # Empty means ``key`` is the hostname (the common case).
     hostname: str = ""

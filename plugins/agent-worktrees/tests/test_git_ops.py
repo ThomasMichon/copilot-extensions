@@ -100,19 +100,19 @@ class TestCrossAccountAuth:
         assert go._parse_github_owner(url) == owner
 
     @pytest.mark.parametrize("url,slug", [
-        ("https://host/gitea/tmichon/aperture-labs.git", "tmichon/aperture-labs"),
+        ("https://host/gitea/example-user/aperture-labs.git", "example-user/aperture-labs"),
         ("https://github.com/owner/copilot-extensions.git", "owner/copilot-extensions"),
         ("git@github.com:owner/repo.git", "owner/repo"),
         ("ssh://git@host/owner/repo", "owner/repo"),
         ("https://host/deep/path/org/proj.git/", "org/proj"),
         # Azure DevOps https remotes: {project}/_git/{repo} -> project/repo.
-        ("https://onedrive.visualstudio.com/Developer/_git/dev.tmichon",
-         "Developer/dev.tmichon"),
-        ("https://dev.azure.com/onedrive/Developer/_git/dev.tmichon",
-         "Developer/dev.tmichon"),
+        ("https://your-org.visualstudio.com/Developer/_git/example-marketplace",
+         "Developer/example-marketplace"),
+        ("https://dev.azure.com/your-org/Developer/_git/example-marketplace",
+         "Developer/example-marketplace"),
         # Azure DevOps ssh (v3/{org}/{project}/{repo}) has no _git segment.
-        ("git@ssh.dev.azure.com:v3/onedrive/Developer/dev.tmichon",
-         "Developer/dev.tmichon"),
+        ("git@ssh.dev.azure.com:v3/your-org/Developer/example-marketplace",
+         "Developer/example-marketplace"),
     ])
     def test_remote_slug(self, monkeypatch, url, slug):
         monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: url)

@@ -96,7 +96,7 @@ def host_marketplaces(copilot_home: Path | None = None) -> dict[str, Any]:
     """The harness's ``extraKnownMarketplaces`` map (name -> definition).
 
     Read from the host ``~/.copilot/settings.json``. Used to copy the definition
-    of any marketplace a resolved plugin source references (e.g. ``dev-tmichon``)
+    of any marketplace a resolved plugin source references (e.g. ``example-marketplace``)
     into the CodeSpace so ``<name>@<marketplace>`` resolves there. Returns ``{}``
     when the settings file is absent or malformed.
     """

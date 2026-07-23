@@ -170,8 +170,8 @@ class CodespaceResolver:
         product checkout plus the account dotfiles repo, but any repo ``<r>`` can
         live at ``/workspaces/<basename(r)>`` by convention (#174):
 
-        - ``<repo>`` == the CodeSpace's own product (e.g. ``odsp-web`` on an
-          ``odsp-web-codespaces`` CodeSpace) -> its existing checkout, no clone.
+        - ``<repo>`` == the CodeSpace's own product (e.g. ``example-web`` on an
+          ``example-web-codespaces`` CodeSpace) -> its existing checkout, no clone.
         - ``<repo>`` == the account dotfiles repo -> the persisted dotfiles dir,
           no clone (the universal bootstrap owns it).
         - any other ``<repo>`` -> ``/workspaces/<basename>``, **clone-if-missing**
@@ -216,7 +216,7 @@ class CodespaceResolver:
         # Always spawn against the RAW codespace name (gh requires it), even if
         # the caller addressed it by friendly name. Resolve the launch command
         # per CodeSpace *repository* so a bare address lands in the right checkout
-        # (e.g. odsp-web-codespaces -> /workspaces/odsp-web), not the global
+        # (e.g. example-web-codespaces -> /workspaces/example-web), not the global
         # default workspace folder. A ``<repo>@<codespace>`` request additionally
         # threads ``requested_repo``/``repo_remote`` so a non-host repo lands at
         # ``/workspaces/<basename>`` (clone-if-missing) by convention (#174).

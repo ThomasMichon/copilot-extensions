@@ -1160,8 +1160,8 @@ class TestPluginInjectionContract:
     """agent-bridge decides related-repo plugins; resolvers fold them."""
 
     def test_pluginref_defaults(self):
-        ref = PluginRef("odsp-web-codespace@dev-tmichon")
-        assert ref.source == "odsp-web-codespace@dev-tmichon"
+        ref = PluginRef("example-web-codespace@example-marketplace")
+        assert ref.source == "example-web-codespace@example-marketplace"
         assert ref.enable is True
         assert PluginRef("x", enable=False).enable is False
 
@@ -1260,26 +1260,26 @@ from agent_bridge.topology import load_control_plane_project
 TOPO_MACHINES_DATA = {
     "control_plane": {"project": "dotfiles"},
     "machines": {
-        "tmichon-dev6": {
+        "host-dev6": {
             "display_name": "dev6",
             "ssh": {
                 "ready": True,
                 "environments": [
-                    {"name": "windows", "alias": "tmichon-dev6", "shell": "pwsh"},
-                    {"name": "wsl", "alias": "tmichon-dev6-wsl", "shell": "bash"},
+                    {"name": "windows", "alias": "host-dev6", "shell": "pwsh"},
+                    {"name": "wsl", "alias": "host-dev6-wsl", "shell": "bash"},
                 ],
             },
         },
-        "tmichon-cloud1": {
+        "host-cloud1": {
             "display_name": "cloud1",
             "ssh": {
                 "ready": True,
                 "environments": [
-                    {"name": "windows", "alias": "tmichon-cloud1", "shell": "pwsh"},
+                    {"name": "windows", "alias": "host-cloud1", "shell": "pwsh"},
                 ],
             },
         },
-        "tmichon-book2": {
+        "host-book2": {
             "display_name": "book2",
             "ssh": {"ready": False},
         },
@@ -1294,12 +1294,12 @@ def _topo_machines():
 class TestShortMachineAgentName:
 
     def test_windows_is_bare(self):
-        m = _topo_machines()["tmichon-dev6"]
+        m = _topo_machines()["host-dev6"]
         win = next(e for e in m.ssh_environments if e.name == "windows")
         assert _short_machine_agent_name(m, win) == "dev6"
 
     def test_wsl_suffix(self):
-        m = _topo_machines()["tmichon-dev6"]
+        m = _topo_machines()["host-dev6"]
         wsl = next(e for e in m.ssh_environments if e.name == "wsl")
         assert _short_machine_agent_name(m, wsl) == "dev6-wsl"
 
@@ -1308,12 +1308,12 @@ class TestMatchMachineShortname:
 
     def test_by_display_name(self):
         ms = _topo_machines()
-        assert _match_machine_shortname(ms, "dev6").key == "tmichon-dev6"
-        assert _match_machine_shortname(ms, "cloud1").key == "tmichon-cloud1"
+        assert _match_machine_shortname(ms, "dev6").key == "host-dev6"
+        assert _match_machine_shortname(ms, "cloud1").key == "host-cloud1"
 
     def test_by_full_key_and_prefix_strip(self):
         ms = _topo_machines()
-        assert _match_machine_shortname(ms, "tmichon-dev6").key == "tmichon-dev6"
+        assert _match_machine_shortname(ms, "host-dev6").key == "host-dev6"
 
     def test_unknown_returns_none(self):
         assert _match_machine_shortname(_topo_machines(), "nope") is None
@@ -1326,16 +1326,16 @@ class TestControlPlaneMachineAgents:
         agents = derive_topology_agents(ms, "dotfiles", [], None)
         assert set(agents) == {"dev6", "dev6-wsl", "cloud1"}
         assert agents["dev6"].project == "dotfiles"
-        assert agents["dev6"].host == "tmichon-dev6"
+        assert agents["dev6"].host == "host-dev6"
         assert agents["dev6"].ssh_environment == "windows"
         assert agents["dev6"].derived is True
         assert agents["dev6-wsl"].ssh_environment == "wsl"
-        assert agents["cloud1"].host == "tmichon-cloud1"
+        assert agents["cloud1"].host == "host-cloud1"
 
     def test_book2_has_no_agent(self):
         # No ssh environments -> no control-plane agent.
         agents = derive_topology_agents(_topo_machines(), "dotfiles", [], None)
-        assert not any(a.host == "tmichon-book2" for a in agents.values())
+        assert not any(a.host == "host-book2" for a in agents.values())
 
     def test_no_project_no_control_plane_agents(self):
         agents = derive_topology_agents(_topo_machines(), None, [], None)
@@ -1347,17 +1347,17 @@ class TestRelatedRemoteAgents:
     def test_remote_related_synthesized(self):
         ms = _topo_machines()
         related = [
-            ("odsp-web", ["cloud1"], "agent-bridge"),
+            ("example-web", ["cloud1"], "agent-bridge"),
             ("SPO.Core", ["dev6"], "agent-bridge"),
             ("skip-me", ["cloud1"], "none"),
         ]
-        local = ms["tmichon-dev6"]  # we are "on" dev6
+        local = ms["host-dev6"]  # we are "on" dev6
         agents = derive_topology_agents(ms, None, related, local)
         # Remote related repo -> <repo>@<machine>.
-        assert "odsp-web@cloud1" in agents
-        assert agents["odsp-web@cloud1"].project == "odsp-web"
-        assert agents["odsp-web@cloud1"].host == "tmichon-cloud1"
-        assert agents["odsp-web@cloud1"].derived is True
+        assert "example-web@cloud1" in agents
+        assert agents["example-web@cloud1"].project == "example-web"
+        assert agents["example-web@cloud1"].host == "host-cloud1"
+        assert agents["example-web@cloud1"].derived is True
         # Local related repo -> skipped (covered by projects.yaml discovery).
         assert "SPO.Core@dev6" not in agents
         # Non-agent-bridge delegate -> skipped.
@@ -1501,7 +1501,7 @@ class TestReposRegistryAgents:
 
     def test_local_loopback_repo_agents_without_control_plane(self):
         ms = _topo_machines()
-        local = ms["tmichon-dev6"]
+        local = ms["host-dev6"]
         # No control_plane.project, no related -> the machine is STILL addressable
         # via each of its agent-backing checkouts.
         agents = derive_topology_agents(
@@ -1509,7 +1509,7 @@ class TestReposRegistryAgents:
         )
         assert "web-app@dev6" in agents
         assert agents["web-app@dev6"].project == "web-app"
-        assert agents["web-app@dev6"].host == "tmichon-dev6"
+        assert agents["web-app@dev6"].host == "host-dev6"
         assert agents["web-app@dev6"].ssh_environment == "windows"
         assert agents["web-app@dev6"].derived is True
         assert "api-svc@dev6" in agents
@@ -1518,7 +1518,7 @@ class TestReposRegistryAgents:
 
     def test_additive_alongside_control_plane(self):
         ms = _topo_machines()
-        local = ms["tmichon-dev6"]
+        local = ms["host-dev6"]
         agents = derive_topology_agents(
             ms, "dotfiles", [], local, "windows", self.REPOS,
         )
@@ -1538,7 +1538,7 @@ class TestReposRegistryAgents:
         # the machine is not ssh_ready -> not loopback, not reachable.
         data = {
             "machines": {
-                "tmichon-book2": {
+                "host-book2": {
                     "display_name": "book2",
                     "ssh": {
                         "ready": False,
@@ -1550,13 +1550,13 @@ class TestReposRegistryAgents:
             },
         }
         ms = parse_machines_yaml(data)
-        local = ms["tmichon-book2"]
+        local = ms["host-book2"]
         agents = derive_topology_agents(ms, None, [], local, "wsl", self.REPOS)
         assert agents == {}
 
     def test_existing_entry_not_overridden(self):
         ms = _topo_machines()
-        local = ms["tmichon-dev6"]
+        local = ms["host-dev6"]
         # A prior source already emitted the name -> setdefault leaves it intact
         # (control_plane / related / explicit win over the repo-registry source).
         related = [("web-app", ["cloud1"], "agent-bridge")]  # remote, unrelated key
@@ -1564,11 +1564,11 @@ class TestReposRegistryAgents:
             ms, None, related, local, "windows", self.REPOS,
         )
         assert agents["web-app@dev6"].derived is True
-        assert agents["web-app@dev6"].host == "tmichon-dev6"
+        assert agents["web-app@dev6"].host == "host-dev6"
 
     def test_malformed_entries_ignored(self):
         ms = _topo_machines()
-        local = ms["tmichon-dev6"]
+        local = ms["host-dev6"]
         repos = [
             "not-a-dict",
             {"class": "worktree", "agent": True},  # no name
@@ -1585,7 +1585,7 @@ class TestLoadRelatedEntries:
         d = tmp_path / ".agent-worktrees"
         d.mkdir()
         (d / "related.yaml").write_text(textwrap.dedent("""
-            primary: odsp-web
+            primary: example-web
             related:
               SPO.Core:
                 locus: { machines: [dev6, cloud1] }
@@ -1608,22 +1608,22 @@ class TestReachability:
     UNREADY = {
         "control_plane": {"project": "dotfiles"},
         "machines": {
-            "tmichon-dev6": {
+            "host-dev6": {
                 "display_name": "dev6",
                 "ssh": {
                     "ready": False,
                     "environments": [
-                        {"name": "windows", "alias": "tmichon-dev6", "shell": "pwsh"},
-                        {"name": "wsl", "alias": "tmichon-dev6-wsl", "shell": "bash"},
+                        {"name": "windows", "alias": "host-dev6", "shell": "pwsh"},
+                        {"name": "wsl", "alias": "host-dev6-wsl", "shell": "bash"},
                     ],
                 },
             },
-            "tmichon-cloud1": {
+            "host-cloud1": {
                 "display_name": "cloud1",
                 "ssh": {
                     "ready": False,
                     "environments": [
-                        {"name": "windows", "alias": "tmichon-cloud1", "shell": "pwsh"},
+                        {"name": "windows", "alias": "host-cloud1", "shell": "pwsh"},
                     ],
                 },
             },
@@ -1632,7 +1632,7 @@ class TestReachability:
 
     def test_unreachable_remote_skipped_but_loopback_kept(self):
         ms = parse_machines_yaml(self.UNREADY)
-        local = ms["tmichon-dev6"]
+        local = ms["host-dev6"]
         # We are on dev6 (windows). Nothing is ssh_ready.
         agents = derive_topology_agents(ms, "dotfiles", [], local, "windows")
         # Local same-platform env -> loopback -> kept.
@@ -1649,11 +1649,11 @@ class TestReachability:
 
     def test_related_remote_requires_ssh_ready(self):
         ms = parse_machines_yaml(self.UNREADY)
-        local = ms["tmichon-dev6"]
-        related = [("odsp-web", ["cloud1"], "agent-bridge")]
+        local = ms["host-dev6"]
+        related = [("example-web", ["cloud1"], "agent-bridge")]
         # cloud1 not ssh_ready -> related-remote agent skipped.
         agents = derive_topology_agents(ms, None, related, local, "windows")
-        assert "odsp-web@cloud1" not in agents
+        assert "example-web@cloud1" not in agents
 
 
 class TestSplitRepoVenue:
@@ -1668,7 +1668,7 @@ class TestSplitRepoVenue:
 
     def test_namespaced_venue(self):
         from agent_bridge.agent_registry import _split_repo_venue
-        assert _split_repo_venue("odsp-web@codespace:foo") == ("odsp-web", "codespace:foo")
+        assert _split_repo_venue("example-web@codespace:foo") == ("example-web", "codespace:foo")
 
     def test_empty_side_is_bare(self):
         from agent_bridge.agent_registry import _split_repo_venue
@@ -1681,7 +1681,7 @@ class TestVenueBoundResolve:
         self.machines = parse_machines_yaml(TOPO_MACHINES_DATA)
         self.agents = {
             "dev6": AgentConfig(
-                name="dev6", host="tmichon-dev6", ssh_environment="windows",
+                name="dev6", host="host-dev6", ssh_environment="windows",
                 project="dotfiles", derived=True,
             ),
         }
@@ -1689,7 +1689,7 @@ class TestVenueBoundResolve:
     @pytest.mark.asyncio
     async def test_repo_at_machine_rebinds_project_loopback(self):
         from unittest.mock import patch
-        local = self.machines["tmichon-dev6"]
+        local = self.machines["host-dev6"]
         with patch(
             "agent_bridge.agent_registry._detect_local_machine",
             return_value=(local, "windows"),
@@ -1707,11 +1707,11 @@ class TestVenueBoundResolve:
         from unittest.mock import patch
         agents = {
             "web-app@dev6": AgentConfig(
-                name="web-app@dev6", host="tmichon-dev6",
+                name="web-app@dev6", host="host-dev6",
                 ssh_environment="windows", project="web-app", derived=True,
             ),
         }
-        local = self.machines["tmichon-dev6"]
+        local = self.machines["host-dev6"]
         with patch(
             "agent_bridge.agent_registry._detect_local_machine",
             return_value=(local, "windows"),
@@ -1724,7 +1724,7 @@ class TestVenueBoundResolve:
     @pytest.mark.asyncio
     async def test_repo_at_machine_default_project_when_bare(self):
         from unittest.mock import patch
-        local = self.machines["tmichon-dev6"]
+        local = self.machines["host-dev6"]
         with patch(
             "agent_bridge.agent_registry._detect_local_machine",
             return_value=(local, "windows"),
@@ -1758,7 +1758,7 @@ class TestSenderRepoFallback:
         self.machines = parse_machines_yaml(TOPO_MACHINES_DATA)
         self.agents = {
             "dev6": AgentConfig(
-                name="dev6", host="tmichon-dev6", ssh_environment="windows",
+                name="dev6", host="host-dev6", ssh_environment="windows",
                 project="dotfiles", derived=True,
             ),
             "SPO.Core": AgentConfig(
@@ -1768,7 +1768,7 @@ class TestSenderRepoFallback:
 
     def _resolver(self):
         from unittest.mock import patch
-        local = self.machines["tmichon-dev6"]
+        local = self.machines["host-dev6"]
         return patch(
             "agent_bridge.agent_registry._detect_local_machine",
             return_value=(local, "windows"),
@@ -1818,17 +1818,17 @@ class TestResolveRepoRemote:
         from agent_bridge.agent_registry import resolve_repo_remote
         self._write(
             tmp_path, monkeypatch,
-            "repos:\n  dev.tmichon:\n    remote: https://x/dev.tmichon\n",
+            "repos:\n  example-marketplace:\n    remote: https://x/example-marketplace\n",
         )
-        assert resolve_repo_remote("dev.tmichon") == "https://x/dev.tmichon"
+        assert resolve_repo_remote("example-marketplace") == "https://x/example-marketplace"
 
     def test_basename_fallback_is_case_insensitive(self, tmp_path, monkeypatch):
         from agent_bridge.agent_registry import resolve_repo_remote
         self._write(
             tmp_path, monkeypatch,
-            "repos:\n  onedrive/Dev.Tmichon:\n    remote: https://x/d\n",
+            "repos:\n  your-org/Example.Marketplace:\n    remote: https://x/d\n",
         )
-        assert resolve_repo_remote("dev.tmichon") == "https://x/d"
+        assert resolve_repo_remote("example-marketplace") == "https://x/d"
 
     def test_unknown_repo_is_none(self, tmp_path, monkeypatch):
         from agent_bridge.agent_registry import resolve_repo_remote
@@ -1886,15 +1886,15 @@ class TestRepoRemoteThreading:
         monkeypatch.setattr(
             "agent_bridge.agent_registry.resolve_repo_remote",
             lambda repo: (
-                "https://x/dev.tmichon" if repo == "dev.tmichon" else None
+                "https://x/example-marketplace" if repo == "example-marketplace" else None
             ),
         )
         r = AgentResolver({}, {})
         pr = _RepoRemoteAwareResolver("cs")
         r.register_namespace_resolver(pr)
-        await r.resolve_async("dev.tmichon@cs:mycs")
-        assert pr.seen["repo"] == "dev.tmichon"
-        assert pr.seen["repo_remote"] == "https://x/dev.tmichon"
+        await r.resolve_async("example-marketplace@cs:mycs")
+        assert pr.seen["repo"] == "example-marketplace"
+        assert pr.seen["repo_remote"] == "https://x/example-marketplace"
         assert pr.seen["name"] == "mycs"
 
     @pytest.mark.asyncio
@@ -1903,13 +1903,13 @@ class TestRepoRemoteThreading:
         # (back-compat), while repo is still honored (no raise).
         monkeypatch.setattr(
             "agent_bridge.agent_registry.resolve_repo_remote",
-            lambda repo: "https://x/dev.tmichon",
+            lambda repo: "https://x/example-marketplace",
         )
         r = AgentResolver({}, {})
         pr = _RepoOnlyResolver("cs2")
         r.register_namespace_resolver(pr)
-        await r.resolve_async("dev.tmichon@cs2:mycs")
-        assert pr.seen == {"name": "mycs", "repo": "dev.tmichon"}
+        await r.resolve_async("example-marketplace@cs2:mycs")
+        assert pr.seen == {"name": "mycs", "repo": "example-marketplace"}
 
 
 def test_detect_local_machine_via_hostname_field(monkeypatch):
@@ -1918,7 +1918,7 @@ def test_detect_local_machine_via_hostname_field(monkeypatch):
     from agent_bridge.agent_registry import _detect_local_machine
     machines = parse_machines_yaml({
         "machines": {
-            "tmichon-augloop1": {
+            "host-augloop1": {
                 "display_name": "augloop1",
                 "hostname": "cpc-tmich-oixui",
                 "environment": "Windows 11",
@@ -1928,4 +1928,4 @@ def test_detect_local_machine_via_hostname_field(monkeypatch):
     monkeypatch.setattr("socket.gethostname", lambda: "CPC-tmich-OIXUI")
     machine, _platform = _detect_local_machine(machines)
     assert machine is not None
-    assert machine.key == "tmichon-augloop1"
+    assert machine.key == "host-augloop1"

@@ -7,34 +7,34 @@ from agent_codespaces.resolver import _norm_repo, _repo_matches_codespace
 
 class TestNormRepo:
     def test_strips_owner_and_codespaces_suffix(self):
-        assert _norm_repo("odsp-microsoft/odsp-web-codespaces") == "odsp-web"
-        assert _norm_repo("odsp-web") == "odsp-web"
-        assert _norm_repo("tmichon_microsoft/dotfiles") == "dotfiles"
+        assert _norm_repo("example-org/example-web-codespaces") == "example-web"
+        assert _norm_repo("example-web") == "example-web"
+        assert _norm_repo("example-user/dotfiles") == "dotfiles"
 
     def test_case_insensitive(self):
-        assert _norm_repo("ODSP-Web") == "odsp-web"
+        assert _norm_repo("Example-Web") == "example-web"
 
 
 class TestRepoMatchesCodespace:
     def test_logical_repo_matches_codespaces_host(self):
-        # odsp-web addresses an odsp-web-codespaces CodeSpace.
+        # example-web addresses an example-web-codespaces CodeSpace.
         assert _repo_matches_codespace(
-            "odsp-web", "odsp-microsoft/odsp-web-codespaces"
+            "example-web", "example-org/example-web-codespaces"
         )
 
     def test_exact_host_repo_matches(self):
         assert _repo_matches_codespace(
-            "odsp-web-codespaces", "odsp-microsoft/odsp-web-codespaces"
+            "example-web-codespaces", "example-org/example-web-codespaces"
         )
 
     def test_different_repo_does_not_match(self):
         assert not _repo_matches_codespace(
-            "dotfiles", "odsp-microsoft/odsp-web-codespaces"
+            "dotfiles", "example-org/example-web-codespaces"
         )
 
     def test_empty_cs_repository(self):
-        assert not _repo_matches_codespace("odsp-web", None)
-        assert not _repo_matches_codespace("odsp-web", "")
+        assert not _repo_matches_codespace("example-web", None)
+        assert not _repo_matches_codespace("example-web", "")
 
 
 import sys
@@ -47,7 +47,7 @@ from agent_codespaces.lifecycle import CodespaceInfo
 from agent_codespaces.resolver import CodespaceResolver
 
 _COPILOT = "copilot --acp --stdio --allow-all-tools"
-_CS_REPO = "odsp-microsoft/odsp-web-codespaces"
+_CS_REPO = "example-org/example-web-codespaces"
 
 
 @pytest.fixture(autouse=True)
@@ -100,35 +100,35 @@ class TestResolveCrossRepo:
     @pytest.mark.asyncio
     async def test_other_repo_clone_if_missing(self, _patched):
         _patched(CodespacesConfig())
-        remote = "https://onedrive.visualstudio.com/onedrive/_git/dev.tmichon"
+        remote = "https://your-org.visualstudio.com/your-org/_git/example-marketplace"
         target = await CodespaceResolver().resolve(
-            "cs-1", repo="dev.tmichon", repo_remote=remote,
+            "cs-1", repo="example-marketplace", repo_remote=remote,
         )
         cmd = _remote_cmd(target.spawn_command)
         assert cmd == (
-            f"[ -d /workspaces/dev.tmichon/.git ] || "
-            f"git clone {remote} /workspaces/dev.tmichon; "
-            f"cd /workspaces/dev.tmichon && {_COPILOT}"
+            f"[ -d /workspaces/example-marketplace/.git ] || "
+            f"git clone {remote} /workspaces/example-marketplace; "
+            f"cd /workspaces/example-marketplace && {_COPILOT}"
         )
 
     @pytest.mark.asyncio
     async def test_own_product_no_clone(self, _patched):
-        config = CodespacesConfig(repos={_CS_REPO: RepoConfig(workspace_repo="odsp-web")})
+        config = CodespacesConfig(repos={_CS_REPO: RepoConfig(workspace_repo="example-web")})
         _patched(config)
         target = await CodespaceResolver().resolve(
-            "cs-1", repo="odsp-web",
-            repo_remote="https://github.com/odsp-microsoft/odsp-web",
+            "cs-1", repo="example-web",
+            repo_remote="https://github.com/example-org/example-web",
         )
         cmd = _remote_cmd(target.spawn_command)
-        assert cmd == f"cd /workspaces/odsp-web && {_COPILOT}"
+        assert cmd == f"cd /workspaces/example-web && {_COPILOT}"
         assert "git clone" not in cmd
 
     @pytest.mark.asyncio
     async def test_dotfiles_no_clone(self, _patched):
-        _patched(CodespacesConfig(dotfiles_repo="tmichon_microsoft/dotfiles"))
+        _patched(CodespacesConfig(dotfiles_repo="example-user/dotfiles"))
         target = await CodespaceResolver().resolve(
             "cs-1", repo="dotfiles",
-            repo_remote="https://github.com/tmichon_microsoft/dotfiles",
+            repo_remote="https://github.com/example-user/dotfiles",
         )
         cmd = _remote_cmd(target.spawn_command)
         assert cmd == (
@@ -139,11 +139,11 @@ class TestResolveCrossRepo:
 
     @pytest.mark.asyncio
     async def test_bare_request_unchanged(self, _patched):
-        config = CodespacesConfig(repos={_CS_REPO: RepoConfig(workspace_repo="odsp-web")})
+        config = CodespacesConfig(repos={_CS_REPO: RepoConfig(workspace_repo="example-web")})
         _patched(config)
         target = await CodespaceResolver().resolve("cs-1")
         cmd = _remote_cmd(target.spawn_command)
-        assert cmd == f"cd /workspaces/odsp-web && {_COPILOT}"
+        assert cmd == f"cd /workspaces/example-web && {_COPILOT}"
 
     @pytest.mark.asyncio
     async def test_cross_repo_no_longer_rejected(self, _patched):

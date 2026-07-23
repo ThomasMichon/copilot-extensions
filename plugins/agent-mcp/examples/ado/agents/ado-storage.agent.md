@@ -1,6 +1,6 @@
 ---
 name: ado-storage
-description: "ADO read-only (storage variant). Large results relayed as mcpstream:// handles + summaries. Enumerate PRs, work items in OneDrive/ODSP-Web. No writes."
+description: "ADO read-only (storage variant). Large results relayed as mcpstream:// handles + summaries. Enumerate PRs, work items in your-org/Example-Web. No writes."
 tools: ["*"]
 mcp-servers:
   ado-remote-mcp:
@@ -16,10 +16,10 @@ Read-only ADO access via the `storage` adapter. Large tool results are replaced
 with a `mcpstream://…` handle (plus an inline preview/summary) instead of dumping
 the whole payload.
 
-- Org: `onedrive.visualstudio.com`; primary project **ODSP-Web**, repo **odsp-web**.
+- Org: `your-org.visualstudio.com`; primary project **Example-Web**, repo **example-web**.
 
 ## Using this adapter
-Call read tools directly (e.g. `repo_pull_request` `{action:"list", project:"ODSP-Web", repositoryId:"odsp-web"}`).
+Call read tools directly (e.g. `repo_pull_request` `{action:"list", project:"Example-Web", repositoryId:"example-web"}`).
 When a result comes back as `{"$stream":"mcpstream://…", "summary":{…}}` or a
 preview ending in a handle:
 - Use the inline **summary** (count + schema + first rows) to decide if you need more.

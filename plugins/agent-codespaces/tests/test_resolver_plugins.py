@@ -8,7 +8,7 @@ from agent_codespaces.lifecycle import CodespaceInfo
 from agent_codespaces.resolver import CodespaceResolver, _build_spawn_command
 
 
-def _cs(name="cs-1", repo="odsp-microsoft/odsp-web-codespaces"):
+def _cs(name="cs-1", repo="example-org/example-web-codespaces"):
     return CodespaceInfo(
         name=name, display_name=name, repository=repo,
         branch="main", state="Available", machine="m",
@@ -39,7 +39,7 @@ async def test_target_repo(monkeypatch):
         "agent_codespaces.resolver.list_codespaces", lambda: [_cs()],
     )
     r = CodespaceResolver()
-    assert await r.target_repo("cs-1") == "odsp-microsoft/odsp-web-codespaces"
+    assert await r.target_repo("cs-1") == "example-org/example-web-codespaces"
 
 
 @pytest.mark.asyncio

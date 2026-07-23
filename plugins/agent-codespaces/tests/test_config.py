@@ -27,9 +27,9 @@ def test_repo_copilot_settings_merges_marketplaces_and_enablement(tmp_path):
     settings_dir.mkdir(parents=True)
     (settings_dir / "settings.json").write_text(json.dumps({
         "extraKnownMarketplaces": {
-            "dev-tmichon": {"source": {"source": "git", "url": "u"}},
+            "example-marketplace": {"source": {"source": "git", "url": "u"}},
         },
-        "enabledPlugins": {"odsp-web-harness@dev-tmichon": True, "off@m": False},
+        "enabledPlugins": {"example-web-harness@example-marketplace": True, "off@m": False},
     }), encoding="utf-8")
     # settings.local.json overrides enabledPlugins (last-wins within a repo).
     (settings_dir / "settings.local.json").write_text(json.dumps({
@@ -37,8 +37,8 @@ def test_repo_copilot_settings_merges_marketplaces_and_enablement(tmp_path):
     }), encoding="utf-8")
 
     merged = repo_copilot_settings([repo])
-    assert "dev-tmichon" in merged["extraKnownMarketplaces"]
-    assert merged["enabledPlugins"]["odsp-web-harness@dev-tmichon"] is True
+    assert "example-marketplace" in merged["extraKnownMarketplaces"]
+    assert merged["enabledPlugins"]["example-web-harness@example-marketplace"] is True
     assert merged["enabledPlugins"]["off@m"] is True  # local override wins
 
 
@@ -263,8 +263,8 @@ class TestEffectiveAcpCommand:
 class TestPerRepoWorkspaceFolder:
     """Per-CodeSpace-repo workspace folder resolution (the related-repo link).
 
-    A CodeSpaces repo (e.g. ``org/odsp-web-codespaces``) often differs from the
-    product checkout it hosts (``/workspaces/odsp-web``). These verify that the
+    A CodeSpaces repo (e.g. ``org/example-web-codespaces``) often differs from the
+    product checkout it hosts (``/workspaces/example-web``). These verify that the
     folder resolves per repo rather than from a single global default.
     """
 
@@ -272,30 +272,30 @@ class TestPerRepoWorkspaceFolder:
         from agent_codespaces.config import RepoConfig
 
         return CodespacesConfig(
-            repos={"org/odsp-web-codespaces": RepoConfig(**repo_kwargs)}
+            repos={"org/example-web-codespaces": RepoConfig(**repo_kwargs)}
         )
 
     def test_workspace_repo_derives_folder(self):
         """``workspace_repo`` derives ``/workspaces/<basename>``."""
-        config = self._config(workspace_repo="odsp-web")
-        assert config.workspace_folder_for("org/odsp-web-codespaces") == (
-            "/workspaces/odsp-web"
+        config = self._config(workspace_repo="example-web")
+        assert config.workspace_folder_for("org/example-web-codespaces") == (
+            "/workspaces/example-web"
         )
-        assert config.effective_acp_command_for("org/odsp-web-codespaces") == (
-            "cd /workspaces/odsp-web && copilot --acp --stdio --allow-all-tools"
+        assert config.effective_acp_command_for("org/example-web-codespaces") == (
+            "cd /workspaces/example-web && copilot --acp --stdio --allow-all-tools"
         )
 
     def test_workspace_repo_with_owner_is_basenamed(self):
-        config = self._config(workspace_repo="odsp-microsoft/odsp-web")
-        assert config.workspace_folder_for("org/odsp-web-codespaces") == (
-            "/workspaces/odsp-web"
+        config = self._config(workspace_repo="example-org/example-web")
+        assert config.workspace_folder_for("org/example-web-codespaces") == (
+            "/workspaces/example-web"
         )
 
     def test_explicit_workspace_folder_overrides_workspace_repo(self):
         config = self._config(
-            workspace_repo="odsp-web", workspace_folder="/custom/checkout"
+            workspace_repo="example-web", workspace_folder="/custom/checkout"
         )
-        assert config.workspace_folder_for("org/odsp-web-codespaces") == (
+        assert config.workspace_folder_for("org/example-web-codespaces") == (
             "/custom/checkout"
         )
 
@@ -303,12 +303,12 @@ class TestPerRepoWorkspaceFolder:
         config = CodespacesConfig(workspace_folder="/workspaces/global")
         from agent_codespaces.config import RepoConfig
 
-        config.repos["org/odsp-web-codespaces"] = RepoConfig(
-            workspace_repo="odsp-web"
+        config.repos["org/example-web-codespaces"] = RepoConfig(
+            workspace_repo="example-web"
         )
         # The mapped repo gets its own folder...
-        assert config.workspace_folder_for("org/odsp-web-codespaces") == (
-            "/workspaces/odsp-web"
+        assert config.workspace_folder_for("org/example-web-codespaces") == (
+            "/workspaces/example-web"
         )
         # ...while an unmapped repo falls back to the global default.
         assert config.workspace_folder_for("org/other") == "/workspaces/global"
@@ -319,7 +319,7 @@ class TestPerRepoWorkspaceFolder:
         assert config.workspace_folder_for("org/unknown") == "/workspaces/global"
 
     def test_no_mapping_resolves_remote_workspace(self):
-        config = self._config(workspace_repo="odsp-web")
+        config = self._config(workspace_repo="example-web")
         # A repo with no per-repo entry and no global default → remote-resolved.
         cmd = config.effective_acp_command_for("org/unmapped")
         assert (
@@ -329,9 +329,9 @@ class TestPerRepoWorkspaceFolder:
         )
 
     def test_global_acp_command_still_overrides(self):
-        config = self._config(workspace_repo="odsp-web")
+        config = self._config(workspace_repo="example-web")
         config.acp_command = "custom --acp"
-        assert config.effective_acp_command_for("org/odsp-web-codespaces") == (
+        assert config.effective_acp_command_for("org/example-web-codespaces") == (
             "custom --acp"
         )
 
@@ -339,18 +339,18 @@ class TestPerRepoWorkspaceFolder:
         repo = config_dir / "repo"
         _write_codespaces_yaml(repo, {
             "repos": {
-                "org/odsp-web-codespaces": {
+                "org/example-web-codespaces": {
                     "machine_type": "largePremiumLinux256gb",
-                    "workspace_repo": "odsp-web",
+                    "workspace_repo": "example-web",
                 },
             },
         })
         save_adopted_repos([AdoptedRepo(path=repo)])
         config = load_merged_config()
-        rc = config.repos["org/odsp-web-codespaces"]
-        assert rc.workspace_repo == "odsp-web"
-        assert config.effective_acp_command_for("org/odsp-web-codespaces") == (
-            "cd /workspaces/odsp-web && copilot --acp --stdio --allow-all-tools"
+        rc = config.repos["org/example-web-codespaces"]
+        assert rc.workspace_repo == "example-web"
+        assert config.effective_acp_command_for("org/example-web-codespaces") == (
+            "cd /workspaces/example-web && copilot --acp --stdio --allow-all-tools"
         )
 
 
@@ -363,27 +363,27 @@ class TestCrossRepoRequestFolder:
     """
 
     _COPILOT = "copilot --acp --stdio --allow-all-tools"
-    _CS = "odsp-microsoft/odsp-web-codespaces"
+    _CS = "example-org/example-web-codespaces"
 
     def test_own_product_is_prepopulated_no_clone(self):
         config = CodespacesConfig()
         folder, prepopulated = config.workspace_folder_for_request(
-            self._CS, "odsp-web"
+            self._CS, "example-web"
         )
-        assert folder == "/workspaces/odsp-web"
+        assert folder == "/workspaces/example-web"
         assert prepopulated is True
 
     def test_own_product_command_has_no_clone(self):
         config = CodespacesConfig()
         cmd = config.effective_acp_command_for(
-            self._CS, requested_repo="odsp-web",
-            repo_remote="https://github.com/odsp-microsoft/odsp-web",
+            self._CS, requested_repo="example-web",
+            repo_remote="https://github.com/example-org/example-web",
         )
-        assert cmd == f"cd /workspaces/odsp-web && {self._COPILOT}"
+        assert cmd == f"cd /workspaces/example-web && {self._COPILOT}"
         assert "git clone" not in cmd
 
     def test_dotfiles_maps_to_persisted_dir(self):
-        config = CodespacesConfig(dotfiles_repo="tmichon_microsoft/dotfiles")
+        config = CodespacesConfig(dotfiles_repo="example-user/dotfiles")
         folder, prepopulated = config.workspace_folder_for_request(
             self._CS, "dotfiles"
         )
@@ -391,10 +391,10 @@ class TestCrossRepoRequestFolder:
         assert prepopulated is True
 
     def test_dotfiles_command_has_no_clone(self):
-        config = CodespacesConfig(dotfiles_repo="tmichon_microsoft/dotfiles")
+        config = CodespacesConfig(dotfiles_repo="example-user/dotfiles")
         cmd = config.effective_acp_command_for(
-            self._CS, requested_repo="tmichon_microsoft/dotfiles",
-            repo_remote="https://github.com/tmichon_microsoft/dotfiles",
+            self._CS, requested_repo="example-user/dotfiles",
+            repo_remote="https://github.com/example-user/dotfiles",
         )
         assert cmd == (
             "cd /workspaces/.codespaces/.persistedshare/dotfiles "
@@ -404,43 +404,43 @@ class TestCrossRepoRequestFolder:
 
     def test_other_repo_clone_if_missing(self):
         config = CodespacesConfig()
-        remote = "https://onedrive.visualstudio.com/onedrive/_git/dev.tmichon"
+        remote = "https://your-org.visualstudio.com/your-org/_git/example-marketplace"
         folder, prepopulated = config.workspace_folder_for_request(
-            self._CS, "dev.tmichon"
+            self._CS, "example-marketplace"
         )
-        assert folder == "/workspaces/dev.tmichon"
+        assert folder == "/workspaces/example-marketplace"
         assert prepopulated is False
         cmd = config.effective_acp_command_for(
-            self._CS, requested_repo="dev.tmichon", repo_remote=remote,
+            self._CS, requested_repo="example-marketplace", repo_remote=remote,
         )
         assert cmd == (
-            f"[ -d /workspaces/dev.tmichon/.git ] || "
-            f"git clone {remote} /workspaces/dev.tmichon; "
-            f"cd /workspaces/dev.tmichon && {self._COPILOT}"
+            f"[ -d /workspaces/example-marketplace/.git ] || "
+            f"git clone {remote} /workspaces/example-marketplace; "
+            f"cd /workspaces/example-marketplace && {self._COPILOT}"
         )
 
     def test_other_repo_owner_prefix_basenamed(self):
         config = CodespacesConfig()
         folder, prepopulated = config.workspace_folder_for_request(
-            self._CS, "onedrive/dev.tmichon"
+            self._CS, "your-org/example-marketplace"
         )
-        assert folder == "/workspaces/dev.tmichon"
+        assert folder == "/workspaces/example-marketplace"
         assert prepopulated is False
 
     def test_other_repo_no_remote_falls_to_plain_cd(self):
         """No known remote: cd only (fails loudly on the CodeSpace if absent)."""
         config = CodespacesConfig()
         cmd = config.effective_acp_command_for(
-            self._CS, requested_repo="dev.tmichon", repo_remote=None,
+            self._CS, requested_repo="example-marketplace", repo_remote=None,
         )
-        assert cmd == f"cd /workspaces/dev.tmichon && {self._COPILOT}"
+        assert cmd == f"cd /workspaces/example-marketplace && {self._COPILOT}"
         assert "git clone" not in cmd
 
     def test_bare_request_unchanged(self):
         """requested_repo=None behaves exactly as the legacy bare path."""
         config = CodespacesConfig()
         from agent_codespaces.config import RepoConfig
-        config.repos[self._CS] = RepoConfig(workspace_repo="odsp-web")
+        config.repos[self._CS] = RepoConfig(workspace_repo="example-web")
         assert config.effective_acp_command_for(self._CS) == (
-            f"cd /workspaces/odsp-web && {self._COPILOT}"
+            f"cd /workspaces/example-web && {self._COPILOT}"
         )

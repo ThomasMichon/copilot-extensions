@@ -42,8 +42,8 @@ def _norm_repo(value: str) -> str:
     """Normalize a repo name for cross-repo matching.
 
     Strips any ``owner/`` prefix, lower-cases, and drops a trailing
-    ``-codespaces`` so a logical repo (``odsp-web``) matches its CodeSpaces
-    host repo (``odsp-microsoft/odsp-web-codespaces``).
+    ``-codespaces`` so a logical repo (``example-web``) matches its CodeSpaces
+    host repo (``example-org/example-web-codespaces``).
     """
     s = value.strip().lower().split("/")[-1]
     suffix = "-codespaces"
@@ -111,15 +111,15 @@ class RepoConfig:
     here apply only to CodeSpaces of this repo.
 
     A CodeSpaces repo frequently differs from the product checkout it hosts
-    (e.g. ``my-org/odsp-web-codespaces`` serves a ``/workspaces/odsp-web``
+    (e.g. ``my-org/example-web-codespaces`` serves a ``/workspaces/example-web``
     checkout). The directional "consume-from" relationship -- *we consume
     CodeSpaces from this repo for product repo X* -- is recorded with
     ``workspace_repo``, mirroring agent-worktrees' "related repos" concept.
     The remote workspace folder then derives from it
     (``/workspaces/<basename(workspace_repo)>``) unless an explicit
     ``workspace_folder`` overrides it. This is what makes an agent launched
-    for ``odsp-web-codespaces`` land in ``/workspaces/odsp-web`` rather than
-    the (wrong) ``/workspaces/odsp-web-codespaces``.
+    for ``example-web-codespaces`` land in ``/workspaces/example-web`` rather than
+    the (wrong) ``/workspaces/example-web-codespaces``.
     """
 
     workspace_repo: str | None = None
@@ -259,8 +259,8 @@ class CodespacesConfig:
         2. ``repos.<repo>.workspace_repo`` -- the product repo this CodeSpace
            hosts; the folder derives as ``/workspaces/<basename>`` (the
            GitHub Codespaces checkout convention). This is the "related
-           repo" link: it lets ``odsp-web-codespaces`` map to
-           ``/workspaces/odsp-web`` without restating the path.
+           repo" link: it lets ``example-web-codespaces`` map to
+           ``/workspaces/example-web`` without restating the path.
         3. ``defaults.workspace_folder`` -- the global fallback.
 
         Returns ``None`` when nothing is configured, so the caller falls back
@@ -290,8 +290,8 @@ class CodespacesConfig:
         - ``requested_repo`` is the **account dotfiles repo** -> ``DOTFILES_DIR``
           (``/workspaces/.codespaces/.persistedshare/dotfiles``), ``prepopulated``
           True -- the universal bootstrap clones/keeps it current.
-        - ``requested_repo`` is the **CodeSpace's own product** (e.g. ``odsp-web``
-          on an ``odsp-web-codespaces`` CodeSpace) -> the bare default folder
+        - ``requested_repo`` is the **CodeSpace's own product** (e.g. ``example-web``
+          on an ``example-web-codespaces`` CodeSpace) -> the bare default folder
           (``workspace_folder_for(cs_repository)``), ``prepopulated`` True -- the
           devcontainer already checked it out.
         - **any other repo** -> ``/workspaces/<basename(requested_repo)>``,

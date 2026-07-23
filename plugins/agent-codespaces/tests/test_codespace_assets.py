@@ -79,7 +79,7 @@ class TestProvisionCommand:
         broker/codespace-token helpers, so headless `git push` works."""
         cmd = build_provision_command()
         for host in (
-            "https://onedrive.visualstudio.com",
+            "https://your-org.visualstudio.com",
             "https://dev.azure.com",
             "https://github.com",
         ):

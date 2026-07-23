@@ -33,7 +33,7 @@ def project_for_task(task: dict) -> str | None:
     ``project-scoped-invocation`` pattern. Preference: the registry's
     authoritative reverse-mapping of the canonical lane
     (``identity.name_for_repo``); failing that, the lane's final path segment
-    (``…/tmichon/aperture-labs`` -> ``aperture-labs``) as a best effort. Returns
+    (``…/example-user/aperture-labs`` -> ``aperture-labs``) as a best effort. Returns
     ``None`` only when the task has no lane at all -- the spawn then falls back to
     CWD discovery, which surfaces the misconfiguration loudly for a CWD-neutral
     caller rather than silently embodying the wrong project.

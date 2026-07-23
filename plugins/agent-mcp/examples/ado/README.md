@@ -6,7 +6,7 @@ variants* of it, each tuned for how an agent should consume it — then hand eac
 variant to a dedicated read-only agent and compare.
 
 Every file here is runnable and was measured live against
-`https://mcp.dev.azure.com/onedrive`.
+`https://mcp.dev.azure.com/your-org`.
 
 ## The problem
 
@@ -31,7 +31,7 @@ existing `@ado-data` bridge config):
 ```yaml
 server:
   type: http
-  url: https://mcp.dev.azure.com/onedrive
+  url: https://mcp.dev.azure.com/your-org
 auth:
   kind: entra
   resource: 2a72489c-aab2-4b65-b93a-a91edccf33b8   # mcp.dev.azure.com
@@ -109,15 +109,15 @@ Measure any variant (drives the MCP handshake + sample read-only calls):
 ```bash
 # requires `az login` for the Entra token
 python examples/ado/probe.py examples/ado/transform.mcp.yaml \
-  'PRs:repo_pull_request:{"action":"list","project":"ODSP-Web","repositoryId":"odsp-web"}' \
-  'WI:search_workitem:{"searchText":"file picker","project":"ODSP-Web","top":5}'
+  'PRs:repo_pull_request:{"action":"list","project":"Example-Web","repositoryId":"example-web"}' \
+  'WI:search_workitem:{"searchText":"file picker","project":"Example-Web","top":5}'
 ```
 
 Run a dedicated agent (a fresh Copilot CLI session discovers the agent file):
 
 ```bash
 copilot --agent ado-transform --allow-all-tools \
-  -p 'List the 3 most recent PRs in odsp-web (ODSP-Web): id + title.'
+  -p 'List the 3 most recent PRs in example-web (Example-Web): id + title.'
 ```
 
 > In your own repo, co-locate the bridge config next to the agent (e.g.

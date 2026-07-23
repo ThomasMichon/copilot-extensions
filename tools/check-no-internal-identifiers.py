@@ -38,6 +38,29 @@ SELF = {
     "plugins/agent-codespaces/tests/test_config_init.py",
 }
 
+# Allowlist: (identifier -> path prefixes) where a denylisted substring is a
+# legitimate *product/generic* term, not the internal identifier. The sole case
+# today is the Microsoft **OneDrive** product -- agent-logger's filesystem sync
+# target (``OneDriveTarget`` / ``resolve_onedrive_root`` / the ``onedrive``
+# target name / the ``OneDrive*`` env vars / ``~/OneDrive``) legitimately names
+# the consumer OneDrive folder, which the bare ``onedrive`` denylist substring
+# cannot distinguish from the internal ``onedrive`` ADO org. The org form is
+# scrubbed everywhere (``onedrive.visualstudio.com`` etc.), so within these
+# paths ``onedrive`` is always the product. Prefixes are matched case-
+# insensitively against the repo-relative path.
+ALLOW: dict[str, tuple[str, ...]] = {
+    "onedrive": ("plugins/agent-logger/", "readme.md"),
+}
+
+
+def _allowed(ident: str, rel: str) -> bool:
+    """True when *ident* is an allowlisted product/generic term in *rel*."""
+    prefixes = ALLOW.get(ident.lower())
+    if not prefixes:
+        return False
+    low = rel.lower()
+    return any(low.startswith(p) for p in prefixes)
+
 
 def _load_identifiers() -> list[str]:
     ids: list[str] = []
@@ -86,12 +109,13 @@ def main() -> int:
         except (OSError, UnicodeDecodeError):
             continue  # binary or unreadable -- skip
         lower = text.lower()
-        if not any(ident in lower for ident in identifiers):
+        if not any(ident in lower for ident in identifiers
+                   if not _allowed(ident, rel)):
             continue
         for lineno, line in enumerate(text.splitlines(), start=1):
             ll = line.lower()
             for ident in identifiers:
-                if ident in ll:
+                if ident in ll and not _allowed(ident, rel):
                     violations.append(f"{rel}:{lineno}: forbidden identifier "
                                       f"'{ident}'")
 

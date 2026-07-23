@@ -1,8 +1,8 @@
 # Session-Host survive-and-reattach spike (Phase 0)
 
 Throwaway spike for the **agent-bridge Session-Host decoupling** effort
-(aperture-labs [#1759](https://gitea.michon.ski/tmichon/aperture-labs/issues/1759) /
-Phase-0 go/no-go [#1761](https://gitea.michon.ski/tmichon/aperture-labs/issues/1761)).
+(aperture-labs [#1759](https://gitea.michon.ski/example-user/aperture-labs/issues/1759) /
+Phase-0 go/no-go [#1761](https://gitea.michon.ski/example-user/aperture-labs/issues/1761)).
 
 It proves the load-bearing primitive **before** any real code is built: a
 Copilot `--acp` child can be owned by a **Session Host** that outlives the

@@ -55,17 +55,17 @@ At a glance:
 
 ```yaml
 # <repo>/.agent-worktrees/related.yaml
-primary: odsp-web                 # the default/primary related repo
+primary: example-web                 # the default/primary related repo
 related:
-  odsp-web:
+  example-web:
     role: product                 # product|dependency|consumer|tooling|docs|sibling
     summary: "Primary product monorepo we ship changes to."
     locus:
       preferred: codespace        # local | machine:<key> | codespace | container
-      codespace: { repo: org/odsp-web-codespaces,
-                   workspace_folder: /workspaces/odsp-web }   # cloud: any machine
-      container: { repo: org/odsp-web-codespaces,
-                   workspace_folder: /workspaces/odsp-web,
+      codespace: { repo: org/example-web-codespaces,
+                   workspace_folder: /workspaces/example-web }   # cloud: any machine
+      container: { repo: org/example-web-codespaces,
+                   workspace_folder: /workspaces/example-web,
                    machines: [dev6] }                         # local fleet: dev6 only
     delegate: { via: agent-codespaces }
 ```
@@ -132,8 +132,8 @@ committed alongside `related.yaml`.
 
 ```bash
 # Link the product repo, preferred via a CodeSpace, and make it primary
-related add odsp-web --role product --primary \
-  --locus codespace --cs-repo org/odsp-web-codespaces \
+related add example-web --role product --primary \
+  --locus codespace --cs-repo org/example-web-codespaces \
   --cs-machine largePremiumLinux256gb --cs-location EastUs \
   --delegate agent-codespaces
 
@@ -142,6 +142,6 @@ related add copilot-extensions --role tooling \
   --locus machine:dev6 --machines dev6,cloud1 --delegate agent-bridge
 
 related list                 # review the index + the primary
-related show odsp-web        # entry + [class] path remote from the registry
-related doc odsp-web         # open/scaffold the narrative to fill in
+related show example-web        # entry + [class] path remote from the registry
+related doc example-web         # open/scaffold the narrative to fill in
 ```

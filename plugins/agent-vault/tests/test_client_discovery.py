@@ -167,7 +167,7 @@ def test_windows_run_dirs_globs_profiles(monkeypatch, tmp_path):
     mount = tmp_path / "mnt_c"
     users = mount / "Users"
     # A real profile with an endpoint file, plus a skipped system profile.
-    good = users / "tmichon" / ".agent-vault" / "run"
+    good = users / "example-user" / ".agent-vault" / "run"
     good.mkdir(parents=True)
     (good / "endpoint.json").write_text("{}", encoding="utf-8")
     skipped = users / "Public" / ".agent-vault" / "run"

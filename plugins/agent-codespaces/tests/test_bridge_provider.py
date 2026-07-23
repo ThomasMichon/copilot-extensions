@@ -154,7 +154,7 @@ class TestBuildAgentConfigs:
         from agent_codespaces.config import CodespacesConfig, RepoConfig
 
         mock_config = CodespacesConfig(
-            repos={"org/other-repo": RepoConfig(workspace_repo="odsp-web")}
+            repos={"org/other-repo": RepoConfig(workspace_repo="example-web")}
         )
         with patch(
             "agent_codespaces.config.load_merged_config",
@@ -164,7 +164,7 @@ class TestBuildAgentConfigs:
 
         by_name = {a["name"]: a for a in agents}
         mapped = " ".join(by_name["cs-shiny-potato-def456"]["spawn_command"])
-        assert "cd /workspaces/odsp-web && copilot --acp --stdio" in mapped
+        assert "cd /workspaces/example-web && copilot --acp --stdio" in mapped
 
         unmapped = " ".join(by_name["cs-fuzzy-adventure-abc123"]["spawn_command"])
         assert "CODESPACE_VSCODE_FOLDER" in unmapped

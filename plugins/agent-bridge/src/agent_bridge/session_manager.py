@@ -1894,7 +1894,7 @@ class SessionManager:
                 # as fd 0/1 and its exit ends the shell (child-liveness tracks it).
                 remote_argv = ["bash", "-lc", relay_prelude + cs_target["acp_command"]]
                 # Copilot runs its tools from the ACP session cwd, so it must be
-                # the CodeSpace workspace checkout (e.g. /workspaces/odsp-web) --
+                # the CodeSpace workspace checkout (e.g. /workspaces/example-web) --
                 # NOT the _default_cwd() /home/<user> fallback, or the agent works
                 # blind with no repo in view. Prefer the structured provider
                 # workspace_folder; else the cd-target parsed from acp_command.

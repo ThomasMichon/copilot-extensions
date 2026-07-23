@@ -214,7 +214,7 @@ def test_machine_gated_disallowed_machine(env):
     env.deploy_runtime("agent-bridge", "2.0.0")  # drift, but wrong machine
     env.write_gate({"agent-bridge": ["lambda-core", "borealis"]})
     plan = reconcile.build_plan(
-        env.repo, machine="tmichon-book2", cache={}, save=False
+        env.repo, machine="host-book2", cache={}, save=False
     )
     assert _services(plan, phase="runtime") == set()
 
@@ -285,11 +285,11 @@ def test_installer_argv_prefers_install_then_init(env, monkeypatch):
 def test_load_runtime_gate_parses_deploy_machines(env):
     env.write_gate({
         "agent-bridge": ["lambda-core", "borealis"],
-        "agent-codespaces": ["tmichon-book2"],
+        "agent-codespaces": ["host-book2"],
     })
     gate = reconcile.load_runtime_gate(env.repo)
     assert gate["agent-bridge"] == {"lambda-core", "borealis"}
-    assert gate["agent-codespaces"] == {"tmichon-book2"}
+    assert gate["agent-codespaces"] == {"host-book2"}
 
 
 # ---------------------------------------------------------------------------
