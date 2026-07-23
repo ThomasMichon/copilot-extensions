@@ -340,7 +340,19 @@ if [[ "$ACTION" == "refresh" ]]; then
     # The picker's refresh icon exits with action=refresh. It runs from the
     # runtime venv the update replaces, so apply here (venv now free), then
     # re-exec the (now-updated) launcher to reopen the picker on the new version.
-    setup_log INFO 'Picker refresh -- applying staged update and relaunching'
+    setup_log INFO 'Picker refresh -- running full update and relaunching'
+    # The explicit "Update available" -> enter gesture runs the SAME
+    # comprehensive update as the `update` command (every registered plugin
+    # payload + sibling modules + the runtime installer), not just the
+    # opportunistic staged apply, which only pulls agent-worktrees and gates
+    # its installer on a fingerprint diff / venv-drift -- so an
+    # already-pulled-but-not-yet-deployed payload or sibling could relaunch
+    # stale (dotfiles#443). `update` is itself version-gated, so it stays quick
+    # when everything is already current.
+    if [[ "${WORKTREE_NO_UPDATE:-}" != "1" ]]; then
+        "$PYTHON" -m agent_worktrees update \
+            || setup_log WARN 'Full update returned non-zero -- continuing to reconcile/relaunch'
+    fi
     invoke_update_apply 1
     _RELAUNCH="$HOME/.agent-worktrees/bin/launch-session.sh"
     if [[ -x "$_RELAUNCH" ]]; then

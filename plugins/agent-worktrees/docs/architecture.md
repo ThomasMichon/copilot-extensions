@@ -189,25 +189,50 @@ agent-worktrees register dotfiles --repo-dir ~/src/dotfiles
 
 ## Update Mechanisms
 
-### Pre-Flight Auto-Update
+### Pre-Flight Auto-Update (opportunistic)
 
-The `launch-session` wrapper checks for new commits on each session
-launch. If the anchor repo has changes affecting the worktree manager,
-the launcher re-runs the installer automatically.
+On **every** session launch the wrapper stages an agent-worktrees marketplace
+pull in the background (`stage-update`) and, once the picker closes, joins and
+applies it (`Invoke-UpdateApply` / `invoke_update_apply`): it runs the runtime
+installer **iff** the staged download changed the payload (fingerprint diff) or
+the deployed runtime version drifted from the payload, then the pre-launch
+self-update and a plugin reconcile. This path is deliberately lightweight -- it
+only touches agent-worktrees -- so it is **not** relied on to fully update
+sibling plugins or modules.
 
 Skip with `--no-update` or `WORKTREE_NO_UPDATE=1`.
 
-### Plugin Marketplace Update
+### "Update available" -> the full update (picker refresh)
+
+When the picker's version indicator shows **Update available** and you press
+enter, the launcher exits with `action=refresh` and runs the **full**
+`agent-worktrees update` (below) before re-execing the now-updated launcher --
+*not* just the opportunistic apply above. This closes the gap where an
+already-pulled-but-not-yet-deployed payload, or a sibling plugin/module, could
+relaunch stale (dotfiles#443).
+
+### Plugin Marketplace Update / `update` command
 
 ```bash
-copilot plugin update agent-worktrees@copilot-extensions
+copilot plugin update agent-worktrees@copilot-extensions   # payload only
+agent-worktrees update                                     # full, comprehensive
 ```
 
-Or use the built-in update command:
+`agent-worktrees update` is the authoritative, comprehensive update. It:
 
-```bash
-agent-worktrees update
-```
+1. Pulls the agent-worktrees marketplace payload.
+2. Refreshes **every** registered plugin payload (incl. payload-only plugins).
+3. Deploys the agent-worktrees runtime installer.
+4. Updates sibling modules (agent-bridge, ...).
+5. Fast-forwards the managed repo anchor(s).
+
+**Quick skip (version-gated).** Steps 3 and 4 skip a runtime whose **deployed
+version already equals its (freshly-pulled) payload version** -- the `devN`
+version tracks commit content, so an equal version means the runtime is already
+current, and the (slow) re-deploy is skipped. The skip is conservative: an
+unknown deployed version (no `deploy-manifest.json`) always re-deploys, so a
+stale runtime is never left behind. Pass `--force` to re-deploy every runtime
+unconditionally.
 
 ### Version Checking
 
