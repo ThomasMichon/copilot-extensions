@@ -1004,6 +1004,48 @@ function Deploy-TerminalScripts {
     }
 }
 
+function Ensure-PsmuxSshSafe {
+    <# `winget install marlocarlo.psmux` registers psmux as an App-Execution-Alias
+       reparse shim at %LOCALAPPDATA%\Microsoft\WinGet\Links\psmux.exe. Windows
+       refuses to run that shim over a NON-interactive network logon ("the path
+       cannot be traversed because it contains an untrusted mount point"), so
+       `psmux` is unusable when a worktree session is driven over SSH -- e.g. the
+       dtssh interactive reach or an agent-bridge dispatch landing as a
+       piped/NoProfile pwsh. (Same reparse-shim wall the WinGet uv.exe install
+       hits.)
+
+       Fix: put the REAL psmux binary's directory -- under WinGet\Packages, a
+       stable per-package path that survives version bumps -- on the User PATH
+       AHEAD of WinGet\Links, so `psmux` resolves to a plain exe in every session
+       kind (interactive, redirected, and NoProfile dispatch). Idempotent. #>
+    $realExe = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Recurse -Filter psmux.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $realExe) { return }
+    $realDir  = $realExe.DirectoryName
+    $linksDir = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'
+    $realN    = $realDir.TrimEnd('\').ToLowerInvariant()
+    $linksN   = $linksDir.TrimEnd('\').ToLowerInvariant()
+
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (-not $userPath) { $userPath = '' }
+    $parts = @($userPath -split ';' | Where-Object { $_ })
+
+    $realIdx = -1; $linksIdx = -1
+    for ($i = 0; $i -lt $parts.Count; $i++) {
+        $pn = $parts[$i].TrimEnd('\').ToLowerInvariant()
+        if ($realIdx  -lt 0 -and $pn -eq $realN)  { $realIdx  = $i }
+        if ($linksIdx -lt 0 -and $pn -eq $linksN) { $linksIdx = $i }
+    }
+
+    # No-op when the real dir is already present AND ahead of the Links shim.
+    if (-not ($realIdx -ge 0 -and ($linksIdx -lt 0 -or $realIdx -lt $linksIdx))) {
+        $rebuilt = @($realDir) + @($parts | Where-Object { $_.TrimEnd('\').ToLowerInvariant() -ne $realN })
+        [Environment]::SetEnvironmentVariable('Path', ($rebuilt -join ';'), 'User')
+        Write-ServiceChanged "psmux: put real binary dir ahead of WinGet\Links on User PATH (SSH-safe): $realDir"
+    }
+    # Reflect in the current process too so a same-session check resolves it.
+    if ($env:Path -notlike "*$realDir*") { $env:Path = "$realDir;$env:Path" }
+}
+
 function Ensure-Psmux {
     <# Install psmux 3.3.5 (pinned) when absent; if 3.3.6 is present -- the
        version with the `attach-session -t` regression (psmux#408, which makes
@@ -1024,6 +1066,7 @@ function Ensure-Psmux {
         } else {
             Write-ServiceWarn "psmux install failed - sessions will launch without multiplexing"
         }
+        Ensure-PsmuxSshSafe
         return
     }
     $psmuxVer = (& psmux --help 2>&1 | Select-Object -First 1) -replace '.*psmux v([0-9.]+).*', '$1'
@@ -1047,6 +1090,7 @@ function Ensure-Psmux {
     } else {
         Write-ServiceOk "psmux available ($psmuxVer)"
     }
+    Ensure-PsmuxSshSafe
 }
 
 function Deploy-Icon {
