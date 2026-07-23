@@ -29,6 +29,7 @@ batch). This document is the contract between them and the agent.
   "log_path_template": "{year}/{month}/{day} {hhmmss} {title}.md",
   "timezone": null,
   "note_marker": "SESSION NOTE:",
+  "log_template": null,
   "narration_style": null,
   "exemplars": null,
   "closing_remark": null
@@ -48,6 +49,7 @@ batch). This document is the contract between them and the agent.
 | `log_path_template` | no | Defaults to the agent-logger config template. Tokens: `{year} {month} {day} {hhmmss} {machine} {title}`. |
 | `timezone` | no | IANA tz for timestamps; `null` = system local. |
 | `note_marker` | no | Operator-note marker prefix (default `SESSION NOTE:`). |
+| `log_template` | no | Optional Markdown skeleton/instructions from repo-local config. `null` = use the built-in structured-frontmatter log. |
 | `narration_style` | no | `null` (default) or caller-injected instructions for **interleaved** personality woven through the narrative body (primary voice seam). |
 | `exemplars` | no | `null` (default) or a list of short few-shot tone/depth reference passages (or a path to them). |
 | `closing_remark` | no | `null` (default) or caller-injected instructions for an **end-of-log** sign-off (end-only complement to `narration_style`). |
@@ -92,6 +94,56 @@ The plugin's own `log-session` and `process-backlog` skills always leave all
 three fields null, so out of the box every log is persona-free. Only a host
 that deliberately injects instructions gets styled output, and the styling
 lives entirely in that host.
+
+## Repo-local organization config
+
+The interactive `prepare-session-log --json` helper layers a repo-local
+organization config on top of machine-local defaults. A repository may commit
+one of these files at its git root:
+
+- `.agent-logger.yaml`
+- `.agent-logger.yml`
+- `.config/agent-logger.yaml`
+- `.config/agent-logger.yml`
+
+Only the `log:` block is honored from repo-local config. This lets a repository
+choose its own output tree and Markdown skeleton without letting a checkout
+change machine-local sync targets.
+
+Example:
+
+```yaml
+log:
+  root: .
+  path_template: "logs/{year}/{month}.{day} {title}.md"
+  template: |
+    # {title}
+
+    **Date:** {date}
+    **Branch(es):** {branches}
+    **PR(s):** {prs}
+
+    ## Summary
+
+    {summary}
+
+    ## Key Changes
+
+    {key_changes}
+
+    ## Commits
+
+    {commits}
+
+    ## Open Items
+
+    {open_items}
+```
+
+The writer treats `log_template` as a log-body contract: it always writes its
+standard YAML frontmatter, then fills placeholders with the session's real
+values and preserves the requested section order. Leave it `null` for the
+built-in body organization.
 
 **Interleaved vs. end-only.** `narration_style` exists precisely so voice
 need not be *"jammed at the end"* -- a host that wants personality *woven

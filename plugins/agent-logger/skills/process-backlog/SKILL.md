@@ -66,11 +66,19 @@ Full example: [`references/manifest.json`](references/manifest.json). Shape:
     }
   ],
   "output_root": "<logs root>",
+  "log_path_template": "<agent-logger config template>",
+  "timezone": null,
+  "note_marker": "SESSION NOTE:",
+  "log_template": null,
   "narration_style": null,
   "exemplars": null,
   "closing_remark": null
 }
 ```
+
+Use `agent-logger config` or `prepare-session-log --json --title "<sample>"`
+from the repository to pick up any repo-local `.agent-logger.yaml` `log:`
+organization block before building the batch manifest.
 
 Cap the batch to a sensible size (e.g. 1-4 substantial sessions or a day's
 worth) so the agent's context isn't overwhelmed; repeat for more.

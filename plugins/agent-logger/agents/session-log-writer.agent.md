@@ -52,6 +52,7 @@ The caller passes a **manifest file path** in its prompt. Read it with the
   "log_path_template": "{year}/{month}/{day} {hhmmss} {title}.md",
   "timezone": null,
   "note_marker": "SESSION NOTE:",
+  "log_template": null,
   "narration_style": null,
   "exemplars": null,
   "closing_remark": null
@@ -68,6 +69,7 @@ The caller passes a **manifest file path** in its prompt. Read it with the
 | `log_path_template` | Path template, tokens `{year} {month} {day} {hhmmss} {machine} {title}`. |
 | `timezone` | IANA tz for timestamps; `null` = system local. |
 | `note_marker` | Marker prefix that flags operator-highlighted notes (default `SESSION NOTE:`). |
+| `log_template` | Optional Markdown skeleton/instructions from repo-local config; `null` = use the built-in structured-frontmatter log. |
 | `narration_style` | `null`, or caller-injected instructions for **interleaved** personality woven through the narrative (the primary voice seam). |
 | `exemplars` | `null`, or a list of short few-shot reference passages (or a path to them) whose tone the writer should emulate. |
 | `closing_remark` | `null`, or caller-injected instructions for an **end-of-log** sign-off -- a simple, end-only complement to `narration_style`. |
@@ -160,9 +162,18 @@ Render the output path from `log_path_template` under `output_root`, with
 replace `:`→` -`, `/`,`\`→`-`; collapse whitespace/hyphens; strip trailing
 dots/spaces). Use literal spaces in paths -- never backslash-escape them.
 
-Every log begins with a `---` YAML frontmatter block. Populate `machine`,
-`session_id`, `previous_session_id` (if available from digest context),
-`start_time`, `end_time`, and `session_notes` (if any).
+If `log_template` is non-null, treat it as the repository's output contract
+for standalone logs. Preserve its section order and wording, fill placeholders
+with real session values, and synthesize missing fields rather than leaving
+placeholder text behind. Common placeholders include `{title}`, `{date}`,
+`{branches}`, `{prs}`, `{summary}`, `{key_changes}`, `{commits}`, and
+`{open_items}`; templates may also contain plain instructions instead of only
+placeholders. Do not add the built-in YAML frontmatter unless the template asks
+for it.
+
+If `log_template` is null, every log begins with a `---` YAML frontmatter block.
+Populate `machine`, `session_id`, `previous_session_id` (if available from
+digest context), `start_time`, `end_time`, and `session_notes` (if any).
 
 **Daily digests** (batch mode): group digest-category sessions by date +
 machine into one file; YAML frontmatter lists each session; each gets a

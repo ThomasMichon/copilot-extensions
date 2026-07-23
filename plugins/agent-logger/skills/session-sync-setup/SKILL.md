@@ -51,6 +51,45 @@ sync:
 See [`references/config.yaml`](references/config.yaml) for the `onedrive`,
 `ssh`, `ssh-tunnel`, and `ingest` target blocks.
 
+## Repo-local log organization
+
+Session-sync is machine-local, but log organization can be repo-local. A
+repository may commit `.agent-logger.yaml` (or `.agent-logger.yml`,
+`.config/agent-logger.yaml`, `.config/agent-logger.yml`) at its git root with
+only a `log:` block. `prepare-session-log --json` layers that block over the
+machine-local config and passes it through the manifest:
+
+```yaml
+log:
+  root: .
+  path_template: "logs/{year}/{month}.{day} {title}.md"
+  template: |
+    # {title}
+
+    **Date:** {date}
+    **Branch(es):** {branches}
+    **PR(s):** {prs}
+
+    ## Summary
+
+    {summary}
+
+    ## Key Changes
+
+    {key_changes}
+
+    ## Commits
+
+    {commits}
+
+    ## Open Items
+
+    {open_items}
+```
+
+Repo-local config cannot change `sync:` targets; those remain in
+`~/.agent-logger/config.yaml`.
+
 ## Verify
 
 ```

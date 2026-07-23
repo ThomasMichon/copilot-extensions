@@ -4,7 +4,8 @@ Resolution order (lowest precedence first):
 
 1. Built-in defaults (:data:`DEFAULTS`).
 2. ``$AGENT_LOGGER_HOME/config.yaml`` (or ``~/.agent-logger/config.yaml``).
-3. Environment-variable overrides (``AGENT_LOGGER_*``).
+3. Repository-local organization config (``.agent-logger.yaml`` by convention).
+4. Environment-variable overrides (``AGENT_LOGGER_*``).
 
 Everything that couples the reusable code to a particular facility -- the
 digest store location, the sync target, the voice pack, the output path
@@ -61,7 +62,8 @@ DEFAULTS: dict[str, Any] = {
             "ingest": {},
         },
     },
-    # Log writer presentation.
+    # Log writer presentation. Repository-local config may override only this
+    # block, so a checked-in convention cannot alter machine-local sync state.
     "log": {
         # Root directory under which logs are written. None = current
         # working directory (the repo the user is in).
@@ -76,6 +78,9 @@ DEFAULTS: dict[str, Any] = {
         "voice_pack": "none",
         # Marker that flags operator-highlighted session notes.
         "note_marker": "SESSION NOTE:",
+        # Optional Markdown outline/instructions for repository-specific log
+        # body sections. Null means use the writer's built-in structure.
+        "template": None,
     },
     # Machine identity. When name is None it is auto-detected (hostname,
     # with a -wsl suffix inside WSL).
@@ -83,6 +88,13 @@ DEFAULTS: dict[str, Any] = {
         "name": None,
     },
 }
+
+REPO_CONFIG_FILENAMES: tuple[str, ...] = (
+    ".agent-logger.yaml",
+    ".agent-logger.yml",
+    ".config/agent-logger.yaml",
+    ".config/agent-logger.yml",
+)
 
 
 def home_dir() -> Path:
@@ -109,13 +121,20 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return out
 
 
-def _load_user_config(path: Path) -> dict[str, Any]:
+def _load_yaml_config(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
     if yaml is None:  # pragma: no cover
         raise RuntimeError("pyyaml is required to read config.yaml")
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def _load_user_config(path: Path) -> dict[str, Any]:
+    data = _load_yaml_config(path)
+    if not data:
         return {}
     # Lazy schema migration (in memory, never persists / never raises) so a
     # still-old config reads at the current shape before install/update rewrites
@@ -125,12 +144,72 @@ def _load_user_config(path: Path) -> dict[str, Any]:
     return config_migrations.migrate_loaded(data)
 
 
+def _find_repo_root(start: Path | None = None) -> Path | None:
+    """Find the nearest git repository root at or above ``start``."""
+    here = (start or Path.cwd()).expanduser().resolve()
+    if here.is_file():
+        here = here.parent
+    for candidate in (here, *here.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def find_repo_config(start: Path | None = None) -> Path | None:
+    """Find the repository-local agent-logger config by convention.
+
+    ``$AGENT_LOGGER_REPO_CONFIG`` may point at an explicit file. Set it to
+    ``0``/``false``/``off``/``none`` to disable repo-local config discovery.
+    Otherwise the nearest git root is searched for :data:`REPO_CONFIG_FILENAMES`.
+    """
+    env = os.environ.get("AGENT_LOGGER_REPO_CONFIG")
+    if env:
+        if env.strip().lower() in {"0", "false", "off", "none"}:
+            return None
+        explicit = Path(env).expanduser()
+        return explicit if explicit.is_file() else None
+
+    root = _find_repo_root(start)
+    if root is None:
+        return None
+    for name in REPO_CONFIG_FILENAMES:
+        candidate = root / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _load_repo_config(path: Path) -> dict[str, Any]:
+    """Load the repo-local organization config.
+
+    Repo-local config is intentionally scoped to ``log`` settings. It lets a
+    repository define its checked-in log organization without letting arbitrary
+    checkouts change machine-local sync targets or runtime state locations.
+    """
+    data = _load_yaml_config(path)
+    log = data.get("log") if isinstance(data, dict) else None
+    if not isinstance(log, dict):
+        return {}
+
+    scoped = copy.deepcopy(log)
+    config_base = path.parent.parent if path.parent.name == ".config" else path.parent
+    root = scoped.get("root")
+    if isinstance(root, str) and root.strip() and not root.startswith("~"):
+        root_path = Path(root)
+        if not root_path.is_absolute():
+            scoped["root"] = str((config_base / root_path).resolve())
+    return {"log": scoped}
+
+
 class Config:
     """Resolved agent-logger configuration."""
 
-    def __init__(self, data: dict[str, Any], home: Path) -> None:
+    def __init__(
+        self, data: dict[str, Any], home: Path, repo_config_path: Path | None = None
+    ) -> None:
         self._data = data
         self.home = home
+        self.repo_config_path = repo_config_path
 
     # -- resolved convenience accessors ---------------------------------
 
@@ -245,6 +324,14 @@ class Config:
         return self._data.get("log", {}).get("note_marker", DEFAULTS["log"]["note_marker"])
 
     @property
+    def log_template(self) -> str | None:
+        """Optional repository-supplied Markdown outline for the log body."""
+        raw = self._data.get("log", {}).get("template")
+        if raw is None:
+            return None
+        return str(raw)
+
+    @property
     def machine_name(self) -> str | None:
         return self._data.get("machine", {}).get("name")
 
@@ -264,10 +351,18 @@ class Config:
         return copy.deepcopy(self._data)
 
 
-def load_config(home: Path | None = None) -> Config:
+def load_config(
+    home: Path | None = None,
+    *,
+    repo_start: Path | None = None,
+    include_repo: bool = True,
+) -> Config:
     """Load layered configuration into a :class:`Config`."""
     resolved_home = home or home_dir()
     data = _deep_merge(DEFAULTS, _load_user_config(resolved_home / "config.yaml"))
+    repo_config_path = find_repo_config(repo_start) if include_repo else None
+    if repo_config_path:
+        data = _deep_merge(data, _load_repo_config(repo_config_path))
 
     # Environment overrides (flat, opt-in).
     if os.environ.get("AGENT_LOGGER_SYNC_TARGET"):
@@ -275,4 +370,4 @@ def load_config(home: Path | None = None) -> Config:
     if os.environ.get("AGENT_LOGGER_VOICE_PACK"):
         data["log"]["voice_pack"] = os.environ["AGENT_LOGGER_VOICE_PACK"]
 
-    return Config(data, resolved_home)
+    return Config(data, resolved_home, repo_config_path)
