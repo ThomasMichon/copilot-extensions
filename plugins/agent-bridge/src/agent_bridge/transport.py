@@ -608,11 +608,18 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
             # *explicitly* via ``-EncodedCommand`` (base64 UTF-16LE): this is
             # quoting-proof and independent of the remote DefaultShell -- it
             # runs correctly whether sshd hands the line to cmd.exe or pwsh.
+            #
+            # ``-WindowStyle Hidden`` keeps this ACP-stdio pwsh headless. When a
+            # remote Windows sshd execs a console-subsystem child without a
+            # console (the non-PTY exec path we use), Windows otherwise allocates
+            # a *visible* console window for it -- so every inbound dispatch pops
+            # a pwsh window on the target box (dotfiles#403). Hidden costs nothing
+            # for a stdio-piped ACP agent (stdio is inherited, not the window).
             exe = "powershell" if shell == "powershell" else "pwsh"
             encoded = base64.b64encode(
                 pwsh_script.encode("utf-16-le")
             ).decode("ascii")
-            return f"{exe} -NoProfile -EncodedCommand {encoded}"
+            return f"{exe} -NoProfile -WindowStyle Hidden -EncodedCommand {encoded}"
         # Prepend env exports (e.g. auth hook vars) so they're available
         # to the binstub and all child processes in the SSH session
         if target.env:

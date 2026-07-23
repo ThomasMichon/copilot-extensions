@@ -154,7 +154,15 @@ class TestBuildRemoteCmd:
 
     def test_project_pwsh_skips_bash_breadcrumb(self):
         """PowerShell targets must not get the bash breadcrumb -- it
-        ParserErrors in pwsh and aborts the whole launch command (#985)."""
+        ParserErrors in pwsh and aborts the whole launch command (#985).
+
+        The pwsh path is invoked via ``-EncodedCommand`` (quoting-proof,
+        DefaultShell-independent) and forced headless with
+        ``-WindowStyle Hidden`` so inbound dispatch doesn't pop a console
+        window on the target (dotfiles#403).
+        """
+        import base64
+
         target = SpawnTarget(
             type="ssh", host="lambda-core", user="tmichon",
             project="aperture-labs", ssh_shell="pwsh",
@@ -163,8 +171,12 @@ class TestBuildRemoteCmd:
         cmd = _build_remote_cmd(target, session_id="s")
         assert "reached-device" not in cmd  # no breadcrumb prelude
         assert not cmd.startswith("(")      # no bash subshell
-        assert cmd.startswith("aperture-labs")
-        assert "'--'" in cmd and "--acp" in cmd
+        assert cmd.startswith("pwsh -NoProfile -WindowStyle Hidden -EncodedCommand ")
+        # The encoded payload is the real launch script; decode + assert on it.
+        encoded = cmd.rsplit(" ", 1)[-1]
+        script = base64.b64decode(encoded).decode("utf-16-le")
+        assert script.startswith("aperture-labs")
+        assert "'--'" in script and "--acp" in script
 
     def test_project_posix_keeps_breadcrumb(self):
         """POSIX targets still get the device-arrival breadcrumb."""
