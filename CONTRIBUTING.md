@@ -72,6 +72,11 @@ plugin you changed.
 > the `pyproject.toml` version in the **same** commit — it is a *fourth* file for
 > that plugin, easy to miss because the marketplace doesn't read it. A stale
 > `__version__` makes a correctly-deployed runtime misreport its own version.
+>
+> **Enforced by `tools/check-version-consistency.py`** (pre-push): it fails the
+> push if any plugin's `plugin.json` / `pyproject.toml` / `marketplace.json`
+> versions disagree — the guard added after #65 bumped only `pyproject.toml` and
+> wedged the Picker's "Update available" indicator into a permanent loop.
 
 **agent-worktrees:**
 
@@ -382,7 +387,10 @@ The repo ships git hooks under `tools/hooks/`:
 - **`pre-push`** — runs the repo-wide guards: `tools/check-install-contract.py`
   (the [install contract](docs/install-contract.md)),
   `tools/check-no-internal-identifiers.py`, `tools/check-skills.py`,
-  `tools/check-docs-consistency.py`, and `tools/check-runbook-references.py`.
+  `tools/check-docs-consistency.py`, `tools/check-runbook-references.py`, and
+  `tools/check-version-consistency.py` (every plugin's version identical across
+  `plugin.json` / `pyproject.toml` / its `marketplace.json` entry — a one-file
+  bump wedges the Picker's update indicator).
 
 They are **not active until wired** per clone (git does not auto-enable a
 committed hooks dir). Run the helper once per checkout:

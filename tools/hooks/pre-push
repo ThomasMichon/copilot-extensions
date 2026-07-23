@@ -29,4 +29,7 @@ fi
 "${PY[@]}" "$ROOT/tools/check-skills.py"
 # Keep the docs honest: plugin counts/lists and runbook skill/plugin references.
 "${PY[@]}" "$ROOT/tools/check-docs-consistency.py"
-exec "${PY[@]}" "$ROOT/tools/check-runbook-references.py"
+"${PY[@]}" "$ROOT/tools/check-runbook-references.py"
+# Keep each plugin's version identical across plugin.json / pyproject.toml /
+# marketplace.json (a one-file bump wedges the Picker's update indicator).
+exec "${PY[@]}" "$ROOT/tools/check-version-consistency.py"
