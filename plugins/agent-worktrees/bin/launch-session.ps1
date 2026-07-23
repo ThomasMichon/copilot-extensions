@@ -398,7 +398,23 @@ if ($plan.action -eq 'remote') {
 # here (venv now free), then re-exec the (now-updated) launcher to reopen the
 # picker on the new version.
 if ($plan.action -eq 'refresh') {
-    Write-SetupLog 'Picker refresh -- applying staged update and relaunching'
+    Write-SetupLog 'Picker refresh -- running full update and relaunching'
+    # The explicit "Update available" -> enter gesture runs the SAME
+    # comprehensive update as the `update` command (every registered plugin
+    # payload + sibling modules + the runtime installer), not just the
+    # opportunistic staged apply. The staged apply only pulls agent-worktrees
+    # and gates its installer on a fingerprint diff / venv-drift, so an
+    # already-pulled-but-not-yet-deployed payload -- or any sibling
+    # plugin/module -- could relaunch stale (dotfiles#443). `update` is itself
+    # version-gated, so it stays quick when everything is already current.
+    if (-not $noUpdate) {
+        & $VenvPython -m agent_worktrees update
+        if ($LASTEXITCODE -ne 0) {
+            Write-SetupLog "Full update returned exit $LASTEXITCODE -- continuing to reconcile/relaunch" 'WARN'
+        }
+    }
+    # Reconcile repo-gated payloads/runtimes + reap the staged job (installer
+    # and pre-launch here no-op: the full update above already deployed).
     Invoke-UpdateApply -StageJob $script:StageJob -WithReconcile
     $newLauncher = Join-Path $env:USERPROFILE '.agent-worktrees\bin\launch-session.ps1'
     if (Test-Path $newLauncher) {

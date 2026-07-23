@@ -6157,31 +6157,46 @@ def cmd_update(args: argparse.Namespace) -> int:
 
     output.info(f"Plugin source: {plugin_dir}")
 
-    # Step 3 -- run the platform-specific installer from the plugin dir
+    # Step 3 -- run the platform-specific installer from the plugin dir,
+    # unless the deployed runtime already matches the freshly-pulled payload.
+    # The devN version tracks commit content, so equal versions mean the
+    # runtime is already current -- skip the (slow) re-deploy for speed
+    # (dotfiles#443's "quick skip"). --force always re-deploys; an unknown
+    # deployed version (no deploy-manifest) counts as drift and deploys, so we
+    # never skip on uncertainty.
+    from . import reconcile as _reconcile
+
     plat = cfg.detect_platform()
-    if plat == "windows":
-        installer = plugin_dir / "scripts" / "install.ps1"
-        shell = shutil.which("pwsh") or shutil.which("powershell")
-        if not shell:
-            output.err("PowerShell not found")
-            return 1
-        argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
-                "-File", str(installer), "update"]
+    force = getattr(args, "force", False)
+    aw_payload_ver = _reconcile.payload_version(plugin_dir)
+    aw_deployed_ver = _reconcile.runtime_deployed_version("agent-worktrees")
+    if (not force) and aw_payload_ver and aw_payload_ver == aw_deployed_ver:
+        output.ok(f"Runtime already at {aw_deployed_ver} -- skipping installer "
+                  "(use --force to re-deploy)")
     else:
-        installer = plugin_dir / "scripts" / "install.sh"
-        argv = ["bash", str(installer), "update"]
+        if plat == "windows":
+            installer = plugin_dir / "scripts" / "install.ps1"
+            shell = shutil.which("pwsh") or shutil.which("powershell")
+            if not shell:
+                output.err("PowerShell not found")
+                return 1
+            argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", str(installer), "update"]
+        else:
+            installer = plugin_dir / "scripts" / "install.sh"
+            argv = ["bash", str(installer), "update"]
 
-    if not installer.exists():
-        output.err(f"Installer not found: {installer}")
-        return 1
+        if not installer.exists():
+            output.err(f"Installer not found: {installer}")
+            return 1
 
-    result = subprocess.run(argv, cwd=plugin_dir, timeout=300)
-    if result.returncode != 0:
-        return result.returncode
+        result = subprocess.run(argv, cwd=plugin_dir, timeout=300)
+        if result.returncode != 0:
+            return result.returncode
 
     # Step 4 -- update registered sibling modules (agent-bridge, etc.)
     skip_modules = getattr(args, "skip_modules", None)
-    _update_modules(plugin_dir, plat, skip_modules)
+    _update_modules(plugin_dir, plat, skip_modules, force=force)
 
     # Step 5 -- fast-forward the managed repo anchor(s) so in-repo config
     # bindings deploy alongside the plugin update (not just on next launch).
@@ -6455,6 +6470,7 @@ def _update_modules(
     plugin_dir: Path,
     platform: str,
     skip_modules: list[str] | None,
+    force: bool = False,
 ) -> None:
     """Update sibling modules registered in modules.json.
 
@@ -6531,6 +6547,22 @@ def _update_modules(
             output.warn(f"Module '{name}' source not found: {module_dir}")
             results.append((name, "source dir not found"))
             continue
+
+        # Quick skip (dotfiles#443): the payload was just refreshed above, so
+        # if the module's deployed runtime version already matches its payload
+        # version, its installer is a no-op -- skip the (slow) re-deploy. Only
+        # skip when we can positively confirm equality; an unknown deployed
+        # version (no deploy-manifest) falls through and re-deploys. --force
+        # always re-deploys.
+        if not force:
+            from . import reconcile as _reconcile
+            mod_payload_ver = _reconcile.payload_version(module_dir)
+            mod_deployed_ver = _reconcile.runtime_deployed_version(name)
+            if mod_payload_ver and mod_payload_ver == mod_deployed_ver:
+                output.ok(f"{name} already at {mod_deployed_ver} -- "
+                          "skipping installer")
+                results.append((name, "SKIPPED (current)"))
+                continue
 
         # Locate the platform installer (convention: scripts/install.{ps1,sh})
         if platform == "windows":
@@ -8826,6 +8858,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Skip module updates (all if no names given, or named modules)")
     p.add_argument("--no-anchor-sync", action="store_true",
                    help="Skip fast-forwarding the managed repo anchor(s) after update")
+    p.add_argument("--force", action="store_true",
+                   help="Re-deploy every runtime installer even when the "
+                        "deployed version already matches the payload "
+                        "(default: skip already-current runtimes for speed)")
 
     # install-status
     sub.add_parser("install-status", help="Show installation status")
