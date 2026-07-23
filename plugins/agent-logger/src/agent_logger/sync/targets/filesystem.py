@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import time
 from pathlib import Path
 
@@ -29,6 +30,35 @@ _EXCLUDE_NAMES = frozenset({".lock"})
 _SESSION_INDEX_NAMES = frozenset(
     {"session-store.db", "session-store.db-wal", "session-store.db-shm"}
 )
+
+
+def _unlink_replace_target(path: Path) -> None:
+    """Remove a destination before replacement, clearing read-only if needed."""
+    try:
+        path.unlink(missing_ok=True)
+    except PermissionError:
+        if path.exists():
+            os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+            path.unlink()
+        else:
+            raise
+
+
+def _copy_replace(src: Path, dst: Path) -> None:
+    """Copy ``src`` to ``dst`` after clearing any read-only destination."""
+    _unlink_replace_target(dst)
+    try:
+        shutil.copy2(src, dst)
+    except PermissionError:
+        # Some Windows/mounted-file-system combinations still fail while
+        # applying metadata. Fall back to content-first replacement and keep
+        # metadata best-effort so sync progress is not blocked.
+        _unlink_replace_target(dst)
+        shutil.copyfile(src, dst)
+        try:
+            shutil.copystat(src, dst)
+        except OSError:
+            pass
 
 
 def _needs_copy(src: Path, dst: Path) -> bool:
@@ -115,8 +145,7 @@ class FilesystemTarget(Target):
                     # and with it the post-push notify. Unlinking needs only
                     # write permission on the parent directory, which we have,
                     # so it succeeds regardless of the file's own mode.
-                    dst_file.unlink(missing_ok=True)
-                    shutil.copy2(src_file, dst_file)
+                    _copy_replace(src_file, dst_file)
                 except OSError as exc:
                     return PushResult(ok=False, detail=f"copy failed: {exc}")
                 copied += 1
