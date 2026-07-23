@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from agent_logger.config import load_config
+from agent_logger.config import RepositoryConfigError, load_config
 from agent_logger.segmenter.platform import detect_machine, sanitize_path_component
 
 
@@ -128,7 +128,11 @@ def main() -> None:
 
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-    cfg = load_config()
+    try:
+        cfg = load_config()
+    except RepositoryConfigError as exc:
+        print(f"Error: invalid repository configuration: {exc}", file=sys.stderr)
+        sys.exit(2)
 
     # Machine & environment
     raw_machine = args.machine or cfg.machine_name or detect_machine()

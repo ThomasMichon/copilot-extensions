@@ -60,6 +60,7 @@ only a `log:` block. `prepare-session-log --json` layers that block over the
 machine-local config and passes it through the manifest:
 
 ```yaml
+schema_version: 1
 log:
   root: .
   path_template: "logs/{year}/{month}.{day} {title}.md"
@@ -88,7 +89,10 @@ log:
 ```
 
 Repo-local config cannot change `sync:` targets; those remain in
-`~/.agent-logger/config.yaml`.
+`~/.agent-logger/config.yaml`. Only `root`, `path_template`, `timezone`,
+`note_marker`, and `template` are accepted under `log:`. Invalid YAML, unknown
+fields/placeholders, unsupported schema versions, unsafe paths, and invalid
+timezones fail explicitly.
 
 ## Verify
 

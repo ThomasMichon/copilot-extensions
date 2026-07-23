@@ -84,9 +84,11 @@ dir is **local-only** — never place it inside a cloud-synced folder.
 
 Repo-local config is discovered at the current git root from
 `.agent-logger.yaml`, `.agent-logger.yml`, `.config/agent-logger.yaml`, or
-`.config/agent-logger.yml`. Only the `log:` block is honored there, so a repo
-can own `root`, `path_template`, and an optional Markdown `template` without
-changing machine-local session-sync targets.
+`.config/agent-logger.yml`. The version-1 schema accepts only `root`,
+`path_template`, `timezone`, `note_marker`, and an optional Markdown
+`template` under `log:`. Invalid configuration and paths outside the
+repository fail explicitly. Non-logging components ignore repo-local
+configuration, so a layout error cannot disrupt session sync or digest storage.
 
 ## Deployment topologies
 

@@ -240,7 +240,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    cfg = load_config()
+    cfg = load_config(include_repo=False)
 
     if args.command == "run":
         return run_sync(

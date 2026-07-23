@@ -19,7 +19,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "agent-logger"
-version = "0.1.1.dev17"
+version = "0.1.1.dev18"
 source = { editable = "." }
 dependencies = [
     { name = "agent-config-migrate" },

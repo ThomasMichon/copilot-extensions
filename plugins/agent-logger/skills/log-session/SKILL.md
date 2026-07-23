@@ -56,6 +56,7 @@ from the current repository root: `.agent-logger.yaml`, `.agent-logger.yml`,
 block is honored. A repo that wants its own tree/format can set, for example:
 
 ```yaml
+schema_version: 1
 log:
   root: .
   path_template: "logs/{year}/{month}.{day} {title}.md"
@@ -82,6 +83,11 @@ log:
 
     {open_items}
 ```
+
+The repository file is validated before any log path is created. Unknown
+fields, unsupported schema versions/placeholders, malformed YAML, invalid
+timezones, and paths that are absolute or escape the repository fail with an
+explicit error. Do not silently fall back when validation fails.
 
 ### 2. Build a one-session manifest
 
