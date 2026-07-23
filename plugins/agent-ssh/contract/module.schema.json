@@ -47,7 +47,7 @@
       "type": "object",
       "description": "Which lifecycle verbs the transport implements. emit-profile + verify are satisfied by the core; install-client and provision-server are transport-owned.",
       "properties": {
-        "install-client":   { "type": "boolean" },
+        "install-client":   { "type": "boolean", "description": "Transport installs a client binary. On Windows the install-client entrypoint MUST place a real standalone exe on PATH ahead of WinGet\\Links (NOT a WinGet App Execution Alias shim, which fails over non-interactive SSH). See docs/transport-provider-contract.md." },
         "emit-profile":     { "type": "boolean" },
         "verify":           { "type": "boolean" },
         "provision-server": { "type": "boolean" }
