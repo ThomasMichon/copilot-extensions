@@ -2265,11 +2265,104 @@ def _cmd_end(args: argparse.Namespace) -> None:
 
 
 def _cmd_resume(args: argparse.Namespace) -> None:
-    """Resume a stopped session."""
+    """Resume a stopped session, or load/take-over a still-recognized worktree.
+
+    The positional accepts either an **ACP session id** (owned by the bridge)
+    or a **worktree handle**. Resolution order:
+
+      1. Try to resume it as a bridge-owned ACP session (the historical
+         behavior).
+      2. On 404 (no such owned session), treat it as a **worktree handle** and
+         ensure that worktree has a live owned session -- resuming its latest
+         session, or, for a *dormant* worktree (its interactive CLI stopped,
+         e.g. after a reboot), adopting the on-disk worktree with a fresh owned
+         session. This is just a **note**: no confirmation needed.
+
+    **Break-glass for a LIVE worktree.** If a *fresh live* interactive CLI still
+    holds the worktree, taking it over would spawn a second controller on the
+    same checkout, so the bridge refuses (409 ``live_cli_holds_worktree``).
+    Stopping the live CLI first, then re-running with ``--force``, performs the
+    affirmative take-over.
+    """
+    from .client import BridgeClientError, BridgeConnectionError
+
     client = _get_client()
-    result = client.resume_session(args.session_id)
+    target = args.session_id
+    reclaim = bool(getattr(args, "force", False))
+
+    # 1. Try the historical owned-ACP-session resume first. A worktree handle
+    #    is not an owned session id, so this 404s and we fall through.
+    if not reclaim:
+        try:
+            result = client.resume_session(target)
+            status = result.get("status", "")
+            print(f"[OK] Session {target} resumed ({status})")
+            return
+        except BridgeClientError as exc:
+            if exc.status != 404:
+                print(
+                    f"[FAIL] Could not resume session {target}: {exc.detail}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            # 404 -> not an owned session; fall through to worktree resolution.
+        except BridgeConnectionError:
+            print(
+                "[FAIL] agent-bridge is not reachable; could not resume "
+                f"{target}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    # 2. Treat the target as a worktree handle: load it (dormant = a note) or
+    #    take it over (--force past a live holder = break-glass).
+    try:
+        result = client.resume_worktree(target, reclaim=reclaim)
+    except BridgeClientError as exc:
+        if exc.status == 409:
+            detail = exc.detail
+            reason = detail.get("reason") if isinstance(detail, dict) else None
+            if reason == "live_cli_holds_worktree":
+                holder = (
+                    detail.get("session_id")
+                    if isinstance(detail, dict)
+                    else None
+                )
+                print(
+                    f"[BREAK-GLASS] A live interactive CLI (session {holder}) "
+                    f"still holds worktree {target}.\n"
+                    "  Taking it over would run a second controller on the same "
+                    "checkout.\n"
+                    "  Stop that CLI first, then re-run with --force to take it "
+                    "over.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            print(f"[FAIL] Could not resume worktree {target}: {exc.detail}",
+                  file=sys.stderr)
+            sys.exit(1)
+        if exc.status == 404:
+            print(
+                f"[FAIL] {target} is neither a bridge-owned session nor a "
+                "recognized worktree. Pass a worktree handle (e.g. "
+                "'<machine>-<env>-<ts>-<id>') to load a dormant worktree.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print(f"[FAIL] Could not resume worktree {target}: {exc.detail}",
+              file=sys.stderr)
+        sys.exit(1)
+    except BridgeConnectionError:
+        print(
+            f"[FAIL] agent-bridge is not reachable; could not resume {target}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     status = result.get("status", "")
-    print(f"[OK] Session {args.session_id} resumed ({status})")
+    sid = result.get("session_id", "") or target
+    verb = "took over" if reclaim else "loaded"
+    print(f"[OK] Worktree {target} {verb} as owned session {sid} ({status})")
 
 
 def _cmd_session_usage(args: argparse.Namespace) -> None:
@@ -2886,8 +2979,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     end_p.set_defaults(func=_cmd_end)
 
-    resume_p = sub.add_parser("resume", help="Resume a stopped session")
-    resume_p.add_argument("session_id", help="Session ID")
+    resume_p = sub.add_parser(
+        "resume",
+        help="Resume a stopped session, or load/take-over a worktree by handle",
+    )
+    resume_p.add_argument(
+        "session_id",
+        metavar="target",
+        help="Session ID (owned ACP session) or worktree handle to load",
+    )
+    resume_p.add_argument(
+        "--force",
+        "--reclaim",
+        dest="force",
+        action="store_true",
+        help=(
+            "Break-glass take-over: adopt the worktree even if a live "
+            "interactive CLI holds it (stop that CLI first)"
+        ),
+    )
     resume_p.set_defaults(func=_cmd_resume)
 
     usage_p = sub.add_parser(

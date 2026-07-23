@@ -145,8 +145,14 @@ agent-bridge wait <session-id>
 # Stop a session (preserves state for resume)
 agent-bridge stop <session-id>
 
-# Resume a stopped session
-agent-bridge resume <session-id>
+# Resume a stopped session -- or load/take-over a worktree by handle.
+# The target may be an owned ACP session id OR a worktree handle. If it is a
+# worktree handle whose interactive CLI has stopped (e.g. after a reboot), the
+# worktree is loaded as a fresh owned session -- a dormant worktree is just a
+# note. If a *live* interactive CLI still holds the worktree, resume refuses
+# (break-glass); stop that CLI first, then re-run with --force to take it over.
+agent-bridge resume <session-id|worktree-handle>
+agent-bridge resume <worktree-handle> --force   # affirmative take-over
 
 # End a session (full cleanup)
 agent-bridge end <session-id>
