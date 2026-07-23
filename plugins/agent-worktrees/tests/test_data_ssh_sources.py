@@ -621,7 +621,7 @@ def test_load_one_failure_logs_reason(monkeypatch, tmp_path):
     logf = tmp_path / "picker-ssh.log"
     monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: logf)
 
-    def boom(source, runner=None):
+    def boom(source, runner=None, classify=True, argv=None, timeout=None):
         raise data_ssh._RemoteFetchError(
             "exit 1", returncode=1, stderr="boom-detail",
             argv=["ssh", "dev6", "cmd"])
@@ -636,3 +636,93 @@ def test_load_one_failure_logs_reason(monkeypatch, tmp_path):
     assert "dev6/Win [load]" in text
     assert "exit=1 alias=tmichon-dev6" in text
     assert "stderr| boom-detail" in text
+
+
+# ── remote two-phase load: fast enumeration then follow-up classification ─────
+
+def _classify_src():
+    """A ready remote whose argv carries --classify (so phase-1 strips it)."""
+    argv = data_ssh._argv_for("pwsh", "tmichon-dev6", "dotfiles", classify=True)
+    return data_ssh.Source("dev6", "Win", argv, ready=True, alias="tmichon-dev6")
+
+
+def test_remote_two_phase_paints_fast_then_classifies(monkeypatch, tmp_path):
+    monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
+    src = _classify_src()
+    calls = []
+
+    def fake_fetch(source, runner=None, classify=True, argv=None, timeout=None):
+        # Phase 1 passes an explicit fast argv override; phase 2 uses source.argv.
+        if argv is not None:
+            calls.append(("fast", timeout))
+            return ["f1"]
+        calls.append(("classify", timeout))
+        return ["c1", "c2"]
+
+    monkeypatch.setattr(data_ssh, "_fetch", fake_fetch)
+    loader = data_ssh.LiveLoader([src])
+    loader._load_remote_two_phase(src)
+
+    assert loader.state("dev6", "Win") == "ready"
+    assert loader.records() == ["c1", "c2"]          # classified rows swapped in
+    assert [c[0] for c in calls] == ["fast", "classify"]
+    # phase-1 uses the interactive timeout; phase-2 the longer classify budget.
+    assert calls[0][1] is None
+    assert calls[1][1] == max(src.timeout, data_ssh._CLASSIFY_TIMEOUT)
+
+
+def test_remote_two_phase_keeps_fast_rows_when_classify_fails(monkeypatch, tmp_path):
+    monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
+    src = _classify_src()
+
+    def fake_fetch(source, runner=None, classify=True, argv=None, timeout=None):
+        if argv is not None:
+            return ["f1"]
+        raise data_ssh._RemoteFetchError("exit 1", returncode=1)
+
+    monkeypatch.setattr(data_ssh, "_fetch", fake_fetch)
+    loader = data_ssh.LiveLoader([src])
+    loader._load_remote_two_phase(src)
+
+    # Enumeration survives a classify timeout: tab stays resolved on fast rows.
+    assert loader.state("dev6", "Win") == "ready"
+    assert loader.records() == ["f1"]
+    text = (tmp_path / "l.log").read_text(encoding="utf-8")
+    assert "[classify]" in text
+
+
+def test_remote_two_phase_fast_failure_fails_machine(monkeypatch, tmp_path):
+    monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
+    src = _classify_src()
+
+    def fake_fetch(source, runner=None, classify=True, argv=None, timeout=None):
+        raise data_ssh._RemoteFetchError(
+            "ssh: Could not resolve hostname", returncode=255)
+
+    monkeypatch.setattr(data_ssh, "_fetch", fake_fetch)
+    loader = data_ssh.LiveLoader([src])
+    loader._load_remote_two_phase(src)
+
+    assert loader.state("dev6", "Win") == "failed"
+    assert "[fast]" in (tmp_path / "l.log").read_text(encoding="utf-8")
+
+
+def test_remote_single_pass_when_classify_unsupported(monkeypatch, tmp_path):
+    monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
+    # A remote whose argv already lacks --classify (older agent-worktrees):
+    # nothing to strip, so it loads in exactly one pass.
+    argv = data_ssh._argv_for("pwsh", "tmichon-old", "dotfiles", classify=False)
+    src = data_ssh.Source("old", "Win", argv, ready=True, alias="tmichon-old")
+    calls = []
+
+    def fake_fetch(source, runner=None, classify=True, argv=None, timeout=None):
+        calls.append(argv)
+        return ["x"]
+
+    monkeypatch.setattr(data_ssh, "_fetch", fake_fetch)
+    loader = data_ssh.LiveLoader([src])
+    loader._load_remote_two_phase(src)
+
+    assert loader.state("old", "Win") == "ready"
+    assert loader.records() == ["x"]
+    assert len(calls) == 1                            # no second phase
