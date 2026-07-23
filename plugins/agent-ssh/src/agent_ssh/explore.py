@@ -6,7 +6,9 @@ the agent fabric:
 
 - its checked-out repos and **where** they live -- read from the machine's own
   per-machine repo registry (``agent-worktrees repos list --json``), the source
-  of truth for its locations -- and which of those **back an agent**;
+  of truth for its locations -- which of those **back an agent**, and each repo's
+  declared **purpose** (``role`` + ``summary``) read from the in-repo
+  ``.agent-worktrees/related.yaml`` catalog(s) checked out on the machine;
 - whether the fabric's worktree / coordination / dispatch runtimes are installed
   (``agent-worktrees`` / ``agent-bridge`` / ``agent-dispatch`` binstubs + version);
 - the **derived agents** that fall out of "the machine is reachable AND it has an
@@ -68,11 +70,24 @@ for _t in agent-worktrees agent-bridge agent-dispatch; do
 done
 printf '%s:repos===\n' "===AGENT_SSH_PROBE"
 _awt=`_find_tool agent-worktrees 2>/dev/null || true`
+_repos_json='{}'
 if [ -n "$_awt" ]; then
-  "$_awt" repos list --json 2>/dev/null || echo '{}'
-else
-  echo '{}'
+  _repos_json=`"$_awt" repos list --json 2>/dev/null || echo '{}'`
 fi
+printf '%s\n' "$_repos_json"
+printf '%s:related===\n' "===AGENT_SSH_PROBE"
+printf '%s\n' "$_repos_json" \
+  | grep -oE '"(windows|wsl|linux)"[[:space:]]*:[[:space:]]*"[^"]+"' 2>/dev/null \
+  | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/' \
+  | while IFS= read -r _p; do
+      [ -n "$_p" ] || continue
+      _rf="$_p/.agent-worktrees/related.yaml"
+      if [ -f "$_rf" ]; then
+        printf '>>>RELFILE:%s\n' "$_p"
+        cat "$_rf" 2>/dev/null || true
+        printf '\n>>>RELEND\n'
+      fi
+    done
 printf '%s:end===\n' "===AGENT_SSH_PROBE"
 """
 
@@ -96,6 +111,8 @@ class DerivedAgent:
     repo: str
     repo_class: str
     path: str          # the checkout path on the target (its platform)
+    role: str = ""     # repo purpose (role), from an in-repo related.yaml catalog
+    summary: str = ""  # repo purpose (summary), from an in-repo related.yaml catalog
 
 
 @dataclass
@@ -174,8 +191,69 @@ def _section(raw: str, name: str) -> str:
     return "\n".join(out).strip()
 
 
+def parse_related(raw: str) -> dict[str, dict[str, str]]:
+    """Parse the ``related`` probe section into a ``name -> {role, summary}`` map.
+
+    The section carries the concatenated ``.agent-worktrees/related.yaml`` files
+    found in the machine's checked-out repos, each framed by ``>>>RELFILE:<path>``
+    / ``>>>RELEND``. ``related.yaml`` is directional (each repo's POV of the
+    OTHERS): its ``related:`` entries carry a per-repo ``role`` + ``summary`` --
+    the declared **purpose**. We union all catalogs into one map keyed by the
+    global-registry repo name; the first non-empty purpose for a name wins.
+
+    Fail-safe: any unparseable block is skipped and yields no purposes.
+    """
+    purposes: dict[str, dict[str, str]] = {}
+    if not raw.strip():
+        return purposes
+    try:
+        import yaml
+    except ImportError:  # pragma: no cover - pyyaml is a declared dependency
+        return purposes
+
+    blocks: list[str] = []
+    current: list[str] | None = None
+    for line in raw.splitlines():
+        if line.startswith(">>>RELFILE:"):
+            current = []
+            continue
+        if line.strip() == ">>>RELEND":
+            if current is not None:
+                blocks.append("\n".join(current))
+            current = None
+            continue
+        if current is not None:
+            current.append(line)
+
+    for body in blocks:
+        try:
+            doc = yaml.safe_load(body) or {}
+        except Exception:  # noqa: S112 -- a malformed remote related.yaml is skipped, not fatal
+            continue
+        if not isinstance(doc, dict):
+            continue
+        related = doc.get("related")
+        if not isinstance(related, dict):
+            continue
+        for name, entry in related.items():
+            if not isinstance(entry, dict):
+                continue
+            key = str(name).strip()
+            if not key:
+                continue
+            role = str(entry.get("role", "") or "").strip()
+            summary = str(entry.get("summary", "") or "").strip()
+            if not role and not summary:
+                continue
+            existing = purposes.get(key)
+            if existing and (existing.get("role") or existing.get("summary")):
+                continue  # first non-empty purpose wins
+            purposes[key] = {"role": role, "summary": summary}
+    return purposes
+
+
 def parse_probe(raw: str) -> dict:
-    """Parse the delimited probe output into {os, runtimes, repos}."""
+    """Parse the delimited probe output into {os, runtimes, repos, purposes}."""
     os_line = _section(raw, "os") or "unknown"
 
     runtimes: list[RuntimeInfo] = []
@@ -201,17 +279,26 @@ def parse_probe(raw: str) -> dict:
         except (ValueError, TypeError):
             repos = []
 
-    return {"os": os_line, "runtimes": runtimes, "repos": repos}
+    purposes = parse_related(_section(raw, "related"))
+
+    return {"os": os_line, "runtimes": runtimes, "repos": repos, "purposes": purposes}
 
 
-def derive_agents(target: str, repos: list[dict]) -> list[DerivedAgent]:
+def derive_agents(
+    target: str,
+    repos: list[dict],
+    purposes: dict[str, dict[str, str]] | None = None,
+) -> list[DerivedAgent]:
     """Derive the addressable agents on *target*: its agent-backing repos.
 
     A machine's own checked-out, ``agent: true`` repos ARE the agents reachable
     on it -- ``<repo>@<target>``. This is the roster falling out of two facts
     already true (the machine is reachable; it has repo X checked out that backs
-    an agent), read live from the machine's own registry.
+    an agent), read live from the machine's own registry. Each agent carries its
+    declared **purpose** (``role`` + ``summary``) when the repo appears in an
+    in-repo ``related.yaml`` catalog on the machine (*purposes*).
     """
+    purposes = purposes or {}
     agents: list[DerivedAgent] = []
     for entry in repos:
         if not isinstance(entry, dict) or not entry.get("agent"):
@@ -225,12 +312,15 @@ def derive_agents(target: str, repos: list[dict]) -> list[DerivedAgent]:
         path = ""
         if isinstance(paths, dict) and paths:
             path = str(next(iter(paths.values())))
+        purpose = purposes.get(name) or {}
         agents.append(
             DerivedAgent(
                 name=f"{name}@{target}",
                 repo=name,
                 repo_class=str(entry.get("class", "")),
                 path=path,
+                role=str(purpose.get("role", "")),
+                summary=str(purpose.get("summary", "")),
             )
         )
     return agents
@@ -255,7 +345,15 @@ def explore(target: str, timeout: int = 10) -> ExploreResult:
     result.os = parsed["os"]
     result.runtimes = parsed["runtimes"]
     result.repos = parsed["repos"]
-    result.derived_agents = derive_agents(target, result.repos)
+    purposes = parsed.get("purposes") or {}
+    # Annotate each repo with its declared purpose (role + summary), when the
+    # machine's in-repo related.yaml catalog(s) describe it.
+    for entry in result.repos:
+        if isinstance(entry, dict):
+            p = purposes.get(str(entry.get("name", "")).strip())
+            if p:
+                entry["purpose"] = p
+    result.derived_agents = derive_agents(target, result.repos, purposes)
     return result
 
 
@@ -286,9 +384,18 @@ def format_report(result: ExploreResult) -> str:
         paths = entry.get("paths") or {}
         path = next(iter(paths.values()), "") if isinstance(paths, dict) else ""
         lines.append(f"    - {name} [{cls}, {agent}]  {path}")
+        purpose = entry.get("purpose") or {}
+        if isinstance(purpose, dict) and (purpose.get("role") or purpose.get("summary")):
+            role = purpose.get("role", "")
+            summary = purpose.get("summary", "")
+            tag = f"[{role}] " if role else ""
+            lines.append(f"        purpose: {tag}{summary}".rstrip())
 
     lines.append(f"  derived agents ({len(result.derived_agents)}):")
     for ag in result.derived_agents:
         lines.append(f"    - {ag.name}  ({ag.repo_class})  {ag.path}")
+        if ag.role or ag.summary:
+            tag = f"[{ag.role}] " if ag.role else ""
+            lines.append(f"        purpose: {tag}{ag.summary}".rstrip())
 
     return "\n".join(lines)

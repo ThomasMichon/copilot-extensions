@@ -42,7 +42,7 @@
     {
       "name": "agent-ssh",
       "description": "SSH connectivity layer for the agent fabric: emit and verify machine-name SSH profiles from a normalized registry, and define the public transport-provider contract for pluggable direct or tunnel transports.",
-      "version": "0.1.0-dev4",
+      "version": "0.1.0-dev5",
       "source": "plugins/agent-ssh"
     },
     {
