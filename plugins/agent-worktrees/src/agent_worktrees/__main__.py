@@ -874,6 +874,33 @@ def _build_launch_cmd(
     return cmd
 
 
+def _emit_parent_context_hint(record, *, to_stderr: bool = False) -> None:
+    """Surface a worktree's originating ``parent_session`` as a *hint* only.
+
+    A worktree with no session of its own used to auto-resume its
+    ``parent_session`` (#1029). But that session belongs to a *different*
+    worktree, and Copilot's resume-auto-cd adopts the resumed session's
+    persisted cwd -- so the tab (named after THIS worktree's id) would open in
+    the parent's directory, mismatching the mux worktree id and the loaded
+    path. Fix B keeps the pointer as context only: the operator can ``/resume``
+    it explicitly once inside, preserving path/mux alignment.
+
+    ``to_stderr`` routes the hint to stderr for the JSON-emitting launch path
+    (a stdout write there would corrupt the JSON contract).
+    """
+    parent = sessions.validate_session_id(record.parent_session)
+    if not parent:
+        return
+    msg = (
+        f"   No session of its own -- originating context is {parent[:12]} "
+        f"(run /resume {parent[:8]} inside to load it here)."
+    )
+    if to_stderr:
+        sys.stderr.write(msg + "\n")
+    else:
+        print(msg)
+
+
 def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     """Live-cutover handoff: spawn a seeded successor Copilot or retire a pane.
 
@@ -1266,15 +1293,19 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 last_session = sessions.find_latest_session_id_fast(
                     record.worktree_path, record.sessions,
                 )
-                if not last_session:
-                    # #1029: no session of its own -- fall back to the originating
-                    # session so a PR/feedback worktree resumes with context.
-                    last_session = sessions.validate_session_id(record.parent_session)
                 if last_session:
                     # copilot's --resume[=value] is an optional-value option;
                     # the id MUST be attached with '=' or it is treated as a
                     # stray operand ("unknown command").
                     launch_cmd.append(f"--resume={last_session}")
+                else:
+                    # Fix B: never auto-resume a foreign ``parent_session`` --
+                    # it belongs to a different worktree, so Copilot's
+                    # resume-auto-cd would adopt its persisted cwd and launch
+                    # this tab in the parent's directory (worktree id/path
+                    # mismatch). Surface it as a hint only; keep this worktree's
+                    # own path.
+                    _emit_parent_context_hint(record, to_stderr=True)
 
             _json_output({
                 "worktree": _worktree_to_dict(record),
@@ -2660,16 +2691,18 @@ def _resolve_resume(
         last_session = sessions.find_latest_session_id_fast(
             record.worktree_path, record.sessions,
         )
-        if not last_session:
-            # #1029: no session of its own -- fall back to the originating
-            # session so a PR/feedback worktree resumes with context.
-            last_session = sessions.validate_session_id(record.parent_session)
         if last_session:
             # copilot's --resume[=value] is an optional-value option; the id
             # MUST be attached with '=' or it is treated as a stray operand
             # ("unknown command").
             launch_cmd.append(f"--resume={last_session}")
             print(f"   Resuming session: {last_session[:12]}…")
+        else:
+            # Fix B: never auto-resume a foreign ``parent_session`` -- it
+            # belongs to a different worktree, so Copilot's resume-auto-cd
+            # would adopt its persisted cwd and launch this tab in the
+            # parent's directory (worktree id/path mismatch). Hint only.
+            _emit_parent_context_hint(record)
 
     print()
 
