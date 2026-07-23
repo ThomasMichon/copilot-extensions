@@ -864,28 +864,16 @@ const session = await joinSession({
 // events. This top-level code runs on every import of the module -- and the
 // module is (re)imported MULTIPLE times per session: the runtime forks a
 // discovery pass plus the real join at startup, and re-forks on
-// reconnect/resume. So session-start work here must be idempotent; anything
-// user-visible (session.log surfaces to the chat UI) is deduped per session to
-// avoid spamming the UI on every fork.
+// reconnect/resume. So session-start work here must be idempotent.
+//
+// NOTE: no user-visible "Session started" breadcrumb is emitted here. session.log
+// surfaces to the chat UI, and a single such notification was observed being
+// re-painted indefinitely by the CLI's notification renderer (dotfiles#447),
+// flooding the UI. The extension's launch is already recorded per-fork in its
+// own extension launch log, so nothing is lost by staying silent in the UI.
 state.sessionId = session.sessionId ?? state.sessionId ?? null;
 state.cwd = state.cwd || process.cwd();
 state.turnCount = 0;
-
-// Emit the session-start breadcrumb at most once per session. An exclusive
-// create (flag "wx") wins for exactly one fork; concurrent/later forks throw
-// EEXIST and stay silent. Skipped entirely when sessionId is absent (e.g. a
-// discovery pass), which must never log.
-if (state.sessionId) {
-  const startedMarker = join(tmpdir(), `context-handoff-started-${state.sessionId}`);
-  try {
-    writeFileSync(startedMarker, "", { flag: "wx" });
-    await session.log(
-      `[Context Handoff] Session started (id=${state.sessionId}, cwd=${state.cwd})`
-    );
-  } catch {
-    // Marker already present -> another fork of this session already logged.
-  }
-}
 
 // Turn counting + first-prompt capture (replaces onUserPromptSubmitted).
 session.on("user.message", (event) => {
