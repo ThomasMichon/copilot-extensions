@@ -267,7 +267,12 @@ def test_env_script_absolute_path_preserved(monkeypatch):
     monkeypatch.setattr(m.platform, "system", lambda: "Linux")
     cfg_ = _env_config(env_script={"linux": "/opt/prime.sh"}, platform_name="linux")
     cmd = m._build_launch_cmd(cfg_, _args([]), "/a")
-    assert cmd[cmd.index("--env-script") + 1] == "/opt/prime.sh"
+    env_arg = cmd[cmd.index("--env-script") + 1]
+    # An absolute env_script path is used as-is, never joined onto the anchor.
+    # (Assert structurally, not by exact string: the host os.sep differs.)
+    assert env_arg.endswith("prime.sh")
+    assert "opt" in env_arg
+    assert "a" not in env_arg.split(os.sep)[:2]  # not prefixed by anchor "/a"
 
 
 def test_env_script_with_setup_hook_passes_both(monkeypatch):
