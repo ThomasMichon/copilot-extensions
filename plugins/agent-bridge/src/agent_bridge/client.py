@@ -500,6 +500,28 @@ class BridgeClient:
         """POST /api/v1/sessions/{id}/resume"""
         return self._request("POST", f"/api/v1/sessions/{session_id}/resume") or {}
 
+    def resume_worktree(
+        self, worktree_id: str, *, reclaim: bool = False
+    ) -> dict[str, Any]:
+        """POST /api/v1/worktrees/{id}/resume -- ensure a worktree has a live
+        owned session (resume its latest, or start a fresh one if the worktree
+        still exists on disk but has no resumable session).
+
+        ``reclaim`` is the break-glass take-over: a *fresh live* interactive CLI
+        holding the worktree normally yields a 409
+        (``reason: live_cli_holds_worktree``); ``reclaim=true`` bypasses that
+        guard so the caller can own a worktree it has just freed.
+        """
+        params = {"reclaim": "true"} if reclaim else None
+        return (
+            self._request(
+                "POST",
+                f"/api/v1/worktrees/{worktree_id}/resume",
+                params=params,
+            )
+            or {}
+        )
+
     def end_session(self, session_id: str, *, force: bool = False) -> None:
         """DELETE /api/v1/sessions/{id}
 
