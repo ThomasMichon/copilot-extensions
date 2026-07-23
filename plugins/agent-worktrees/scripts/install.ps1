@@ -455,11 +455,11 @@ function Invoke-VenvPackageInstall {
        Prefers `<venv python> -m pip` whenever the venv has pip -- which it does
        when the venv was built from a signed system Python via `python -m venv`
        (the SAC path in Deploy-Venv). This avoids `uv` entirely on Smart App
-       Control / profile-mount Cloud PCs (e.g. augloop), where launching the
+       Control / profile-mount Cloud PCs, where launching the
        WinGet `uv.exe` reparse shim fails ("untrusted mount point"). Falls back
        to `uv` only on venvs that lack pip (uv-created). Every command runs from
        a trusted CWD (SystemDrive root), never the profile mount, so even the uv
-       fallback is safe there. See issue #385.
+       fallback is safe there.
 
        Returns [pscustomobject]@{ ExitCode; Output }. #>
     param(
@@ -618,7 +618,7 @@ function Get-SignedBasePython {
        (Authenticode survives the copy), which SAC allows.
 
        Candidates are gathered from several sources because none is reliable on
-       its own: the `py` launcher is absent on some Cloud PCs (e.g. augloop), so
+       its own: the `py` launcher is absent on some Cloud PCs, so
        we also scan the well-known all-users / per-user install roots (where a
        signed `C:\Program Files\Python312\python.exe` lives) and any
        `python`/`python3` on PATH -- skipping the WindowsApps App Execution
@@ -707,7 +707,7 @@ function Deploy-Venv {
             # Run uv from a trusted CWD (SystemDrive root), never the profile
             # mount -- launching the WinGet uv.exe reparse shim with the profile
             # as CWD is blocked on SAC/profile-mount Cloud PCs ("untrusted mount
-            # point"). See issue #385.
+            # point").
             $prevLoc = Get-Location
             Set-Location "$env:SystemDrive\"
             try {
