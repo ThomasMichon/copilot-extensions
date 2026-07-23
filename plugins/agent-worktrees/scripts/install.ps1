@@ -448,6 +448,50 @@ function Write-V3Manifest {
     Write-ServiceOk "Deploy manifest written (source: $kind)"
 }
 
+function Invoke-VenvPackageInstall {
+    <# Install a local package dir into the venv, forcing the local code to
+       refresh even when its (dev) version string is unchanged.
+
+       Prefers `<venv python> -m pip` whenever the venv has pip -- which it does
+       when the venv was built from a signed system Python via `python -m venv`
+       (the SAC path in Deploy-Venv). This avoids `uv` entirely on Smart App
+       Control / profile-mount Cloud PCs (e.g. augloop), where launching the
+       WinGet `uv.exe` reparse shim fails ("untrusted mount point"). Falls back
+       to `uv` only on venvs that lack pip (uv-created). Every command runs from
+       a trusted CWD (SystemDrive root), never the profile mount, so even the uv
+       fallback is safe there. See issue #385.
+
+       Returns [pscustomobject]@{ ExitCode; Output }. #>
+    param(
+        [Parameter(Mandatory)][string]$VenvPython,
+        [Parameter(Mandatory)][string]$PkgName,
+        [Parameter(Mandatory)][string]$PkgDir
+    )
+
+    $hasPip = $false
+    try { & $VenvPython -m pip --version *> $null; $hasPip = ($LASTEXITCODE -eq 0) } catch { $hasPip = $false }
+
+    $prevLoc = Get-Location
+    Set-Location "$env:SystemDrive\"
+    try {
+        if ($hasPip) {
+            # 1) Resolve + install dependencies (idempotent once present).
+            $out = & $VenvPython -m pip install "$PkgDir" --quiet 2>&1 | Out-String
+            if ($LASTEXITCODE -eq 0) {
+                # 2) Force just the local package's code to refresh (deps are
+                #    already satisfied) so unchanged dev versions still update.
+                $out += & $VenvPython -m pip install --force-reinstall --no-deps "$PkgDir" --quiet 2>&1 | Out-String
+            }
+        } else {
+            $out = & uv pip install --python $VenvPython --reinstall-package $PkgName "$PkgDir" --quiet 2>&1 | Out-String
+        }
+        $rc = $LASTEXITCODE
+    } finally {
+        Set-Location $prevLoc
+    }
+    return [pscustomobject]@{ ExitCode = $rc; Output = $out }
+}
+
 function Deploy-Package {
     <# Install the agent_worktrees package into the venv via uv (non-editable),
        then stamp build info into the INSTALLED site-packages copy. Replaces the
@@ -493,21 +537,21 @@ function Deploy-Package {
     # path is identical in the git-checkout and marketplace layouts.
     $cfgMigrateDir = Join-Path $PluginDir 'libs\config-migrate'
     if (Test-Path (Join-Path $cfgMigrateDir 'pyproject.toml')) {
-        $libOut = & uv pip install --python $VenvPython --reinstall-package agent-config-migrate "$cfgMigrateDir" --quiet 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) {
-            Write-ServiceErr "config-migrate library install failed (exit $LASTEXITCODE)"
-            if ($libOut.Trim()) { Write-ServiceErr ("uv: " + $libOut.Trim()) }
+        $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-config-migrate' -PkgDir $cfgMigrateDir
+        if ($libRes.ExitCode -ne 0) {
+            Write-ServiceErr "config-migrate library install failed (exit $($libRes.ExitCode))"
+            if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
             $ErrorActionPreference = $prevEAP
             return $false
         }
     }
 
-    $installOut = & uv pip install --python $VenvPython --reinstall-package agent-worktrees "$PluginDir" --quiet 2>&1 | Out-String
-    $rc = $LASTEXITCODE
+    $installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees' -PkgDir $PluginDir
+    $rc = $installRes.ExitCode
     $ErrorActionPreference = $prevEAP
     if ($rc -ne 0) {
         Write-ServiceErr "Package install failed (exit $rc)"
-        if ($installOut.Trim()) { Write-ServiceErr ("uv: " + $installOut.Trim()) }
+        if ($installRes.Output.Trim()) { Write-ServiceErr ("install: " + $installRes.Output.Trim()) }
         return $false
     }
 
@@ -571,20 +615,55 @@ function Get-SignedBasePython {
        (>=3.11), or $null. Smart App Control blocks the unsigned uv-managed
        Python and the console-script trampoline .exe; building the venv from a
        signed base with `--copies` embeds a signed python.exe in the venv
-       (Authenticode survives the copy), which SAC allows. #>
+       (Authenticode survives the copy), which SAC allows.
+
+       Candidates are gathered from several sources because none is reliable on
+       its own: the `py` launcher is absent on some Cloud PCs (e.g. augloop), so
+       we also scan the well-known all-users / per-user install roots (where a
+       signed `C:\Program Files\Python312\python.exe` lives) and any
+       `python`/`python3` on PATH -- skipping the WindowsApps App Execution
+       Alias, which is a 0-byte reparse stub, not a real interpreter. Each
+       candidate is verified to be a real interpreter >=3.11 before its
+       signature is checked. #>
     $cands = @()
+
+    # 1. py launcher (when present) -- newest first.
     if (Get-Command py -ErrorAction SilentlyContinue) {
         foreach ($v in '3.13', '3.12', '3.11') {
             $p = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
             if ($LASTEXITCODE -eq 0 -and $p) { $cands += $p }
         }
     }
+
+    # 2. Well-known install roots (all-users + per-user); newest version first.
+    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, (Join-Path $env:LOCALAPPDATA 'Programs\Python'))
+    foreach ($root in $roots) {
+        if (-not $root) { continue }
+        Get-ChildItem -Path $root -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object {
+                $exe = Join-Path $_.FullName 'python.exe'
+                if (Test-Path $exe) { $cands += $exe }
+            }
+    }
+
+    # 3. python / python3 on PATH, minus the WindowsApps alias reparse stub.
+    foreach ($name in 'python', 'python3') {
+        Get-Command $name -All -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -and $_.Path -notmatch '\\WindowsApps\\' } |
+            ForEach-Object { $cands += $_.Path }
+    }
+
     foreach ($c in ($cands | Select-Object -Unique)) {
-        if (Test-Path $c) {
-            try {
-                if ((Get-AuthenticodeSignature $c).Status -eq 'Valid') { return $c }
-            } catch {}
-        }
+        if (-not (Test-Path $c)) { continue }
+        # Must be a real interpreter >= 3.11 ...
+        $ver = (& $c -c "import sys;print('%d.%d' % sys.version_info[:2])" 2>$null | Out-String).Trim()
+        if (-not ($ver -match '^(\d+)\.(\d+)$')) { continue }
+        if ([int]$Matches[1] -lt 3 -or ([int]$Matches[1] -eq 3 -and [int]$Matches[2] -lt 11)) { continue }
+        # ... and SAC-trusted (Authenticode Valid).
+        try {
+            if ((Get-AuthenticodeSignature $c).Status -eq 'Valid') { return $c }
+        } catch {}
     }
     return $null
 }
@@ -625,16 +704,26 @@ function Deploy-Venv {
             if (-not $signedBase) {
                 Write-ServiceWarn "No signed system Python found -- using uv (unsigned). On Smart App Control machines, install python.org Python 3.11+ and re-run update."
             }
-            $args_ = @('venv', $VenvDir, '--python', '3.11', '--allow-existing')
-            $result = & uv @args_ 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                # Fallback: try without version constraint
-                $args_ = @('venv', $VenvDir, '--allow-existing')
+            # Run uv from a trusted CWD (SystemDrive root), never the profile
+            # mount -- launching the WinGet uv.exe reparse shim with the profile
+            # as CWD is blocked on SAC/profile-mount Cloud PCs ("untrusted mount
+            # point"). See issue #385.
+            $prevLoc = Get-Location
+            Set-Location "$env:SystemDrive\"
+            try {
+                $args_ = @('venv', $VenvDir, '--python', '3.11', '--allow-existing')
                 $result = & uv @args_ 2>&1
                 if ($LASTEXITCODE -ne 0) {
-                    Write-ServiceErr "Failed to create venv: $result"
-                    return $false
+                    # Fallback: try without version constraint
+                    $args_ = @('venv', $VenvDir, '--allow-existing')
+                    $result = & uv @args_ 2>&1
                 }
+            } finally {
+                Set-Location $prevLoc
+            }
+            if ($LASTEXITCODE -ne 0) {
+                Write-ServiceErr "Failed to create venv: $result"
+                return $false
             }
             Write-ServiceOk "Venv created at $VenvDir"
         }
