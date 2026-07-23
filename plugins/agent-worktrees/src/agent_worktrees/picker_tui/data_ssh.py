@@ -519,6 +519,14 @@ def _kill_proc_tree(proc):
 
 _SSH_LOG_MAX_BYTES = 1_000_000  # rotate the single log once it passes ~1 MB
 
+# Phase-2 (``--classify``) budget for a remote source. The fast phase-1 listing
+# already paints the machine's rows well within ``Source.timeout``, so the
+# expensive per-worktree git classification runs as a non-blocking follow-up on
+# a more generous budget -- a slow box (e.g. dev6's large worktree set) can
+# finish classifying without the whole enumeration hinging on beating the short
+# interactive timeout.
+_CLASSIFY_TIMEOUT = 60
+
 
 class _RemoteFetchError(RuntimeError):
     """A remote ``list`` fetch failed; carries diagnostic detail for logging.
@@ -591,7 +599,8 @@ def _remote_cmd_str(argv) -> str:
         return str(argv)
 
 
-def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None):
+def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None,
+           timeout=None):
     """Run one source's list command and return normalized worktree records.
 
     Local sources load in-process. Remotes run over SSH, retrying without
@@ -599,20 +608,25 @@ def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None):
 
     ``runner`` runs the subprocess (default :func:`_run`); :class:`LiveLoader`
     passes its own tracked-and-killable runner so a picker exit can cancel any
-    in-flight prefetch. ``argv`` overrides the source's default list argv (used
-    by the PR-reconcile pass, #2102) without persisting to ``source.argv``.
+    in-flight prefetch. ``argv`` overrides the source's default list argv
+    (used by the fast phase-1 pass and the PR-reconcile pass, #2102) without
+    persisting to ``source.argv``. ``timeout`` overrides ``source.timeout`` for
+    this call (used by the remote phase-2 classify pass, which runs on the more
+    generous :data:`_CLASSIFY_TIMEOUT` budget).
 
     ``classify`` only affects the **local** source: ``False`` skips the expensive
     per-worktree git classification for a fast provisional listing (the loader's
-    phase-1 fast pass). Remote sources always classify via their argv (the
-    ``--classify`` flag), so this flag is a no-op for them.
+    phase-1 fast pass). Remote sources classify via their argv (the
+    ``--classify`` flag), so this flag is a no-op for them -- their phase-1
+    fast pass is driven by an ``argv`` override instead.
     """
     runner = runner or _run
     if source.local:
         return data_local.load(source.machine, source.env, classify=classify)
 
+    eff_timeout = source.timeout if timeout is None else timeout
     use_argv = argv if argv is not None else source.argv
-    proc = runner(use_argv, source.timeout)
+    proc = runner(use_argv, eff_timeout)
     if proc.returncode != 0 and _is_classify_unsupported(proc.stderr):
         # Older remote: drop --classify and retry (rows will lack canonical
         # state but still load). Encoding-aware so the pwsh/-EncodedCommand
@@ -624,7 +638,7 @@ def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None):
         if argv is None:
             source.argv = retry
             source.use_classify = False
-        proc = runner(retry, source.timeout)
+        proc = runner(retry, eff_timeout)
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip().splitlines()
         msg = err[-1] if err else f"exit {proc.returncode}"
@@ -911,21 +925,72 @@ class LiveLoader:
             # Local tab: fast-then-fill so rows paint immediately (see below).
             self._load_local_two_phase(source)
             return
+        # Remote tab: fast enumeration first, then a follow-up classify pass --
+        # symmetrical to the local two-phase, so a remote's rows resolve well
+        # inside the interactive timeout instead of gambling the whole
+        # enumeration on beating it with per-worktree git classification.
+        self._load_remote_two_phase(source)
+
+    def _load_remote_two_phase(self, source: Source):
+        """Fast-then-classify for a remote tab (mirrors the local two-phase).
+
+        Phase 1 runs the remote ``list`` **without** ``--classify`` -- a cheap
+        tracking/sessions/mux listing that returns well within ``Source.timeout``
+        -- so the machine's rows paint reliably instead of the enumeration
+        hinging on beating the timeout with per-worktree git classification.
+        Phase 2 re-runs *with* ``--classify`` on the more generous
+        :data:`_CLASSIFY_TIMEOUT` budget and swaps the authoritative state in on
+        success; a timeout or error there keeps the honest phase-1 rows (the tab
+        stays resolved, just without canonical git state) rather than failing
+        the machine.
+
+        A remote already known not to support ``--classify`` (an older
+        agent-worktrees, ``use_classify`` cleared by a prior fetch) has nothing
+        to classify, so it loads in a single pass -- there is no second phase."""
+        gen = self._gen.get(source.key, 0)
+        fast_argv = _drop_classify_arg(source.argv)
+        two_phase = source.use_classify and fast_argv != source.argv
+        # Phase 1: fast, no classify (or the only pass for a no-classify remote).
         t0 = _dt.datetime.now()
         try:
-            recs = _fetch(source, runner=self._spawn)
+            first = _fetch(source, runner=self._spawn,
+                           argv=(fast_argv if two_phase else None))
         except Exception as exc:  # any failure -> failed state
-            self._log_fetch_failure(source, exc, t0)
+            self._log_fetch_failure(source, exc, t0,
+                                    phase="fast" if two_phase else "load")
             with self._lock:
                 self._state[source.key] = "failed"
                 self._error[source.key] = str(exc).strip() or type(exc).__name__
             return
         elapsed = (_dt.datetime.now() - t0).total_seconds()
-        _ssh_log(f"  OK      {source.machine}/{source.env} "
-                 f"resolved {len(recs)} worktree(s) in {elapsed:.1f}s")
+        label = "fast, no classify" if two_phase else "single pass"
+        _ssh_log(f"  OK      {source.machine}/{source.env} resolved "
+                 f"{len(first)} worktree(s) ({label}) in {elapsed:.1f}s")
         with self._lock:
-            self._records[source.key] = recs
+            if self._cancelled.is_set():
+                return
+            self._records[source.key] = first
             self._state[source.key] = "ready"
+        if not two_phase or self._cancelled.is_set():
+            return
+        # Phase 2: authoritative git classification on the longer classify budget
+        # (non-blocking -- the rows are already painted); swapped in on success.
+        t1 = _dt.datetime.now()
+        classify_timeout = max(source.timeout, _CLASSIFY_TIMEOUT)
+        try:
+            full = _fetch(source, runner=self._spawn, timeout=classify_timeout)
+        except Exception as exc:
+            self._log_fetch_failure(source, exc, t1, phase="classify",
+                                    timeout=classify_timeout)
+            return  # keep the honest phase-1 rows; the tab stays resolved
+        elapsed2 = (_dt.datetime.now() - t1).total_seconds()
+        _ssh_log(f"  OK      {source.machine}/{source.env} classified "
+                 f"{len(full)} worktree(s) in {elapsed2:.1f}s")
+        with self._lock:
+            if (not self._cancelled.is_set()
+                    and self._state.get(source.key) == "ready"
+                    and self._gen.get(source.key, 0) == gen):
+                self._records[source.key] = full
 
     def _load_local_two_phase(self, source: Source):
         """Fast-then-fill for the local tab.
@@ -992,18 +1057,22 @@ class LiveLoader:
         except Exception:
             pass
 
-    def _log_fetch_failure(self, source, exc, t0, *, phase="load"):
+    def _log_fetch_failure(self, source, exc, t0, *, phase="load", timeout=None):
         """Record why one remote source failed to resolve: elapsed, timeout vs
-        error, exit code, stderr tail, and the decoded remote command."""
+        error, exit code, stderr tail, and the decoded remote command.
+
+        ``timeout`` overrides ``source.timeout`` for the elapsed-vs-budget
+        labeling (the phase-2 classify pass runs on a longer budget)."""
         try:
+            budget = source.timeout if timeout is None else timeout
             elapsed = (_dt.datetime.now() - t0).total_seconds()
             timed_out = isinstance(exc, subprocess.TimeoutExpired) or (
-                elapsed >= source.timeout * 0.9)
+                elapsed >= budget * 0.9)
             kind = "TIMEOUT" if timed_out else "FAILED"
             detail = str(exc).strip() or type(exc).__name__
             _ssh_log(
                 f"  {kind:7s} {source.machine}/{source.env} [{phase}] "
-                f"after {elapsed:.1f}s (timeout={source.timeout}s): {detail}")
+                f"after {elapsed:.1f}s (timeout={budget}s): {detail}")
             rc = getattr(exc, "returncode", None)
             if rc is not None:
                 _ssh_log(f"            exit={rc} alias={source.alias}")
