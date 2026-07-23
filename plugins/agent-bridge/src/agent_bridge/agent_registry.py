@@ -1,7 +1,8 @@
 """Agent registry -- parse agent configs and resolve to spawn targets.
 
 Derives the agent roster from committed topology (machines.yaml + each repo's
-related.yaml) via :func:`derive_topology_agents` -- machines × repos ×
+related.yaml) and the local machine's live repo registry (``repos.yaml`` -- its
+``agent: true`` checkouts) via :func:`derive_topology_agents` -- machines × repos ×
 environments -- and cross-references machine topology to resolve named agents to
 SpawnTargets. A hand-authored ``acp-agents.json`` is still honored if a profile
 sets ``agents_config`` (deprecated, explicit-wins back-compat).
@@ -633,6 +634,13 @@ def load_local_repos() -> list[dict]:
 
     Returns ``[]`` if the binstub is absent or the query fails, so callers simply
     fall back to prior behavior (no roster derived from repos.yaml).
+
+    The binstub launches ``agent-worktrees`` in its **own** interpreter, so the
+    child env is scrubbed of the parent's virtual-env markers
+    (``VIRTUAL_ENV`` / ``PYTHONHOME`` / ``__PYVENV_LAUNCHER__`` / ``PYTHONPATH``).
+    Without this, an agent-bridge running from its own venv leaks its interpreter
+    context into the child, which (with a uv-managed Python) trips an
+    ``_sre`` "SRE module mismatch" and makes this silently return ``[]``.
     """
     import subprocess
 
@@ -643,6 +651,11 @@ def load_local_repos() -> list[dict]:
     creationflags = (
         subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0  # type: ignore[attr-defined]
     )
+    child_env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("VIRTUAL_ENV", "PYTHONHOME", "__PYVENV_LAUNCHER__", "PYTHONPATH")
+    }
     try:
         proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
             [exe, "repos", "list", "--json"],
@@ -651,6 +664,7 @@ def load_local_repos() -> list[dict]:
             timeout=15,
             check=False,
             creationflags=creationflags,
+            env=child_env,
         )
     except Exception as exc:
         log.warning("agent-worktrees repos list failed: %s", exc)
@@ -725,6 +739,7 @@ def derive_topology_agents(
     related: list[tuple[str, list[str], str]],
     local_machine: MachineConfig | None,
     local_platform: str = "",
+    repos: list[dict] | None = None,
 ) -> dict[str, AgentConfig]:
     """Synthesize the agent roster from topology (machines × repos × envs).
 
@@ -737,6 +752,15 @@ def derive_topology_agents(
        delegates via ``agent-bridge``, one ``<repo>@<machine>`` agent per
        **remote** machine in its ``locus.machines`` (local ones are already
        covered by projects.yaml auto-discovery).
+    3. **Repo-registry agents** (``repos`` -- the normalized live registry from
+       :func:`load_local_repos`) -- for **each** ``agent: true`` repo checked out
+       on the **local** machine, one ``<repo>@<machine>`` agent. This surfaces the
+       machine's whole agent-backing set in the roster (parity with
+       ``agent-ssh explore``'s derived agents), keyed by repo **name** so it holds
+       even when ``machines.yaml`` is loaded from a worktree (a sibling of the
+       anchor path the registry records). ``control_plane.project`` /
+       ``related.yaml`` / explicit entries remain overrides -- emitted first, and
+       this source uses ``setdefault`` semantics.
 
     Only **reachable** agents are emitted: an (machine, env) pair is reachable
     if it is local loopback (this machine + this platform) *or* the machine is
@@ -803,6 +827,43 @@ def derive_topology_agents(
                 ),
             )
 
+    # 3. Repo-registry agents -- every ``agent: true`` checkout on the local
+    #    machine, as <repo>@<machine>. Surfaces the machine's full agent-backing
+    #    set in the roster (not just the control-plane venue), keyed by repo name
+    #    so it holds even for a worktree-loaded machines.yaml. Reachability-gated.
+    if local_machine and repos:
+        env = (
+            local_machine.get_ssh_env(local_platform) if local_platform else None
+        )
+        reachable = bool(
+            (env and _is_loopback(local_machine, env)) or local_machine.ssh_ready
+        )
+        if reachable:
+            venue = local_machine.display_name or local_machine.key
+            spawn_env = env or local_machine.get_spawnable_ssh_env()
+            env_name = spawn_env.name if spawn_env else None
+            for entry in repos:
+                if not isinstance(entry, dict) or not entry.get("agent"):
+                    continue
+                repo = str(entry.get("name", "")).strip()
+                if not repo:
+                    continue
+                name = f"{repo}@{venue}"
+                if name in out:
+                    continue  # control_plane / related / explicit entry wins
+                out[name] = AgentConfig(
+                    name=name,
+                    host=local_machine.key,
+                    ssh_environment=env_name,
+                    project=repo,
+                    derived=True,
+                    display_name=name,
+                    description=(
+                        f"'{repo}' on {local_machine.display_name} "
+                        "[derived from repos.yaml agent-backing checkout]"
+                    ),
+                )
+
     return out
 
 
@@ -839,7 +900,11 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
         # explicit entries win over derived ones below.
         if profile.agents_config:
             all_agents.update(load_agent_registry(profile.agents_config))
-        # Derive the roster from topology (replaces acp-agents.json).
+        # Derive the roster from topology (replaces acp-agents.json). The local
+        # per-machine repo registry (agent flag + checkout paths) is live-queried
+        # once and reused for both control-plane inference and the per-repo
+        # <repo>@<machine> derivation below.
+        local_repos = load_local_repos()
         cp_project = load_control_plane_project(profile.machines_yaml)
         cp_source = "machines.yaml"
         if not cp_project:
@@ -848,7 +913,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             # machine that has the control repo checked out (agent-backing) is
             # thus addressable without control_plane.project being set.
             cp_project = infer_control_plane_project(
-                load_local_repos(), profile.machines_yaml,
+                local_repos, profile.machines_yaml,
             )
             cp_source = "repos.yaml (agent flag)"
         if cp_project:
@@ -860,6 +925,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
         local_machine, local_platform = _detect_local_machine(machines)
         derived = derive_topology_agents(
             machines, cp_project, related, local_machine, local_platform,
+            local_repos,
         )
         for name, agent in derived.items():
             all_agents.setdefault(name, agent)  # explicit agents_config wins
@@ -1256,10 +1322,16 @@ class AgentResolver:
             await resolver.ensure_ready(name)
             return await self._resolve_with_plugins(resolver, name)
 
-        # ``<repo>@<venue>`` -- an explicit repo bound to a venue. Resolve the
+        # ``<repo>@<venue>`` -- an explicit repo bound to a venue. If the full
+        # name is itself an explicit registry entry (e.g. a ``<repo>@<machine>``
+        # agent derived from the machine's repo registry or a ``related.yaml``
+        # locus), resolve it directly -- it already carries its host/env/project
+        # and needs no bare venue agent to rebind onto. Otherwise resolve the
         # venue and run <repo> there instead of the venue's default repo.
         repo, venue = _split_repo_venue(agent_name)
         if repo is not None:
+            if agent_name in self._agents:
+                return self._resolve_static(agent_name)
             return await self._resolve_venue_bound(repo, venue)
 
         # Bare name (no prefix): search static/provider agents AND every
