@@ -1455,6 +1455,129 @@ class TestLoadLocalRepos:
         )
         assert load_local_repos() == []
 
+    def test_child_env_scrubs_venv_markers(self, monkeypatch):
+        # The child binstub must not inherit the parent's venv interpreter
+        # context, or a uv-managed Python trips an _sre "SRE module mismatch".
+        import subprocess as _sp
+        monkeypatch.setattr(
+            "agent_bridge.agent_registry._agent_worktrees_bin", lambda: "awt",
+        )
+        for var in ("VIRTUAL_ENV", "PYTHONHOME", "__PYVENV_LAUNCHER__", "PYTHONPATH"):
+            monkeypatch.setenv(var, "leaked")
+        captured = {}
+
+        def _fake_run(argv, **kw):
+            import json as _json
+            captured["env"] = kw.get("env")
+
+            class _P:
+                returncode = 0
+                stdout = _json.dumps({"repos": [{"name": "r", "agent": True}]})
+
+            return _P()
+
+        monkeypatch.setattr(_sp, "run", _fake_run)
+        out = load_local_repos()
+        assert out == [{"name": "r", "agent": True}]
+        env = captured["env"]
+        assert env is not None
+        for var in ("VIRTUAL_ENV", "PYTHONHOME", "__PYVENV_LAUNCHER__", "PYTHONPATH"):
+            assert var not in env
+
+
+class TestReposRegistryAgents:
+    """<repo>@<machine> agents derived from the local machine's live registry
+    (the normalized ``load_local_repos`` shape: dicts w/ name/class/agent/paths).
+    """
+
+    REPOS = [
+        {"name": "web-app", "class": "worktree", "agent": True,
+         "paths": {"windows": "D:\\Src\\web-app"}},
+        {"name": "api-svc", "class": "worktree", "agent": True,
+         "paths": {"windows": "D:\\Src\\api-svc"}},
+        {"name": "docs-only", "class": "reference", "agent": False,
+         "paths": {"windows": "D:\\Src\\docs-only"}},
+    ]
+
+    def test_local_loopback_repo_agents_without_control_plane(self):
+        ms = _topo_machines()
+        local = ms["tmichon-dev6"]
+        # No control_plane.project, no related -> the machine is STILL addressable
+        # via each of its agent-backing checkouts.
+        agents = derive_topology_agents(
+            ms, None, [], local, "windows", self.REPOS,
+        )
+        assert "web-app@dev6" in agents
+        assert agents["web-app@dev6"].project == "web-app"
+        assert agents["web-app@dev6"].host == "tmichon-dev6"
+        assert agents["web-app@dev6"].ssh_environment == "windows"
+        assert agents["web-app@dev6"].derived is True
+        assert "api-svc@dev6" in agents
+        # agent: false repo -> not emitted.
+        assert not any(n.startswith("docs-only") for n in agents)
+
+    def test_additive_alongside_control_plane(self):
+        ms = _topo_machines()
+        local = ms["tmichon-dev6"]
+        agents = derive_topology_agents(
+            ms, "dotfiles", [], local, "windows", self.REPOS,
+        )
+        # Control-plane venue agent AND every repo-registry agent coexist.
+        assert "dev6" in agents  # control-plane bare venue
+        assert agents["dev6"].project == "dotfiles"
+        assert "web-app@dev6" in agents
+        assert "api-svc@dev6" in agents
+
+    def test_no_local_machine_no_repo_agents(self):
+        ms = _topo_machines()
+        agents = derive_topology_agents(ms, None, [], None, "", self.REPOS)
+        assert agents == {}
+
+    def test_unreachable_local_env_skipped(self):
+        # Local machine present, but our platform (wsl) has no matching env and
+        # the machine is not ssh_ready -> not loopback, not reachable.
+        data = {
+            "machines": {
+                "tmichon-book2": {
+                    "display_name": "book2",
+                    "ssh": {
+                        "ready": False,
+                        "environments": [
+                            {"name": "windows", "alias": "b2", "shell": "pwsh"},
+                        ],
+                    },
+                },
+            },
+        }
+        ms = parse_machines_yaml(data)
+        local = ms["tmichon-book2"]
+        agents = derive_topology_agents(ms, None, [], local, "wsl", self.REPOS)
+        assert agents == {}
+
+    def test_existing_entry_not_overridden(self):
+        ms = _topo_machines()
+        local = ms["tmichon-dev6"]
+        # A prior source already emitted the name -> setdefault leaves it intact
+        # (control_plane / related / explicit win over the repo-registry source).
+        related = [("web-app", ["cloud1"], "agent-bridge")]  # remote, unrelated key
+        agents = derive_topology_agents(
+            ms, None, related, local, "windows", self.REPOS,
+        )
+        assert agents["web-app@dev6"].derived is True
+        assert agents["web-app@dev6"].host == "tmichon-dev6"
+
+    def test_malformed_entries_ignored(self):
+        ms = _topo_machines()
+        local = ms["tmichon-dev6"]
+        repos = [
+            "not-a-dict",
+            {"class": "worktree", "agent": True},  # no name
+            {"name": "", "agent": True},           # blank name
+            {"name": "ok", "agent": True, "paths": {}},
+        ]
+        agents = derive_topology_agents(ms, None, [], local, "windows", repos)
+        assert set(n for n in agents if "@" in n) == {"ok@dev6"}
+
 
 class TestLoadRelatedEntries:
 
@@ -1576,6 +1699,27 @@ class TestVenueBoundResolve:
         # Loopback (dev6 windows == local) -> local spawn running SPO.Core.
         assert target.type == "local"
         assert target.project == "SPO.Core"
+
+    @pytest.mark.asyncio
+    async def test_explicit_repo_at_machine_agent_resolves_static(self):
+        # A derived <repo>@<machine> entry that IS an exact registry key resolves
+        # directly (loopback) -- it needs no bare venue agent to rebind onto.
+        from unittest.mock import patch
+        agents = {
+            "web-app@dev6": AgentConfig(
+                name="web-app@dev6", host="tmichon-dev6",
+                ssh_environment="windows", project="web-app", derived=True,
+            ),
+        }
+        local = self.machines["tmichon-dev6"]
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local, "windows"),
+        ):
+            resolver = AgentResolver(agents, self.machines)
+            target = await resolver.resolve_async("web-app@dev6")
+        assert target.type == "local"
+        assert target.project == "web-app"
 
     @pytest.mark.asyncio
     async def test_repo_at_machine_default_project_when_bare(self):
