@@ -53,10 +53,12 @@ agent-ssh explore <ssh-target> [--json] [--timeout 10]
 Introspects a **reachable** target over SSH and reports, by convention, what the
 machine offers the fabric: its checked-out repos and **where** they live (read
 live from the machine's own repo registry, `agent-worktrees repos list --json`),
-which of those **back an agent**, whether the fabric runtimes (`agent-worktrees`
+which of those **back an agent**, each repo's declared **purpose** (`role` +
+`summary`, read from the in-repo `.agent-worktrees/related.yaml` catalog(s)
+checked out on the machine), whether the fabric runtimes (`agent-worktrees`
 / `agent-bridge` / `agent-dispatch`) are installed, and the **derived agents**
-that fall out — `<repo>@<target>` for each agent-backing checkout. `--json` emits
-the structured result.
+that fall out — `<repo>@<target>` for each agent-backing checkout (carrying that
+purpose). `--json` emits the structured result.
 
 `explore` is **read-only** — it runs one SSH probe and prints a report; it never
 mutates local or remote state. Repo locations are read live from the machine at
