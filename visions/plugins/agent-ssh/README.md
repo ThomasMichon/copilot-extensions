@@ -115,12 +115,51 @@ Verify — on demand and/or continuously — that a machine advertised as reacha
 whose transport has decayed is demoted from the reachable set so higher layers
 stop routing to a dead path; a repaired machine is restored.
 
+### Mesh introspection & derived roster
+Reaching a machine is only the *floor*; the fabric also needs to know **what a
+reachable machine offers** — which repos are checked out on it and where, and
+which fabric runtimes it already hosts — so the layers above can address the
+right agent without a second, hand-maintained map. agent-ssh can **introspect a
+reachable target live**: shell in over the very transport it provisioned and
+read, *by convention*, what the machine itself already declares — its own
+per-machine **repo registry** (the checkouts and their locations, and which back
+an agent), whether the coordination and worktree runtimes are installed, and the
+by-convention config that names each repo's purpose. From connectivity **×** each
+machine's **live** repo registry, the fabric's addressable **agent roster is
+derived**, not separately authored: a machine's own checkouts *are* the list of
+agents reachable on it. Introspection is **report-first** — it surfaces what a
+target actually has before anything is written — and **adoption is the explicit
+follow-on** that records the finding into the mesh. The machine remains the
+single owning store of *its own* locations; the fabric reads them at query time
+rather than copying them into a central list that will drift.
+
 ## Features
 
 ### provisioned-not-assumed-transport
 The SSH mesh is something agent-ssh **provisions and maintains**, not something
 it assumes a human wired. Installing OpenSSH, minting/pinning keys, standing up a
 transport, and repairing a decayed one are first-class capabilities of the layer.
+
+### live-machine-introspection
+Invoked locally against a reachable target, agent-ssh **explores** it over SSH
+and reports, **by convention**, what the machine offers the fabric: the repos it
+has checked out and **where** (from the machine's own repo registry, the source
+of truth for its locations), which of those **back an agent**, whether the
+fabric's coordination and worktree runtimes are installed, and the in-repo config
+that names each repo's purpose. Exploration is **read-only by default**; recording
+a finding into the mesh is an explicit, separate **adopt** step — so probing a
+machine never silently mutates the registry.
+
+### derived-agent-roster
+The fabric's addressable agent roster is **derived** from *connectivity* × *each
+machine's live repo-checkout locations* × *in-repo repo→purpose config* — not
+maintained as a separate, hand-authored list that a consumer must be told out of
+band. A machine's own checked-out, agent-backing repos **are** the agents
+reachable on it; the roster falls out of the two things that are already true
+(the machine is reachable, and it has repo X checked out at path P) plus the
+repo's declared purpose. This removes the class of failure where a machine is
+fully reachable and set up, yet unaddressable because a separate roster binding
+was never wired.
 
 ### declared-mesh-adoption
 An operator **declares** the machines and roles of one mesh; *adopting* a machine
@@ -206,6 +245,21 @@ not persist a competing copy of who-is-reachable-how, nor re-derive connectivity
 themselves. This is the fabric's *derive-don't-duplicate* rule applied to
 transport.
 
+### locations-live-from-the-machine
+A machine's actual repo-checkout locations are read from **that machine's own
+repo registry at query time** — the machine is the source of truth for where its
+own checkouts live. The fabric does **not** copy those paths into a central store
+that drifts; in-repo config may declare an *expected* location, but the mesh's
+**live** answer wins. This is *derive-don't-duplicate* applied to repo locations:
+the same rule that keeps reachability honest keeps the derived roster honest.
+
+### explore-before-adopt
+Introspecting a target is **read-only first**: exploration reports what a machine
+actually offers the fabric before anything is written. Turning a finding into a
+recorded mesh/registry entry is an explicit **adopt** step the operator (or an
+automation) invokes deliberately — so discovery never silently mutates the
+declared mesh, and a probe of an untrusted or transient target leaves no residue.
+
 ### uses-real-identity
 Reach is established under the operator's **real identity** and existing identity
 provider — not a per-agent or per-mesh service account minted for SSH. Real-user
@@ -219,7 +273,13 @@ layer's.)
 - **Not the coordination / dispatch layer.** agent-ssh provides **transport** —
   the ability to *reach* a machine over SSH. Creating, messaging, delegating to,
   or recovering remote **agents** rides *on* this layer and belongs to
-  agent-bridge / agent-dispatch, not here.
+  agent-bridge / agent-dispatch, not here. The derived roster is a case of this
+  seam, not an exception to it: agent-ssh surfaces the **inputs** a roster is
+  derived from (reachability, each machine's live repo-checkout locations, the
+  in-repo repo→purpose config) and the introspection to gather them; the
+  coordination layer **derives its addressable roster** from those inputs and
+  owns the agents themselves. agent-ssh does not create, message, or manage an
+  agent.
 - **Not a venue provider.** Provisioning a CodeSpace or a container and
   presenting its agent to the fabric is the venue providers' territory; agent-ssh
   wires **machine-to-machine SSH reachability**, the substrate a machine venue
@@ -289,3 +349,17 @@ layer's.)
   Mined from the operator's multi-part split (upstream core + a per-audience
   transport plugin each) and validated against a staged draft proving fragment
   coexistence on one client.
+- **2026-07-22** — Extended past *reach* into **knowing what a reachable machine
+  offers**: added the **Mesh introspection & derived roster** concept, the
+  `live-machine-introspection` and `derived-agent-roster` features, and the
+  `locations-live-from-the-machine` and `explore-before-adopt` behaviors. Intent
+  mined from the observation that the fabric's coordination layer needed a
+  separately hand-maintained binding to know which repos back agents on which
+  machines — so a machine could be fully reachable and provisioned yet
+  unaddressable because that roster map was never wired. Grounds the roster in two
+  facts already true (the machine is reachable; it has a repo checked out that
+  backs an agent) plus the repo's declared purpose, and reads each machine's own
+  repo registry **live** for locations rather than duplicating them. Extends the
+  existing `derive-dont-duplicate` rule from reachability to repo-locations, and
+  `declared-mesh-adoption` with a discover-then-adopt path. Confirmed design
+  posture (wrap existing connectivity; live-query locations; report-then-adopt).
