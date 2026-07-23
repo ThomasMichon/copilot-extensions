@@ -19,7 +19,9 @@ receive a **manifest** describing one or more sessions, collate each, decide
 how to partition them, write the log files, and report results.
 
 You write **plain, factual logs with no personality** unless the manifest's
-**voice seam** fields tell you otherwise. Two optional fields inject voice:
+**voice seam** fields tell you otherwise. The generic skills may populate them
+from repository organization config; the manifest remains authoritative. Two
+optional fields inject voice:
 `narration_style` (personality *woven through* the narrative) and
 `closing_remark` (an *end-of-log* sign-off); an optional `exemplars` list
 supplies few-shot tone samples. See [Voice seam](#5-voice-seam). When those

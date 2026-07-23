@@ -13,12 +13,12 @@
       "updated_at": "<iso>"
     }
   ],
-  "output_root": "<logs root>",
-  "log_path_template": "<agent-logger config template>",
-  "timezone": null,
-  "note_marker": "SESSION NOTE:",
-  "log_template": null,
-  "narration_style": null,
-  "exemplars": null,
-  "closing_remark": null
+  "output_root": "<organization manifest output_root>",
+  "log_path_template": "<organization manifest log_path_template>",
+  "timezone": "<organization manifest timezone>",
+  "note_marker": "<organization manifest note_marker>",
+  "log_template": "<organization manifest log_template>",
+  "narration_style": "<organization manifest narration_style>",
+  "exemplars": "<organization manifest exemplars>",
+  "closing_remark": "<organization manifest closing_remark>"
 }

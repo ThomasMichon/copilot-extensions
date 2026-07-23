@@ -40,6 +40,7 @@ while **`register` / `adopt` is the only verb that writes into the repo**. So
 |------|---------|-----------|
 | `.github/copilot/settings.json` | Which plugins the repo enables + the marketplace (`enabledPlugins`, `extraKnownMarketplaces`) | `installing-plugins` skill / adopt |
 | `<repo>/.agent-worktrees/config.yaml` | The repo's own worktree settings — PR mode (`pr:`), workflow, defaults shared by every machine | `register` / adopt |
+| `<repo>/.agent-logger.yaml` (or documented aliases) | Shared session-log location, naming/template, and optional writer voice seams | you / adopt |
 | `<repo>/.agent-worktrees/related.yaml` | The related-repo index (role, locus, delegate) from this repo's POV | `related add` |
 | `machines.yaml` | SSH machine topology the mesh plugins read (control repo) | you / adopt |
 | `codespaces.yaml` | Codespace defaults + credential-relay policy (control repo) | `codespaces-setup` |

@@ -5,17 +5,17 @@ description: >
   with no service required. Use this skill when the user wants to catch up
   on session logging -- e.g. "log my session backlog", "write logs for my
   recent sessions". It builds a batch manifest and hands it to the
-  session-log-writer agent. Voice-neutral. Trigger phrases include: - 'log
-  my backlog' - 'process my session backlog' - 'write logs for recent
-  sessions' - 'catch up on session logs'
+  session-log-writer agent. Voice-neutral by default; honors repository-owned
+  organization configuration. Trigger phrases include: - 'log my backlog' -
+  'process my session backlog' - 'write logs for recent sessions' - 'catch up
+  on session logs'
 ---
 
 # Process Backlog (local, no service)
 
 Turn a backlog of unlogged Copilot sessions into Markdown logs on this
-machine -- the no-service alternative to the orchestrator daemon. Produces
-**plain, persona-free** logs (the closing-remark seam stays null unless a
-host wrapper injects instructions).
+machine -- the no-service alternative to the orchestrator daemon. Logs are
+plain unless repository organization config supplies optional voice seams.
 
 ## When to use
 
@@ -27,7 +27,13 @@ scheduled fleet processing, that is the orchestrator daemon (separate).
 
 ## Procedure
 
-### 1. Enumerate candidate sessions
+### 1. Load repository organization
+
+From the target repository/worktree root, run `agent-logger organization`.
+Use the returned `manifest` object for output location, naming/template, note
+marker, and optional voice seams. Invalid config is an explicit error.
+
+### 2. Enumerate candidate sessions
 
 Choose the session source:
 
@@ -38,14 +44,14 @@ Choose the session source:
 For each candidate, read `workspace.yaml` for `repository`, `branch`, and
 the auto-summary, and check `events.jsonl` exists (skip empty sessions).
 
-### 2. Filter out already-logged sessions
+### 3. Filter out already-logged sessions
 
 Skip any session whose `session_id` already appears in a log file's YAML
 frontmatter under `output_root`, or whose target path already exists. This
 mirrors the agent's own skip check -- do it here to avoid spawning work that
 will be skipped.
 
-### 3. Build a batch manifest
+### 4. Build a batch manifest
 
 Full example: [`references/manifest.json`](references/manifest.json). Shape:
 
@@ -65,31 +71,29 @@ Full example: [`references/manifest.json`](references/manifest.json). Shape:
       "updated_at": "<iso>"
     }
   ],
-  "output_root": "<logs root>",
-  "log_path_template": "<agent-logger config template>",
-  "timezone": null,
-  "note_marker": "SESSION NOTE:",
-  "log_template": null,
-  "narration_style": null,
-  "exemplars": null,
-  "closing_remark": null
+  "output_root": "<organization manifest output_root>",
+  "log_path_template": "<organization manifest log_path_template>",
+  "timezone": "<organization manifest timezone>",
+  "note_marker": "<organization manifest note_marker>",
+  "log_template": "<organization manifest log_template>",
+  "narration_style": "<organization manifest narration_style>",
+  "exemplars": "<organization manifest exemplars>",
+  "closing_remark": "<organization manifest closing_remark>"
 }
 ```
 
-Use `agent-logger config` or `prepare-session-log --json --title "<sample>"`
-from the repository to pick up any repo-local `.agent-logger.yaml` `log:`
-organization block before building the batch manifest.
+Copy those fields exactly from `agent-logger organization`.
 
 Cap the batch to a sensible size (e.g. 1-4 substantial sessions or a day's
 worth) so the agent's context isn't overwhelmed; repeat for more.
 
-### 4. Delegate
+### 5. Delegate
 
 Spawn the **session-log-writer** agent (`agent_type: "session-log-writer"`,
 `mode: "sync"`) with the manifest path. In batch mode it triages each
 session (standalone / digest / skip), writes logs, and reports.
 
-### 5. Report
+### 6. Report
 
 Summarize what was written and skipped for the user, then commit per the
 host repo's git policy.

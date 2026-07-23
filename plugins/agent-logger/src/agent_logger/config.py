@@ -83,6 +83,10 @@ DEFAULTS: dict[str, Any] = {
         # Optional Markdown outline/instructions for repository-specific log
         # body sections. Null means use the writer's built-in structure.
         "template": None,
+        # Optional manifest voice seams. Null keeps the generic writer neutral.
+        "narration_style": None,
+        "exemplars": None,
+        "closing_remark": None,
     },
     # Machine identity. When name is None it is auto-detected (hostname,
     # with a -wsl suffix inside WSL).
@@ -98,7 +102,16 @@ REPO_CONFIG_FILENAMES: tuple[str, ...] = (
     ".config/agent-logger.yml",
 )
 REPO_CONFIG_SCHEMA_VERSION = 1
-REPO_LOG_FIELDS = {"root", "path_template", "timezone", "note_marker", "template"}
+REPO_LOG_FIELDS = {
+    "root",
+    "path_template",
+    "timezone",
+    "note_marker",
+    "template",
+    "narration_style",
+    "exemplars",
+    "closing_remark",
+}
 PATH_TEMPLATE_FIELDS = {"year", "month", "day", "hhmmss", "machine", "title"}
 LOG_TEMPLATE_FIELDS = {
     "title",
@@ -204,6 +217,14 @@ def _validate_template(
             raise RepositoryConfigError(
                 f"{location} placeholders do not support formatting or conversion"
             )
+    return value.strip()
+
+
+def _validate_optional_text(value: Any, location: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise RepositoryConfigError(f"{location} must be null or a non-empty string")
     return value.strip()
 
 
@@ -334,6 +355,26 @@ def _load_repo_config(path: Path) -> dict[str, Any]:
             allowed_fields=LOG_TEMPLATE_FIELDS,
         )
 
+    for field in ("narration_style", "closing_remark"):
+        if field in scoped:
+            scoped[field] = _validate_optional_text(scoped[field], f"log.{field}")
+
+    if "exemplars" in scoped:
+        exemplars = scoped["exemplars"]
+        if exemplars is None:
+            pass
+        elif isinstance(exemplars, str):
+            scoped["exemplars"] = _validate_optional_text(exemplars, "log.exemplars")
+        elif isinstance(exemplars, list) and all(
+            isinstance(item, str) and item.strip() for item in exemplars
+        ):
+            scoped["exemplars"] = [item.strip() for item in exemplars]
+        else:
+            raise RepositoryConfigError(
+                "log.exemplars must be null, a non-empty string, "
+                "or a list of non-empty strings"
+            )
+
     return {"log": scoped}
 
 
@@ -341,11 +382,16 @@ class Config:
     """Resolved agent-logger configuration."""
 
     def __init__(
-        self, data: dict[str, Any], home: Path, repo_config_path: Path | None = None
+        self,
+        data: dict[str, Any],
+        home: Path,
+        repo_config_path: Path | None = None,
+        repo_root: Path | None = None,
     ) -> None:
         self._data = data
         self.home = home
         self.repo_config_path = repo_config_path
+        self.repo_root = repo_root
 
     # -- resolved convenience accessors ---------------------------------
 
@@ -468,6 +514,18 @@ class Config:
         return str(raw)
 
     @property
+    def narration_style(self) -> str | None:
+        return self._data.get("log", {}).get("narration_style")
+
+    @property
+    def exemplars(self) -> str | list[str] | None:
+        return self._data.get("log", {}).get("exemplars")
+
+    @property
+    def closing_remark(self) -> str | None:
+        return self._data.get("log", {}).get("closing_remark")
+
+    @property
     def machine_name(self) -> str | None:
         return self._data.get("machine", {}).get("name")
 
@@ -486,6 +544,23 @@ class Config:
         """
         return copy.deepcopy(self._data)
 
+    def organization_manifest(self) -> dict[str, Any]:
+        """Return repository organization fields ready for a writer manifest."""
+        configured_root = self._data.get("log", {}).get("root")
+        output_root = (
+            self.log_root if configured_root else (self.repo_root or Path.cwd()) / "logs"
+        )
+        return {
+            "output_root": str(output_root),
+            "log_path_template": self.log_path_template,
+            "timezone": self.log_timezone,
+            "note_marker": self.note_marker,
+            "log_template": self.log_template,
+            "narration_style": self.narration_style,
+            "exemplars": copy.deepcopy(self.exemplars),
+            "closing_remark": self.closing_remark,
+        }
+
 
 def load_config(
     home: Path | None = None,
@@ -496,6 +571,7 @@ def load_config(
     """Load layered configuration into a :class:`Config`."""
     resolved_home = home or home_dir()
     data = _deep_merge(DEFAULTS, _load_user_config(resolved_home / "config.yaml"))
+    repo_root = _find_repo_root(repo_start) if include_repo else None
     repo_config_path = find_repo_config(repo_start) if include_repo else None
     if repo_config_path:
         data = _deep_merge(data, _load_repo_config(repo_config_path))
@@ -506,4 +582,4 @@ def load_config(
     if os.environ.get("AGENT_LOGGER_VOICE_PACK"):
         data["log"]["voice_pack"] = os.environ["AGENT_LOGGER_VOICE_PACK"]
 
-    return Config(data, resolved_home, repo_config_path)
+    return Config(data, resolved_home, repo_config_path, repo_root)

@@ -133,6 +133,7 @@ def main() -> None:
     except RepositoryConfigError as exc:
         print(f"Error: invalid repository configuration: {exc}", file=sys.stderr)
         sys.exit(2)
+    organization = cfg.organization_manifest()
 
     # Machine & environment
     raw_machine = args.machine or cfg.machine_name or detect_machine()
@@ -171,7 +172,11 @@ def main() -> None:
 
     # Log path — rendered from the configurable template under the log root.
     # Tokens: {year} {month} {day} {hhmmss} {machine} {title}.
-    log_root = Path(args.log_root).expanduser() if args.log_root else cfg.log_root
+    log_root = (
+        Path(args.log_root).expanduser()
+        if args.log_root
+        else Path(organization["output_root"])
+    )
     rel_path = cfg.log_path_template.format(
         year=local_date.year,
         month=mm,
@@ -203,11 +208,8 @@ def main() -> None:
         "log_filename": log_filename,
         "log_path": str(log_path),
         "digest_dir": str(digest_dir),
+        **organization,
         "output_root": str(log_root),
-        "log_path_template": cfg.log_path_template,
-        "timezone": cfg.log_timezone,
-        "note_marker": cfg.note_marker,
-        "log_template": cfg.log_template,
         "repo_config_path": str(cfg.repo_config_path) if cfg.repo_config_path else None,
     }
 
@@ -238,6 +240,12 @@ def main() -> None:
         print(f"repo_config_path: {cfg.repo_config_path}")
     if cfg.log_template:
         print("log_template: <configured; use --json to read>")
+    if cfg.narration_style:
+        print("narration_style: <configured; use --json to read>")
+    if cfg.exemplars:
+        print("exemplars: <configured; use --json to read>")
+    if cfg.closing_remark:
+        print("closing_remark: <configured; use --json to read>")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,8 @@ description: >
   Write a Markdown session log for the current Copilot session on demand.
   Use this skill when the user explicitly asks to "write the session log" or
   "log this session" as a file. It prepares a one-session manifest and hands
-  it to the session-log-writer agent. Voice-neutral -- produces plain logs.
+  it to the session-log-writer agent. Voice-neutral by default; honors
+  repository-owned organization configuration.
   Trigger phrases include: - 'write the session log' - 'generate a log file'
   - 'log this session to a file' - 'save a session log'
 ---
@@ -13,13 +14,8 @@ description: >
 
 Write a structured Markdown log for the **current** session, now. This skill
 is the interactive, single-session entry point to the
-`session-log-writer` agent. It produces a **plain, persona-free** log.
-
-> Personality is never added here. A host repo that wants styled output wraps
-> this flow and injects `narration_style` (interleaved voice) and/or
-> `closing_remark` (an end sign-off) instructions into the agent prompt (see
-> `docs/manifest-contract.md` -> the voice seam). This skill leaves all voice
-> fields null.
+`session-log-writer` agent. It produces a plain log unless repository
+organization config supplies optional voice-seam instructions.
 
 ## Procedure
 
@@ -48,7 +44,7 @@ Pass the session ID from the session context (omit `--session` to
 auto-detect the most recently active session for the current project). The
 tool prints `machine`, `session_id`, `session_dir`, `cutoff`, `log_path`,
 `digest_dir`, `output_root`, `log_path_template`, `timezone`, `note_marker`,
-and (when configured) `log_template`.
+`log_template`, `narration_style`, `exemplars`, and `closing_remark`.
 
 `prepare-session-log` discovers repo-local organization config by convention
 from the current repository root: `.agent-logger.yaml`, `.agent-logger.yml`,
@@ -82,6 +78,9 @@ log:
     ## Open Items
 
     {open_items}
+  narration_style: null
+  exemplars: null
+  closing_remark: "End with one concise takeaway."
 ```
 
 The repository file is validated before any log path is created. Unknown
@@ -106,17 +105,16 @@ example: [`references/manifest.json`](references/manifest.json)):
   "timezone": "<prep.timezone>",
   "note_marker": "<prep.note_marker>",
   "log_template": "<prep.log_template>",
-  "narration_style": null,
-  "exemplars": null,
-  "closing_remark": null
+  "narration_style": "<prep.narration_style>",
+  "exemplars": "<prep.exemplars>",
+  "closing_remark": "<prep.closing_remark>"
 }
 ```
 
 Use the prep output verbatim for the organization fields. `log_template` may
 be `null`; when non-null it is the repo's requested Markdown structure and the
-writer must preserve it. Leave the voice fields (`narration_style`,
-`exemplars`, `closing_remark`) null unless a wrapping host skill instructs
-otherwise.
+writer must preserve it. Voice fields remain null unless repository config
+deliberately supplies them.
 
 ### 3. Delegate
 
@@ -127,9 +125,9 @@ collates, reads the digest, writes the log, and returns a short result.
 ### 4. Present
 
 Relay the agent's result to the user (the log path and a one-line summary).
-If a `narration_style` or `closing_remark` was injected by a host wrapper and
-the agent produced styled output, present it verbatim. Then commit the log per
-the host repo's git policy.
+If repository config supplied a `narration_style` or `closing_remark` and the
+agent produced styled output, present it verbatim. Then commit the log per the
+host repo's git policy.
 
 ## Why sync
 

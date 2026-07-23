@@ -65,9 +65,10 @@ batch). This document is the contract between them and the agent.
 
 ## The voice seam (how voice is injected)
 
-**The agent has no personality of its own.** Voice is injected by the caller
-through three optional, null-by-default fields; when all are null the agent
-writes a plain log with no remark, quip, or persona.
+**The agent has no personality of its own.** Voice is injected through three
+optional, null-by-default fields. The generic skills copy them from repository
+organization config; when all are null the agent writes a plain log with no
+remark, quip, or persona.
 
 | Field | Where the voice lands |
 |-------|-----------------------|
@@ -75,14 +76,14 @@ writes a plain log with no remark, quip, or persona.
 | `closing_remark` | A single **end-of-log** sign-off after a trailing `---`. The simple, end-only complement. |
 | `exemplars` | Few-shot **tone samples** that inform the writing (not copied). |
 
-This is the single, deliberate seam through which a host repo adds voice
+This is the single, deliberate seam through which a repository adds voice
 **without the plugin ever containing one**. To inject a persona:
 
 1. The host owns a **voice skill** (its character/quip rules) in its own
    repo -- not in this plugin.
-2. The host's wrapping caller (its own `log-session` variant, or its
-   orchestrator runner) sets `narration_style` (and optionally `exemplars`
-   and/or `closing_remark`) to the voice skill's instructions -- e.g. a
+2. The repository's organization config sets `narration_style` (and optionally
+   `exemplars` and/or `closing_remark`) to the voice skill's instructions --
+   e.g. a
    directive like *"Consult the `my-voice` skill; weave brief in-character
    asides between thematic sections where they add warmth or wit, never
    forced; then close with a 2-3 line sign-off."*
@@ -90,10 +91,9 @@ This is the single, deliberate seam through which a host repo adds voice
    `exemplars` for tone, and appends any `closing_remark` after a `---`
    separator in each standalone log.
 
-The plugin's own `log-session` and `process-backlog` skills always leave all
-three fields null, so out of the box every log is persona-free. Only a host
-that deliberately injects instructions gets styled output, and the styling
-lives entirely in that host.
+Without repository configuration all three fields remain null, so out of the
+box every log is persona-free. Only a repository that deliberately supplies
+instructions gets styled output.
 
 ## Repo-local organization config
 
@@ -139,20 +139,27 @@ log:
     ## Open Items
 
     {open_items}
+  narration_style: null
+  exemplars: null
+  closing_remark: "End with one concise takeaway."
 ```
 
 The writer treats `log_template` as the repository's complete standalone-log
 contract: it fills placeholders with real session values and preserves the
 requested section order. It does not add built-in YAML frontmatter unless the
 template asks for it. Leave `log_template` null for the backward-compatible
-built-in body organization and frontmatter.
+built-in body organization and frontmatter. The same `log:` block may supply
+`narration_style`, `exemplars`, and `closing_remark`;
+`prepare-session-log --json` and `agent-logger organization` copy them into
+the manifest unchanged, eliminating wrapper-only injection.
 
 `schema_version` may be omitted for compatibility and is then treated as
 version 1. The loader rejects unsupported versions, malformed YAML, unknown
 fields/placeholders, invalid timezones, and output paths that are absolute or
 escape the repository. Repo-local config accepts only `root`, `path_template`,
-`timezone`, `note_marker`, and `template` under `log:`; it cannot change sync
-or other machine-local behavior.
+`timezone`, `note_marker`, `template`, `narration_style`, `exemplars`, and
+`closing_remark` under `log:`; it cannot change sync or other machine-local
+behavior.
 
 **Interleaved vs. end-only.** `narration_style` exists precisely so voice
 need not be *"jammed at the end"* -- a host that wants personality *woven
@@ -174,7 +181,7 @@ sign-off sets `closing_remark`; a host that wants both sets both.
 }
 ```
 
-## Example: batch with injected voice (host-side)
+## Example: batch with repository-configured voice
 
 ```json
 {

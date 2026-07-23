@@ -1,7 +1,7 @@
 """``agent-logger`` top-level CLI.
 
-Subcommands are added as the plugin grows. For now it exposes version and
-config introspection; the segmenter ships its own console scripts
+Subcommands are added as the plugin grows. It exposes version, configuration,
+and repository organization introspection; the segmenter ships its own scripts
 (``collate-session`` etc.).
 """
 
@@ -31,11 +31,25 @@ def _cmd_config(_args: argparse.Namespace) -> int:
         "log_root": str(cfg.log_root),
         "log_path_template": cfg.log_path_template,
         "log_template_configured": cfg.log_template is not None,
+        "narration_style_configured": cfg.narration_style is not None,
+        "exemplars_configured": cfg.exemplars is not None,
+        "closing_remark_configured": cfg.closing_remark is not None,
         "voice_pack": cfg.voice_pack,
         "note_marker": cfg.note_marker,
         "machine_name": cfg.machine_name,
     }
     print(json.dumps(summary, indent=2))
+    return 0
+
+
+def _cmd_organization(_args: argparse.Namespace) -> int:
+    cfg = load_config()
+    result = {
+        "repository_root": str(cfg.repo_root) if cfg.repo_root else None,
+        "config_path": str(cfg.repo_config_path) if cfg.repo_config_path else None,
+        "manifest": cfg.organization_manifest(),
+    }
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -60,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_config = sub.add_parser("config", help="show resolved configuration")
     p_config.set_defaults(func=_cmd_config)
+
+    p_organization = sub.add_parser(
+        "organization",
+        help="show repository organization config as manifest-ready JSON",
+    )
+    p_organization.set_defaults(func=_cmd_organization)
 
     p_migrate = sub.add_parser(
         "config-migrate", help="migrate machine-local config.yaml schema (idempotent)"

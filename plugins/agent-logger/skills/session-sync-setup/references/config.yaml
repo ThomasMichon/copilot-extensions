@@ -47,3 +47,6 @@ log:
   timezone: null
   note_marker: "SESSION NOTE:"
   template: null
+  narration_style: null
+  exemplars: null
+  closing_remark: null
