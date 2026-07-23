@@ -857,17 +857,19 @@ def _build_launch_cmd(
     profile_args = profile.copilot_args if profile and profile.copilot_args else []
     cmd.extend(profile_args)
 
-    # Auto-approve tools so worktree sessions run without per-tool
-    # confirmation prompts.  Skip ACP sessions (agent-bridge manages
-    # permissions over the protocol) and never duplicate an
-    # all-permissions flag the caller already supplied.
+    # Auto-approve everything so worktree sessions run without any
+    # confirmation prompts.  --allow-all is equivalent to
+    # --allow-all-tools --allow-all-paths --allow-all-urls, so a worktree
+    # session never stalls on a tool, path, or URL prompt.  Skip ACP
+    # sessions (agent-bridge manages permissions over the protocol) and
+    # never duplicate an all-permissions flag the caller already supplied.
     passthrough = list(extra) + list(profile_args)
     if "--acp" not in passthrough and not any(
         a == flag
         for a in passthrough
         for flag in ("--allow-all-tools", "--allow-all", "--yolo")
     ):
-        cmd.append("--allow-all-tools")
+        cmd.append("--allow-all")
 
     return cmd
 
