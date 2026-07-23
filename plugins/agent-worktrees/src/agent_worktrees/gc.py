@@ -134,6 +134,83 @@ def classify_orphan(d: Path, *, min_settle_secs: float = _MIN_SETTLE_SECS) -> Or
     return OrphanVerdict(str(d), "remove", "effectively empty")
 
 
+# ---------------------------------------------------------------------------
+# Managed (system/bridge) worktree GC
+# ---------------------------------------------------------------------------
+
+# The daemon-owned kinds that routine cleanup deliberately skips (they are torn
+# down by their owning service). They still leak -- a crashed daemon, or a caller
+# that finalized without tearing its bridge worktree down -- so this GC reaps the
+# *provably dead* ones. Mirrors ``tracking.MANAGED_KINDS`` (kept as a literal so
+# ``gc`` stays import-light / pure).
+MANAGED_KINDS = ("system", "bridge")
+
+# Git states / statuses that mean "the work here is done / never happened" -- the
+# only conditions a managed worktree may be reaped from (besides plain UNUSED).
+_FINAL_STATES = frozenset({"completed", "gone"})
+_FINAL_STATUSES = frozenset({"finalized", "complete", "completed"})
+
+# A dead managed worktree must be quiet this long before it's reaped, so a daemon
+# that just created one (creation races the sweep) is never yanked out from under.
+MANAGED_GC_GRACE_SECS = 3600  # 1 hour
+
+
+@dataclass
+class ManagedVerdict:
+    worktree_id: str
+    action: str  # "remove" | "skip"
+    reason: str
+
+
+def classify_managed_worktree(
+    *,
+    worktree_id: str,
+    kind: str,
+    follow_up: bool,
+    status: str,
+    git_state: str,
+    has_live_mux: bool,
+    attached: bool,
+    has_live_session: bool,
+    idle_secs: float | None,
+    min_idle_secs: float = MANAGED_GC_GRACE_SECS,
+) -> ManagedVerdict:
+    """Decide whether one managed (system/bridge) worktree may be GC'd.
+
+    Eligibility (all required): the worktree is **FINAL or UNUSED** (its work is
+    done or never happened), has **no active process** (no live mux session, no
+    attached terminal client, no live Copilot session), carries **no follow-up
+    flag**, and has been **idle past the grace window**. Anything else -- a
+    dirty/WIP tree, a live session, an attached client, a follow-up mark, or a
+    still-fresh worktree -- is spared. Pure/inspectable: takes only facts, does
+    no I/O.
+    """
+    if kind not in MANAGED_KINDS:
+        return ManagedVerdict(worktree_id, "skip", "not-managed")
+    if follow_up:
+        return ManagedVerdict(worktree_id, "skip", "follow-up")
+    if attached:
+        return ManagedVerdict(worktree_id, "skip", "attached")
+    if has_live_mux:
+        return ManagedVerdict(worktree_id, "skip", "live-mux")
+    if has_live_session:
+        return ManagedVerdict(worktree_id, "skip", "live-session")
+
+    is_final = status in _FINAL_STATUSES or git_state in _FINAL_STATES
+    is_unused = git_state == "unused"
+    if not (is_final or is_unused):
+        return ManagedVerdict(worktree_id, "skip", "not-final-or-unused")
+
+    # Never risk reaping something we can't prove is idle.
+    if idle_secs is None:
+        return ManagedVerdict(worktree_id, "skip", "activity-unknown")
+    if idle_secs < min_idle_secs:
+        return ManagedVerdict(worktree_id, "skip", "idle-grace")
+
+    return ManagedVerdict(worktree_id, "remove",
+                          "final" if is_final else "unused")
+
+
 def _on_rm_error(func, path, _exc):
     """rmtree error hook: clear a read-only bit and retry the operation once."""
     try:
@@ -200,10 +277,14 @@ def sweep_orphans(
 
 
 __all__ = [
-    "candidate_roots",
-    "find_orphans",
-    "classify_orphan",
-    "sweep_orphans",
-    "OrphanVerdict",
     "CACHE_DIRNAMES",
+    "MANAGED_GC_GRACE_SECS",
+    "MANAGED_KINDS",
+    "ManagedVerdict",
+    "OrphanVerdict",
+    "candidate_roots",
+    "classify_managed_worktree",
+    "classify_orphan",
+    "find_orphans",
+    "sweep_orphans",
 ]

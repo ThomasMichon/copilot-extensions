@@ -220,6 +220,8 @@ class TestReapOrphans:
 
 def test_sweep_orphans_on_exit_is_best_effort(monkeypatch):
     """A reap hiccup at session end never propagates out of post-exit."""
+    monkeypatch.setattr(cli, "_sweep_managed_on_exit", lambda: None)
+
     def boom():
         raise RuntimeError("mux enumeration failed")
 
@@ -229,12 +231,37 @@ def test_sweep_orphans_on_exit_is_best_effort(monkeypatch):
 
 def test_sweep_orphans_on_exit_runs_the_reaper(monkeypatch):
     seen = {"n": 0}
+    monkeypatch.setattr(cli, "_sweep_managed_on_exit", lambda: None)
     monkeypatch.setattr(
         cli, "reap_orphan_mux_sessions",
         lambda: (seen.__setitem__("n", seen["n"] + 1)
                  or {"available": True, "reaped": [], "skipped": [], "errors": []}))
     cli._sweep_orphans_on_exit()
     assert seen["n"] == 1
+
+
+def test_sweep_orphans_on_exit_also_sweeps_managed(monkeypatch):
+    """The session-end boundary runs the managed (system/bridge) leak GC too,
+    on the same no-daemon cadence (#1069)."""
+    seen = {"mux": 0, "managed": 0}
+    monkeypatch.setattr(
+        cli, "reap_orphan_mux_sessions",
+        lambda: (seen.__setitem__("mux", 1)
+                 or {"available": True, "reaped": [], "skipped": [], "errors": []}))
+    monkeypatch.setattr(
+        cli, "sweep_managed_worktrees",
+        lambda *a, **k: (seen.__setitem__("managed", 1)
+                         or {"removed": [], "skipped": []}))
+    cli._sweep_orphans_on_exit()
+    assert seen == {"mux": 1, "managed": 1}
+
+
+def test_sweep_managed_on_exit_is_best_effort(monkeypatch):
+    """A managed-sweep hiccup at a lifecycle boundary is swallowed."""
+    def boom(*a, **k):
+        raise RuntimeError("classify blew up")
+    monkeypatch.setattr(cli, "sweep_managed_worktrees", boom)
+    assert cli._sweep_managed_on_exit() is None      # swallowed, no raise
 
 
 def _post_exit_args(wt_id="wt-x"):
@@ -271,3 +298,65 @@ def test_post_exit_sweeps_orphans_when_no_record(tmp_path, monkeypatch):
 
     assert cli.cmd_post_exit(_post_exit_args()) == 0
     assert calls["sweep"] == 1
+
+
+# ── #1069 managed (system/bridge) leak GC: sweep_managed_worktrees ────────────
+
+def _managed_sweep(records, *, dry_run=True, mux=None, activity=None, now=None):
+    """Invoke ``sweep_managed_worktrees`` with the fleet's I/O fully patched.
+
+    Dry-run by default (no git/FS side effects). Records with a non-existent
+    ``worktree_path`` resolve their git-state from ``status`` (finalized ->
+    'completed'), so no real git call is needed.
+    """
+    import types
+    repo = types.SimpleNamespace(anchor="/tmp/anchor", remote="origin",
+                                 default_branch="main")
+    config = types.SimpleNamespace(default_repo=repo, repo_name="repo")
+    with patch("agent_worktrees.config.load_config", return_value=config), \
+         patch("agent_worktrees.config.tracking_dir", return_value=Path("/tmp")), \
+         patch("agent_worktrees.tracking.list_records", return_value=records), \
+         patch("agent_worktrees.sessions._list_mux_sessions",
+               return_value=(mux or {})), \
+         patch("agent_worktrees.sessions._mux_session_activity",
+               return_value=(activity or {})), \
+         patch("agent_worktrees.sessions.scan_sessions_fast",
+               return_value=types.SimpleNamespace(active_sessions={})), \
+         patch("agent_worktrees.__main__._build_active_paths", return_value=set()):
+        return cli.sweep_managed_worktrees(dry_run=dry_run, now=now)
+
+
+def _mgd(wt_id, *, kind="bridge", status="finalized", follow_up=False):
+    rec = _rec(wt_id, status=status, path="/no/such/dir-xyz", kind=kind)
+    rec.follow_up = follow_up
+    return rec
+
+
+def test_managed_sweep_no_records_is_noop():
+    report = _managed_sweep([])
+    assert report == {"removed": [], "skipped": []}
+
+
+def test_managed_sweep_reaps_dead_final_bridge_dry_run():
+    report = _managed_sweep([_mgd("brg", kind="bridge")])
+    assert [x["id"] for x in report["removed"]] == ["brg"]
+    assert "would remove" in report["removed"][0]["reason"]
+
+
+def test_managed_sweep_spares_follow_up_and_live():
+    recs = [
+        _mgd("keep-fu", follow_up=True),          # follow-up -> spared
+        _mgd("keep-live", kind="system"),         # live mux -> spared
+        _mgd("reap", kind="bridge"),              # dead final -> reaped
+    ]
+    report = _managed_sweep(recs, mux={"wt-keep-live": 0})
+    assert [x["id"] for x in report["removed"]] == ["reap"]
+    reasons = {x["id"]: x["reason"] for x in report["skipped"]}
+    assert reasons["keep-fu"] == "follow-up"
+    assert reasons["keep-live"] == "live-mux"
+
+
+def test_managed_sweep_ignores_non_managed_records():
+    # A plain session record is not managed -> never in the managed sweep.
+    report = _managed_sweep([_rec("sess", status="finalized", kind="session")])
+    assert report == {"removed": [], "skipped": []}

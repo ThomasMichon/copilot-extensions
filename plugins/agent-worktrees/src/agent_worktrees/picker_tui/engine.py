@@ -302,6 +302,8 @@ ACTION_DESC = {
             "troubleshooting).",
     "Resume": "Relaunch this stopped worktree's Copilot, resuming its last "
               "session in a fresh TMux/PSMux.",
+    "Messages": "Peek the last few messages of this worktree's latest session "
+                "(read-only) -- see what it was doing without opening it.",
     "Sync": "Fast-forward this worktree onto the default branch (FF-only).",
     "Cleanup": "Remove this worktree (safe once merged/idle).",
     "Finalize": "Wrap up this conversation-only / unused worktree: verify "
@@ -388,6 +390,8 @@ class PickerScreen(Widget):
         self.top = 0                  # scroll offset into body vrows
         self.submenu = None           # worktree action modal
         self.submenu_idx = 0
+        self.msgview = None           # recent-messages viewer overlay (#session-viewer)
+        self._msgview_lock = threading.Lock()
         self.cleanup = None           # cleanup-scope modal (Maintenance)
         self.optmenu = None           # "More options…" create modal
         self.maint_sel = ListSelection()   # Maintenance multi-select (#1345)
@@ -659,6 +663,10 @@ class PickerScreen(Widget):
         # Drive the mock cleanup/sync progress dialog forward.
         if self.progress and not self.progress["done"]:
             self._advance_progress()
+            busy = True
+        # Keep the tick lively while the recent-messages viewer is still loading
+        # so its result appears promptly (the load runs on a daemon thread).
+        if self.msgview and self.msgview.get("loading"):
             busy = True
         # Full 10 fps only while something is actually animating (the SSH
         # connect spinner or a running progress dialog). When idle, throttle to
@@ -2339,7 +2347,8 @@ class PickerScreen(Widget):
         # body offset = title+htabs+header_border+stats = len(top)+2
         modal = (self.submenu or self.maint_menu or self.cleanup
                  or self.optmenu or self.prof_confirm or self.progress
-                 or self.quit_confirm or self.task_menu or self.cfgmenu)
+                 or self.quit_confirm or self.task_menu or self.cfgmenu
+                 or self.msgview)
         # The Clean/Sync dialog is a LIVE FILTER over the worktree list (#2179):
         # keep the list visible (build_body dims rows outside the selected set)
         # and dock the bucket toggles at the bottom, instead of graying the whole
@@ -2355,6 +2364,8 @@ class PickerScreen(Widget):
                 self._overlay_quit_confirm(lines, W, off, bh)
             elif self.submenu:
                 self._overlay_submenu(lines, W, off, bh)
+            elif self.msgview:
+                self._overlay_msgview(lines, W, off, bh)
             elif self.task_menu:
                 self._overlay_task_menu(lines, W, off, bh)
             elif self.cfgmenu:
@@ -2746,6 +2757,106 @@ class PickerScreen(Widget):
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)
 
+    def _overlay_msgview(self, lines, W, top_off, body_h):
+        """Render the recent-messages viewer overlay for a worktree.
+
+        A read-only peek: header (title + id/machine), then the last few
+        conversation turns of the latest session (role-labeled, word-wrapped),
+        or a loading spinner / error / empty line. ``↑/↓`` scroll long content;
+        ``Esc`` closes. The body is windowed to fit, so a long transcript never
+        overflows the panel.
+        """
+        mv = self.msgview
+        rec = mv["rec"]
+        pw = min(W - 6, 88)
+        title = f" {rec.get('title', '')}"
+        meta = (f" {rec.get('id4')} · {rec.get('machine')} · {rec.get('env')}"
+                f" · {rec.get('state')}")
+        header = "─ Recent messages "
+        panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
+                      style=C_BAND)]
+        panel.append(self._prow(title, pw, style="bold white"))
+        panel.append(self._prow(meta, pw, style=C_DIM))
+        panel.append(self._prow("", pw))
+
+        # Body rows: assemble the full list, then window by scroll offset.
+        avail = max(3, body_h - 9)  # rows left for the message body
+        body: list[Text] = []
+        if mv.get("loading"):
+            spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[(self.frame // 2) % 10]
+            body.append(self._prow(f" {spin} Loading recent messages…",
+                                   pw, style="grey62"))
+        elif mv.get("error"):
+            body.append(self._prow(f" ⚠ {mv['error']}", pw, style="yellow"))
+        elif not mv.get("messages"):
+            body.append(self._prow(" (no conversation messages in the latest "
+                                   "session)", pw, style="grey62"))
+        else:
+            for m in mv["messages"]:
+                is_user = m.get("role") == "user"
+                who = "you" if is_user else "agent"
+                glyph = "▍"
+                who_style = "bold #4aa3ff" if is_user else "bold #7ee787"
+                body.append(self._prow(f" {glyph} {who}", pw, style=who_style))
+                for seg in self._wrap_text(m.get("text", ""), pw - 5):
+                    body.append(self._prow("   " + seg, pw, style="white"))
+                body.append(self._prow("", pw))
+
+        total = len(body)
+        max_scroll = max(0, total - avail)
+        scroll = min(mv.get("scroll", 0), max_scroll)
+        mv["scroll"] = scroll
+        window = body[scroll:scroll + avail]
+        panel.extend(window)
+        if total > avail:
+            more = total - avail - scroll
+            panel.append(self._prow(
+                f"   … {more} more line(s) below" if more > 0
+                else "   (end)", pw, style=C_DIM))
+
+        panel.append(self._prow("", pw))
+        sid = mv.get("session_id") or ""
+        foot = " Esc close · ↑/↓ scroll"
+        if sid:
+            foot = f" session {sid[:8]} ·" + foot
+        panel.append(self._prow(foot, pw, style="grey62"))
+        panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
+        self._blit_panel(lines, W, panel, top_off, body_h)
+
+    @staticmethod
+    def _wrap_text(text: str, width: int) -> list[str]:
+        """Word-wrap ``text`` to ``width`` columns; collapse blank lines.
+
+        Preserves the transcript's own line breaks, then greedily wraps each
+        line on whitespace. A single word longer than ``width`` is hard-split.
+        """
+        width = max(8, width)
+        out: list[str] = []
+        for raw in text.replace("\r", "").split("\n"):
+            line = raw.rstrip()
+            if not line:
+                if out and out[-1] != "":
+                    out.append("")
+                continue
+            cur = ""
+            for word in line.split(" "):
+                while len(word) > width:
+                    if cur:
+                        out.append(cur)
+                        cur = ""
+                    out.append(word[:width])
+                    word = word[width:]
+                if not cur:
+                    cur = word
+                elif len(cur) + 1 + len(word) <= width:
+                    cur += " " + word
+                else:
+                    out.append(cur)
+                    cur = word
+            if cur:
+                out.append(cur)
+        return out or [""]
+
     def _overlay_task_menu(self, lines, W, top_off, body_h):
         menu = self.task_menu
         reg = menu["reg"]
@@ -3036,6 +3147,8 @@ class PickerScreen(Widget):
             return self._key_prof_confirm(key)
         if self.submenu:
             return self._key_submenu(key)
+        if self.msgview:
+            return self._key_msgview(key)
         if self.task_menu:
             return self._key_task_menu(key)
         if self.cfgmenu:
@@ -3251,6 +3364,9 @@ class PickerScreen(Widget):
                 self._decide(self._resume_decision(rec, no_mux=no_mux))
             elif cur == "Resume":
                 self._decide(self._resume_decision(rec))
+            elif cur == "Messages":
+                # Read-only peek at the worktree's latest session messages.
+                self._open_msgview(rec)
             elif cur == "Jump to host":
                 # Internal navigation -- stay in the picker (#1424).
                 self._jump_to_worktree((rec.get("raw") or {}).get("id"))
@@ -3752,6 +3868,11 @@ class PickerScreen(Widget):
             acts = ["Open"]
         else:
             acts = ["Resume"]
+        # A worktree we don't positively know to be sessionless can show its
+        # latest session's recent messages -- a read-only peek at what it was
+        # doing, independent of whether the disposition summary ever accumulated.
+        if not rec.get("sessionless"):
+            acts.append("Messages")
         if rec.get("ff_eligible"):
             acts.append("Sync")
         if self._cleanable(rec):
@@ -3777,6 +3898,80 @@ class PickerScreen(Widget):
                 acts.append("Jump to host")
         self.submenu = {"rec": rec, "actions": acts, "no_mux": False}
         self.submenu_idx = 0
+
+    # ---- Recent-messages viewer (read-only session peek) ----
+    def _open_msgview(self, rec, *, limit=3):
+        """Open the recent-messages overlay for a worktree and start loading.
+
+        Read-only companion to the disposition summary: shows the last few
+        conversation turns of the worktree's latest session so the operator can
+        tell what it was doing (and whether it still needs follow-up) without
+        opening it. The load runs off the render thread -- local worktrees call
+        the summary layer in-process; remote worktrees run ``recent-messages``
+        over SSH. Never blocks or crashes the UI: a failure resolves to an error
+        line in the overlay.
+        """
+        self.msgview = {
+            "rec": rec, "limit": limit, "loading": True,
+            "messages": [], "error": None, "session_id": None, "scroll": 0,
+        }
+        threading.Thread(
+            target=self._msgview_worker, args=(rec, limit),
+            name="msgview-load", daemon=True,
+        ).start()
+
+    def _msgview_worker(self, rec, limit):
+        """Daemon-thread body: fetch recent messages and store the result."""
+        wt_id = (rec.get("raw") or {}).get("id")
+        m, e = rec.get("machine"), rec.get("env")
+        try:
+            if not wt_id:
+                payload = {"error": "no worktree id"}
+            elif (m, e) == getattr(self.src, "LOCAL", None):
+                from .. import config as _cfg
+                from .. import sessions as _sessions
+                from .. import tracking as _tracking
+                records = _tracking.list_records(_cfg.tracking_dir())
+                record = next(
+                    (r for r in records if r.worktree_id == wt_id), None)
+                if record is None:
+                    payload = {"error": f"worktree {wt_id} not found locally"}
+                else:
+                    payload = _sessions.recent_worktree_messages(
+                        record, limit=limit)
+            else:
+                from . import data_ssh, maintenance
+                argv = data_ssh.recent_messages_argv(m, e, wt_id, limit=limit)
+                if argv is None:
+                    payload = {"error": f"no remote route to {m} {e}"}
+                else:
+                    payload = maintenance._ssh_json(argv)
+        except Exception as exc:  # never let the loader thread crash the UI
+            payload = {"error": str(exc) or type(exc).__name__}
+
+        with self._msgview_lock:
+            # A late result for a viewer the operator already closed / reopened
+            # is dropped (identity check on the live overlay's rec).
+            mv = self.msgview
+            if mv is None or mv.get("rec") is not rec:
+                return
+            mv["loading"] = False
+            if payload.get("error"):
+                mv["error"] = payload["error"]
+            else:
+                mv["messages"] = payload.get("messages", [])
+                mv["session_id"] = payload.get("session_id")
+
+    def _key_msgview(self, key):
+        """Keys for the recent-messages overlay: scroll + close."""
+        mv = self.msgview
+        if key in ("escape", "q", "tab", "enter"):
+            self.msgview = None
+            return
+        if key == "down":
+            mv["scroll"] = mv.get("scroll", 0) + 1
+        elif key == "up":
+            mv["scroll"] = max(0, mv.get("scroll", 0) - 1)
 
     def _machine_index_for(self, machine, env):
         """Index of the (machine, env) tab in ``self.machines``, or None."""

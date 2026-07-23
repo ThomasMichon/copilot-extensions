@@ -2458,6 +2458,97 @@ def test_submenu_verbs_track_session_liveness():
     asyncio.run(run())
 
 
+def test_submenu_offers_messages_only_with_a_session():
+    """The read-only 'Messages' peek is offered for any worktree that could have
+    a session (live or stopped), but not for a positively-sessionless one."""
+    src = _verb_fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            by_id4 = {w["id4"]: i for i, w in enumerate(scr.list_records())}
+
+            for tag in ("live", "stop"):
+                scr.sel = ("L", by_id4[tag])
+                scr._open_submenu()
+                assert "Messages" in scr.submenu["actions"], tag
+                scr.submenu = None
+
+            scr.sel = ("L", by_id4["none"])       # sessionless -> no peek
+            scr._open_submenu()
+            assert "Messages" not in scr.submenu["actions"]
+
+    asyncio.run(run())
+
+
+def test_msgview_local_load_populates_and_closes(monkeypatch):
+    """Enter on 'Messages' loads the worktree's latest-session tail in-process
+    (local target) into the viewer overlay, and Esc closes it."""
+    import agent_worktrees.config as _cfg
+    import agent_worktrees.sessions as _sessions
+    import agent_worktrees.tracking as _tracking
+
+    monkeypatch.setattr(_cfg, "tracking_dir", lambda: __import__("pathlib").Path("."))
+    monkeypatch.setattr(
+        _tracking, "list_records",
+        lambda *_a, **_k: [types.SimpleNamespace(
+            worktree_id="lambda-core-win-20260627-stop")])
+    payload = {"session_id": "sess-abc12345",
+               "messages": [{"role": "user", "text": "do the thing"},
+                            {"role": "assistant", "text": "done"}],
+               "count": 2}
+    monkeypatch.setattr(_sessions, "recent_worktree_messages",
+                        lambda *_a, **_k: dict(payload))
+
+    src = _verb_fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            by_id4 = {w["id4"]: i for i, w in enumerate(scr.list_records())}
+            scr.sel = ("L", by_id4["stop"])
+            scr._open_submenu()
+            scr.submenu_idx = scr.submenu["actions"].index("Messages")
+            scr._key_submenu("enter")
+            assert scr.submenu is None
+            assert scr.msgview is not None
+            # Wait for the daemon loader thread to resolve.
+            for _ in range(200):
+                if scr.msgview and not scr.msgview["loading"]:
+                    break
+                await pilot.pause()
+                time.sleep(0.01)
+            assert scr.msgview["loading"] is False
+            assert scr.msgview["error"] is None
+            assert [m["text"] for m in scr.msgview["messages"]] == [
+                "do the thing", "done"]
+            assert scr.msgview["session_id"] == "sess-abc12345"
+            # A repaint with the overlay populated must not raise.
+            scr.render()
+            scr._key_msgview("escape")
+            assert scr.msgview is None
+
+    asyncio.run(run())
+
+
+def test_wrap_text_wraps_and_hard_splits():
+    """Word-wrap respects width, keeps whole words, and hard-splits a word
+    longer than the width."""
+    wrap = PickerScreen._wrap_text
+    assert wrap("one two three", 8) == ["one two", "three"]
+    # A word longer than the width is hard-split (width floored at 8).
+    assert wrap("abcdefghij", 8) == ["abcdefgh", "ij"]
+    # Preserved newline; empty input yields a single empty line.
+    assert wrap("a\nb", 10) == ["a", "b"]
+    assert wrap("", 10) == [""]
+
+
 def test_submenu_stop_starts_single_item_restart_run(monkeypatch):
     """Enter on 'Stop' launches a one-item op=restart progress run through the
     real maintenance executor path (not a mock note)."""

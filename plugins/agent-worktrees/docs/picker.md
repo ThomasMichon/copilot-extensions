@@ -128,6 +128,14 @@ machine/environment**, then launches into it. (Programmatic equivalent:
 **Jump to host** for a bridge/system row (navigates to the owning machine tab and
 highlights the worktree by its stable id).
 
+**Messages** (read-only) peeks the last few conversation turns of the worktree's
+latest session in an overlay, so you can tell what a worktree was doing — and
+whether it still needs follow-up — without opening it. This is the read-side
+companion to the disposition summary: it derives recent context straight from the
+session's `events.jsonl` even when the agent-asserted summary never accumulated.
+`↑`/`↓` scroll; `Esc` closes. Local worktrees load in-process; a remote worktree's
+messages are fetched over SSH. (Backed by the `recent-messages` CLI verb.)
+
 ### Bulk Cleanup and Sync
 The **Cleanup** and **Sync** buttons on the Worktrees row open dialogs that act
 across worktrees:

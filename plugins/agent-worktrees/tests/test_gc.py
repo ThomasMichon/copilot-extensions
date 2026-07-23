@@ -129,3 +129,70 @@ def test_locked_dir_is_skipped_not_crashed(tmp_path, monkeypatch):
     assert report["removed"] == []
     assert len(report["skipped"]) == 1
     assert "locked" in report["skipped"][0]["reason"]
+
+
+# ---------------------------------------------------------------------------
+# classify_managed_worktree (system/bridge leak GC eligibility)
+# ---------------------------------------------------------------------------
+
+def _managed(**over):
+    """A managed-worktree fact set that is eligible for reap by default."""
+    base = dict(
+        worktree_id="wt-1", kind="bridge", follow_up=False,
+        status="finalized", git_state="completed", has_live_mux=False,
+        attached=False, has_live_session=False, idle_secs=7200.0,
+    )
+    base.update(over)
+    return gc.classify_managed_worktree(**base)
+
+
+def test_managed_final_idle_dead_is_removed():
+    assert _managed().action == "remove"
+    assert _managed().reason == "final"
+
+
+def test_managed_unused_is_removed():
+    v = _managed(status="active", git_state="unused")
+    assert v.action == "remove"
+    assert v.reason == "unused"
+
+
+def test_managed_gone_dir_counts_as_final():
+    v = _managed(status="active", git_state="gone")
+    assert v.action == "remove" and v.reason == "final"
+
+
+def test_managed_non_managed_kind_skipped():
+    assert _managed(kind="session").reason == "not-managed"
+
+
+def test_managed_follow_up_is_spared():
+    assert _managed(follow_up=True).reason == "follow-up"
+
+
+def test_managed_attached_is_spared():
+    assert _managed(attached=True).reason == "attached"
+
+
+def test_managed_live_mux_is_spared():
+    assert _managed(has_live_mux=True).reason == "live-mux"
+
+
+def test_managed_live_session_is_spared():
+    assert _managed(has_live_session=True).reason == "live-session"
+
+
+def test_managed_dirty_or_wip_is_spared():
+    # A managed worktree still doing real work (dirty/wip) is never final/unused.
+    assert _managed(status="active", git_state="dirty").reason == "not-final-or-unused"
+    assert _managed(status="active", git_state="wip").reason == "not-final-or-unused"
+
+
+def test_managed_fresh_within_grace_is_spared():
+    assert _managed(idle_secs=60.0).action == "skip"
+    assert _managed(idle_secs=60.0).reason == "idle-grace"
+
+
+def test_managed_unknown_activity_is_spared():
+    # Never risk reaping something we can't prove is idle.
+    assert _managed(idle_secs=None).reason == "activity-unknown"
