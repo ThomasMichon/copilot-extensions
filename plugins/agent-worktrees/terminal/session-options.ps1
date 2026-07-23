@@ -24,6 +24,10 @@ function Set-AwPsmuxSessionOptions {
     param([string]$Session)
     if ([string]::IsNullOrWhiteSpace($Session)) { return }
     if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) { return }
+    # Use the launcher-resolved psmux path (real WinGet Packages exe when the
+    # command on PATH is a 0-byte reparse stub pwsh 7.4.x can't launch); fall
+    # back to bare 'psmux' when called outside the launcher's scope.
+    $muxBin = if ($script:AwPsmuxBin) { $script:AwPsmuxBin } else { 'psmux' }
 
     # Each (option, value) pair is stamped session-scoped via `set-option -t`.
     #
@@ -57,6 +61,6 @@ function Set-AwPsmuxSessionOptions {
         @('pwsh-mouse-selection',         'off')
     )
     foreach ($opt in $opts) {
-        try { & psmux set-option -t $Session $opt[0] $opt[1] 2>&1 | Out-Null } catch {}
+        try { & $muxBin set-option -t $Session $opt[0] $opt[1] 2>&1 | Out-Null } catch {}
     }
 }

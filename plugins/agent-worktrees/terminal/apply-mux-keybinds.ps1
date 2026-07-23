@@ -83,17 +83,40 @@ function Persist-Block {
     Write-Host "apply-mux-keybinds: persisted managed block to $Conf"
 }
 
+function Resolve-AwPsmuxBin {
+    <# WinGet installs psmux as a 0-byte App Execution Alias reparse stub under
+       %LOCALAPPDATA%\Microsoft\WinGet\Links\psmux.exe that PowerShell 7.4.x
+       cannot launch -- a native `& psmux ...` throws a terminating error
+       ("StandardOutputEncoding is only supported when standard output is
+       redirected"). Resolve the stub to the real
+       ...\WinGet\Packages\...\psmux.exe so native launches work on any pwsh. #>
+    param($Cmd)
+    if (-not $Cmd) { return 'psmux' }
+    $src = $Cmd.Source
+    try {
+        $item = Get-Item -LiteralPath $src -ErrorAction Stop
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -eq 0) {
+            $real = Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
+                -Recurse -Filter 'psmux.exe' -ErrorAction SilentlyContinue |
+                Select-Object -First 1 -ExpandProperty FullName
+            if ($real) { return $real }
+        }
+    } catch {}
+    return $src
+}
+
 function Invoke-LiveApply {
-    $sessions = & psmux list-sessions 2>$null
+    $muxBin = Resolve-AwPsmuxBin (Get-Command psmux -ErrorAction SilentlyContinue)
+    $sessions = & $muxBin list-sessions 2>$null
     if (-not $sessions) {
         Write-Host 'apply-mux-keybinds: no running psmux server -- the persisted block applies when one starts'
         return
     }
-    & psmux set-option -g prefix C-b 2>&1 | Out-Null
-    & psmux unbind-key -a -T root 2>&1 | Out-Null
-    & psmux bind-key -T root WheelUpPane   send-keys -M 2>&1 | Out-Null
-    & psmux bind-key -T root WheelDownPane send-keys -M 2>&1 | Out-Null
-    & psmux set-option -g paste-detection off 2>&1 | Out-Null
+    & $muxBin set-option -g prefix C-b 2>&1 | Out-Null
+    & $muxBin unbind-key -a -T root 2>&1 | Out-Null
+    & $muxBin bind-key -T root WheelUpPane   send-keys -M 2>&1 | Out-Null
+    & $muxBin bind-key -T root WheelDownPane send-keys -M 2>&1 | Out-Null
+    & $muxBin set-option -g paste-detection off 2>&1 | Out-Null
     Write-Host 'apply-mux-keybinds: applied keystroke passthrough to the running psmux server'
 }
 
