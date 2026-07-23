@@ -856,21 +856,36 @@ const session = await joinSession({
   ],
 });
 
-await session.log("Context handoff extension loaded");
-
 // --- Session lifecycle reconstructed from events (SDK callback hooks removed) ---
 // The native runtime dropped SDK callback hooks ("SDK hook callbacks are no
 // longer supported by the native runtime"), which hard-failed joinSession when
 // a `hooks` object was passed. The former onSessionStart / onUserPromptSubmitted
 // / onPostToolUse behaviours are reconstructed below from observable session
-// events. The extension module loads once per session, so session-start work
-// runs inline here (session.sessionId is available directly on the session).
+// events. This top-level code runs on every import of the module -- and the
+// module is (re)imported MULTIPLE times per session: the runtime forks a
+// discovery pass plus the real join at startup, and re-forks on
+// reconnect/resume. So session-start work here must be idempotent; anything
+// user-visible (session.log surfaces to the chat UI) is deduped per session to
+// avoid spamming the UI on every fork.
 state.sessionId = session.sessionId ?? state.sessionId ?? null;
 state.cwd = state.cwd || process.cwd();
 state.turnCount = 0;
-await session.log(
-  `[Context Handoff] Session started (id=${state.sessionId}, cwd=${state.cwd})`
-);
+
+// Emit the session-start breadcrumb at most once per session. An exclusive
+// create (flag "wx") wins for exactly one fork; concurrent/later forks throw
+// EEXIST and stay silent. Skipped entirely when sessionId is absent (e.g. a
+// discovery pass), which must never log.
+if (state.sessionId) {
+  const startedMarker = join(tmpdir(), `context-handoff-started-${state.sessionId}`);
+  try {
+    writeFileSync(startedMarker, "", { flag: "wx" });
+    await session.log(
+      `[Context Handoff] Session started (id=${state.sessionId}, cwd=${state.cwd})`
+    );
+  } catch {
+    // Marker already present -> another fork of this session already logged.
+  }
+}
 
 // Turn counting + first-prompt capture (replaces onUserPromptSubmitted).
 session.on("user.message", (event) => {
