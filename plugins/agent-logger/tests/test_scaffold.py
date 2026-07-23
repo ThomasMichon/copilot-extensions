@@ -74,6 +74,10 @@ def test_repo_config_overrides_log_layout_only(tmp_path: Path, monkeypatch) -> N
                 "    # {title}",
                 "",
                 "    **Date:** {date}",
+                "  narration_style: Use brief section introductions.",
+                "  exemplars:",
+                "    - docs/example.md",
+                "  closing_remark: End with one concise takeaway.",
             ]
         ),
         encoding="utf-8",
@@ -89,6 +93,9 @@ def test_repo_config_overrides_log_layout_only(tmp_path: Path, monkeypatch) -> N
     assert cfg.log_path_template == "logs/{year}/{month}.{day} {title}.md"
     assert cfg.log_template is not None
     assert "**Date:** {date}" in cfg.log_template
+    assert cfg.narration_style == "Use brief section introductions."
+    assert cfg.exemplars == ["docs/example.md"]
+    assert cfg.closing_remark == "End with one concise takeaway."
 
 
 @pytest.mark.parametrize(
@@ -107,6 +114,14 @@ def test_repo_config_overrides_log_layout_only(tmp_path: Path, monkeypatch) -> N
         (
             "schema_version: 1\nlog:\n  voice_pack: surprise\n",
             r"unsupported field\(s\): voice_pack",
+        ),
+        (
+            "schema_version: 1\nlog:\n  closing_remark: [not, text]\n",
+            "log.closing_remark must be null or a non-empty string",
+        ),
+        (
+            "schema_version: 1\nlog:\n  exemplars: [valid, '']\n",
+            "log.exemplars must be null",
         ),
         (
             "schema_version: 1\nsync:\n  target: ssh\nlog: {}\n",
@@ -185,6 +200,47 @@ def test_repo_config_can_be_disabled(tmp_path: Path, monkeypatch) -> None:
     assert cfg.log_path_template == DEFAULTS["log"]["path_template"]
 
 
+def test_organization_cli_reports_manifest_ready_config(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".agent-logger.yaml").write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "log:",
+                "  root: records",
+                "  closing_remark: End with a short summary.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path / "home"))
+
+    assert cli_main(["organization"]) == 0
+    result = json.loads(capsys.readouterr().out)
+
+    assert result["repository_root"] == str(repo)
+    assert result["config_path"] == str(repo / ".agent-logger.yaml")
+    assert result["manifest"]["output_root"] == str(repo / "records")
+    assert result["manifest"]["closing_remark"] == "End with a short summary."
+
+
+def test_organization_defaults_to_repo_logs(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path / "home"))
+
+    assert cli_main(["organization"]) == 0
+    result = json.loads(capsys.readouterr().out)
+
+    assert result["manifest"]["output_root"] == str(repo / "logs")
+    assert result["manifest"]["closing_remark"] is None
+
+
 def test_prepare_log_reports_repo_organization(tmp_path: Path, monkeypatch, capsys) -> None:
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
@@ -199,6 +255,8 @@ def test_prepare_log_reports_repo_organization(tmp_path: Path, monkeypatch, caps
                 "    ## Summary",
                 "",
                 "    ## Follow-up",
+                "  narration_style: Use short asides.",
+                "  closing_remark: Close with one sentence.",
             ]
         ),
         encoding="utf-8",
@@ -224,6 +282,8 @@ def test_prepare_log_reports_repo_organization(tmp_path: Path, monkeypatch, caps
     assert result["output_root"] == str(repo)
     assert result["log_path_template"] == "logs/{year}/{month}.{day} {title}.md"
     assert result["log_template"] == "## Summary\n\n## Follow-up"
+    assert result["narration_style"] == "Use short asides."
+    assert result["closing_remark"] == "Close with one sentence."
     assert Path(result["log_path"]).parent == repo / "logs" / result["date"][:4]
 
 

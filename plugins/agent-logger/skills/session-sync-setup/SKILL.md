@@ -86,13 +86,18 @@ log:
     ## Open Items
 
     {open_items}
+  narration_style: null
+  exemplars: null
+  closing_remark: "End with one concise takeaway."
 ```
 
 Repo-local config cannot change `sync:` targets; those remain in
 `~/.agent-logger/config.yaml`. Only `root`, `path_template`, `timezone`,
-`note_marker`, and `template` are accepted under `log:`. Invalid YAML, unknown
+`note_marker`, `template`, `narration_style`, `exemplars`, and
+`closing_remark` are accepted under `log:`. Invalid YAML, unknown
 fields/placeholders, unsupported schema versions, unsafe paths, and invalid
-timezones fail explicitly.
+timezones fail explicitly. Run `agent-logger organization` to inspect the
+manifest-ready result.
 
 ## Verify
 

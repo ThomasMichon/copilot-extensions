@@ -69,11 +69,11 @@ sessions into structured Markdown logs. Two skills drive it:
 - `log-session` — interactive, the current session (manifest-of-one).
 - `process-backlog` — local batch, a backlog of unlogged sessions.
 
-The agent has **no personality of its own**. It produces a closing remark
-only when a caller injects instructions through the manifest's
-**closing-remark seam** — see [manifest-contract.md](manifest-contract.md).
-A host repo (e.g. one with its own character voices) injects them; the
-plugin never contains a persona.
+The agent has **no personality of its own**. It produces a closing remark only
+when the manifest includes instructions through its **closing-remark seam**.
+The generic skills populate location, naming/template, and optional voice
+fields from repository organization config, so no wrapper is required merely
+to inject those choices. See [manifest-contract.md](manifest-contract.md).
 
 ## Configuration
 

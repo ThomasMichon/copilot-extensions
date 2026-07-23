@@ -13,7 +13,7 @@
   "timezone": "<prep.timezone>",
   "note_marker": "<prep.note_marker>",
   "log_template": "<prep.log_template>",
-  "narration_style": null,
-  "exemplars": null,
-  "closing_remark": null
+  "narration_style": "<prep.narration_style>",
+  "exemplars": "<prep.exemplars>",
+  "closing_remark": "<prep.closing_remark>"
 }
