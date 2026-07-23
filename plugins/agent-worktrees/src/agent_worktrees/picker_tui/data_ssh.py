@@ -507,6 +507,90 @@ def _kill_proc_tree(proc):
             pass
 
 
+# --- SSH resolution diagnostics --------------------------------------------
+# Every picker load fans out to each ready machine over SSH. When a remote
+# fails to resolve, the reason (nonzero exit + stderr, a connect/list timeout,
+# unparseable output, or a source that was skipped because it is not-ready /
+# has no SSH alias) is otherwise invisible -- the tab just shows "failed" with
+# no operator-facing detail. We append a structured, per-load record to
+# ``~/.agent-worktrees/logs/picker-ssh.log`` so a failed enumeration is
+# diagnosable after the fact. Logging is strictly best-effort: every helper
+# swallows its own errors and never affects the picker.
+
+_SSH_LOG_MAX_BYTES = 1_000_000  # rotate the single log once it passes ~1 MB
+
+
+class _RemoteFetchError(RuntimeError):
+    """A remote ``list`` fetch failed; carries diagnostic detail for logging.
+
+    ``str(self)`` stays a concise one-liner (what the picker records as the
+    tab's ``_error``), while ``returncode`` / ``stderr`` / ``argv`` carry the
+    full context the SSH log prints.
+    """
+
+    def __init__(self, message, *, returncode=None, stderr="", argv=None):
+        super().__init__(message)
+        self.returncode = returncode
+        self.stderr = stderr or ""
+        self.argv = argv
+
+
+def _ssh_log_path():
+    """``~/.agent-worktrees/logs/picker-ssh.log`` (created lazily), or None."""
+    try:
+        d = cfg.install_dir() / "logs"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "picker-ssh.log"
+    except Exception:
+        return None
+
+
+def _ssh_log(line: str) -> None:
+    """Append one timestamped line to the picker SSH log. Never raises."""
+    try:
+        path = _ssh_log_path()
+        if path is None:
+            return
+        try:
+            if path.exists() and path.stat().st_size > _SSH_LOG_MAX_BYTES:
+                # Keep the most-recent half so the file stays bounded without
+                # discarding the passes an operator is most likely to inspect.
+                tail = path.read_bytes()[-(_SSH_LOG_MAX_BYTES // 2):]
+                path.write_bytes(b"# (rotated -- older lines dropped)\n" + tail)
+        except Exception:
+            pass
+        ts = _dt.datetime.now().isoformat(timespec="seconds")
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(f"{ts} pid={os.getpid()} {line}\n")
+    except Exception:
+        pass
+
+
+def _remote_cmd_str(argv) -> str:
+    """Readable remote command from a list argv (decodes ``-EncodedCommand``).
+
+    The Windows remote form is ``pwsh -NoProfile -EncodedCommand <base64>``;
+    decode the blob back to its ``<project> list ...`` text so the log shows the
+    actual command that was run, not an opaque base64 string.
+    """
+    try:
+        if not argv:
+            return ""
+        parts = list(argv)
+        marker = "-EncodedCommand "
+        for i, a in enumerate(parts):
+            if isinstance(a, str) and marker in a:
+                head, b64 = a.rsplit(marker, 1)
+                try:
+                    dec = base64.b64decode(b64).decode("utf-16-le")
+                    parts[i] = f"{head}(decoded) {dec}"
+                except Exception:
+                    pass
+        return " ".join(str(p) for p in parts)
+    except Exception:
+        return str(argv)
+
+
 def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None):
     """Run one source's list command and return normalized worktree records.
 
@@ -543,8 +627,18 @@ def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None):
         proc = runner(retry, source.timeout)
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip().splitlines()
-        raise RuntimeError(err[-1] if err else f"exit {proc.returncode}")
-    data = _extract_json(proc.stdout)
+        msg = err[-1] if err else f"exit {proc.returncode}"
+        raise _RemoteFetchError(
+            msg, returncode=proc.returncode,
+            stderr=(proc.stderr or proc.stdout or ""), argv=use_argv,
+        )
+    try:
+        data = _extract_json(proc.stdout)
+    except Exception as exc:
+        raise _RemoteFetchError(
+            f"unparseable output: {exc}", returncode=proc.returncode,
+            stderr=(proc.stdout or "")[:2000], argv=use_argv,
+        ) from exc
     return [derive.norm(w, source.machine, source.env)
             for w in data.get("worktrees", [])]
 
@@ -561,6 +655,7 @@ class LiveLoader:
 
     def __init__(self, sources=None):
         all_sources = list(sources if sources is not None else _build_sources())
+        self._all_sources = all_sources
         self._sources = [s for s in all_sources if s.ready]
         self._lock = threading.Lock()
         self._state = {}     # (machine, env) -> loading|ready|failed
@@ -591,6 +686,7 @@ class LiveLoader:
 
     def start(self):
         derive.NOW = _dt.datetime.now()
+        self._log_load_header()
         # Every source -- local included -- loads on its own daemon thread so
         # the picker paints and accepts keys the instant it mounts; rows stream
         # in (local + remote alike) via the engine's render tick as each source
@@ -815,13 +911,18 @@ class LiveLoader:
             # Local tab: fast-then-fill so rows paint immediately (see below).
             self._load_local_two_phase(source)
             return
+        t0 = _dt.datetime.now()
         try:
             recs = _fetch(source, runner=self._spawn)
         except Exception as exc:  # any failure -> failed state
+            self._log_fetch_failure(source, exc, t0)
             with self._lock:
                 self._state[source.key] = "failed"
                 self._error[source.key] = str(exc).strip() or type(exc).__name__
             return
+        elapsed = (_dt.datetime.now() - t0).total_seconds()
+        _ssh_log(f"  OK      {source.machine}/{source.env} "
+                 f"resolved {len(recs)} worktree(s) in {elapsed:.1f}s")
         with self._lock:
             self._records[source.key] = recs
             self._state[source.key] = "ready"
@@ -837,9 +938,11 @@ class LiveLoader:
         the authoritative ``state`` in. A generation guard keeps a concurrent
         :meth:`reload` from being clobbered by this pass's phase 2 (#1421)."""
         gen = self._gen.get(source.key, 0)
+        t0 = _dt.datetime.now()
         try:
             fast = _fetch(source, classify=False)
         except Exception as exc:
+            self._log_fetch_failure(source, exc, t0, phase="local")
             with self._lock:
                 self._state[source.key] = "failed"
                 self._error[source.key] = str(exc).strip() or type(exc).__name__
@@ -859,6 +962,58 @@ class LiveLoader:
                     and self._state.get(source.key) == "ready"
                     and self._gen.get(source.key, 0) == gen):
                 self._records[source.key] = full
+
+    def _log_load_header(self):
+        """Enumerate every source this load pass will (or won't) resolve.
+
+        Written once per :meth:`start` so the SSH log opens each pass with the
+        full roster: which envs load locally, which remotes are contacted over
+        SSH (with alias + timeout), and which are skipped and *why* (no SSH
+        alias, or the machine is not ``ssh.ready`` in ``machines.yaml``) -- the
+        skipped ones are never contacted, so this is the only place their
+        non-resolution is recorded."""
+        try:
+            srcs = getattr(self, "_all_sources", None) or self._sources
+            local = [s for s in srcs if s.local]
+            remote = [s for s in srcs if s.ready and not s.local]
+            skipped = [s for s in srcs if not s.ready and not s.local]
+            _ssh_log(
+                f"=== picker load pass: {len(remote)} remote to resolve, "
+                f"{len(local)} local, {len(skipped)} skipped ===")
+            for s in local:
+                _ssh_log(f"  LOCAL   {s.machine}/{s.env} (in-process)")
+            for s in remote:
+                _ssh_log(f"  RESOLVE {s.machine}/{s.env} "
+                         f"alias={s.alias} timeout={s.timeout}s")
+            for s in skipped:
+                why = ("no SSH alias/profile" if not s.alias
+                       else "machine not ssh.ready in machines.yaml")
+                _ssh_log(f"  SKIP    {s.machine}/{s.env} ({why})")
+        except Exception:
+            pass
+
+    def _log_fetch_failure(self, source, exc, t0, *, phase="load"):
+        """Record why one remote source failed to resolve: elapsed, timeout vs
+        error, exit code, stderr tail, and the decoded remote command."""
+        try:
+            elapsed = (_dt.datetime.now() - t0).total_seconds()
+            timed_out = isinstance(exc, subprocess.TimeoutExpired) or (
+                elapsed >= source.timeout * 0.9)
+            kind = "TIMEOUT" if timed_out else "FAILED"
+            detail = str(exc).strip() or type(exc).__name__
+            _ssh_log(
+                f"  {kind:7s} {source.machine}/{source.env} [{phase}] "
+                f"after {elapsed:.1f}s (timeout={source.timeout}s): {detail}")
+            rc = getattr(exc, "returncode", None)
+            if rc is not None:
+                _ssh_log(f"            exit={rc} alias={source.alias}")
+            stderr = getattr(exc, "stderr", "") or ""
+            for ln in stderr.strip().splitlines()[-8:]:
+                _ssh_log(f"            stderr| {ln}")
+            argv = getattr(exc, "argv", None) or source.argv
+            _ssh_log(f"            cmd: {_remote_cmd_str(argv)}")
+        except Exception:
+            pass
 
     def state(self, machine, env):
         with self._lock:
