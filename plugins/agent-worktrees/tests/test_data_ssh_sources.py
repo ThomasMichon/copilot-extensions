@@ -49,9 +49,9 @@ def test_local_machine_matched_by_hostname_field(monkeypatch):
     recognized as local via its hostname field -- so it becomes the in-process
     local tab and NO duplicate raw-COMPUTERNAME source leaks in."""
     entries = {
-        "tmichon-augloop1": _entry(
-            "tmichon-augloop1", "augloop1",
-            [cfg.SSHEnvironment(name="windows", alias="tmichon-augloop1",
+        "host-augloop1": _entry(
+            "host-augloop1", "augloop1",
+            [cfg.SSHEnvironment(name="windows", alias="host-augloop1",
                                 shell="pwsh")],
             ssh_ready=True, alias="augloop1", hostname="cpc-tmich-oixui"),
     }
@@ -232,7 +232,7 @@ def test_ssh_not_ready_remote_env_is_disabled(monkeypatch):
             [cfg.SSHEnvironment(name="windows", alias="lambda-core",
                                 shell="pwsh")]),
         "book2": _entry(
-            "book2", "tmichon-book2",
+            "book2", "host-book2",
             [cfg.SSHEnvironment(name="windows", alias="book2", shell="pwsh")],
             ssh_ready=False),
     }
@@ -241,7 +241,7 @@ def test_ssh_not_ready_remote_env_is_disabled(monkeypatch):
         local_id=("lambda-core", "windows"))
 
     by = _by_key(data_ssh._build_sources())
-    book2 = by[("tmichon-book2", "Win")]
+    book2 = by[("host-book2", "Win")]
     assert book2.ready is False
     assert book2.argv is None
     assert book2.alias == "book2"
@@ -386,9 +386,9 @@ def test_argv_for_pwsh_uses_encoded_command():
     """
     import base64
 
-    argv = data_ssh._argv_for("pwsh", "tmichon-dev6", "dotfiles", classify=True)
+    argv = data_ssh._argv_for("pwsh", "host-dev6", "dotfiles", classify=True)
     assert argv[0] == "ssh"
-    assert argv[1] == "tmichon-dev6"
+    assert argv[1] == "host-dev6"
     remote = argv[-1]
     assert remote.startswith("pwsh -NoProfile -EncodedCommand ")
     assert "-Command '" not in remote
@@ -403,7 +403,7 @@ def test_argv_for_pwsh_uses_encoded_command():
 def test_wrap_remote_pwsh_uses_encoded_command():
     import base64
 
-    argv = data_ssh._wrap_remote("pwsh", "tmichon-cloud1", "dotfiles cleanup --json")
+    argv = data_ssh._wrap_remote("pwsh", "host-cloud1", "dotfiles cleanup --json")
     remote = argv[-1]
     assert remote.startswith("pwsh -NoProfile -EncodedCommand ")
     enc = remote.split("-EncodedCommand ", 1)[1]
@@ -419,7 +419,7 @@ def test_classify_fallback_is_encoding_aware(monkeypatch):
     str.replace would be a no-op and the retry would resend the same command)."""
     import base64
 
-    argv = data_ssh._argv_for("pwsh", "tmichon-cloud1", "dotfiles", classify=True)
+    argv = data_ssh._argv_for("pwsh", "host-cloud1", "dotfiles", classify=True)
 
     # Direct: decode -> drop --classify -> re-encode, still EncodedCommand.
     stripped = data_ssh._drop_classify_arg(argv)
@@ -569,7 +569,7 @@ def test_machine_key_map_empty_on_unreadable_roster(monkeypatch):
 
 def test_remote_cmd_str_decodes_encoded_command():
     """The Windows remote form is logged decoded, not as opaque base64."""
-    argv = data_ssh._argv_for("pwsh", "tmichon-cloud1", "dotfiles", classify=True)
+    argv = data_ssh._argv_for("pwsh", "host-cloud1", "dotfiles", classify=True)
     rendered = data_ssh._remote_cmd_str(argv)
     assert "(decoded) dotfiles list --json" in rendered
     assert "--include-other-platforms" in rendered
@@ -617,18 +617,18 @@ def test_log_load_header_enumerates_roster_with_skip_reasons(monkeypatch, tmp_pa
     sources = [
         data_ssh.Source("book2", "Win", None, local=True, ready=True),
         data_ssh.Source("dev6", "Win", ["ssh", "d", "x"], ready=True,
-                        alias="tmichon-dev6"),
+                        alias="host-dev6"),
         data_ssh.Source("cloud1", "Win", None, ready=False, alias="",
                         shell="pwsh"),
         data_ssh.Source("augloop1", "Win", None, ready=False,
-                        alias="tmichon-augloop1", shell="pwsh"),
+                        alias="host-augloop1", shell="pwsh"),
     ]
     loader = data_ssh.LiveLoader(sources)
     loader._log_load_header()
     text = logf.read_text(encoding="utf-8")
     assert "1 remote to resolve, 1 local, 2 skipped" in text
     assert "LOCAL   book2/Win" in text
-    assert "RESOLVE dev6/Win alias=tmichon-dev6" in text
+    assert "RESOLVE dev6/Win alias=host-dev6" in text
     assert "SKIP    cloud1/Win (no SSH alias/profile)" in text
     assert "SKIP    augloop1/Win (machine not ssh.ready in machines.yaml)" in text
 
@@ -644,13 +644,13 @@ def test_load_one_failure_logs_reason(monkeypatch, tmp_path):
 
     monkeypatch.setattr(data_ssh, "_fetch", boom)
     src = data_ssh.Source("dev6", "Win", ["ssh", "dev6", "cmd"], ready=True,
-                          alias="tmichon-dev6")
+                          alias="host-dev6")
     loader = data_ssh.LiveLoader([src])
     loader._load_one(src)
     assert loader.state("dev6", "Win") == "failed"
     text = logf.read_text(encoding="utf-8")
     assert "dev6/Win [load]" in text
-    assert "exit=1 alias=tmichon-dev6" in text
+    assert "exit=1 alias=host-dev6" in text
     assert "stderr| boom-detail" in text
 
 
@@ -658,8 +658,8 @@ def test_load_one_failure_logs_reason(monkeypatch, tmp_path):
 
 def _classify_src():
     """A ready remote whose argv carries --classify (so phase-1 strips it)."""
-    argv = data_ssh._argv_for("pwsh", "tmichon-dev6", "dotfiles", classify=True)
-    return data_ssh.Source("dev6", "Win", argv, ready=True, alias="tmichon-dev6")
+    argv = data_ssh._argv_for("pwsh", "host-dev6", "dotfiles", classify=True)
+    return data_ssh.Source("dev6", "Win", argv, ready=True, alias="host-dev6")
 
 
 def test_remote_two_phase_paints_fast_then_classifies(monkeypatch, tmp_path):
@@ -727,8 +727,8 @@ def test_remote_single_pass_when_classify_unsupported(monkeypatch, tmp_path):
     monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
     # A remote whose argv already lacks --classify (older agent-worktrees):
     # nothing to strip, so it loads in exactly one pass.
-    argv = data_ssh._argv_for("pwsh", "tmichon-old", "dotfiles", classify=False)
-    src = data_ssh.Source("old", "Win", argv, ready=True, alias="tmichon-old")
+    argv = data_ssh._argv_for("pwsh", "host-old", "dotfiles", classify=False)
+    src = data_ssh.Source("old", "Win", argv, ready=True, alias="host-old")
     calls = []
 
     def fake_fetch(source, runner=None, classify=True, argv=None, timeout=None):

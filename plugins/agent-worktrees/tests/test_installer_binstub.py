@@ -73,7 +73,7 @@ def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path)
 def test_deploy_binstubs_writes_ps1_on_windows(monkeypatch, tmp_path: Path):
     """On Windows ``register``/``deploy_binstubs`` must emit the ``.ps1`` primary
     (pwsh prefers it), not just the ``.cmd`` fallback -- the omission was the
-    root cause of the odsp-ai-hub launcher misbehaving."""
+    root cause of the example-ai-hub launcher misbehaving."""
     if platform.system() != "Windows":
         import pytest
         pytest.skip("Windows-only .ps1 primary")

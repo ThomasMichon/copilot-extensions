@@ -164,7 +164,7 @@ class TestBuildRemoteCmd:
         import base64
 
         target = SpawnTarget(
-            type="ssh", host="lambda-core", user="tmichon",
+            type="ssh", host="lambda-core", user="example-user",
             project="aperture-labs", ssh_shell="pwsh",
             copilot_args=["--allow-all"],
         )

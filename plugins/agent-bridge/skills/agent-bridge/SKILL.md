@@ -398,12 +398,12 @@ venue (machine / codespace / container). Address them two ways:
 
 - **Bare venue** — `dev6`, `<codespace>`: runs the venue's default repo (a
   machine's control-plane project; a CodeSpace's own workspace, e.g.
-  `odsp-web`).
+  `example-web`).
 - **`<repo>@<venue>`** — bind an explicit repo to a venue:
   - `SPO.Core@dev6` → the SPO.Core binstub on dev6 (loopback; runs `<repo>`
     instead of the control-plane default).
-  - `odsp-web@<codespace>` → the CodeSpace's own repo (same as bare).
-  - `dotfiles@<odsp-web-codespace>` → **error**: launching a *different* repo's
+  - `example-web@<codespace>` → the CodeSpace's own repo (same as bare).
+  - `dotfiles@<example-web-codespace>` → **error**: launching a *different* repo's
     checkout on a CodeSpace is not yet supported (a CodeSpace hosts one repo).
 
 With the inter-machine SSH mesh retired, machine venues are **loopback-only**

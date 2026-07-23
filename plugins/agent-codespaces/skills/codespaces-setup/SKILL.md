@@ -321,17 +321,17 @@ repos:
 #### Per-repo workspace folder (CodeSpaces repo ≠ checkout)
 
 A CodeSpaces repo frequently differs from the product checkout it hosts:
-`org/odsp-web-codespaces` serves a `/workspaces/odsp-web` checkout. Deriving the
+`org/example-web-codespaces` serves a `/workspaces/example-web` checkout. Deriving the
 folder from the CodeSpaces repo name would give the **wrong**
-`/workspaces/odsp-web-codespaces`. Record the relationship once with
+`/workspaces/example-web-codespaces`. Record the relationship once with
 `workspace_repo`; agents launched for that CodeSpace (via agent-bridge or the
 `codespace:` resolver) then land in the right directory:
 
 ```yaml
 repos:
-  odsp-microsoft/odsp-web-codespaces:
+  example-org/example-web-codespaces:
     machine_type: largePremiumLinux256gb
-    workspace_repo: odsp-web        # -> agents launch in /workspaces/odsp-web
+    workspace_repo: example-web        # -> agents launch in /workspaces/example-web
 ```
 
 Resolution order for a CodeSpace's workspace folder (most specific wins):

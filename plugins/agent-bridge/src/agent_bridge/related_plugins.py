@@ -175,7 +175,7 @@ def related_plugins_for_repo(
     """Related-repo plugins the control plane side-loads for ``repo``.
 
     ``repo`` is a dispatched target's workspace repo (e.g.
-    ``odsp-microsoft/odsp-web-codespaces``). It is matched (case-insensitive)
+    ``example-org/example-web-codespaces``). It is matched (case-insensitive)
     against each related entry's ``locus.codespace.repo`` /
     ``locus.container.repo``; the first matching entry's ``plugins`` are
     returned. Fail-safe: unknown repo / missing files -> ``[]``.

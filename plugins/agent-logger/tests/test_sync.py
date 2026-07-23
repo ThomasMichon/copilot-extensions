@@ -351,8 +351,8 @@ def test_rsync_session_filters_scope_without_allowlist() -> None:
 def test_config_repo_allowlist_parsing(tmp_path: Path) -> None:
     base = load_config(home=tmp_path).as_dict()
     data = dict(base)
-    data["sync"] = dict(data["sync"], repo_allowlist="dotfiles, odsp-ai-hub")
-    assert Config(data, tmp_path).sync_repo_allowlist == ["dotfiles", "odsp-ai-hub"]
+    data["sync"] = dict(data["sync"], repo_allowlist="dotfiles, example-ai-hub")
+    assert Config(data, tmp_path).sync_repo_allowlist == ["dotfiles", "example-ai-hub"]
 
 
 # ── Post-push notify (target-independent) ────────────────────────────

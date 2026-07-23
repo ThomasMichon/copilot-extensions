@@ -124,16 +124,16 @@ def test_parse_codespace_target_recognizes_shape():
 
     cmd = [
         "python", "-m", "agent_codespaces", "ssh", "--stdio",
-        "plugin-propagation-test-v467", "--repo", "odsp-microsoft/odsp-web-codespaces",
-        "--remote-cmd", "cd /workspaces/odsp-web && copilot --acp --stdio",
+        "plugin-propagation-test-v467", "--repo", "example-org/example-web-codespaces",
+        "--remote-cmd", "cd /workspaces/example-web && copilot --acp --stdio",
     ]
     parsed = parse_codespace_target(cmd)
     assert parsed["name"] == "plugin-propagation-test-v467"
-    assert parsed["repo"] == "odsp-microsoft/odsp-web-codespaces"
-    assert parsed["acp_command"].startswith("cd /workspaces/odsp-web")
+    assert parsed["repo"] == "example-org/example-web-codespaces"
+    assert parsed["acp_command"].startswith("cd /workspaces/example-web")
     # The ACP session cwd is parsed from the leading `cd` so copilot's tools run
     # in the workspace checkout, not /home/<user> (regression: agent ran blind).
-    assert parsed["workspace_folder"] == "/workspaces/odsp-web"
+    assert parsed["workspace_folder"] == "/workspaces/example-web"
 
 
 def test_workspace_folder_from_acp_command():
@@ -142,8 +142,8 @@ def test_workspace_folder_from_acp_command():
     )
 
     assert (
-        workspace_folder_from_acp_command("cd /workspaces/odsp-web && copilot --acp")
-        == "/workspaces/odsp-web"
+        workspace_folder_from_acp_command("cd /workspaces/example-web && copilot --acp")
+        == "/workspaces/example-web"
     )
     # Env-expanded fallback (no static path) -> None, so the caller keeps its
     # default cwd rather than passing an unresolved shell expression to ACP.

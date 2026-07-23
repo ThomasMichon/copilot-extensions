@@ -49,7 +49,7 @@ def resolve_repo_remote(repo: str) -> str | None:
     ``/workspaces/<basename>`` layout, #174) can clone the repo if it is missing.
 
     Matching is exact on the registry key first, then a case-insensitive fallback
-    on the key's basename (so ``odsp-web`` matches an ``odsp-web`` entry regardless
+    on the key's basename (so ``example-web`` matches an ``example-web`` entry regardless
     of case). Returns ``None`` when the registry is absent/unparseable or the repo
     (or its ``remote``) is unknown -- the caller decides whether that is fatal
     (for a pre-populated venue folder it is not; for a clone-if-missing it is).
@@ -533,7 +533,7 @@ def _match_machine_shortname(
     """Resolve a related.yaml ``locus.machines`` short name to a MachineConfig.
 
     ``related.yaml`` uses short names (``dev6``, ``cloud1``); machine keys are
-    the full hostnames (``tmichon-dev6``). Match by display_name, key, or the
+    the full hostnames (``host-dev6``). Match by display_name, key, or the
     key with a leading ``<prefix>-`` stripped.
     """
     sl = short.strip().lower()
@@ -553,10 +553,10 @@ def _split_repo_venue(agent_name: str) -> tuple[str | None, str]:
 
     The repo dimension is orthogonal to the venue (machine / codespace /
     container): ``SPO.Core@dev6`` runs the SPO.Core binstub on the dev6 venue,
-    ``odsp-web@<codespace>`` targets odsp-web's workspace on that codespace. A
+    ``example-web@<codespace>`` targets example-web's workspace on that codespace. A
     name with no ``@`` (or a leading/trailing empty side) is a bare venue and
     yields ``(None, agent_name)`` -- unchanged behavior. The venue half may
-    itself be namespaced (e.g. ``odsp-web@codespace:foo``); only the first
+    itself be namespaced (e.g. ``example-web@codespace:foo``); only the first
     ``@`` is the separator.
     """
     if "@" in agent_name:

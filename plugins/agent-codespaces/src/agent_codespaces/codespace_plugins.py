@@ -8,9 +8,9 @@ the core Copilot CLI ignores it; ``agent-codespaces`` is the consumer that reads
 it. Each entry::
 
     {
-      "source": "odsp-web-codespace@dev-tmichon",   // install source
+      "source": "example-web-codespace@example-marketplace",   // install source
       "enable": true,                                // enable after install
-      "forWorkspaceRepo": "odsp-microsoft/odsp-web"  // optional scope filter
+      "forWorkspaceRepo": "example-org/example-web"  // optional scope filter
     }
 
 ``forWorkspaceRepo`` (string, list, or omitted) scopes an entry to CodeSpaces of
@@ -178,7 +178,7 @@ def repo_matches(filters: tuple[str, ...], workspace_repo: str | None) -> bool:
 
     An empty filter set means "global" (always applies). Otherwise the workspace
     repo must match at least one filter, case-insensitively, as an exact string
-    or an ``fnmatch`` glob (e.g. ``"odsp-microsoft/*"``). An unknown workspace
+    or an ``fnmatch`` glob (e.g. ``"example-org/*"``). An unknown workspace
     repo (``None``) matches only the global (empty-filter) case.
     """
     if not filters:
@@ -343,7 +343,7 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "workspace_repo",
         nargs="?",
-        help="Target CodeSpace workspace repo (e.g. odsp-microsoft/odsp-web). "
+        help="Target CodeSpace workspace repo (e.g. example-org/example-web). "
         "Omit to see only the globally-scoped plugins.",
     )
     parser.add_argument(

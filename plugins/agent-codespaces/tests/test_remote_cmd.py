@@ -51,7 +51,7 @@ def test_timeout_fails_loudly_with_124_and_surfaces_output(capsys):
 
 _PLUGIN_DIRS = [
     "/home/vscode/.copilot/installed-plugins/copilot-extensions/agent-worktrees",
-    "/home/vscode/.copilot/installed-plugins/dev-tmichon/odsp-web-agent",
+    "/home/vscode/.copilot/installed-plugins/example-marketplace/example-web-agent",
 ]
 
 

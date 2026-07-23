@@ -16,7 +16,7 @@ from agent_codespaces import codespace_register as cr
 from agent_codespaces.codespace_plugins import CodespacePluginSpec
 
 MKTS = {
-    "dev-tmichon": {"source": {"source": "git", "url": "https://example/dev.tmichon"}},
+    "example-marketplace": {"source": {"source": "git", "url": "https://example/example-marketplace"}},
     "other": {"source": {"source": "github", "repo": "o/other"}},
 }
 
@@ -31,10 +31,10 @@ def _spec(source: str, enable: bool = True) -> CodespacePluginSpec:
 
 def test_plugin_dirs_maps_enabled_marketplace_specs():
     dirs = cr.codespace_plugin_dirs(
-        [_spec("odsp-web-agent@dev-tmichon"), _spec("b@other")]
+        [_spec("example-web-agent@example-marketplace"), _spec("b@other")]
     )
     assert dirs == [
-        "$HOME/.copilot/installed-plugins/dev-tmichon/odsp-web-agent",
+        "$HOME/.copilot/installed-plugins/example-marketplace/example-web-agent",
         "$HOME/.copilot/installed-plugins/other/b",
     ]
 
@@ -42,19 +42,19 @@ def test_plugin_dirs_maps_enabled_marketplace_specs():
 def test_plugin_dirs_skips_disabled_and_non_marketplace():
     dirs = cr.codespace_plugin_dirs(
         [
-            _spec("a@dev-tmichon", enable=False),   # install-only -> skip
+            _spec("a@example-marketplace", enable=False),   # install-only -> skip
             _spec("bare-source"),                    # not name@mkt -> skip
-            _spec("c@dev-tmichon"),                  # kept
+            _spec("c@example-marketplace"),                  # kept
         ]
     )
-    assert dirs == ["$HOME/.copilot/installed-plugins/dev-tmichon/c"]
+    assert dirs == ["$HOME/.copilot/installed-plugins/example-marketplace/c"]
 
 
 def test_plugin_dirs_dedups():
     dirs = cr.codespace_plugin_dirs(
-        [_spec("a@dev-tmichon"), _spec("a@dev-tmichon")]
+        [_spec("a@example-marketplace"), _spec("a@example-marketplace")]
     )
-    assert dirs == ["$HOME/.copilot/installed-plugins/dev-tmichon/a"]
+    assert dirs == ["$HOME/.copilot/installed-plugins/example-marketplace/a"]
 
 
 # --------------------------------------------------------------------------
@@ -63,28 +63,28 @@ def test_plugin_dirs_dedups():
 
 def test_payload_collects_referenced_marketplaces_only():
     payload = cr.build_register_payload(
-        [_spec("odsp-web-agent@dev-tmichon")], MKTS,
+        [_spec("example-web-agent@example-marketplace")], MKTS,
     )
     assert payload["experimental"] is True
-    assert list(payload["marketplaces"]) == ["dev-tmichon"]
+    assert list(payload["marketplaces"]) == ["example-marketplace"]
     assert payload["plugins"] == [
-        {"source": "odsp-web-agent@dev-tmichon", "enable": True},
+        {"source": "example-web-agent@example-marketplace", "enable": True},
     ]
 
 
 def test_payload_dedups_by_source_and_keeps_enable():
     payload = cr.build_register_payload(
         [
-            _spec("a@dev-tmichon", enable=True),
-            _spec("a@dev-tmichon", enable=True),
+            _spec("a@example-marketplace", enable=True),
+            _spec("a@example-marketplace", enable=True),
             _spec("b@other", enable=False),
         ],
         MKTS,
     )
     sources = [p["source"] for p in payload["plugins"]]
-    assert sources == ["a@dev-tmichon", "b@other"]
+    assert sources == ["a@example-marketplace", "b@other"]
     assert payload["plugins"][1]["enable"] is False
-    assert set(payload["marketplaces"]) == {"dev-tmichon", "other"}
+    assert set(payload["marketplaces"]) == {"example-marketplace", "other"}
 
 
 def test_payload_skips_unknown_marketplace():
@@ -103,7 +103,7 @@ def test_command_none_for_empty():
 
 def test_command_includes_merge_and_installs():
     cmd = cr.build_register_command(
-        [_spec("odsp-web-agent@dev-tmichon"), _spec("b@other", enable=False)],
+        [_spec("example-web-agent@example-marketplace"), _spec("b@other", enable=False)],
         MKTS,
     )
     assert cmd is not None
@@ -114,7 +114,7 @@ def test_command_includes_merge_and_installs():
     assert "rc=$?" in cmd
     assert "if [ $rc -eq 0 ]" in cmd
     # both plugins are pre-installed (payload warming), best-effort.
-    assert "copilot plugin install odsp-web-agent@dev-tmichon || true" in cmd
+    assert "copilot plugin install example-web-agent@example-marketplace || true" in cmd
     assert "copilot plugin install b@other || true" in cmd
     # temp files always cleaned up.
     assert "rm -f" in cmd
@@ -122,7 +122,7 @@ def test_command_includes_merge_and_installs():
 
 def test_command_no_install_when_disabled():
     cmd = cr.build_register_command(
-        [_spec("a@dev-tmichon")], MKTS, do_install=False,
+        [_spec("a@example-marketplace")], MKTS, do_install=False,
     )
     assert cmd is not None
     assert "copilot plugin install" not in cmd
@@ -134,7 +134,7 @@ def test_command_reads_host_marketplaces_when_omitted(tmp_path: Path):
         json.dumps({"extraKnownMarketplaces": MKTS}), encoding="utf-8",
     )
     cmd = cr.build_register_command(
-        [_spec("a@dev-tmichon")], copilot_home=tmp_path,
+        [_spec("a@example-marketplace")], copilot_home=tmp_path,
     )
     assert cmd is not None
     assert "python3" in cmd
@@ -183,13 +183,13 @@ def _run_merge(home: Path, payload: dict) -> dict:
 
 def test_merge_script_writes_fresh_settings(tmp_path: Path):
     payload = cr.build_register_payload(
-        [_spec("odsp-web-agent@dev-tmichon"), _spec("b@other", enable=False)],
+        [_spec("example-web-agent@example-marketplace"), _spec("b@other", enable=False)],
         MKTS,
     )
     data = _run_merge(tmp_path, payload)
     assert data["experimental"] is True
-    assert data["extraKnownMarketplaces"]["dev-tmichon"] == MKTS["dev-tmichon"]
-    assert data["enabledPlugins"] == {"odsp-web-agent@dev-tmichon": True}
+    assert data["extraKnownMarketplaces"]["example-marketplace"] == MKTS["example-marketplace"]
+    assert data["enabledPlugins"] == {"example-web-agent@example-marketplace": True}
 
 
 def test_merge_script_preserves_existing_and_merges(tmp_path: Path):
@@ -203,22 +203,22 @@ def test_merge_script_preserves_existing_and_merges(tmp_path: Path):
         }),
         encoding="utf-8",
     )
-    payload = cr.build_register_payload([_spec("a@dev-tmichon")], MKTS)
+    payload = cr.build_register_payload([_spec("a@example-marketplace")], MKTS)
     data = _run_merge(tmp_path, payload)
     # Pre-existing settings untouched.
     assert data["model"] == "keep-me"
     assert data["enabledPlugins"]["pre@existing"] is True
     assert "pre" in data["extraKnownMarketplaces"]
     # New enablement + marketplace merged in.
-    assert data["enabledPlugins"]["a@dev-tmichon"] is True
-    assert data["extraKnownMarketplaces"]["dev-tmichon"] == MKTS["dev-tmichon"]
+    assert data["enabledPlugins"]["a@example-marketplace"] is True
+    assert data["extraKnownMarketplaces"]["example-marketplace"] == MKTS["example-marketplace"]
 
 
 def test_merge_script_tolerates_garbage_settings(tmp_path: Path):
     copilot = tmp_path / ".copilot"
     copilot.mkdir()
     (copilot / "settings.json").write_text("not json {{{", encoding="utf-8")
-    payload = cr.build_register_payload([_spec("a@dev-tmichon")], MKTS)
+    payload = cr.build_register_payload([_spec("a@example-marketplace")], MKTS)
     data = _run_merge(tmp_path, payload)
-    assert data["enabledPlugins"] == {"a@dev-tmichon": True}
+    assert data["enabledPlugins"] == {"a@example-marketplace": True}
     assert data["experimental"] is True

@@ -5,23 +5,23 @@
 # on them. Keys are names in the global repos.yaml registry. Field docs: the
 # agent-worktrees-related SKILL.md. Managed by `agent-worktrees related ...`.
 
-primary: odsp-web                 # the default/primary related repo
+primary: example-web                 # the default/primary related repo
 related:
-  odsp-web:
+  example-web:
     role: product                 # product|dependency|consumer|tooling|docs|sibling
     summary: "Primary product monorepo we ship changes to."
-    doc: related/odsp-web.md      # narrative, relative to .agent-worktrees/
+    doc: related/example-web.md      # narrative, relative to .agent-worktrees/
     locus:
       preferred: codespace        # local | machine:<key> | codespace | container
       machines: [dev6]            # boxes the repo is available on (optional)
       # CodeSpace venue -- cloud, usable from ANY machine.
-      codespace: { repo: org/odsp-web-codespaces,
+      codespace: { repo: org/example-web-codespaces,
                    machine: largePremiumLinux256gb, location: EastUs,
-                   workspace_folder: /workspaces/odsp-web }
+                   workspace_folder: /workspaces/example-web }
       # Container venue -- a local Docker dev-container fleet, scoped to the
       # boxes that host it (`machines` restricts where it can run).
-      container: { repo: org/odsp-web-codespaces,
-                   workspace_folder: /workspaces/odsp-web,
+      container: { repo: org/example-web-codespaces,
+                   workspace_folder: /workspaces/example-web,
                    machines: [dev6] }
     delegate: { via: agent-codespaces }   # agent-bridge | agent-codespaces | agent-containers | none
   copilot-extensions:

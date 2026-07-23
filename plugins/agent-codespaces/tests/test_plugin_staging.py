@@ -20,8 +20,8 @@ def _make_payload(root: Path, mkt: str, name: str) -> Path:
 
 
 def test_parse_source():
-    assert ps.parse_source("odsp-web-codespace@dev-tmichon") == (
-        "odsp-web-codespace", "dev-tmichon",
+    assert ps.parse_source("example-web-codespace@example-marketplace") == (
+        "example-web-codespace", "example-marketplace",
     )
     assert ps.parse_source("noat") is None
     assert ps.parse_source("@only") is None
@@ -29,15 +29,15 @@ def test_parse_source():
 
 
 def test_dest_dir_sanitizes_and_roots():
-    assert ps.dest_dir("odsp-web@mkt") == "$HOME/.acp-staged-plugins/odsp-web"
+    assert ps.dest_dir("example-web@mkt") == "$HOME/.acp-staged-plugins/example-web"
     assert ps.dest_dir("weird/../name@m").startswith("$HOME/.acp-staged-plugins/")
     assert "/" not in ps.dest_dir("weird/../name@m").rsplit("/", 1)[1]
 
 
 def test_host_payload_dir_direct(tmp_path: Path):
-    _make_payload(tmp_path, "dev-tmichon", "odsp-web-codespace")
-    got = ps.host_payload_dir("odsp-web-codespace@dev-tmichon", copilot_home=tmp_path)
-    assert got == tmp_path / "installed-plugins" / "dev-tmichon" / "odsp-web-codespace"
+    _make_payload(tmp_path, "example-marketplace", "example-web-codespace")
+    got = ps.host_payload_dir("example-web-codespace@example-marketplace", copilot_home=tmp_path)
+    assert got == tmp_path / "installed-plugins" / "example-marketplace" / "example-web-codespace"
 
 
 def test_host_payload_dir_scan_fallback(tmp_path: Path):

@@ -208,7 +208,7 @@ class TestPRConfigParsing:
             "      enabled: true\n"
             "      required: true\n"
             "      provider: azure-devops\n"
-            "      api_base: https://onedrive.visualstudio.com\n"
+            "      api_base: https://your-org.visualstudio.com\n"
             "      automerge_label: auto-complete\n"
             "      approval_required: false\n"
             "      bypass_policy: true\n"
@@ -759,13 +759,13 @@ class TestFindMachineEntry:
         # A machine keyed by a friendly name declares its raw COMPUTERNAME via
         # `hostname:`; it must be findable by key, alias, hostname, or display_name.
         e = {
-            "tmichon-augloop1": cfg.MachineEntry(
-                key="tmichon-augloop1", display_name="augloop1",
+            "host-augloop1": cfg.MachineEntry(
+                key="host-augloop1", display_name="augloop1",
                 environment="Windows 11", alias="augloop1",
                 hostname="cpc-tmich-oixui",
             ),
         }
-        assert cfg.find_machine_entry(e, "tmichon-augloop1") is not None   # key
+        assert cfg.find_machine_entry(e, "host-augloop1") is not None   # key
         assert cfg.find_machine_entry(e, "augloop1") is not None           # alias/display
         assert cfg.find_machine_entry(e, "cpc-tmich-oixui") is not None    # hostname field
         assert cfg.find_machine_entry(e, "CPC-tmich-OIXUI") is not None    # hostname, case-insensitive
@@ -787,7 +787,7 @@ class TestDetectMachine:
         # Key is the friendly name; COMPUTERNAME is declared via `hostname:`.
         self._write(tmp_path, (
             "machines:\n"
-            "  tmichon-augloop1:\n"
+            "  host-augloop1:\n"
             "    display_name: augloop1\n"
             "    alias: augloop1\n"
             "    hostname: cpc-tmich-oixui\n"
@@ -799,17 +799,17 @@ class TestDetectMachine:
     def test_detect_via_key(self, tmp_path: Path, monkeypatch):
         self._write(tmp_path, (
             "machines:\n"
-            "  tmichon-dev6:\n"
+            "  host-dev6:\n"
             "    display_name: dev6\n"
             "    environment: Windows 11\n"
         ))
-        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "tmichon-dev6")
-        assert cfg.detect_machine(tmp_path) == "tmichon-dev6"
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "host-dev6")
+        assert cfg.detect_machine(tmp_path) == "host-dev6"
 
     def test_detect_falls_back_to_raw_hostname(self, tmp_path: Path, monkeypatch):
         self._write(tmp_path, (
             "machines:\n"
-            "  tmichon-dev6:\n"
+            "  host-dev6:\n"
             "    display_name: dev6\n"
             "    environment: Windows 11\n"
         ))

@@ -71,7 +71,7 @@ as gitea/github -- not a special case:
 | gitea / github | applies the `automerge_label` (the review gate then merges) | the real label on the PR |
 | azure-devops | sets **native** auto-complete (`az repos pr update --auto-complete` with `squash` / `delete_source_branch` / `bypass_policy`) -- no label | the synthetic `auto-complete` marker, present once auto-complete is set |
 
-So an **ADO repo** (e.g. `dev.tmichon`) binds `automerge_label: auto-complete`
+So an **ADO repo** (e.g. `example-marketplace`) binds `automerge_label: auto-complete`
 (the abstract consent-marker name) and uses the full family. Extra ADO knobs:
 
 - `approval_required: false` -- **self-complete**: eligible when simply *not*

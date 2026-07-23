@@ -18,7 +18,7 @@ def test_path_helpers(tmp_path: Path):
     assert related.related_dir(tmp_path) == tmp_path / ".agent-worktrees"
     assert related.related_path(tmp_path) == tmp_path / ".agent-worktrees" / "related.yaml"
     assert related.docs_dir(tmp_path) == tmp_path / ".agent-worktrees" / "related"
-    assert related.default_doc_rel("odsp-web") == "related/odsp-web.md"
+    assert related.default_doc_rel("example-web") == "related/example-web.md"
 
 
 def test_doc_abs_path_default_and_explicit(tmp_path: Path):
@@ -90,16 +90,16 @@ def test_read_non_mapping_returns_empty(tmp_path: Path):
 
 def test_write_then_read_roundtrip(tmp_path: Path):
     cfg = RelatedConfig(
-        primary="odsp-web",
+        primary="example-web",
         related={
-            "odsp-web": RelatedEntry(
-                name="odsp-web",
+            "example-web": RelatedEntry(
+                name="example-web",
                 role="product",
                 summary="Primary product monorepo.",
-                doc="related/odsp-web.md",
+                doc="related/example-web.md",
                 locus=Locus(
                     preferred="codespace",
-                    codespace={"repo": "org/odsp-web-codespaces",
+                    codespace={"repo": "org/example-web-codespaces",
                                "machine": "largePremiumLinux256gb",
                                "location": "EastUs"},
                 ),
@@ -117,15 +117,15 @@ def test_write_then_read_roundtrip(tmp_path: Path):
     related.write_related(tmp_path, cfg)
     got = related.read_related(tmp_path)
 
-    assert got.primary == "odsp-web"
-    assert set(got.related) == {"odsp-web", "copilot-extensions"}
+    assert got.primary == "example-web"
+    assert set(got.related) == {"example-web", "copilot-extensions"}
 
-    ow = got.related["odsp-web"]
+    ow = got.related["example-web"]
     assert ow.role == "product"
     assert ow.summary == "Primary product monorepo."
-    assert ow.doc == "related/odsp-web.md"
+    assert ow.doc == "related/example-web.md"
     assert ow.locus.preferred == "codespace"
-    assert ow.locus.codespace["repo"] == "org/odsp-web-codespaces"
+    assert ow.locus.codespace["repo"] == "org/example-web-codespaces"
     assert ow.locus.codespace["location"] == "EastUs"
     assert ow.delegate == "agent-codespaces"
 
@@ -178,8 +178,8 @@ def test_delegate_read_nested_and_bare(tmp_path: Path):
 
 def test_primary_get_set(tmp_path: Path):
     assert related.get_primary(tmp_path) == ""
-    related.set_primary(tmp_path, "odsp-web")
-    assert related.get_primary(tmp_path) == "odsp-web"
+    related.set_primary(tmp_path, "example-web")
+    assert related.get_primary(tmp_path) == "example-web"
 
 
 def test_upsert_insert_then_merge(tmp_path: Path):
@@ -251,14 +251,14 @@ def test_remove_keeps_unrelated_primary(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 def test_scaffold_doc_creates_then_preserves(tmp_path: Path):
-    e = RelatedEntry(name="odsp-web", role="product", summary="The product.")
+    e = RelatedEntry(name="example-web", role="product", summary="The product.")
     path, created = related.scaffold_doc(tmp_path, e)
     assert created is True
     assert path == related.doc_abs_path(tmp_path, e)
     text = path.read_text(encoding="utf-8")
-    assert "# odsp-web — related repo" in text
+    assert "# example-web — related repo" in text
     assert "product" in text
-    assert "repos find odsp-web" in text          # the no-hardcoded-path rule
+    assert "repos find example-web" in text          # the no-hardcoded-path rule
 
     # second call leaves the file untouched
     path2, created2 = related.scaffold_doc(tmp_path, e)
@@ -313,12 +313,12 @@ def test_cli_errors(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("key,current,expected", [
-    ("dev6", "tmichon-dev6", True),
+    ("dev6", "host-dev6", True),
     ("dev6", "dev6", True),
     ("dev6", "DEV6", True),
-    ("cloud1", "tmichon-dev6", False),
-    ("dev6", "tmichon-dev6-wsl", False),   # last segment is 'wsl'
-    ("", "tmichon-dev6", False),
+    ("cloud1", "host-dev6", False),
+    ("dev6", "host-dev6-wsl", False),   # last segment is 'wsl'
+    ("", "host-dev6", False),
 ])
 def test_machine_matches(key, current, expected):
     assert related.machine_matches(key, current) is expected
@@ -327,7 +327,7 @@ def test_machine_matches(key, current, expected):
 def test_resolve_local_worktree_adopted(tmp_path: Path):
     e = RelatedEntry(name="ce", locus=Locus(preferred="local"))
     r = related.build_resolution(
-        e, current_machine="tmichon-dev6", repo_class="worktree",
+        e, current_machine="host-dev6", repo_class="worktree",
         repo_path="D:/Src/ce", adopted=True,
     )
     assert r.locus_kind == "local"
@@ -343,7 +343,7 @@ def test_resolve_worktree_base_repo_edits_anchor(tmp_path: Path):
     # place in the anchor, never via `--new` worktree isolation (#143).
     e = RelatedEntry(name="SPO.Core", locus=Locus(preferred="local"))
     r = related.build_resolution(
-        e, current_machine="tmichon-dev6", repo_class="worktree",
+        e, current_machine="host-dev6", repo_class="worktree",
         repo_path="D:/Enlist/SPO", adopted=True, base_repo=True,
     )
     assert r.editing_model == "anchor"
@@ -356,7 +356,7 @@ def test_resolve_worktree_base_repo_edits_anchor(tmp_path: Path):
 def test_resolve_worktree_unadopted_suggests_register(tmp_path: Path):
     e = RelatedEntry(name="aih")
     r = related.build_resolution(
-        e, current_machine="tmichon-dev6", repo_class="worktree",
+        e, current_machine="host-dev6", repo_class="worktree",
         repo_path=None, adopted=False,
     )
     assert r.editing_model == "worktree-unadopted"
@@ -377,7 +377,7 @@ def test_resolve_machine_elsewhere_delegates(tmp_path: Path):
     e = RelatedEntry(name="x", locus=Locus(preferred="machine:cloud1"),
                      delegate="agent-bridge")
     r = related.build_resolution(
-        e, current_machine="tmichon-dev6", repo_class="worktree",
+        e, current_machine="host-dev6", repo_class="worktree",
         repo_path=None, adopted=True,
     )
     assert r.locus_kind == "machine"
@@ -389,7 +389,7 @@ def test_resolve_machine_elsewhere_delegates(tmp_path: Path):
 def test_resolve_machine_here_is_local(tmp_path: Path):
     e = RelatedEntry(name="x", locus=Locus(preferred="machine:dev6"))
     r = related.build_resolution(
-        e, current_machine="tmichon-dev6", repo_class="singleton",
+        e, current_machine="host-dev6", repo_class="singleton",
         repo_path="D:/Git/x", adopted=False,
     )
     assert r.available_here is True
@@ -399,19 +399,19 @@ def test_resolve_machine_here_is_local(tmp_path: Path):
 
 def test_resolve_codespace(tmp_path: Path):
     e = RelatedEntry(
-        name="odsp-web", delegate="agent-codespaces",
+        name="example-web", delegate="agent-codespaces",
         locus=Locus(preferred="codespace",
-                    codespace={"repo": "org/odsp-web-codespaces",
+                    codespace={"repo": "org/example-web-codespaces",
                                "machine": "largePremiumLinux256gb",
                                "location": "EastUs"}),
     )
     r = related.build_resolution(
-        e, current_machine="tmichon-dev6", repo_class="reference",
+        e, current_machine="host-dev6", repo_class="reference",
         repo_path=None, adopted=False,
     )
     assert r.locus_kind == "codespace"
     assert r.available_here is True
-    assert any("gh cs create -R org/odsp-web-codespaces" in s for s in r.steps)
+    assert any("gh cs create -R org/example-web-codespaces" in s for s in r.steps)
     assert any("agent-bridge send codespace:" in s for s in r.steps)
 
 
@@ -419,7 +419,7 @@ def test_resolve_local_unavailable_on_this_machine(tmp_path: Path):
     e = RelatedEntry(name="x", locus=Locus(machines=["cloud1", "book2"]),
                      delegate="agent-bridge")
     r = related.build_resolution(
-        e, current_machine="tmichon-dev6", repo_class="worktree",
+        e, current_machine="host-dev6", repo_class="worktree",
         repo_path=None, adopted=False,
     )
     assert r.available_here is False
@@ -440,13 +440,13 @@ def test_cli_resolve_uses_primary_when_no_name(tmp_path: Path, capfd):
 def test_cli_add_codespace_flags(tmp_path: Path):
     from agent_worktrees.__main__ import cmd_related_dispatch as run
 
-    rc = run(["add", "odsp-web", "--repo", str(tmp_path), "--locus", "codespace",
-              "--cs-repo", "org/odsp-web-codespaces", "--cs-machine", "big",
+    rc = run(["add", "example-web", "--repo", str(tmp_path), "--locus", "codespace",
+              "--cs-repo", "org/example-web-codespaces", "--cs-machine", "big",
               "--cs-location", "EastUs", "--no-scaffold"])
     assert rc == 0
-    e = related.get_related(tmp_path, "odsp-web")
+    e = related.get_related(tmp_path, "example-web")
     assert e.locus.preferred == "codespace"
-    assert e.locus.codespace == {"repo": "org/odsp-web-codespaces",
+    assert e.locus.codespace == {"repo": "org/example-web-codespaces",
                                  "machine": "big", "location": "EastUs"}
 
 
@@ -456,25 +456,25 @@ def test_cli_add_codespace_flags(tmp_path: Path):
 
 def test_container_venue_roundtrip(tmp_path: Path):
     cfg = RelatedConfig(
-        primary="odsp-web",
+        primary="example-web",
         related={
-            "odsp-web": RelatedEntry(
-                name="odsp-web", role="product", delegate="agent-codespaces",
+            "example-web": RelatedEntry(
+                name="example-web", role="product", delegate="agent-codespaces",
                 locus=Locus(
                     preferred="codespace",
-                    codespace={"repo": "org/odsp-web-codespaces",
-                               "workspace_folder": "/workspaces/odsp-web"},
-                    container={"repo": "org/odsp-web-codespaces",
-                               "workspace_folder": "/workspaces/odsp-web",
+                    codespace={"repo": "org/example-web-codespaces",
+                               "workspace_folder": "/workspaces/example-web"},
+                    container={"repo": "org/example-web-codespaces",
+                               "workspace_folder": "/workspaces/example-web",
                                "machines": ["dev6"]},
                 ),
             ),
         },
     )
     related.write_related(tmp_path, cfg)
-    got = related.read_related(tmp_path).related["odsp-web"]
-    assert got.locus.codespace["workspace_folder"] == "/workspaces/odsp-web"
-    assert got.locus.container["repo"] == "org/odsp-web-codespaces"
+    got = related.read_related(tmp_path).related["example-web"]
+    assert got.locus.codespace["workspace_folder"] == "/workspaces/example-web"
+    assert got.locus.container["repo"] == "org/example-web-codespaces"
     assert got.locus.container["machines"] == ["dev6"]   # list preserved
 
 
@@ -495,70 +495,70 @@ def test_container_emitted_yaml_is_valid(tmp_path: Path):
 def test_cli_add_container_flags(tmp_path: Path):
     from agent_worktrees.__main__ import cmd_related_dispatch as run
 
-    rc = run(["add", "odsp-web", "--repo", str(tmp_path), "--locus", "codespace",
-              "--cs-repo", "org/odsp-web-codespaces",
-              "--cs-workspace", "/workspaces/odsp-web",
-              "--container-repo", "org/odsp-web-codespaces",
-              "--container-workspace", "/workspaces/odsp-web",
+    rc = run(["add", "example-web", "--repo", str(tmp_path), "--locus", "codespace",
+              "--cs-repo", "org/example-web-codespaces",
+              "--cs-workspace", "/workspaces/example-web",
+              "--container-repo", "org/example-web-codespaces",
+              "--container-workspace", "/workspaces/example-web",
               "--container-machines", "dev6", "--no-scaffold"])
     assert rc == 0
-    e = related.get_related(tmp_path, "odsp-web")
-    assert e.locus.codespace["workspace_folder"] == "/workspaces/odsp-web"
-    assert e.locus.container == {"repo": "org/odsp-web-codespaces",
-                                 "workspace_folder": "/workspaces/odsp-web",
+    e = related.get_related(tmp_path, "example-web")
+    assert e.locus.codespace["workspace_folder"] == "/workspaces/example-web"
+    assert e.locus.container == {"repo": "org/example-web-codespaces",
+                                 "workspace_folder": "/workspaces/example-web",
                                  "machines": ["dev6"]}
 
 
 def test_resolve_container_available_here(tmp_path: Path):
     e = RelatedEntry(
-        name="odsp-web", delegate="agent-containers",
+        name="example-web", delegate="agent-containers",
         locus=Locus(preferred="container",
-                    container={"repo": "org/odsp-web-codespaces",
+                    container={"repo": "org/example-web-codespaces",
                                "machines": ["dev6"]}),
     )
     r = related.build_resolution(
-        e, current_machine="tmichon-dev6", repo_class="reference",
+        e, current_machine="host-dev6", repo_class="reference",
         repo_path=None, adopted=False,
     )
     assert r.locus_kind == "container"
     assert r.available_here is True
-    assert any("agent-containers up odsp-web" in s for s in r.steps)
+    assert any("agent-containers up example-web" in s for s in r.steps)
     assert any("agent-bridge send container:" in s for s in r.steps)
 
 
 def test_resolve_container_unavailable_elsewhere_falls_back(tmp_path: Path):
     e = RelatedEntry(
-        name="odsp-web",
+        name="example-web",
         locus=Locus(preferred="container",
-                    codespace={"repo": "org/odsp-web-codespaces"},
-                    container={"repo": "org/odsp-web-codespaces",
+                    codespace={"repo": "org/example-web-codespaces"},
+                    container={"repo": "org/example-web-codespaces",
                                "machines": ["dev6"]}),
     )
     r = related.build_resolution(
-        e, current_machine="tmichon-cloud1", repo_class="reference",
+        e, current_machine="host-cloud1", repo_class="reference",
         repo_path=None, adopted=False,
     )
     assert r.available_here is False
     assert any("only available on: dev6" in n for n in r.notes)
     # CodeSpace is offered as the machine-agnostic fallback
-    assert any("gh cs create -R org/odsp-web-codespaces" in n for n in r.notes)
+    assert any("gh cs create -R org/example-web-codespaces" in n for n in r.notes)
 
 
 def test_resolve_codespace_notes_container_alternative_here(tmp_path: Path):
     e = RelatedEntry(
-        name="odsp-web", delegate="agent-codespaces",
+        name="example-web", delegate="agent-codespaces",
         locus=Locus(preferred="codespace",
-                    codespace={"repo": "org/odsp-web-codespaces",
-                               "workspace_folder": "/workspaces/odsp-web"},
-                    container={"repo": "org/odsp-web-codespaces",
+                    codespace={"repo": "org/example-web-codespaces",
+                               "workspace_folder": "/workspaces/example-web"},
+                    container={"repo": "org/example-web-codespaces",
                                "machines": ["dev6"]}),
     )
     r = related.build_resolution(
-        e, current_machine="tmichon-dev6", repo_class="reference",
+        e, current_machine="host-dev6", repo_class="reference",
         repo_path=None, adopted=False,
     )
     assert r.locus_kind == "codespace"
-    assert any("/workspaces/odsp-web" in n for n in r.notes)
+    assert any("/workspaces/example-web" in n for n in r.notes)
     assert any("container fleet is also available here" in n for n in r.notes)
 
 
@@ -568,19 +568,19 @@ def test_resolve_codespace_notes_container_alternative_here(tmp_path: Path):
 
 def test_plugins_roundtrip(tmp_path: Path):
     cfg = RelatedConfig(related={
-        "odsp-web": RelatedEntry(
-            name="odsp-web",
+        "example-web": RelatedEntry(
+            name="example-web",
             plugins=[
-                {"source": "odsp-web-codespace@dev-tmichon", "enable": True},
-                {"source": "extra@dev-tmichon", "enable": False},
+                {"source": "example-web-codespace@example-marketplace", "enable": True},
+                {"source": "extra@example-marketplace", "enable": False},
             ],
         ),
     })
     related.write_related(tmp_path, cfg)
-    got = related.read_related(tmp_path).related["odsp-web"]
+    got = related.read_related(tmp_path).related["example-web"]
     assert got.plugins == [
-        {"source": "odsp-web-codespace@dev-tmichon", "enable": True},
-        {"source": "extra@dev-tmichon", "enable": False},
+        {"source": "example-web-codespace@example-marketplace", "enable": True},
+        {"source": "extra@example-marketplace", "enable": False},
     ]
 
 

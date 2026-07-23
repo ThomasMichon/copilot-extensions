@@ -151,7 +151,7 @@ def build_provision_command() -> str:
         'done; '
         'rm -f "$HOME/.agent-codespaces-auth-wrapper"; '
         # --- #133/#112/#159: pin the relay-first git credential helper --------
-        # The native git config points ADO (onedrive.visualstudio.com /
+        # The native git config points ADO (your-org.visualstudio.com /
         # dev.azure.com) at the VS Code broker (`external-git ado-helper`), which
         # returns EMPTY over headless SSH -> `git push` fails with "could not
         # read Username"; and GitHub at the codespace-scoped
@@ -164,7 +164,7 @@ def build_provision_command() -> str:
         # and the wrapper falls back to the real VS Code helper when no relay is
         # active, so interactive VS Code auth is unaffected. Best-effort.
         "( "
-        'for _h in "https://onedrive.visualstudio.com" '
+        'for _h in "https://your-org.visualstudio.com" '
         '"https://dev.azure.com" "https://github.com"; do '
         'git config --global --unset-all "credential.${_h}.helper" 2>/dev/null || true; '
         'git config --global --add "credential.${_h}.helper" ""; '

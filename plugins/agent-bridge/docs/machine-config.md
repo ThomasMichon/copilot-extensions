@@ -192,12 +192,12 @@ no hand-authored agent list. Two sources:
    control_plane:
      project: dotfiles
    machines:
-     tmichon-dev6:
+     host-dev6:
        display_name: dev6
        ssh:
          environments:
-           - { name: windows, alias: tmichon-dev6, shell: pwsh }
-           - { name: wsl, alias: tmichon-dev6-wsl, shell: bash }
+           - { name: windows, alias: host-dev6, shell: pwsh }
+           - { name: wsl, alias: host-dev6-wsl, shell: bash }
    ```
 
 2. **Each repo's `.agent-worktrees/related.yaml`** → a `<repo>@<machine>` agent

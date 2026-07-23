@@ -224,7 +224,7 @@ app-level** (the effort's deliberate conclusion: systemd and Windows Scheduled
 Tasks share almost no lifecycle surface, so the drain/handoff logic must not
 live in the service manager). Design and validation are tracked in the
 aperture-labs effort `agent-bridge-zero-downtime-deploy` (umbrella issue
-[aperture-labs #1236](https://home.thomasmichon.com/gitea/tmichon/aperture-labs/issues/1236)).
+[aperture-labs #1236](https://home.thomasmichon.com/gitea/example-user/aperture-labs/issues/1236)).
 
 ### 1. Routing table (`<config_dir>/active.json`)
 
@@ -340,7 +340,7 @@ stable **per-session supervisor** that owns the child over an **AF_UNIX socket**
 and a **restartable frontend** that adopts supervisors on restart (and a rework
 of the Windows kill-on-job-close so supervisors survive frontend exit). That
 supervisor/broker split is **not implemented** and remains tracked in effort
-[#1236](https://home.thomasmichon.com/gitea/tmichon/aperture-labs/issues/1236).
+[#1236](https://home.thomasmichon.com/gitea/example-user/aperture-labs/issues/1236).
 
 ## Persistence
 

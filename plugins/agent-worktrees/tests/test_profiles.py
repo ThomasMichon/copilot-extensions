@@ -26,8 +26,8 @@ def test_no_agent_config_seeds_empty_managed_selection(tmp_path):
 
     cfg_path = tmp_path / "config.yaml"
     m._write_config(
-        cfg_path, Path("D:/Src/dev.tmichon"), "tmichon-dev6", "windows",
-        "dev.tmichon", "main", no_terminal_profile=True)
+        cfg_path, Path("D:/Src/example-marketplace"), "host-dev6", "windows",
+        "example-marketplace", "main", no_terminal_profile=True)
     data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert data["terminal_profiles"] == []
     # Managed (key present) + empty -> no profiles, NOT legacy.
@@ -43,7 +43,7 @@ def test_default_config_omits_terminal_profiles_key(tmp_path):
 
     cfg_path = tmp_path / "config.yaml"
     m._write_config(
-        cfg_path, Path("D:/Src/x"), "tmichon-dev6", "windows", "x", "main")
+        cfg_path, Path("D:/Src/x"), "host-dev6", "windows", "x", "main")
     data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert profiles.CONFIG_KEY not in data
     assert profiles.has_selection(cfg_path) is False

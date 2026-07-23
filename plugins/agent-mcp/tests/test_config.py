@@ -257,7 +257,7 @@ def _make_plugin_bridge(root, marketplace, plugin, filename, doc=None):
 
 def test_resolve_plugin_bridge(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_MCP_PLUGIN_ROOTS", str(tmp_path))
-    p = _make_plugin_bridge(tmp_path, "dev-tmichon", "ado-data", "ado.mcp.yaml")
+    p = _make_plugin_bridge(tmp_path, "example-marketplace", "ado-data", "ado.mcp.yaml")
     # File uses the ``.mcp`` infix; the bridge name is the bare ``ado``.
     assert resolve_config_path("ado") == p
     cfg = load_config("ado")
@@ -294,8 +294,8 @@ def test_ambiguous_plugin_bridge_raises(tmp_path, monkeypatch):
 def test_discover_plugin_bridges(tmp_path, monkeypatch):
     from agent_mcp.config import discover_plugin_bridges
     monkeypatch.setenv("AGENT_MCP_PLUGIN_ROOTS", str(tmp_path))
-    _make_plugin_bridge(tmp_path, "dev-tmichon", "ado-data", "ado.mcp.yaml")
-    _make_plugin_bridge(tmp_path, "dev-tmichon", "incident-management", "icm.mcp.yaml")
+    _make_plugin_bridge(tmp_path, "example-marketplace", "ado-data", "ado.mcp.yaml")
+    _make_plugin_bridge(tmp_path, "example-marketplace", "incident-management", "icm.mcp.yaml")
     found = discover_plugin_bridges()
     assert set(found) == {"ado", "icm"}
 

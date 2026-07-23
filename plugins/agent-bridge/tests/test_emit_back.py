@@ -24,7 +24,7 @@ class TestConnectionIdentity:
         client = _FakeClient({
             "agent_name": "SPO.Core@cloud1",
             "target_type": "ssh",
-            "target_host": "tmichon-cloud1",
+            "target_host": "host-cloud1",
             "project": "SPO.Core",
             "worktree_id": "wt-abc123",
         })
@@ -32,7 +32,7 @@ class TestConnectionIdentity:
         assert ident["session_id"] == "sess-1"
         assert ident["agent"] == "SPO.Core@cloud1"
         assert ident["repo"] == "SPO.Core"
-        assert ident["venue"] == "ssh:tmichon-cloud1"
+        assert ident["venue"] == "ssh:host-cloud1"
         assert ident["worktree_id"] == "wt-abc123"
 
     def test_command_venue_codespace(self):
@@ -68,13 +68,13 @@ class TestConnectionIdentity:
         _print_connection_identity({
             "session_id": "sess-5",
             "agent": "dotfiles@cloud1",
-            "venue": "ssh:tmichon-cloud1",
+            "venue": "ssh:host-cloud1",
             "worktree_id": "wt-9",
         })
         out = capsys.readouterr().out
         assert "session=sess-5" in out
         assert "agent=dotfiles@cloud1" in out
-        assert "venue=ssh:tmichon-cloud1" in out
+        assert "venue=ssh:host-cloud1" in out
         assert "worktree=wt-9" in out
 
     def test_print_omits_missing_fields(self, capsys):

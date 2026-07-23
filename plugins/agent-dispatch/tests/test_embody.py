@@ -137,7 +137,7 @@ def test_project_for_task_prefers_registry_name(monkeypatch):
         "agent_dispatch.identity.name_for_repo",
         lambda canonical: "aperture-labs" if "aperture-labs" in (canonical or "") else None,
     )
-    task = {"repo": "gitea.michon.ski/tmichon/aperture-labs"}
+    task = {"repo": "gitea.michon.ski/example-user/aperture-labs"}
     assert embody.project_for_task(task) == "aperture-labs"
 
 

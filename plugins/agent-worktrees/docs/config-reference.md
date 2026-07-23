@@ -337,19 +337,19 @@ skill (authoring the index) and **`working-cross-repo`** skill (using it).
 
 ```yaml
 # <anchor>/.agent-worktrees/related.yaml
-primary: odsp-web                  # the default/primary related repo
+primary: example-web                  # the default/primary related repo
 related:
-  odsp-web:
+  example-web:
     role: product                  # product|dependency|consumer|tooling|docs|sibling
     summary: "Primary product monorepo we ship changes to."
-    doc: related/odsp-web.md       # narrative, relative to .agent-worktrees/
+    doc: related/example-web.md       # narrative, relative to .agent-worktrees/
     locus:
       preferred: codespace         # local | machine:<key> | codespace | container
       machines: [dev6]             # boxes a *local* checkout is available on (optional)
-      codespace: { repo: org/odsp-web-codespaces,
-                   workspace_folder: /workspaces/odsp-web }   # cloud: any machine
-      container: { repo: org/odsp-web-codespaces,
-                   workspace_folder: /workspaces/odsp-web,
+      codespace: { repo: org/example-web-codespaces,
+                   workspace_folder: /workspaces/example-web }   # cloud: any machine
+      container: { repo: org/example-web-codespaces,
+                   workspace_folder: /workspaces/example-web,
                    machines: [dev6] }                         # local fleet: dev6 only
     delegate: { via: agent-codespaces }   # agent-bridge | agent-codespaces | agent-containers | none
 ```

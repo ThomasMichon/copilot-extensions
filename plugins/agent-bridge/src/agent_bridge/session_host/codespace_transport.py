@@ -130,7 +130,7 @@ def workspace_folder_from_acp_command(acp_command: str) -> str | None:
     s = (acp_command or "").strip()
     if not s.startswith("cd "):
         return None
-    clause = s.split("&&", 1)[0].strip()  # "cd /workspaces/odsp-web"
+    clause = s.split("&&", 1)[0].strip()  # "cd /workspaces/example-web"
     try:
         parts = shlex.split(clause)
     except ValueError:
