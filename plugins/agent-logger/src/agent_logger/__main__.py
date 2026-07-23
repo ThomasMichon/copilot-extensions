@@ -12,7 +12,7 @@ import json
 import sys
 
 from agent_logger._build_info import BUILT_AT, COMMIT, __version__
-from agent_logger.config import load_config
+from agent_logger.config import RepositoryConfigError, load_config
 
 
 def _cmd_version(_args: argparse.Namespace) -> int:
@@ -80,7 +80,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
 
-    return args.func(args)
+    try:
+        return args.func(args)
+    except RepositoryConfigError as exc:
+        print(f"agent-logger: invalid repository configuration: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

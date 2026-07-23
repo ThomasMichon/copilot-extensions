@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, WSL environment setup, and CLI customization",
-    "version": "1.7.4-dev293"
+    "version": "1.7.4-dev294"
   },
   "plugins": [
     {
@@ -48,7 +48,7 @@
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync raw sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.1.1-dev17",
+      "version": "0.1.1-dev18",
       "source": "plugins/agent-logger"
     },
     {

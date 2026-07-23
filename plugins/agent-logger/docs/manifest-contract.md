@@ -113,6 +113,7 @@ change machine-local sync targets.
 Example:
 
 ```yaml
+schema_version: 1
 log:
   root: .
   path_template: "logs/{year}/{month}.{day} {title}.md"
@@ -140,10 +141,18 @@ log:
     {open_items}
 ```
 
-The writer treats `log_template` as a log-body contract: it always writes its
-standard YAML frontmatter, then fills placeholders with the session's real
-values and preserves the requested section order. Leave it `null` for the
-built-in body organization.
+The writer treats `log_template` as the repository's complete standalone-log
+contract: it fills placeholders with real session values and preserves the
+requested section order. It does not add built-in YAML frontmatter unless the
+template asks for it. Leave `log_template` null for the backward-compatible
+built-in body organization and frontmatter.
+
+`schema_version` may be omitted for compatibility and is then treated as
+version 1. The loader rejects unsupported versions, malformed YAML, unknown
+fields/placeholders, invalid timezones, and output paths that are absolute or
+escape the repository. Repo-local config accepts only `root`, `path_template`,
+`timezone`, `note_marker`, and `template` under `log:`; it cannot change sync
+or other machine-local behavior.
 
 **Interleaved vs. end-only.** `narration_style` exists precisely so voice
 need not be *"jammed at the end"* -- a host that wants personality *woven

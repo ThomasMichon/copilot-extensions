@@ -62,6 +62,11 @@ organization config (`.agent-logger.yaml` / `.agent-logger.yml` /
 agent-logger config
 ```
 
+Repository files use schema version 1 (an omitted version is accepted as v1
+for compatibility) and may set only `log.root`, `log.path_template`,
+`log.timezone`, `log.note_marker`, and `log.template`. Invalid or unsafe
+configuration fails explicitly instead of silently falling back.
+
 ## License
 
 MIT

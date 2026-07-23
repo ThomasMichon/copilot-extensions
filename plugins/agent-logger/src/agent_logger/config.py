@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import copy
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from string import Formatter
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 try:
     import yaml
@@ -95,6 +97,23 @@ REPO_CONFIG_FILENAMES: tuple[str, ...] = (
     ".config/agent-logger.yaml",
     ".config/agent-logger.yml",
 )
+REPO_CONFIG_SCHEMA_VERSION = 1
+REPO_LOG_FIELDS = {"root", "path_template", "timezone", "note_marker", "template"}
+PATH_TEMPLATE_FIELDS = {"year", "month", "day", "hhmmss", "machine", "title"}
+LOG_TEMPLATE_FIELDS = {
+    "title",
+    "date",
+    "branches",
+    "prs",
+    "summary",
+    "key_changes",
+    "commits",
+    "open_items",
+}
+
+
+class RepositoryConfigError(ValueError):
+    """Raised when repository-local organization configuration is invalid."""
 
 
 def home_dir() -> Path:
@@ -129,6 +148,76 @@ def _load_yaml_config(path: Path) -> dict[str, Any]:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         return {}
+    return data
+
+
+def _reject_unknown_fields(
+    data: dict[str, Any], allowed: set[str], location: str
+) -> None:
+    unknown = sorted(
+        repr(key) if not isinstance(key, str) else key
+        for key in data
+        if not isinstance(key, str) or key not in allowed
+    )
+    if unknown:
+        raise RepositoryConfigError(
+            f"{location} contains unsupported field(s): {', '.join(unknown)}"
+        )
+
+
+def _validate_relative_path(value: Any, location: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise RepositoryConfigError(f"{location} must be a non-empty relative path")
+    text = value.strip()
+    if (
+        text.startswith("~")
+        or PurePosixPath(text).is_absolute()
+        or PureWindowsPath(text).is_absolute()
+    ):
+        raise RepositoryConfigError(f"{location} must be relative to the repository root")
+    if ".." in PurePosixPath(text.replace("\\", "/")).parts:
+        raise RepositoryConfigError(f"{location} must not escape the repository root")
+    return text
+
+
+def _validate_template(
+    value: Any,
+    *,
+    location: str,
+    allowed_fields: set[str],
+) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise RepositoryConfigError(f"{location} must be a non-empty string")
+    try:
+        parsed = list(Formatter().parse(value))
+    except ValueError as exc:
+        raise RepositoryConfigError(f"{location} is invalid: {exc}") from exc
+    for _literal, field, format_spec, conversion in parsed:
+        if field is None:
+            continue
+        if field not in allowed_fields:
+            raise RepositoryConfigError(
+                f"{location} uses unsupported placeholder {{{field}}}; "
+                f"allowed: {', '.join(sorted(allowed_fields))}"
+            )
+        if format_spec or conversion:
+            raise RepositoryConfigError(
+                f"{location} placeholders do not support formatting or conversion"
+            )
+    return value.strip()
+
+
+def _load_repo_yaml(path: Path) -> dict[str, Any]:
+    if yaml is None:  # pragma: no cover
+        raise RuntimeError("pyyaml is required to read repository configuration")
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise RepositoryConfigError(f"{path}: invalid YAML: {exc}") from exc
+    except OSError as exc:
+        raise RepositoryConfigError(f"{path}: cannot read configuration: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RepositoryConfigError(f"{path} must contain a YAML mapping")
     return data
 
 
@@ -167,7 +256,11 @@ def find_repo_config(start: Path | None = None) -> Path | None:
         if env.strip().lower() in {"0", "false", "off", "none"}:
             return None
         explicit = Path(env).expanduser()
-        return explicit if explicit.is_file() else None
+        if not explicit.is_file():
+            raise RepositoryConfigError(
+                f"AGENT_LOGGER_REPO_CONFIG does not name a file: {explicit}"
+            )
+        return explicit
 
     root = _find_repo_root(start)
     if root is None:
@@ -186,18 +279,61 @@ def _load_repo_config(path: Path) -> dict[str, Any]:
     repository define its checked-in log organization without letting arbitrary
     checkouts change machine-local sync targets or runtime state locations.
     """
-    data = _load_yaml_config(path)
-    log = data.get("log") if isinstance(data, dict) else None
+    data = _load_repo_yaml(path)
+    _reject_unknown_fields(data, {"schema_version", "log"}, str(path))
+    schema_version = data.get("schema_version", REPO_CONFIG_SCHEMA_VERSION)
+    if schema_version != REPO_CONFIG_SCHEMA_VERSION:
+        raise RepositoryConfigError(
+            f"{path}: schema_version must be {REPO_CONFIG_SCHEMA_VERSION}, "
+            f"got {schema_version!r}"
+        )
+
+    log = data.get("log")
     if not isinstance(log, dict):
-        return {}
+        raise RepositoryConfigError(f"{path}: log must be a mapping")
+    _reject_unknown_fields(log, REPO_LOG_FIELDS, f"{path}: log")
 
     scoped = copy.deepcopy(log)
     config_base = path.parent.parent if path.parent.name == ".config" else path.parent
-    root = scoped.get("root")
-    if isinstance(root, str) and root.strip() and not root.startswith("~"):
-        root_path = Path(root)
-        if not root_path.is_absolute():
-            scoped["root"] = str((config_base / root_path).resolve())
+
+    if "root" in scoped:
+        root = _validate_relative_path(scoped["root"], "log.root")
+        scoped["root"] = str((config_base / root).resolve())
+
+    if "path_template" in scoped:
+        path_template = _validate_relative_path(
+            scoped["path_template"], "log.path_template"
+        )
+        scoped["path_template"] = _validate_template(
+            path_template,
+            location="log.path_template",
+            allowed_fields=PATH_TEMPLATE_FIELDS,
+        )
+
+    if "timezone" in scoped and scoped["timezone"] is not None:
+        timezone = scoped["timezone"]
+        if not isinstance(timezone, str) or not timezone.strip():
+            raise RepositoryConfigError("log.timezone must be null or an IANA timezone")
+        try:
+            ZoneInfo(timezone)
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise RepositoryConfigError(
+                f"log.timezone is not a valid IANA timezone: {timezone!r}"
+            ) from exc
+
+    if "note_marker" in scoped:
+        marker = scoped["note_marker"]
+        if not isinstance(marker, str) or not marker.strip():
+            raise RepositoryConfigError("log.note_marker must be a non-empty string")
+        scoped["note_marker"] = marker.strip()
+
+    if "template" in scoped and scoped["template"] is not None:
+        scoped["template"] = _validate_template(
+            scoped["template"],
+            location="log.template",
+            allowed_fields=LOG_TEMPLATE_FIELDS,
+        )
+
     return {"log": scoped}
 
 

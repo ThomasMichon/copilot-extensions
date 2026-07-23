@@ -59,7 +59,7 @@ def _default_digest_root() -> str:
     ``--nas-root`` flag (kept for backward compatibility) or by setting
     ``store_dir`` in the agent-logger config.
     """
-    return str(load_config().store_dir)
+    return str(load_config(include_repo=False).store_dir)
 
 
 DEFAULT_NAS_ROOT = _default_digest_root()

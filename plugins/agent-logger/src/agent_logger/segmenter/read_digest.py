@@ -50,7 +50,7 @@ def _persistent_digest_root() -> Path:
 
     Defaults to ``~/.agent-logger/session-digests/``.
     """
-    return load_config().store_dir
+    return load_config(include_repo=False).store_dir
 
 
 _LOCAL_ROOT = _persistent_digest_root()

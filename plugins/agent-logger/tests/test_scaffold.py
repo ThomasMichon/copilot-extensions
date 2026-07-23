@@ -7,8 +7,16 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 from agent_logger import __version__
-from agent_logger.config import DEFAULTS, find_repo_config, load_config
+from agent_logger.__main__ import main as cli_main
+from agent_logger.config import (
+    DEFAULTS,
+    RepositoryConfigError,
+    find_repo_config,
+    load_config,
+)
 from agent_logger.segmenter import prepare_log
 from agent_logger.segmenter.platform import detect_machine, sanitize_path_component
 
@@ -58,8 +66,7 @@ def test_repo_config_overrides_log_layout_only(tmp_path: Path, monkeypatch) -> N
     (repo / ".agent-logger.yaml").write_text(
         "\n".join(
             [
-                "sync:",
-                "  target: ssh",
+                "schema_version: 1",
                 "log:",
                 "  root: .",
                 "  path_template: logs/{year}/{month}.{day} {title}.md",
@@ -84,6 +91,84 @@ def test_repo_config_overrides_log_layout_only(tmp_path: Path, monkeypatch) -> N
     assert "**Date:** {date}" in cfg.log_template
 
 
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ("schema_version: 2\nlog: {}\n", "schema_version must be 1"),
+        ("schema_version: 1\nlog:\n  root: ../logs\n", "must not escape"),
+        (
+            'schema_version: 1\nlog:\n  path_template: "{repository}/{title}.md"\n',
+            r"unsupported placeholder \{repository\}",
+        ),
+        (
+            "schema_version: 1\nlog:\n  template: ['not markdown']\n",
+            "log.template must be a non-empty string",
+        ),
+        (
+            "schema_version: 1\nlog:\n  voice_pack: surprise\n",
+            r"unsupported field\(s\): voice_pack",
+        ),
+        (
+            "schema_version: 1\nsync:\n  target: ssh\nlog: {}\n",
+            r"unsupported field\(s\): sync",
+        ),
+    ],
+)
+def test_repo_config_validation_errors(
+    tmp_path: Path, monkeypatch, body: str, message: str
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".agent-logger.yaml").write_text(body, encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    with pytest.raises(RepositoryConfigError, match=message):
+        load_config(home=tmp_path / "home")
+
+
+def test_non_logging_config_ignores_invalid_repo_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".agent-logger.yaml").write_text(
+        "schema_version: 1\nlog:\n  root: ../outside\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    cfg = load_config(home=tmp_path / "home", include_repo=False)
+
+    assert cfg.repo_config_path is None
+    assert cfg.sync_target == "local"
+
+
+def test_missing_explicit_repo_config_is_an_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    missing = tmp_path / "missing.yaml"
+    monkeypatch.setenv("AGENT_LOGGER_REPO_CONFIG", str(missing))
+
+    with pytest.raises(RepositoryConfigError, match="does not name a file"):
+        load_config(home=tmp_path / "home")
+
+
+def test_config_cli_reports_repository_validation_error(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".agent-logger.yaml").write_text(
+        "schema_version: 1\nlog:\n  root: ../outside\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path / "home"))
+
+    assert cli_main(["config"]) == 2
+    assert "invalid repository configuration" in capsys.readouterr().err
+
+
 def test_repo_config_can_be_disabled(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
@@ -106,6 +191,7 @@ def test_prepare_log_reports_repo_organization(tmp_path: Path, monkeypatch, caps
     (repo / ".agent-logger.yaml").write_text(
         "\n".join(
             [
+                "schema_version: 1",
                 "log:",
                 "  root: .",
                 '  path_template: "logs/{year}/{month}.{day} {title}.md"',
