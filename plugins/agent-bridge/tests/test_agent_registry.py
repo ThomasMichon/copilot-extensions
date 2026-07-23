@@ -1248,6 +1248,8 @@ import textwrap
 
 from agent_bridge.agent_registry import (
     derive_topology_agents,
+    infer_control_plane_project,
+    load_local_repos,
     _short_machine_agent_name,
     _match_machine_shortname,
     _load_related_entries,
@@ -1378,6 +1380,80 @@ class TestLoadControlPlaneProject:
         p = tmp_path / "machines.yaml"
         p.write_text("machines: {}\n", encoding="utf-8")
         assert load_control_plane_project(p) is None
+
+
+class TestInferControlPlaneProject:
+    """control_plane.project falls out of the live repo registry (agent flag +
+    checkout paths) -- no hand-wired binding needed."""
+
+    def _repos(self, root):
+        # Normalized ``agent-worktrees repos list --json`` shape.
+        return [
+            {"name": "control-repo", "class": "worktree", "agent": True,
+             "paths": {"windows": str(root / "control-repo")}},
+            {"name": "other-repo", "class": "worktree", "agent": True,
+             "paths": {"windows": str(root / "other-repo")}},
+            {"name": "runtime-lib", "class": "worktree", "agent": False,
+             "paths": {"windows": str(root / "runtime-lib")}},
+        ]
+
+    def test_owning_repo_inferred(self, tmp_path):
+        repo = tmp_path / "control-repo"
+        repo.mkdir()
+        m = repo / "machines.yaml"
+        m.write_text("machines: {}\n", encoding="utf-8")
+        assert infer_control_plane_project(self._repos(tmp_path), m) == "control-repo"
+
+    def test_machines_yaml_nested_under_checkout(self, tmp_path):
+        # machines.yaml under a subdir of the checkout still resolves to the repo.
+        repo = tmp_path / "control-repo"
+        (repo / "config").mkdir(parents=True)
+        m = repo / "config" / "machines.yaml"
+        m.write_text("machines: {}\n", encoding="utf-8")
+        assert infer_control_plane_project(self._repos(tmp_path), m) == "control-repo"
+
+    def test_non_agent_repo_never_inferred(self, tmp_path):
+        # machines.yaml owned only by an agent:false repo -> no inference.
+        repo = tmp_path / "runtime-lib"
+        repo.mkdir()
+        m = repo / "machines.yaml"
+        m.write_text("machines: {}\n", encoding="utf-8")
+        assert infer_control_plane_project(self._repos(tmp_path), m) is None
+
+    def test_unowned_machines_yaml_returns_none(self, tmp_path):
+        m = tmp_path / "loose" / "machines.yaml"
+        m.parent.mkdir()
+        m.write_text("machines: {}\n", encoding="utf-8")
+        assert infer_control_plane_project(self._repos(tmp_path), m) is None
+
+    def test_longest_owning_path_wins(self, tmp_path):
+        # A nested agent repo checked out *inside* another wins over the ancestor.
+        outer = tmp_path / "outer"
+        inner = outer / "inner"
+        inner.mkdir(parents=True)
+        repos = [
+            {"name": "outer", "class": "worktree", "agent": True,
+             "paths": {"windows": str(outer)}},
+            {"name": "inner", "class": "worktree", "agent": True,
+             "paths": {"windows": str(inner)}},
+        ]
+        m = inner / "machines.yaml"
+        m.write_text("machines: {}\n", encoding="utf-8")
+        assert infer_control_plane_project(repos, m) == "inner"
+
+    def test_empty_registry_returns_none(self, tmp_path):
+        m = tmp_path / "machines.yaml"
+        m.write_text("machines: {}\n", encoding="utf-8")
+        assert infer_control_plane_project([], m) is None
+
+
+class TestLoadLocalRepos:
+
+    def test_returns_empty_when_binstub_missing(self, monkeypatch):
+        monkeypatch.setattr(
+            "agent_bridge.agent_registry._agent_worktrees_bin", lambda: None,
+        )
+        assert load_local_repos() == []
 
 
 class TestLoadRelatedEntries:

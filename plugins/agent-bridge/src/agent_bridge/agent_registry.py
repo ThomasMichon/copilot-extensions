@@ -602,6 +602,123 @@ def _load_related_entries(repo_root: Path) -> list[tuple[str, list[str], str]]:
     return out
 
 
+def _agent_worktrees_bin() -> str | None:
+    """Resolve the local ``agent-worktrees`` binstub, or None.
+
+    Uses ``shutil.which`` first (honors PATHEXT so a Windows ``.cmd`` shim is
+    found), then a ``$HOME/.local/bin`` fallback -- the same resolution order the
+    remote ``agent-ssh explore`` probe uses, so local and remote introspection
+    agree on what "installed" means.
+    """
+    import shutil
+    exe = shutil.which("agent-worktrees")
+    if exe:
+        return exe
+    base = Path.home() / ".local" / "bin"
+    for cand in ("agent-worktrees.cmd", "agent-worktrees"):
+        p = base / cand
+        if p.exists():
+            return str(p)
+    return None
+
+
+def load_local_repos() -> list[dict]:
+    """Live-query the local per-machine repo registry (normalized).
+
+    Runs ``agent-worktrees repos list --json`` -- the machine's own source of
+    truth for checkout locations plus the per-repo ``agent`` flag -- and returns
+    its ``repos`` list (``{name, class, remote, agent, paths, ...}``). This is the
+    same normalized shape ``agent-ssh explore`` reads over SSH, kept live (no
+    cache): the locations fall out of the machine, not a hand-maintained copy.
+
+    Returns ``[]`` if the binstub is absent or the query fails, so callers simply
+    fall back to prior behavior (no roster derived from repos.yaml).
+    """
+    import subprocess
+
+    exe = _agent_worktrees_bin()
+    if not exe:
+        log.debug("agent-worktrees binstub not found -- no local repo registry")
+        return []
+    creationflags = (
+        subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0  # type: ignore[attr-defined]
+    )
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
+            [exe, "repos", "list", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+            creationflags=creationflags,
+        )
+    except Exception as exc:
+        log.warning("agent-worktrees repos list failed: %s", exc)
+        return []
+    if proc.returncode != 0:
+        log.debug("agent-worktrees repos list exited %s", proc.returncode)
+        return []
+    try:
+        doc = json.loads(proc.stdout or "{}")
+    except (ValueError, TypeError):
+        log.debug("agent-worktrees repos list emitted non-JSON")
+        return []
+    return list(doc.get("repos", [])) if isinstance(doc, dict) else []
+
+
+def infer_control_plane_project(
+    repos: list[dict], machines_yaml_path: str | Path,
+) -> str | None:
+    """Infer the control-plane project from the live per-machine repo registry.
+
+    The control-plane project is the ``agent: true`` repo whose checkout **owns**
+    the loaded ``machines.yaml`` -- i.e. the topology file lives inside that
+    repo's checkout path. This lets the roster binding fall out of two facts
+    already true (the machine has the control repo checked out, with the agent
+    flag, at a known path; and that checkout contains the topology file), so a
+    machine that is reachable and has an agent-backing checkout is addressable
+    with **no** hand-wired ``control_plane.project``.
+
+    ``repos`` is the normalized registry (see :func:`load_local_repos`). Matching
+    is by longest owning path so a nested checkout wins over an ancestor. Returns
+    ``None`` when no agent-backing repo owns the topology file -- callers then
+    keep prior behavior or honor an explicit ``control_plane.project``.
+    """
+    try:
+        mpath = Path(machines_yaml_path).expanduser().resolve()
+    except Exception:
+        return None
+
+    def _resolve(raw: object) -> Path | None:
+        if not raw:
+            return None
+        try:
+            return Path(str(raw)).expanduser().resolve()
+        except Exception:
+            return None
+
+    best_name: str | None = None
+    best_len = -1
+    for entry in repos:
+        if not isinstance(entry, dict) or not entry.get("agent"):
+            continue
+        name = str(entry.get("name", "")).strip()
+        if not name:
+            continue
+        paths = entry.get("paths") or {}
+        if not isinstance(paths, dict):
+            continue
+        for raw in paths.values():
+            cp = _resolve(raw)
+            if cp is None:
+                continue
+            if mpath == cp or cp in mpath.parents:
+                plen = len(str(cp))
+                if plen > best_len:
+                    best_name, best_len = name, plen
+    return best_name
+
+
 def derive_topology_agents(
     machines: dict[str, MachineConfig],
     control_plane_project: str | None,
@@ -724,6 +841,20 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             all_agents.update(load_agent_registry(profile.agents_config))
         # Derive the roster from topology (replaces acp-agents.json).
         cp_project = load_control_plane_project(profile.machines_yaml)
+        cp_source = "machines.yaml"
+        if not cp_project:
+            # No hand-wired binding: infer the control-plane repo from the live
+            # per-machine repo registry (the agent flag + checkout paths). A
+            # machine that has the control repo checked out (agent-backing) is
+            # thus addressable without control_plane.project being set.
+            cp_project = infer_control_plane_project(
+                load_local_repos(), profile.machines_yaml,
+            )
+            cp_source = "repos.yaml (agent flag)"
+        if cp_project:
+            log.info(
+                "Control-plane project '%s' (from %s)", cp_project, cp_source,
+            )
         repo_root = Path(profile.machines_yaml).expanduser().resolve().parent
         related = _load_related_entries(repo_root)
         local_machine, local_platform = _detect_local_machine(machines)
