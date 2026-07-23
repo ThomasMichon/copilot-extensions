@@ -934,6 +934,72 @@ def read_session_transcript(session_id: str) -> list[dict]:
     return events
 
 
+# The event types that carry an actual conversational turn (as opposed to the
+# tool/lifecycle chatter in ``_RENDERABLE_EVENT_TYPES``). The recent-messages
+# viewer shows only these -- the human-readable back-and-forth.
+_CONVERSATION_EVENT_TYPES = {"user.message": "user",
+                             "assistant.message": "assistant"}
+
+
+def _event_text(ev: dict) -> str:
+    """Extract the displayable text from a user/assistant message event.
+
+    Both carry the turn text under ``data.content``; an assistant turn that is
+    *only* tool calls has an empty ``content`` (its work is the tool requests,
+    not prose). Returns the stripped text, or "" when there is nothing to show.
+    """
+    data = ev.get("data")
+    if not isinstance(data, dict):
+        return ""
+    content = data.get("content", "")
+    return content.strip() if isinstance(content, str) else ""
+
+
+def recent_worktree_messages(record, *, limit: int = 3) -> dict:
+    """The last *limit* conversational messages of a worktree's latest session.
+
+    The read-side companion to the disposition ``summary`` overlay (see
+    ``tracking.set_disposition``): when the agent-asserted summary is missing or
+    stale, this derives *what the worktree was actually doing* straight from the
+    latest session's ``events.jsonl`` -- the last human/assistant turns, newest
+    last. Owned by the same session/summary layer that stores the disposition so
+    the Picker has a single place to ask "what is this worktree?".
+
+    Picks the worktree's newest session (``list_worktree_sessions`` is sorted
+    newest-first), then returns its final *limit* ``user.message`` /
+    ``assistant.message`` turns that carry text (tool-only assistant turns are
+    skipped). Never raises: a worktree with no session / no transcript yields an
+    empty ``messages`` list and a ``None`` ``session_id``.
+
+    Returns a JSON-ready dict::
+
+        {"session_id": "<id>|None",
+         "messages": [{"role": "user|assistant",
+                       "text": "...",
+                       "timestamp": "<iso>"}, ...],
+         "count": <int>}          # messages returned (<= limit)
+    """
+    lim = max(1, int(limit))
+    sess_list = list_worktree_sessions(record)
+    if not sess_list:
+        return {"session_id": None, "messages": [], "count": 0}
+    session_id = sess_list[0]["id"]
+
+    messages: list[dict] = []
+    for ev in read_session_transcript(session_id):
+        role = _CONVERSATION_EVENT_TYPES.get(ev.get("type", ""))
+        if role is None:
+            continue
+        text = _event_text(ev)
+        if not text:
+            continue
+        messages.append({"role": role, "text": text,
+                         "timestamp": str(ev.get("timestamp", ""))})
+
+    tail = messages[-lim:]
+    return {"session_id": session_id, "messages": tail, "count": len(tail)}
+
+
 @dataclass
 class MuxInfo:
     """Multiplexer session status for a worktree."""

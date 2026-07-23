@@ -2551,6 +2551,8 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
             reap_orphan_mux_sessions()
         except Exception:
             pass
+        # Same no-daemon cadence for the managed (system/bridge) leak GC (#1069).
+        _sweep_managed_on_exit()
     threading.Thread(target=_reap_bg, name="reap-orphans", daemon=True).start()
 
     # Avoid a confusing double hop: when this picker is itself running over SSH,
@@ -2998,6 +3000,30 @@ def _sweep_orphans_on_exit() -> None:
             output.ok(
                 f"Reaped {len(reaped)} idle orphan mux session(s): "
                 f"{', '.join(reaped)}"
+            )
+    except Exception:
+        pass
+    _sweep_managed_on_exit()
+
+
+def _sweep_managed_on_exit() -> None:
+    """Best-effort GC of leaked system/bridge worktrees at a lifecycle boundary.
+
+    Same **no-daemon** cadence as the mux reap: the conservative managed sweep
+    (:func:`sweep_managed_worktrees` -- provably-dead only: FINAL/UNUSED, no
+    active process, no follow-up, idle past grace) runs on picker *launch* and
+    session *end*, so leaked ``system``/``bridge`` worktrees don't accumulate
+    without any scheduled task or monitor process (#1069). A caller worktree's
+    session ending is exactly when its bridge worktree becomes reapable, so this
+    boundary is where the accumulation is caught. Never raises.
+    """
+    try:
+        report = sweep_managed_worktrees()
+        removed = report.get("removed") or []
+        if removed:
+            output.ok(
+                f"GC'd {len(removed)} leaked managed worktree(s): "
+                + ", ".join(x["id"] for x in removed)
             )
     except Exception:
         pass
@@ -4725,6 +4751,113 @@ def reap_orphan_mux_sessions(*, dry_run: bool = False,
             "skipped": skipped, "errors": errors}
 
 
+def _remove_managed_worktree(rec, repo, tracking_path: Path) -> list[str]:
+    """Tear down one managed (system/bridge) worktree: mux, git worktree,
+    branch, tracking record. Mirrors ``cmd_remove_system``'s removal steps.
+    Returns any non-fatal warnings."""
+    warns: list[str] = []
+    try:
+        sessions.kill_tmux_session(rec.worktree_id)  # normally none for a reap
+    except Exception:
+        pass
+    if rec.worktree_path and Path(rec.worktree_path).exists():
+        try:
+            git_ops.remove_worktree(repo.anchor, rec.worktree_path)
+        except Exception as exc:
+            warns.append(f"worktree remove failed: {exc}")
+    if rec.branch:
+        git_ops.git("branch", "-D", rec.branch, cwd=repo.anchor, check=False)
+    yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
+    try:
+        yaml_path.unlink()
+    except OSError:
+        pass
+    return warns
+
+
+def sweep_managed_worktrees(*, dry_run: bool = False,
+                            min_idle_secs: float | None = None,
+                            now: float | None = None) -> dict:
+    """GC leaked **system/bridge** worktrees (the daemon-owned kinds routine
+    cleanup skips -- issue #1069).
+
+    Reaps only the *provably dead* ones -- **FINAL or UNUSED, no active process
+    (mux/session/attached), no follow-up flag, idle past the grace window** --
+    via :func:`gc.classify_managed_worktree`. A dirty/WIP tree, a live session,
+    an attached client, a follow-up mark, or a still-fresh worktree is spared.
+    Returns ``{removed: [{id, reason}], skipped: [{id, reason}]}``.
+    """
+    from . import gc as gc_mod
+
+    if min_idle_secs is None:
+        min_idle_secs = gc_mod.MANAGED_GC_GRACE_SECS
+    now = time.time() if now is None else now
+
+    config = cfg.load_config()
+    repo = config.default_repo
+    tracking_path = cfg.tracking_dir()
+    records = tracking.list_records(tracking_path)
+    managed = [r for r in records if r.kind in tracking.MANAGED_KINDS]
+
+    result: dict = {"removed": [], "skipped": []}
+    if not managed:
+        return result
+
+    mux = sessions._list_mux_sessions() or {}
+    activity_by_name = sessions._mux_session_activity()
+    session_ctx = sessions.scan_sessions_fast(managed)
+    active_paths = _build_active_paths(managed, session_ctx)
+
+    for rec in managed:
+        name = f"wt-{rec.worktree_id}"
+        has_live_mux = name in mux
+        attached = bool(mux.get(name))
+        norm = _normalize_path(rec.worktree_path) if rec.worktree_path else ""
+        has_live_session = norm in session_ctx.active_sessions
+
+        if rec.worktree_path and Path(rec.worktree_path).exists():
+            info = git_ops.classify_worktree(
+                rec.worktree_path, rec.branch, fetch=False,
+                remote=repo.remote, default_branch=repo.default_branch,
+                active_paths=active_paths,
+            )
+            git_state = info.state.value
+        elif rec.status in ("finalized", "complete", "completed"):
+            git_state = "completed"
+        else:
+            git_state = "gone"
+
+        last_active = activity_by_name.get(name)
+        if last_active is None:
+            last_active = _iso_epoch(rec.last_resumed_at) or _iso_epoch(rec.started_at)
+        idle_secs = None if last_active is None else (now - last_active)
+
+        verdict = gc_mod.classify_managed_worktree(
+            worktree_id=rec.worktree_id, kind=rec.kind,
+            follow_up=rec.follow_up, status=rec.status, git_state=git_state,
+            has_live_mux=has_live_mux, attached=attached,
+            has_live_session=has_live_session, idle_secs=idle_secs,
+            min_idle_secs=min_idle_secs,
+        )
+        if verdict.action == "skip":
+            result["skipped"].append({"id": rec.worktree_id, "reason": verdict.reason})
+            continue
+        if dry_run:
+            result["removed"].append(
+                {"id": rec.worktree_id, "reason": f"would remove ({verdict.reason})"})
+            continue
+        warns = _remove_managed_worktree(rec, repo, tracking_path)
+        try:
+            activity.log_event("managed_worktree_gc",
+                               worktree_id=rec.worktree_id, reason=verdict.reason)
+        except Exception:
+            pass
+        reason = verdict.reason + (f"; {'; '.join(warns)}" if warns else "")
+        result["removed"].append({"id": rec.worktree_id, "reason": reason})
+
+    return result
+
+
 def cmd_reap_sessions(args: argparse.Namespace) -> int:
     """``reap-sessions`` -- sweep orphaned mux sessions (issue #713).
 
@@ -5029,28 +5162,53 @@ def _print_gc_orphans(report: dict, dry_run: bool) -> None:
                   f"{len(skipped)} skipped.")
 
 
+def _print_gc_managed(report: dict, dry_run: bool) -> None:
+    """Human-facing summary of the managed (system/bridge) worktree sweep."""
+    removed = report.get("removed", [])
+    skipped = report.get("skipped", [])
+    print()
+    print("🧹 Managed worktrees -- leaked system/bridge (dead, final/unused)")
+    if not removed and not skipped:
+        print("  none tracked.")
+        return
+    verb = "would remove" if dry_run else "removed"
+    for item in removed:
+        print(f"  ✓ {verb}: {item['id']}  ({item['reason']})")
+    for item in skipped:
+        print(f"  · kept: {item['id']}  ({item['reason']})")
+    print()
+    if dry_run:
+        print(f"{len(removed)} managed worktree(s) would be reaped, "
+              f"{len(skipped)} kept.")
+    else:
+        output.ok(f"Reaped {len(removed)} managed worktree(s); "
+                  f"{len(skipped)} kept.")
+
+
 def cmd_gc(args: argparse.Namespace) -> int:
     """Garbage-collect this project's worktrees on this machine.
 
-    One command, two sweeps, then a prune:
+    One command, three sweeps, then a prune:
 
       1. **Tracked reap** -- the same prune-safety verdict as ``cleanup``
          (finalized/merged/clean; ``--include-unused`` / ``--include-conversations``
          widen it). Never touches a dirty / ahead / follow-up / active / system
          worktree. ``--dry-run`` lists without removing.
-      2. **Orphan-directory sweep** -- removes *effectively-empty* on-disk
+      2. **Managed (system/bridge) sweep** -- reaps *leaked* daemon-owned
+         worktrees that routine cleanup skips: only the provably dead ones
+         (FINAL or UNUSED, no active mux/session/attach, no follow-up, idle past
+         the grace window). Skip with ``--no-managed`` (#1069).
+      3. **Orphan-directory sweep** -- removes *effectively-empty* on-disk
          directories under the worktree roots that are neither a registered git
          worktree nor a tracking record (leftovers from interrupted/forced
          removals), with a locked-directory retry/skip; a leftover holding real
          files is reported, never auto-deleted.
-      3. ``git worktree prune`` to drop stale registrations.
+      4. ``git worktree prune`` to drop stale registrations.
 
-    Idempotent: a second run right after the first finds nothing to do. System
-    worktrees are cleanup-exempt (reaped by their owning daemon); a first-class
-    system-worktree GC follows once their typing (#1069) is in place.
+    Idempotent: a second run right after the first finds nothing to do.
 
-    ``--json`` reports the orphan sweep (machine-readable); the tracked reap runs
-    in text mode.
+    ``--json`` reports the managed + orphan sweeps (machine-readable); the
+    tracked reap runs in text mode.
     """
     from . import gc as gc_mod
 
@@ -5059,10 +5217,12 @@ def cmd_gc(args: argparse.Namespace) -> int:
     records = tracking.list_records(cfg.tracking_dir())
     dry = getattr(args, "dry_run", False)
     json_mode = getattr(args, "json", False)
+    orphans_only = getattr(args, "orphans_only", False)
+    do_managed = not getattr(args, "no_managed", False) and not orphans_only
 
     # 1. Tracked reap -- reuse the cleanup verdict machinery (one fetch, full
     #    safety). Skipped in --json mode (its output is text) and --orphans-only.
-    if not json_mode and not getattr(args, "orphans_only", False):
+    if not json_mode and not orphans_only:
         cmd_cleanup(argparse.Namespace(
             clean=not dry, worktree_id=None, force=False, json=False,
             include_unused=getattr(args, "include_unused", False),
@@ -5071,18 +5231,30 @@ def cmd_gc(args: argparse.Namespace) -> int:
             max_age_days=getattr(args, "max_age_days", 7),
         ))
 
-    # 2. Orphan-directory sweep (the GC-specific capability).
+    # 2. Managed (system/bridge) leak sweep -- the daemon-owned kinds cleanup
+    #    skips. Only provably-dead ones are reaped (#1069).
+    grace_hours = getattr(args, "managed_grace_hours", None)
+    managed_kwargs = {"dry_run": dry}
+    if grace_hours is not None:
+        managed_kwargs["min_idle_secs"] = float(grace_hours) * 3600
+    managed = sweep_managed_worktrees(**managed_kwargs) if do_managed \
+        else {"removed": [], "skipped": []}
+
+    # 3. Orphan-directory sweep (the GC-specific capability).
     orphans = gc_mod.sweep_orphans(repo, records, dry_run=dry)
 
-    # 3. Prune stale worktree registrations.
+    # 4. Prune stale worktree registrations.
     if not dry:
         git_ops.prune_worktrees(cwd=repo.anchor)
 
     if json_mode:
         print(json.dumps(
-            {"dry_run": dry, "repo": config.repo_name, "orphans": orphans},
+            {"dry_run": dry, "repo": config.repo_name,
+             "managed": managed, "orphans": orphans},
             indent=2))
         return 0
+    if do_managed:
+        _print_gc_managed(managed, dry)
     _print_gc_orphans(orphans, dry)
     return 0
 
@@ -8555,7 +8727,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--title-only", action="store_true")
 
     # status
-    p = sub.add_parser("status", help="Show worktree git status (read); annotate this worktree's disposition (write)")
+    p = sub.add_parser("status", help="Show worktree git status (read); "
+                       "annotate this worktree's disposition (write)")
     p.add_argument("--json", action="store_true")
     p.add_argument("--mux-details", action="store_true",
                    help="Include mux session attached/detached status (JSON only)")
@@ -8741,7 +8914,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Emit the orphan-sweep report as JSON (the tracked reap "
                         "runs in text mode)")
     p.add_argument("--orphans-only", action="store_true",
-                   help="Only sweep orphan directories; skip the tracked reap")
+                   help="Only sweep orphan directories; skip the tracked reap "
+                        "and the managed (system/bridge) sweep")
+    p.add_argument("--no-managed", action="store_true",
+                   help="Skip the managed (system/bridge) leak sweep")
+    p.add_argument("--managed-grace-hours", type=float, default=None,
+                   help="Idle window before a dead managed worktree is reaped "
+                        "(default 1h); a still-fresh one is always spared")
     p.add_argument("--include-unused", action="store_true",
                    help="Also reap truly-empty tracked worktrees (no commits, "
                         "zero conversation turns)")
@@ -9001,6 +9180,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit a Copilot session's renderable transcript events (JSON)",
     )
     sp.add_argument("session_id", help="Copilot session ID")
+    sp.add_argument("--json", action="store_true",
+                    help="Emit JSON (default; accepted for caller compatibility)")
+
+    # recent-messages -- a worktree's latest session's last N conversation turns
+    sp = sub.add_parser(
+        "recent-messages",
+        help="Show a worktree's latest session's last N conversation messages "
+             "(JSON) -- the read-side companion to the disposition summary",
+    )
+    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id",
+                    required=True, help="Worktree ID (full or 4-char suffix)")
+    sp.add_argument("--limit", type=int, default=3,
+                    help="How many of the most recent messages to return "
+                         "(default: 3)")
     sp.add_argument("--json", action="store_true",
                     help="Emit JSON (default; accepted for caller compatibility)")
 
@@ -9360,6 +9553,26 @@ def cmd_session_transcript(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_recent_messages(args: argparse.Namespace) -> int:
+    """Emit a worktree's latest session's last N conversation messages as JSON.
+
+    The read-side companion to the disposition ``summary`` overlay: when the
+    agent-asserted summary never accumulated, this derives recent context
+    straight from the worktree's newest session ``events.jsonl``. Accepts a full
+    worktree id or its 4-char suffix. An unknown worktree is a JSON error; a
+    known worktree with no session yields an empty ``messages`` list.
+    """
+    wt_id = _resolve_worktree_id(args.worktree_id)
+    records = tracking.list_records(cfg.tracking_dir())
+    rec = next((r for r in records if r.worktree_id == wt_id), None)
+    if rec is None:
+        return _json_error(f"No worktree found: {args.worktree_id}")
+    payload = sessions.recent_worktree_messages(rec, limit=getattr(args, "limit", 3))
+    payload["worktree_id"] = rec.worktree_id
+    _json_output(payload)
+    return 0
+
+
 def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
     """Reconcile repo-configured copilot-extensions plugins (JSON action plan).
 
@@ -9498,6 +9711,7 @@ COMMAND_MAP = {
     "backfill-sessions": cmd_backfill_sessions,
     "list-sessions": cmd_list_sessions,
     "session-transcript": cmd_session_transcript,
+    "recent-messages": cmd_recent_messages,
     "anchor-check": cmd_anchor_check,
     "activity": activity.cmd_activity,
     "activity-log": activity.cmd_activity_log,

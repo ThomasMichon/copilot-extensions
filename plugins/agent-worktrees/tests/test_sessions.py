@@ -13,6 +13,7 @@ from agent_worktrees.sessions import (
     backfill_sessions,
     find_latest_session_id,
     find_latest_session_id_fast,
+    recent_worktree_messages,
     scan_sessions,
     scan_sessions_fast,
     validate_session_id,
@@ -790,3 +791,97 @@ class TestValidateSessionId:
     def test_none_for_empty_input(self):
         assert validate_session_id(None) is None
         assert validate_session_id("") is None
+
+
+# ---------------------------------------------------------------------------
+# recent_worktree_messages (read-side companion to the disposition summary)
+# ---------------------------------------------------------------------------
+
+def _conv_event(kind: str, content: str, ts: str) -> str:
+    """A real-shaped user/assistant message event line (text under data.content)."""
+    import json
+    return json.dumps({"type": kind, "data": {"content": content}, "timestamp": ts})
+
+
+class TestRecentWorktreeMessages:
+    """The last-N conversation-turn derivation behind the Picker viewer."""
+
+    def test_returns_last_n_newest_last(self, tmp_session_state_dir: Path):
+        wt_path = "/tmp/wt-recent"
+        make_session_dir(
+            tmp_session_state_dir, "sess-recent", wt_path,
+            events_lines=[
+                _conv_event("user.message", "first ask", "2026-06-01T10:00:00Z"),
+                _conv_event("assistant.message", "first answer", "2026-06-01T10:00:01Z"),
+                _conv_event("user.message", "second ask", "2026-06-01T10:00:02Z"),
+                _conv_event("assistant.message", "second answer", "2026-06-01T10:00:03Z"),
+                _conv_event("user.message", "third ask", "2026-06-01T10:00:04Z"),
+            ],
+        )
+        rec = _make_record("wt-recent", wt_path,
+                           sessions=[SessionEntry("sess-recent", "2026-06-01T10:00:00")])
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            out = recent_worktree_messages(rec, limit=3)
+        assert out["session_id"] == "sess-recent"
+        assert out["count"] == 3
+        # Newest last, oldest of the tail first.
+        assert [m["text"] for m in out["messages"]] == [
+            "second ask", "second answer", "third ask"]
+        assert [m["role"] for m in out["messages"]] == [
+            "user", "assistant", "user"]
+
+    def test_skips_tool_only_assistant_turns(self, tmp_session_state_dir: Path):
+        wt_path = "/tmp/wt-toolonly"
+        make_session_dir(
+            tmp_session_state_dir, "sess-tool", wt_path,
+            events_lines=[
+                _conv_event("user.message", "do the thing", "2026-06-01T10:00:00Z"),
+                # Tool-only assistant turn -- empty content, must be skipped.
+                _conv_event("assistant.message", "", "2026-06-01T10:00:01Z"),
+                _conv_event("assistant.message", "done", "2026-06-01T10:00:02Z"),
+            ],
+        )
+        rec = _make_record("wt-toolonly", wt_path,
+                           sessions=[SessionEntry("sess-tool", "2026-06-01T10:00:00")])
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            out = recent_worktree_messages(rec, limit=5)
+        assert [m["text"] for m in out["messages"]] == ["do the thing", "done"]
+
+    def test_picks_newest_session(self, tmp_session_state_dir: Path):
+        wt_path = "/tmp/wt-multi"
+        make_session_dir(
+            tmp_session_state_dir, "sess-old", wt_path,
+            updated_at="2026-06-01T10:00:00.000Z",
+            events_lines=[_conv_event("user.message", "old work", "2026-06-01T10:00:00Z")],
+        )
+        make_session_dir(
+            tmp_session_state_dir, "sess-new", wt_path,
+            updated_at="2026-06-02T10:00:00.000Z",
+            events_lines=[_conv_event("user.message", "new work", "2026-06-02T10:00:00Z")],
+        )
+        rec = _make_record("wt-multi", wt_path, sessions=[
+            SessionEntry("sess-old", "2026-06-01T10:00:00"),
+            SessionEntry("sess-new", "2026-06-02T10:00:00"),
+        ])
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            out = recent_worktree_messages(rec, limit=3)
+        assert out["session_id"] == "sess-new"
+        assert [m["text"] for m in out["messages"]] == ["new work"]
+
+    def test_empty_when_no_session(self, tmp_session_state_dir: Path):
+        rec = _make_record("wt-none", "/tmp/wt-none", sessions=[])
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            out = recent_worktree_messages(rec, limit=3)
+        assert out == {"session_id": None, "messages": [], "count": 0}

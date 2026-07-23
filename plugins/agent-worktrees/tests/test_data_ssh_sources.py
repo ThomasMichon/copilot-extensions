@@ -208,6 +208,22 @@ def test_remote_op_argv_finalize_uses_positional_id_and_json(monkeypatch):
     assert "--worktree-id" not in inner
 
 
+def test_recent_messages_argv_remote_builds_worktree_scoped_cli(monkeypatch):
+    """The remote recent-messages fetch runs
+    ``<proj> recent-messages --worktree <id> --limit N --json``."""
+    _remote_roster(monkeypatch)
+    argv = data_ssh.recent_messages_argv("Wheatley", "Linux", "wt-xyz", limit=5)
+    assert argv is not None and argv[0] == "ssh"
+    inner = argv[-1]
+    assert "proj recent-messages --worktree wt-xyz --limit 5 --json" in inner
+
+
+def test_recent_messages_argv_local_returns_none(monkeypatch):
+    """A local target yields no SSH argv (the caller loads it in-process)."""
+    _remote_roster(monkeypatch)
+    assert data_ssh.recent_messages_argv("Lambda-Core", "Win", "wt-xyz") is None
+
+
 def test_ssh_not_ready_remote_env_is_disabled(monkeypatch):
     """A ssh.ready:false machine's remote env stays a disabled tab."""
     entries = {

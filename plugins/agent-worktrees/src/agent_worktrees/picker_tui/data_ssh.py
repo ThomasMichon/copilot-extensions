@@ -286,6 +286,24 @@ def remote_op_argv(machine, env, op, worktree_id, *, include_unused=False,
     return None
 
 
+def recent_messages_argv(machine, env, worktree_id, *, limit=3):
+    """Build the SSH argv to fetch a remote worktree's recent session messages.
+
+    Runs ``<project> recent-messages --worktree <id> --limit N --json`` on the
+    remote host. Returns the ssh argv, or ``None`` for the local host or an
+    unknown / not-ready target (the caller loads local worktrees in-process).
+    """
+    project = _project()
+    for s in _build_sources():
+        if s.machine == machine and s.env == env:
+            if s.local or not s.ready or not s.alias:
+                return None
+            inner = (f"{project} recent-messages --worktree {worktree_id} "
+                     f"--limit {int(limit)} --json")
+            return _wrap_remote(s.shell, s.alias, inner)
+    return None
+
+
 def profiles_argv(machine, env, *, action, set_json=None, no_mirror=False):
     """SSH argv to run ``profiles get|apply`` on a remote host/env.
 

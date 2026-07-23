@@ -81,7 +81,12 @@ continue to work unchanged.
 | `finalize` | Validate the branch's content is on upstream; prune the worktree/branch only when idle (deferred while a session is live) |
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
 | `cleanup` | List and remove orphaned or finalized worktrees |
+| `gc` | Garbage-collect this project's worktrees on this machine: tracked reap (cleanup verdict) + **managed system/bridge leak sweep** (`--no-managed` to skip) + orphan-directory sweep + `git worktree prune`. `--dry-run` lists without removing; `--json` reports the managed + orphan sweeps. Also runs automatically on the no-daemon cadence (picker launch + session end) |
+| `reap-sessions` | Reap leaked `wt-<id>` tmux/psmux sessions whose worktree is finalized/gone/untracked **and** idle past the grace window (spares attached/active/busy) |
 | `status` | Show worktree git status |
+| `recent-messages` | Show a worktree's latest session's last N conversation messages (`--worktree <id>` `--limit N`, JSON) -- the read-side companion to the disposition summary; reads `events.jsonl` directly. Backs the picker's **Messages** viewer |
+| `list-sessions` | List a worktree's Copilot sessions with metadata (JSON) |
+| `session-transcript` | Emit a Copilot session's renderable transcript events by session id (JSON) |
 | `status-segment` | Print a styled status-bar segment for the worktree at the cwd (for a tmux/psmux status line) |
 | `status-context` | Print a styled left status-bar segment: machine, environment, and repo:id4 for the worktree at the cwd |
 | `status-updater` | Background loop that keeps a session's `@aw_ctx`/`@aw_seg` status vars fresh **off the paint path** (no per-render binstub spawn) |
@@ -278,6 +283,23 @@ only -- it never rebases, merges, or discards local commits.
 - **System menu -> Update stale worktrees.** Fetches once, then fast-forwards
   a single selected eligible worktree or all eligible worktrees in a batch.
   Only clean, strictly-behind worktrees with no local commits are eligible.
+
+## Garbage collection
+
+agent-worktrees runs **no persistent monitor process**. Stale state is reclaimed
+on a cadence at two natural lifecycle boundaries -- **picker launch** and
+**session end** -- so nothing accumulates without a scheduled task:
+
+- **Orphan mux sessions.** Leaked `wt-<id>` tmux/psmux sessions of finalized /
+  gone / untracked worktrees are reaped once idle past the grace window
+  (`reap-sessions`); an attached, active, or recently-busy session is spared.
+- **Leaked system/bridge worktrees.** The daemon-owned kinds routine `cleanup`
+  skips can leak (a crashed daemon, or a caller that finalized without tearing
+  its bridge worktree down). The managed sweep reaps only the **provably dead**
+  ones -- FINAL or UNUSED, no active process (mux/session/attach), no follow-up
+  flag, idle past the grace window -- and rides the same cadence. Run it
+  explicitly (with the tracked + orphan-directory sweeps) via `gc`; a caller
+  worktree's session ending is when its bridge worktree becomes reapable.
 
 ## Installation & Config
 
