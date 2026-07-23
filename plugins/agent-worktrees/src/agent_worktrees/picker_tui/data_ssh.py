@@ -248,6 +248,59 @@ def _wrap_remote(shell: str, alias: str, inner: str):
     return ["ssh", alias, f"bash -lc '{inner}'"]
 
 
+def _stream_argv(source):
+    """SSH argv that runs the remote ``list`` in NDJSON **streaming** mode.
+
+    Same classify + mux + platform list flags as :func:`_argv_for` plus
+    ``--stream``: the producer emits a ``begin`` frame, fast (unclassified)
+    rows, then classified rows, then a ``done`` frame -- one JSON object per
+    flushed line -- so the whole two-phase load happens over a single SSH
+    connection with progressive fill."""
+    project = _project()
+    cmd = f"{project} {_list_args(source.shell, classify=True)} --stream"
+    return _wrap_remote(source.shell, source.alias, cmd)
+
+
+def _parse_ndjson_line(raw: str):
+    """Parse one NDJSON line to a dict, tolerating banner noise / blank lines.
+
+    Login shells / pwsh can emit a line of noise before the JSON, so locate the
+    first ``{`` and decode from there. Returns ``None`` when the line carries no
+    JSON object (blank, banner, partial)."""
+    if not raw:
+        return None
+    s = raw.strip()
+    i = s.find("{")
+    if i < 0:
+        return None
+    try:
+        return json.loads(s[i:])
+    except Exception:
+        return None
+
+
+def _is_stream_unsupported(stderr: str) -> bool:
+    """True when a remote's argparse rejected ``--stream`` (older
+    agent-worktrees), so the caller falls back to the non-streaming path."""
+    s = (stderr or "").lower()
+    return "unrecognized arguments" in s and "--stream" in s
+
+
+def _stream_enabled() -> bool:
+    """Whether the Picker attempts single-connection NDJSON streaming before the
+    two-phase load.
+
+    Off by default during the fleet-rollout window: a remote that lacks the
+    ``--stream`` producer costs a wasted connect + argparse probe (~seconds)
+    before the two-phase fallback, which would regress first paint. So streaming
+    is **opt-in** until the producer is deployed mesh-wide -- enable with
+    ``AGENT_WORKTREES_PICKER_STREAM=1`` (any of 1/true/yes/on). Once every
+    machine's runtime carries the producer, this can flip to on by default."""
+    return os.environ.get(
+        "AGENT_WORKTREES_PICKER_STREAM", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
 def remote_op_argv(machine, env, op, worktree_id, *, include_unused=False,
                    include_conversations=False, force=False):
     """Build the SSH argv to run one maintenance op on a remote machine/env.
@@ -938,16 +991,154 @@ class LiveLoader:
                     self._procs.remove(proc)
         return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
+    def _spawn_stream(self, argv):
+        """Spawn a tracked, killable **streaming** child: returns the live
+        :class:`subprocess.Popen` (NOT communicated) so the caller can read
+        stdout line-by-line as the remote flushes NDJSON. Registered in
+        ``self._procs`` exactly like :meth:`_spawn`, so :meth:`cancel` (picker
+        teardown) tears it down and no ``ssh ... list --stream`` is orphaned."""
+        if self._cancelled.is_set():
+            raise RuntimeError("cancelled")
+        kwargs = dict(
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            text=True, encoding="utf-8", errors="replace",
+            bufsize=1,   # line-buffered: surface rows as they arrive
+        )
+        if os.name == "posix":
+            kwargs["start_new_session"] = True
+        else:
+            kwargs["creationflags"] = (
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                | _CREATE_NO_WINDOW
+            )
+        proc = subprocess.Popen(argv, **kwargs)
+        with self._procs_lock:
+            self._procs.append(proc)
+        # Close the cancel/spawn race (see _spawn).
+        if self._cancelled.is_set():
+            _kill_proc_tree(proc)
+        return proc
+
+    def _untrack(self, proc):
+        with self._procs_lock:
+            if proc in self._procs:
+                self._procs.remove(proc)
+
     def _load_one(self, source: Source):
         if source.local:
             # Local tab: fast-then-fill so rows paint immediately (see below).
             self._load_local_two_phase(source)
             return
-        # Remote tab: fast enumeration first, then a follow-up classify pass --
-        # symmetrical to the local two-phase, so a remote's rows resolve well
-        # inside the interactive timeout instead of gambling the whole
-        # enumeration on beating it with per-worktree git classification.
+        # Remote tab: try single-connection NDJSON streaming -- fast rows paint
+        # as they arrive, then each upgrades in place as its classified row
+        # streams in. Opt-in (see _stream_enabled) during the rollout window;
+        # falls back to the two-phase path when disabled or when the remote is
+        # too old to know --stream.
+        gen = self._gen.get(source.key, 0)
+        if _stream_enabled() and self._load_remote_stream(source, gen):
+            return
         self._load_remote_two_phase(source)
+
+    def _load_remote_stream(self, source: Source, gen: int) -> bool:
+        """Single-connection NDJSON streaming load.
+
+        Paints fast rows as they arrive (flipping the source to ``ready`` on the
+        first one) and upgrades each in place when its classified row streams in
+        -- collapsing the two-phase load's two SSH round-trips into one. An
+        overall :data:`_CLASSIFY_TIMEOUT` watchdog kills a stalled stream; rows
+        already received are kept (the tab stays resolved), mirroring the
+        two-phase classify-timeout behavior.
+
+        Returns True when the remote spoke the streaming protocol (resolved
+        fully, partially, or errored -- all handled/logged here). Returns False
+        **only** when the remote is too old to know ``--stream`` (argparse
+        'unrecognized arguments'), so the caller falls back to two-phase."""
+        argv = _stream_argv(source)
+        deadline = max(source.timeout, _CLASSIFY_TIMEOUT)
+        t0 = _dt.datetime.now()
+        by_id: dict = {}
+        order: list = []
+        ready = False
+        done = False
+        err = ""
+        try:
+            proc = self._spawn_stream(argv)
+        except Exception as exc:
+            self._log_fetch_failure(source, exc, t0, phase="stream")
+            with self._lock:
+                self._state[source.key] = "failed"
+                self._error[source.key] = str(exc).strip() or type(exc).__name__
+            return True
+        timer = threading.Timer(deadline, lambda: _kill_proc_tree(proc))
+        timer.daemon = True
+        timer.start()
+        try:
+            for raw in proc.stdout:
+                if self._cancelled.is_set():
+                    break
+                obj = _parse_ndjson_line(raw)
+                if obj is None:
+                    continue
+                typ = obj.get("type")
+                if typ == "worktree":
+                    wt = obj.get("wt") or {}
+                    rid = wt.get("id")
+                    if not rid:
+                        continue
+                    rec = derive.norm(wt, source.machine, source.env)
+                    with self._lock:
+                        if self._cancelled.is_set():
+                            break
+                        if self._gen.get(source.key, 0) != gen:
+                            break   # superseded by a reload()
+                        if rid not in by_id:
+                            order.append(rid)
+                        by_id[rid] = rec
+                        self._records[source.key] = [by_id[i] for i in order]
+                        if not ready:
+                            self._state[source.key] = "ready"
+                            ready = True
+                elif typ == "done":
+                    done = True
+        finally:
+            timer.cancel()
+            try:
+                _, err = proc.communicate(timeout=5)
+            except Exception:
+                _kill_proc_tree(proc)
+                try:
+                    _, err = proc.communicate(timeout=5)
+                except Exception:
+                    err = ""
+            self._untrack(proc)
+        elapsed = (_dt.datetime.now() - t0).total_seconds()
+        rc = proc.returncode
+        if ready or done:
+            # Fully or partially resolved (or an empty remote) -- keep the rows.
+            with self._lock:
+                if (not self._cancelled.is_set()
+                        and self._gen.get(source.key, 0) == gen):
+                    self._records[source.key] = [by_id[i] for i in order]
+                    self._state[source.key] = "ready"
+            note = "streamed" if done else "streamed (partial)"
+            _ssh_log(f"  OK      {source.machine}/{source.env} {note} "
+                     f"{len(order)} worktree(s) in {elapsed:.1f}s")
+            return True
+        # No rows: an old remote falls back to two-phase; anything else is a
+        # real failure the streaming path owns.
+        if _is_stream_unsupported(err):
+            _ssh_log(f"  ~       {source.machine}/{source.env} --stream "
+                     f"unsupported; falling back to two-phase")
+            return False
+        exc = _RemoteFetchError(
+            (err.strip().splitlines()[-1] if err.strip() else f"exit {rc}"),
+            returncode=rc, stderr=err, argv=argv)
+        self._log_fetch_failure(source, exc, t0, phase="stream", timeout=deadline)
+        with self._lock:
+            self._state[source.key] = "failed"
+            self._error[source.key] = str(exc).strip() or type(exc).__name__
+        return True
 
     def _load_remote_two_phase(self, source: Source):
         """Fast-then-classify for a remote tab (mirrors the local two-phase).
