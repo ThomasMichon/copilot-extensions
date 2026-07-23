@@ -92,6 +92,7 @@ adoption, and session launch.
 | `copilot-extensions-setup` | Install and adopt for all three plugins |
 | `agent-worktrees-wsl-provision` | Provision the current project in WSL |
 | `agent-worktrees-repos` | Repos registry -- known repos and source roots |
+| `repairing-worktrees` | Diagnose/repair worktree+session health via `doctor` |
 | `create-setup-script` | Generate repo-specific session setup scripts |
 | `agent-ssh` | SSH transport helpers |
 
