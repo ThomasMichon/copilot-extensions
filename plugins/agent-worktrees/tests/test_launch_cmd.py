@@ -23,22 +23,24 @@ def _args(copilot_args: list[str]) -> argparse.Namespace:
     return argparse.Namespace(copilot_args=copilot_args, recovery=False)
 
 
-def test_plain_launch_appends_allow_all_tools():
+def test_plain_launch_appends_allow_all():
     cmd = m._build_launch_cmd(_config(), _args([]), "/w/wt")
-    assert cmd[-1] == "--allow-all-tools"
+    assert cmd[-1] == "--allow-all"
 
 
-def test_acp_launch_skips_allow_all_tools():
+def test_acp_launch_skips_allow_all():
     cmd = m._build_launch_cmd(_config(), _args(["--acp", "--stdio"]), "/w/wt")
-    assert "--allow-all-tools" not in cmd
+    assert "--allow-all" not in cmd
 
 
 def test_existing_all_perm_flag_not_duplicated():
-    # --allow-all and --yolo already imply --allow-all-tools, so we must not
-    # append a redundant one; an explicit --allow-all-tools is also not doubled.
+    # --allow-all-tools, --allow-all, and --yolo are each an all-permissions
+    # stance the caller already expressed, so we must not append our default
+    # --allow-all on top of any of them.
     for flag in ("--allow-all-tools", "--allow-all", "--yolo"):
         cmd = m._build_launch_cmd(_config(), _args([flag]), "/w/wt")
-        assert cmd.count("--allow-all-tools") == (1 if flag == "--allow-all-tools" else 0)
+        assert "--allow-all" not in [c for c in cmd if c != flag]
+        assert cmd.count(flag) == 1
 
 
 def test_resume_uses_equals_form():
@@ -90,7 +92,7 @@ def test_setup_hook_builds_normalized_launch(monkeypatch):
     assert hook_arg.endswith("session-setup.sh")
     # relative hook path is resolved against the anchor
     assert "tools" in hook_arg and "setup" in hook_arg
-    assert cmd[-1] == "--allow-all-tools"
+    assert cmd[-1] == "--allow-all"
 
 
 def test_setup_hook_absolute_path_preserved(monkeypatch):
