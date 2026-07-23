@@ -579,13 +579,33 @@ try {
     # in-process, that window persists for the life of the coordinator.
     $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
         -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`""
-    $trigger = New-ScheduledTaskTrigger -AtLogOn
+    # Two triggers: -AtStartup makes the coordinator a true always-on service that
+    # comes up at boot with NO interactive login (essential for a headless box
+    # like Borealis, accessed only over SSH); -AtLogOn additionally (re)starts it
+    # when the operator logs in (covers a manually-stopped task on a
+    # console-driven box). The dev58 bounded bind-host retry
+    # (_resolve_bind_host_resilient) rides out the boot-before-WSL race on NAT,
+    # where the vEthernet(WSL) IP isn't up yet the instant -AtStartup fires.
+    $trigger = @(
+        (New-ScheduledTaskTrigger -AtStartup),
+        (New-ScheduledTaskTrigger -AtLogOn)
+    )
     $settings = New-ScheduledTaskSettingsSet `
         -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
         -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
     $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
+    # LogonType S4U ("run whether the user is logged on or not", no stored
+    # password): the coordinator must run headless. The prior Interactive logon
+    # type only ran while the user had an interactive console session, so on a
+    # headless SSH-only box the task registered but never fired (observed on
+    # Borealis: State=Ready, LastRunTime=never). S4U runs it in a non-interactive
+    # session at boot; validated binding the vEthernet(WSL) IP on Borealis NAT and
+    # loopback on mirrored hosts. Set-ScheduledTask/Register with S4U succeeds
+    # non-elevated (unlike a password-backed Password logon). NOTE: the supervisor
+    # task below deliberately stays Interactive -- it spawns embody CLI sessions
+    # that need an interactive session, which S4U's non-interactive station lacks.
+    $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType S4U -RunLevel Limited
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'

@@ -66,6 +66,44 @@ def test_serve_invocation_drops_to_continue():
     )
 
 
+def _install_coordinator_task_body() -> str:
+    """The body of the `Install-CoordinatorTask` function -- the coordinator's
+    scheduled-task registration -- isolated from the separate supervisor task
+    (which deliberately keeps a different principal)."""
+    text = INSTALL_PS1.read_text(encoding="utf-8")
+    m = re.search(r"function\s+Install-CoordinatorTask\s*\{", text)
+    assert m, "could not locate Install-CoordinatorTask in install.ps1"
+    # Body runs until the next column-0 `function ` declaration.
+    rest = text[m.end() :]
+    nxt = re.search(r"\n function |\nfunction ", rest)
+    return rest[: nxt.start()] if nxt else rest
+
+
+def test_coordinator_task_runs_headless_via_s4u():
+    """The coordinator task must use LogonType S4U so it runs on a headless box
+    with no interactive login (Borealis is SSH-only). Interactive registered but
+    never fired there."""
+    body = _install_coordinator_task_body()
+    assert "-LogonType S4U" in body, (
+        "coordinator principal must be -LogonType S4U (runs headless, no login); "
+        "Interactive only runs with a console session"
+    )
+    assert "-LogonType Interactive" not in body, (
+        "coordinator principal must not be Interactive -- it won't fire on a "
+        "headless host"
+    )
+
+
+def test_coordinator_task_starts_at_boot():
+    """The coordinator task must have an -AtStartup trigger so it is a true
+    always-on service surviving a headless reboot."""
+    body = _install_coordinator_task_body()
+    assert "-AtStartup" in body, (
+        "coordinator task must include a New-ScheduledTaskTrigger -AtStartup so "
+        "it comes up at boot without a login"
+    )
+
+
 def test_serve_output_still_captured_to_log():
     """The launcher must still capture serve output to the log for headless
     diagnosability (#2889)."""
