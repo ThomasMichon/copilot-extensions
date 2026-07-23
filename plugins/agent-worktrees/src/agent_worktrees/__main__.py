@@ -9325,6 +9325,25 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--field", action="append", default=[],
                     help="Extra context as key=value (repeatable)")
 
+    # doctor -- diagnose (and with --fix) repair worktree/session health
+    sp = sub.add_parser(
+        "doctor",
+        help="Diagnose (and with --fix, repair) worktree/session health: "
+             "corrupt tracking records, empty session registries, stale "
+             "status, orphaned empty session shells, cwd/path misalignment.",
+    )
+    sp.add_argument("--fix", action="store_true",
+                    help="Apply non-destructive repairs (YAML integrity, "
+                         "registry/title backfill, stale status). Default: "
+                         "report only.")
+    sp.add_argument("--gc-sessions", action="store_true", dest="gc_sessions",
+                    help="With --fix, also delete empty (0-user-message) "
+                         "session-state shells and purge their session-store "
+                         "rows (destructive; guarded by age/lock/current/"
+                         "registered).")
+    sp.add_argument("--json", action="store_true",
+                    help="Emit the health report as JSON.")
+
     return parser
 
 
@@ -9528,23 +9547,10 @@ def _capture_session_title(worktree_id: str, session_id: str) -> bool:
     return False
 
 
-def cmd_backfill_sessions(args: argparse.Namespace) -> int:
-    """Populate empty session registries -- and the Picker's title slot --
-    from existing session-state data.
-
-    Two independent passes:
-
-      1. **Session registry** -- records with an empty ``sessions`` list get
-         their discovered session ids written back.
-
-      2. **Title (overall summary)** -- records lacking a ``title`` get one
-         captured from their newest session's ``workspace.yaml`` (newest
-         first, falling back to older sessions whose state still exists), so
-         the Picker shows the summary instead of "(untitled)".  Runs even
-         when every record already has session data -- e.g. after an earlier
-         sessions-only backfill that left titles null.
-    """
-    tracking_path = cfg.tracking_dir()
+def _run_backfill(tracking_path: Path) -> dict:
+    """Registry + title backfill core (shared by ``backfill-sessions`` and
+    ``doctor``). Writes discovered session ids into empty registries and fills
+    missing titles from the newest session's summary. Returns counts."""
     records = tracking.list_records(tracking_path)
 
     # --- Pass 1: session registry (only records with empty sessions) ---
@@ -9552,7 +9558,6 @@ def cmd_backfill_sessions(args: argparse.Namespace) -> int:
     discovered: dict[str, list[str]] = {}
     sess_updated = 0
     if need_backfill:
-        print(f"Scanning session-state for {len(need_backfill)} worktree(s)...")
         discovered = sessions.backfill_sessions(need_backfill)
         for rec in need_backfill:
             sids = discovered.get(rec.worktree_id, [])
@@ -9588,13 +9593,193 @@ def cmd_backfill_sessions(args: argparse.Namespace) -> int:
                 tracking.save_record(rec)
                 titled += 1
 
-    total_sessions = sum(len(v) for v in discovered.values())
+    return {
+        "scanned": len(need_backfill),
+        "sessions": sum(len(v) for v in discovered.values()),
+        "worktrees": len(discovered),
+        "registry": sess_updated,
+        "titles": titled,
+    }
+
+
+def cmd_backfill_sessions(args: argparse.Namespace) -> int:
+    """Populate empty session registries -- and the Picker's title slot --
+    from existing session-state data.
+
+    Two independent passes:
+
+      1. **Session registry** -- records with an empty ``sessions`` list get
+         their discovered session ids written back.
+
+      2. **Title (overall summary)** -- records lacking a ``title`` get one
+         captured from their newest session's ``workspace.yaml`` (newest
+         first, falling back to older sessions whose state still exists), so
+         the Picker shows the summary instead of "(untitled)".  Runs even
+         when every record already has session data -- e.g. after an earlier
+         sessions-only backfill that left titles null.
+    """
+    r = _run_backfill(cfg.tracking_dir())
+    if r["scanned"]:
+        print(f"Scanning session-state for {r['scanned']} worktree(s)...")
     print(
-        f"Backfilled {total_sessions} session(s) across "
-        f"{len(discovered)} worktree(s); "
-        f"{sess_updated} registry + {titled} title record(s) updated"
+        f"Backfilled {r['sessions']} session(s) across "
+        f"{r['worktrees']} worktree(s); "
+        f"{r['registry']} registry + {r['titles']} title record(s) updated"
     )
     return 0
+
+
+def _current_session_ids() -> set[str]:
+    """Session ids that must never be GC'd: the running agent's own session."""
+    sid = os.environ.get("COPILOT_AGENT_SESSION_ID")
+    return {sid} if sid else set()
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """``doctor`` -- diagnose (and with ``--fix``, repair) worktree/session
+    health for this project.
+
+    Read-only by default. ``--fix`` applies non-destructive repairs
+    (YAML integrity, registry/title backfill, stale status). ``--gc-sessions``
+    (with ``--fix``) additionally removes empty session-state shells and purges
+    their orphaned ``session-store.db`` rows. ``--json`` emits the report.
+    """
+    from . import health
+
+    apply = getattr(args, "fix", False)
+    do_gc = getattr(args, "gc_sessions", False)
+    json_mode = getattr(args, "json", False)
+
+    tracking_dir = cfg.tracking_dir()
+    session_dir = sessions._session_state_dir()
+    store_db = health.default_store_db(session_dir)
+
+    # 1. YAML integrity -- FIRST so a repaired record is visible to the passes
+    #    below (list_records silently skips an unparseable file).
+    yaml_findings = health.repair_yaml_integrity(tracking_dir, apply=apply)
+
+    # 2. Registry + title backfill (delegates to the shared core when applying;
+    #    read-only scan otherwise -- backfill_sessions never writes).
+    if apply:
+        backfill = _run_backfill(tracking_dir)
+    else:
+        recs = tracking.list_records(tracking_dir)
+        need = [r for r in recs if not r.sessions]
+        disc = sessions.backfill_sessions(need) if need else {}
+        backfill = {
+            "scanned": len(need),
+            "sessions": sum(len(v) for v in disc.values()),
+            "worktrees": len(disc),
+            "registry": len(disc),
+            "titles": len([r for r in recs if not (r.title and r.title != "null")]),
+        }
+
+    records = tracking.list_records(tracking_dir)
+
+    # 3. Stale status: active + completed_at -> complete
+    stale = health.find_stale_status(records)
+    stale_fixed = 0
+    if apply:
+        for r in stale:
+            r.status = "complete"
+            tracking.save_record(r)
+            stale_fixed += 1
+
+    # 4. Empty session-state shells (never GC the current or a registered one)
+    exclude = health.registered_session_ids(records) | _current_session_ids()
+    shells = health.find_empty_session_shells(
+        session_dir, exclude_ids=frozenset(exclude))
+    gc_result = health.gc_empty_shells(
+        session_dir, store_db, shells, apply=(apply and do_gc))
+
+    # 5. Alignment audit (report-only)
+    misaligned = health.audit_alignment(records, session_dir)
+
+    try:
+        proj_name = cfg.project_name()
+    except Exception:
+        proj_name = ""
+
+    report = {
+        "project": proj_name,
+        "mode": "fix" if apply else "report",
+        "yaml_integrity": {
+            "bad": len(yaml_findings),
+            "repairable": sum(1 for f in yaml_findings if f.repairable),
+            "repaired": sum(1 for f in yaml_findings if f.repaired),
+            "files": [
+                {"file": f.path.name, "error": f.error,
+                 "repairable": f.repairable, "repaired": f.repaired}
+                for f in yaml_findings
+            ],
+        },
+        "backfill": backfill,
+        "stale_status": {"found": len(stale), "fixed": stale_fixed,
+                         "ids": [r.worktree_id for r in stale]},
+        "empty_sessions": gc_result,
+        "misaligned": {"count": len(misaligned), "worktrees": misaligned},
+    }
+
+    if json_mode:
+        _json_output(report)
+        return 0
+
+    _render_doctor_report(report, applied=apply, gc_applied=(apply and do_gc))
+    return 0
+
+
+def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> None:
+    chk = "\u2713"
+    print(f"Worktree/session doctor ({'fix' if applied else 'report-only'})")
+
+    yi = report["yaml_integrity"]
+    if yi["bad"]:
+        tail = f", {yi['repaired']} repaired" if applied else \
+            f", {yi['repairable']} repairable"
+        print(f"  ! Corrupt tracking records: {yi['bad']}{tail}")
+        for f in yi["files"]:
+            mark = "fixed" if f["repaired"] else (
+                "repairable" if f["repairable"] else "manual")
+            print(f"      - {f['file']} [{mark}] {f['error']}")
+    else:
+        print("  \u2713 Tracking records parse cleanly")
+
+    bf = report["backfill"]
+    if applied:
+        print(f"  \u2713 Backfill: {bf['registry']} registry + "
+              f"{bf['titles']} title record(s) updated "
+              f"({bf['sessions']} session(s))")
+    else:
+        print(f"  \u2022 Backfill candidates: {bf['worktrees']} worktree(s) "
+              f"w/ discoverable sessions, {bf['titles']} missing title(s)")
+
+    ss = report["stale_status"]
+    if ss["found"]:
+        print(f"  {chk if applied else '!'} Stale status "
+              f"(active + completed_at): {ss['found']} "
+              f"{'fixed' if applied else 'found'} -> {', '.join(ss['ids'][:8])}")
+    else:
+        print(f"  {chk} No stale statuses")
+
+    es = report["empty_sessions"]
+    if es["count"]:
+        if gc_applied:
+            print(f"  \u2713 Empty session shells: removed {es['removed_dirs']} "
+                  f"dir(s), purged {es['removed_rows']} store row(s)")
+        else:
+            hint = "" if applied else " (needs --fix --gc-sessions)"
+            print(f"  \u2022 Empty session shells: {es['count']} "
+                  f"candidate(s){hint}")
+    else:
+        print("  \u2713 No orphaned empty session shells")
+
+    mis = report["misaligned"]
+    if mis["count"]:
+        print(f"  \u2022 Alignment audit: {mis['count']} session-less "
+              f"worktree(s) point at a foreign parent cwd "
+              f"(resume handled by Fix; informational)")
+    else:
+        print("  \u2713 No worktree/path misalignment")
 
 
 def cmd_list_sessions(args: argparse.Namespace) -> int:
@@ -9793,6 +9978,7 @@ COMMAND_MAP = {
     "register-session": cmd_register_session,
     "deregister-session": cmd_deregister_session,
     "backfill-sessions": cmd_backfill_sessions,
+    "doctor": cmd_doctor,
     "list-sessions": cmd_list_sessions,
     "session-transcript": cmd_session_transcript,
     "recent-messages": cmd_recent_messages,

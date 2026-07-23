@@ -83,6 +83,7 @@ continue to work unchanged.
 | `cleanup` | List and remove orphaned or finalized worktrees |
 | `gc` | Garbage-collect this project's worktrees on this machine: tracked reap (cleanup verdict) + **managed system/bridge leak sweep** (`--no-managed` to skip) + orphan-directory sweep + `git worktree prune`. `--dry-run` lists without removing; `--json` reports the managed + orphan sweeps. Also runs automatically on the no-daemon cadence (picker launch + session end) |
 | `reap-sessions` | Reap leaked `wt-<id>` tmux/psmux sessions whose worktree is finalized/gone/untracked **and** idle past the grace window (spares attached/active/busy) |
+| `doctor` | Diagnose (and with `--fix`, repair) this project's worktree/session **record + session-state** health: corrupt tracking records, empty session registries + missing titles (backfill), stale `active`+`completed_at` status, orphaned 0-user-message session shells (`--gc-sessions`, destructive), and cwd/path misalignment (report-only). Read-only by default; `--json` for the report |
 | `status` | Show worktree git status |
 | `recent-messages` | Show a worktree's latest session's last N conversation messages (`--worktree <id>` `--limit N`, JSON) -- the read-side companion to the disposition summary; reads `events.jsonl` directly. Backs the picker's **Messages** viewer |
 | `list-sessions` | List a worktree's Copilot sessions with metadata (JSON) |
