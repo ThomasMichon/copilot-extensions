@@ -646,7 +646,7 @@ def test_load_one_failure_logs_reason(monkeypatch, tmp_path):
     src = data_ssh.Source("dev6", "Win", ["ssh", "dev6", "cmd"], ready=True,
                           alias="host-dev6")
     loader = data_ssh.LiveLoader([src])
-    loader._load_one(src)
+    loader._load_remote_two_phase(src)
     assert loader.state("dev6", "Win") == "failed"
     text = logf.read_text(encoding="utf-8")
     assert "dev6/Win [load]" in text
@@ -742,3 +742,149 @@ def test_remote_single_pass_when_classify_unsupported(monkeypatch, tmp_path):
     assert loader.state("old", "Win") == "ready"
     assert loader.records() == ["x"]
     assert len(calls) == 1                            # no second phase
+
+
+# ── remote NDJSON streaming load (Phase A) ────────────────────────────────────
+
+import json as _json
+
+
+class _FakeStreamProc:
+    """Stand-in for a streaming Popen: yields pre-baked NDJSON lines on stdout."""
+
+    def __init__(self, lines, err="", rc=0):
+        self.stdout = iter(list(lines))
+        self._err = err
+        self.returncode = rc
+
+    def communicate(self, timeout=None):
+        return ("", self._err)
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self):
+        pass
+
+
+def _nd(obj):
+    return _json.dumps(obj) + "\n"
+
+
+def _stream_src():
+    argv = data_ssh._argv_for("pwsh", "host-dev6", "dotfiles", classify=True)
+    return data_ssh.Source("dev6", "Win", argv, ready=True, alias="host-dev6")
+
+
+def test_stream_paints_fast_then_classified(monkeypatch, tmp_path):
+    monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
+    # Keep the record identity trivial so we can assert the fast->classified swap.
+    monkeypatch.setattr(data_ssh.derive, "norm", lambda wt, m, e: dict(wt))
+    lines = [
+        _nd({"type": "begin", "count": 2}),
+        _nd({"type": "worktree", "phase": "fast", "wt": {"id": "A"}}),
+        _nd({"type": "worktree", "phase": "fast", "wt": {"id": "B"}}),
+        _nd({"type": "worktree", "phase": "classified",
+             "wt": {"id": "A", "state": "clean"}}),
+        _nd({"type": "worktree", "phase": "classified",
+             "wt": {"id": "B", "state": "unused"}}),
+        _nd({"type": "done", "count": 2}),
+    ]
+    src = _stream_src()
+    loader = data_ssh.LiveLoader([src])
+    monkeypatch.setattr(loader, "_spawn_stream", lambda argv: _FakeStreamProc(lines))
+
+    handled = loader._load_remote_stream(src, loader._gen[src.key])
+    assert handled is True
+    assert loader.state("dev6", "Win") == "ready"
+    recs = loader.records()
+    assert [r["id"] for r in recs] == ["A", "B"]         # first-seen order kept
+    assert recs[0]["state"] == "clean"                   # classified swapped in
+    assert recs[1]["state"] == "unused"
+    assert "streamed 2 worktree(s)" in (tmp_path / "l.log").read_text("utf-8")
+
+
+def test_stream_empty_remote_resolves_ready(monkeypatch, tmp_path):
+    monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
+    lines = [_nd({"type": "begin", "count": 0}), _nd({"type": "done", "count": 0})]
+    src = _stream_src()
+    loader = data_ssh.LiveLoader([src])
+    monkeypatch.setattr(loader, "_spawn_stream", lambda argv: _FakeStreamProc(lines))
+
+    handled = loader._load_remote_stream(src, loader._gen[src.key])
+    assert handled is True
+    assert loader.state("dev6", "Win") == "ready"        # empty is success
+    assert loader.records() == []
+
+
+def test_stream_unsupported_returns_false_for_fallback(monkeypatch, tmp_path):
+    monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
+    proc = _FakeStreamProc(
+        [], err="error: unrecognized arguments: --stream", rc=2)
+    src = _stream_src()
+    loader = data_ssh.LiveLoader([src])
+    monkeypatch.setattr(loader, "_spawn_stream", lambda argv: proc)
+
+    handled = loader._load_remote_stream(src, loader._gen[src.key])
+    assert handled is False                              # caller falls back
+    assert loader.state("dev6", "Win") != "ready"
+
+
+def test_stream_hard_failure_marks_failed(monkeypatch, tmp_path):
+    monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
+    proc = _FakeStreamProc(
+        [], err="ssh: Could not resolve hostname", rc=255)
+    src = _stream_src()
+    loader = data_ssh.LiveLoader([src])
+    monkeypatch.setattr(loader, "_spawn_stream", lambda argv: proc)
+
+    handled = loader._load_remote_stream(src, loader._gen[src.key])
+    assert handled is True                               # owned, not fallback
+    assert loader.state("dev6", "Win") == "failed"
+    assert "[stream]" in (tmp_path / "l.log").read_text("utf-8")
+
+
+def test_load_one_prefers_stream_then_falls_back(monkeypatch, tmp_path):
+    monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_STREAM", "1")
+    src = _stream_src()
+    loader = data_ssh.LiveLoader([src])
+    calls = []
+    # Streaming declines (old remote) -> _load_one must fall back to two-phase.
+    monkeypatch.setattr(loader, "_load_remote_stream",
+                        lambda s, gen: calls.append("stream") or False)
+    monkeypatch.setattr(loader, "_load_remote_two_phase",
+                        lambda s: calls.append("two_phase"))
+    loader._load_one(src)
+    assert calls == ["stream", "two_phase"]
+
+
+def test_load_one_skips_stream_when_disabled(monkeypatch):
+    # Default (gate off): _load_one goes straight to two-phase, never streams.
+    monkeypatch.delenv("AGENT_WORKTREES_PICKER_STREAM", raising=False)
+    src = _stream_src()
+    loader = data_ssh.LiveLoader([src])
+    calls = []
+    monkeypatch.setattr(loader, "_load_remote_stream",
+                        lambda s, gen: calls.append("stream") or True)
+    monkeypatch.setattr(loader, "_load_remote_two_phase",
+                        lambda s: calls.append("two_phase"))
+    loader._load_one(src)
+    assert calls == ["two_phase"]
+
+
+def test_stream_enabled_reads_env(monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_PICKER_STREAM", raising=False)
+    assert data_ssh._stream_enabled() is False
+    for v in ("1", "true", "YES", "on"):
+        monkeypatch.setenv("AGENT_WORKTREES_PICKER_STREAM", v)
+        assert data_ssh._stream_enabled() is True
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_STREAM", "0")
+    assert data_ssh._stream_enabled() is False
+
+
+def test_stream_argv_adds_stream_flag():
+    src = _stream_src()
+    argv = data_ssh._stream_argv(src)
+    rendered = data_ssh._remote_cmd_str(argv)
+    assert "list --json" in rendered and "--stream" in rendered

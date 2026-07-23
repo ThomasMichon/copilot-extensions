@@ -291,32 +291,49 @@ def _classify_records(
     config = cfg.load_config()
     repo = config.default_repo
     active_paths = _build_active_paths(records, session_ctx)
-    out: dict[str, git_ops.WorktreeStateInfo] = {}
-    for rec in records:
-        if rec.worktree_path and Path(rec.worktree_path).exists():
-            info = git_ops.classify_worktree(
-                rec.worktree_path, rec.branch,
-                fetch=False, remote=repo.remote,
-                default_branch=repo.default_branch, active_paths=active_paths,
+    return {
+        rec.worktree_id: _classify_one_record(
+            rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx)
+        for rec in records
+    }
+
+
+def _classify_one_record(
+    rec: tracking.WorktreeRecord,
+    *,
+    repo,
+    active_paths,
+    session_ctx: sessions.SessionContext | None = None,
+) -> git_ops.WorktreeStateInfo:
+    """Classify one worktree's git state -- the per-record body of
+    :func:`_classify_records`, factored out so the streaming list
+    (:func:`_cmd_list_stream`) can emit classification progressively, one
+    worktree at a time, instead of computing the whole batch before any row is
+    sent. ``repo`` / ``active_paths`` are hoisted out of the per-record loop by
+    the caller (they are the same for every record)."""
+    if rec.worktree_path and Path(rec.worktree_path).exists():
+        info = git_ops.classify_worktree(
+            rec.worktree_path, rec.branch,
+            fetch=False, remote=repo.remote,
+            default_branch=repo.default_branch, active_paths=active_paths,
+        )
+        info = _apply_tracking_override(rec, info)
+    elif rec.status == "finalized":
+        info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    else:
+        info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
+    # Layer the session-derived CONVO refinement so this data contract
+    # reports the same display state the tmux status bar does.
+    if session_ctx is not None:
+        turns = session_ctx.turn_count.get(
+            _normalize_path(rec.worktree_path), 0,
+        )
+        if turns:
+            info = dataclasses.replace(
+                info,
+                state=git_ops.refine_state_with_session(info.state, turns),
             )
-            info = _apply_tracking_override(rec, info)
-        elif rec.status == "finalized":
-            info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
-        else:
-            info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
-        # Layer the session-derived CONVO refinement so this data contract
-        # reports the same display state the tmux status bar does.
-        if session_ctx is not None:
-            turns = session_ctx.turn_count.get(
-                _normalize_path(rec.worktree_path), 0,
-            )
-            if turns:
-                info = dataclasses.replace(
-                    info,
-                    state=git_ops.refine_state_with_session(info.state, turns),
-                )
-        out[rec.worktree_id] = info
-    return out
+    return info
 
 
 def _make_pr_lookup(config):
@@ -4272,6 +4289,62 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
 # list -- lightweight inventory from tracking records
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _cmd_list_stream(args: argparse.Namespace, records) -> int:
+    """Emit the worktree listing as newline-delimited JSON for the Picker's
+    streaming SSH consumer -- one JSON object per line, each flushed immediately.
+
+    Frame order (mirrors the two-phase load, collapsed into one connection):
+
+    - ``{"type":"begin","count":N}`` -- so the reader knows the roster size.
+    - ``{"type":"worktree","phase":"fast","wt":{...}}`` per record, with **no**
+      git classification, so enumeration paints at once.
+    - when ``--classify`` is set, ``{"type":"worktree","phase":"classified",
+      "wt":{...}}`` per record as its git state is computed (streamed one at a
+      time via :func:`_classify_one_record`), so rows upgrade progressively
+      instead of after a terminal blob.
+    - ``{"type":"done","count":N}``.
+
+    Each line is a standalone object written to the real stdout and flushed, so a
+    reader over SSH sees rows as they are produced rather than all at the end."""
+    out = sys.__stdout__
+
+    def emit(obj: dict) -> None:
+        out.write(json.dumps(obj, default=str))
+        out.write("\n")
+        out.flush()
+
+    mux_map: dict[str, sessions.MuxInfo] = {}
+    if getattr(args, "mux_details", False):
+        mux_map = sessions.mux_status_many([r.worktree_id for r in records])
+    session_ctx = sessions.scan_sessions_fast(records)
+
+    def to_dict(rec, state_info):
+        wt = _worktree_to_dict(
+            rec, mux_info=mux_map.get(rec.worktree_id),
+            session_ctx=session_ctx, state_info=state_info)
+        title = wt.get("title")
+        if not title or title == "null":
+            wt["title"] = session_ctx.latest_summary.get(
+                _normalize_path(rec.worktree_path))
+        return wt
+
+    emit({"type": "begin", "version": _JSON_SCHEMA_VERSION, "count": len(records)})
+    for rec in records:
+        emit({"type": "worktree", "phase": "fast", "wt": to_dict(rec, None)})
+    if getattr(args, "classify", False):
+        config = cfg.load_config()
+        repo = config.default_repo
+        active_paths = _build_active_paths(records, session_ctx)
+        for rec in records:
+            info = _classify_one_record(
+                rec, repo=repo, active_paths=active_paths,
+                session_ctx=session_ctx)
+            emit({"type": "worktree", "phase": "classified",
+                  "wt": to_dict(rec, info)})
+    emit({"type": "done", "count": len(records)})
+    return 0
+
+
 def cmd_list(args: argparse.Namespace) -> int:
     """List worktrees from tracking records.
 
@@ -4304,6 +4377,11 @@ def cmd_list(args: argparse.Namespace) -> int:
             and Path(r.worktree_path).exists()
             and (Path(r.worktree_path) / ".git").exists()
         ]
+
+    if getattr(args, "stream", False):
+        # NDJSON streaming path (implies --json): the Picker's streaming SSH
+        # consumer reads rows progressively over one connection.
+        return _cmd_list_stream(args, records)
 
     if args.json:
         mux_map: dict[str, sessions.MuxInfo] = {}
@@ -8848,6 +8926,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--classify", action="store_true",
                    help="Include git state classification (state/ahead/behind/"
                         "dirty; JSON only). Slower: ~5 git calls per worktree.")
+    p.add_argument("--stream", action="store_true",
+                   help="Emit newline-delimited JSON (one worktree per line, "
+                        "flushed) for the Picker's streaming SSH consumer: a "
+                        "begin frame, fast (unclassified) rows, then classified "
+                        "rows (with --classify), then a done frame. Implies "
+                        "--json.")
 
     # create (non-interactive worktree creation; --system for daemon-owned)
     p = sub.add_parser(
