@@ -2,6 +2,7 @@
 
 Subcommands:
   emit-profile   Render/write a managed SSH profile fragment.
+  explore        Introspect a reachable SSH target (repos, runtimes, agents).
   verify         Probe machine-name SSH reachability using the active profile.
   version        Show package version.
 """
@@ -9,11 +10,13 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 from . import __version__
+from . import explore as explore_mod
 from . import ssh_profile
 
 
@@ -75,6 +78,15 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     return rc
 
 
+def _cmd_explore(args: argparse.Namespace) -> int:
+    result = explore_mod.explore(args.target, timeout=args.timeout)
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2))
+    else:
+        print(explore_mod.format_report(result))
+    return 0 if result.reachable else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-ssh",
@@ -98,6 +110,20 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--timeout", type=int, default=8, help="SSH ConnectTimeout seconds.")
     verify.add_argument("names", nargs="*", help="Host aliases to probe.")
     verify.set_defaults(func=_cmd_verify)
+
+    explore = sub.add_parser(
+        "explore",
+        help="Introspect a reachable SSH target: its checked-out repos + locations, "
+        "installed fabric runtimes, and the agents that fall out of them.",
+    )
+    explore.add_argument("target", help="SSH host alias to introspect (ssh <target>).")
+    explore.add_argument(
+        "--timeout", type=int, default=10, help="SSH ConnectTimeout seconds."
+    )
+    explore.add_argument(
+        "--json", action="store_true", help="Emit the structured result as JSON."
+    )
+    explore.set_defaults(func=_cmd_explore)
 
     sub.add_parser("version", help="Show version")
     return parser

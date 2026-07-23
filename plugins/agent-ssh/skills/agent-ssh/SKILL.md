@@ -44,6 +44,25 @@ agent-ssh verify --timeout 8 machine-a machine-b
 A failure is fail-safe: the host is not considered reachable until the probe
 succeeds.
 
+## Explore a machine
+
+```bash
+agent-ssh explore <ssh-target> [--json] [--timeout 10]
+```
+
+Introspects a **reachable** target over SSH and reports, by convention, what the
+machine offers the fabric: its checked-out repos and **where** they live (read
+live from the machine's own repo registry, `agent-worktrees repos list --json`),
+which of those **back an agent**, whether the fabric runtimes (`agent-worktrees`
+/ `agent-bridge` / `agent-dispatch`) are installed, and the **derived agents**
+that fall out — `<repo>@<target>` for each agent-backing checkout. `--json` emits
+the structured result.
+
+`explore` is **read-only** — it runs one SSH probe and prints a report; it never
+mutates local or remote state. Repo locations are read live from the machine at
+query time (derive-don't-duplicate). It targets POSIX shells (Linux / WSL); a
+PowerShell-host probe is a follow-on.
+
 ## Writing a transport
 
 Ship a `module.yaml` conforming to `contract/module.schema.json`. Provide a
