@@ -14,6 +14,7 @@ from agent_bridge.transport import (
     SpawnTarget,
     _build_remote_cmd,
     _extract_json_object,
+    _resolve_remote_existing_cwd,
     _resolve_worktree,
     _resolve_worktree_remote,
     _wrap_batch_for_windows,
@@ -306,7 +307,7 @@ class TestSpawnSsh:
 
     @pytest.mark.asyncio
     async def test_ssh_project_resolve_failure_falls_back_to_new(self, mock_manager):
-        """If remote resolve fails, launch falls back to a direct --new (no crash)."""
+        """If remote resolve fails, launch falls back with a verified cwd."""
         target = SpawnTarget(
             type="ssh", host="server-a", user="deploy", project="my-project",
         )
@@ -315,22 +316,30 @@ class TestSpawnSsh:
         failed.exit_code = 1
         failed.stdout = ""
         failed.stderr = "resolve blew up"
-        mock_manager.exec_command = AsyncMock(return_value=failed)
+        home = MagicMock()
+        home.timed_out = False
+        home.exit_code = 0
+        home.stdout = "/home/deploy\n"
+        home.stderr = ""
+        mock_manager.exec_command = AsyncMock(side_effect=[failed, home])
 
         with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
             await spawn_ssh(target)
 
         # No id bound; launch uses the legacy direct --new path.
         assert target.worktree_id is None
+        assert target.cwd == "/home/deploy"
+        assert mock_manager.exec_command.call_count == 2
         remote_cmd = mock_manager.open_stdio_channel.call_args[0][1]
         assert "--new" in remote_cmd
         assert "--worktree-id" not in remote_cmd
 
     @pytest.mark.asyncio
     async def test_ssh_project_with_existing_worktree_id_skips_resolve(self, mock_manager):
-        """A session roll (worktree_id already set) should not re-resolve --new."""
+        """A session roll with persisted cwd should not re-resolve."""
         target = SpawnTarget(
             type="ssh", host="server-a", user="deploy", project="my-project",
+            cwd="/home/deploy/src.worktrees/server-a-existing-1234",
             worktree_id="server-a-existing-1234",
         )
 
@@ -341,6 +350,23 @@ class TestSpawnSsh:
         remote_cmd = mock_manager.open_stdio_channel.call_args[0][1]
         assert "--worktree-id" in remote_cmd
         assert "server-a-existing-1234" in remote_cmd
+
+    @pytest.mark.asyncio
+    async def test_resolve_remote_existing_cwd_posix(self, mock_manager):
+        """The fallback cwd probe returns the target's existing home directory."""
+        result = MagicMock()
+        result.timed_out = False
+        result.exit_code = 0
+        result.stdout = "/home/deploy\n"
+        result.stderr = ""
+        mock_manager.exec_command = AsyncMock(return_value=result)
+        target = SpawnTarget(type="ssh", host="server-a", user="deploy", ssh_shell="bash")
+
+        cwd = await _resolve_remote_existing_cwd(mock_manager, target)
+
+        assert cwd == "/home/deploy"
+        cmd = mock_manager.exec_command.call_args[0][1]
+        assert "$HOME" in cmd
 
     @pytest.mark.asyncio
     async def test_ssh_requires_host(self):

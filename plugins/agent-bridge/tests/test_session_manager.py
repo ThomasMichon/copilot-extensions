@@ -10,7 +10,7 @@ import pytest
 
 from agent_bridge.db import Database
 from agent_bridge.models import SessionStatus
-from agent_bridge.session_manager import SessionManager
+from agent_bridge.session_manager import SessionManager, _default_cwd
 from agent_bridge.transport import SpawnTarget
 
 
@@ -25,6 +25,27 @@ def _mock_agent_proc():
     proc.proc.stderr = MagicMock()
     proc.proc.stderr.readline = AsyncMock(return_value=b"")
     return proc
+
+
+class TestDefaultCwd:
+    """Fallback cwd derivation for ACP session creation."""
+
+    def test_windows_without_user_uses_drive_root(self) -> None:
+        target = SpawnTarget(type="ssh", host="host-a", ssh_shell="pwsh")
+        assert _default_cwd(target) == "C:\\"
+        assert _default_cwd(target) != "C:\\Users\\root"
+
+    def test_windows_root_user_uses_drive_root(self) -> None:
+        target = SpawnTarget(type="ssh", host="host-a", user="root", ssh_shell="pwsh")
+        assert _default_cwd(target) == "C:\\"
+
+    def test_posix_root_user_uses_root_home(self) -> None:
+        target = SpawnTarget(type="ssh", host="host-a", user="root", ssh_shell="bash")
+        assert _default_cwd(target) == "/root"
+
+    def test_posix_without_user_uses_filesystem_root(self) -> None:
+        target = SpawnTarget(type="ssh", host="host-a", ssh_shell="bash")
+        assert _default_cwd(target) == "/"
 
 
 @pytest.fixture
@@ -996,4 +1017,3 @@ class TestTeardownDuringDrain:
         # ...but teardown of the existing session still succeeds.
         await session_manager.end_session(session.session_id)
         assert session_manager.get_session(session.session_id) is None
-

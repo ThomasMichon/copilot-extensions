@@ -39,6 +39,11 @@ _PROJECTS_YAML_DEFAULT = "~/.agent-worktrees/projects.yaml"
 _REPOS_YAML_DEFAULT = "~/.agent-worktrees/repos.yaml"
 
 
+def _repo_basename_key(repo: object) -> str:
+    """Normalize a repo key for basename fallback matching."""
+    return str(repo).strip().lower().split("/")[-1].replace(".", "-").replace("_", "-")
+
+
 def resolve_repo_remote(repo: str) -> str | None:
     """Resolve a logical repo name to its git remote URL.
 
@@ -79,11 +84,11 @@ def resolve_repo_remote(repo: str) -> str | None:
 
     entry = repos.get(repo)
     if not isinstance(entry, dict):
-        want = repo.strip().lower().split("/")[-1]
+        want = _repo_basename_key(repo)
         for key, val in repos.items():
             if not isinstance(val, dict):
                 continue
-            if str(key).strip().lower().split("/")[-1] == want:
+            if _repo_basename_key(key) == want:
                 entry = val
                 break
     if not isinstance(entry, dict):
