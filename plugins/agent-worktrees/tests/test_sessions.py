@@ -13,6 +13,7 @@ from agent_worktrees.sessions import (
     backfill_sessions,
     find_latest_session_id,
     find_latest_session_id_fast,
+    mux_seed_pane,
     recent_worktree_messages,
     scan_sessions,
     scan_sessions_fast,
@@ -885,3 +886,122 @@ class TestRecentWorktreeMessages:
         ):
             out = recent_worktree_messages(rec, limit=3)
         assert out == {"session_id": None, "messages": [], "count": 0}
+
+
+# ---------------------------------------------------------------------------
+# mux_seed_pane — hardened readiness + echo-verify (issue: replay debounce)
+# ---------------------------------------------------------------------------
+
+class _SeedDriver:
+    """Fake ``subprocess.run`` for capture-pane / send-keys during seeding.
+
+    Before the literal ``-l`` type, capture-pane serves ``ready_caps`` (the
+    readiness poll); after it, ``echo_caps`` (the echo-verify poll). Exhausted
+    lists yield ``""``. Every send-keys is recorded.
+    """
+
+    def __init__(self, ready_caps, echo_caps):
+        self.ready_caps = list(ready_caps)
+        self.echo_caps = list(echo_caps)
+        self.typed = False
+        self.sends = []  # each == the args after ``-t <pane>``
+
+    def run(self, argv, **kw):
+        from types import SimpleNamespace
+
+        verb = argv[1]
+        if verb == "capture-pane":
+            src = self.echo_caps if self.typed else self.ready_caps
+            out = src.pop(0) if src else ""
+            return SimpleNamespace(stdout=out, returncode=0)
+        if verb == "send-keys":
+            self.sends.append(argv[4:])  # drop [bin, send-keys, -t, pane]
+            if "-l" in argv:
+                self.typed = True
+            return SimpleNamespace(returncode=0)
+        return SimpleNamespace(stdout="", returncode=0)
+
+    def enter_sent(self):
+        return any(s == ["Enter"] for s in self.sends)
+
+
+class _Clock:
+    def __init__(self, step=10.0):
+        self.t = 0.0
+        self.step = step
+
+    def __call__(self):
+        v = self.t
+        self.t += self.step
+        return v
+
+
+def _run_seed(driver, seed="Continue: build multi-account effort"):
+    with patch("subprocess.run", side_effect=driver.run), \
+         patch("time.sleep"), \
+         patch("time.monotonic", side_effect=_Clock()), \
+         patch("agent_worktrees.sessions._mux_bin", return_value="tmux"):
+        return mux_seed_pane(
+            "%9", seed, ready_timeout=100.0, poll_interval=0.0, settle=0.0,
+        )
+
+
+def test_seed_pane_not_ready_never_submits():
+    # Copilot never shows a cue -> we must NOT type or press Enter (no blind
+    # submit into a half-loaded TUI / fallback shell).
+    driver = _SeedDriver(ready_caps=[], echo_caps=[])
+    result = _run_seed(driver)
+    assert result["ready"] is False
+    assert result["sent"] is False
+    assert result["submitted"] is False
+    assert result["reason"] == "not-ready-timeout"
+    assert driver.sends == []  # nothing typed, Enter never pressed
+
+
+def test_seed_pane_requires_two_consecutive_cues():
+    # A single transient caret frame (then gone) is NOT enough; a flapping cue
+    # keeps stability from reaching 2, so seeding still degrades to not-ready.
+    driver = _SeedDriver(ready_caps=["❯", "", "❯", "", "❯", ""], echo_caps=[])
+    result = _run_seed(driver)
+    assert result["ready"] is False
+    assert driver.sends == []
+
+
+def test_seed_pane_happy_path_submits():
+    # Stable caret (2 in a row) -> type -> the echo shows the seed head -> Enter.
+    seed = "Continue: build multi-account effort"
+    driver = _SeedDriver(
+        ready_caps=["❯", "❯"],
+        echo_caps=[f"❯ {seed}"],
+    )
+    result = _run_seed(driver, seed=seed)
+    assert result["ready"] is True
+    assert result["sent"] is True
+    assert result["submitted"] is True
+    assert result["ok"] is True
+    assert driver.enter_sent() is True
+
+
+def test_seed_pane_footer_cue_also_ready():
+    # The "esc … interrupt" footer is a valid Copilot cue (no caret needed).
+    seed = "Continue: do the thing"
+    driver = _SeedDriver(
+        ready_caps=["press esc to interrupt", "press esc to interrupt"],
+        echo_caps=[seed],
+    )
+    result = _run_seed(driver, seed=seed)
+    assert result["ready"] is True
+    assert result["submitted"] is True
+
+
+def test_seed_pane_not_echoed_skips_enter():
+    # Ready + typed, but the seed never echoes back -> do NOT press Enter, so a
+    # partially-eaten seed is never submitted as a bogus turn.
+    seed = "Continue: build multi-account effort"
+    driver = _SeedDriver(ready_caps=["❯", "❯"], echo_caps=[])
+    result = _run_seed(driver, seed=seed)
+    assert result["ready"] is True
+    assert result["sent"] is True
+    assert result["submitted"] is False
+    assert result["reason"] == "seed-not-echoed"
+    assert driver.enter_sent() is False

@@ -1468,10 +1468,25 @@ def mux_seed_pane(
     (spaces and all) as one line -- the same mux mechanism the retire path uses --
     sidestepping every command-line quoting hazard.
 
-    Waits (up to ``ready_timeout``) for Copilot's input prompt to appear before
-    typing, so keystrokes are not eaten by TUI startup, then sends the text, a
-    brief ``settle`` pause, and Enter. Returns ``{ok, pane, ready, sent}``.
+    Hardened against seeding into the wrong pane state (a half-loaded TUI, or a
+    pane that fell back to a bare shell whose ``❯`` looks like Copilot's caret):
+
+    * **Confirmed-ready, not first-frame.** Readiness requires a Copilot cue (the
+      ``❯`` caret or the ``esc … interrupt`` footer -- the generic rule line is no
+      longer trusted) seen on **two consecutive** polls, so a transient
+      banner/spinner frame can't trip it.
+    * **Never blind-submit.** If readiness is not confirmed within
+      ``ready_timeout`` the seed is **not** typed and Enter is **never** pressed --
+      the successor just lands at a fresh prompt (safe) instead of executing a
+      mistyped line. The caller sees ``sent``/``submitted`` false.
+    * **Echo-verify before Enter.** After typing, the pane is captured and Enter
+      is pressed **only** once a distinctive head of the seed is echoed there, so
+      a partially-eaten seed is never submitted as a bogus turn.
+
+    Returns ``{ok, pane, ready, sent, submitted, reason}`` -- ``ok`` is true only
+    when the seed was actually delivered as a turn (``submitted``).
     """
+    import re
     import subprocess
     import time
 
@@ -1487,15 +1502,35 @@ def mux_seed_pane(
         except (OSError, subprocess.TimeoutExpired):
             return ""
 
-    # Poll for readiness: Copilot renders a ``❯`` prompt caret + a rule line.
+    def _is_copilot_ready(cap: str) -> bool:
+        low = cap.lower()
+        # Copilot-specific cues only: the input caret, or the interrupt footer.
+        # A bare rule line (``─────``) is NOT trusted -- banners/spinners draw it.
+        return ("❯" in cap) or ("esc" in low and "interrupt" in low)
+
+    # Readiness must be STABLE (two consecutive sightings) so a single transient
+    # frame (a startup banner, a spinner) is not mistaken for the input prompt.
     ready = False
+    stable = 0
     deadline = time.monotonic() + ready_timeout
     while time.monotonic() < deadline:
-        cap = _cap()
-        if "❯" in cap or "esc interrupt" in cap or "─────" in cap:
-            ready = True
-            break
+        if _is_copilot_ready(_cap()):
+            stable += 1
+            if stable >= 2:
+                ready = True
+                break
+        else:
+            stable = 0
         time.sleep(poll_interval)
+
+    # Safety gate: without a confirmed-ready Copilot we do NOT type or submit --
+    # blind keystrokes into a half-loaded TUI or a fallback shell could execute a
+    # mistyped command. Degrade to "landed unseeded" (the operator can paste).
+    if not ready:
+        return {
+            "ok": False, "pane": pane_id, "ready": False,
+            "sent": False, "submitted": False, "reason": "not-ready-timeout",
+        }
 
     def _send(*a: str) -> bool:
         try:
@@ -1507,12 +1542,44 @@ def mux_seed_pane(
         except (OSError, subprocess.TimeoutExpired):
             return False
 
+    # A distinctive head of the seed, whitespace-squashed so terminal soft-wrap
+    # (a newline inserted mid-line in the captured buffer) can't defeat the echo
+    # check below.
+    def _squash(s: str) -> str:
+        return re.sub(r"\s+", "", s)
+
+    head = _squash(seed)[:16]
+
     # ``-l`` sends the seed literally (no key-name interpretation), so the whole
     # multi-word prompt lands as one input line.
     sent = _send("-l", seed)
     time.sleep(settle)
-    _send("Enter")
-    return {"ok": bool(sent), "pane": pane_id, "ready": ready, "sent": bool(sent)}
+
+    # Echo-verify: press Enter only once the seed's head is visible in the pane,
+    # so a partially-eaten or lost seed is never submitted as a bogus turn.
+    echoed = False
+    if sent and head:
+        for _ in range(4):
+            if head in _squash(_cap()):
+                echoed = True
+                break
+            time.sleep(poll_interval)
+    elif sent:
+        echoed = True  # empty seed: nothing to verify
+
+    submitted = False
+    reason = None
+    if echoed:
+        submitted = _send("Enter")
+        if not submitted:
+            reason = "enter-failed"
+    else:
+        reason = "seed-not-echoed" if sent else "send-failed"
+
+    return {
+        "ok": bool(submitted), "pane": pane_id, "ready": ready,
+        "sent": bool(sent), "submitted": bool(submitted), "reason": reason,
+    }
 
 
 def mux_active_pane(worktree_id: str, *, mux: str | None = None) -> str | None:
