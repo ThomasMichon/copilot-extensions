@@ -566,7 +566,98 @@ def test_consume_defer_complete_stops_at_started(monkeypatch, capsys):
     assert "the brief" in capsys.readouterr().out
 
 
-def test_parser_focus_positional_and_list():
+class _SpentHandoffClient:
+    """A fake client whose task is an already-completed handoff baton."""
+
+    def __init__(self, *, labels=None, source=None, status="completed"):
+        self._task = {
+            "id": "T1",
+            "status": status,
+            "owner": None,
+            "labels": labels if labels is not None else ["handoff"],
+            "source": source,
+            "result_ref": "resumed:wt-9",
+        }
+        self.transitions: list[str] = []
+
+    def get(self, task_id):
+        return dict(self._task, id=task_id)
+
+    def approve(self, task_id):
+        self.transitions.append("approve")
+        return self._task
+
+    def claim(self, **kw):
+        self.transitions.append("claim")
+        return {"owner": "m/wt"}
+
+    def start(self, task_id, owner):
+        self.transitions.append("start")
+
+    def complete(self, task_id, owner, *, result_ref=None):
+        self.transitions.append("complete")
+
+    def payload(self, task_id):
+        self.transitions.append("payload")
+        return {"payload": "PAYLOAD-XYZZY"}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return None
+
+
+def test_consume_completed_handoff_is_not_replayed(monkeypatch, capsys):
+    """A spent (completed) handoff baton is refused with exit 3, never replayed --
+    so a re-seeded live-cutover successor does not redo finished work."""
+    from agent_dispatch import __main__, identity
+
+    fake = _SpentHandoffClient(labels=["handoff"])
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 3
+    out = capsys.readouterr().out
+    # STOP notice replaces the brief; no lifecycle transitions or payload read.
+    assert "already COMPLETED" in out
+    assert "PAYLOAD-XYZZY" not in out
+    assert fake.transitions == []
+
+
+def test_consume_completed_handoff_by_source_is_not_replayed(monkeypatch, capsys):
+    """The handoff is recognized by source=context-handoff too (no label)."""
+    from agent_dispatch import __main__, identity
+
+    fake = _SpentHandoffClient(labels=[], source="context-handoff")
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1", "--defer-complete"])
+    assert args.func(args) == 3
+    assert "already COMPLETED" in capsys.readouterr().out
+    assert fake.transitions == []
+
+
+def test_consume_completed_non_handoff_still_prints_payload(monkeypatch, capsys):
+    """The debounce is scoped to handoffs: a completed *non-handoff* task
+    consumed again still just prints its payload (unchanged behavior)."""
+    from agent_dispatch import __main__, identity
+
+    fake = _SpentHandoffClient(labels=[], source=None)
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 0
+    out = capsys.readouterr().out
+    assert "PAYLOAD-XYZZY" in out
+    # Terminal task: no re-claim transitions, just the payload read.
+    assert fake.transitions == ["payload"]
     a = build_parser().parse_args(["focus", "working on X"])
     assert a.focus_text == "working on X" and a.list is False
     b = build_parser().parse_args(["focus", "--list", "--machine", "borealis"])

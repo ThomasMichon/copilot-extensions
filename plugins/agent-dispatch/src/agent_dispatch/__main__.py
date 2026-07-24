@@ -832,6 +832,31 @@ def _cmd_payload(args: argparse.Namespace) -> int:
     return _emit(result)
 
 
+def _consume_already_spent(task_id: str, task: dict) -> int:
+    """Refuse to replay a spent handoff baton.
+
+    Prints a clear STOP notice (read by the successor agent in place of the
+    brief) and returns exit ``3`` so programmatic callers can detect the
+    already-consumed no-op. The work is done; a re-seeded successor must not
+    redo it.
+    """
+    result_ref = task.get("result_ref")
+    result_str = f" (result: {result_ref})" if result_ref else ""
+    print(
+        f"[agent-dispatch] Handoff task {task_id} is already COMPLETED"
+        f"{result_str}.\n"
+        f"This handoff was already picked up and its work finished -- NOT "
+        f"replaying the brief. Do NOT redo this work; end your turn.\n"
+        f"If this is unexpected, inspect with: agent-dispatch show {task_id}"
+    )
+    print(
+        f"agent-dispatch: handoff {task_id} already consumed (completed); "
+        f"not replayed",
+        file=sys.stderr,
+    )
+    return 3
+
+
 def _cmd_consume(args: argparse.Namespace) -> int:
     """Resume-and-consume a handoff and print its payload content.
 
@@ -849,9 +874,19 @@ def _cmd_consume(args: argparse.Namespace) -> int:
       <id>`` **explicitly** only when it reaches the handoff's goal -- so
       ``completed`` means *the work is done*, not *the baton was handed over*.
 
-    Transitions are best-effort and idempotent: an already-advanced or
-    already-terminal task just prints its payload (never an error), and a task
-    the caller can't take ownership of is still read and printed.
+    Transitions are best-effort and idempotent: an already-advanced task just
+    prints its payload (never an error), and a task the caller can't take
+    ownership of is still read and printed.
+
+    **Replay debounce (a *completed handoff* is spent).** A handoff is a baton:
+    once it has been picked up and its work driven to ``completed``, re-consuming
+    it must NOT re-deliver the brief as if it were fresh. A live-cutover (or any
+    re-seeded successor) that re-runs ``consume <id>`` on an already-completed
+    handoff would otherwise redo finished work. So a completed *handoff* is
+    refused here with a clear stop notice (exit ``3``) instead of its payload --
+    the single chokepoint every task-backed resume seed flows through. A
+    still-in-flight handoff (``started`` -- e.g. a legitimate takeover recovery)
+    is unaffected; only ``completed`` is treated as spent.
     """
     task_id = args.task_id
     defer = getattr(args, "defer_complete", False)
@@ -867,6 +902,12 @@ def _cmd_consume(args: argparse.Namespace) -> int:
             print(f"agent-dispatch: {exc}", file=sys.stderr)
             return 1
         status = task.get("status")
+        # Debounce a spent baton: a *completed handoff* is never replayed.
+        is_handoff = ("handoff" in (task.get("labels") or [])) or (
+            task.get("source") == "context-handoff"
+        )
+        if is_handoff and status == "completed":
+            return _consume_already_spent(task_id, task)
         if status not in ("completed", "abandoned"):
             owner: str | None = None
             if status == "proposed":
@@ -1372,7 +1413,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "consume",
-        help="resume-and-consume a handoff: drive it to completed (idempotent) "
+        help="resume-and-consume a handoff: drive it to completed (idempotent; "
+        "a spent completed handoff is refused, exit 3, never replayed) "
         "and print its payload -- the successor's one-command pickup",
     )
     p.add_argument("task_id")
