@@ -6,7 +6,10 @@ session-to-log pipeline out of any single bespoke service:
 
 - **Segmenter** — collate one Copilot session into context-ingestible
   Markdown digest chunks (`collate-session`, `read-session-digest`,
-  `prepare-session-log`).
+  `prepare-session-log`), and **ramp up into a dormant session**
+  (`ramp-up-session`) — discover a worktree's most recent session, collate it
+  ephemerally, and print a takeover brief so a fresh session can pick up the
+  torch of one that can no longer be resumed.
 - **Log writer** — one voice-neutral `session-log-writer` agent that turns a
   manifest of 1..N sessions into structured Markdown logs, plus the
   `log-session` (interactive) and `process-backlog` (local batch) skills

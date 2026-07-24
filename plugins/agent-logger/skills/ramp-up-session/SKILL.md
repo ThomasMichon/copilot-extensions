@@ -1,0 +1,129 @@
+---
+name: ramp-up-session
+description: >
+  Take over a dormant Copilot session from its on-disk state. Use this skill
+  when a session cannot be resumed (a wedged CLI, a machine restart, an
+  abandoned worktree) but its work should continue. It discovers the worktree's
+  most recent session, collates its events.jsonl into a digest, and reconstructs
+  where it left off so a fresh session can pick up the torch.
+  Trigger phrases include: - 'ramp up on <worktree>' - 'take over that session'
+  - 'resume the dormant session' - 'pick up where the old session left off'
+  - 'session takeover' - 'I can''t resume the session, continue its work'
+---
+
+# Session Ramp-Up
+
+Resume the *work* of a session that can no longer be resumed the normal way.
+Every Copilot session records its raw event stream at
+`~/.copilot/session-state/<id>/events.jsonl`; this skill turns that stream into
+a compact takeover brief and hands your current session the torch.
+
+It reuses the segmenter engine wholesale — `ramp-up-session` is a thin front
+end over the same `collate-session` machinery, adding only worktree-scoped
+session discovery. The collated digest is written **ephemerally** (to
+`$TEMP/session-digest/<id>/`), never to the persistent digest store.
+
+## When to use
+
+- The CLI is wedged / never reaches "ready", so `--resume` won't work.
+- A machine restart killed a session mid-task.
+- You want to continue a different worktree's abandoned session from a fresh
+  one.
+
+## Procedure
+
+### 1. Identify the dormant worktree
+
+You need the **worktree root path** (the directory whose `workspace.yaml`
+cwd/git_root the session recorded). If the operator names a worktree, use that
+path; otherwise ask which worktree to ramp up on.
+
+### 2. List candidates (optional but recommended)
+
+```
+ramp-up-session <worktree-path> --list
+```
+
+`ramp-up-session` is deployed as a binstub in `~/.local/bin` by the
+agent-logger installer. If it is not on PATH (payload installed but the runtime
+installer hasn't run, or `~/.local/bin` isn't on PATH), invoke it via the
+deployed venv interpreter instead:
+
+```
+# POSIX
+~/.agent-logger/.venv/bin/python -m agent_logger.segmenter.ramp_up <worktree-path> --list
+# Windows
+~/.agent-logger/.venv/Scripts/python.exe -m agent_logger.segmenter.ramp_up <worktree-path> --list
+```
+
+This enumerates the sessions that map to the worktree, most recent first. Pick
+the one to take over (usually the most recent).
+
+### 3. Produce the takeover brief
+
+Ramp up the most recent session (omit `--list`), or a specific one with
+`--session <id>`:
+
+```
+ramp-up-session <worktree-path>
+ramp-up-session <worktree-path> --session <id>       # a specific session
+ramp-up-session <worktree-path> --tail-turns 10      # surface more trailing turns
+```
+
+The brief contains:
+
+- **Metadata** — session id, branch, working dir, head commit.
+- **Checkpoints** — the CLI's own pre-compaction summaries (the strongest
+  signal of accumulated work), when present.
+- **Session stats** — turns, tool calls, failures, checkpoints.
+- **Where it left off** — the last few turns verbatim (last user ask, the
+  assistant's trailing actions, and any in-flight or failed tool calls).
+
+Read the whole brief. It is your situational handoff.
+
+### 4. Go deeper if needed
+
+The full transcript was collated ephemerally. Read more with the existing
+digest reader (no facility paths, temp-store aware):
+
+```
+read-session-digest <id> context
+read-session-digest <id> list
+read-session-digest <id> segment <N>
+read-session-digest <id> grep --pattern <regex>
+```
+
+Use `grep` to find the last decision, an error, a file path, or the task the
+session was on.
+
+### 5. Reconcile against the worktree's real state
+
+The brief tells you what the session *intended*; the worktree tells you what
+actually **landed**. Before continuing, inspect the worktree itself:
+
+```
+git -C <worktree-path> status
+git -C <worktree-path> log --oneline -n 15
+git -C <worktree-path> diff            # uncommitted work in flight
+```
+
+Match the tail's in-flight actions against committed vs. uncommitted state so
+you don't redo finished work or drop unfinished work.
+
+### 6. Pick up the torch
+
+Summarize the situation back to the operator in a few lines — what the session
+was doing, what has landed, and what remains — then **continue the work** from
+where it stopped. If the takeover requires a decision only the operator can
+make, surface it; otherwise proceed.
+
+## Notes
+
+- **Discovery matches the worktree root**, not a subdirectory. If no sessions
+  are found, confirm you passed the worktree root (the path in the session's
+  `workspace.yaml`).
+- **Quip/sub-agent temp sessions are excluded** automatically.
+- **Nothing is persisted** to the digest store; the digest under
+  `$TEMP/session-digest/<id>/` is scratch and safe to delete.
+- `--json` emits a machine-readable summary (session id, digest dir, counts)
+  instead of the Markdown brief, for programmatic callers.
