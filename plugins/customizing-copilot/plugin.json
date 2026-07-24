@@ -1,7 +1,7 @@
 {
   "name": "customizing-copilot",
   "description": "Customize and extend the GitHub Copilot CLI -- authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, and authoring <repo>-harness plugins -- with the per-skill folder conventions and Agent Skills best practices baked in. Ships the authoring-skills, defining-subagents, registering-mcp-servers, installing-plugins, building-harnesses, reviewing-customizations, and authoring-harness-plugins skills.",
-  "version": "0.1.0-dev14",
+  "version": "0.1.0-dev15",
   "author": {
     "name": "Thomas Michon"
   },

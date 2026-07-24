@@ -68,6 +68,28 @@ gate. It is a **heuristic aid, not a proof** — it deliberately under-flags rat
 than cry wolf; feed its findings into the design critique, don't treat a clean
 scan as a full review.
 
+**Collision detection spans prose *and* installed plugins.** Trigger collisions
+are computed from both the structured `Trigger phrases include:` list **and**
+inline prose (`Use when asked to "…"`) — a skill hides no triggers by choosing
+prose. Crucially, a harness that *consumes* plugins can only mis-route if a
+**local** skill collides with a **plugin** skill, and the plugin skills live
+outside the repo. Pass the installed-plugin tree so the scan sees those
+cross-layer collisions:
+
+```bash
+# add the operator's installed plugins to the collision map (findings still
+# only fire against skills you OWN — third-party plugins are reference-only):
+python3 <skill-dir>/scripts/scan-customizations.py <repo-root> --include-installed
+# or point at an explicit tree (repeatable):
+python3 <skill-dir>/scripts/scan-customizations.py <repo-root> \
+    --include-plugins ~/.copilot/installed-plugins
+```
+
+Collision owners are tagged with their origin (`skill [marketplace/plugin]`), so
+a `LOCAL ↔ PLUGIN` clash is obvious. Some collisions are intentional (an
+authority override that deliberately reclaims a phrase); judge each in the
+design critique rather than "fixing" it blindly.
+
 ### 1. Design critique (rubber-duck)
 
 Hand the gathered files to a **review sub-agent** — the Copilot CLI built-in
