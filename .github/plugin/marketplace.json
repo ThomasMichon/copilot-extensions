@@ -48,7 +48,7 @@
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync raw sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.1.1-dev19",
+      "version": "0.1.1-dev20",
       "source": "plugins/agent-logger"
     },
     {
@@ -84,7 +84,7 @@
     {
       "name": "agent-vault",
       "description": "Local KeePassXC-backed secret store for Copilot CLI agents. A machine-local service caches the KeePass master password with a TTL and auto-prompts on lock; a CLI fetches API keys, SSH keys, and account credentials on demand and manages entries (get/has/search/list/show/add/set-password/set-username/remove/move/import-key/export-key) without hardcoding, committing, or exporting them. Destructive edits are scoped to the configured vault group unless forced. Includes a SUDO_ASKPASS helper for sudo -A, a git-credential helper that delegates allowlisted HTTPS hosts to Git Credential Manager, and an opt-in Fernet-encrypted persistent cache that serves reads across restarts and while the vault is locked.",
-      "version": "0.1.0-dev19",
+      "version": "0.1.0-dev20",
       "source": "plugins/agent-vault"
     },
     {

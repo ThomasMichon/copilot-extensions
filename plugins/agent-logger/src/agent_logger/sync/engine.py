@@ -218,6 +218,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--dry-run", action="store_true", help="show what would happen")
     p_run.add_argument("--prune", action="store_true", help="prune old sessions after sync")
     p_run.add_argument("--verbose", action="store_true", help="verbose output")
+    p_run.add_argument(
+        "--detach",
+        action="store_true",
+        help="stage the package to a temp dir and run the sync in a detached, "
+        "update-safe child process with a neutral cwd (used by the "
+        "session-end hook so the sync never pins the worktree or collides "
+        "with an agent-logger self-update)",
+    )
 
     p_push = sub.add_parser(
         "push",
@@ -242,19 +250,31 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     cfg = load_config(include_repo=False)
 
-    if args.command == "run":
-        return run_sync(
-            cfg, dry_run=args.dry_run, prune=args.prune, verbose=args.verbose
-        )
-    if args.command == "push":
-        return run_push(
-            cfg, source=args.source, machine=args.machine, verbose=args.verbose
-        )
-    if args.command == "status":
-        return do_status(cfg)
-    if args.command == "doctor":
-        return do_doctor(cfg)
-    return 2
+    try:
+        if args.command == "run":
+            if getattr(args, "detach", False):
+                from agent_logger.sync import spawn
+
+                return spawn.spawn_detached_sync(cfg, prune=args.prune)
+            return run_sync(
+                cfg, dry_run=args.dry_run, prune=args.prune, verbose=args.verbose
+            )
+        if args.command == "push":
+            return run_push(
+                cfg, source=args.source, machine=args.machine, verbose=args.verbose
+            )
+        if args.command == "status":
+            return do_status(cfg)
+        if args.command == "doctor":
+            return do_doctor(cfg)
+        return 2
+    finally:
+        # A staged child (launched via `run --detach`) removes its throwaway
+        # staging dir on the way out, whatever the outcome.
+        if os.environ.get("AGENT_LOGGER_SYNC_STAGED"):
+            from agent_logger.sync import spawn
+
+            spawn.cleanup_staging()
 
 
 if __name__ == "__main__":
