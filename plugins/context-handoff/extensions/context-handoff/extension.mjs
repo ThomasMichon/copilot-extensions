@@ -618,7 +618,12 @@ const session = await joinSession({
         // session's title-inference (biased toward the START of the prompt)
         // derives a meaningful title from the topic rather than the generic
         // handoff boilerplate that follows it.
-        const lead = title ? `Continue: ${title}` : "Continue this session";
+        // De-dupe the prefix: a handoff title often already begins with
+        // "Continue:" (e.g. a successor handing off again), which would compound
+        // into "Continue: Continue: …" on each hop. Only prepend when absent.
+        const lead = title
+          ? (/^\s*continue\s*:/i.test(title) ? title : `Continue: ${title}`)
+          : "Continue this session";
 
         // Store the handoff (agent-dispatch task preferred, else session file)
         // and derive both the short reply prompt (the baton paste-seed) and the

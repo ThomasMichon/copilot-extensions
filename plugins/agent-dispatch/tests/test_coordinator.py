@@ -427,8 +427,8 @@ def test_sweep_disabled_by_default(tmp_path):
 
 def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatch, capsys):
     """``agent-dispatch consume`` drives a proposed handoff to completed and
-    prints its payload -- and is idempotent (a second call on the now-terminal
-    task just re-prints the payload, no error)."""
+    prints its payload -- then a second consume of the now-spent baton is
+    REFUSED (exit 3, stop notice), never replaying the finished work."""
     import argparse
 
     from agent_dispatch import __main__
@@ -437,6 +437,7 @@ def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatc
     task = client.create(
         "handoff",
         proposed=True,
+        labels=["handoff"],
         target_worktree="wt-1",
         payload_inline="BRIEF-BODY",
         repo=TEST_REPO,
@@ -465,7 +466,10 @@ def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatc
     # proves the successor's identity owned it through the complete transition.
     assert done["result_ref"] == "consumed:wt-1"
 
-    # Idempotent: consuming an already-terminal task just re-prints the payload.
-    assert __main__._cmd_consume(args) == 0
-    assert "BRIEF-BODY" in capsys.readouterr().out
+    # Debounce: consuming the now-completed handoff again is refused (exit 3)
+    # with a stop notice instead of a replayed brief.
+    assert __main__._cmd_consume(args) == 3
+    out = capsys.readouterr().out
+    assert "already COMPLETED" in out
+    assert "BRIEF-BODY" not in out
     assert client.get(tid)["status"] == Status.COMPLETED
