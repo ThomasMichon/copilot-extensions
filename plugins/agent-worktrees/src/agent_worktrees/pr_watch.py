@@ -25,7 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 from . import pr_contract as pc
-from .providers import ProviderError, get_provider, resolve_token
+from .providers import ProviderError, account_token_for_slug, get_provider
 
 
 @dataclass
@@ -187,7 +187,7 @@ def build_fetch(
     """
     provider = get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
     base = (api_base or getattr(prcfg, "api_base", "") or "").strip()
-    tok = token if token is not None else resolve_token(prcfg)
+    tok = token if token is not None else account_token_for_slug(repo, prcfg)
 
     def _fetch() -> pc.PRSnapshot:
         return provider.get_snapshot(repo, number, api_base=base, token=tok)

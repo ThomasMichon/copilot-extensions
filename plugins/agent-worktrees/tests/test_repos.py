@@ -209,6 +209,76 @@ def test_migrate_no_legacy_file(home: Path):
 
 
 # ---------------------------------------------------------------------------
+# Account resolution (repo-scoped identity)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("remote,owner", [
+    ("https://github.com/example-org/proj.git", "example-org"),
+    ("https://github.com/example-org/proj", "example-org"),
+    ("git@github.com:example-org/proj.git", "example-org"),
+    ("ssh://git@github.com/example-org/proj.git", "example-org"),
+    ("https://gitlab.com/example-org/proj.git", None),   # non-github
+    ("https://host.example.com/gitea/u/r.git", None),    # non-github
+    ("", None),
+])
+def test_github_owner(remote, owner):
+    assert repos.github_owner(remote) == owner
+
+
+def test_resolve_account_explicit_wins():
+    entry = repos.RepoEntry(
+        name="proj", account="host-acct",
+        remote="https://github.com/example-org/proj.git",
+    )
+    assert repos.resolve_account(entry) == "host-acct"
+
+
+def test_resolve_account_derives_owner():
+    entry = repos.RepoEntry(
+        name="proj", remote="https://github.com/example-org/proj.git",
+    )
+    assert repos.resolve_account(entry) == "example-org"
+
+
+def test_resolve_account_none_for_non_github():
+    entry = repos.RepoEntry(name="proj", remote="https://gitlab.com/o/r.git")
+    assert repos.resolve_account(entry) is None
+
+
+def test_resolve_account_none_for_missing_entry():
+    assert repos.resolve_account(None) is None
+
+
+def test_account_for_github_slug_derives(home: Path):
+    # No override registered -> the account is the slug owner.
+    assert repos.account_for_github_slug("example-org/proj") == "example-org"
+
+
+def test_account_for_github_slug_honors_override(home: Path):
+    # A registered repo with an explicit account whose remote owner matches the
+    # slug owner overrides the derived owner (EMU accounts can span orgs).
+    repos.add_repo(
+        "proj", "D:/Src/proj", repo_class="worktree",
+        remote="https://github.com/example-org/proj.git",
+        account="host-acct", plat="windows",
+    )
+    assert repos.account_for_github_slug("example-org/other") == "host-acct"
+    assert repos.account_for_github_slug("unrelated/repo") == "unrelated"
+    assert repos.account_for_github_slug("") is None
+
+
+def test_add_repo_persists_account(home: Path):
+    repos.add_repo(
+        "proj", "D:/Src/proj", repo_class="worktree",
+        remote="https://github.com/example-org/proj.git",
+        account="host-acct", plat="windows",
+    )
+    reg = repos.read_registry()
+    assert reg.repos["proj"].account == "host-acct"
+    assert repos.resolve_account(reg.repos["proj"]) == "host-acct"
+
+
+# ---------------------------------------------------------------------------
 # Git hygiene: status + sync
 # ---------------------------------------------------------------------------
 

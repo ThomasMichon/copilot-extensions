@@ -580,7 +580,7 @@ def _open_via_provider(
         scope.draft = True
     try:
         provider = providers.get_provider(prcfg.provider)
-        token = providers.resolve_token(prcfg)
+        token = providers.account_token_for_slug(scope.repo, prcfg)
         pull = provider.create_pull(scope, token=token)
     except (providers.ProviderError, OSError) as e:
         # A provider failure (or a spawn error that slipped past run_cli) must
@@ -698,7 +698,7 @@ def _reconcile_active_pr(
         from . import providers
 
         provider = providers.get_provider(provider_name)
-        token = providers.resolve_token(prcfg)
+        token = providers.account_token_for_slug(target_repo, prcfg)
         pull = provider.get_pull(
             target_repo, active.number,
             api_base=getattr(prcfg, "api_base", "") or "", token=token,
@@ -750,7 +750,7 @@ def _live_pr_state(
         from . import providers
 
         provider = providers.get_provider(provider_name)
-        token = providers.resolve_token(prcfg)
+        token = providers.account_token_for_slug(target_repo, prcfg)
         snap = provider.get_snapshot(
             target_repo, active.number,
             api_base=getattr(prcfg, "api_base", "") or "", token=token,
@@ -928,7 +928,7 @@ def pr_ready(
         from . import providers
 
         provider = providers.get_provider(provider_name)
-        token = providers.resolve_token(prcfg)
+        token = providers.account_token_for_slug(repo, prcfg)
         snap = provider.get_snapshot(
             repo, pr.number, api_base=api_base, token=token,
         )
@@ -1068,7 +1068,7 @@ def pr_threads(
         from . import providers
 
         provider = providers.get_provider(provider_name)
-        token = providers.resolve_token(prcfg)
+        token = providers.account_token_for_slug(target_repo, prcfg)
         listing = provider.get_comment_threads(
             target_repo, active.number, api_base=api_base, token=token,
         )

@@ -45,6 +45,60 @@ class TestResolveToken:
         assert base.resolve_token(prcfg) == "env-tok"
 
 
+class TestAccountTokenForSlug:
+    """The gh-ops half of repo-scoped identity (v1: github-only)."""
+
+    def test_explicit_config_token_wins(self, monkeypatch):
+        # An explicit vault/env binding always wins -- no account lookup, no gh.
+        monkeypatch.setenv("MY_TOKEN", "vault-tok")
+        monkeypatch.setattr(
+            "agent_worktrees.repos.account_for_github_slug",
+            lambda slug: pytest.fail("should not resolve account when token set"),
+        )
+        prcfg = cfg.PRConfig(provider="github", token_env="MY_TOKEN")
+        assert base.account_token_for_slug("example-org/proj", prcfg) == "vault-tok"
+
+    def test_github_resolves_account_token(self, monkeypatch):
+        monkeypatch.setattr(
+            "agent_worktrees.repos.account_for_github_slug",
+            lambda slug: "host-acct",
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.git_ops.gh_token_for_account",
+            lambda account: "gh-tok" if account == "host-acct" else None,
+        )
+        prcfg = cfg.PRConfig(provider="github")
+        assert base.account_token_for_slug("example-org/proj", prcfg) == "gh-tok"
+
+    def test_non_github_provider_is_none(self, monkeypatch):
+        # v1 is github-only: other providers keep ambient-auth behavior.
+        monkeypatch.setattr(
+            "agent_worktrees.repos.account_for_github_slug",
+            lambda slug: pytest.fail("non-github must not resolve an account"),
+        )
+        prcfg = cfg.PRConfig(provider="gitea")
+        assert base.account_token_for_slug("example-org/proj", prcfg) is None
+
+    def test_github_no_account_is_none(self, monkeypatch):
+        monkeypatch.setattr(
+            "agent_worktrees.repos.account_for_github_slug", lambda slug: None,
+        )
+        prcfg = cfg.PRConfig(provider="github")
+        assert base.account_token_for_slug("", prcfg) is None
+
+    def test_github_account_without_gh_token_is_none(self, monkeypatch):
+        # Account resolves but gh has no token for it -> fall through to ambient.
+        monkeypatch.setattr(
+            "agent_worktrees.repos.account_for_github_slug",
+            lambda slug: "host-acct",
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.git_ops.gh_token_for_account", lambda account: None,
+        )
+        prcfg = cfg.PRConfig(provider="github")
+        assert base.account_token_for_slug("example-org/proj", prcfg) is None
+
+
 class TestGetProvider:
     def test_known_providers(self):
         assert base.get_provider("gitea").name == "gitea"

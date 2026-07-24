@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from . import pr_contract as pc
-from .providers import get_provider, resolve_token
+from .providers import account_token_for_slug, get_provider
 
 
 def _binding(prcfg) -> dict:
@@ -77,7 +77,7 @@ def merge_one(
     """
     provider = provider or get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
     base = (api_base or getattr(prcfg, "api_base", "") or "").strip()
-    tok = token if token is not None else resolve_token(prcfg)
+    tok = token if token is not None else account_token_for_slug(repo, prcfg)
 
     snap = provider.get_snapshot(repo, number, api_base=base, token=tok)
     state, action, reason = _decide(snap, prcfg, default_branch=default_branch)
@@ -123,7 +123,7 @@ def sweep_once(
     """
     provider = provider or get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
     base = (api_base or getattr(prcfg, "api_base", "") or "").strip()
-    tok = token if token is not None else resolve_token(prcfg)
+    tok = token if token is not None else account_token_for_slug(repo, prcfg)
 
     if only is not None:
         numbers: tuple[int, ...] = (only,)
