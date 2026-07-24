@@ -10,6 +10,10 @@ build/
 .venv/
 .pytest_cache/
 .ruff_cache/
+# pytest tmp_path artifacts (some suites symlink into a .pytmp working dir);
+# never track these -- committed symlinks with absolute targets break plugin
+# installs on Linux (dangling-symlink copy -> os error 2).
+.pytmp/
 
 # uv materializes a lockfile on `uv run`/`uv sync`. Plugins that intentionally
 # do NOT pin a lockfile must ignore it so it never dirties a worktree and
