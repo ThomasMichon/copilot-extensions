@@ -937,6 +937,12 @@ def daemonize_unix() -> bool:
         time.sleep(0.5)
         return False
     os.setsid()
+    # Neutral cwd: a detached daemon must not hold the caller's directory
+    # (which may be a worktree or the plugin payload) open.
+    try:
+        os.chdir(str(Path.home()))
+    except OSError:
+        pass
     pid2 = os.fork()
     if pid2 > 0:
         os._exit(0)
@@ -955,6 +961,9 @@ def daemonize_windows(argv: list[str]) -> None:
     cmd = [sys.executable, *argv, "--foreground"]
     subprocess.Popen(
         cmd,
+        # Neutral cwd: the detached daemon must not inherit (and pin) the
+        # caller's directory, which may be a worktree or the plugin payload.
+        cwd=str(Path.home()),
         creationflags=create_no_window | detached_process,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
