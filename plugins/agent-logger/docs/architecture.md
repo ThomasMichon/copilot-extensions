@@ -21,7 +21,7 @@ to run them.
 ### Segmenter (`agent_logger.segmenter`)
 
 Collates a single Copilot session into context-ingestible Markdown digest
-chunks. Three console scripts:
+chunks. Four console scripts:
 
 - `collate-session` — split a session (`~/.copilot/session-state/<id>`) into
   a context file + numbered transcript segments, written to a local store
@@ -30,6 +30,13 @@ chunks. Three console scripts:
 - `prepare-session-log` — detect machine, generate a cutoff, and render a
   log path from a configurable template, including any repo-local
   organization config discovered from the current git root.
+- `ramp-up-session` — **take over a dormant session.** Discovers the most
+  recent session for any named worktree (the one primitive `collate-session`
+  lacks — it resolves `"current"` only for its own repo), collates it
+  ephemerally (reusing the same engine), and prints a takeover **brief**
+  (metadata + the CLI's pre-compaction checkpoints + stats + a "where it left
+  off" tail of the last few turns) so a fresh session can pick up the torch of
+  a session that can no longer be resumed. Drives the `ramp-up-session` skill.
 
 All machine/path/voice coupling is configuration — there is no facility
 hostname, NAS path, or persona baked in.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-logger"
-version = "0.1.1-dev20"
+version = "0.1.1-dev21"
 description = "Reusable Copilot CLI session logging -- segmenter, log writer, session-sync, and orchestrator"
 readme = "README.md"
 license = "MIT"
@@ -27,6 +27,7 @@ agent-logger = "agent_logger.__main__:main"
 collate-session = "agent_logger.segmenter.collate:main"
 read-session-digest = "agent_logger.segmenter.read_digest:main"
 prepare-session-log = "agent_logger.segmenter.prepare_log:main"
+ramp-up-session = "agent_logger.segmenter.ramp_up:main"
 session-sync = "agent_logger.sync.engine:main"
 
 [tool.setuptools.packages.find]
