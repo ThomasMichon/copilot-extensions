@@ -419,6 +419,55 @@ async def _resolve_worktree_remote(
     return plan
 
 
+async def _resolve_remote_existing_cwd(
+    manager: Any, target: SpawnTarget, *, timeout: float = 10.0,
+) -> str | None:
+    """Ask an SSH target for a directory that exists there.
+
+    Used only as a fallback when worktree resolution cannot provide the real
+    checkout path. ACP validates ``cwd`` during ``new_session``/``load_session``,
+    so a verified remote home/current directory is safer than a templated guess.
+    """
+    if not target.host:
+        return None
+    if target.ssh_shell in ("pwsh", "powershell", "cmd"):
+        exe = "powershell" if target.ssh_shell in ("powershell", "cmd") else "pwsh"
+        script = r"""
+$ErrorActionPreference = 'SilentlyContinue'
+$candidates = @($env:USERPROFILE, $HOME, (Get-Location).Path, 'C:\')
+foreach ($candidate in $candidates) {
+    if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Container)) {
+        [Console]::Out.Write($candidate)
+        exit 0
+    }
+}
+exit 1
+"""
+        encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+        cmd = f"{exe} -NoProfile -EncodedCommand {encoded}"
+    else:
+        cmd = (
+            'if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then '
+            'printf %s "$HOME"; else pwd; fi'
+        )
+
+    try:
+        result = await manager.exec_command(target.host, cmd, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001 -- best-effort fallback probe
+        log.warning("Remote cwd fallback probe failed for %s: %s", target.host, exc)
+        return None
+    if result.timed_out or result.exit_code != 0:
+        detail = "timed out" if result.timed_out else f"exit {result.exit_code}"
+        stderr = (result.stderr or "").strip()
+        if stderr:
+            detail = f"{detail}: {stderr[:200]}"
+        log.warning("Remote cwd fallback probe failed for %s (%s)", target.host, detail)
+        return None
+
+    lines = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+    return lines[-1] if lines else None
+
+
 async def resolve_local_launch(
     target: SpawnTarget,
     *,
@@ -774,30 +823,56 @@ async def spawn_ssh(
     # bridge's session<->worktree linkage (managed/live state, duplicate NF
     # cards). ``resolve --new`` creates the worktree; _build_remote_cmd then
     # takes its resume branch (--worktree-id) so the binstub launches into the
-    # just-created worktree (no second worktree). On any failure this is
-    # non-fatal: we fall through to the legacy direct --new launch, which still
-    # runs -- only the worktree_id binding is lost.
-    if target.project and not target.worktree_id:
-        with tracker.stage(ConnectStage.WORKTREE, f"resolve project={target.project}"):
-            try:
-                plan = await _resolve_worktree_remote(manager, target)
-                launch = plan.get("launch", plan)
-                wt_id = launch.get("worktree_id")
-                work_dir = launch.get("work_dir")
-                if wt_id:
-                    target.worktree_id = wt_id
-                if work_dir and not target.cwd:
-                    target.cwd = work_dir
-                log.info(
-                    "Bound remote worktree for %s: id=%s cwd=%s",
-                    target.host, wt_id, work_dir,
-                )
-            except Exception as exc:  # noqa: BLE001 -- non-fatal, see above
-                log.warning(
-                    "Remote worktree resolve failed for %s (%s); falling back "
-                    "to direct --new launch without worktree_id binding",
-                    target.host, exc,
-                )
+    # just-created worktree (no second worktree). If resolve fails, keep the
+    # legacy direct --new launch path but surface the failure as a connection
+    # checkpoint and probe the target for an existing cwd so ACP validation does
+    # not fail on a templated, non-existent home directory.
+    if target.project and (not target.worktree_id or not target.cwd):
+        tracker.started(ConnectStage.WORKTREE, f"resolve project={target.project}")
+        try:
+            plan = await _resolve_worktree_remote(manager, target)
+            launch = plan.get("launch", plan)
+            wt_id = launch.get("worktree_id")
+            work_dir = launch.get("work_dir")
+            if wt_id:
+                target.worktree_id = wt_id
+            if work_dir and not target.cwd:
+                target.cwd = work_dir
+            if not target.cwd:
+                fallback = await _resolve_remote_existing_cwd(manager, target)
+                if fallback:
+                    target.cwd = fallback
+                    log.warning(
+                        "Remote worktree resolve for %s returned no cwd; "
+                        "using verified fallback cwd=%s",
+                        target.host, fallback,
+                    )
+            log.info(
+                "Bound remote worktree for %s: id=%s cwd=%s",
+                target.host, wt_id, target.cwd,
+            )
+            tracker.reached(
+                ConnectStage.WORKTREE,
+                f"worktree={target.worktree_id or '(unbound)'} cwd={target.cwd or '(none)'}",
+            )
+        except Exception as exc:  # noqa: BLE001 -- non-fatal, see above
+            detail = (
+                f"remote worktree resolve failed for {target.host}: {exc}; "
+                "falling back to direct launch"
+            )
+            log.warning("%s", detail)
+            if not target.cwd:
+                fallback = await _resolve_remote_existing_cwd(manager, target)
+                if fallback:
+                    target.cwd = fallback
+                    detail += f" with verified cwd={fallback}"
+                    log.warning(
+                        "Using verified remote fallback cwd for %s: %s",
+                        target.host, fallback,
+                    )
+                else:
+                    detail += "; no verified cwd available"
+            tracker.failed(ConnectStage.WORKTREE, detail, retryable=False)
 
     # Stages 5-7 happen remotely inside the binstub; the device breadcrumb
     # (in the remote command) is the on-device proof of arrival.
