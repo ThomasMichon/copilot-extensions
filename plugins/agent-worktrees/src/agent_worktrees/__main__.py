@@ -5916,6 +5916,25 @@ def _cleanup_stale_instructions(proj_dir: Path) -> None:
                 pass
 
 
+def _ensure_ado_pr_cli(pr_cfg) -> None:
+    """Provision the Azure DevOps CLI prereq for a repo that manages PRs via ADO.
+
+    ``create-pr``/``pr-merge`` shell out to ``az repos pr ...`` (the
+    ``azure-devops`` provider), which needs the ``azure-devops`` az extension.
+    A machine missing it makes ``az`` prompt interactively and fail under
+    automation, so provision it at install/adopt time. Best-effort: warn,
+    never abort.
+    """
+    try:
+        if not (pr_cfg.enabled and pr_cfg.provider == "azure-devops"):
+            return
+        from .providers.azure_devops import ensure_cli_ready
+        ok, msg = ensure_cli_ready()
+        (output.ok if ok else output.warn)(f"Azure DevOps CLI: {msg}")
+    except Exception as e:  # best-effort preflight -- never block install/adopt
+        output.warn(f"Could not verify Azure DevOps CLI setup: {e}")
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     """Deploy the worktree manager shared runtime + register current project."""
     project = cfg.project_name()
@@ -6047,6 +6066,13 @@ def cmd_install(args: argparse.Namespace) -> int:
                 )
     except Exception as e:
         output.warn(f"Could not check git-hook health: {e}")
+
+    # Azure DevOps PR provider prereq (machine-local): ensure the az
+    # 'azure-devops' extension so create-pr/pr-merge work on this machine.
+    try:
+        _ensure_ado_pr_cli(cfg.load_config(config_path).default_repo.pr)
+    except Exception:
+        pass
 
     print()
     output.ok("Installation complete")
@@ -6325,6 +6351,13 @@ def cmd_register(args: argparse.Namespace) -> int:
                 )
     except Exception as e:
         output.warn(f"Could not install git hooks: {e}")
+
+    # Azure DevOps PR provider needs the az 'azure-devops' extension; provision
+    # it at adopt time so the first create-pr doesn't fail on a fresh machine.
+    try:
+        _ensure_ado_pr_cli(cfg.load_config(config_path).default_repo.pr)
+    except Exception:
+        pass
 
     # Refresh Windows Terminal profiles if installed via install.ps1
     if plat == "windows":
