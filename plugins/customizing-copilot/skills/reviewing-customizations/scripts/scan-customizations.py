@@ -10,9 +10,13 @@ Checks (all stdlib, no dependencies):
 
   1. skill frontmatter   -- SKILL.md has YAML frontmatter with `name` +
                             `description`, and the description advertises
-                            trigger phrases.
+                            structured trigger phrases.
   2. name/folder match   -- a skill's `name` equals its parent folder name.
   3. trigger collision   -- the same trigger phrase is claimed by two+ skills.
+                            Both structured (`Trigger phrases include:`) and
+                            inline *prose* quoted phrases count, and (with
+                            `--include-plugins`) collisions are detected across
+                            LOCAL skills and installed-plugin skills too.
   4. anti-recursion      -- an agent that declares `mcp-servers` also carries an
                             MCP-readiness probe and an anti-self-delegation line.
   5. secrets             -- a secret-looking key is assigned a literal value
@@ -22,8 +26,13 @@ Checks (all stdlib, no dependencies):
 
 Usage:
     scan-customizations.py [REPO_ROOT] [--json] [--strict]
+                           [--include-plugins DIR ...] [--include-installed]
 
-`REPO_ROOT` defaults to the current directory. Exit code is 0 unless `--strict`
+`REPO_ROOT` defaults to the current directory. `--include-plugins` adds one or
+more installed-plugin trees (layout `<root>/<marketplace>/<plugin>/skills/...`)
+whose skills join the trigger-collision map *only* (no findings are raised
+against third-party plugins you don't own); `--include-installed` is a shortcut
+for the default `~/.copilot/installed-plugins`. Exit code is 0 unless `--strict`
 is given and at least one BLOCKING finding was reported.
 """
 
@@ -127,18 +136,29 @@ def split_frontmatter(text: str) -> tuple[str, str] | None:
     return m.group(1), m.group(2)
 
 
+def _dedup(items: list[str]) -> list[str]:
+    """Case-insensitive dedup preserving first-seen order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in items:
+        k = t.strip().lower()
+        if k and k not in seen:
+            seen.add(k)
+            out.append(t.strip())
+    return out
+
+
 def extract_triggers(frontmatter: str) -> list[str]:
-    """Pull trigger phrases out of a skill description block.
+    """Pull *structured* trigger phrases from a `Trigger phrases include:` block.
 
     Handles both the inline `Trigger phrases include: - 'a' - 'b'` form and the
     multiline dash-list form.
     """
-    triggers: list[str] = []
-    lowered = frontmatter
-    idx = lowered.lower().find("trigger phrases")
+    idx = frontmatter.lower().find("trigger phrases")
     if idx == -1:
-        return triggers
+        return []
     tail = frontmatter[idx:]
+    triggers: list[str] = []
     # Inline: "- 'phrase'" segments anywhere in the tail.
     for m in re.finditer(r"-\s*['\"]([^'\"]+)['\"]", tail):
         triggers.append(m.group(1).strip())
@@ -147,15 +167,64 @@ def extract_triggers(frontmatter: str) -> list[str]:
         m = re.match(r"\s*-\s+(?!['\"])(.+?)\s*$", line)
         if m:
             triggers.append(m.group(1).strip())
-    # Dedup preserving order.
-    seen: set[str] = set()
+    return _dedup(triggers)
+
+
+def get_field_block(frontmatter: str, key: str) -> str:
+    """Return a field's value including a multi-line YAML block/folded scalar.
+
+    Covers the three shapes these skills use: a single-line `key: "..."`, a
+    block scalar (`key: >` / `key: |` with optional chomp), and a plain value
+    continued on indented lines.
+    """
+    lines = frontmatter.splitlines()
+    for i, line in enumerate(lines):
+        m = re.match(rf"(?i)^{re.escape(key)}\s*:\s*(.*)$", line)
+        if not m:
+            continue
+        first = m.group(1).strip()
+        if first in ("|", ">", "|-", ">-", "|+", ">+", ""):
+            block: list[str] = []
+            for cont in lines[i + 1:]:
+                if cont.strip() == "" or re.match(r"^\s", cont):
+                    block.append(cont)
+                else:
+                    break
+            return "\n".join(block)
+        return first
+    return ""
+
+
+def extract_prose_triggers(frontmatter: str) -> list[str]:
+    """Quoted multi-word trigger phrases embedded in a prose `description`.
+
+    Many skills advertise triggers inline (`Use when asked to "create a
+    codespace", ...`) instead of the structured list. Those still drive
+    auto-invocation, so they must participate in collision detection. Only the
+    `description` value is searched, and only multi-word quoted phrases are
+    taken -- single tokens are usually tool/command names, not triggers.
+    """
+    desc = get_field_block(frontmatter, "description")
+    if not desc:
+        return []
     out: list[str] = []
-    for t in triggers:
-        k = t.lower()
-        if k and k not in seen:
-            seen.add(k)
-            out.append(t)
-    return out
+    for m in re.finditer(r"['\"\u201c]([A-Za-z][^'\"\u201c\u201d]{3,60})['\"\u201d]", desc):
+        phrase = m.group(1).strip()
+        if " " in phrase:  # multi-word only
+            out.append(phrase)
+    return _dedup(out)
+
+
+def _plugin_origin(sf: Path) -> str:
+    """`<marketplace>/<plugin>` (or `<plugin>`) inferred from a skill path."""
+    parts = sf.parts
+    try:
+        si = len(parts) - 1 - parts[::-1].index("skills")
+    except ValueError:
+        return ""
+    plugin = parts[si - 1] if si - 1 >= 0 else ""
+    mkt = parts[si - 2] if si - 2 >= 0 else ""
+    return f"{mkt}/{plugin}" if mkt and plugin else plugin
 
 
 def get_field(frontmatter: str, key: str) -> str | None:
@@ -163,13 +232,15 @@ def get_field(frontmatter: str, key: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
-def scan_skills(root: Path, report: Report) -> None:
-    skill_files = sorted(root.glob(".github/skills/*/SKILL.md"))
-    # Also pick up plugin-authored skills if this repo ships plugins.
-    skill_files += sorted(root.glob("plugins/*/skills/*/SKILL.md"))
-    trigger_owner: dict[str, list[str]] = {}
+def scan_skills(root: Path, report: Report,
+                extra_skill_roots: list[Path] | None = None) -> None:
+    trigger_owner: dict[str, set[str]] = {}
 
-    for sf in skill_files:
+    # Owned skills: local `.github/skills` + this repo's own `plugins/*`. Full
+    # checks apply, and both structured + prose triggers feed the collision map.
+    owned = sorted(root.glob(".github/skills/*/SKILL.md"))
+    owned += sorted(root.glob("plugins/*/skills/*/SKILL.md"))
+    for sf in owned:
         text = sf.read_text(encoding="utf-8", errors="replace")
         fm = split_frontmatter(text)
         if fm is None:
@@ -189,15 +260,32 @@ def scan_skills(root: Path, report: Report) -> None:
         if name and name != folder:
             report.add(BLOCKING, "name-folder-match", sf,
                        f"skill `name: {name}` != folder `{folder}`")
-        triggers = extract_triggers(frontmatter)
-        if not triggers:
+        structured = extract_triggers(frontmatter)
+        if not structured:
             report.add(WARNING, "skill-triggers", sf,
-                       "description advertises no trigger phrases")
-        for t in triggers:
-            trigger_owner.setdefault(t.lower(), []).append(name or folder)
+                       "description advertises no structured trigger phrases "
+                       "(`Trigger phrases include:` list)")
+        for t in _dedup(structured + extract_prose_triggers(frontmatter)):
+            trigger_owner.setdefault(t.lower(), set()).add(name or folder)
+
+    # Reference skills from installed-plugin roots: they join the collision map
+    # only (no findings -- we don't own them), so a LOCAL<->PLUGIN collision is
+    # visible even though the plugin lives outside the repo.
+    for proot in (extra_skill_roots or []):
+        for sf in sorted(proot.glob("*/*/skills/*/SKILL.md")):
+            fm = split_frontmatter(sf.read_text(encoding="utf-8", errors="replace"))
+            if fm is None:
+                continue
+            frontmatter, _ = fm
+            name = get_field(frontmatter, "name") or sf.parent.name
+            origin = _plugin_origin(sf)
+            label = f"{name} [{origin}]" if origin else name
+            for t in _dedup(extract_triggers(frontmatter)
+                            + extract_prose_triggers(frontmatter)):
+                trigger_owner.setdefault(t.lower(), set()).add(label)
 
     for phrase, owners in sorted(trigger_owner.items()):
-        uniq = sorted(set(owners))
+        uniq = sorted(owners)
         if len(uniq) > 1:
             report.add(WARNING, "trigger-collision", ".github/skills",
                        f"trigger '{phrase}' claimed by: {', '.join(uniq)}")
@@ -280,9 +368,9 @@ def scan_text_files(root: Path, report: Report) -> None:
                                f"ssh/scp/rsync targets raw IP {ip} (use an alias)")
 
 
-def run(root: Path) -> Report:
+def run(root: Path, extra_skill_roots: list[Path] | None = None) -> Report:
     report = Report()
-    scan_skills(root, report)
+    scan_skills(root, report, extra_skill_roots)
     scan_agents(root, report)
     scan_text_files(root, report)
     return report
@@ -295,6 +383,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", action="store_true", help="emit findings as JSON")
     ap.add_argument("--strict", action="store_true",
                     help="exit non-zero if any BLOCKING finding is reported")
+    ap.add_argument("--include-plugins", action="append", default=[], metavar="DIR",
+                    help="installed-plugin tree (<root>/<marketplace>/<plugin>/skills/...) "
+                         "whose skills join the collision map; repeatable")
+    ap.add_argument("--include-installed", action="store_true",
+                    help="shortcut for --include-plugins ~/.copilot/installed-plugins")
     args = ap.parse_args(argv)
 
     root = Path(args.root).resolve()
@@ -302,7 +395,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {root} is not a directory", file=sys.stderr)
         return 2
 
-    report = run(root)
+    extra_roots: list[Path] = []
+    plugin_dirs = list(args.include_plugins)
+    if args.include_installed:
+        plugin_dirs.append(str(Path.home() / ".copilot" / "installed-plugins"))
+    for d in plugin_dirs:
+        p = Path(d).expanduser().resolve()
+        if p.is_dir():
+            extra_roots.append(p)
+        else:
+            print(f"warning: --include-plugins {p} is not a directory (skipped)",
+                  file=sys.stderr)
+
+    report = run(root, extra_roots)
 
     if args.json:
         print(json.dumps({
