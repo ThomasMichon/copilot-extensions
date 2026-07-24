@@ -242,6 +242,36 @@ def resolve_token(prcfg) -> str | None:
     return None
 
 
+def account_token_for_slug(slug: str | None, prcfg) -> str | None:
+    """Resolve the provider token for a repo, honoring its repo-scoped account.
+
+    The gh-ops half of the repo-scoped identity layer.  Order:
+
+    1. an explicitly configured ``pr.token_command`` / ``pr.token_env`` (the
+       vault/env binding) always wins -- unchanged from :func:`resolve_token`;
+    2. else, for the **github** provider only, the repo's resolved account
+       (``repos.account_for_github_slug`` -- explicit ``account:`` override or
+       the derived owner of ``slug``) mints a ``gh`` token
+       (``gh auth token --user <account>`` via ``git_ops.gh_token_for_account``);
+    3. else None -- the provider uses its ambient CLI auth exactly as before.
+
+    v1 is GitHub-only: non-github providers (and github repos with no
+    resolvable account) fall straight through to today's behavior, so this is
+    additive and safe.
+    """
+    tok = resolve_token(prcfg)
+    if tok:
+        return tok
+    if (getattr(prcfg, "provider", "") or "") != "github":
+        return None
+    from .. import git_ops, repos
+
+    account = repos.account_for_github_slug(slug)
+    if not account:
+        return None
+    return git_ops.gh_token_for_account(account)
+
+
 def run_cli(
     args: list[str],
     *,
@@ -343,6 +373,7 @@ __all__ = [
     "PRScope",
     "ProviderError",
     "PullResult",
+    "account_token_for_slug",
     "get_provider",
     "resolve_token",
     "run_cli",

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -77,6 +78,12 @@ class RepoEntry:
     default_branch: str = ""
     tags: list[str] = field(default_factory=list)
     contributing: str = ""
+    # Optional preferred GitHub identity (a ``gh`` account login) this repo's
+    # git/gh operations run under. Absent => derived from the remote owner for
+    # github.com remotes, else no account (today's ambient-auth behavior). An
+    # explicit value overrides the derived owner (an EMU account can span orgs,
+    # so owner != account isn't guaranteed). See :func:`resolve_account`.
+    account: str = ""
     # Whether this repo backs a same-machine agent in agent-bridge. Defaults
     # ON for worktree/singleton repos (you adopt them to work in them); OFF for
     # reference repos (read-only). `register`/`add --no-agent` forces it off.
@@ -171,6 +178,7 @@ def read_registry() -> ReposRegistry:
                     default_branch=entry.get("default_branch", ""),
                     tags=tags,
                     contributing=entry.get("contributing", ""),
+                    account=str(entry.get("account", "") or ""),
                     agent=agent,
                     paths=paths,
                 )
@@ -213,6 +221,8 @@ def write_registry(registry: ReposRegistry) -> None:
                 lines.append(f"    agent: {'true' if entry.agent else 'false'}")
             if entry.remote:
                 lines.append(f"    remote: {_quote(entry.remote)}")
+            if entry.account:
+                lines.append(f"    account: {_quote(entry.account)}")
             if entry.default_branch:
                 lines.append(f"    default_branch: {_quote(entry.default_branch)}")
             if entry.tags:
@@ -276,6 +286,80 @@ def find_repo(name: str) -> RepoEntry | None:
     return registry.repos.get(name)
 
 
+# ---------------------------------------------------------------------------
+# Account resolution (repo -> preferred GitHub identity)
+# ---------------------------------------------------------------------------
+#
+# The repo-scoped identity layer: a repo has a preferred ``account`` (a ``gh``
+# account login) its git/gh operations run under, so agents never hand-switch
+# ``gh auth switch``.  ``resolve_account`` is the single source of truth --
+# explicit ``account:`` wins, else the owner is derived from a github.com
+# remote, else None (a non-GitHub or underivable remote keeps today's ambient
+# behavior; nothing switches).  GitHub-only in v1.
+
+def github_owner(remote: str) -> str | None:
+    """Extract the owner from a github.com remote URL (https or ssh form).
+
+    Returns None for non-GitHub remotes (so ADO/gitea derive no account).
+    """
+    if not remote:
+        return None
+    url = remote.strip()
+    m = re.match(r"https?://[^/]*github\.com/([^/]+)/", url)
+    if m:
+        return m.group(1)
+    m = re.match(r"(?:ssh://)?git@[^:/]*github\.com[:/]([^/]+)/", url)
+    if m:
+        return m.group(1)
+    return None
+
+
+def resolve_account(entry: RepoEntry | None) -> str | None:
+    """Resolve the preferred GitHub account for a repo entry.
+
+    Order: explicit ``account:`` -> owner derived from a github.com remote ->
+    None.  None means "no account preference" -- git/gh operations use the
+    ambient ``gh`` account exactly as before (additive + safe).
+    """
+    if entry is None:
+        return None
+    if entry.account:
+        return entry.account
+    return github_owner(entry.remote)
+
+
+def account_for_github_owner(owner: str | None) -> str | None:
+    """Resolve the effective account for a github ``owner`` (from a repo slug).
+
+    Honors an explicit ``account:`` override on any registered repo whose
+    github remote is owned by ``owner`` (owner != account is possible for EMU
+    accounts spanning orgs); otherwise the account *is* the owner.  Returns
+    None only for an empty owner.  Used at gh/git touch-sites that know the
+    hosting ``owner/name`` slug but not the registry name.
+    """
+    if not owner:
+        return None
+    try:
+        registry = read_registry()
+    except Exception:
+        registry = ReposRegistry()
+    for entry in registry.repos.values():
+        if not entry.account:
+            continue
+        eowner = github_owner(entry.remote)
+        if eowner and eowner.casefold() == owner.casefold():
+            return entry.account
+    return owner
+
+
+def account_for_github_slug(slug: str | None) -> str | None:
+    """Resolve the effective account for a github ``owner/name`` slug."""
+    if not slug:
+        return None
+    owner = slug.split("/", 1)[0] if "/" in slug else slug
+    return account_for_github_owner(owner)
+
+
 def add_repo(
     name: str,
     path: str,
@@ -285,6 +369,7 @@ def add_repo(
     default_branch: str = "",
     tags: list[str] | None = None,
     contributing: str = "",
+    account: str = "",
     agent: bool | None = None,
     plat: str | None = None,
 ) -> RepoEntry:
@@ -309,6 +394,8 @@ def add_repo(
             existing.tags = list(tags)
         if contributing:
             existing.contributing = contributing
+        if account:
+            existing.account = account
         if agent is not None:
             existing.agent = agent
         entry = existing
@@ -320,6 +407,7 @@ def add_repo(
             default_branch=default_branch,
             tags=list(tags) if tags else [],
             contributing=contributing,
+            account=account,
             agent=agent if agent is not None else (repo_class != "reference"),
             paths={plat: path},
         )

@@ -721,6 +721,17 @@ def _gh_token_for_owner(owner: str) -> str | None:
     return result.stdout.strip() or None
 
 
+def gh_token_for_account(account: str) -> str | None:
+    """Public: mint a ``gh`` token for a specific account login, or None.
+
+    The auth-provider seam for the repo-scoped identity layer -- ``gh`` itself
+    is the token store/minter in v1.  Returns None when ``gh`` is unavailable
+    or ``account`` is not an authenticated ``gh`` account (callers then fall
+    back to the ambient credential).
+    """
+    return _gh_token_for_owner(account)
+
+
 @functools.cache
 def _active_gh_account() -> str | None:
     """Return the login of the **active** ``gh`` account, or None.
@@ -779,10 +790,18 @@ def _auth_config_args(remote: str, *, cwd: str | Path) -> list[str]:
     owner = _parse_github_owner(url)
     if not owner:
         return []
+    # Honor an explicit repos.yaml ``account:`` override (owner != account is
+    # possible for EMU accounts spanning orgs); absent an override the account
+    # *is* the owner, preserving the derive-from-owner behavior (#29).
+    try:
+        from . import repos
+        account = repos.account_for_github_owner(owner) or owner
+    except Exception:
+        account = owner
     active = _active_gh_account()
-    if active and active.casefold() == owner.casefold():
+    if active and active.casefold() == account.casefold():
         return []
-    token = _gh_token_for_owner(owner)
+    token = _gh_token_for_owner(account)
     if not token:
         return []
     cred = base64.b64encode(f"x-access-token:{token}".encode()).decode()

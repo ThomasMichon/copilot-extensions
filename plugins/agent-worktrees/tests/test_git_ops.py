@@ -154,6 +154,32 @@ class TestCrossAccountAuth:
                             lambda owner: pytest.fail("should not be called"))
         assert go._auth_config_args("origin", cwd=".") == []
 
+    def test_auth_args_honors_account_override(self, monkeypatch):
+        """An explicit repos.yaml account: overrides the derived remote owner,
+        so the injected credential authenticates as the account (not the org)."""
+        import base64
+
+        from agent_worktrees import repos as repos_mod
+        monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: "https://github.com/example-org/r.git")
+        # Registry maps this owner's repo to a different account login.
+        monkeypatch.setattr(
+            repos_mod, "account_for_github_owner",
+            lambda owner: "host-acct" if owner == "example-org" else owner,
+        )
+        monkeypatch.setattr(go, "_active_gh_account", lambda: "example-org")
+        seen: list[str] = []
+
+        def _tok(account):
+            seen.append(account)
+            return "acct_secret"
+
+        monkeypatch.setattr(go, "_gh_token_for_owner", _tok)
+        args = go._auth_config_args("origin", cwd=".")
+        # Effective account (host-acct) != active (example-org) -> inject it.
+        assert seen == ["host-acct"]
+        expected = base64.b64encode(b"x-access-token:acct_secret").decode()
+        assert args == ["-c", f"http.extraheader=AUTHORIZATION: basic {expected}"]
+
     def test_active_gh_account_parses_active_marker(self, monkeypatch):
         out = (
             "github.com\n"

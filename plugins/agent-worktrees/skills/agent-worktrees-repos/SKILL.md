@@ -118,7 +118,8 @@ All commands are accessed via `agent-worktrees repos <subcommand>`:
 repos list [--class reference|singleton|worktree] [--json]
 repos find <name>
 repos add <name> <path> [--class C] [--remote URL]
-                        [--default-branch B] [--tags a,b] [--contributing PATH]
+                        [--account LOGIN] [--default-branch B]
+                        [--tags a,b] [--contributing PATH]
 repos remove <name>
 repos clone <remote> [--name N] [--target PATH]
 repos srcroot [--set PATH] [--platform windows|wsl|linux]
@@ -195,6 +196,7 @@ repos:
   copilot-extensions:
     class: worktree                # reference | singleton | worktree
     remote: "https://github.com/ThomasMichon/copilot-extensions.git"
+    account: ThomasMichon          # optional; else derived from the remote owner
     default_branch: main
     windows: D:\Src\copilot-extensions
     wsl: ~/src/copilot-extensions
@@ -206,10 +208,33 @@ repos:
 |-------|-------------|
 | `class` | `reference` \| `singleton` \| `worktree` (see above) |
 | `remote` | Git remote URL |
+| `account` | Preferred GitHub identity (a `gh` account login) this repo's git/gh ops run under. Optional — absent, it's **derived** from a `github.com` remote owner; a non-GitHub/underivable remote means no account (ambient auth). See *Repo-scoped identity* below. |
 | `default_branch` | Branch `status`/`sync` track (default: current) |
 | `tags` | Filter tags for batch ops (`facility`, `work`, …) |
 | `contributing` | Path to CONTRIBUTING.md — read before editing |
 | `windows`/`wsl`/`linux` | Per-platform checkout paths |
+
+### Repo-scoped identity (multi-account)
+
+Operating across repos under different GitHub identities (e.g. an EMU work
+account vs. a personal account) otherwise forces manual `gh auth switch`.
+agent-worktrees resolves the **account from repo context** and applies it
+inline, so agents never hand-switch:
+
+- **Resolution** (`resolve_account`): explicit `account:` → owner derived from a
+  `github.com` remote → none. None = today's ambient-`gh` behavior (additive,
+  safe). GitHub-only in v1; ADO/gitea remotes resolve no account.
+- **gh/PR ops** (`create-pr`, `pr-merge`, `pr-ready`, `pr-status`, `pr-watch`,
+  `pr-complete`, label/GraphQL): the resolved account mints a token
+  (`gh auth token --user <account>` → `GH_TOKEN`); an explicit
+  `pr.token_command`/`pr.token_env` still wins. No global switch.
+- **git push/fetch**: the account credential is injected per-invocation via
+  `http.extraheader` (never persisted to `.git/config`), with a plain-push
+  retry fallback.
+
+`repos list` and `related resolve` surface the resolved account (`explicit` vs
+`derived`). Set an explicit `account:` only when owner ≠ account (an EMU account
+spanning orgs); otherwise let it derive.
 
 ## Integration Points
 

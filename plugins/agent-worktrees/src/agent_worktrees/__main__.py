@@ -343,13 +343,13 @@ def _make_pr_lookup(config):
     from . import providers
 
     prcfg = config.default_repo.pr
-    try:
-        token = providers.resolve_token(prcfg)
-    except Exception:
-        token = None
     api_base = getattr(prcfg, "api_base", "") or ""
 
     def lookup(repo, number):
+        try:
+            token = providers.account_token_for_slug(repo, prcfg)
+        except Exception:
+            token = None
         try:
             provider = providers.get_provider(prcfg.provider)
             return provider.get_pull(repo, number, api_base=api_base, token=token)
@@ -7625,7 +7625,8 @@ def _repos_usage() -> None:
     print("  find <name>                         Resolve a repo to its local path")
     print("  add <name> <path>                   Register a repo at a known path")
     print("     [--class C] [--remote URL] [--default-branch B]")
-    print("     [--tags a,b] [--contributing PATH] [--agent|--no-agent]")
+    print("     [--account LOGIN] [--tags a,b] [--contributing PATH]")
+    print("     [--agent|--no-agent]")
     print("  remove <name>                       Remove a repo from the registry")
     print("  clone <remote> [--name N]           Clone a repo to srcroot and register")
     print("     [--target PATH]")
@@ -7685,6 +7686,8 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                         "default_branch": e.default_branch,
                         "tags": e.tags,
                         "contributing": e.contributing,
+                        "account": e.account,
+                        "resolved_account": repos.resolve_account(e),
                         "agent": e.agent,
                         "paths": e.paths,
                     }
@@ -7704,6 +7707,10 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                 print(f"  {e.name:<25} {tag:<20} {local}")
                 if e.remote:
                     print(f"  {'':25} {'':20} {e.remote}")
+                acct = repos.resolve_account(e)
+                if acct:
+                    src = "explicit" if e.account else "derived"
+                    print(f"  {'':25} {'':20} account: {acct} ({src})")
         return 0
 
     if sub == "find":
@@ -7735,8 +7742,8 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             output.err(
                 "Usage: repos add <name> <path> "
                 "[--class reference|singleton|worktree] [--remote URL] "
-                "[--default-branch B] [--tags a,b] [--contributing PATH] "
-                "[--agent|--no-agent]"
+                "[--default-branch B] [--account LOGIN] [--tags a,b] "
+                "[--contributing PATH] [--agent|--no-agent]"
             )
             return 1
         name, path = rest[0], rest[1]
@@ -7758,6 +7765,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         remote = _opt("--remote") or remote
         default_branch = _opt("--default-branch") or default_branch
         contributing = _opt("--contributing") or contributing
+        account = _opt("--account") or ""
         raw_tags = _opt("--tags")
         if raw_tags:
             tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
@@ -7775,6 +7783,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             default_branch=default_branch,
             tags=tags,
             contributing=contributing,
+            account=account,
             agent=agent_flag,
         )
         return 0
@@ -8287,6 +8296,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 "available_here": resn.available_here,
                 "editing_model": resn.editing_model,
                 "base_repo": base_repo,
+                "account": repos.resolve_account(reg),
                 "delegate_via": resn.delegate_via,
                 "current_machine": current_machine,
                 "steps": resn.steps,
@@ -8307,6 +8317,10 @@ def cmd_related_dispatch(argv: list[str]) -> int:
               + (f"  [{resn.editing_model}]" if resn.editing_model else ""))
         if reg and reg.local_path():
             print(f"  path:     {reg.local_path()}")
+        _acct = repos.resolve_account(reg)
+        if _acct:
+            _asrc = "explicit" if (reg and reg.account) else "derived"
+            print(f"  account:  {_acct} ({_asrc})")
         if resn.delegate_via:
             print(f"  delegate: {resn.delegate_via}")
         print(f"  machine:  {current_machine or '(unknown)'}")
