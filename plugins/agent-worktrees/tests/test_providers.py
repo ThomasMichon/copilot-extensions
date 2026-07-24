@@ -628,6 +628,76 @@ class TestAzureDevOpsProvider:
             assert res.state == exp_state
 
 
+class TestEnsureCliReady:
+    """ensure_cli_ready() provisions the az 'azure-devops' extension for the
+    ADO PR provider -- the install/adopt preflight so the first create-pr
+    doesn't hit an interactive extension-install prompt under automation."""
+
+    @staticmethod
+    def _have_az(monkeypatch, azure):
+        monkeypatch.setattr(azure.shutil, "which", lambda name: "az")
+
+    def test_missing_az_reports_gap(self, monkeypatch):
+        from agent_worktrees.providers import azure_devops as azure
+        monkeypatch.setattr(azure.shutil, "which", lambda name: None)
+        ok, msg = azure.ensure_cli_ready()
+        assert ok is False
+        assert "az" in msg and "azure-devops" in msg
+
+    def test_extension_already_present(self, monkeypatch):
+        from agent_worktrees.providers import azure_devops as azure
+        self._have_az(monkeypatch, azure)
+        monkeypatch.setattr(azure, "run_cli", lambda args, **kw: _proc(returncode=0))
+        ok, msg = azure.ensure_cli_ready()
+        assert ok is True
+        assert "already installed" in msg
+
+    def test_installs_when_missing(self, monkeypatch):
+        from agent_worktrees.providers import azure_devops as azure
+        self._have_az(monkeypatch, azure)
+        calls = []
+
+        def fake(args, **kw):
+            calls.append(args)
+            # `extension show` fails (absent); `extension add` succeeds.
+            return _proc(returncode=1) if "show" in args else _proc(returncode=0)
+
+        monkeypatch.setattr(azure, "run_cli", fake)
+        ok, msg = azure.ensure_cli_ready()
+        assert ok is True
+        assert "installed the 'azure-devops' extension" in msg
+        assert any("add" in a for a in calls)
+
+    def test_install_false_reports_without_mutating(self, monkeypatch):
+        from agent_worktrees.providers import azure_devops as azure
+        self._have_az(monkeypatch, azure)
+        added = []
+
+        def fake(args, **kw):
+            if "add" in args:
+                added.append(args)
+            return _proc(returncode=1)
+
+        monkeypatch.setattr(azure, "run_cli", fake)
+        ok, msg = azure.ensure_cli_ready(install=False)
+        assert ok is False
+        assert "missing" in msg
+        assert added == []  # never attempts an install in report-only mode
+
+    def test_install_failure_is_reported(self, monkeypatch):
+        from agent_worktrees.providers import azure_devops as azure
+        self._have_az(monkeypatch, azure)
+
+        def fake(args, **kw):
+            return _proc(returncode=1) if "show" in args else _proc(
+                returncode=2, stderr="boom")
+
+        monkeypatch.setattr(azure, "run_cli", fake)
+        ok, msg = azure.ensure_cli_ready()
+        assert ok is False
+        assert "could not install" in msg and "boom" in msg
+
+
 # ---------------------------------------------------------------------------
 # create_pr auto-open wiring (fake provider)
 # ---------------------------------------------------------------------------

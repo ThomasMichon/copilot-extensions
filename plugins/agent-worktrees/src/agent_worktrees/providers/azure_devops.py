@@ -12,6 +12,7 @@ is ``project/repo``.
 from __future__ import annotations
 
 import json
+import shutil
 from typing import TYPE_CHECKING
 
 from .base import ProviderError, PRScope, PullResult, run_cli
@@ -28,6 +29,46 @@ AUTO_COMPLETE_MARKER = "auto-complete"
 #: Azure DevOps AAD resource GUID -- the audience for a REST access token minted
 #: from an ambient ``az login`` when no PAT is configured.
 _ADO_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798"
+
+
+def ensure_cli_ready(*, install: bool = True) -> tuple[bool, str]:
+    """Ensure the Azure CLI and its ``azure-devops`` extension are available.
+
+    The provider methods below shell out to ``az repos pr ...``, which require
+    the ``azure-devops`` az extension. On a machine where it is missing, ``az``
+    tries to *interactively* prompt to install the extension and hits EOF under
+    automation -- so the first ``create-pr`` fails. Provisioning it up front at
+    install/adopt time (see the callers in ``__main__``) avoids that first-use
+    failure.
+
+    Best-effort: returns ``(ok, message)``. ``ok`` is False only when the
+    prerequisite is genuinely absent and could not be provisioned; callers
+    should warn rather than abort, since ``az`` may be provisioned out of band
+    later. ``install=False`` reports the gap without mutating the machine
+    (useful for a ``doctor``-style check).
+    """
+    if shutil.which("az") is None:
+        return False, (
+            "the Azure CLI ('az') was not found on PATH; install it, then run "
+            "'az extension add --name azure-devops'."
+        )
+    if run_cli(["az", "extension", "show", "--name", "azure-devops"]).returncode == 0:
+        return True, "'azure-devops' extension already installed."
+    if not install:
+        return False, (
+            "'azure-devops' extension is missing; run "
+            "'az extension add --name azure-devops'."
+        )
+    added = run_cli(
+        ["az", "extension", "add", "--name", "azure-devops", "--only-show-errors"],
+        timeout=300,
+    )
+    if added.returncode != 0:
+        return False, (
+            "could not install the 'azure-devops' extension: "
+            + (added.stderr.strip() or added.stdout.strip() or "unknown error")
+        )
+    return True, "installed the 'azure-devops' extension."
 
 
 class AzureDevOpsProvider:
