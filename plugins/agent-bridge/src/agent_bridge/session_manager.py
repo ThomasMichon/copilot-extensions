@@ -231,15 +231,19 @@ async def _cleanup_worktree(target: SpawnTarget, turn_count: int) -> None:
 def _default_cwd(target: SpawnTarget) -> str:
     """Derive a plausible default CWD for a spawn target.
 
-    Binstub SSH agents resolve CWD remotely, so target.cwd is None.
-    The ACP spec requires an absolute path for new_session/load_session.
-    The actual working directory is set by the remote launch script --
-    this value is only used to satisfy the ACP protocol requirement.
+    The ACP runtime validates this path before it creates or loads a session, so
+    the fallback must be a directory that is sensible for the target platform
+    even when the SSH profile does not expose a user name.
     """
-    user = target.user or "root"
-    # PowerShell/cmd targets are Windows -- home is C:\Users\<user>
+    user = target.user
     if target.ssh_shell in ("pwsh", "powershell", "cmd"):
+        if not user or user.lower() == "root":
+            return "C:\\"
         return f"C:\\Users\\{user}"
+    if user == "root":
+        return "/root"
+    if not user:
+        return "/"
     return f"/home/{user}"
 
 
