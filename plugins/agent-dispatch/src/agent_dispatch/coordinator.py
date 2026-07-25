@@ -27,22 +27,57 @@ from .queue import SpawnReservation, Task, TaskError, TaskQueue, worker_id_for
 log = logging.getLogger("agent-dispatch.coordinator")
 
 
-async def _sweep_loop(queue: TaskQueue, interval: float, bus: EventBus) -> None:
-    """Periodically recover expired leases so a crashed worker's task resurfaces.
+def _resolve_owner_session_id(worker_id: str | None) -> str | None:
+    """Best-effort: resolve a worker's (``machine/worktree``) current live-session
+    id, captured on ``start`` as the task's owner identity for liveness GC.
 
-    Runs the (synchronous) recovery sweep off the event loop via a worker thread.
-    Cancelled cleanly on shutdown.
+    Shells the same agent-bridge live-session resolver `tracking` uses. Any
+    failure (no bridge, unreachable, no session yet) returns ``None`` -- the task
+    is then simply not GC-attributable until a later capture, never wrongly
+    requeued (an owner without a captured identity reads ``unknown``).
+    """
+    if not worker_id or "/" not in worker_id:
+        return None
+    from . import tracking
+
+    machine, _sep, worktree = worker_id.partition("/")
+    if not worktree:
+        return None
+    local = tracking.remote_dispatch.local_machine()
+    is_remote = bool(machine) and bool(local) and machine != local
+    session = tracking.resolve_live_session(
+        worktree, machine=machine if is_remote else None
+    )
+    if not session:
+        return None
+    return session.get("session_id") or session.get("id")
+
+
+async def _gc_loop(queue: TaskQueue, interval: float, bus: EventBus) -> None:
+    """Periodically garbage-collect held tasks by **worker liveness**.
+
+    Replaces the old lease-expiry sweep: a held task is requeued only when its
+    owner worktree is *confirmed gone* (not because a wall-clock lease elapsed),
+    so long-running live work is never disturbed and a bridge blip (verdict
+    ``unknown``) leaves a task alone. Runs the (synchronous, subprocess-shelling)
+    reconcile off the event loop via a worker thread. Cancelled cleanly on
+    shutdown.
     """
     while True:
         await asyncio.sleep(interval)
         try:
-            recovered = await asyncio.to_thread(queue.recover_expired_leases)
+            counts = await asyncio.to_thread(queue.reconcile_liveness)
         except Exception:  # pragma: no cover -- never let the loop die on a blip
-            log.exception("lease-recovery sweep failed")
+            log.exception("liveness GC pass failed")
             continue
-        if recovered:
-            log.info("lease-recovery sweep requeued %d expired task(s)", recovered)
-            bus.publish({"type": "task.swept", "recovered": recovered})
+        requeued = counts.get("requeued", 0)
+        if requeued:
+            log.info(
+                "liveness GC requeued %d task(s) with a gone owner (checked %d)",
+                requeued,
+                counts.get("checked", 0),
+            )
+            bus.publish({"type": "task.reconciled", "requeued": requeued, **counts})
 
 
 class CreateBody(BaseModel):
@@ -79,6 +114,10 @@ class ClaimBody(BaseModel):
 
 class WorkerBody(BaseModel):
     worker_id: str
+    #: Optional: the worktree's current live-session id, captured on ``start`` as
+    #: the task's owner identity (for liveness GC). When omitted the coordinator
+    #: resolves it best-effort from the owner worktree.
+    owner_session_id: str | None = None
 
 
 class YieldBody(BaseModel):
@@ -175,7 +214,7 @@ def create_app(
     async def lifespan(_app: FastAPI):
         bus.bind_loop(asyncio.get_running_loop())
         sweeper = (
-            asyncio.create_task(_sweep_loop(queue, sweep_interval, bus))
+            asyncio.create_task(_gc_loop(queue, sweep_interval, bus))
             if sweep_interval and sweep_interval > 0
             else None
         )
@@ -222,8 +261,13 @@ def create_app(
         return result
 
     @app.get("/health")
-    def health() -> dict:
-        return {"status": "ok", "version": __version__, "subscribers": bus.subscriber_count}
+    def health(repo: str | None = None) -> dict:
+        return {
+            "status": "ok",
+            "version": __version__,
+            "subscribers": bus.subscriber_count,
+            "backlog": queue.backlog_health(repo=repo),
+        }
 
     @app.get("/events")
     async def events_stream() -> StreamingResponse:
@@ -328,7 +372,11 @@ def create_app(
 
     @app.post("/tasks/{task_id}/start")
     def start(task_id: str, body: WorkerBody) -> dict:
-        return _guard(lambda: queue.start(task_id, body.worker_id), "task.started")
+        owner_session_id = body.owner_session_id or _resolve_owner_session_id(body.worker_id)
+        return _guard(
+            lambda: queue.start(task_id, body.worker_id, owner_session_id=owner_session_id),
+            "task.started",
+        )
 
     @app.post("/tasks/{task_id}/yield")
     def yield_task(task_id: str, body: YieldBody) -> dict:
@@ -379,7 +427,10 @@ def create_app(
 
     @app.post("/recover")
     def recover() -> dict:
-        return {"recovered": queue.recover_expired_leases()}
+        """Force a liveness GC pass now (requeue tasks whose owner is gone)."""
+        counts = queue.reconcile_liveness()
+        # Back-compat: keep the old ``recovered`` key alongside the richer counts.
+        return {"recovered": counts["requeued"], **counts}
 
     # -- spawn reservations --------------------------------------------------
 

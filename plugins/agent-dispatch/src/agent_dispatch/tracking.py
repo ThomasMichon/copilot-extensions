@@ -160,6 +160,87 @@ def embodiment_overlay(session: dict[str, Any] | None) -> dict[str, Any] | None:
     return overlay or None
 
 
+#: The three liveness verdicts a GC reconcile acts on. ``LIVE`` and ``GONE`` are
+#: *positive* answers from a working resolver; ``UNKNOWN`` means the resolver
+#: could not answer (no CLI/ssh, unreachable bridge, timeout, error) -- the
+#: caller must treat it as "can't tell", never as "gone".
+LIVE = "live"
+GONE = "gone"
+UNKNOWN = "unknown"
+
+
+def liveness_verdict(
+    worktree: str | None,
+    *,
+    machine: str | None = None,
+    owner_session_id: str | None = None,
+    timeout: float | None = None,
+) -> str:
+    """Resolve a task owner's liveness to a **tri-state, identity-keyed** verdict.
+
+    The safety crux GC depends on. It is keyed on the owner's **session
+    identity**, not mere worktree occupancy -- because a worktree is reused across
+    sessions, so "a session occupies the worktree" does not mean "*this task's*
+    owner is alive." Two failure modes this closes: a reused worktree hiding a
+    gone owner (false ``live``), and a claim-before-registration race requeuing a
+    live owner (false ``gone``).
+
+    Given the task's captured ``owner_session_id``:
+
+    - :data:`LIVE` -- the resolver answered and the worktree's **current** live
+      session **is** ``owner_session_id`` (the same owner is still there).
+    - :data:`GONE` -- the resolver answered authoritatively and the worktree is
+      **empty** (``{}``) or holds a **different** session id than
+      ``owner_session_id`` (a new session reused the worktree; our owner is gone).
+    - :data:`UNKNOWN` -- the resolver could not answer (no CLI/ssh, non-zero exit,
+      timeout, unparseable/non-object output -- a possibly restarting/partial
+      registry), **or** ``owner_session_id`` is not captured yet (the claim ->
+      register window). GC leaves the task alone (degrade safe; never requeue on
+      ignorance or an unattributable snapshot).
+
+    Never raises. Mirrors :func:`resolve_live_session`'s transport (local
+    ``agent-bridge``; a remote owner over ``ssh <machine> agent-bridge``).
+    """
+    if not worktree:
+        return UNKNOWN
+    argv = _bridge_resolve_argv(worktree, machine=machine)
+    if argv is None:
+        return UNKNOWN
+    if timeout is None:
+        timeout = 6.0 if machine else 3.0
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
+            argv,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return UNKNOWN
+    if proc.returncode != 0:
+        return UNKNOWN  # bridge/ssh errored -- can't tell, not "gone"
+    out = proc.stdout.strip()
+    if not out:
+        return UNKNOWN  # exit 0 but silent -- ambiguous, treat as can't-tell
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return UNKNOWN
+    if not isinstance(data, dict):
+        return UNKNOWN
+    # The resolver answered. Without a captured owner identity we cannot safely
+    # attribute the worktree's state to this task's owner -> can't-tell.
+    if owner_session_id is None:
+        return UNKNOWN
+    if not data:
+        return GONE  # `{}` (CLI 404): the worktree is empty -> our owner is gone
+    current = data.get("session_id") or data.get("id")
+    if current is None:
+        return UNKNOWN  # answered but unattributable
+    return LIVE if current == owner_session_id else GONE
+
+
 def enrich_task(
     task: Any,
     *,

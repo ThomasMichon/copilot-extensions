@@ -107,7 +107,7 @@ computes identically.
 
 ## See also
 
-- The **`agent-dispatch`** skill — the full CLI, the six-state lifecycle, worker
+- The **`agent-dispatch`** skill — the full CLI, the seven-state lifecycle, worker
   identity, capability/affinity routing, and selector (`--require`/`--exclude`)
   matching. Its **"Which coordination system?"** matrix disambiguates
   native sub-agent vs. agent-bridge vs. agent-dispatch when you're unsure which

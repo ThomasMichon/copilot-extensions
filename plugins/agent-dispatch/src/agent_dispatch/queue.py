@@ -32,7 +32,7 @@ import json
 import sqlite3
 import time
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -137,11 +137,15 @@ class Status:
     STARTED = "started"
     COMPLETED = "completed"
     ABANDONED = "abandoned"
+    #: Terminal failure: a held task requeued too many times (its owner kept
+    #: going gone) -- an actionable dead-letter end state rather than churning
+    #: crash -> gone -> requeue forever.
+    DEAD_LETTER = "dead_letter"
 
-    #: States a worker actively holds (leased); recoverable on lease expiry.
+    #: States a worker actively holds; recoverable by liveness GC (owner-gone).
     HELD = frozenset({CLAIMED, STARTED})
     #: Terminal states -- no further transitions.
-    TERMINAL = frozenset({COMPLETED, ABANDONED})
+    TERMINAL = frozenset({COMPLETED, ABANDONED, DEAD_LETTER})
     #: Non-terminal states from which an abandon (with permission) is allowed.
     ABANDONABLE = frozenset({PROPOSED, QUEUED, CLAIMED, STARTED})
 
@@ -216,6 +220,21 @@ class Task:
     #: Latest-only structured progress beat (JSON: phase/summary/blocker/pr/ts),
     #: or None. The "how far toward the goal" signal for at-a-glance tracking.
     latest_progress: str | None = None
+    #: The live-session identity that owns this task (captured at ``start``), and
+    #: a monotonic fence bumped each claim. Liveness GC compares the *owner's*
+    #: session identity -- not mere worktree occupancy -- and fences the requeue
+    #: on (owner_session_id, generation) so a reused worktree or a resuming stale
+    #: worker cannot corrupt recovery.
+    owner_session_id: str | None = None
+    generation: int = 0
+    #: Informational "last observed" beat (past observation), set by claim/start/
+    #: progress. Distinct from the deprecated ``lease_expires_at`` (a future
+    #: deadline), which recovery no longer reads.
+    last_seen_at: float | None = None
+    #: The last liveness verdict GC recorded for this task's owner
+    #: (``live``/``gone``/``unknown``), so the buildup metric can classify held
+    #: tasks without re-probing the bridge on every ``/health`` call.
+    last_liveness: str | None = None
 
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> Task:
@@ -248,6 +267,10 @@ class Task:
             completed_at=row["completed_at"],
             result_ref=row["result_ref"],
             latest_progress=row["latest_progress"],
+            owner_session_id=row["owner_session_id"],
+            generation=row["generation"],
+            last_seen_at=row["last_seen_at"],
+            last_liveness=row["last_liveness"],
         )
 
 
@@ -312,6 +335,10 @@ _COLUMNS: dict[str, str] = {
     "completed_at": "REAL",
     "result_ref": "TEXT",
     "latest_progress": "TEXT",
+    "owner_session_id": "TEXT",
+    "generation": "INTEGER NOT NULL DEFAULT 0",
+    "last_seen_at": "REAL",
+    "last_liveness": "TEXT",
 }
 
 
@@ -596,8 +623,9 @@ class TaskQueue:
                 lease = self.lease_seconds
                 conn.execute(
                     "UPDATE tasks SET status = ?, owner = ?, claimed_at = ?, updated_at = ?,"
-                    " lease_expires_at = ?, attempts = 1 WHERE id = ?",
-                    (Status.CLAIMED, claim_as, ts, ts, ts + lease, task_id),
+                    " lease_expires_at = ?, last_seen_at = ?, generation = generation + 1,"
+                    " attempts = 1 WHERE id = ?",
+                    (Status.CLAIMED, claim_as, ts, ts, ts + lease, ts, task_id),
                 )
                 self._audit(
                     conn, task_id, ts=ts, from_status=Status.QUEUED,
@@ -711,8 +739,10 @@ class TaskQueue:
                 return None
             conn.execute(
                 "UPDATE tasks SET status = ?, owner = ?, claimed_at = ?, updated_at = ?,"
-                " lease_expires_at = ?, attempts = attempts + 1 WHERE id = ? AND status = ?",
-                (Status.CLAIMED, worker_id, ts, ts, ts + lease, chosen["id"], Status.QUEUED),
+                " lease_expires_at = ?, last_seen_at = ?, generation = generation + 1,"
+                " owner_session_id = NULL, last_liveness = NULL,"
+                " attempts = attempts + 1 WHERE id = ? AND status = ?",
+                (Status.CLAIMED, worker_id, ts, ts, ts + lease, ts, chosen["id"], Status.QUEUED),
             )
             self._audit(
                 conn,
@@ -776,16 +806,26 @@ class TaskQueue:
             return 1
         return 0
 
-    def start(self, task_id: str, worker_id: str, *, now: float | None = None) -> Task:
+    def start(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        owner_session_id: str | None = None,
+        now: float | None = None,
+    ) -> Task:
         """Move a ``claimed`` task to ``started`` (owner must match).
 
-        Committing to the work **extends the lease to the full work lease** (from
-        whatever the claim granted -- e.g. a tight evaluation-window lease). This
-        only ever *lengthens* a lease, never shortens one, so it is safe for every
-        consumer: a task claimed under a short eval lease that is then started gets
-        the normal work window without waiting for the first heartbeat.
+        Commits the worker to the work. If ``owner_session_id`` is supplied (the
+        worktree's current live-session id), it is **captured on the task** so
+        liveness GC can later compare the *owner's session identity* -- not mere
+        worktree occupancy -- and know whether *this* owner is still alive even if
+        another session reuses the worktree. Also refreshes ``last_seen_at``.
         """
         ts = self._now(now)
+        extra: dict[str, object] = {"last_seen_at": ts}
+        if owner_session_id is not None:
+            extra["owner_session_id"] = owner_session_id
         return self._transition(
             task_id,
             allowed={Status.CLAIMED},
@@ -794,7 +834,7 @@ class TaskQueue:
             now=now,
             note="start",
             stamp="started_at",
-            extra={"lease_expires_at": ts + self.lease_seconds},
+            extra=extra,
         )
 
     def complete(
@@ -949,13 +989,14 @@ class TaskQueue:
             if extend_lease:
                 conn.execute(
                     "UPDATE tasks SET latest_progress = ?, lease_expires_at = ?,"
-                    " updated_at = ? WHERE id = ?",
-                    (payload, ts + self.lease_seconds, ts, task_id),
+                    " last_seen_at = ?, updated_at = ? WHERE id = ?",
+                    (payload, ts + self.lease_seconds, ts, ts, task_id),
                 )
             else:
                 conn.execute(
-                    "UPDATE tasks SET latest_progress = ?, updated_at = ? WHERE id = ?",
-                    (payload, ts, task_id),
+                    "UPDATE tasks SET latest_progress = ?, last_seen_at = ?,"
+                    " updated_at = ? WHERE id = ?",
+                    (payload, ts, ts, task_id),
                 )
             phase_tag = f"[{snapshot['phase']}] " if snapshot.get("phase") else ""
             self._audit(
@@ -972,35 +1013,222 @@ class TaskQueue:
         return result  # type: ignore[return-value]
 
     def recover_expired_leases(self, *, now: float | None = None) -> int:
-        """Return every held task whose lease has expired to ``queued``.
+        """Deprecated compatibility shim -- now runs a **liveness** GC pass.
 
-        This is the crash-recovery sweep: a worker that died mid-lease releases
-        its task to any other capable worker. Returns the number recovered.
+        The recovery trigger moved from wall-clock lease expiry to worker
+        liveness (see :meth:`reconcile_liveness`). This method is retained so the
+        ``POST /recover`` route and any external caller keep working, but it no
+        longer requeues on elapsed time: it requeues only tasks whose owner is
+        **confirmed gone**. Returns the number requeued.
         """
+        return self.reconcile_liveness(now=now)["requeued"]
+
+    #: Liveness verdicts a reconcile acts on (mirror of ``tracking`` constants,
+    #: duplicated here so the engine takes no import dependency on the resolver).
+    LIVENESS_LIVE = "live"
+    LIVENESS_GONE = "gone"
+    LIVENESS_UNKNOWN = "unknown"
+    #: A held task requeued this many times by GC (owner kept going gone) is
+    #: retired to the terminal ``dead_letter`` state instead of churning forever.
+    DEFAULT_MAX_ATTEMPTS = 5
+
+    def reconcile_liveness(
+        self,
+        resolver: Callable[[str, str | None, str | None], str] | None = None,
+        *,
+        max_attempts: int | None = None,
+        now: float | None = None,
+    ) -> dict[str, int]:
+        """Garbage-collect held tasks by reconciling them against **owner-session
+        liveness** -- the recovery mechanism that replaces time-based lease expiry.
+
+        For each ``claimed``/``started`` task the owner's liveness is resolved to a
+        tri-state verdict (keyed on the task's captured ``owner_session_id`` -- not
+        mere worktree occupancy) and acted on:
+
+        - ``live``    -> leave it (the *same* owner still holds it, no matter how
+          long -- there is **no** wall-clock expiry).
+        - ``gone``    -> **fenced** requeue (owner confirmed gone). Past
+          ``max_attempts`` requeues the task is retired to ``dead_letter`` instead.
+        - ``unknown`` -> leave it (resolver couldn't tell, or identity not captured
+          yet -- degrade safe; never requeue on ignorance).
+
+        The last verdict is persisted to ``last_liveness`` so the buildup metric
+        can classify held tasks without re-probing the bridge.
+
+        ``resolver`` is ``(worktree, machine, owner_session_id) -> verdict``; the
+        default shells :func:`tracking.liveness_verdict`. Injecting it keeps the
+        engine subprocess-free and lets tests drive verdicts deterministically.
+
+        **Fencing:** liveness is probed **outside** the write lock, then each gone
+        task is requeued under a short transaction with a conditional update on
+        ``(id, status, owner_session_id, generation)`` -- so if the owner
+        registered, resumed, completed, or the task was re-claimed between probe
+        and write, the update **no-ops** (no double-execution, no clobber).
+
+        Returns counts: ``checked``/``live``/``gone``/``unknown``/``requeued``/
+        ``dead_lettered``.
+        """
+        if resolver is None:
+            from . import tracking
+
+            def resolver(
+                worktree: str, machine: str | None, owner_session_id: str | None
+            ) -> str:
+                return tracking.liveness_verdict(
+                    worktree, machine=machine, owner_session_id=owner_session_id
+                )
+
+        cap = self.DEFAULT_MAX_ATTEMPTS if max_attempts is None else max_attempts
         ts = self._now(now)
+        counts = {
+            "checked": 0, "live": 0, "gone": 0, "unknown": 0,
+            "requeued": 0, "dead_lettered": 0,
+        }
+        with self._connect() as conn:
+            held = conn.execute(
+                "SELECT id, owner, owner_session_id, generation, attempts"
+                " FROM tasks WHERE status IN (?, ?)",
+                (Status.CLAIMED, Status.STARTED),
+            ).fetchall()
+        # (task_id, verdict, owner_session_id, generation, attempts) per held task.
+        probed: list[tuple[str, str, str | None, int, int]] = []
+        for row in held:
+            counts["checked"] += 1
+            machine, _sep, worktree = (row["owner"] or "").partition("/")
+            if not worktree:
+                verdict = self.LIVENESS_UNKNOWN
+            else:
+                verdict = resolver(worktree, machine or None, row["owner_session_id"])
+            counts[verdict] = counts.get(verdict, 0) + 1
+            probed.append(
+                (row["id"], verdict, row["owner_session_id"], row["generation"],
+                 row["attempts"])
+            )
+        if not probed:
+            return counts
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            rows = conn.execute(
-                "SELECT id, status FROM tasks WHERE status IN (?, ?)"
-                " AND lease_expires_at IS NOT NULL AND lease_expires_at < ?",
-                (Status.CLAIMED, Status.STARTED, ts),
-            ).fetchall()
-            for row in rows:
+            for task_id, verdict, owner_session_id, generation, attempts in probed:
+                # Persist the last verdict for the buildup metric (fenced on the
+                # generation so a re-claim mid-pass isn't tagged with a stale beat).
                 conn.execute(
-                    "UPDATE tasks SET status = ?, owner = NULL, lease_expires_at = NULL,"
-                    " updated_at = ? WHERE id = ?",
-                    (Status.QUEUED, ts, row["id"]),
+                    "UPDATE tasks SET last_liveness = ? WHERE id = ? AND generation = ?"
+                    " AND status IN (?, ?)",
+                    (verdict, task_id, generation, Status.CLAIMED, Status.STARTED),
                 )
-                self._audit(
-                    conn,
-                    row["id"],
-                    ts=ts,
-                    from_status=row["status"],
-                    to_status=Status.QUEUED,
-                    note="lease-expired",
+                if verdict != self.LIVENESS_GONE:
+                    continue
+                to_status = (
+                    Status.DEAD_LETTER if attempts >= cap else Status.QUEUED
                 )
+                owner_clause = (
+                    "owner_session_id = ?" if owner_session_id is not None
+                    else "owner_session_id IS NULL"
+                )
+                params: list[object] = [to_status, ts]
+                if to_status == Status.QUEUED:
+                    # requeue: clear ownership + identity, bump attempts
+                    set_sql = (
+                        "status = ?, updated_at = ?, owner = NULL,"
+                        " owner_session_id = NULL, lease_expires_at = NULL,"
+                        " attempts = attempts + 1"
+                    )
+                else:
+                    set_sql = "status = ?, updated_at = ?"
+                sql = (
+                    f"UPDATE tasks SET {set_sql} WHERE id = ? AND status IN (?, ?)"  # noqa: S608 (set_sql is a constant; all values parameterized)
+                    f" AND generation = ? AND {owner_clause}"
+                )
+                params += [task_id, Status.CLAIMED, Status.STARTED, generation]
+                if owner_session_id is not None:
+                    params.append(owner_session_id)
+                cur = conn.execute(sql, params)
+                if cur.rowcount:
+                    self._audit(
+                        conn, task_id, ts=ts,
+                        from_status=Status.STARTED, to_status=to_status,
+                        note="owner-gone" if to_status == Status.QUEUED
+                        else "owner-gone (dead-letter: max attempts)",
+                    )
+                    if to_status == Status.QUEUED:
+                        counts["requeued"] += 1
+                    else:
+                        counts["dead_lettered"] += 1
             conn.execute("COMMIT")
-        return len(rows)
+        return counts
+
+    def backlog_health(
+        self, *, repo: str | None = None, now: float | None = None
+    ) -> dict[str, float | int | None]:
+        """A queryable **buildup** signal: how much work is waiting to drain.
+
+        In a healthy system tasks are short-lived; a growing, undraining backlog
+        is a system-health signal that warrants attention (see the vision's
+        *buildup-is-a-health-signal*). This surfaces the raw numbers -- it takes
+        **no** action (escalate-or-demote is a consumer/facility policy, not the
+        engine). Reports, scoped to ``repo`` when given:
+
+        - ``queued`` / ``proposed`` / ``held`` / ``dead_letter`` -- counts by phase.
+        - ``oldest_queued_age`` -- seconds the oldest ``queued`` task has waited
+          (``None`` when empty), the clearest "is it draining?" beat.
+        - ``held_live`` / ``held_gone`` / ``held_unknown`` -- held tasks broken out
+          by the **last GC liveness verdict** (a held task not yet reconciled
+          counts as ``unknown``). A ``gone`` owner is requeued immediately, so the
+          real backlog signal is ``held_live`` -- a live owner that has stopped
+          progressing.
+        - ``oldest_held_live_age`` -- seconds since the oldest **live**-owned held
+          task last made progress (``last_seen_at``), i.e. the *stuck-but-alive*
+          signal Q2 says buildup should surface (``None`` when none).
+        """
+        ts = self._now(now)
+        where_repo = " AND repo = ?" if repo is not None else ""
+        args: tuple[object, ...] = (repo,) if repo is not None else ()
+        with self._connect() as conn:
+            def _count(status: str) -> int:
+                return conn.execute(
+                    f"SELECT COUNT(*) FROM tasks WHERE status = ?{where_repo}",  # noqa: S608 (constant clause; parameterized)
+                    (status, *args),
+                ).fetchone()[0]
+
+            queued = _count(Status.QUEUED)
+            proposed = _count(Status.PROPOSED)
+            dead_letter = _count(Status.DEAD_LETTER)
+            held_rows = conn.execute(
+                "SELECT last_liveness, last_seen_at FROM tasks"  # noqa: S608 (constant clause; parameterized)
+                f" WHERE status IN (?, ?){where_repo}",
+                (Status.CLAIMED, Status.STARTED, *args),
+            ).fetchall()
+            oldest = conn.execute(
+                f"SELECT MIN(created_at) FROM tasks WHERE status = ?{where_repo}",  # noqa: S608 (constant clause; parameterized)
+                (Status.QUEUED, *args),
+            ).fetchone()[0]
+        held_live = held_gone = held_unknown = 0
+        oldest_live_seen: float | None = None
+        for row in held_rows:
+            verdict = row["last_liveness"]
+            if verdict == self.LIVENESS_LIVE:
+                held_live += 1
+                seen = row["last_seen_at"]
+                if seen is not None and (oldest_live_seen is None or seen < oldest_live_seen):
+                    oldest_live_seen = seen
+            elif verdict == self.LIVENESS_GONE:
+                held_gone += 1
+            else:  # unknown or not-yet-reconciled (NULL)
+                held_unknown += 1
+        return {
+            "queued": queued,
+            "proposed": proposed,
+            "held": len(held_rows),
+            "held_live": held_live,
+            "held_gone": held_gone,
+            "held_unknown": held_unknown,
+            "dead_letter": dead_letter,
+            "oldest_queued_age": round(ts - oldest, 3) if oldest is not None else None,
+            "oldest_held_live_age": (
+                round(ts - oldest_live_seen, 3) if oldest_live_seen is not None else None
+            ),
+        }
 
     def detach(self, task_id: str, *, now: float | None = None) -> Task:
         """Demote a hard worktree pin to a soft affinity (portability).

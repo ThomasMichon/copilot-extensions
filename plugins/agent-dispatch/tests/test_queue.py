@@ -92,15 +92,22 @@ def test_two_queued_two_workers_no_double_claim(q):
     assert q.claim_one("w3") is None
 
 
-# -- lease expiry / recovery -------------------------------------------------
+# -- liveness GC / recovery --------------------------------------------------
 
 
-def test_lease_expiry_requeues(q):
+def test_gone_owner_requeues(q):
     t = q.create("leased")
-    q.claim_one("w1", now=1000.0, lease_seconds=60)
-    assert q.recover_expired_leases(now=1030.0) == 0  # not yet expired
-    recovered = q.recover_expired_leases(now=2000.0)
-    assert recovered == 1
+    q.claim_one("m/wt", machine="m", worktree="wt", now=1000.0)
+    # owner still live -> never requeued, no matter how much time passes
+    assert q.reconcile_liveness(lambda wt, mc, sid: "live", now=9999.0)["requeued"] == 0
+    assert q.get(t.id).status == Status.CLAIMED
+    # resolver can't tell (bridge down) -> leave it alone (degrade safe)
+    assert q.reconcile_liveness(lambda wt, mc, sid: "unknown", now=9999.0)["requeued"] == 0
+    assert q.get(t.id).status == Status.CLAIMED
+    # owner confirmed gone -> requeued (fenced on owner identity; here owner_session_id
+    # is NULL since the task was claimed-not-started, and the fence matches NULL)
+    counts = q.reconcile_liveness(lambda wt, mc, sid: "gone", now=2000.0)
+    assert counts["checked"] == 1 and counts["gone"] == 1 and counts["requeued"] == 1
     back = q.get(t.id)
     assert back.status == Status.QUEUED
     assert back.owner is None
@@ -109,23 +116,23 @@ def test_lease_expiry_requeues(q):
 
 
 def test_cooperative_redundancy_after_worker_death(q):
-    """A capable second worker reclaims a dead worker's task after lease expiry."""
+    """A capable second worker reclaims a dead worker's task once it is gone."""
     q.create("review", requires=["review"])
-    first = q.claim_one("w1", capabilities=["review"], now=1000.0, lease_seconds=60)
-    assert first is not None and first.owner == "w1"
-    # w1 "dies"; nobody else can claim while the lease holds
+    first = q.claim_one("m/wt", capabilities=["review"], machine="m", worktree="wt", now=1000.0)
+    assert first is not None and first.owner == "m/wt"
+    # w2 can't claim while the first worker still holds it
     assert q.claim_one("w2", capabilities=["review"], now=1010.0) is None
-    q.recover_expired_leases(now=2000.0)
+    q.reconcile_liveness(lambda wt, mc, sid: "gone", now=2000.0)
     second = q.claim_one("w2", capabilities=["review"], now=2001.0)
     assert second is not None and second.owner == "w2"
 
 
-def test_heartbeat_extends_lease(q):
+def test_heartbeat_refreshes_last_seen(q):
+    """heartbeat/progress no longer govern recovery (liveness does), but still
+    refresh the informational ``lease_expires_at`` (a ``last_seen`` beat)."""
     t = q.create("long")
     q.claim_one("w1", now=1000.0, lease_seconds=60)
     q.heartbeat(t.id, "w1", now=1050.0)
-    # lease was extended to 1050 + DEFAULT_LEASE_SECONDS, so still held at 1100
-    assert q.recover_expired_leases(now=1100.0) == 0
     assert q.get(t.id).lease_expires_at == pytest.approx(1050.0 + DEFAULT_LEASE_SECONDS)
 
 
@@ -189,12 +196,11 @@ def test_record_progress_optional_fields(q):
     assert "blocker" not in snap  # empty/None optional fields are dropped
 
 
-def test_record_progress_extends_lease(q):
+def test_record_progress_refreshes_last_seen(q):
     t = q.create("work")
     q.claim_one("w1", now=1000.0, lease_seconds=60)
     q.record_progress(t.id, "w1", phase="p", summary="alive", now=1050.0)
-    # progress doubles as a heartbeat: lease pushed to 1050 + DEFAULT_LEASE_SECONDS
-    assert q.recover_expired_leases(now=1100.0) == 0
+    # progress doubles as a last-seen beat: refreshes the informational timestamp
     assert q.get(t.id).lease_expires_at == pytest.approx(1050.0 + DEFAULT_LEASE_SECONDS)
 
 

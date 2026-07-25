@@ -2,11 +2,11 @@
 name: agent-dispatch
 description: >
   Coordinate agent work through the agent-dispatch task queue -- a portable,
-  single-writer leased queue with a per-host coordinator. Use it to enqueue,
+  single-writer queue with a per-host coordinator. Use it to enqueue,
   browse/dedup, atomically claim, and drive tasks through their lifecycle so
   multiple worktree/session agents cooperate without racing through
   origin/master or needing an account per agent. Covers the CLI verbs, the
-  six-state model, worker identity (machine/worktree), capability + affinity
+  seven-state model, worker identity (machine/worktree), capability + affinity
   routing, include/exclude selector matching, targeting, dedup-before-create,
   atomic create-and-claim, spawning workers via agent-bridge,
   and loopback-vs-remote coordinator config.
@@ -34,7 +34,7 @@ queue of *tasks*, so multiple agents coordinate without racing through
 A **task** is a graduated handoff: a title + `prompt` + optional Markdown
 `payload`. It carries routing (`requires` / `affinity`), targeting
 (`target_machine` / `target_worktree` / `target_repo`, `labels`), and moves
-through a six-state lifecycle.
+through a seven-state lifecycle.
 
 ## When to reach for it
 
@@ -42,8 +42,8 @@ through a six-state lifecycle.
   babysitting it -- enqueue a task, let a capable worker claim it.
 - **Several agents** could do a piece of work and exactly one should -- the
   atomic claim guarantees a single winner.
-- A **crashed/full-auto agent** must not hold work forever -- lease expiry
-  returns the task to the queue automatically.
+- A **crashed/full-auto agent** must not hold work forever -- a liveness GC pass
+  returns the task to the queue once its owner worktree is confirmed gone.
 - You're **graduating a context-handoff** into durable, browsable, claimable
   work instead of a dead-end paste-prompt.
 
@@ -175,41 +175,48 @@ agent-dispatch list --status queued
   *type* and *reads back* the local repo **name** (resolved through the
   agent-worktrees registry). Output carries both `repo` (remote) and `repo_name`.
 
-## The six-state lifecycle
+## The seven-state lifecycle
 
 ```
 proposed -> queued -> claimed -> started -> completed        (terminal)
                 ^         |          |
                 +- decline/yield ----+
-                ^
-                +- lease expiry (internal requeue, attempts++)
-   (any non-terminal) -----------------------------> abandoned (terminal, permission-gated)
+                ^         |          |
+                +- owner-gone (liveness GC requeue, attempts++)
+                          |          |
+   (any non-terminal) --> abandoned (terminal, permission-gated)
+   (owner-gone past the attempts cap) --> dead_letter (terminal)
 ```
 
 | State | Meaning | Claimable? |
 |-------|---------|-----------|
 | **proposed** | drafted / wording still undecided | No |
 | **queued** | ready to be picked up | Yes |
-| **claimed** | leased; worker may evaluate before committing | held |
+| **claimed** | held; worker may evaluate before committing | held |
 | **started** | under active implementation | held |
 | **completed** | driven to done | terminal |
 | **abandoned** | discarded (duplicate / dropped priority) | terminal |
+| **dead_letter** | requeued too many times (owner kept going gone) -- an actionable failure | terminal |
 
 - **proposed** is a holding state for an idea not yet blessed; `approve` moves it
   to **queued**.
 - **claimed -> started** when the worker commits; **claimed -> queued**
-  (`yield`, a decline) if it evaluates and passes. The `claimed` window can be
-  taken under a **tight evaluation lease** (`claim --evaluation`) so a stuck
-  evaluator auto-releases fast — see *Evaluate before committing* below.
+  (`yield`, a decline) if it evaluates and passes. The `claimed` window is the
+  **evaluation window** (`claim --evaluation`) -- a semantic "evaluating, not yet
+  committed" marker; a claim carries **no wall-clock expiry** (see below).
 - **started -> queued** yields **with a note** on a recoverable snag (merge
   conflict, needs a later cycle); **started -> completed** on success.
 - **abandon requires permission** (`--permit`, or `--duplicate-of <ref>` which
   self-permits and records the dedup reference) -- it's not a unilateral agent
   action; it's the discard path for duplicates / dropped priorities.
-- **Lease expiry -> queued** is automatic and internal (bumps `attempts`): a
-  dead worker's task resurfaces. The coordinator sweeps expired leases on a timer
-  (`AGENT_DISPATCH_SWEEP_INTERVAL`, default 60s); `agent-dispatch recover` forces
-  a sweep on demand.
+- **owner-gone -> queued** is automatic and internal (bumps `attempts`): a held
+  task is requeued **only when its owner worktree is confirmed gone** by a
+  **liveness** garbage-collection pass -- never on elapsed time, so a
+  long-running live worker is never disturbed and a momentary bridge blip
+  (verdict *unknown*) leaves the task alone. The coordinator runs GC on a timer
+  (`AGENT_DISPATCH_GC_INTERVAL`, default 60s); `agent-dispatch recover` forces a
+  pass on demand. (There is **no** lease TTL: recovery is reconciled against live
+  workers, not a clock.)
 
 ## The everyday flow
 
@@ -310,7 +317,7 @@ See the plugin README (**Producers**) for the spec/config shapes.
 agent-dispatch claim --capability logger     # atomically leases one eligible task
 # note the returned task id + owner, then:
 agent-dispatch start    <id> <owner>
-agent-dispatch heartbeat <id> <owner>        # extend the lease during long work
+agent-dispatch heartbeat <id> <owner>        # optional: refresh the last-seen beat
 agent-dispatch complete <id> <owner> --result-ref pr/123
 ```
 
@@ -323,7 +330,7 @@ agent-dispatch complete <id> <owner> --result-ref pr/123
 > `embodiment` overlay above).
 
 Report progress toward the goal so callers/operator watch the fleet at a glance
-(this also heartbeats the lease):
+(this also refreshes the last-seen beat):
 
 ```bash
 agent-dispatch progress <id> --phase implementing --summary "wired the verb; tests green"
@@ -377,9 +384,10 @@ agent-dispatch abandon <id> --worker-id <owner> --permit --reason "dropped prior
 
 `claim` and `start` are **two steps on purpose** — between them is an
 **evaluation window** where you hold the task exclusively but haven't committed
-to running it. Opt into a *tight-lease* window with `claim --evaluation`: a
-stuck evaluator auto-releases fast (the eval lease is much shorter than the work
-lease), and `start` then extends to the full work lease on commit.
+to running it. `claim --evaluation` marks the window as an *evaluation* (a
+worker signals "assessing, not yet committed"); a claim carries **no** wall-clock
+lease, so an evaluator is reclaimed only if its worker goes away (liveness GC),
+and `start` simply commits the task to ``started``.
 
 ```bash
 agent-dispatch claim --task <id> --evaluation    # win a short exclusive eval window
@@ -449,8 +457,9 @@ agent-dispatch watch              # stream task.* events (SSE) as JSON lines
   `review`, `merge`) or an identity pin (`agent:review-bot`). A task is
   claimable only when `requires` is a **subset** of the worker's advertised
   `--capability` set. Two machines advertising the same capability give
-  **cooperative, redundant** coverage: first writer wins; if one dies mid-lease,
-  the other reclaims after expiry -- no leader election.
+  **cooperative, redundant** coverage: first writer wins; if one worker goes
+  away, a liveness GC pass requeues its task and the other reclaims it -- no
+  leader election.
 - **`affinity`** (repeatable `--affinity key=value`) -- soft *preferences*
   (preferred agent/worktree) that order candidates but **never exclude**.
 - A **hard pin** is just a target promoted into `requires`; `detach <id>` demotes
@@ -536,7 +545,7 @@ headers. The CLI and MCP tools are interchangeable — use whichever fits.
 | `AGENT_DISPATCH_SHARED_TOKEN` | bearer for the shared coordinator (independent of `AGENT_DISPATCH_TOKEN`) |
 | `AGENT_DISPATCH_HOST` / `AGENT_DISPATCH_PORT` | where the coordinator binds (server side) |
 | `AGENT_DISPATCH_DB` | SQLite queue file (server side) |
-| `AGENT_DISPATCH_SWEEP_INTERVAL` | auto lease-recovery cadence in seconds (server side; `0` disables) |
+| `AGENT_DISPATCH_GC_INTERVAL` | liveness garbage-collection cadence in seconds (server side; `0` disables). `AGENT_DISPATCH_SWEEP_INTERVAL` is a deprecated alias. |
 
 All CLI output is JSON on stdout, so verbs compose with `jq` and other tooling.
 Global flags `--url` / `--token` override the env per-invocation; `--shared`

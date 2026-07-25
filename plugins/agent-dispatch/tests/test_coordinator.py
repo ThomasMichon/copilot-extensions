@@ -244,9 +244,10 @@ def test_client_error_maps_to_dispatch_error(client):
     assert exc.value.status_code == 404
 
 
-def test_client_recover(client):
+def test_client_recover(client, monkeypatch):
+    monkeypatch.setattr("agent_dispatch.tracking.liveness_verdict", lambda *a, **k: "gone")
     t = client.create("leased")
-    client.claim("w1", lease_seconds=0)  # already expired
+    client.claim("m/wt")  # owner is a machine/worktree so liveness resolves
     assert client.recover()["recovered"] == 1
     assert client.get(t["id"])["status"] == Status.QUEUED
 
@@ -383,40 +384,44 @@ def _boot(app):
     return url, stop
 
 
-def test_background_sweep_auto_recovers_expired_lease(tmp_path):
-    # 1s lease + 0.3s sweep: a claimed task returns to queued with no manual recover.
+def test_background_gc_auto_recovers_gone_owner(tmp_path, monkeypatch):
+    # 0.3s GC interval: a held task whose owner is confirmed gone returns to
+    # queued on its own, with no manual recover.
     from agent_dispatch.coordinator import create_app
 
-    q = TaskQueue(tmp_path / "tasks.db", lease_seconds=1)
+    monkeypatch.setattr("agent_dispatch.tracking.liveness_verdict", lambda *a, **k: "gone")
+    q = TaskQueue(tmp_path / "tasks.db")
     url, stop = _boot(create_app(q, sweep_interval=0.3))
     try:
         c = DispatchClient(url)
         tid = c.create("leased")["id"]
-        assert c.claim(worker_id="w1")["id"] == tid
+        assert c.claim(worker_id="m/wt")["id"] == tid
         assert c.get(tid)["status"] == Status.CLAIMED
         deadline = time.time() + 5
         while time.time() < deadline:
             if c.get(tid)["status"] == Status.QUEUED:
                 break
             time.sleep(0.2)
-        assert c.get(tid)["status"] == Status.QUEUED  # swept back automatically
+        assert c.get(tid)["status"] == Status.QUEUED  # GC requeued it automatically
         assert c.get(tid)["owner"] is None
         c.close()
     finally:
         stop()
 
 
-def test_sweep_disabled_by_default(tmp_path):
-    # sweep_interval=0 (default) -> a held expired lease is NOT auto-recovered.
+def test_gc_disabled_by_default(tmp_path, monkeypatch):
+    # gc_interval=0 (default) -> a held task is NOT auto-recovered even if its
+    # owner is gone; only a manual recover (or an enabled GC loop) requeues it.
     from agent_dispatch.coordinator import create_app
 
-    q = TaskQueue(tmp_path / "tasks.db", lease_seconds=1)
-    url, stop = _boot(create_app(q))  # no sweep_interval
+    monkeypatch.setattr("agent_dispatch.tracking.liveness_verdict", lambda *a, **k: "gone")
+    q = TaskQueue(tmp_path / "tasks.db")
+    url, stop = _boot(create_app(q))  # no sweep_interval -> no GC loop
     try:
         c = DispatchClient(url)
         tid = c.create("leased")["id"]
-        c.claim(worker_id="w1")
-        time.sleep(1.5)  # lease expired, but nothing sweeps it
+        c.claim(worker_id="m/wt")
+        time.sleep(0.5)  # no GC loop running, so nothing requeues on its own
         assert c.get(tid)["status"] == Status.CLAIMED
         assert c.recover()["recovered"] == 1  # manual recover still works
         assert c.get(tid)["status"] == Status.QUEUED

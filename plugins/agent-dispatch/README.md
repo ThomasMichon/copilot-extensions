@@ -104,8 +104,8 @@ if task:
     # ... do the work ...
     q.complete(task.id, "worker-1", result_ref="pr/123")
 
-# Crash recovery: return any expired-lease task to the queue
-q.recover_expired_leases()
+# Crash recovery: return any task whose owner is confirmed gone to the queue
+q.reconcile_liveness()
 ```
 
 ### State model
@@ -115,19 +115,25 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
                 ^         |          |
                 +-- decline/yield ---+
                 ^
-                +-- lease expiry (internal requeue, attempts++)
+                +-- owner-gone (liveness GC requeue, attempts++)
    (any non-terminal) --------------------------> abandoned   (terminal, permission-gated)
 ```
 
 - **proposed** -- written but not yet claimable (a draft handoff / undecided idea).
 - **queued** -- claimable.
-- **claimed** -- leased by a worker (may evaluate before committing).
+- **claimed** -- held by a worker (may evaluate before committing).
 - **started** -- under active implementation.
-- **completed** / **abandoned** -- terminal (abandon requires permission).
-- Lease expiry returns a held task to **queued** (a dead worker's task
-  resurfaces). The coordinator runs this recovery sweep automatically every
-  `AGENT_DISPATCH_SWEEP_INTERVAL` seconds (default 60; `0` disables); `recover`
-  forces one on demand.
+- **completed** / **abandoned** / **dead_letter** -- terminal (abandon requires
+  permission; **dead_letter** is where a task lands when GC has requeued it past
+  the attempts cap -- its owner kept going gone -- an actionable failure state).
+- A **liveness** GC pass returns a held task to **queued** only when its owner's
+  **session** is *confirmed gone* (keyed on the captured `owner_session_id`, not
+  mere worktree occupancy) -- never on elapsed time, so a long-running live
+  worker is never disturbed and a bridge blip (verdict *unknown*) leaves it
+  alone. The requeue is **fenced** on (owner_session_id, generation) so a
+  reused worktree or a resuming stale worker can't corrupt recovery. The
+  coordinator runs GC automatically every `AGENT_DISPATCH_GC_INTERVAL` seconds
+  (default 60; `0` disables); `recover` forces a pass on demand.
 
 ### Routing: `requires` (hard) vs `affinity` (soft)
 
@@ -135,7 +141,8 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
   identity pin (`agent:review-bot`). A task is claimable only when `requires` is
   a subset of the worker's advertised capabilities. This is how the same
   capability on two machines gives **cooperative, redundant** coverage: first
-  writer wins; a dead worker's lease expires and the other reclaims.
+  writer wins; when a worker goes away, a liveness GC pass requeues its task and
+  the other reclaims it.
 - **`affinity`** -- soft preferences (preferred agent/worktree) that order
   candidates but never exclude.
 
@@ -238,7 +245,7 @@ agent-dispatch claim                     # lease my assigned/eligible task (iden
 agent-dispatch start  <id>  <owner>
 agent-dispatch complete <id> <owner> --result-ref pr/123
 agent-dispatch list --status queued
-agent-dispatch recover                                 # requeue expired-lease tasks
+agent-dispatch recover                                 # requeue tasks whose owner is gone
 agent-dispatch watch                                   # stream task events (SSE) as JSON lines
 ```
 
@@ -361,6 +368,6 @@ automatically when the `mcp` extra is installed (pass `enable_mcp=False` to
 
 Configuration (all optional): `AGENT_DISPATCH_HOST`, `AGENT_DISPATCH_PORT`,
 `AGENT_DISPATCH_DB`, `AGENT_DISPATCH_TOKEN` (bearer auth),
-`AGENT_DISPATCH_SWEEP_INTERVAL` (auto lease-recovery cadence in seconds; `0`
+`AGENT_DISPATCH_GC_INTERVAL` (liveness garbage-collection cadence in seconds; `0`
 disables), and `AGENT_DISPATCH_URL` (the base URL the CLI talks to -- point it at
 a remote coordinator on a shared network).
