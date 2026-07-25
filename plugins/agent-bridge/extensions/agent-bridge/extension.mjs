@@ -32,6 +32,7 @@ const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
 const HTTP_TIMEOUT_MS = 4_000; // bridge is local; keep it snappy
 const FLUSH_MS = 1_000; // drain the represented-event queue to the bridge every 1s
 const MAX_QUEUE = 1_000; // bounded buffer; drop OLDEST on overflow (honest reduced fidelity)
+const SEEN_EVENT_CAP = 4_096; // bounded set of recent event ids for redelivery dedup
 const FLUSH_BATCH = 250; // max events POSTed per flush
 const INBOX_POLL_MS = 2_000; // poll the bridge for messages to deliver every 2s
 // Delivery (Phase 2 write path) is SEAMLESS by default. This is a
@@ -72,6 +73,8 @@ const state = {
   flusher: null, // represented-event flush interval handle
   pendingEvents: [], // bounded queue of raw SDK events awaiting flush
   flushing: false, // guard against overlapping flushes
+  seenEventIds: new Set(), // event ids already enqueued -- dedup the CLI's redelivery
+  seenEventOrder: [], // FIFO of ids bounding seenEventIds (evict oldest past cap)
   inboxPoll: null, // delivery inbox poll interval handle
   deliveryEnabled: DELIVERY_DEFAULT_ON, // /peer MUTE toggle (delivery on by default)
   delivering: false, // guard against overlapping inbox drains
@@ -393,7 +396,26 @@ session.on((event) => {
     // OLDEST event on overflow so a burst never grows memory without limit.
     const type = event?.type;
     if (type && REPRESENT_TYPES.has(type)) {
-      state.pendingEvents.push({ type, data: event.data ?? {} });
+      // Redelivery dedup (load-bearing): the CLI runtime delivers each
+      // session.event to this handler once per live-session subscription it
+      // holds for the session -- and those accrue across reconnects -- so one
+      // logical event arrives N times carrying the SAME stable event.id. Left
+      // unchecked, the represented stream fans a single message out to N copies
+      // (the on-disk transcript is deduped by this same id and shows exactly
+      // one). Drop any id we have already enqueued; fall through only for an
+      // event with no id (can't dedup -> honest 1x best-effort).
+      const eventId = event?.id;
+      if (eventId != null) {
+        if (state.seenEventIds.has(eventId)) return; // a redelivery -- skip
+        state.seenEventIds.add(eventId);
+        state.seenEventOrder.push(eventId);
+        if (state.seenEventOrder.length > SEEN_EVENT_CAP) {
+          state.seenEventIds.delete(state.seenEventOrder.shift());
+        }
+      }
+      // Forward the id so the bridge can dedup too (defense-in-depth) and any
+      // consumer has the event's stable identity.
+      state.pendingEvents.push({ type, id: eventId ?? null, data: event.data ?? {} });
       if (state.pendingEvents.length > MAX_QUEUE) {
         state.pendingEvents.splice(0, state.pendingEvents.length - MAX_QUEUE);
       }
