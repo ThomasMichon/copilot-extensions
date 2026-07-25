@@ -130,7 +130,7 @@ install_package() {
   # Both the service CLIs and the segmenter tools the log-session skill and
   # session-log-writer agent invoke, so they resolve on PATH rather than assuming
   # a bare command that was never deployed.
-  for name in session-sync agent-logger collate-session read-session-digest prepare-session-log; do
+  for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
     ln -sf "${VENV}/bin/${name}" "${LOCAL_BIN}/${name}"
   done
   ok "linked binstubs into ${LOCAL_BIN}"
@@ -200,7 +200,7 @@ case "${ACTION}" in
     rm -f "${UNIT_DIR}/${TIMER_NAME}.service" "${UNIT_DIR}/${TIMER_NAME}.timer"
     systemctl --user daemon-reload || true
     chg "timer removed (config at ${INSTALL_DIR} kept)"
-    for name in session-sync agent-logger collate-session read-session-digest prepare-session-log; do
+    for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
       rm -f "${LOCAL_BIN}/${name}"
     done
     chg "binstubs removed from ${LOCAL_BIN}"

@@ -56,7 +56,7 @@ $BinstubCmd = Join-Path $LocalBin 'session-sync.cmd'
 # so the log-session skill and the session-log-writer agent resolve them on PATH
 # -- rather than assuming a console-script trampoline that this installer strips
 # (SAC/CodeIntegrity-3077) and never replaces.
-$BinstubNames = @('session-sync', 'agent-logger', 'collate-session', 'read-session-digest', 'prepare-session-log')
+$BinstubNames = @('session-sync', 'agent-logger', 'collate-session', 'read-session-digest', 'prepare-session-log', 'ramp-up-session')
 
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
 function Remove-ConsoleTrampolines {
@@ -93,7 +93,7 @@ function Remove-LoggerTrampolines {
     if ($env:OS -ne 'Windows_NT') { return }
     $scriptsDir = Join-Path $VenvDir 'Scripts'
     if (-not (Test-Path $scriptsDir)) { return }
-    foreach ($n in @('session-sync', 'collate-session', 'read-session-digest', 'prepare-session-log')) {
+    foreach ($n in @('session-sync', 'collate-session', 'read-session-digest', 'prepare-session-log', 'ramp-up-session')) {
         $exe = Join-Path $scriptsDir "$n.exe"
         if (Test-Path $exe) {
             try { Remove-Item $exe -Force -ErrorAction Stop }
@@ -268,6 +268,7 @@ function Write-Binstubs {
         'collate-session'     = 'agent_logger.segmenter.collate'
         'read-session-digest' = 'agent_logger.segmenter.read_digest'
         'prepare-session-log' = 'agent_logger.segmenter.prepare_log'
+        'ramp-up-session'     = 'agent_logger.segmenter.ramp_up'
     }
     foreach ($name in $stubs.Keys) {
         $mod = $stubs[$name]
