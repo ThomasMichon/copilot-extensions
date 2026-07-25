@@ -26,10 +26,14 @@ Usage:
                     [--segment-size N] [--max-tool-output N]
                     [--machine NAME] [--output-dir DIR] [--json]
 
-WORKTREE defaults to the current directory. With ``--list`` the candidate
-sessions for the worktree are enumerated (most recent first) and nothing is
-collated. With ``--session ID`` a specific session is ramped up regardless of
-worktree.
+WORKTREE may be a short worktree **suffix** (e.g. ``fbc5``), a full path, or
+``.`` for the current directory (the default). A bare suffix is hunted down in
+the local session store by matching worktree directory names ending in
+``-<suffix>``. With ``--machine NAME`` naming another host, the hunt is
+delegated over ``ssh <NAME>`` (a session's raw data lives on the machine that
+produced it); locally, ``--machine`` disambiguates a suffix reused across hosts.
+With ``--list`` the candidate sessions are enumerated (most recent first) and
+nothing is collated. With ``--session ID`` a specific session is ramped up.
 """
 
 from __future__ import annotations
@@ -37,6 +41,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -75,20 +80,15 @@ def _session_state_root() -> Path:
     return find_copilot_dir() / SESSION_STATE_SUBDIR
 
 
-def discover_sessions(worktree_root: str) -> list[dict[str, Any]]:
-    """Find all real Copilot sessions whose workspace maps to *worktree_root*.
+def _iter_sessions():
+    """Yield ``(dir, workspace, cwd, events_path)`` for every real session.
 
     A "real" session has an ``events.jsonl`` and is not a quip/sub-agent temp
-    session. Matching is on the normalized workspace cwd (falling back to
-    git_root), so it is case- and slash-insensitive. Results are sorted most
-    recent first by ``updated_at`` (falling back to the events file mtime).
+    session.
     """
     state_root = _session_state_root()
     if not state_root.is_dir():
-        return []
-
-    target = _normalize_cwd(worktree_root)
-    out: list[dict[str, Any]] = []
+        return
     for d in state_root.iterdir():
         if not d.is_dir():
             continue
@@ -101,28 +101,78 @@ def discover_sessions(worktree_root: str) -> list[dict[str, Any]]:
         cwd = ws.get("cwd", "")
         if _is_quip_session(cwd):
             continue
-        if _workspace_cwd(ws) != target:
-            continue
-        try:
-            mtime = events.stat().st_mtime
-        except OSError:
-            mtime = 0.0
-        out.append(
-            {
-                "id": d.name,
-                "dir": d,
-                "cwd": cwd,
-                "branch": ws.get("branch", ""),
-                "name": ws.get("name", ""),
-                "summary": ws.get("summary", ""),
-                "created_at": ws.get("created_at", ""),
-                "updated_at": ws.get("updated_at", ""),
-                "mtime": mtime,
-            }
-        )
+        yield d, ws, cwd, events
 
-    out.sort(key=lambda x: (x["updated_at"] or "", x["mtime"]), reverse=True)
-    return out
+
+def _session_record(d: Path, ws: dict[str, str], cwd: str, events: Path) -> dict[str, Any]:
+    try:
+        mtime = events.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return {
+        "id": d.name,
+        "dir": d,
+        "cwd": cwd,
+        "branch": ws.get("branch", ""),
+        "name": ws.get("name", ""),
+        "summary": ws.get("summary", ""),
+        "created_at": ws.get("created_at", ""),
+        "updated_at": ws.get("updated_at", ""),
+        "mtime": mtime,
+    }
+
+
+def _sort_recent(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sessions.sort(key=lambda x: (x["updated_at"] or "", x["mtime"]), reverse=True)
+    return sessions
+
+
+def _worktree_suffix(cwd: str) -> str:
+    """Return the trailing hyphen-delimited segment of a worktree dir name.
+
+    Worktrees are named like ``<machine>-<env>-<date>-<time>-<suffix>``; the
+    short suffix (e.g. ``fbc5``) is the last segment. Lowercased.
+    """
+    base = Path(cwd).name.lower()
+    return base.rsplit("-", 1)[-1] if base else ""
+
+
+def discover_sessions(worktree_root: str) -> list[dict[str, Any]]:
+    """Find all real Copilot sessions whose workspace maps to *worktree_root*.
+
+    Matching is on the normalized workspace cwd (falling back to git_root), so
+    it is case- and slash-insensitive. Sorted most recent first.
+    """
+    target = _normalize_cwd(worktree_root)
+    out = [
+        _session_record(d, ws, cwd, events)
+        for d, ws, cwd, events in _iter_sessions()
+        if _workspace_cwd(ws) == target
+    ]
+    return _sort_recent(out)
+
+
+def discover_by_suffix(suffix: str, machine: str | None = None) -> list[dict[str, Any]]:
+    """Find real sessions whose worktree directory ends with ``-<suffix>``.
+
+    This is the "hunt it down from a short id" path: the operator passes just
+    the 4-ish-char worktree suffix (e.g. ``fbc5``) instead of a full path.
+    When *machine* is given, candidates are additionally filtered to worktrees
+    whose directory name starts with that machine designation (worktree names
+    begin with ``<machine>-...``), disambiguating a suffix reused across hosts.
+    Sorted most recent first.
+    """
+    suffix = suffix.lower().lstrip("-")
+    machine = machine.lower() if machine else None
+    out: list[dict[str, Any]] = []
+    for d, ws, cwd, events in _iter_sessions():
+        base = Path(cwd).name.lower()
+        if not (_worktree_suffix(cwd) == suffix or base.endswith("-" + suffix)):
+            continue
+        if machine and not base.startswith(machine):
+            continue
+        out.append(_session_record(d, ws, cwd, events))
+    return _sort_recent(out)
 
 
 def _session_dir_by_id(session_id: str) -> Path | None:
@@ -136,6 +186,44 @@ def _default_output_dir(session_id: str) -> Path:
     temp fallback (``$TEMP/session-digest/<id>``)."""
     tmp = os.environ.get("TEMP") or os.environ.get("TMPDIR") or "/tmp"
     return Path(tmp) / "session-digest" / session_id
+
+
+# ---------------------------------------------------------------------------
+# Cross-machine delegation
+# ---------------------------------------------------------------------------
+
+
+def _is_local_machine(name: str | None) -> bool:
+    """True if *name* refers to the machine we're running on.
+
+    Compared against the detected hostname (``-wsl`` suffix ignored), tolerating
+    the machine-designation prefix worktree names carry (e.g. ``lambda-core``
+    vs ``lambda-core-win``).
+    """
+    if not name:
+        return True
+    local = detect_machine().lower().removesuffix("-wsl")
+    n = name.lower().removesuffix("-wsl")
+    return n == local or local.startswith(n) or n.startswith(local)
+
+
+def _delegate_remote(machine: str, ref: str, passthrough: list[str]) -> int:
+    """Run ``ramp-up-session`` on *machine* over SSH and relay its output.
+
+    The session's raw ``events.jsonl`` lives on the machine that produced it, so
+    a worktree on another host is ramped up *there*. ``machine`` is used as the
+    SSH destination directly — in a facility whose SSH aliases are the machine
+    names this "just works"; anywhere else it must be an SSH-resolvable host
+    with ``ramp-up-session`` on PATH.
+    """
+    remote = ["ramp-up-session", ref, *passthrough]
+    print(f"# Hunting worktree '{ref}' on {machine} via ssh...", file=sys.stderr)
+    try:
+        proc = subprocess.run(["ssh", machine, *remote], check=False)
+    except FileNotFoundError:
+        print("error: ssh not found on PATH (needed to reach another machine)", file=sys.stderr)
+        return 1
+    return proc.returncode
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +356,9 @@ def main() -> None:
         "worktree",
         nargs="?",
         default=".",
-        help="Path to the dormant worktree (default: current directory)",
+        metavar="WORKTREE",
+        help="Worktree to ramp up: a short suffix (e.g. 'fbc5'), a full path, "
+        "or '.' for the current directory (default)",
     )
     parser.add_argument(
         "--session",
@@ -301,7 +391,9 @@ def main() -> None:
     parser.add_argument(
         "--machine",
         default=None,
-        help="Override auto-detected machine name (informational)",
+        help="Machine the worktree lives on. When it names another host, the "
+        "hunt is delegated over `ssh <machine>` (session data is local to the "
+        "machine that produced it). Locally, it filters suffix matches by host.",
     )
     parser.add_argument(
         "--output-dir",
@@ -318,11 +410,33 @@ def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-    machine = (args.machine or detect_machine()).lower()
+    ref = args.worktree
 
-    # ── Resolve the target session ──
+    # ── Cross-machine: delegate the hunt over SSH ──
+    # A worktree on another host has its session data there, so ramp it up there.
+    # (Not for --session, which is a raw UUID meaningful only where it lives, nor
+    # for an explicit local path.)
+    if args.machine and not _is_local_machine(args.machine) and not args.session:
+        if Path(ref).is_dir():
+            print(
+                "error: --machine names another host but a local path was given; "
+                "pass the worktree suffix instead.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        passthrough: list[str] = ["--tail-turns", str(args.tail_turns)]
+        if args.list:
+            passthrough.append("--list")
+        if args.json:
+            passthrough.append("--json")
+        sys.exit(_delegate_remote(args.machine, ref, passthrough))
+
+    machine = (args.machine or detect_machine()).lower()
+    local_filter = args.machine if (args.machine and _is_local_machine(args.machine)) else None
+
+    # ── Resolve the target session(s) locally ──
     sessions: list[dict[str, Any]] = []
-    worktree_root = _normalize_cwd(str(Path(args.worktree).resolve()))
+    worktree_root: str | None = None
 
     if args.session:
         session_dir = _session_dir_by_id(args.session)
@@ -344,9 +458,20 @@ def main() -> None:
             "created_at": ws.get("created_at", ""),
             "updated_at": ws.get("updated_at", ""),
         }
+        worktree_root = _normalize_cwd(ws.get("cwd", "")) or None
         sessions = [chosen]
-    else:
+    elif ref in (".", "") or Path(ref).is_dir():
+        # An explicit worktree path (or the current directory).
+        base = Path(ref) if Path(ref).is_dir() else Path.cwd()
+        worktree_root = _normalize_cwd(str(base.resolve()))
         sessions = discover_sessions(worktree_root)
+    else:
+        # A short worktree suffix -- hunt it down in the local session store.
+        sessions = discover_by_suffix(ref, local_filter)
+        if sessions:
+            worktree_root = _normalize_cwd(sessions[0]["cwd"]) or None
+
+    query_label = worktree_root or f"suffix '{ref}'"
 
     # ── List mode ──
     if args.list:
@@ -354,7 +479,7 @@ def main() -> None:
             print(
                 json.dumps(
                     {
-                        "worktree": worktree_root,
+                        "query": query_label,
                         "machine": machine,
                         "sessions": [
                             {k: (str(v) if k == "dir" else v) for k, v in s.items()}
@@ -365,13 +490,14 @@ def main() -> None:
                 )
             )
         else:
-            print(_render_candidate_list(worktree_root, sessions))
+            print(_render_candidate_list(query_label, sessions))
         return
 
     if not sessions:
         print(
-            f"error: no dormant sessions found for worktree:\n  {worktree_root}\n"
-            "hint: pass the worktree root explicitly, or `--session <id>`; "
+            f"error: no dormant sessions found for: {query_label}\n"
+            "hint: pass the worktree suffix (e.g. 'fbc5'), a full path, or "
+            "`--session <id>`; add `--machine <name>` to hunt another host; "
             "use `--list` to enumerate candidates.",
             file=sys.stderr,
         )
