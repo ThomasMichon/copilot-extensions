@@ -5,7 +5,10 @@ description: >
   when a session cannot be resumed (a wedged CLI, a machine restart, an
   abandoned worktree) but its work should continue. It discovers the worktree's
   most recent session, collates its events.jsonl into a digest, and reconstructs
-  where it left off so a fresh session can pick up the torch.
+  where it left off so a fresh session can pick up the torch. By default it
+  **delegates the context-expensive ramp-in to the `session-rampup` sub-agent**,
+  which returns a compact takeover briefing so the dormant session's transcript
+  never floods the main session.
   Trigger phrases include: - 'ramp up on <worktree>' - 'take over that session'
   - 'resume the dormant session' - 'pick up where the old session left off'
   - 'session takeover' - 'I can''t resume the session, continue its work'
@@ -30,7 +33,52 @@ session discovery. The collated digest is written **ephemerally** (to
 - You want to continue a different worktree's abandoned session from a fresh
   one.
 
-## Procedure
+## Preferred: delegate the ramp-in to a sub-agent
+
+**Ramping in reads a potentially huge transcript. Do it in a sub-agent, not in
+your own context.** A dormant session can carry hundreds of turns; pulling that
+into the main session defeats the purpose (you'd flood the very context you're
+trying to preserve). Delegate the expensive reading to the neutral
+**`session-rampup`** agent, which absorbs the bulk and returns a **compact
+takeover briefing** (target ≤ ~6k tokens). It is the context firewall.
+
+### 1. Identify the dormant worktree
+
+You need the **worktree root path** (the directory whose `workspace.yaml`
+cwd/git_root the session recorded). If the operator names a worktree, use that
+path; otherwise ask which worktree to ramp up on. Optionally note a **focus**
+(what the operator wants to resume).
+
+### 2. Spawn the `session-rampup` agent (sync)
+
+Delegate with the `task` tool, `agent_type: "session-rampup"`, `mode: "sync"`.
+Put the worktree path (and optional session id / focus) in the prompt, e.g.:
+
+```
+Ramp into the dormant session for worktree <ABSOLUTE_WORKTREE_PATH>.
+[Optionally: session <UUID>.]
+Focus: <what to resume, if the operator said>.
+Return the bounded Ramp-Up Briefing.
+```
+
+The agent runs `ramp-up-session`, reads the digest surgically
+(`read-session-digest`), inspects the worktree's git state, reconciles intent
+vs. reality, and returns only the briefing — no raw transcript.
+
+### 3. Take over
+
+Read the returned briefing (it's small by design). Present a few-line situation
+summary to the operator — what the session was doing, what landed, what remains
+— then **continue the work** from where it stopped. For any detail the briefing
+flags, call `read-session-digest <id> ...` yourself (see below) rather than
+re-reading the whole session. If the takeover needs a decision only the operator
+can make, surface it; otherwise proceed.
+
+## Doing it inline (small sessions, or no delegation)
+
+Run the tool in **this** session only when the dormant session is small, or a
+sub-agent isn't available. Otherwise prefer delegation above — a large
+transcript read inline will flood this session's context.
 
 ### 1. Identify the dormant worktree
 
