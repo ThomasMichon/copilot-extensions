@@ -94,7 +94,11 @@ distinct from the in-conversation messages the coordination layer carries,
 because dispatch asks an agent to do work *on the fabric's behalf* and record an
 outcome. Aware of **only** this layer, agents **stash** tasks to be picked up
 later or handed off. Aware of this layer **and** the coordination layer, agents
-**delegate** tasks to spun-off agents.
+**delegate** tasks to spun-off agents. A per-plugin child vision refines it at
+[`visions/plugins/agent-dispatch/`](../plugins/agent-dispatch/README.md) — the
+four production modes (continuation / fire-and-forget / reactive / scheduled),
+the *fire-and-forget-not-driven* line versus the coordination layer, and
+liveness-reconciled recovery over lease timers.
 
 ### agent-codespaces — a venue provider
 **Provisions CodeSpaces** for related repos, injects the right plugins and
@@ -274,7 +278,7 @@ degrades to the same claimable record, not to a silent no-op.
   **[plugin-services](../plugin-services/README.md)** vision's territory. The
   fabric builds *on* that model; it does not restate or duplicate it.
 - **Not an account-per-agent model.** The fabric deliberately coordinates many
-  agents under a shared identity via leased / claimed work, not by minting an
+  agents under a shared identity via claimed work, not by minting an
   account per agent.
 - **Not a replacement for the human's editor or terminal.** The fabric
   coordinates *agents*; it does not own the human's own interactive editing
@@ -296,9 +300,11 @@ degrades to the same claimable record, not to a silent no-op.
   service model the fabric's layers deploy as (it defers cross-host agent reach
   to this fabric).
 - Child visions: [agent-ssh](../plugins/agent-ssh/README.md) — the connectivity /
-  transport layer the fabric's cross-machine reach rides on. Further per-plugin
-  leaves live under `visions/plugins/<name>/` as authored (e.g. a future
-  `visions/plugins/agent-bridge/`).
+  transport layer the fabric's cross-machine reach rides on;
+  [agent-dispatch](../plugins/agent-dispatch/README.md) — the delegation layer's
+  task queue (production modes, fire-and-forget vs. driven, liveness-reconciled
+  recovery). Further per-plugin leaves live under `visions/plugins/<name>/` as
+  authored (e.g. a future `visions/plugins/agent-bridge/`).
 - Reality docs: [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/`.
