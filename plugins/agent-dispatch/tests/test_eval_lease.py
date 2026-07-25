@@ -32,18 +32,21 @@ def test_explicit_lease_overrides_evaluation(q):
     assert q.get(t.id).lease_expires_at == pytest.approx(1000.0 + 30)
 
 
-def test_start_extends_eval_claim_to_work_lease(q):
+def test_start_captures_owner_session_identity(q):
     t = q.create("work")
     q.claim_one("w/1", machine="w", worktree="1", task_id=t.id, now=1000.0, evaluation=True)
-    q.start(t.id, "w/1", now=1050.0)
+    q.start(t.id, "w/1", owner_session_id="S1", now=1050.0)
     task = q.get(t.id)
     assert task.status == Status.STARTED
-    assert task.lease_expires_at == pytest.approx(1050.0 + 900)
+    # start captures the owner-session identity for liveness GC (no work lease)
+    assert task.owner_session_id == "S1"
+    assert task.last_seen_at == pytest.approx(1050.0)
 
 
-def test_expired_eval_lease_is_recovered(q):
+def test_gone_eval_claim_is_recovered(q):
     t = q.create("work")
-    q.claim_one("w/1", machine="w", worktree="1", task_id=t.id, now=1000.0, evaluation=True)
-    recovered = q.recover_expired_leases(now=1000.0 + 120 + 1)
-    assert recovered == 1
+    q.claim_one("m/1", machine="m", worktree="1", task_id=t.id, now=1000.0, evaluation=True)
+    # an evaluator whose session is gone is reclaimed by liveness GC (no timer)
+    counts = q.reconcile_liveness(lambda wt, mc, sid: "gone", now=1000.0 + 5)
+    assert counts["requeued"] == 1
     assert q.get(t.id).status == Status.QUEUED

@@ -112,10 +112,10 @@ def test_requeued_task_is_not_double_spawned(q, client):
     sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
     sup.poll_once()  # spawn #1
 
-    # simulate: embody claimed + started, then its lease expired -> re-queued
+    # simulate: embody claimed + started, then its worker went away -> re-queued
     q.claim_one("m/wt", task_id=t.id, machine="m", worktree="wt")
     q.start(t.id, "m/wt")
-    q.recover_expired_leases(now=q.get(t.id).lease_expires_at + 1)
+    q.reconcile_liveness(lambda wt, mc, sid: "gone")
     assert q.get(t.id).status == Status.QUEUED  # back in the queue
 
     # the supervisor must NOT re-spawn it (reservation still 'spawned')

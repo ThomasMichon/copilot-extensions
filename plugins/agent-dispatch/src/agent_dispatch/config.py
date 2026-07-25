@@ -6,8 +6,11 @@ lone dev box or against a designated coordinator host on a shared network:
 - ``AGENT_DISPATCH_HOST`` / ``AGENT_DISPATCH_PORT`` -- where the coordinator binds.
 - ``AGENT_DISPATCH_DB`` -- the SQLite queue file (server side).
 - ``AGENT_DISPATCH_TOKEN`` -- optional bearer token (server validates, client sends).
-- ``AGENT_DISPATCH_SWEEP_INTERVAL`` -- seconds between automatic lease-recovery
-  sweeps (server side; ``0`` disables the sweep).
+- ``AGENT_DISPATCH_GC_INTERVAL`` -- seconds between automatic **liveness
+  garbage-collection** passes (server side; ``0`` disables). A GC pass requeues a
+  held task only when its owner worktree is *confirmed gone* -- not on elapsed
+  time. ``AGENT_DISPATCH_SWEEP_INTERVAL`` is a **deprecated alias** kept for one
+  release (the recovery mechanism moved from lease expiry to liveness).
 - ``AGENT_DISPATCH_URL`` -- the coordinator base URL the CLI talks to (defaults to
   ``http://<host>:<port>``); set this to point the CLI at a remote coordinator.
 - ``AGENT_DISPATCH_SHARED_URL`` -- the **shared/elected coordinator** endpoint used
@@ -81,7 +84,9 @@ def load_config() -> Config:
         db_path=os.environ.get("AGENT_DISPATCH_DB", str(DEFAULT_DB)),
         token=os.environ.get("AGENT_DISPATCH_TOKEN") or None,
         sweep_interval=float(
-            os.environ.get("AGENT_DISPATCH_SWEEP_INTERVAL", str(DEFAULT_SWEEP_INTERVAL))
+            os.environ.get("AGENT_DISPATCH_GC_INTERVAL")
+            or os.environ.get("AGENT_DISPATCH_SWEEP_INTERVAL")
+            or str(DEFAULT_SWEEP_INTERVAL)
         ),
     )
 

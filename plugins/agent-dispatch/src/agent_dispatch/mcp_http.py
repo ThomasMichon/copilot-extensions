@@ -261,7 +261,13 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
     @mcp.tool(name="dispatch_start")
     def start(task_id: str, worker_id: str) -> dict:
         """Mark a claimed task ``started``."""
-        return _mutate(lambda: queue.start(task_id, worker_id), "task.started")
+        from .coordinator import _resolve_owner_session_id
+
+        owner_session_id = _resolve_owner_session_id(worker_id)
+        return _mutate(
+            lambda: queue.start(task_id, worker_id, owner_session_id=owner_session_id),
+            "task.started",
+        )
 
     @mcp.tool(name="dispatch_yield")
     def yield_task(task_id: str, worker_id: str, note: str | None = None) -> dict:
@@ -297,8 +303,9 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
 
     @mcp.tool(name="dispatch_recover")
     def recover() -> dict:
-        """Force a lease-recovery sweep (requeue expired-lease tasks)."""
-        return {"recovered": queue.recover_expired_leases()}
+        """Force a liveness GC pass (requeue tasks whose owner is confirmed gone)."""
+        counts = queue.reconcile_liveness()
+        return {"recovered": counts["requeued"], **counts}
 
     return mcp
 
