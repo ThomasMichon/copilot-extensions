@@ -122,3 +122,32 @@ def test_provider_resolves_inline_even_when_failfast(empty_registry, monkeypatch
     # allow_prompt=False (fail-fast), yet the provider still unlocks inline.
     assert svc.ensure_unlocked(kpdb, allow_prompt=False) is True
     assert stored[kpdb] == "broker-pw"
+
+
+def test_provider_resolves_during_prompt_cooldown(empty_registry, monkeypatch, kpdb):
+    """A prompt cooldown must NOT suppress the non-interactive providers.
+
+    Regression: a dismissed/failed interactive prompt starts a cooldown that used
+    to gate the whole unlock path, so a master password deposited in the broker
+    *after* the failed prompt went unused until the cooldown lapsed. The cooldown
+    must throttle only the interactive prompt; providers always run.
+    """
+    import time as _time
+
+    svc = VaultService()
+    stored: dict = {}
+    monkeypatch.setattr(svc.cli, "has_password", lambda db=None: db in stored)
+    monkeypatch.setattr(svc.cli, "verify_password", lambda db, pw: pw == "broker-pw")
+    monkeypatch.setattr(svc.cli, "set_password", lambda db, pw: stored.__setitem__(db, pw))
+    _no_prompt(monkeypatch)  # a prompt here would be the bug
+
+    # Simulate a very recent failed/dismissed prompt -> an active cooldown.
+    svc._unlock_failed_at[kpdb] = _time.time()
+    svc._last_dismiss[kpdb] = True  # extended (dismiss) cooldown
+
+    empty_registry.register_unlock_provider(lambda ctx: "broker-pw", name="broker")
+
+    # Even mid-cooldown and even with allow_prompt=True, the provider resolves
+    # inline without any prompt.
+    assert svc.ensure_unlocked(kpdb, allow_prompt=True) is True
+    assert stored[kpdb] == "broker-pw"

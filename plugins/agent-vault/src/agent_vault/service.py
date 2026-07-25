@@ -182,14 +182,6 @@ class VaultService:
             log.error("Cannot unlock -- %s", self._last_error(kpdb))
             return False
 
-        cooldown = self._effective_cooldown(kpdb)
-        failed_at = self._unlock_failed_at.get(kpdb)
-        if failed_at is not None and (time.time() - failed_at) < cooldown:
-            remaining = int(cooldown - (time.time() - failed_at))
-            log.debug("Cooldown active (%ds remaining) -- suppressing prompt%s",
-                      remaining, f" [{reason}]" if reason else "")
-            return False
-
         acquired = self._unlock_lock.acquire(timeout=10)
         if not acquired:
             log.warning("Another unlock prompt is already active%s",
@@ -201,22 +193,14 @@ class VaultService:
             if self.cli.has_password(kpdb):
                 return True
 
-            cooldown = self._effective_cooldown(kpdb)
-            failed_at = self._unlock_failed_at.get(kpdb)
-            if failed_at is not None and (time.time() - failed_at) < cooldown:
-                remaining = int(cooldown - (time.time() - failed_at))
-                log.debug("Cooldown active after lock (%ds remaining) -- suppressing prompt%s",
-                          remaining, f" [{reason}]" if reason else "")
-                return False
-
-            cancel_streak = 0
-            wrong_streak = 0
-            base_prompt = (
-                f"Master password for the '{vault_name}' vault:"
-                if vault_name
-                else f"Master password for {os.path.basename(kpdb)}:"
-            )
-
+            # Inline resolution runs FIRST and UNCONDITIONALLY. Unlock-source
+            # providers (e.g. an operator-held broker deposit) are non-interactive
+            # and cheap, so they are consulted on every locked read regardless of
+            # any prompt cooldown. The cooldown throttles the *interactive prompt*
+            # only -- never the providers. (Previously the cooldown gate ran ahead
+            # of the providers, so a single dismissed/failed prompt suppressed the
+            # broker provider for the whole cooldown window, and a freshly-deposited
+            # master password went unused until it lapsed.)
             provided = get_registry().provide_unlock(
                 UnlockContext(kpdb=kpdb, vault_name=vault_name, reason=reason),
                 lambda candidate: self.cli.verify_password(kpdb, candidate),
@@ -243,6 +227,24 @@ class VaultService:
                 log.info("Vault locked; prompting disabled -- fail-fast%s",
                          f" [{reason}]" if reason else "")
                 return False
+
+            # Interactive prompt path -- the cooldown gates ONLY this, so a recent
+            # dismissed/failed prompt does not immediately re-pop a dialog.
+            cooldown = self._effective_cooldown(kpdb)
+            failed_at = self._unlock_failed_at.get(kpdb)
+            if failed_at is not None and (time.time() - failed_at) < cooldown:
+                remaining = int(cooldown - (time.time() - failed_at))
+                log.debug("Cooldown active (%ds remaining) -- suppressing prompt%s",
+                          remaining, f" [{reason}]" if reason else "")
+                return False
+
+            cancel_streak = 0
+            wrong_streak = 0
+            base_prompt = (
+                f"Master password for the '{vault_name}' vault:"
+                if vault_name
+                else f"Master password for {os.path.basename(kpdb)}:"
+            )
 
             while cancel_streak < MAX_UNLOCK_ATTEMPTS and wrong_streak < MAX_UNLOCK_ATTEMPTS:
                 if wrong_streak > 0:
