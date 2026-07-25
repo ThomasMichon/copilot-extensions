@@ -44,26 +44,29 @@ takeover briefing** (target ≤ ~6k tokens). It is the context firewall.
 
 ### 1. Identify the dormant worktree
 
-You need the **worktree root path** (the directory whose `workspace.yaml`
-cwd/git_root the session recorded). If the operator names a worktree, use that
-path; otherwise ask which worktree to ramp up on. Optionally note a **focus**
-(what the operator wants to resume).
+You just need the worktree's short **suffix** — the last segment of its name
+(e.g. `fbc5` from `lambda-core-win-20260724-120542-fbc5`). A full path or `.`
+(current directory) also work. If the worktree lives on **another machine**,
+note that machine's name. If the operator hasn't said which worktree, ask.
+Optionally note a **focus** (what the operator wants to resume).
 
 ### 2. Spawn the `session-rampup` agent (sync)
 
 Delegate with the `task` tool, `agent_type: "session-rampup"`, `mode: "sync"`.
-Put the worktree path (and optional session id / focus) in the prompt, e.g.:
+Put the worktree suffix (and optional machine / session id / focus) in the
+prompt, e.g.:
 
 ```
-Ramp into the dormant session for worktree <ABSOLUTE_WORKTREE_PATH>.
+Ramp into the dormant session for worktree <SUFFIX> [on machine <NAME>].
 [Optionally: session <UUID>.]
 Focus: <what to resume, if the operator said>.
 Return the bounded Ramp-Up Briefing.
 ```
 
-The agent runs `ramp-up-session`, reads the digest surgically
-(`read-session-digest`), inspects the worktree's git state, reconciles intent
-vs. reality, and returns only the briefing — no raw transcript.
+The agent runs `ramp-up-session <suffix> [--machine <name>]`, reads the digest
+surgically (`read-session-digest`), inspects the worktree's git state,
+reconciles intent vs. reality, and returns only the briefing — no raw
+transcript.
 
 ### 3. Take over
 
@@ -82,14 +85,15 @@ transcript read inline will flood this session's context.
 
 ### 1. Identify the dormant worktree
 
-You need the **worktree root path** (the directory whose `workspace.yaml`
-cwd/git_root the session recorded). If the operator names a worktree, use that
-path; otherwise ask which worktree to ramp up on.
+You need the worktree's short **suffix** (e.g. `fbc5`), a full path, or `.` for
+the current directory. If it lives on another machine, note that machine's name.
+If the operator hasn't said which worktree, ask.
 
 ### 2. List candidates (optional but recommended)
 
 ```
-ramp-up-session <worktree-path> --list
+ramp-up-session <suffix> --list
+ramp-up-session <suffix> --machine <name> --list     # a worktree on another host
 ```
 
 `ramp-up-session` is deployed as a binstub in `~/.local/bin` by the
@@ -99,13 +103,16 @@ deployed venv interpreter instead:
 
 ```
 # POSIX
-~/.agent-logger/.venv/bin/python -m agent_logger.segmenter.ramp_up <worktree-path> --list
+~/.agent-logger/.venv/bin/python -m agent_logger.segmenter.ramp_up <suffix> --list
 # Windows
-~/.agent-logger/.venv/Scripts/python.exe -m agent_logger.segmenter.ramp_up <worktree-path> --list
+~/.agent-logger/.venv/Scripts/python.exe -m agent_logger.segmenter.ramp_up <suffix> --list
 ```
 
-This enumerates the sessions that map to the worktree, most recent first. Pick
-the one to take over (usually the most recent).
+A bare suffix is hunted down in the local session store by matching worktree
+directory names ending in `-<suffix>`. With `--machine <name>` naming another
+host, the hunt is delegated over `ssh <name>` (a session's raw data lives on the
+machine that produced it). This enumerates the matching sessions, most recent
+first. Pick the one to take over (usually the most recent).
 
 ### 3. Produce the takeover brief
 
@@ -113,9 +120,10 @@ Ramp up the most recent session (omit `--list`), or a specific one with
 `--session <id>`:
 
 ```
-ramp-up-session <worktree-path>
-ramp-up-session <worktree-path> --session <id>       # a specific session
-ramp-up-session <worktree-path> --tail-turns 10      # surface more trailing turns
+ramp-up-session <suffix>
+ramp-up-session <suffix> --machine <name>            # a worktree on another host
+ramp-up-session <suffix> --session <id>              # a specific session
+ramp-up-session <suffix> --tail-turns 10             # surface more trailing turns
 ```
 
 The brief contains:

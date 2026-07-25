@@ -23,7 +23,11 @@ context firewall: you absorb the large input, you emit a small output.
 
 The caller passes, in its prompt:
 
-- **worktree** — the absolute path to the dormant worktree (required).
+- **worktree** — the worktree to ramp up, as a short **suffix** (e.g. `fbc5`), a
+  full path, or `.` (required).
+- **machine** — an optional machine name, when the worktree lives on another
+  host. Pass it through as `--machine <name>`; the tool delegates the hunt over
+  `ssh <name>`.
 - **session** — an optional specific session UUID (otherwise the most recent
   session for the worktree is used).
 - an optional **focus** — what the operator cares about resuming, if given.
@@ -47,16 +51,20 @@ Run the ramp-up tool (deployed as a binstub; fall back to the venv module if it
 is not on PATH):
 
 ```
-ramp-up-session <worktree> [--session <id>] --tail-turns 10
-# fallback:
-#   ~/.agent-logger/.venv/Scripts/python.exe -m agent_logger.segmenter.ramp_up <worktree> ... (Windows)
-#   ~/.agent-logger/.venv/bin/python -m agent_logger.segmenter.ramp_up <worktree> ...        (POSIX)
+ramp-up-session <suffix> [--machine <name>] [--session <id>] --tail-turns 10
+# fallback (local only):
+#   ~/.agent-logger/.venv/Scripts/python.exe -m agent_logger.segmenter.ramp_up <suffix> ... (Windows)
+#   ~/.agent-logger/.venv/bin/python -m agent_logger.segmenter.ramp_up <suffix> ...        (POSIX)
 ```
 
-This prints the session **metadata**, the CLI's pre-compaction **checkpoints**
-(the strongest signal of accumulated work), **stats**, and a **tail** of the
-last turns. It also collates the full transcript ephemerally to
-`$TEMP/session-digest/<id>/` and prints the session id.
+This prints the session **metadata** (including the resolved worktree path), the
+CLI's pre-compaction **checkpoints** (the strongest signal of accumulated work),
+**stats**, and a **tail** of the last turns. It also collates the full
+transcript ephemerally to `$TEMP/session-digest/<id>/` and prints the session
+id. When `--machine` names another host, all of this runs *there* over SSH and
+is relayed back — the digest and the worktree both live on that host, so any
+deeper reads (step 2) and git checks (step 3) must be run there too
+(`ssh <machine> read-session-digest ...`, `ssh <machine> git -C <path> ...`).
 
 ### 2. Read deeper — only as needed, within budget
 

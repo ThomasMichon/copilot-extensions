@@ -31,16 +31,16 @@ chunks. Four console scripts:
   log path from a configurable template, including any repo-local
   organization config discovered from the current git root.
 - `ramp-up-session` — **take over a dormant session.** Discovers the most
-  recent session for any named worktree (the one primitive `collate-session`
-  lacks — it resolves `"current"` only for its own repo), collates it
-  ephemerally (reusing the same engine), and prints a takeover **brief**
-  (metadata + the CLI's pre-compaction checkpoints + stats + a "where it left
-  off" tail of the last few turns) so a fresh session can pick up the torch of
-  a session that can no longer be resumed. Drives the `ramp-up-session` skill,
-  which by default delegates the context-expensive ramp-in to the neutral
-  **`session-rampup`** agent (a context firewall — it absorbs the large
-  transcript and returns a compact takeover briefing, so the dormant session
-  never floods the main session's context).
+  recent session for a worktree — named by its short **suffix** (e.g. `fbc5`),
+  a path, or `.` — collates it ephemerally (reusing the same engine), and prints
+  a takeover **brief** (metadata + the CLI's pre-compaction checkpoints + stats
+  + a "where it left off" tail of the last few turns) so a fresh session can
+  pick up the torch of a session that can no longer be resumed. A worktree on
+  another host is hunted over `ssh <machine>` via `--machine`. Drives the
+  `ramp-up-session` skill, which by default delegates the context-expensive
+  ramp-in to the neutral **`session-rampup`** agent (a context firewall — it
+  absorbs the large transcript and returns a compact takeover briefing, so the
+  dormant session never floods the main session's context).
 
 All machine/path/voice coupling is configuration — there is no facility
 hostname, NAS path, or persona baked in.
