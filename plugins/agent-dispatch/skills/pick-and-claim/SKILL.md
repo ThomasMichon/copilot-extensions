@@ -109,6 +109,8 @@ computes identically.
 
 - The **`agent-dispatch`** skill — the full CLI, the six-state lifecycle, worker
   identity, capability/affinity routing, and selector (`--require`/`--exclude`)
-  matching.
+  matching. Its **"Which coordination system?"** matrix disambiguates
+  native sub-agent vs. agent-bridge vs. agent-dispatch when you're unsure which
+  tool a task wants.
 - `agent-dispatch create --help` — the `--claim`, `--dedup-key`, `--require`, and
   `--exclude` flags.

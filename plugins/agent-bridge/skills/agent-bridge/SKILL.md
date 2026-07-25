@@ -42,6 +42,30 @@ your deployment includes a facility-specific adapter skill (e.g.
 `facility-agent-bridge`), it will list the concrete machine and agent
 names for your environment.
 
+### Which coordination system? (sub-agent vs agent-bridge vs agent-dispatch)
+
+There are **three** ways to coordinate agent work on top of agent-worktrees (the
+durable worktree/session substrate), and the choice is easy to get wrong. Pick
+by **what you're doing**:
+
+| Scenario | Use |
+|----------|-----|
+| **In-worktree sub-task** — exploration, safely-parallel writes, MCP round-trips | **native sub-agent** (Task tool) |
+| **Cross-repo / cross-machine sub-task you drive or converse with** — enforce the target repo's conventions, interactive back-and-forth | **agent-bridge** |
+| **Fleet-wide chat / broadcast / status / negotiation** — reserve a resource or deploy slot, coordinate over a bug | **agent-bridge** |
+| **Task claims / dedup of concurrent work** — claim an effort/item so two agents don't collide; release/complete when done | **agent-dispatch** |
+| **Spin-off work you don't wait on** — optional follow-up, a tangential bug found mid-task; the outcome isn't essential | **agent-dispatch** |
+| **Context handoff** — same worktree, next session | **agent-dispatch** task (complete-on-pickup) |
+
+**The distinguishing axis** (the one agents get wrong): **agent-bridge = drive or
+converse with a live agent you own or steer** (you wait on it, answer it, take it
+over); **agent-dispatch = fire-and-forget queued/claimed work you don't own** —
+you may poll its status or send steering messages, but it is *not* a controlled
+sub-agent. Both agent-bridge and agent-dispatch cross machines; the axis is
+**ownership, not location**. For the queue side (claim, dedup, the six-state
+lifecycle) see the **`agent-dispatch`** skill; for dedup-safe open-ended
+self-dispatch see **`pick-and-claim`**.
+
 ### Relay Chain Pattern
 
 When relaying a message through multiple machines (A -> B -> C), each
