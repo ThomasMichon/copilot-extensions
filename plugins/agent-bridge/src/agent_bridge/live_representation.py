@@ -35,10 +35,16 @@ approval can only ever happen at the operator's terminal.
 from __future__ import annotations
 
 import time
+from collections import deque
 from threading import Lock
 from typing import Any
 
 from .events import EventLog, SseEvent
+
+# Bound on the per-session set of ingested event ids used to dedup redelivery.
+# A session's live tail rarely revisits an id older than a few thousand events,
+# so a bounded FIFO caps memory without weakening the dedup in practice.
+_SEEN_ID_CAP = 4096
 
 
 def _text(value: Any) -> str | None:
@@ -304,6 +310,10 @@ class LiveEventStore:
 
     def __init__(self) -> None:
         self._logs: dict[str, EventLog] = {}
+        # Per-session dedup of already-ingested SDK event ids (the set gives O(1)
+        # membership; the deque bounds it FIFO). Guarded by ``_lock``.
+        self._seen_ids: dict[str, set[str]] = {}
+        self._seen_order: dict[str, deque[str]] = {}
         self._lock = Lock()
 
     def get(self, session_id: str) -> EventLog | None:
@@ -324,14 +334,46 @@ class LiveEventStore:
         """Forget a session's represented log (on deregister) to free memory."""
         with self._lock:
             self._logs.pop(session_id, None)
+            self._seen_ids.pop(session_id, None)
+            self._seen_order.pop(session_id, None)
+
+    def _mark_seen(self, session_id: str, event_id: str) -> bool:
+        """Record ``event_id`` for ``session_id``; return True if it is new.
+
+        Returns False when this id was already ingested (a redelivery). Bounded
+        FIFO per session; thread-safe.
+        """
+        with self._lock:
+            seen = self._seen_ids.get(session_id)
+            if seen is None:
+                seen = set()
+                self._seen_ids[session_id] = seen
+                self._seen_order[session_id] = deque()
+            if event_id in seen:
+                return False
+            seen.add(event_id)
+            order = self._seen_order[session_id]
+            order.append(event_id)
+            if len(order) > _SEEN_ID_CAP:
+                seen.discard(order.popleft())
+            return True
 
     def ingest(
         self, session_id: str, sdk_events: list[dict[str, Any]]
     ) -> int:
         """Translate + append a batch of raw SDK events; return the count appended.
 
-        Each item is a raw SDK event ``{"type": str, "data": dict}``. Events that
-        translate to nothing (unknown/dropped types) are silently skipped.
+        Each item is a raw SDK event ``{"type": str, "data": dict, "id": str}``.
+        Events that translate to nothing (unknown/dropped types) are silently
+        skipped.
+
+        Defense-in-depth dedup: the extension already dedups the CLI runtime's
+        per-subscription redelivery (one logical event arrives at its handler
+        once per live-session subscription, all sharing the same ``id``), but a
+        bridge restart, a retried POST, or a second producer could still resend
+        an event already logged. Any ``id`` already ingested for this session is
+        skipped; an event with no ``id`` cannot be deduped and is appended as
+        before (honest best-effort).
         """
         log = self.get_or_create(session_id)
         appended = 0
@@ -340,6 +382,13 @@ class LiveEventStore:
                 continue
             sdk_type = item.get("type")
             if not isinstance(sdk_type, str):
+                continue
+            event_id = item.get("id")
+            if (
+                isinstance(event_id, str)
+                and event_id
+                and not self._mark_seen(session_id, event_id)
+            ):
                 continue
             data = item.get("data")
             data = data if isinstance(data, dict) else {}

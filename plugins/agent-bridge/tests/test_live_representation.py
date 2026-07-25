@@ -223,6 +223,45 @@ class TestLiveEventStore:
         # nothing; all are safely skipped without error.
         assert n == 0
 
+    def test_ingest_dedups_by_event_id(self) -> None:
+        # The CLI runtime redelivers each session.event once per live-session
+        # subscription -- N copies sharing one id. ingest must append only once.
+        store = LiveEventStore()
+        event = {"type": "user.message", "id": "evt-1", "data": {"content": "hi"}}
+        n = store.ingest("s", [event, dict(event), dict(event), dict(event), dict(event)])
+        assert n == 1
+        log = store.get("s")
+        assert log is not None
+        assert [e.event for e in log.get_events()] == ["user_message"]
+        # A later batch replaying the same id (e.g. a retried POST) adds nothing.
+        assert store.ingest("s", [dict(event)]) == 0
+        # A genuinely new id still appends.
+        assert store.ingest(
+            "s", [{"type": "assistant.message", "id": "evt-2", "data": {"content": "yo"}}]
+        ) == 1
+
+    def test_ingest_without_id_appends_each(self) -> None:
+        # No id -> can't dedup; preserve the prior best-effort behavior.
+        store = LiveEventStore()
+        item = {"type": "user.message", "data": {"content": "hi"}}
+        n = store.ingest("s", [dict(item), dict(item)])
+        assert n == 2
+
+    def test_ingest_dedup_is_per_session(self) -> None:
+        store = LiveEventStore()
+        event = {"type": "user.message", "id": "evt-1", "data": {"content": "hi"}}
+        assert store.ingest("a", [dict(event)]) == 1
+        # Same id under a different session is independent -> appended.
+        assert store.ingest("b", [dict(event)]) == 1
+
+    def test_drop_resets_dedup(self) -> None:
+        store = LiveEventStore()
+        event = {"type": "user.message", "id": "evt-1", "data": {"content": "hi"}}
+        assert store.ingest("s", [dict(event)]) == 1
+        store.drop("s")
+        # After drop the session's dedup memory is gone, so the id ingests again.
+        assert store.ingest("s", [dict(event)]) == 1
+
     def test_drop_forgets_log(self) -> None:
         store = LiveEventStore()
         store.ingest("s", [{"type": "assistant.message", "data": {"content": "a"}}])
