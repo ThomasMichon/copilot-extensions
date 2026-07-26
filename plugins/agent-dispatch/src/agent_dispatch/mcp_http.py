@@ -25,6 +25,7 @@ importable (otherwise the REST API still serves).
 from dataclasses import asdict
 from typing import Any
 
+from . import telemetry
 from .events import EventBus
 from .identity import canonicalize_remote
 from .queue import TaskError, TaskQueue, worker_id_for
@@ -53,6 +54,8 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
 
     def _emit(event_type: str, task: dict) -> None:
         bus.publish({"type": event_type, "task": task})
+        # Generic telemetry seam (no-op unless a consumer registered a sink).
+        telemetry.emit(telemetry.task_lifecycle_event(event_type, task))
 
     def _mutate(op, event_type: str | None) -> dict:
         """Run a queue mutation; map TaskError to an error dict; emit on success."""
