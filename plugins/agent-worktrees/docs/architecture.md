@@ -457,3 +457,21 @@ in-process Python. The CLI-over-manifest seam is the cross-venv-correct answer t
 "each plugin installs in its own venv"; richer per-module rendering is explicitly
 out of scope (#1425).
 
+### Modal-overlay registry (single source of truth)
+
+The picker's dialogs (quit-confirm, the per-worktree submenu, the message peek,
+the registered-pivot action menu, the ⚙ Configuration menu, the maintenance
+menu, the Clean/Sync scope dialog, the options menu, the profile-apply confirm,
+the progress spinner) are **modal overlays**: mutually exclusive, each stored as
+a truthy instance attribute, and each with a key handler (`_key_*`) and a render
+handler (`_overlay_*`). `PickerScreen._overlay_registry()` is the **single
+ordered table** of `(state_attr, key_handler, render_handler)`; `_active_overlay()`
+returns the first spec whose state is set. Three call sites derive from it --
+`handle_key` (dispatch), the background-dim decision, and the render dispatch --
+where each used to hand-maintain its **own** parallel list that could silently
+drift when an overlay was added. This is the first slice of the incremental
+migration toward Textual-native focus (#85 F): consolidate the hand-rolled modal
+dispatch behind one registry *before* converting individual overlays to Textual
+`ModalScreen`s -- **extend, not rewrite**, per `visions/picker`'s stability bias.
+A guard test asserts the registry drives both dispatch and precedence.
+
