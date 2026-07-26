@@ -224,6 +224,23 @@ def test_recent_messages_argv_local_returns_none(monkeypatch):
     assert data_ssh.recent_messages_argv("Lambda-Core", "Win", "wt-xyz") is None
 
 
+def test_list_sessions_argv_remote_builds_worktree_scoped_cli(monkeypatch):
+    """The remote session-list fetch runs
+    ``<proj> list-sessions --worktree <id> --json`` (the enriched registry with
+    id + title + is_head, for the picker's diagnostic session list)."""
+    _remote_roster(monkeypatch)
+    argv = data_ssh.list_sessions_argv("Wheatley", "Linux", "wt-xyz")
+    assert argv is not None and argv[0] == "ssh"
+    inner = argv[-1]
+    assert "proj list-sessions --worktree wt-xyz --json" in inner
+
+
+def test_list_sessions_argv_local_returns_none(monkeypatch):
+    """A local target yields no SSH argv (the caller loads it in-process)."""
+    _remote_roster(monkeypatch)
+    assert data_ssh.list_sessions_argv("Lambda-Core", "Win", "wt-xyz") is None
+
+
 def test_ssh_not_ready_remote_env_is_disabled(monkeypatch):
     """A ssh.ready:false machine's remote env stays a disabled tab."""
     entries = {

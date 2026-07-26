@@ -357,6 +357,24 @@ def recent_messages_argv(machine, env, worktree_id, *, limit=3):
     return None
 
 
+def list_sessions_argv(machine, env, worktree_id):
+    """Build the SSH argv to list a remote worktree's Copilot sessions.
+
+    Runs ``<project> list-sessions --worktree <id> --json`` on the remote host
+    (the enriched registry: each entry carries id, name/title, is_head, state).
+    Returns the ssh argv, or ``None`` for the local host or an unknown /
+    not-ready target (the caller loads local worktrees in-process).
+    """
+    project = _project()
+    for s in _build_sources():
+        if s.machine == machine and s.env == env:
+            if s.local or not s.ready or not s.alias:
+                return None
+            inner = f"{project} list-sessions --worktree {worktree_id} --json"
+            return _wrap_remote(s.shell, s.alias, inner)
+    return None
+
+
 def profiles_argv(machine, env, *, action, set_json=None, no_mirror=False):
     """SSH argv to run ``profiles get|apply`` on a remote host/env.
 

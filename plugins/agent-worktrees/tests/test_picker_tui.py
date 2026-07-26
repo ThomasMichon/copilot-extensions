@@ -4233,3 +4233,46 @@ def test_kbd_real_pipeline_binding_gated_by_overlay():
     asyncio.run(run())
 
 
+
+
+def test_msgview_overlay_lists_full_session_ids_and_titles():
+    """The recent-messages overlay lists each session's FULL id + title so the
+    operator can copy an id out (terminal selection) for a manual
+    ``copilot --resume <id>`` (session-lifecycle diagnostic legibility). The
+    head session is marked current; the id is not truncated."""
+    src = _fixture_source()
+    full_head = "11111111-2222-3333-4444-555555555555"
+    full_old = "66666666-7777-8888-9999-000000000000"
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            rec = {"raw": {"id": "lambda-core-win-20260627-aaaa"},
+                   "machine": "lambda-core", "env": "Win",
+                   "id4": "aaaa", "title": "Fix the thing", "state": "wip"}
+            scr.msgview = {
+                "rec": rec, "limit": 3, "loading": False, "error": None,
+                "session_id": full_head, "scroll": 0,
+                "messages": [{"role": "user", "text": "hello"}],
+                "sessions": [
+                    {"id": full_head, "name": "Current work",
+                     "is_head": True, "state": "active"},
+                    {"id": full_old, "name": "Earlier work",
+                     "is_head": False, "state": "handed-off"},
+                ],
+            }
+            out = str(scr.render())
+            # Full ids are present (untruncated) for terminal copy.
+            assert full_head in out
+            assert full_old in out
+            # Titles are shown.
+            assert "Current work" in out
+            assert "Earlier work" in out
+            # The head is marked current; a concluded one shows its state.
+            assert "current" in out
+            assert "handed-off" in out
+
+    asyncio.run(run())
