@@ -94,7 +94,10 @@ async def capture_async(
     *,
     live: bool = False,
     size: tuple[int, int] = DEFAULT_SIZE,
-    local_tab: bool = True,
+    view: str = "local",
+    settle: float = 0.0,
+    keys: Optional[list[str]] = None,
+    update_state: Optional[str] = None,
     prepare: Optional[Callable[[Any, Any], Awaitable[None]]] = None,
     title: str = "Worktree Picker",
 ) -> dict[str, str]:
@@ -102,27 +105,100 @@ async def capture_async(
 
     Spins the real :class:`PickerApp` under Textual's headless test driver, so no
     terminal is required. ``source`` is any picker data source (a fixture object
-    or the ``data_local`` / ``data_ssh`` modules). When ``prepare`` is given it is
-    awaited with ``(screen, pilot)`` to drive the picker to a target state (switch
-    pivot, focus a row, open a dialog) before the capture is taken.
+    or the ``data_local`` / ``data_ssh`` modules).
+
+    - ``view`` -- ``"local"`` focuses the local machine tab; ``"all"`` focuses the
+      aggregate *All machines* tab (index 0).
+    - ``settle`` -- seconds to wait before capture, so a ``live=False`` multi-
+      machine source's staggered "ready" transitions resolve (else remotes show a
+      connect spinner and their rows are excluded from the All view).
+    - ``keys`` -- keys to send (see Textual key names) to drive the picker to a
+      target state before capture.
+    - ``update_state`` -- force the topbar update indicator (e.g. ``"current"``
+      for a clean ✓ instead of a transient "update available").
+    - ``prepare`` -- an escape-hatch coroutine awaited with ``(screen, pilot)``
+      for anything ``keys`` can't express.
     """
     from .engine import PickerApp, PickerScreen
 
     app = PickerApp(source, live=live)
     async with app.run_test(size=size) as pilot:
         scr = app.query_one(PickerScreen)
-        if local_tab:
-            # Default to the local machine tab so a screenshot isn't stuck on the
-            # aggregate "All machines" view.
+        if view == "all":
+            scr.machine_idx = 0
+        else:
             try:
                 scr.machine_idx = scr.local_index()
             except Exception:
                 pass
         await pilot.pause()
+        if settle:
+            import asyncio
+
+            await asyncio.sleep(settle)
+            await pilot.pause()
+        if keys:
+            await pilot.press(*keys)
+            await pilot.pause()
         if prepare is not None:
             await prepare(scr, pilot)
             await pilot.pause()
+        if update_state is not None:
+            # Set last, just before render: a background update-poll can flip it
+            # back during settle, so an early assignment would not stick.
+            scr.update_state = update_state
         return capture_screen(scr, title=title)
+
+
+async def capture_frames_async(
+    source: Any,
+    steps: list[Optional[list[str]]],
+    *,
+    live: bool = False,
+    size: tuple[int, int] = DEFAULT_SIZE,
+    view: str = "local",
+    settle: float = 0.0,
+    update_state: Optional[str] = None,
+    title: str = "Worktree Picker",
+) -> list[dict[str, str]]:
+    """Capture a **sequence** of frames as the picker is keyboard-driven.
+
+    ``steps`` is a list of key-batches: the picker is driven to the initial
+    ``view`` (settling first), a frame is captured, then for each entry the keys
+    are pressed and another frame captured. The first entry may be ``None`` to
+    capture the initial state before any keys. Groundwork for an animated
+    walkthrough (assemble the returned SVGs/PNGs into a GIF) -- realizes the
+    picker vision's *state-sequence* capture.
+    """
+    from .engine import PickerApp, PickerScreen
+
+    frames: list[dict[str, str]] = []
+    app = PickerApp(source, live=live)
+    async with app.run_test(size=size) as pilot:
+        scr = app.query_one(PickerScreen)
+        if view == "all":
+            scr.machine_idx = 0
+        else:
+            try:
+                scr.machine_idx = scr.local_index()
+            except Exception:
+                pass
+        if update_state is not None:
+            scr.update_state = update_state
+        await pilot.pause()
+        if settle:
+            import asyncio
+
+            await asyncio.sleep(settle)
+            await pilot.pause()
+        for batch in steps:
+            if batch:
+                await pilot.press(*batch)
+                await pilot.pause()
+            if update_state is not None:
+                scr.update_state = update_state
+            frames.append(capture_screen(scr, title=title))
+    return frames
 
 
 def capture(source: Any, **kwargs: Any) -> dict[str, str]:

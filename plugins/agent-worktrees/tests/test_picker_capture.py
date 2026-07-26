@@ -13,6 +13,7 @@ Behaviors/renderable-and-assertable-headless (rides on programmatic-parity).
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
 import os
 import re
@@ -24,6 +25,7 @@ pytest.importorskip("textual", reason="textual not installed (optional TUI dep)"
 
 from agent_worktrees.picker_tui import capture as pcap  # noqa: E402
 from agent_worktrees.picker_tui import derive  # noqa: E402
+from agent_worktrees.picker_tui import obscure as pobs  # noqa: E402
 
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "goldens", "picker")
 
@@ -123,3 +125,68 @@ def test_capture_is_deterministic(monkeypatch, tmp_path):
     first = pcap.capture(_fixture_source(), live=False)["text"]
     second = pcap.capture(_fixture_source(), live=False)["text"]
     assert first == second
+
+
+# --- obscuring (shareable capture) -------------------------------------------
+
+def _secret_dump():
+    """One machine/env of raw list-json worktrees full of identifying data."""
+    raws = [
+        {"id": "SECRETHOST-win-20260101-dead", "machine": "SECRET-HOST",
+         "platform": "windows", "status": "active",
+         "started_at": "2026-06-01T00:00:00", "state": "active", "turn_count": 3,
+         "session_count": 1, "title": "Top Secret Roadmap",
+         "summary": "do not leak this classified summary",
+         "branch": "worktree/classified-branch", "path": "/secret/checkout/path",
+         "live_intent": "exfiltrating the mainframe",
+         "pr": {"state": "open", "number": 8472,
+                "url": "https://secret.example/tmichon/private/pulls/8472",
+                "branch": "pr/secret-branch", "head_sha": "deadbeefcafef00d"}},
+        {"id": "SECRETHOST-win-20260101-beef", "machine": "SECRET-HOST",
+         "platform": "windows", "status": "finalized",
+         "completed_at": "2026-06-02T00:00:00", "started_at": "2026-06-01T00:00:00",
+         "state": "completed", "title": "Another Confidential Thing"},
+    ]
+    return [("SECRET-HOST", "Win", True, raws)]
+
+
+def test_obscured_source_scrubs_all_identifiers(monkeypatch, tmp_path):
+    _isolate_pivots(monkeypatch, tmp_path)
+    src = pobs.obscured_source(_secret_dump(), repo="my-project", branch="main")
+    caps = pcap.capture(src, view="all", size=(120, 36), settle=0.0)
+    words = caps["text"] + "\n" + caps["ansi"]
+    blob = words + "\n" + caps["svg"]
+    # alphabetic secrets must not appear anywhere (text/ansi/svg)
+    for secret in ("SECRET-HOST", "Top Secret Roadmap", "Another Confidential",
+                   "do not leak", "secret.example", "classified", "mainframe",
+                   "deadbeef", "/secret/checkout", "tmichon", "private"):
+        assert secret not in blob, secret
+    # the real PR number is replaced (check text/ansi; SVG carries coord numbers)
+    assert "8472" not in words
+    # the obscured labels ARE present
+    assert "my-project" in caps["text"]
+    assert "Nova" in caps["text"]
+
+
+def test_obscured_source_aggregates_multiple_machines(monkeypatch, tmp_path):
+    _isolate_pivots(monkeypatch, tmp_path)
+    dumps = [
+        ("host-a", "Win", True, [
+            {"id": "a-win-0001", "machine": "host-a", "platform": "windows",
+             "status": "active", "state": "active", "started_at": "2026-06-01T00:00:00"}]),
+        ("host-b", "Linux", False, [
+            {"id": "b-lin-0002", "machine": "host-b", "platform": "linux",
+             "status": "active", "state": "active", "started_at": "2026-06-01T00:00:00"}]),
+    ]
+    src = pobs.obscured_source(dumps)
+    assert len(src.load()) == 2
+    codes = {m for _l, m, _e, _ok in src.machines()}
+    assert codes == {"Nova", "Orbit"}
+
+
+def test_capture_frames_returns_one_per_step(monkeypatch, tmp_path):
+    _isolate_pivots(monkeypatch, tmp_path)
+    frames = asyncio.run(pcap.capture_frames_async(
+        _fixture_source(), [None, ["]"], ["["]], size=(118, 36)))
+    assert len(frames) == 3
+    assert all(f["svg"].lstrip().startswith("<svg") for f in frames)
