@@ -2366,10 +2366,8 @@ class PickerScreen(Widget):
         stats = self._stats_row(W)
         lines = list(top) + [header_border, stats] + body_lines + [bottom_border, foot]
         # body offset = title+htabs+header_border+stats = len(top)+2
-        modal = (self.submenu or self.maint_menu or self.cleanup
-                 or self.optmenu or self.prof_confirm or self.progress
-                 or self.quit_confirm or self.task_menu or self.cfgmenu
-                 or self.msgview)
+        ov = self._active_overlay()
+        modal = ov is not None
         # The Clean/Sync dialog is a LIVE FILTER over the worktree list (#2179):
         # keep the list visible (build_body dims rows outside the selected set)
         # and dock the bucket toggles at the bottom, instead of graying the whole
@@ -2381,27 +2379,7 @@ class PickerScreen(Widget):
                 lines = [Text((ln if isinstance(ln, Text) else Text(str(ln))).plain,
                               style="grey35") for ln in lines]
             off, bh = len(top) + 2, body_h
-            if self.quit_confirm:
-                self._overlay_quit_confirm(lines, W, off, bh)
-            elif self.submenu:
-                self._overlay_submenu(lines, W, off, bh)
-            elif self.msgview:
-                self._overlay_msgview(lines, W, off, bh)
-            elif self.task_menu:
-                self._overlay_task_menu(lines, W, off, bh)
-            elif self.cfgmenu:
-                self._overlay_cfgmenu(lines, W, off, bh)
-            elif self.maint_menu:
-                self._overlay_maint_menu(lines, W, off, bh)
-            elif self.cleanup:
-                self._overlay_scopedlg(self.cleanup, lines, W, off, bh, om=False,
-                                       dock_bottom=live_filter)
-            elif self.optmenu:
-                self._overlay_scopedlg(self.optmenu, lines, W, off, bh, om=True)
-            elif self.prof_confirm:
-                self._overlay_prof_confirm(lines, W, off, bh)
-            else:
-                self._overlay_progress(lines, W, off, bh)
+            ov[2](lines, W, off, bh)
         out = Text()
         for i, ln in enumerate(lines):
             if i:
@@ -3153,6 +3131,55 @@ class PickerScreen(Widget):
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)
 
+    # ---- modal-overlay registry (single source of truth) --------------------
+    def _overlay_registry(self):
+        """The modal overlays, in dispatch-precedence order. Each entry is
+        ``(state_attr, key_handler, render_handler)``. Overlays are mutually
+        exclusive; the first whose ``state_attr`` is truthy owns the keyboard
+        and the foreground.
+
+        This table is the **single source of truth** consumed by three call
+        sites that previously each hand-maintained their own parallel list --
+        ``handle_key``'s dispatch chain, the background-dim decision, and the
+        render dispatch chain -- which had to be kept in sync by hand and could
+        silently drift when an overlay was added (#85 F1, the first
+        native-focus-migration slice: consolidate before converting individual
+        overlays to Textual ``ModalScreen``s)."""
+        return [
+            ("quit_confirm", self._key_quit_confirm,
+             lambda ln, W, o, b: self._overlay_quit_confirm(ln, W, o, b)),
+            ("progress", self._key_progress,
+             lambda ln, W, o, b: self._overlay_progress(ln, W, o, b)),
+            ("prof_confirm", self._key_prof_confirm,
+             lambda ln, W, o, b: self._overlay_prof_confirm(ln, W, o, b)),
+            ("submenu", self._key_submenu,
+             lambda ln, W, o, b: self._overlay_submenu(ln, W, o, b)),
+            ("msgview", self._key_msgview,
+             lambda ln, W, o, b: self._overlay_msgview(ln, W, o, b)),
+            ("task_menu", self._key_task_menu,
+             lambda ln, W, o, b: self._overlay_task_menu(ln, W, o, b)),
+            ("cfgmenu", self._key_cfgmenu,
+             lambda ln, W, o, b: self._overlay_cfgmenu(ln, W, o, b)),
+            ("maint_menu", self._key_maint_menu,
+             lambda ln, W, o, b: self._overlay_maint_menu(ln, W, o, b)),
+            ("cleanup", self._key_scopedlg,
+             lambda ln, W, o, b: self._overlay_scopedlg(
+                 self.cleanup, ln, W, o, b, om=False,
+                 dock_bottom=(self._kind() == "worktrees"))),
+            ("optmenu", lambda key: self._key_scopedlg(key, om=True),
+             lambda ln, W, o, b: self._overlay_scopedlg(
+                 self.optmenu, ln, W, o, b, om=True)),
+        ]
+
+    def _active_overlay(self):
+        """The ``(state_attr, key_handler, render_handler)`` spec for the first
+        active overlay in precedence order, or ``None`` when a top-level view
+        has the keyboard."""
+        for spec in self._overlay_registry():
+            if getattr(self, spec[0]):
+                return spec
+        return None
+
     def handle_key(self, key):
         # Remember the grid row before any navigation, so Tab out/in restores it.
         if self.sel and self.sel[0] == "PR":
@@ -3161,26 +3188,9 @@ class PickerScreen(Widget):
         # (#2258 P3-6).
         if self.sel and self.sel[0] == "L":
             self.last_l = self.sel[1]
-        if self.quit_confirm:
-            return self._key_quit_confirm(key)
-        if self.progress:
-            return self._key_progress(key)
-        if self.prof_confirm:
-            return self._key_prof_confirm(key)
-        if self.submenu:
-            return self._key_submenu(key)
-        if self.msgview:
-            return self._key_msgview(key)
-        if self.task_menu:
-            return self._key_task_menu(key)
-        if self.cfgmenu:
-            return self._key_cfgmenu(key)
-        if self.maint_menu:
-            return self._key_maint_menu(key)
-        if self.cleanup:
-            return self._key_scopedlg(key)
-        if self.optmenu:
-            return self._key_scopedlg(key, om=True)
+        ov = self._active_overlay()
+        if ov is not None:
+            return ov[1](key)
 
         # Global region shortcuts:
         #   Ctrl+Shift+←/→  -> rotate the top View pivot

@@ -3918,3 +3918,53 @@ def test_palette_no_stray_shade_literals():
         ):
             offenders.append((i, ln.strip()))
     assert not offenders, f"stray shade literals in style= contexts: {offenders}"
+
+
+def test_overlay_registry_drives_dispatch_and_precedence():
+    """Item F1 (#85): the modal-overlay registry is the single source of truth
+    for key dispatch AND render. Assert (a) no overlay -> _active_overlay() is
+    None; (b) each overlay's state selects its own registry spec and routes
+    handle_key to that spec's handler; (c) precedence follows registry order."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+
+            attrs = [spec[0] for spec in scr._overlay_registry()]
+
+            # (a) A top-level view has no active overlay.
+            for a in attrs:
+                setattr(scr, a, None)
+            assert scr._active_overlay() is None
+
+            # (b) Each overlay's state attr selects its own registry spec.
+            for attr in attrs:
+                for a2 in attrs:
+                    setattr(scr, a2, {"x": 1} if a2 == attr else None)
+                assert scr._active_overlay()[0] == attr
+
+            # (b') handle_key actually ROUTES through the active overlay's
+            # handler rather than the main nav: with quit_confirm open, a key
+            # is consumed by _key_quit_confirm (toggles its index) and never
+            # touches the main-view selection.
+            for a2 in attrs:
+                setattr(scr, a2, None)
+            scr.sel = scr.default_sel()
+            sel_before = scr.sel
+            scr._open_quit_confirm()
+            before = scr.quit_confirm["idx"]
+            scr.handle_key("left")
+            assert scr.quit_confirm["idx"] != before   # overlay consumed it
+            assert scr.sel == sel_before                # main nav untouched
+            scr.quit_confirm = None
+
+            # (c) Precedence: with the first two overlays both set, the earlier
+            # one in registry order wins.
+            setattr(scr, attrs[0], {"x": 1})
+            setattr(scr, attrs[1], {"x": 1})
+            assert scr._active_overlay()[0] == attrs[0]
+
+    asyncio.run(run())
