@@ -113,10 +113,23 @@ def test_wsl_no_tty_service_gui_fails_returns_false(monkeypatch):
 def test_non_wsl_no_tty_uses_client_gui(monkeypatch):
     monkeypatch.setattr(cli, "IS_WSL", False)
     monkeypatch.setattr(cli, "_has_controlling_tty", lambda: False)
+    monkeypatch.setattr(cli, "_in_ssh_session", lambda: False)
     monkeypatch.setattr(cli, "prompt_password", lambda: "hunter2")
     monkeypatch.setattr(cli, "send_command", lambda *a, **k: {"ok": True})
     monkeypatch.setattr(cli, "_terminal_unlock_local", _boom)
     assert cli.auto_unlock() is True
+
+
+def test_non_wsl_no_tty_in_ssh_fails_fast_without_gui(monkeypatch):
+    """#3501: on a non-WSL host reached over a non-interactive SSH session, the
+    client GUI dialog can't reach the operator (it pops on a desktop no one is
+    watching and blocks). auto_unlock must fail fast instead of popping it."""
+    monkeypatch.setattr(cli, "IS_WSL", False)
+    monkeypatch.setattr(cli, "_has_controlling_tty", lambda: False)
+    monkeypatch.setattr(cli, "_in_ssh_session", lambda: True)
+    monkeypatch.setattr(cli, "prompt_password", _boom)  # must NOT pop the GUI
+    monkeypatch.setattr(cli, "_terminal_unlock_local", _boom)
+    assert cli.auto_unlock() is False
 
 
 def test_non_wsl_no_tty_no_gui_returns_false(monkeypatch):
