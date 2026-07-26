@@ -18,10 +18,13 @@ import os
 import threading
 import time
 
+from rich.panel import Panel
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.screen import ModalScreen
 from textual.widget import Widget
+from textual.widgets import Static
 
 from .. import profiles as profiles_mod
 from ..update_stage import indicator_state
@@ -456,7 +459,6 @@ class PickerScreen(Widget):
         self.maint_menu = None        # Maintenance actions menu modal (#1345)
         self.maint_menu_idx = 0
         self.prof_confirm = None      # Profiles Apply confirm dialog (add/remove diff)
-        self.quit_confirm = None      # Esc/q on a main view asks before quitting (#1429)
         self.progress = None          # cleanup/sync progress sub-dialog
         self.executor = None          # real maintenance executor
         # Real cleanup/sync ops are the DEFAULT: the Maintenance actions
@@ -2948,31 +2950,6 @@ class PickerScreen(Widget):
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)
 
-    def _overlay_quit_confirm(self, lines, W, top_off, body_h):
-        """Confirm dialog for Esc/q on a main view -- ask before quitting (#1429)."""
-        qc = self.quit_confirm
-        pw = min(W - 8, 48)
-        header = "─ Quit the Picker? "
-        panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
-                      style=C_BAND)]
-        panel.append(self._prow("", pw))
-        panel.append(self._prow(" Leave the worktree picker?", pw,
-                                style=C_HEADER))
-        panel.append(self._prow("", pw))
-        brow = Text("│", style=C_DIM)
-        inner = Text("   ")
-        inner.append(" Quit ", style=C_BTN_SEL if qc["idx"] == 0 else C_BTN)
-        inner.append("   ")
-        inner.append(" Stay ", style=C_BTN_SEL if qc["idx"] == 1 else C_BTN)
-        inner.append(" " * max(0, pw - 2 - inner.cell_len))
-        brow.append_text(inner)
-        brow.append("│", style=C_DIM)
-        panel.append(brow)
-        panel.append(self._prow(" y quit · n/Esc stay · ←/→ choose", pw,
-                                style=C_MUTED))
-        panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
-        self._blit_panel(lines, W, panel, top_off, body_h)
-
     def _overlay_prof_confirm(self, lines, W, top_off, body_h):
         """Confirm dialog for Profiles Apply: the exact terminal profiles each
         changed host column will gain (+) or lose (-) before anything runs."""
@@ -3187,8 +3164,6 @@ class PickerScreen(Widget):
         native-focus-migration slice: consolidate before converting individual
         overlays to Textual ``ModalScreen``s)."""
         return [
-            ("quit_confirm", self._key_quit_confirm,
-             lambda ln, W, o, b: self._overlay_quit_confirm(ln, W, o, b)),
             ("progress", self._key_progress,
              lambda ln, W, o, b: self._overlay_progress(ln, W, o, b)),
             ("prof_confirm", self._key_prof_confirm,
@@ -3338,26 +3313,16 @@ class PickerScreen(Widget):
     def _open_quit_confirm(self):
         """Esc/q on a main pivot view asks before quitting (#1429).
 
-        Only reached when no nested dialog is open (those consume Esc as
-        back/cancel first), so this guards exactly the top-level views against
-        an accidental Escape. Defaults focus to *Stay* so a reflexive Enter
-        never quits.
+        Migrated to a native Textual ``ModalScreen`` (#88 F4): the first overlay
+        moved off the manual render/dispatch. Textual owns the screen stack,
+        focus, and key routing; the dialog dismisses ``True`` to quit / ``False``
+        to stay. Only reached when no manual overlay is open (those still consume
+        Esc first). Defaults focus to *Stay* so a reflexive Enter never quits.
         """
-        self.quit_confirm = {"idx": 1}   # 0 = Quit, 1 = Stay (safe default)
-
-    def _key_quit_confirm(self, key):
-        qc = self.quit_confirm
-        if key in ("left", "right", "tab"):
-            qc["idx"] ^= 1
-        elif key == "y":
-            self.app.exit()
-        elif key in ("n", "escape", "q"):
-            self.quit_confirm = None
-        elif key in ("enter", "space"):
-            if qc["idx"] == 0:
+        def _after(quit_it):
+            if quit_it:
                 self.app.exit()
-            else:
-                self.quit_confirm = None
+        self.app.push_screen(QuitConfirmScreen(), _after)
 
     def _rotate_machine(self, d):
         was_in_table = self.sel[0] == "L"
@@ -4507,6 +4472,62 @@ PROF_SPECS = [
     ("name", "name", 22, "l", 1), ("app", "host app", 12, "l", 3),
     ("scope", "scope (machine · env)", 20, "l", 2), ("status", "status", 13, "l", 4),
 ]
+
+
+class QuitConfirmScreen(ModalScreen[bool]):
+    """Native modal confirm for Esc/q on a top-level picker view (#88 F4).
+
+    The first picker overlay migrated off the manual render/dispatch model onto
+    a Textual ``ModalScreen``: Textual owns the screen stack, the dim backdrop,
+    and key routing, and the screen returns its verdict via ``dismiss(bool)`` --
+    ``True`` quits, ``False`` stays. Key handling mirrors the former
+    ``_key_quit_confirm`` exactly (y / n / Esc / q / arrows / Enter / Space) and
+    lives in ``on_key`` so it fires as the active screen regardless of child
+    focus. *Stay* is the default so a reflexive Enter never quits.
+    """
+
+    CSS = """
+    QuitConfirmScreen { align: center middle; background: $background 55%; }
+    QuitConfirmScreen > #quit-dialog { width: auto; height: auto; }
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.idx = 1                       # 0 = Quit, 1 = Stay (safe default)
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._panel(), id="quit-dialog")
+
+    def _panel(self) -> Panel:
+        body = Text()
+        body.append("\n Leave the worktree picker?\n\n", style=C_HEADER)
+        btns = Text("   ")
+        btns.append(" Quit ", style=C_BTN_SEL if self.idx == 0 else C_BTN)
+        btns.append("   ")
+        btns.append(" Stay ", style=C_BTN_SEL if self.idx == 1 else C_BTN)
+        body.append_text(btns)
+        body.append("\n\n y quit · n/Esc stay · ←/→ choose", style=C_MUTED)
+        return Panel(body, title="Quit the Picker?", border_style=C_BAND,
+                     width=48)
+
+    def _refresh(self) -> None:
+        self.query_one("#quit-dialog", Static).update(self._panel())
+
+    def on_key(self, event) -> None:
+        key = event.key
+        if key in ("left", "right", "tab"):
+            self.idx ^= 1
+            self._refresh()
+            event.stop()
+        elif key == "y":
+            event.stop()
+            self.dismiss(True)
+        elif key in ("n", "escape", "q"):
+            event.stop()
+            self.dismiss(False)
+        elif key in ("enter", "space"):
+            event.stop()
+            self.dismiss(self.idx == 0)
 
 
 class PickerApp(App):

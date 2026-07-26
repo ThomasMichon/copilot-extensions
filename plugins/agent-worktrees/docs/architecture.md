@@ -493,6 +493,17 @@ dispatch behind one registry *before* converting individual overlays to Textual
 `ModalScreen`s -- **extend, not rewrite**, per `visions/picker`'s stability bias.
 A guard test asserts the registry drives both dispatch and precedence.
 
+**First overlay migrated to a native `ModalScreen` (F4).** The quit-confirm
+dialog is no longer a manual render/dispatch overlay: `_open_quit_confirm`
+`push_screen`s a `QuitConfirmScreen(ModalScreen[bool])`, so Textual owns the
+screen stack, the dim backdrop, focus, and key routing; the screen returns its
+verdict via `dismiss(True|False)` and a callback runs `app.exit()` on quit. It
+is therefore *absent* from the overlay registry (Textual, not `handle_key`,
+dispatches its keys). The remaining overlays stay on the manual model for now;
+the registry is the seam that lets them convert one at a time. The real-framework
+`pilot.press` harness validates the modal end-to-end (open on Esc/q, Stay/Quit,
+`app.exit` only on confirm).
+
 **Global shortcuts are Textual `BINDINGS` (F3).** The truly-global pivot/machine
 shortcuts (`ctrl+shift+left/right`, `ctrl+left/right`) are owned by the
 framework's binding system, not the manual dispatcher: `PickerScreen.BINDINGS`
