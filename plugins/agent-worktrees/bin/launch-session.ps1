@@ -36,6 +36,24 @@ function Write-SetupLog {
     try { Add-Content -Path $script:SetupLog -Value $line -ErrorAction SilentlyContinue } catch {}
 }
 
+# Launch-status line: always logged, and ALSO echoed to the console during an
+# interactive launch so the operator understands what the (otherwise silent)
+# post-Picker/pre-mux pause is waiting on -- the staged update join + apply,
+# which can block for up to 90s. Gated on $script:ShowLaunchStatus so
+# machine/direct-dispatch and JSON paths stay quiet (they never enable it). In
+# --stdio mode the global Write-Host override routes these to stderr, keeping
+# them off the ACP JSON-RPC channel. ASCII only (this launcher declares no
+# UTF-8 console context).
+$script:ShowLaunchStatus = $false
+function Write-SetupStatus {
+    param([string]$Message, [string]$Level = 'INFO')
+    Write-SetupLog $Message $Level
+    if ($script:ShowLaunchStatus) {
+        $color = if ($Level -eq 'WARN') { 'Yellow' } else { 'DarkGray' }
+        Write-Host "  $Message" -ForegroundColor $color
+    }
+}
+
 # Write header and create a "latest" copy for easy access
 try {
     $header = @(
@@ -194,13 +212,21 @@ function Start-UpdateStage {
 function Invoke-UpdateApply {
     # Join the background stage and apply any pending update. Idempotent: runs
     # its body at most once per launch.
-    param($StageJob, [switch]$WithReconcile)
+    param($StageJob, [switch]$WithReconcile, [switch]$ShowStatus)
     if ($script:UpdateApplied) { return }
     $script:UpdateApplied = $true
 
+    # Enable console status echo for interactive launches (the caller passes
+    # -ShowStatus on the Picker exec / refresh paths, never on direct dispatch).
+    $script:ShowLaunchStatus = [bool]$ShowStatus
+
     if (-not $noUpdate) {
-        # Join the background stage (bounded wait).
+        Write-SetupStatus 'Finalizing launch: applying any pending plugin and runtime updates...'
+        # Join the background stage (bounded wait). This is the step most
+        # likely to make the launch look "stuck": the marketplace download
+        # staged while the Picker was open is joined here, up to 90s.
         if ($StageJob) {
+            Write-SetupStatus 'Waiting for the background plugin-update download to finish (up to 90s)...'
             try { Wait-Job $StageJob -Timeout 90 | Out-Null } catch {}
             try { Receive-Job $StageJob -ErrorAction SilentlyContinue | Out-Null } catch {}
             try { Remove-Job $StageJob -Force -ErrorAction SilentlyContinue } catch {}
@@ -213,7 +239,7 @@ function Invoke-UpdateApply {
         # No usable staged result (stage failed, or a peer launch held the
         # lock): run one inline so the marketplace pull still happens.
         if (-not $status -or -not $status.stage_done -or $status.skipped -eq 'locked') {
-            Write-SetupLog 'No usable staged update result; staging inline'
+            Write-SetupStatus 'Background download unavailable; downloading the plugin update now...'
             & $VenvPython -m agent_worktrees stage-update *> $null
             if (Test-Path $statusFile) {
                 try { $status = Get-Content $statusFile -Raw | ConvertFrom-Json } catch {}
@@ -223,7 +249,7 @@ function Invoke-UpdateApply {
         # (1) Marketplace installer, iff the download changed the payload.
         #     NO re-exec: a launcher-script change applies on the next launch.
         if ($status -and $status.plugin_changed) {
-            Write-SetupLog 'Staged update changed the plugin payload — running installer'
+            Write-SetupStatus 'A new plugin version was downloaded; installing the updated runtime...'
             $pdir = $status.plugin_dir
             $pluginInstaller = if ($pdir) { Join-Path $pdir 'scripts\install.ps1' } else { $null }
             if ($pluginInstaller -and (Test-Path $pluginInstaller)) {
@@ -242,16 +268,17 @@ function Invoke-UpdateApply {
         }
 
         # (2) Pre-launch self-update (bootstrap-service staleness; two-pass).
-        Write-SetupLog 'Running pre-launch staleness check'
+        Write-SetupStatus 'Checking bootstrap services for pending updates...'
         $preJson = & $VenvPython -m agent_worktrees pre-launch 2>$null
         if ($LASTEXITCODE -eq 0 -and $preJson) {
             $prePlan = ($preJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
             if (-not $prePlan) {
                 Write-SetupLog 'pre-launch returned invalid JSON — proceeding' 'WARN'
             } elseif ($prePlan.action -eq 'self-update') {
-                Write-SetupLog 'Self-update required — running update commands'
+                Write-SetupStatus 'Bootstrap services are stale; updating them...'
                 foreach ($update in $prePlan.updates) {
-                    Write-SetupLog "Updating $($update.service): $($update.command)"
+                    Write-SetupStatus "Updating $($update.service)..."
+                    Write-SetupLog "  command: $($update.command)"
                     $argv = @($update.argv)
                     if ($argv.Count -gt 0) {
                         $exe = $argv[0]
@@ -277,7 +304,7 @@ function Invoke-UpdateApply {
             Write-SetupLog 'pre-launch check failed or produced no output — proceeding'
         }
     } else {
-        Write-SetupLog 'Update apply skipped (WORKTREE_NO_UPDATE=1)'
+        Write-SetupStatus 'Skipping plugin update check (--no-update).'
         if ($StageJob) { try { Remove-Job $StageJob -Force -ErrorAction SilentlyContinue } catch {} }
     }
 
@@ -294,7 +321,7 @@ function Invoke-UpdateApply {
                 break
             }
             $recUpdates = @($recPlan.updates)
-            Write-SetupLog "Plugin reconcile pass ${rpass}: $($recUpdates.Count) action(s)"
+            Write-SetupStatus "Reconciling plugins (pass ${rpass}): $($recUpdates.Count) action(s)..."
             foreach ($u in $recUpdates) {
                 $rargv = @($u.argv)
                 if ($rargv.Count -eq 0) { continue }
@@ -415,7 +442,7 @@ if ($plan.action -eq 'refresh') {
     }
     # Reconcile repo-gated payloads/runtimes + reap the staged job (installer
     # and pre-launch here no-op: the full update above already deployed).
-    Invoke-UpdateApply -StageJob $script:StageJob -WithReconcile
+    Invoke-UpdateApply -StageJob $script:StageJob -WithReconcile -ShowStatus
     $newLauncher = Join-Path $env:USERPROFILE '.agent-worktrees\bin\launch-session.ps1'
     if (Test-Path $newLauncher) {
         & pwsh.exe -NoProfile -File $newLauncher @CopilotArgs
@@ -436,7 +463,7 @@ if ($plan.action -ne 'exec') {
 # payload (no re-exec -- a launcher change applies next launch), then the
 # pre-launch self-update and plugin reconcile, so Copilot starts on the
 # finished update.
-Invoke-UpdateApply -StageJob $script:StageJob -WithReconcile
+Invoke-UpdateApply -StageJob $script:StageJob -WithReconcile -ShowStatus
 
 # ── Execute the launch plan ──────────────────────────────────────────────
 
