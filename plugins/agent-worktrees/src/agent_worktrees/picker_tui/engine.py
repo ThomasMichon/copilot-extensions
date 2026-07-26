@@ -130,6 +130,26 @@ C_DISPO = {"SAFE": "black on green", "REVIEW": "black on yellow",
 DISPO_MARK = {"SAFE": "✓", "REVIEW": "!", "UNSAFE": "✗"}
 
 
+# ---- key canonicalization ---------------------------------------------------
+# Textual delivers some keys under framework-specific names/aliases; fold them
+# to ONE canonical token here so the render methods match keys declaratively and
+# the framework's naming quirks stay localized (#88 F2). This is the seam a
+# later move to Textual ``BINDINGS`` (F3) builds on.
+KEY_ALIASES = {
+    "left_square_bracket": "[",
+    "right_square_bracket": "]",
+    # Ctrl+Space is NUL, which Textual surfaces as "ctrl+at"; the picker treats
+    # it as a Ctrl-held Space toggle, identical to "ctrl+space".
+    "ctrl+at": "ctrl+space",
+}
+
+
+def canonical_key(key):
+    """Fold a Textual key name to the picker's canonical token (identity for a
+    key with no alias)."""
+    return KEY_ALIASES.get(key, key)
+
+
 # ---- column fitter ----------------------------------------------------------
 
 def fit(specs, avail, flex_key, flex_min):
@@ -3181,6 +3201,10 @@ class PickerScreen(Widget):
         return None
 
     def handle_key(self, key):
+        # Fold framework key-name aliases to canonical tokens once, up front, so
+        # every downstream match (here and in the overlay handlers) is declarative
+        # and alias-free (#88 F2).
+        key = canonical_key(key)
         # Remember the grid row before any navigation, so Tab out/in restores it.
         if self.sel and self.sel[0] == "PR":
             self.last_pr = self.sel[1]
@@ -3197,9 +3221,9 @@ class PickerScreen(Widget):
         #   Ctrl+←/→ (and [ ]) -> rotate the machine picker
         if key in ("ctrl+shift+left", "ctrl+shift+right"):
             return self._switch_pivot(1 if key.endswith("right") else -1)
-        if key in ("[", "left_square_bracket"):
+        if key == "[":
             return self._switch_pivot(-1)
-        if key in ("]", "right_square_bracket"):
+        if key == "]":
             return self._switch_pivot(1)
         if key in ("ctrl+left", "ctrl+right"):
             return self._rotate_machine(1 if key.endswith("right") else -1)
@@ -3258,11 +3282,11 @@ class PickerScreen(Widget):
             self._wt_track_focus()
         elif key == "enter":
             self._activate()
-        elif key in ("space", "ctrl+space", "ctrl+at"):
+        elif key in ("space", "ctrl+space"):
             # Ctrl+Space toggles too (operator request): Textual delivers it as
-            # "ctrl+at" (Ctrl+Space == NUL). It behaves identically to Space so
-            # the toggle works even while the operator is holding Ctrl to move
-            # focus (#2258 follow-up).
+            # "ctrl+at" (Ctrl+Space == NUL), canonicalized to "ctrl+space" up
+            # front. It behaves identically to Space so the toggle works even
+            # while the operator is holding Ctrl to move focus (#2258 follow-up).
             if zone == "L":
                 self._toggle_wt(self.sel[1])
             elif zone == "C":

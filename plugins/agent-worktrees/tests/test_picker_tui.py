@@ -3968,3 +3968,40 @@ def test_overlay_registry_drives_dispatch_and_precedence():
             assert scr._active_overlay()[0] == attrs[0]
 
     asyncio.run(run())
+
+
+def test_canonical_key_folds_framework_aliases():
+    """Item F2 (#88): framework key-name aliases fold to one canonical token;
+    unaliased keys pass through unchanged."""
+    from agent_worktrees.picker_tui.engine import canonical_key
+
+    assert canonical_key("left_square_bracket") == "["
+    assert canonical_key("right_square_bracket") == "]"
+    assert canonical_key("ctrl+at") == "ctrl+space"      # Ctrl+Space == NUL
+    for k in ("down", "up", "enter", "escape", "tab", "ctrl+left", "[", "]",
+              "space", "ctrl+space", "shift+tab", "q"):
+        assert canonical_key(k) == k
+
+
+def test_ctrl_space_alias_toggles_like_space():
+    """handle_key canonicalizes 'ctrl+at' up front, so Ctrl+Space toggles a
+    worktree row exactly as Space does -- proving the fold reaches downstream
+    matching (#88 F2)."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert scr._kind() == "worktrees" and scr.list_records()
+            scr.wt_sel.clear()
+            scr.sel = ("L", 0)
+            assert len(scr.wt_sel) == 0
+            scr.handle_key("ctrl+at")            # the framework alias for C-Space
+            assert len(scr.wt_sel) == 1          # toggled the row ON like Space
+            scr.handle_key("ctrl+space")         # the canonical name
+            assert len(scr.wt_sel) == 0          # toggled it back OFF
+
+    asyncio.run(run())
