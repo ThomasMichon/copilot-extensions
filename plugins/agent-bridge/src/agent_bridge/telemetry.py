@@ -25,7 +25,9 @@ record carrying the session id, the event name, and the target status.
 
 from __future__ import annotations
 
+import importlib
 import logging
+import os
 from collections.abc import Callable
 from typing import Any
 
@@ -33,6 +35,10 @@ log = logging.getLogger("agent-bridge.telemetry")
 
 #: A telemetry sink: a callable receiving one structured event dict.
 TelemetrySink = Callable[[dict[str, Any]], None]
+
+#: Env var naming a sink **factory** to install at startup (see
+#: :func:`load_sink_from_env`). Value form: ``"package.module:make_sink"``.
+SINK_ENV_VAR = "AGENT_BRIDGE_TELEMETRY_SINK"
 
 #: Event types that represent a session lifecycle/health transition worth
 #: surfacing as telemetry. Content-bearing events (``user_message``, tool-call
@@ -79,6 +85,54 @@ def emit(event: dict[str, Any]) -> None:
         sink(event)
     except Exception:  # noqa: BLE001 - telemetry is best-effort, never fatal
         log.debug("telemetry sink raised; dropping event", exc_info=True)
+
+
+def load_sink_from_spec(spec: str) -> TelemetrySink | None:
+    """Import and build a sink from a ``"package.module:factory"`` spec.
+
+    The named attribute is a **factory**: a zero-arg callable returning the
+    actual sink (a ``Callable[[dict], None]``). Factory semantics let a real sink
+    open its own resources and read its own configuration at install time.
+    Returns the built sink, or ``None`` on any failure (fail-open: a bad spec
+    never raises to the caller).
+    """
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    if ":" not in spec:
+        log.warning("telemetry sink spec %r is not 'module:factory'; ignoring", spec)
+        return None
+    module_path, _, attr = spec.partition(":")
+    try:
+        module = importlib.import_module(module_path)
+        factory = getattr(module, attr)
+        sink = factory()
+    except Exception:  # noqa: BLE001 - a bad sink spec must never break startup
+        log.warning("could not load telemetry sink from %r; telemetry stays off",
+                    spec, exc_info=True)
+        return None
+    if not callable(sink):
+        log.warning("telemetry sink factory %r did not return a callable; ignoring",
+                    spec)
+        return None
+    return sink
+
+
+def load_sink_from_env(var: str = SINK_ENV_VAR) -> bool:
+    """Install a telemetry sink named by the environment, if any.
+
+    Reads ``var`` (default :data:`SINK_ENV_VAR`); when it holds a
+    ``"module:factory"`` spec, builds the sink and registers it. Returns ``True``
+    when a sink was installed. Fail-open: an unset var or a bad spec leaves
+    emission a no-op. This is the seam a consumer uses to attach a publisher to
+    a bridge process it does not own -- config, not code.
+    """
+    sink = load_sink_from_spec(os.environ.get(var, ""))
+    if sink is None:
+        return False
+    set_telemetry_sink(sink)
+    log.info("telemetry sink installed from %s", var)
+    return True
 
 
 def session_lifecycle_event(

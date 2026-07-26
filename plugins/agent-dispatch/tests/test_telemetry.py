@@ -89,3 +89,57 @@ def test_task_lifecycle_event_omits_absent_fields() -> None:
     assert ev["to"] == "queued"
     assert "owner" not in ev
     assert "target_machine" not in ev
+
+
+# --- sink loader (config-driven install) -----------------------------------
+
+_LOADED: list[dict] = []
+
+
+def _make_recording_sink():  # module-level factory referenced by spec
+    def _sink(event: dict) -> None:
+        _LOADED.append(event)
+    return _sink
+
+
+def _make_bad_sink():
+    return "not callable"
+
+
+def test_load_sink_from_spec_installs_factory_result() -> None:
+    _reset()
+    sink = telemetry.load_sink_from_spec(f"{__name__}:_make_recording_sink")
+    assert callable(sink)
+
+
+def test_load_sink_from_spec_rejects_non_callable_factory_result() -> None:
+    _reset()
+    assert telemetry.load_sink_from_spec(f"{__name__}:_make_bad_sink") is None
+
+
+def test_load_sink_from_spec_fail_open_on_bad_specs() -> None:
+    _reset()
+    assert telemetry.load_sink_from_spec("") is None
+    assert telemetry.load_sink_from_spec("no-colon") is None
+    assert telemetry.load_sink_from_spec("nonexistent.module:factory") is None
+    assert telemetry.load_sink_from_spec(f"{__name__}:no_such_attr") is None
+
+
+def test_load_sink_from_env_installs_and_delivers(monkeypatch) -> None:
+    _reset()
+    _LOADED.clear()
+    monkeypatch.setenv(telemetry.SINK_ENV_VAR, f"{__name__}:_make_recording_sink")
+    try:
+        assert telemetry.load_sink_from_env() is True
+        assert telemetry.has_sink() is True
+        telemetry.emit({"kind": "state_transition", "to": "claimed"})
+        assert _LOADED == [{"kind": "state_transition", "to": "claimed"}]
+    finally:
+        _reset()
+
+
+def test_load_sink_from_env_noop_when_unset(monkeypatch) -> None:
+    _reset()
+    monkeypatch.delenv(telemetry.SINK_ENV_VAR, raising=False)
+    assert telemetry.load_sink_from_env() is False
+    assert telemetry.has_sink() is False
