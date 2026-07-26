@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
+import socket
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from . import telemetry
@@ -52,9 +55,11 @@ def build_app(cfg: Config | None = None):
 def advertise_endpoint(cfg: Config):
     """Write the rendezvous file advertising the coordinator's bound endpoint.
 
-    Additive discovery: clients resolve the coordinator here instead of assuming
-    the fixed port (they still fall back to it). Best-effort -- a write failure
-    only degrades discovery, never the server. Returns the file path or ``None``.
+    Discovery: clients resolve the coordinator here (env override -> file ->
+    legacy fixed port). Under Stage C the advertised port is the OS-assigned one,
+    so this file is how discovery-capable clients find the dynamic port.
+    Best-effort -- a write failure only degrades discovery, never the server.
+    Returns the file path or ``None``.
     """
     try:
         return write_endpoint(run_dir(), "tcp", f"{cfg.host}:{cfg.port}")
@@ -64,7 +69,15 @@ def advertise_endpoint(cfg: Config):
 
 
 def serve(cfg: Config | None = None) -> None:
-    """Bind and serve the coordinator (blocking)."""
+    """Bind and serve the coordinator (blocking).
+
+    Stage C: the coordinator binds an **OS-assigned** ephemeral port
+    (``127.0.0.1:0``) unless ``AGENT_DISPATCH_PORT`` pins one, reads the *actual*
+    bound port back off the listening socket, and advertises **that** in the
+    rendezvous file -- so no fixed loopback port is reserved and discovery-capable
+    clients follow the real port. ``Config.port`` remains the legacy client
+    fallback (fixed 9847) until Stage D retires it.
+    """
     import uvicorn
 
     cfg = cfg or load_config()
@@ -80,11 +93,55 @@ def serve(cfg: Config | None = None) -> None:
             "Docker bridge subnets only)",
             cfg.host,
         )
+    # Stage C: pre-bind the listening socket ourselves so we can capture the
+    # OS-assigned port and advertise the *actual* endpoint before serving. Passing
+    # the already-bound socket to uvicorn avoids a fixed-port reservation entirely.
+    sock = _bind_listen_socket(cfg.host, _server_bind_port())
+    bound_port = sock.getsockname()[1]
     # Advertise the bound endpoint for discovery (see the endpoint-rendezvous lib
-    # and docs/patterns/local-endpoint-discovery.md). Additive: un-updated clients
-    # still reach the fixed port.
-    advertise_endpoint(cfg)
+    # and docs/patterns/local-endpoint-discovery.md). Additive: discovery-capable
+    # clients resolve this dynamic port from the rendezvous file.
+    advertise_endpoint(replace(cfg, port=bound_port))
     try:
-        uvicorn.run(build_app(cfg), host=cfg.host, port=cfg.port, log_level="info")
+        uvicorn.Server(uvicorn.Config(build_app(cfg), log_level="info")).run(sockets=[sock])
     finally:
         clear_endpoint(run_dir())
+        sock.close()
+
+
+def _server_bind_port() -> int:
+    """The port the coordinator should bind.
+
+    A pinned ``AGENT_DISPATCH_PORT`` binds that exact port; otherwise ``0`` lets
+    the OS assign an ephemeral one (Stage C dynamic bind). This is deliberately
+    independent of ``Config.port`` (the *client* fallback, still fixed 9847 until
+    Stage D) so the server drops the fixed reservation without breaking clients.
+    """
+    pinned = os.environ.get("AGENT_DISPATCH_PORT")
+    if pinned is not None and pinned.strip():
+        try:
+            return int(pinned)
+        except ValueError:
+            log.warning(
+                "ignoring non-integer AGENT_DISPATCH_PORT=%r; using an OS-assigned port",
+                pinned,
+            )
+    return 0
+
+
+def _bind_listen_socket(host: str, port: int) -> socket.socket:
+    """Bind and return a listening TCP socket for ``host:port``.
+
+    With ``port == 0`` the OS assigns an ephemeral port, read back via
+    ``getsockname``. Uses ``getaddrinfo`` so an IPv4 or IPv6 bind host both work.
+    """
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    family, socktype, proto, _canon, sockaddr = infos[0]
+    sock = socket.socket(family, socktype, proto)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(sockaddr)
+    except OSError:
+        sock.close()
+        raise
+    return sock
