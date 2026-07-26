@@ -380,10 +380,10 @@ def test_worktrees_space_toggles_selection():
             assert recs
             wid = recs[0]["id4"]
             scr.sel = ("L", 0)
-            scr.handle_key("space")
+            scr._dispatch_key("space")
             assert wid in scr.wt_sel
             assert scr.submenu is None            # Space no longer opens submenu
-            scr.handle_key("space")
+            scr._dispatch_key("space")
             assert wid not in scr.wt_sel
 
     asyncio.run(run())
@@ -403,7 +403,7 @@ def test_worktrees_enter_without_selection_opens_submenu():
             assert scr.list_records()
             scr.sel = ("L", 0)
             assert not scr.wt_sel
-            scr.handle_key("enter")
+            scr._dispatch_key("enter")
             assert scr.submenu is not None
             assert scr.submenu["actions"][0] in ("Open", "Resume")
 
@@ -424,9 +424,9 @@ def test_worktrees_enter_with_single_selection_opens_submenu():
             await pilot.pause()
             assert scr.list_records()
             scr.sel = ("L", 0)
-            scr.handle_key("space")               # select exactly one row
+            scr._dispatch_key("space")               # select exactly one row
             assert len(scr.wt_sel) == 1
-            scr.handle_key("enter")               # -> per-row submenu
+            scr._dispatch_key("enter")               # -> per-row submenu
             assert scr.maint_menu is None
             assert scr.submenu is not None
             assert scr.submenu["actions"][0] in ("Open", "Resume")
@@ -452,7 +452,7 @@ def test_worktrees_enter_with_multi_selection_opens_bulk_menu():
             scr.wt_sel.replace({recs[cleanable[0]]["id4"],
                                 recs[cleanable[1]]["id4"]})
             scr.sel = ("L", cleanable[0])
-            scr.handle_key("enter")               # -> bulk action menu
+            scr._dispatch_key("enter")               # -> bulk action menu
             assert scr.submenu is None
             assert scr.maint_menu is not None
             assert "Cleanup" in scr.maint_menu["actions"]
@@ -476,7 +476,7 @@ def test_worktrees_bulk_menu_routes_to_scoped_cleanup():
             if not cleanable:
                 return
             scr.sel = ("L", cleanable[0])
-            scr.handle_key("space")
+            scr._dispatch_key("space")
             scr._open_wt_action_menu()
             scr.maint_menu_idx = scr.maint_menu["actions"].index("Cleanup")
             scr._key_maint_menu("enter")          # route to scoped cleanup
@@ -679,12 +679,12 @@ def test_arrow_moves_focus_and_selection_follows():
         scr.sel = ("L", 0)
         scr._wt_track_focus()             # seed: focus follows to row 0
         assert scr.wt_sel == {ids[0]}
-        scr.handle_key("down")
+        scr._dispatch_key("down")
         assert scr.sel == ("L", 1)
         assert scr.wt_sel == {ids[1]}     # collapsed to the new focus
-        scr.handle_key("down")
+        scr._dispatch_key("down")
         assert scr.wt_sel == {ids[2]}
-        scr.handle_key("up")
+        scr._dispatch_key("up")
         assert scr.wt_sel == {ids[1]}
 
     _wt_scr(body)
@@ -697,7 +697,7 @@ def test_arrow_out_of_list_clears_selection():
         scr.sel = ("L", 0)
         scr._wt_track_focus()
         assert scr.wt_sel
-        scr.handle_key("up")              # ("L",0) -> ("BTN",0), leaves the list
+        scr._dispatch_key("up")              # ("L",0) -> ("BTN",0), leaves the list
         assert scr.sel[0] != "L"
         assert not scr.wt_sel
 
@@ -711,12 +711,12 @@ def test_shift_arrow_extends_range_from_anchor():
         ids = [r["id4"] for r in scr.list_records()]
         assert len(ids) >= 4
         scr.sel = ("L", 1)                # anchor seeds here on first shift move
-        scr.handle_key("shift+down")
+        scr._dispatch_key("shift+down")
         assert scr.sel == ("L", 2)
         assert scr.wt_sel == {ids[1], ids[2]}
-        scr.handle_key("shift+down")
+        scr._dispatch_key("shift+down")
         assert scr.wt_sel == {ids[1], ids[2], ids[3]}
-        scr.handle_key("shift+up")        # shrink back toward the anchor
+        scr._dispatch_key("shift+up")        # shrink back toward the anchor
         assert scr.sel == ("L", 2)
         assert scr.wt_sel == {ids[1], ids[2]}
 
@@ -728,7 +728,7 @@ def test_shift_arrow_clamps_inside_list():
     async def body(scr):
         n = len(scr.list_records())
         scr.sel = ("L", n - 1)
-        scr.handle_key("shift+down")      # already at the bottom
+        scr._dispatch_key("shift+down")      # already at the bottom
         assert scr.sel == ("L", n - 1)
 
     _wt_scr(body)
@@ -742,12 +742,12 @@ def test_space_is_additive_and_reseats_anchor():
     async def body(scr):
         ids = [r["id4"] for r in scr.list_records()]
         scr.sel = ("L", 0)
-        scr.handle_key("space")           # additive select row 0
+        scr._dispatch_key("space")           # additive select row 0
         scr.sel = ("L", 2)
-        scr.handle_key("space")           # additive select row 2 (row 0 kept)
+        scr._dispatch_key("space")           # additive select row 2 (row 0 kept)
         assert scr.wt_sel == {ids[0], ids[2]}
         assert scr.wt_anchor == 2         # Space re-seated the anchor
-        scr.handle_key("shift+down")      # extend the range from row 2
+        scr._dispatch_key("shift+down")      # extend the range from row 2
         assert scr.sel == ("L", 3)
         assert scr.wt_sel == {ids[2], ids[3]}
 
@@ -760,11 +760,11 @@ def test_ctrl_arrow_moves_focus_only():
     async def body(scr):
         ids = [r["id4"] for r in scr.list_records()]
         scr.sel = ("L", 0)
-        scr.handle_key("space")           # build a selection at row 0
-        scr.handle_key("ctrl+down")       # move focus only
+        scr._dispatch_key("space")           # build a selection at row 0
+        scr._dispatch_key("ctrl+down")       # move focus only
         assert scr.sel == ("L", 1)
         assert scr.wt_sel == {ids[0]}     # selection untouched
-        scr.handle_key("ctrl+down")
+        scr._dispatch_key("ctrl+down")
         assert scr.sel == ("L", 2)
         assert scr.wt_sel == {ids[0]}
 
@@ -777,13 +777,13 @@ def test_escape_collapses_selection_before_quit():
     async def body(scr):
         ids = [r["id4"] for r in scr.list_records()]
         scr.sel = ("L", 1)
-        scr.handle_key("shift+down")
-        scr.handle_key("shift+down")      # rows 1..3 selected
+        scr._dispatch_key("shift+down")
+        scr._dispatch_key("shift+down")      # rows 1..3 selected
         assert len(scr.wt_sel) == 3
-        scr.handle_key("escape")          # collapse, not quit
+        scr._dispatch_key("escape")          # collapse, not quit
         assert not _quit_modal_open(scr)
         assert scr.wt_sel == {ids[scr.sel[1]]}
-        scr.handle_key("escape")          # nothing left to collapse -> quit prompt
+        scr._dispatch_key("escape")          # nothing left to collapse -> quit prompt
         assert _quit_modal_open(scr)
 
     _wt_scr(body)
@@ -794,11 +794,11 @@ def test_escape_outside_list_clears_to_nothing():
     nothing (still not a quit)."""
     async def body(scr):
         scr.sel = ("L", 1)
-        scr.handle_key("shift+down")
-        scr.handle_key("shift+down")
+        scr._dispatch_key("shift+down")
+        scr._dispatch_key("shift+down")
         assert len(scr.wt_sel) == 3
         scr.sel = ("BTN", 0)              # tabbed away; selection persists
-        scr.handle_key("escape")
+        scr._dispatch_key("escape")
         assert not _quit_modal_open(scr)
         assert not scr.wt_sel
 
@@ -811,15 +811,15 @@ def test_tab_preserves_selection_and_remembers_focus():
     async def body(scr):
         ids = [r["id4"] for r in scr.list_records()]
         scr.sel = ("L", 2)
-        scr.handle_key("space")           # select row 2, focus row 2
+        scr._dispatch_key("space")           # select row 2, focus row 2
         # Tab out to another region, then keep tabbing back around to the list.
         seen = set()
-        scr.handle_key("tab")
+        scr._dispatch_key("tab")
         while scr.sel[0] != "L":
             key = tuple(scr.sel)
             assert key not in seen, "Tab cycle did not return to the list"
             seen.add(key)
-            scr.handle_key("tab")
+            scr._dispatch_key("tab")
         assert scr.sel == ("L", 2)        # focus restored
         assert scr.wt_sel == {ids[2]}     # selection preserved
 
@@ -1028,11 +1028,11 @@ def test_ctrl_space_toggles_selection():
             wid = recs[0]["id4"]
             scr.sel = ("L", 0)
             scr.wt_sel.clear()
-            scr.handle_key("ctrl+at")            # canonical Textual key
+            scr._dispatch_key("ctrl+at")            # canonical Textual key
             assert wid in scr.wt_sel
-            scr.handle_key("ctrl+at")
+            scr._dispatch_key("ctrl+at")
             assert wid not in scr.wt_sel
-            scr.handle_key("ctrl+space")         # alias also accepted
+            scr._dispatch_key("ctrl+space")         # alias also accepted
             assert wid in scr.wt_sel
 
     asyncio.run(run())
@@ -1100,22 +1100,22 @@ def test_configuration_in_pivot_row_via_arrows(monkeypatch):
             # It is NOT in the Tab cycle, and Tab from the pivots skips it.
             assert ("CFG", 0) not in scr.region_heads()
             scr.sel = ("V", 0)
-            scr.handle_key("tab")
+            scr._dispatch_key("tab")
             assert scr.sel == ("M", 0)            # Tab -> Machine, not Config
 
             # From the last left-rail pivot, ◀▶ steps onto Configuration.
             lefts = scr._left_pivots()
             scr.htab = lefts[-1]
             scr.sel = ("V", 0)
-            scr.handle_key("right")
+            scr._dispatch_key("right")
             assert scr.sel == ("CFG", 0)
             # ◀ steps back onto the pivot row.
-            scr.handle_key("left")
+            scr._dispatch_key("left")
             assert scr.sel == ("V", 0) and scr.htab == lefts[-1]
 
             # Up/Down leave Configuration for the row's vertical neighbours.
             scr.sel = ("CFG", 0)
-            scr.handle_key("down")
+            scr._dispatch_key("down")
             assert scr.sel == ("M", 0)
 
     asyncio.run(run())
@@ -1808,9 +1808,9 @@ def test_profiles_grid_cell_restored_on_tab():
             await pilot.pause()
             scr.sel = ("PR", 1)
             scr.pcol = 1
-            scr.handle_key("shift+tab")     # grid -> View region
+            scr._dispatch_key("shift+tab")     # grid -> View region
             assert scr.sel[0] != "PR"
-            scr.handle_key("tab")           # back into the grid
+            scr._dispatch_key("tab")           # back into the grid
             assert scr.sel == ("PR", 1)     # target row restored
             assert scr.pcol == 1            # host column persisted
 
@@ -3846,7 +3846,7 @@ def test_contributed_worktree_action_in_submenu_and_runs(tmp_path, monkeypatch):
 
             # Enter runs it with a substituted worktree context.
             scr.submenu_idx = acts.index("Send message")
-            scr.handle_key("enter")
+            scr._dispatch_key("enter")
             assert scr.submenu is None
             assert captured["label"] == "Send message"
             assert captured["ctx"]["worktree"]         # the worktree id
@@ -3957,7 +3957,7 @@ def test_overlay_registry_drives_dispatch_and_precedence():
     """Item F1 (#85): the modal-overlay registry is the single source of truth
     for key dispatch AND render. Assert (a) no overlay -> _active_overlay() is
     None; (b) each overlay's state selects its own registry spec and routes
-    handle_key to that spec's handler; (c) precedence follows registry order."""
+    _dispatch_key to that spec's handler; (c) precedence follows registry order."""
     src = _fixture_source()
 
     async def run():
@@ -3993,7 +3993,7 @@ def test_overlay_registry_drives_dispatch_and_precedence():
             sel_before = scr.sel
             scr._open_submenu()
             assert scr.submenu is not None
-            scr.handle_key("down")                     # consumed by the overlay
+            scr._dispatch_key("down")                     # consumed by the overlay
             assert scr.submenu is not None             # overlay still has the keyboard
             assert scr.sel == sel_before               # main nav untouched
             scr.submenu = None
@@ -4022,7 +4022,7 @@ def test_canonical_key_folds_framework_aliases():
 
 
 def test_ctrl_space_alias_toggles_like_space():
-    """handle_key canonicalizes 'ctrl+at' up front, so Ctrl+Space toggles a
+    """_dispatch_key canonicalizes 'ctrl+at' up front, so Ctrl+Space toggles a
     worktree row exactly as Space does -- proving the fold reaches downstream
     matching (#88 F2)."""
     src = _fixture_source()
@@ -4037,9 +4037,9 @@ def test_ctrl_space_alias_toggles_like_space():
             scr.wt_sel.clear()
             scr.sel = ("L", 0)
             assert len(scr.wt_sel) == 0
-            scr.handle_key("ctrl+at")            # the framework alias for C-Space
+            scr._dispatch_key("ctrl+at")            # the framework alias for C-Space
             assert len(scr.wt_sel) == 1          # toggled the row ON like Space
-            scr.handle_key("ctrl+space")         # the canonical name
+            scr._dispatch_key("ctrl+space")         # the canonical name
             assert len(scr.wt_sel) == 0          # toggled it back OFF
 
     asyncio.run(run())
@@ -4048,7 +4048,7 @@ def test_ctrl_space_alias_toggles_like_space():
 # ---------------------------------------------------------------------------
 # Real-framework keyboard integration (pilot.press) -- the F3/F4 safety net.
 #
-# Unlike the tests above (which call scr.handle_key(...) directly), these drive
+# Unlike the tests above (which call scr._dispatch_key(...) directly), these drive
 # keys through Textual's ACTUAL input pipeline: pilot.press -> Key event ->
 # PickerScreen.on_key (event.stop / prevent_default) -> handle_key. They lock the
 # current keyboard behavior through the real dispatch so the native-focus rewires
@@ -4274,5 +4274,33 @@ def test_msgview_overlay_lists_full_session_ids_and_titles():
             # The head is marked current; a concluded one shows its state.
             assert "current" in out
             assert "handed-off" in out
+
+    asyncio.run(run())
+
+
+def test_global_binding_keys_bubble_without_crashing():
+    """Regression: the manual key dispatcher must NOT be named ``handle_key``
+    -- that shadows Textual's ``Widget.handle_key`` coroutine, which ``_on_key``
+    awaits to run the BINDINGS system. When a global BINDING key (Ctrl+←/→,
+    F3/F4/F5) bubbles to the framework with no overlay active, awaiting the old
+    synchronous override returned ``None`` and crashed
+    ("object NoneType can't be used in 'await' expression"). Pressing them via
+    the real key pipeline must dispatch cleanly."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            # These route through Textual's native binding dispatch (the path
+            # that crashed). None may raise.
+            for key in ("ctrl+right", "ctrl+left",
+                        "ctrl+shift+right", "ctrl+shift+left"):
+                await pilot.press(key)
+                await pilot.pause()
+            # The app survived (no exception captured by the test harness).
+            assert app.query_one(PickerScreen) is scr
 
     asyncio.run(run())

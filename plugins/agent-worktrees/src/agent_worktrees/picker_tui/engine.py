@@ -3134,7 +3134,7 @@ class PickerScreen(Widget):
 
         This table is the **single source of truth** consumed by three call
         sites that previously each hand-maintained their own parallel list --
-        ``handle_key``'s dispatch chain, the background-dim decision, and the
+        ``_dispatch_key``'s dispatch chain, the background-dim decision, and the
         render dispatch chain -- which had to be kept in sync by hand and could
         silently drift when an overlay was added (#85 F1, the first
         native-focus-migration slice: consolidate before converting individual
@@ -3170,7 +3170,14 @@ class PickerScreen(Widget):
                 return spec
         return None
 
-    def handle_key(self, key):
+    def _dispatch_key(self, key):
+        # NOTE: this MUST NOT be named ``handle_key`` -- Textual's
+        # ``Widget.handle_key`` is an ``async`` coroutine its ``_on_key``
+        # awaits to run the BINDINGS system. Shadowing it with this synchronous
+        # dispatcher makes Textual ``await`` a ``None`` return and crash
+        # ("object NoneType can't be used in 'await' expression") whenever a
+        # global BINDING key (Ctrl+←/→, F3/F4/F5) bubbles to the framework.
+        # Keeping a distinct name lets Textual's native binding dispatch run.
         # Fold framework key-name aliases to canonical tokens once, up front, so
         # every downstream match (here and in the overlay handlers) is declarative
         # and alias-free (#88 F2).
@@ -4464,7 +4471,7 @@ class PickerScreen(Widget):
         event.prevent_default()
         if event.character in ("[", "]"):
             key = event.character
-        self.handle_key(key)
+        self._dispatch_key(key)
         self.refresh()
 
 
