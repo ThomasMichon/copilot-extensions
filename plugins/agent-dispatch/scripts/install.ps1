@@ -840,51 +840,14 @@ function Test-Elevated {
     }
 }
 
-function Test-PortExcluded {
-    # True if $Port falls within any TCP excluded/reserved range that netsh lists
-    # (persistent reservations plus live dynamic Hyper-V/WSL exclusions).
-    param([Parameter(Mandatory)][int]$Port)
-    $out = & netsh.exe int ipv4 show excludedportrange protocol=tcp 2>$null
-    foreach ($line in $out) {
-        if ($line -match '^\s*(\d+)\s+(\d+)') {
-            $start = [int]$Matches[1]
-            $end = [int]$Matches[2]
-            if ($Port -ge $start -and $Port -le $end) { return $true }
-        }
-    }
-    return $false
-}
-
-function Add-PortReservation {
-    # Persistently reserve the coordinator port so the Windows dynamic port
-    # allocator (Hyper-V/WSL/HNS) never steals it -- the durable fix for the
-    # transient WinError 10013 collisions (issue #2818). Idempotent: skips when
-    # the port is already excluded. Needs elevation; degrades to a logged SKIP
-    # (with the one-time command) when not admin.
-    if ($env:OS -ne 'Windows_NT') { return }
-    if (-not (Get-Command netsh.exe -ErrorAction SilentlyContinue)) {
-        Write-Skip 'netsh unavailable -- cannot reserve coordinator port'
-        return
-    }
-    $port = $DefaultPort
-    if ($env:AGENT_DISPATCH_PORT) {
-        try { $port = [int]$env:AGENT_DISPATCH_PORT } catch { $port = $DefaultPort }
-    }
-    if (Test-PortExcluded -Port $port) {
-        Write-Skip "Coordinator port $port already reserved/excluded (netsh)"
-        return
-    }
-    if (-not (Test-Elevated)) {
-        Write-Skip "Coordinator port $port not reserved -- needs elevation (run once, elevated: netsh int ipv4 add excludedportrange protocol=tcp startport=$port numberofports=1)"
-        return
-    }
-    $null = & netsh.exe int ipv4 add excludedportrange protocol=tcp startport=$port numberofports=1 2>&1
-    if (Test-PortExcluded -Port $port) {
-        Write-Ok "Coordinator port $port reserved (netsh excludedportrange)"
-    } else {
-        Write-Warn "Could not reserve coordinator port $port (netsh add failed -- may be held by a live dynamic exclusion; retry after a WSL/Hyper-V restart)"
-    }
-}
+# -- Coordinator port reservation: RETIRED (durable-service-transport Stage D) --
+# The netsh 9847 excludedportrange reservation (Test-PortExcluded / Add-PortReservation)
+# existed only to stop the Windows dynamic-port allocator from stealing the FIXED
+# coordinator port (#2818). Stage C flipped the coordinator to an OS-assigned dynamic
+# port advertised via the rendezvous file, so there is no fixed port to protect and the
+# reservation is retired. Any leftover live 9847 exclusion is harmless (it only keeps
+# 9847 out of the ephemeral pool) and can be cleared elevated:
+#   netsh int ipv4 delete excludedportrange protocol=tcp startport=9847 numberofports=1
 
 # -- Coordinator firewall (Windows, NAT mode only) --------------------------
 
@@ -894,7 +857,7 @@ function Add-CoordinatorFirewallRule {
     # SCOPED to that interface (never profile-wide, never the LAN) so a WSL client
     # can reach the coordinator while the LAN stays isolated. Mirrored mode needs
     # no rule (shared loopback). Idempotent; needs elevation -- degrades to a
-    # logged SKIP with the one-time command, mirroring Add-PortReservation.
+    # logged SKIP with the one-time command when not admin.
     if ($env:OS -ne 'Windows_NT') { return }
     if (-not (Test-Path $VenvPython)) { return }
 
@@ -909,10 +872,6 @@ function Add-CoordinatorFirewallRule {
         return
     }
 
-    $port = $DefaultPort
-    if ($env:AGENT_DISPATCH_PORT) {
-        try { $port = [int]$env:AGENT_DISPATCH_PORT } catch { $port = $DefaultPort }
-    }
     $ruleName = 'agent-dispatch coordinator (WSL)'
 
     if (-not (Get-Command New-NetFirewallRule -ErrorAction SilentlyContinue)) {
@@ -933,20 +892,34 @@ function Add-CoordinatorFirewallRule {
         return
     }
 
-    if (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue) {
-        Write-Skip "Coordinator firewall rule already present ('$ruleName')"
-        return
+    # Stage C/D: the coordinator binds a DYNAMIC (OS-assigned) port, so the rule is
+    # PROGRAM-scoped (the venv python), not port-scoped -- a fixed -LocalPort would
+    # miss the dynamic port (#3499). Interface + program scoped keeps it WSL-only.
+    $existing = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+    if ($existing) {
+        $appFilter = $existing | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue
+        if ($appFilter -and $appFilter.Program -and ($appFilter.Program -ieq $VenvPython)) {
+            Write-Skip "Coordinator firewall rule already present + program-scoped ('$ruleName')"
+            return
+        }
+        # Legacy port-pinned rule -- migrate it to program-scoped (#3499).
+        if (-not (Test-Elevated)) {
+            Write-Skip "Coordinator firewall rule needs migration to program-scoped (#3499) -- needs elevation"
+            return
+        }
+        $existing | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+        Write-Step "Removed legacy port-pinned coordinator firewall rule (migrating to program-scoped, #3499)"
     }
     if (-not (Test-Elevated)) {
-        Write-Skip "Coordinator firewall rule not added -- needs elevation (run once, elevated: New-NetFirewallRule -DisplayName '$ruleName' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $port -InterfaceAlias '$alias')"
+        Write-Skip "Coordinator firewall rule not added -- needs elevation (run once, elevated: New-NetFirewallRule -DisplayName '$ruleName' -Direction Inbound -Action Allow -Program '$VenvPython' -InterfaceAlias '$alias')"
         return
     }
     try {
         New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow `
-            -Protocol TCP -LocalPort $port -InterfaceAlias $alias -Profile Any `
-            -Description 'agent-dispatch coordinator -- WSL-only, interface-scoped (issue #2818)' `
+            -Program $VenvPython -InterfaceAlias $alias -Profile Any `
+            -Description 'agent-dispatch coordinator -- WSL-only, interface + program scoped (issues #2818, #3499)' `
             -ErrorAction Stop | Out-Null
-        Write-Ok "Coordinator firewall rule added ('$ruleName' on '$alias', TCP $port, WSL-only)"
+        Write-Ok "Coordinator firewall rule added ('$ruleName' on '$alias', program-scoped, WSL-only)"
     } catch {
         Write-Warn "Could not add coordinator firewall rule: $_"
     }
@@ -957,7 +930,6 @@ function Add-CoordinatorFirewallRule {
 function Invoke-Install {
     Write-Host ''; Write-Host '=== agent-dispatch install ===' -ForegroundColor Cyan; Write-Host ''
     Install-Runtime
-    Add-PortReservation
     Install-CoordinatorTask
     if (-not $NoService) { Add-CoordinatorFirewallRule }
     Install-SupervisorTask
@@ -968,7 +940,6 @@ function Invoke-Update {
     Write-Host ''; Write-Host '=== agent-dispatch update ===' -ForegroundColor Cyan; Write-Host ''
     Invoke-DowngradeGuard
     Install-Runtime
-    Add-PortReservation
     Install-CoordinatorTask
     if (-not $NoService) { Add-CoordinatorFirewallRule }
     Install-SupervisorTask
