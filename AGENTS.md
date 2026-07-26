@@ -157,18 +157,45 @@ docs honest; run it before pushing doc changes.)
 
 ### Test Before Push
 
-- **agent-bridge:** Run `pytest` from `plugins/agent-bridge/` before
-  pushing. The test suite covers transport, sessions, config, and CLI.
-- **agent-codespaces:** Run `pytest` from `plugins/agent-codespaces/` before
-  pushing. Covers config, lifecycle, resolver, and the credential relay.
-- **agent-containers:** Run `pytest` from `plugins/agent-containers/` before
-  pushing. Covers config, lifecycle, the lease broker, and the resolver.
-- **agent-mcp:** Run `pytest` from `plugins/agent-mcp/` before pushing. Covers
-  config loading, auth injectors, transports, bridge framing, the decorator
-  pipeline (filter/rename/defer/code-mode/storage), and an end-to-end stdio
-  bridge run. The code-mode Node tests skip automatically when `node` is absent.
-- **agent-worktrees:** No automated test suite yet. Verify worktree
-  operations work end-to-end (create, finalize, cleanup).
+Enforcement is **automated** on two levels, so you rarely run these by hand:
+
+- **Pre-push hook** (`tools/hooks/pre-push`, enabled via `tools/setup-hooks.*`)
+  runs the fast `@pytest.mark.guard` subset of any **changed** plugin in a
+  managed `uv` venv — marketplace + picker integrity guards (overlay-registry,
+  palette, shipped-manifest contract, key canonicalization, F3 binding
+  invariants) in sub-second-per-plugin. It skips gracefully if `uv` is absent
+  and can be bypassed with `AGENT_WORKTREES_SKIP_GUARD_TESTS=1`.
+- **CI** (planned): a GitHub Actions workflow runs each **changed** plugin's
+  **full** suite server-side on push/PR (windows-latest), so nothing slows a
+  local push while every change is still exercised end-to-end. Installing it
+  requires a one-time `gh auth refresh -h github.com -s workflow` (GitHub blocks
+  pushing `.github/workflows/*` without `workflow` scope); the ready workflow is
+  driven by the same `tools/run-plugin-tests.py --changed` runner.
+
+Run suites yourself with the turn-key runner (builds/reuses a cached dev venv
+per plugin under `.test-venvs/`, git-ignored):
+
+```bash
+python tools/run-plugin-tests.py agent-worktrees        # one plugin, full suite
+python tools/run-plugin-tests.py --changed              # plugins changed vs origin/main
+python tools/run-plugin-tests.py --all                  # every plugin with a suite
+python tools/run-plugin-tests.py agent-worktrees --guards  # just the fast guards
+python tools/run-plugin-tests.py agent-worktrees -k picker  # filter
+```
+
+Per-plugin coverage notes:
+
+- **agent-bridge:** transport, sessions, config, and CLI.
+- **agent-codespaces:** config, lifecycle, resolver, and the credential relay.
+- **agent-containers:** config, lifecycle, the lease broker, and the resolver.
+- **agent-mcp:** config loading, auth injectors, transports, bridge framing, the
+  decorator pipeline (filter/rename/defer/code-mode/storage), and an end-to-end
+  stdio bridge run. The code-mode Node tests skip automatically when `node` is
+  absent.
+- **agent-worktrees:** a large suite (~1400 tests) covering worktree lifecycle,
+  the status/tracking model, PR flow, and the Textual **Picker** (including a
+  real-framework `pilot.press` keyboard harness). Mark fast structural/contract
+  checks with `@pytest.mark.guard` so the pre-push hook enforces them.
 
 ### Deploy After Push
 

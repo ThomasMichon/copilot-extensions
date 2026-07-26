@@ -3896,6 +3896,7 @@ def test_contributed_config_section_in_cfgmenu_and_runs(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+@pytest.mark.guard
 def test_palette_no_stray_shade_literals():
     """Item E guardrail (#85): the render methods route de-emphasized text
     through the named ``C_*`` palette, not bare shade codes. Assert no routed
@@ -3920,6 +3921,7 @@ def test_palette_no_stray_shade_literals():
     assert not offenders, f"stray shade literals in style= contexts: {offenders}"
 
 
+@pytest.mark.guard
 def test_overlay_registry_drives_dispatch_and_precedence():
     """Item F1 (#85): the modal-overlay registry is the single source of truth
     for key dispatch AND render. Assert (a) no overlay -> _active_overlay() is
@@ -3970,6 +3972,7 @@ def test_overlay_registry_drives_dispatch_and_precedence():
     asyncio.run(run())
 
 
+@pytest.mark.guard
 def test_canonical_key_folds_framework_aliases():
     """Item F2 (#88): framework key-name aliases fold to one canonical token;
     unaliased keys pass through unchanged."""
@@ -4135,6 +4138,7 @@ def test_kbd_real_pipeline_escape_opens_quit_confirm_and_n_cancels():
     asyncio.run(run())
 
 
+@pytest.mark.guard
 def test_kbd_real_pipeline_ctrl_shift_rotates_pivot_via_binding():
     """Ctrl+Shift+←/→ is owned by Textual BINDINGS (F3), no longer the manual
     dispatcher. Driven through the real pipeline it must still rotate the pivot
@@ -4160,6 +4164,7 @@ def test_kbd_real_pipeline_ctrl_shift_rotates_pivot_via_binding():
     asyncio.run(run())
 
 
+@pytest.mark.guard
 def test_kbd_real_pipeline_binding_gated_by_overlay():
     """A global binding must NOT fire while a modal overlay owns the keyboard:
     on_key routes the combo to the manual dispatcher, where the active overlay

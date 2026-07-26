@@ -355,6 +355,7 @@ def _shipped_manifests():
     return sorted(root.glob("*/pivots/*.json")) if root.is_dir() else []
 
 
+@pytest.mark.guard
 def test_shipped_pivot_manifests_are_contract_valid():
     """Every manifest a plugin ships in its `pivots/` dir must parse cleanly
     against the current contract -- a `list` pivot (if declared), plus any
@@ -373,6 +374,7 @@ def test_shipped_pivot_manifests_are_contract_valid():
         pivots.parse_config_sections(data, name=path.stem)
 
 
+@pytest.mark.guard
 def test_shipped_list_pivots_have_runnable_argv():
     """Each shipped `list` pivot names a non-empty argv whose first token looks
     like a plugin binstub on PATH (not a placeholder), so the picker's runtime
