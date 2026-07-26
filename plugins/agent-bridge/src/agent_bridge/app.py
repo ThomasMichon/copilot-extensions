@@ -480,9 +480,12 @@ def create_app(*, config=None, token: str | None = None) -> FastAPI:
     cfg = config or load_config()
     auth_token = token or load_or_create_auth_token()
 
-    # Install a telemetry sink if one is named in the environment (generic open
-    # hook; a no-op unless a consumer configured a sink). Fail-open.
-    telemetry.load_sink_from_env()
+    # Install a telemetry sink if one is configured (generic open hook; a no-op
+    # unless a consumer wired a sink). Prefer a convention-located config file
+    # (env-free); fall back to the environment so env-wired deploys don't
+    # regress. Fail-open either way.
+    if not telemetry.load_sink_from_config():
+        telemetry.load_sink_from_env()
 
     app = FastAPI(
         title="Agent Bridge",

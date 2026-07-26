@@ -143,3 +143,51 @@ def test_load_sink_from_env_noop_when_unset(monkeypatch) -> None:
     monkeypatch.delenv(telemetry.SINK_ENV_VAR, raising=False)
     assert telemetry.load_sink_from_env() is False
     assert telemetry.has_sink() is False
+
+
+# --- sink loader (config-file install, env-free) ----------------------------
+
+
+def test_load_sink_from_config_installs_and_delivers(tmp_path) -> None:
+    _reset()
+    _LOADED.clear()
+    cfg = tmp_path / "telemetry.json"
+    cfg.write_text(f'{{"sink": "{__name__}:_make_recording_sink"}}', encoding="utf-8")
+    try:
+        assert telemetry.load_sink_from_config(cfg) is True
+        assert telemetry.has_sink() is True
+        telemetry.emit({"kind": "state_transition", "to": "claimed"})
+        assert _LOADED == [{"kind": "state_transition", "to": "claimed"}]
+    finally:
+        _reset()
+
+
+def test_load_sink_from_config_noop_when_file_missing(tmp_path) -> None:
+    _reset()
+    assert telemetry.load_sink_from_config(tmp_path / "absent.json") is False
+    assert telemetry.has_sink() is False
+
+
+def test_load_sink_from_config_fail_open_on_bad_json(tmp_path) -> None:
+    _reset()
+    cfg = tmp_path / "telemetry.json"
+    cfg.write_text("{not valid json", encoding="utf-8")
+    assert telemetry.load_sink_from_config(cfg) is False
+    assert telemetry.has_sink() is False
+
+
+def test_load_sink_from_config_fail_open_on_missing_or_bad_sink(tmp_path) -> None:
+    _reset()
+    for payload in ('{}', '{"sink": ""}', '{"sink": "no-colon"}', '[]'):
+        cfg = tmp_path / "telemetry.json"
+        cfg.write_text(payload, encoding="utf-8")
+        assert telemetry.load_sink_from_config(cfg) is False
+        assert telemetry.has_sink() is False
+
+
+def test_load_sink_from_config_default_path_is_convention() -> None:
+    _reset()
+    from pathlib import Path
+
+    expected = Path.home() / ".agent-dispatch" / telemetry.CONFIG_FILENAME
+    assert telemetry._default_config_path() == expected

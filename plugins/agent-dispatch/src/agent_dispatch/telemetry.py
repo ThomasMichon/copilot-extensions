@@ -24,9 +24,11 @@ secret. A consumer maps that record onto whatever telemetry schema it uses.
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import os
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 log = logging.getLogger("agent-dispatch.telemetry")
@@ -38,7 +40,23 @@ TelemetrySink = Callable[[dict[str, Any]], None]
 #: :func:`load_sink_from_env`). Value form: ``"package.module:make_sink"``.
 SINK_ENV_VAR = "AGENT_DISPATCH_TELEMETRY_SINK"
 
+#: Config file consulted at startup for a sink spec, discovered by **convention**
+#: -- no environment variable points at it (see :func:`load_sink_from_config`). A
+#: JSON object with a top-level ``"sink": "package.module:factory"`` key. This is
+#: the **env-free** wiring path: dropping this file attaches a sink without
+#: setting :data:`SINK_ENV_VAR`.
+CONFIG_FILENAME = "telemetry.json"
+
 _sink: TelemetrySink | None = None
+
+
+def _default_config_path() -> Path:
+    """Convention location of the telemetry config file.
+
+    ``~/.agent-dispatch/telemetry.json`` -- the coordinator's runtime dir, the
+    same root that holds the queue DB and the rendezvous file.
+    """
+    return Path.home() / ".agent-dispatch" / CONFIG_FILENAME
 
 
 def set_telemetry_sink(sink: TelemetrySink | None) -> None:
@@ -117,6 +135,35 @@ def load_sink_from_env(var: str = SINK_ENV_VAR) -> bool:
         return False
     set_telemetry_sink(sink)
     log.info("telemetry sink installed from %s", var)
+    return True
+
+
+def load_sink_from_config(path: str | os.PathLike[str] | None = None) -> bool:
+    """Install a telemetry sink named by a **convention-located config file**, if any.
+
+    Reads a JSON file (default :func:`_default_config_path`, i.e.
+    ``~/.agent-dispatch/telemetry.json``) whose top-level ``"sink"`` key holds a
+    ``"module:factory"`` spec, builds the sink, and registers it. Returns ``True``
+    when a sink was installed. Fail-open: a missing/unreadable file, invalid JSON,
+    or a bad spec leaves emission a no-op. This is the **env-free** wiring path --
+    a host attaches a sink by dropping this file, with **no** environment variable.
+    """
+    p = Path(path) if path is not None else _default_config_path()
+    try:
+        raw = p.read_text(encoding="utf-8")
+    except OSError:
+        return False  # no config file (or unreadable) -> a silent no-op
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        log.warning("telemetry config %s is not valid JSON; telemetry stays off", p)
+        return False
+    spec = str(data.get("sink") or "").strip() if isinstance(data, dict) else ""
+    sink = load_sink_from_spec(spec)
+    if sink is None:
+        return False
+    set_telemetry_sink(sink)
+    log.info("telemetry sink installed from %s", p)
     return True
 
 
