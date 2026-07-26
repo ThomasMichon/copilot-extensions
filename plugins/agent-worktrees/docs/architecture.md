@@ -515,6 +515,16 @@ on `False` it is a no-op. It too is *absent* from the overlay registry. The same
 `pilot.press` harness validates it end-to-end (Apply confirms and runs the
 per-host progress, Esc cancels without writing).
 
+**Third overlay migrated: the registered-pivot action menu (F4).** The
+`TaskMenuScreen(ModalScreen[int])` replaces the `task_menu` manual overlay and
+introduces the *list-menu* variant of the pattern: `_open_task_menu`
+`push_screen`s it with the focused task's declared actions and returns the
+chosen action *index* via `dismiss(int|None)`; the callback runs the selected
+action (`None` cancels). Navigation (`up`/`down`, wrapping) updates the
+highlight and the per-action description in place. It too is *absent* from the
+overlay registry, and the `pilot.press` harness drives it end-to-end (open,
+arrow to an action, Enter runs it; Esc/q/Tab cancel).
+
 **Global shortcuts are Textual `BINDINGS` (F3).** The truly-global pivot/machine
 shortcuts (`ctrl+shift+left/right`, `ctrl+left/right`) are owned by the
 framework's binding system, not the manual dispatcher: `PickerScreen.BINDINGS`

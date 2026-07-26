@@ -435,10 +435,8 @@ class PickerScreen(Widget):
         self.registered_pivots = []   # RegisteredPivot list from the manifest scan
         self.wt_actions = []          # contributed WorktreeAction list (#B)
         self.config_sections = []     # contributed ConfigSection list (#B slice 2)
-        self.task_menu = None         # registered-pivot Enter action sub-menu
         self.cfgmenu = None           # ⚙ Configuration menu (hosts Profiles) (#1426)
         self.cfgmenu_idx = 0
-        self.task_menu_idx = 0
         self._pivot_runtimes = {}     # pivot name -> RegisteredPivotRuntime (lazy)
         self._load_pivots()
         self.machine_idx = 0          # selected machine sub-pivot (Worktrees/Maint)
@@ -2665,9 +2663,6 @@ class PickerScreen(Widget):
                          f" · Esc back")
             else:
                 hints = f"↑↓ choose · Enter: {cur.lower()} {wid} · Esc back"
-        elif self.task_menu:
-            cur = self.task_menu["actions"][self.task_menu_idx]
-            hints = f"↑↓ choose · Enter: {cur.label} · Esc back"
         elif self.cfgmenu:
             hints = "↑↓ choose · Enter: open · Esc back"
         elif self.maint_menu:
@@ -2930,34 +2925,6 @@ class PickerScreen(Widget):
                 out.append(cur)
         return out or [""]
 
-    def _overlay_task_menu(self, lines, W, top_off, body_h):
-        menu = self.task_menu
-        reg = menu["reg"]
-        rec = menu["rec"]
-        acts = menu["actions"]
-        idx = self.task_menu_idx
-        pw = min(W - 8, 72)
-        title = f" {rec.get(reg.title_field) or rec.get(reg.id_field) or ''}"
-        sub_bits = []
-        if reg.worktree_field and rec.get(reg.worktree_field):
-            sub_bits.append(str(rec.get(reg.worktree_field)))
-        if reg.subtitle_field and rec.get(reg.subtitle_field):
-            sub_bits.append(str(rec.get(reg.subtitle_field)))
-        header = f"─ {reg.label} "
-        panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮", style=C_BAND)]
-        panel.append(self._prow(title, pw, style=C_HEADER))
-        if sub_bits:
-            panel.append(self._prow(" " + " · ".join(sub_bits), pw, style=C_DIM))
-        panel.append(self._prow("", pw))
-        for i, a in enumerate(acts):
-            mark = " ▸ " if i == idx else "   "
-            panel.append(self._prow(mark + a.label, pw, selected=(i == idx)))
-        panel.append(self._prow("", pw))
-        desc = acts[idx].description if acts else ""
-        panel.append(self._prow(" " + desc, pw, style=C_FAINT))
-        panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
-        self._blit_panel(lines, W, panel, top_off, body_h)
-
     # Per-action descriptions for the Maintenance actions menu (#1345).
     def _overlay_maint_menu(self, lines, W, top_off, body_h):
         m = self.maint_menu
@@ -3146,8 +3113,6 @@ class PickerScreen(Widget):
              lambda ln, W, o, b: self._overlay_submenu(ln, W, o, b)),
             ("msgview", self._key_msgview,
              lambda ln, W, o, b: self._overlay_msgview(ln, W, o, b)),
-            ("task_menu", self._key_task_menu,
-             lambda ln, W, o, b: self._overlay_task_menu(ln, W, o, b)),
             ("cfgmenu", self._key_cfgmenu,
              lambda ln, W, o, b: self._overlay_cfgmenu(ln, W, o, b)),
             ("maint_menu", self._key_maint_menu,
@@ -4307,15 +4272,24 @@ class PickerScreen(Widget):
     # ---- registered-pivot (Tasks) action sub-menu ----
     def _open_task_menu(self):
         """Open the Enter action sub-menu for the focused task, built from the
-        registered pivot's declared ``actions``."""
+        registered pivot's declared ``actions``.
+
+        Migrated to a native Textual ``ModalScreen`` (#88 F4): ``push_screen``s a
+        ``TaskMenuScreen`` that owns the stack, focus, and key routing and returns
+        the chosen action index via ``dismiss(int|None)``; the callback runs the
+        selected action (``None`` cancels)."""
         reg = self._reg_pivot()
         rec = self._selected_task()
         if reg is None or not rec or not reg.actions:
             if reg is not None and not reg.actions:
                 self.debug = f"{reg.label}: no actions declared"
             return
-        self.task_menu = {"rec": rec, "actions": list(reg.actions), "reg": reg}
-        self.task_menu_idx = 0
+        actions = list(reg.actions)
+
+        def _after(choice):
+            if choice is not None:
+                self._run_task_action(reg, actions[choice], rec)
+        self.app.push_screen(TaskMenuScreen(reg, rec, actions), _after)
 
     def _task_action_ctx(self, reg, rec):
         """Placeholder context for an action's argv template: the entry's own
@@ -4328,22 +4302,6 @@ class PickerScreen(Widget):
         ctx["worktree"] = wt or ""
         ctx["machine"] = self._pivot_machine_id() or ""
         return ctx
-
-    def _key_task_menu(self, key):
-        menu = self.task_menu
-        acts = menu["actions"]
-        if key == "down":
-            self.task_menu_idx = (self.task_menu_idx + 1) % len(acts)
-        elif key == "up":
-            self.task_menu_idx = (self.task_menu_idx - 1) % len(acts)
-        elif key == "enter":
-            action = acts[self.task_menu_idx]
-            reg = menu["reg"]
-            rec = menu["rec"]
-            self.task_menu = None
-            self._run_task_action(reg, action, rec)
-        elif key in ("escape", "q", "tab"):
-            self.task_menu = None
 
     def _run_task_action(self, reg, action, rec):
         """Execute one task action, then invalidate the cached list so the row
@@ -4638,6 +4596,75 @@ class ProfConfirmScreen(ModalScreen[bool]):
         elif key in ("escape", "q"):
             event.stop()
             self.dismiss(False)
+
+
+class TaskMenuScreen(ModalScreen[int]):
+    """Native modal action sub-menu for a registered-pivot task (#88 F4).
+
+    A picker overlay migrated off the manual render/dispatch model onto a Textual
+    ``ModalScreen``. It lists the focused task's declared actions and returns the
+    chosen action *index* via ``dismiss(int)``, or ``dismiss(None)`` on cancel;
+    the caller runs the selected action. Navigation (``up``/``down``, wrapping)
+    updates the highlight and the per-action description in place, mirroring the
+    former ``_key_task_menu`` exactly (Enter selects, Esc/q/Tab cancel).
+    """
+
+    CSS = """
+    TaskMenuScreen { align: center middle; background: $background 55%; }
+    TaskMenuScreen > #task-menu { width: auto; height: auto; }
+    """
+
+    def __init__(self, reg, rec, actions) -> None:
+        super().__init__()
+        self._reg = reg
+        self._rec = rec
+        self._actions = actions
+        self.idx = 0
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._panel(), id="task-menu")
+
+    def _panel(self) -> Panel:
+        reg, rec, acts, idx = self._reg, self._rec, self._actions, self.idx
+        title = rec.get(reg.title_field) or rec.get(reg.id_field) or ""
+        sub_bits = []
+        if reg.worktree_field and rec.get(reg.worktree_field):
+            sub_bits.append(str(rec.get(reg.worktree_field)))
+        if reg.subtitle_field and rec.get(reg.subtitle_field):
+            sub_bits.append(str(rec.get(reg.subtitle_field)))
+        body = Text()
+        body.append(f"\n {title}\n", style=C_HEADER)
+        if sub_bits:
+            body.append(" " + " · ".join(sub_bits) + "\n", style=C_DIM)
+        body.append("\n")
+        for i, a in enumerate(acts):
+            mark = " ▸ " if i == idx else "   "
+            body.append(mark + a.label + "\n",
+                        style=C_SEL if i == idx else None)
+        desc = acts[idx].description if acts else ""
+        body.append("\n " + (desc or "") + "\n", style=C_FAINT)
+        return Panel(body, title=reg.label, border_style=C_BAND, width=72)
+
+    def _refresh(self) -> None:
+        self.query_one("#task-menu", Static).update(self._panel())
+
+    def on_key(self, event) -> None:
+        key = event.key
+        n = len(self._actions)
+        if key == "down":
+            self.idx = (self.idx + 1) % n
+            self._refresh()
+            event.stop()
+        elif key == "up":
+            self.idx = (self.idx - 1) % n
+            self._refresh()
+            event.stop()
+        elif key == "enter":
+            event.stop()
+            self.dismiss(self.idx)
+        elif key in ("escape", "q", "tab"):
+            event.stop()
+            self.dismiss(None)
 
 
 class PickerApp(App):
