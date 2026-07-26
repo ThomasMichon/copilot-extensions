@@ -29,6 +29,7 @@ import importlib
 import json
 import logging
 import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,14 @@ SINK_ENV_VAR = "AGENT_BRIDGE_TELEMETRY_SINK"
 #: the **env-free** wiring path: dropping this file attaches a sink without
 #: setting :data:`SINK_ENV_VAR`.
 CONFIG_FILENAME = "telemetry.json"
+
+#: ``module:factory`` spec of the **built-in spool sink** shipped by this plugin
+#: (see :func:`make_spool_sink`). A consumer selects it from the config file with
+#: ``{"sink": "agent_bridge.telemetry:make_spool_sink", "spool": "<path>"}`` -- no
+#: external package, so the daemon's interpreter stays free of any consumer
+#: dependency (the sink runs entirely inside this plugin's own environment). The
+#: out-of-process consumer drains the spool file on its own schedule.
+SPOOL_SINK_SPEC = "agent_bridge.telemetry:make_spool_sink"
 
 
 def _default_config_path() -> Path:
@@ -183,6 +192,60 @@ def load_sink_from_config(path: str | os.PathLike[str] | None = None) -> bool:
     set_telemetry_sink(sink)
     log.info("telemetry sink installed from %s", p)
     return True
+
+
+def _configured_spool_path(path: str | os.PathLike[str] | None = None) -> str | None:
+    """The ``"spool"`` path declared in the telemetry config file, or ``None``.
+
+    Read from the same convention-located config file the sink spec comes from
+    (:func:`_default_config_path`). Lets the built-in :func:`make_spool_sink`
+    discover its output path from the declaration, keeping the zero-arg factory
+    contract of :func:`load_sink_from_spec`.
+    """
+    p = Path(path) if path is not None else _default_config_path()
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    spool = data.get("spool")
+    return spool.strip() if isinstance(spool, str) and spool.strip() else None
+
+
+def make_spool_sink(spool: str | os.PathLike[str] | None = None) -> TelemetrySink | None:
+    """Built-in, dependency-free sink that appends each event to a **spool file**.
+
+    A batteries-included telemetry backend that keeps the daemon's process
+    **self-contained**: instead of importing a consumer's package, the consumer
+    selects this sink by declaration (:data:`SPOOL_SINK_SPEC`) and names a
+    ``"spool"`` path in the config file, then drains that file **out of process**
+    on its own schedule. Each event is written as one JSON-Lines record (the
+    generic event dict, stamped with an emit ``ts`` in epoch milliseconds if it
+    lacks one) -- the transport is a plain append-only file, nothing more.
+
+    Zero-arg-callable so :func:`load_sink_from_spec` can invoke it as a factory;
+    the spool path falls back to the config file's ``"spool"`` key. Returns
+    ``None`` (a no-op, fail-open) when no spool path is configured.
+    """
+    target = spool if spool is not None else _configured_spool_path()
+    target = str(target).strip() if target else ""
+    if not target:
+        log.warning("spool sink: no 'spool' path configured; telemetry stays off")
+        return None
+    spool_path = Path(target).expanduser()
+
+    def sink(event: dict[str, Any]) -> None:
+        try:
+            rec = dict(event)
+            rec.setdefault("ts", int(time.time() * 1000))
+            line = json.dumps(rec, separators=(",", ":"), default=str)
+            with open(spool_path, "a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+        except Exception:  # noqa: BLE001 - a sink is best-effort, never fatal
+            log.debug("spool sink write failed; dropping event", exc_info=True)
+
+    return sink
 
 
 def session_lifecycle_event(

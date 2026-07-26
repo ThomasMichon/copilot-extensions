@@ -137,6 +137,16 @@ sink leaves the coordinator untouched. *How* the consumer is attached — an
 environment variable, a dropped config file — and the on-disk shape of that
 configuration are spec-level, not fixed here.
 
+So that a consumer need not inject its own code into the coordinator's process
+to observe it, the layer also ships a **built-in, dependency-free emitter** the
+declaration can select — a plain **append-only spool** of the generic lifecycle
+records. The consumer then **drains that transport out of process**, on its own
+schedule and in its own environment, and shapes the records into whatever
+telemetry system it runs. This keeps the coordinator process **self-contained**
+(only the layer's own code runs in it) while still making its lifecycle fully
+consumable: the integration is **process-to-process over a declared transport**,
+not a shared runtime.
+
 ## Behaviors
 
 ### fire-and-forget-not-driven
@@ -241,3 +251,10 @@ this layer.)
   code** (an environment variable or a dropped config file), carrying lifecycle
   state and structure only. States the intent behind the pluggable emission seam;
   the attachment mechanism and on-disk config shape stay spec-level.
+- **2026-07-26** — Extended *observable-lifecycle* with the **built-in emitter**
+  intent: the layer ships a dependency-free, declaration-selectable emitter (a
+  plain append-only spool of the generic records) that a consumer drains **out of
+  process**, so observing the coordinator needs no consumer code injected into its
+  runtime. Crystallizes the *process-to-process over a declared transport, not a
+  shared runtime* property behind the seam. Mined from an operator steer to treat
+  the plugin's own runtime as sealed and integrate telemetry process-to-process.
