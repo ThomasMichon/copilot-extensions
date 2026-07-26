@@ -68,7 +68,7 @@ def emit(event: dict[str, Any]) -> None:
         return
     try:
         sink(event)
-    except Exception:  # noqa: BLE001 - telemetry is best-effort, never fatal
+    except Exception:  # telemetry is best-effort, never fatal
         log.debug("telemetry sink raised; dropping event", exc_info=True)
 
 
@@ -92,7 +92,7 @@ def load_sink_from_spec(spec: str) -> TelemetrySink | None:
         module = importlib.import_module(module_path)
         factory = getattr(module, attr)
         sink = factory()
-    except Exception:  # noqa: BLE001 - a bad sink spec must never break startup
+    except Exception:  # a bad sink spec must never break startup
         log.warning("could not load telemetry sink from %r; telemetry stays off",
                     spec, exc_info=True)
         return None
