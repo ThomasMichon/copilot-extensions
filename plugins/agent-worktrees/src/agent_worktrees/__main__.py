@@ -1120,8 +1120,15 @@ def cmd_embody(args: argparse.Namespace) -> int:
         )
 
     new_pane = result.get("new_pane")
+    # A freshly-embodied session can be MCP/skill-heavy and take well over the
+    # 20s handoff default to reach Copilot's input caret; seeding races that
+    # load, and if it loses, the seed is never typed and the session sits idle
+    # at an empty prompt. Give embody a generous, tunable seed-ready timeout so
+    # a slow-loading autopilot is still driven autonomously.
+    seed_ready_timeout = getattr(args, "seed_ready_timeout", None) or 180.0
     seed_result = (
-        sessions.mux_seed_pane(new_pane, seed) if (new_pane and seed) else {}
+        sessions.mux_seed_pane(new_pane, seed, ready_timeout=seed_ready_timeout)
+        if (new_pane and seed) else {}
     )
 
     verified = None
@@ -1146,6 +1153,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
         "driven_by": driver,
         "seeded": bool(seed_result.get("sent")) if seed else False,
         "seed_ready": bool(seed_result.get("ready")) if seed else False,
+        "seed_submitted": bool(seed_result.get("submitted")) if seed else False,
+        "seed_reason": seed_result.get("reason") if seed else None,
         "mux_verified": verified,
         "verify_hint": (
             f"agent-bridge live-sessions | grep {wt_id}  "
@@ -8974,6 +8983,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", default=None,
                    help="Seed prompt injected as the session's first "
                         "interactive turn once Copilot is ready")
+    p.add_argument("--seed-ready-timeout", dest="seed_ready_timeout",
+                   type=float, default=180.0, metavar="SECONDS",
+                   help="How long to wait for Copilot's input prompt before "
+                        "typing the --seed (default 180). A fresh MCP/skill-heavy "
+                        "autopilot can take much longer than the fast handoff "
+                        "default to become ready; if this is too short the seed "
+                        "is never delivered and the session idles at an empty "
+                        "prompt")
     p.add_argument("--driver", default=None,
                    help="Label of the agent steering this session; stamps the "
                         "'driven by <agent>' banner (AGENT_BRIDGE_DRIVEN_BY) so "

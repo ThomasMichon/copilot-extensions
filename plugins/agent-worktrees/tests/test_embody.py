@@ -106,6 +106,7 @@ class TestMuxNewSession:
 # -- cmd_embody control flow ------------------------------------------------
 def _ns(**kw):
     base = dict(worktree_id=None, new=False, seed=None, driver=None,
+                seed_ready_timeout=180.0,
                 verify_timeout=0.0, recovery=False, dry_run=False)
     base.update(kw)
     return argparse.Namespace(**base)
@@ -177,8 +178,9 @@ class TestCmdEmbody:
         monkeypatch.setattr(sessions, "mux_new_session", _spawn)
         seeded = {}
         def _seed(pane, seed, **k):
-            seeded.update(pane=pane, seed=seed)
-            return {"ok": True, "pane": pane, "ready": True, "sent": True}
+            seeded.update(pane=pane, seed=seed, ready_timeout=k.get("ready_timeout"))
+            return {"ok": True, "pane": pane, "ready": True, "sent": True,
+                    "submitted": True, "reason": None}
         monkeypatch.setattr(sessions, "mux_seed_pane", _seed)
 
         rc = m.cmd_embody(_ns(worktree_id="wtZ", seed="do the thing"))
@@ -186,8 +188,40 @@ class TestCmdEmbody:
         out = json.loads(capfd.readouterr().out)
         assert out["created"] is True and out["new_pane"] == "%5"
         assert out["seeded"] is True and out["seed_ready"] is True
+        assert out["seed_submitted"] is True and out["seed_reason"] is None
         assert spawned == {"wt": "wtZ", "wd": "/w/wtZ", "cmd": ["copilot"]}
-        assert seeded == {"pane": "%5", "seed": "do the thing"}
+        # The generous, tunable seed-ready timeout is threaded through so a
+        # slow-loading MCP-heavy autopilot is not abandoned at 20s (default 180).
+        assert seeded == {
+            "pane": "%5", "seed": "do the thing", "ready_timeout": 180.0,
+        }
+
+    def test_seed_ready_timeout_is_forwarded(self, monkeypatch, capfd, tmp_path):
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtT")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtT.yaml").write_text("x")
+        monkeypatch.setattr(
+            m.tracking, "load_record",
+            lambda p: type("Rec", (), {"worktree_path": "/w/wtT"})(),
+        )
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        monkeypatch.setattr(
+            sessions, "mux_new_session",
+            lambda *a, **k: {"ok": True, "session": "wt-wtT",
+                             "new_pane": "%9", "error": None},
+        )
+        captured = {}
+        def _seed(pane, seed, **k):
+            captured.update(ready_timeout=k.get("ready_timeout"))
+            return {"ok": True, "pane": pane, "ready": True, "sent": True,
+                    "submitted": True, "reason": None}
+        monkeypatch.setattr(sessions, "mux_seed_pane", _seed)
+        rc = m.cmd_embody(
+            _ns(worktree_id="wtT", seed="go", seed_ready_timeout=42.0)
+        )
+        assert rc == 0
+        assert captured["ready_timeout"] == 42.0
 
     def test_driver_stamps_driven_by_env_and_output(
         self, monkeypatch, capfd, tmp_path,
