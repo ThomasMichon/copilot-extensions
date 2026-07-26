@@ -225,6 +225,38 @@ def test_max_attempts_zero_retries_forever(q, client):
     assert q.latest_reservation(t.id).attempt == 5  # unbounded retries
 
 
+def test_label_max_attempts_raises_one_labels_bound(q, client):
+    """A per-label override raises one label's dead-letter bound above the
+    global default (#3492) -- so its tasks retry longer, independently."""
+    t = q.create("work", labels=["intelligence-dampener"])
+    sup = Supervisor(
+        client, spawn_fn=lambda _t: (False, {"error": "x"}),
+        repo=TEST_REPO, max_concurrent=5, max_attempts=1,
+        label_max_attempts={"intelligence-dampener": 3},
+    )
+    # Global bound is 1, but the label override is 3: it retries up to 3.
+    for _ in range(3):
+        assert sup.poll_once() == []
+    assert len(q.list_reservations(task_id=t.id, state="failed")) == 3
+    # A fourth cycle must NOT reserve a 4th attempt -- dead-lettered at 3.
+    assert sup.poll_once() == []
+    assert q.latest_reservation(t.id).attempt == 3
+
+
+def test_label_max_attempts_leaves_other_labels_on_global_bound(q, client):
+    """A label with no override still uses the global bound -- reviving one
+    label's tasks does not revive another's (the decoupling #3492 exists for)."""
+    t = q.create("work", labels=["coherence-adjudication-board"])
+    sup = Supervisor(
+        client, spawn_fn=lambda _t: (False, {"error": "x"}),
+        repo=TEST_REPO, max_concurrent=5, max_attempts=1,
+        label_max_attempts={"intelligence-dampener": 5},
+    )
+    assert sup.poll_once() == []  # 1 attempt burned
+    assert sup.poll_once() == []  # dead-lettered at the global bound of 1
+    assert q.latest_reservation(t.id).attempt == 1
+
+
 # -- liveness-gated heartbeat ------------------------------------------------
 
 
