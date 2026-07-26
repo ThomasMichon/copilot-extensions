@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-07-21
+- **Last revised:** 2026-07-25
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -259,6 +259,33 @@ other: an **absent** assertion defaults to the safe, current behavior, and the
 derived pulse — being coarse and sometimes vague — **never** sets the durable
 disposition. Truly finishing a worktree and asserting it *resolved* are the same
 act; leaving a stopping point with work still owed is asserting *follow-ups*.
+
+### single-current-session-per-worktree
+A worktree has, at any moment, **one current session** — its head. An agent is a
+**series of sessions in one worktree**, so "the agent for this worktree" resolves
+to that head, and a message or a viewer addressing the worktree reaches the
+**current** session even across a handoff. A session's **conclusion is asserted**,
+the same way a worktree's disposition is: a session stays *current* until the
+agent that owns it (or the operator) **deliberately concludes it**, never merely
+because a newer one appeared or an older one went quiet. Succession is a
+**durable, two-way chain** — each session knows both the one it continued and the
+one that continued it — so the lineage of work in a worktree is traversable in
+either direction, not reconstructed from timestamps.
+
+Because a second controller on one checkout is a resource clash — two agents
+racing the same tree — **starting a new session where the current one is not yet
+concluded is gated, not silent.** The caller must resolve the incumbent one of
+three ways before a fresh session is permitted: **reuse** it (continue the
+existing conversation — the default, since the worktree is already the caller's
+charge), **hand it off** (have the incumbent produce a continuation, conclude it,
+and open a successor seeded from it), or **sunset** it (drive the incumbent to a
+finished disposition and retire it). A deliberate **break-glass** override remains
+for the exceptional case, but the safe default is that the fabric *refuses to
+duplicate* rather than quietly spawning a rival. This is the session-level
+expression of *discover-before-duplicate* and *derive-dont-duplicate*: the
+current-session pointer and the succession chain are **owned by the ground
+layer** (which owns session lifecycle), and higher layers **enforce and derive
+from** them rather than keeping a rival notion of "current."
 
 ### handoff-orchestrated-above-primitives
 Session **launch** is a ground-layer **primitive** — "spin a Copilot session in
