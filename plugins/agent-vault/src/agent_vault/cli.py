@@ -29,6 +29,16 @@ def _detect_wsl() -> bool:
 
 IS_WSL = _detect_wsl()
 
+
+def _in_ssh_session() -> bool:
+    """Whether this process is running inside an inbound SSH session.
+
+    A client GUI dialog can only reach the operator at an interactive desktop; over
+    a non-interactive SSH session there is no desktop they are watching, so a
+    GUI-based unlock prompt would block (or time out) on a dialog no one can answer.
+    """
+    return bool(os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"))
+
 # Timeout (seconds) for the silent provider-only unlock probe -- long enough for
 # the daemon to run its unlock providers (e.g. a ~3 s broker fetch + a KeePassXC
 # verify), short enough that a miss falls back to the interactive prompt promptly.
@@ -506,6 +516,14 @@ def auto_unlock() -> bool:
         # operator; let the service resolve providers and prompt there.
         print("[agent-vault] Requesting password via vault service...", file=sys.stderr)
         return _server_prompted_unlock()
+    # A client GUI dialog only reaches the operator at an interactive desktop. Over
+    # a non-interactive SSH session there is no desktop they are watching, so
+    # popping it would block (up to the prompt timeout) on a dialog no one can
+    # answer -- notably a Windows host reached over SSH with a live console session
+    # (#3501). Fail fast to the actionable needs_unlock instead, matching the
+    # headless behavior, rather than stalling on an unseen dialog.
+    if _in_ssh_session():
+        return False
     pw = prompt_password()
     if pw:
         resp = send_command({"action": "unlock", "password": pw}, timeout=15.0)
