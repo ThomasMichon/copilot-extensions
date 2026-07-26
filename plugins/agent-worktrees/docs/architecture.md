@@ -344,7 +344,8 @@ does.
   when that layer is installed and its CLI is on `PATH`:
   `agent-dispatch` -> **Tasks** (`agent-dispatch inbox --machine {machine}`),
   `agent-bridge` -> **Bridges** (`agent-bridge agents --json`),
-  `agent-codespaces` -> **CodeSpaces** (`agent-codespaces list --json`). Each
+  `agent-codespaces` -> **CodeSpaces** (`agent-codespaces list --json`),
+  `agent-containers` -> **Containers** (`agent-containers fleet --json`). Each
   CLI must print a **bare JSON array** of objects; the manifest's `entry` map
   pulls id/title/subtitle/badges out of each. This is graceful-capability-scaling
   in practice: adopt more of the fabric, get more pivots; adopt less, and the
