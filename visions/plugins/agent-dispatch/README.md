@@ -6,7 +6,7 @@
   version-control remote or minting an account per agent.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-07-24
+- **Last revised:** 2026-07-26
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -125,6 +125,18 @@ the live transcript (the coordination layer's *summary-status-is-first-class*,
 seen from the delegation side). A caller or operator surveys the fleet's progress
 at a glance without reading each session.
 
+### observable-lifecycle
+The layer's task lifecycle is **externally observable** through a
+**backend-agnostic telemetry seam**: the coordinator declares its lifecycle
+surface and ships a **no-op-by-default** emission hook, and a downstream
+observability consumer **attaches a publisher by configuration, not code** —
+without the layer depending on any specific telemetry backend or transport. The
+seam carries lifecycle **state and structure only** (never a task's prompt,
+payload, or any secret) and is **fail-open**: an unconfigured or misconfigured
+sink leaves the coordinator untouched. *How* the consumer is attached — an
+environment variable, a dropped config file — and the on-disk shape of that
+configuration are spec-level, not fixed here.
+
 ## Behaviors
 
 ### fire-and-forget-not-driven
@@ -223,3 +235,9 @@ this layer.)
   rather than silently requeued. The *fire-and-forget-not-driven* axis was
   crystallized from recurring agent confusion between this layer and the
   coordination layer.
+- **2026-07-26** — Added the *observable-lifecycle* feature: the layer's task
+  lifecycle is externally observable through a backend-agnostic, no-op-by-default
+  telemetry seam that a downstream consumer attaches **by configuration, not
+  code** (an environment variable or a dropped config file), carrying lifecycle
+  state and structure only. States the intent behind the pluggable emission seam;
+  the attachment mechanism and on-disk config shape stay spec-level.

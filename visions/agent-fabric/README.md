@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-07-25
+- **Last revised:** 2026-07-26
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -176,6 +176,18 @@ done). And a **live activity pulse** *passively derived* from the agent's own
 intent signals, needing no cooperation, giving a rapid — if coarse — sense of
 current motion. The disposition is high-signal and slow; the pulse is low-signal
 and fast; neither is faked from the other.
+
+### externally-observable
+Beyond the fabric's own picker legibility, each layer's lifecycle is
+**externally observable** through a **backend-agnostic telemetry seam**: a layer
+declares its lifecycle surface and ships a **no-op-by-default** emission hook, and
+a downstream observability consumer **attaches a publisher by configuration, not
+code** — without any layer depending on a specific telemetry backend or
+transport. The seam carries lifecycle **state and structure only** (never
+conversation content, a task prompt/payload, or any secret) and is **fail-open**:
+an unconfigured or misconfigured sink leaves the layer untouched. *How* a consumer
+is attached (an environment variable, a dropped config file) and the on-disk
+config shape are spec-level, not fixed by this vision.
 
 ### survivable-work
 An agent's session output is **recoverable and digestible** after the fact —
@@ -368,3 +380,13 @@ degrades to the same claimable record, not to a silent no-op.
   project for 'embody'`) because embody discovered its project only from CWD.
   The fix (name the project via `--project`) generalized into the standing intent
   that no fabric layer should be reachable *only* by standing inside a repo.
+- **2026-07-26** — Added §Features/`externally-observable`: beyond the picker's
+  internal legibility, each layer surfaces its lifecycle through a
+  backend-agnostic, no-op-by-default **telemetry seam** that a downstream
+  observability consumer attaches **by configuration, not code** (an environment
+  variable or a dropped config file), carrying lifecycle state and structure only.
+  Mined from extending the delegation/coordination layers' pluggable emission hook
+  with a config-file attachment path so a host wires telemetry without any
+  environment variable; the attachment mechanism and on-disk config shape stay
+  spec-level. Paired with the leaf `visions/plugins/agent-dispatch`
+  *observable-lifecycle* feature.
