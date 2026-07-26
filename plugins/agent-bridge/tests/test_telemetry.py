@@ -184,3 +184,73 @@ def test_load_sink_from_config_default_path_honors_config_dir(monkeypatch, tmp_p
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
     expected = tmp_path / telemetry.CONFIG_FILENAME
     assert telemetry._default_config_path() == expected
+
+
+# --- built-in spool sink (dependency-free, out-of-process drain) ------------
+
+import json  # noqa: E402
+
+
+def _read_spool(path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def test_make_spool_sink_appends_jsonl_with_ts(tmp_path) -> None:
+    _reset()
+    spool = tmp_path / "agent-bridge.spool"
+    sink = telemetry.make_spool_sink(spool)
+    assert callable(sink)
+    sink({"kind": "state_transition", "name": "session", "event": "session_state_changed", "to": "idle"})
+    rows = _read_spool(spool)
+    assert len(rows) == 1
+    assert rows[0]["name"] == "session"
+    assert rows[0]["to"] == "idle"
+    assert isinstance(rows[0]["ts"], int)
+
+
+def test_make_spool_sink_preserves_existing_ts(tmp_path) -> None:
+    _reset()
+    spool = tmp_path / "s.spool"
+    telemetry.make_spool_sink(spool)({"kind": "event", "name": "session", "ts": 456})
+    assert _read_spool(spool)[0]["ts"] == 456
+
+
+def test_make_spool_sink_noop_without_path() -> None:
+    _reset()
+    assert telemetry.make_spool_sink("") is None
+    assert telemetry.make_spool_sink(None) is None
+
+
+def test_make_spool_sink_reads_path_from_config(tmp_path) -> None:
+    _reset()
+    spool = tmp_path / "declared.spool"
+    cfg = tmp_path / "telemetry.json"
+    cfg.write_text(
+        json.dumps({"sink": telemetry.SPOOL_SINK_SPEC, "spool": str(spool)}), encoding="utf-8"
+    )
+    assert telemetry._configured_spool_path(cfg) == str(spool)
+
+
+def test_spool_sink_selected_end_to_end_via_config(tmp_path, monkeypatch) -> None:
+    _reset()
+    spool = tmp_path / "e2e.spool"
+    cfg = tmp_path / "telemetry.json"
+    cfg.write_text(
+        json.dumps({"sink": telemetry.SPOOL_SINK_SPEC, "spool": str(spool)}), encoding="utf-8"
+    )
+    monkeypatch.setattr(telemetry, "_default_config_path", lambda: cfg)
+    try:
+        assert telemetry.load_sink_from_config(cfg) is True
+        assert telemetry.has_sink() is True
+        telemetry.emit({"kind": "state_transition", "name": "session", "to": "idle"})
+        rows = _read_spool(spool)
+        assert rows and rows[0]["to"] == "idle"
+    finally:
+        _reset()
+
+
+def test_spool_sink_fail_open_on_bad_path(tmp_path) -> None:
+    _reset()
+    sink = telemetry.make_spool_sink(tmp_path)  # a dir -> unwritable as a file
+    assert callable(sink)
+    sink({"kind": "event", "name": "session"})  # must not raise
