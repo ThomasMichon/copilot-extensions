@@ -379,6 +379,7 @@ class PickerScreen(Widget):
         self.pivots = []              # list of {"label","kind","pivot"} descriptors
         self.htabs = list(BUILTIN_PIVOTS)   # display labels (rebuilt in _load_pivots)
         self.registered_pivots = []   # RegisteredPivot list from the manifest scan
+        self.wt_actions = []          # contributed WorktreeAction list (#B)
         self.task_menu = None         # registered-pivot Enter action sub-menu
         self.cfgmenu = None           # ⚙ Configuration menu (hosts Profiles) (#1426)
         self.cfgmenu_idx = 0
@@ -459,12 +460,17 @@ class PickerScreen(Widget):
             pivots_mod.ensure_pivots()
             registered = pivots_mod.discover_pivots()
             descriptors = pivots_mod.order_pivots(BUILTIN_PIVOTS, registered)
+            wt_actions = pivots_mod.discover_worktree_actions()
         except Exception:
-            registered, descriptors = [], [
+            registered, descriptors, wt_actions = [], [
                 {"label": b, "kind": b.lower(), "pivot": None} for b in BUILTIN_PIVOTS
-            ]
+            ], []
         self.registered_pivots = registered
         self.pivots = descriptors
+        # Cross-plugin worktree-row actions (a layer augmenting the Worktrees
+        # view's Enter sub-menu, e.g. a bridge's "Send message"): discovered
+        # from the same manifests, independent of any list pivot (#B).
+        self.wt_actions = wt_actions
         # Tag each pivot with its placement (left cycle / config menu / hidden
         # anchor) so nav machinery can partition them without disturbing the
         # ``order_pivots`` weave that registered ``after`` hints rely on (#1426).
@@ -3388,6 +3394,11 @@ class PickerScreen(Widget):
                 self.submenu["no_mux"] = not self.submenu["no_mux"]
         elif key == "enter":
             rec = self.submenu["rec"]
+            ext = self.submenu.get("ext", {})
+            if cur in ext:
+                # A cross-plugin contributed action (#B): run it and rescan.
+                self._run_wt_action(ext[cur], rec)
+                return
             no_mux = self.submenu.get("no_mux", False)
             self.submenu = None
             if cur == "Open":
@@ -3926,8 +3937,57 @@ class PickerScreen(Widget):
             elif self._machine_index_for(
                     rec.get("machine"), rec.get("env")) is not None:
                 acts.append("Jump to host")
-        self.submenu = {"rec": rec, "actions": acts, "no_mux": False}
+        # Cross-plugin worktree actions (#B): any installed layer can add a verb
+        # to this menu. Only actions whose `when` matches the worktree appear,
+        # and a contributed label never shadows a built-in verb.
+        from . import pivots as _pivots
+
+        ext: dict = {}
+        for act in getattr(self, "wt_actions", []) or []:
+            if act.label in acts or act.label in ext:
+                continue
+            try:
+                if _pivots.worktree_action_matches(act, rec):
+                    acts.append(act.label)
+                    ext[act.label] = act
+            except Exception:
+                continue
+        self.submenu = {"rec": rec, "actions": acts, "no_mux": False, "ext": ext}
         self.submenu_idx = 0
+
+    def _wt_action_ctx(self, rec: dict) -> dict:
+        """Placeholder context for a contributed worktree action's argv template:
+        the worktree's id/machine/env/repo plus its (scalar) raw fields."""
+        raw = rec.get("raw") or {}
+        ctx = {k: v for k, v in raw.items()
+               if isinstance(v, (str, int, float, bool))}
+        ctx.update({
+            "worktree": raw.get("id") or rec.get("id4"),
+            "id": raw.get("id") or rec.get("id4"),
+            "id4": rec.get("id4"),
+            "machine": str(rec.get("machine") or raw.get("machine") or ""),
+            "env": str(rec.get("env") or ""),
+            "repo": getattr(self.src, "REPO", "") or "",
+            "title": rec.get("title", ""),
+            "state": rec.get("state", ""),
+        })
+        return ctx
+
+    def _run_wt_action(self, action, rec: dict) -> None:
+        """Run a contributed worktree action (subprocess), report the outcome,
+        and rescan (the action may have changed worktree/session state)."""
+        from . import tasks
+
+        label, source = action.label, action.source
+        self.submenu = None
+        ok, msg = tasks.run_worktree_action(action, self._wt_action_ctx(rec))
+        self.debug = (f"{label} ({source}): {msg or 'done'}" if ok
+                      else f"{label} ({source}) failed: {msg}")
+        try:
+            self.setup()
+            self.sel = self.default_sel()
+        except Exception:
+            pass
 
     # ---- Recent-messages viewer (read-only session peek) ----
     def _open_msgview(self, rec, *, limit=3):

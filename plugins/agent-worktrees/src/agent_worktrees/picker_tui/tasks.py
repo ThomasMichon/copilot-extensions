@@ -135,3 +135,26 @@ class RegisteredPivotRuntime:
             detail = (proc.stderr or "").strip().splitlines()
             return (False, (detail[-1] if detail else f"exit {proc.returncode}")[:200])
         return (True, (proc.stdout or "").strip()[:200])
+
+
+def run_worktree_action(action, ctx: Mapping[str, object]) -> tuple[bool, str]:
+    """Run a contributed :class:`~picker_tui.pivots.WorktreeAction` against
+    ``ctx`` as a subprocess (argv[0] resolved on ``PATH``). Returns
+    ``(ok, message)`` and never raises, so the picker can surface the outcome in
+    its status line. Mirrors :meth:`RegisteredPivotRuntime.run_action` but is
+    stand-alone: worktree actions are not bound to a pivot's runtime."""
+    argv = _resolve_argv(action.run, ctx)
+    if not argv:
+        return (False, "empty action command")
+    try:
+        proc = subprocess.run(
+            argv, capture_output=True, text=True, timeout=ACTION_TIMEOUT, check=False
+        )
+    except FileNotFoundError:
+        return (False, f"{argv[0]} not found on PATH")
+    except (OSError, subprocess.SubprocessError) as exc:
+        return (False, str(exc)[:200])
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip().splitlines()
+        return (False, (detail[-1] if detail else f"exit {proc.returncode}")[:200])
+    return (True, (proc.stdout or "").strip()[:200])

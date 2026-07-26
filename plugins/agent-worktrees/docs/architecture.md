@@ -345,6 +345,18 @@ does.
   `{title}`, plus any entry field) are substituted at activation time. Data
   flows **only** through the contributing plugin's CLI -- never a cross-venv
   import -- so the seam stays generic for future pivots (Bridges, Containers, ...).
+- **Worktree-row actions (cross-plugin, #B).** Beyond contributing a *pivot*, a
+  manifest may declare `worktree_actions` -- a list of `{label, run, when?}` that
+  augment a **worktree's** Enter sub-menu on the built-in Worktrees view. This is
+  how a layer reaches *into* the core view (a bridge's "Send message", a
+  dispatcher's "Dispatch task here") without owning a pivot. `run` is an argv
+  template substituted from the worktree's context (`{worktree}`/`{machine}`/
+  `{env}`/`{repo}`/`{id4}` plus the record's fields); `when` (optional) gates the
+  action to worktrees whose normalized record matches every field. Discovered by
+  `discover_worktree_actions` from the **same** manifest dir -- **independent of
+  `list`**, so a manifest may contribute only worktree actions (no pivot). A
+  contributed label never shadows a built-in verb; the action runs as a
+  subprocess (`tasks.run_worktree_action`) and the picker rescans after.
 - **Dispatch is kind-keyed, not index-keyed.** Built-in pivot logic switches on
   the pivot *kind* (`worktrees`/`maintenance`/`profiles`/`registered`), so an
   inserted pivot never renumbers the built-ins.

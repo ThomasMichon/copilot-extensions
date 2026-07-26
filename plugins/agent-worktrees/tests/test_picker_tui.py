@@ -3736,3 +3736,89 @@ def test_registered_pivot_switch_pivot_cycles_left_rail(tmp_path, monkeypatch):
             assert "maintenance" not in seen
 
     asyncio.run(run())
+
+
+# --- cross-plugin worktree-row actions (#B) ---------------------------------
+
+def test_worktree_action_matches_when_filter():
+    """`when` gates a contributed worktree action to matching records."""
+    from agent_worktrees.picker_tui import pivots
+
+    def act(when):
+        return pivots.WorktreeAction(key="k", label="L", run=("x",),
+                                     source="s", when=when)
+
+    assert pivots.worktree_action_matches(act(None), {"state": "ACTIVE"})
+    assert pivots.worktree_action_matches(act({}), {"state": "ACTIVE"})
+    assert pivots.worktree_action_matches(
+        act({"state": ["ACTIVE", "WIP"]}), {"state": "WIP"})
+    assert not pivots.worktree_action_matches(
+        act({"state": ["ACTIVE"]}), {"state": "FINAL"})
+    # boolean-ish match (JSON true vs Python bool)
+    assert pivots.worktree_action_matches(act({"mux_live": True}),
+                                          {"mux_live": True})
+    assert not pivots.worktree_action_matches(act({"mux_live": True}),
+                                              {"mux_live": False})
+
+
+def _write_wt_actions(directory, actions):
+    import json
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "bridge.json").write_text(
+        json.dumps({"worktree_actions": actions}), encoding="utf-8")
+
+
+def test_contributed_worktree_action_in_submenu_and_runs(tmp_path, monkeypatch):
+    """A manifest with only `worktree_actions` (no list pivot) augments a
+    worktree's Enter sub-menu; `when` filters; Enter runs it with a substituted
+    context and never shadows a built-in verb (#B)."""
+    from agent_worktrees.picker_tui import tasks
+
+    pv = tmp_path / "pivots"
+    _write_wt_actions(pv, [
+        {"label": "Send message", "run": ["mybridge", "send", "{worktree}",
+                                          "--machine", "{machine}"]},
+        {"label": "Only when final", "run": ["x"], "when": {"state": "FINAL"}},
+    ])
+    monkeypatch.setenv("AGENT_WORKTREES_PIVOTS_DIR", str(pv))
+    monkeypatch.setenv("AGENT_WORKTREES_PLUGINS_DIR", str(tmp_path / "plugins"))
+    (tmp_path / "plugins").mkdir()
+
+    captured = {}
+
+    def fake_run(action, ctx):
+        captured["label"] = action.label
+        captured["ctx"] = dict(ctx)
+        return (True, "sent")
+
+    monkeypatch.setattr(tasks, "run_worktree_action", fake_run)
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert scr.wt_actions, "worktree actions discovered"
+
+            # Focus a non-final worktree row and open its sub-menu.
+            row = next(i for i, r in enumerate(scr.list_records())
+                       if r["state"] != "FINAL")
+            scr.sel = ("L", row)
+            scr._open_submenu()
+            acts = scr.submenu["actions"]
+            assert "Send message" in acts             # unconditional action
+            assert "Only when final" not in acts       # gated out by `when`
+            assert scr.submenu["ext"]["Send message"].source == "bridge"
+
+            # Enter runs it with a substituted worktree context.
+            scr.submenu_idx = acts.index("Send message")
+            scr.handle_key("enter")
+            assert scr.submenu is None
+            assert captured["label"] == "Send message"
+            assert captured["ctx"]["worktree"]         # the worktree id
+            assert captured["ctx"]["machine"]
+
+    asyncio.run(run())
