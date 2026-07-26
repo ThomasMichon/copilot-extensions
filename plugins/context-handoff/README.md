@@ -73,3 +73,24 @@ start a fresh session (the context-handoff-setup skill walks through this).
 | 70% | Urgent reminder: "generate NOW, compaction at ~80%" |
 
 Reminder state resets after a successful compaction.
+
+## Live cutover records the durable session lineage
+
+A live cutover (`continue_handoff`) spawns a seeded successor Copilot in a new
+mux window, cuts the operator over, and retires this session's pane on the next
+`session.idle`. Beyond the mux choreography, the cutover now writes the
+worktree's **session lineage** into the agent-worktrees ground layer (which owns
+that state -- context-handoff keeps no rival pointer):
+
+- At cutover the outgoing session is durably concluded **`handed-off`** via
+  `agent-worktrees conclude-session`, not merely a killed pane. That advances the
+  worktree head off it, so a stale replay of the same handoff -- or agent-bridge's
+  create guard -- no longer treats the worktree as still holding the retired
+  session (the spent-baton replay).
+- The successor completes the **two-way `predecessor`/`successor` link** when it
+  registers: `agent-worktrees register_session` auto-adopts the pending handoff,
+  the first moment the successor's fresh session id exists. The lineage of
+  sessions in a worktree is then traversable in both directions.
+
+Both writes are best-effort: a failure never undoes the (already successful)
+cutover.

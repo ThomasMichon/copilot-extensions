@@ -162,14 +162,47 @@ notion (per the vision's *derive-dont-duplicate*):
 - `conclude_session(record, sid, state=…)` — mark `concluded`/`handed-off`;
   advances the head off the concluded session (to the newest survivor, or None).
 - `link_succession(record, old, new)` — write the two-way link, conclude the
-  predecessor (`handed-off`), and move the head to the successor. This is the
-  primitive the context-handoff cutover calls.
+  predecessor (`handed-off`), and move the head to the successor. The explicit
+  form used when both session ids are already known.
 
 `register_session` (the sessionStart hook) **initializes** the head for a
 worktree that has no current session yet, but **never moves an existing active
 head** — a second session arriving while one is still current is the contested
 case the agent-bridge creation guard prevents upstream; the ground layer only
-records it.
+records it. It also **completes a pending handoff's two-way link**: when the
+prior current session was concluded via a *handoff* (state `handed-off`,
+successor not yet known — e.g. context-handoff's live cutover), the fresh
+session registering next *is* that handoff's successor, so `register_session`
+stamps `predecessor.successor` / `successor.predecessor` and moves the head to
+it. This is the moment the successor's (fresh) id first exists; a plain
+`concluded`/sunset predecessor expects no successor and is skipped.
+
+**Cross-layer write interface — `conclude-session` / `link-succession`.** A
+higher layer in its own venv cannot import `tracking.py`, so the two writes a
+handoff needs are exposed as CLIs alongside the `head-session` read:
+
+```bash
+# Assert a session concluded; advances the head off it (the cutover's durable
+# write -- context-handoff shells this so the retired session is an asserted
+# `handed-off`, not merely a killed pane, closing the spent-baton replay).
+agent-worktrees conclude-session --worktree <id> --session <sid> \
+    --state handed-off
+# {"worktree_id": "...", "session": "<sid>", "state": "handed-off",
+#  "head_session": "<sid>"|null}
+
+# Write the two-way link explicitly (both ids known); concludes the predecessor
+# and moves the head to the successor.
+agent-worktrees link-succession --worktree <id> \
+    --predecessor <sid> --successor <sid>
+```
+
+Both resolve the worktree across **all** projects (a higher-layer caller's CWD
+is unrelated to the worktree it acts on) and persist to that resolved record.
+Unlike the fail-open `head-session` read, an unknown worktree/session is a real
+error here — a mutation must not silently no-op. The live cutover uses
+`conclude-session` for the predecessor and lets `register_session` stamp the
+successor half once its id exists; `link-succession` is for callers that already
+hold both ids (an explicit, non-cutover handoff or a manual repair).
 
 **Cross-layer read interface — `agent-worktrees head-session`.** Because a
 higher layer (agent-bridge, context-handoff) runs in its *own* venv and cannot

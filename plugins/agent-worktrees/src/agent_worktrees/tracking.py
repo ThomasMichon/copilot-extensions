@@ -944,6 +944,29 @@ class _RecordLock:
             self._fd = None
 
 
+def _pending_handoff_predecessor(
+    record: WorktreeRecord, *, exclude: str
+) -> SessionEntry | None:
+    """The most-recent ``handed-off`` session still awaiting a successor, if any.
+
+    A handoff marks its predecessor ``handed-off`` at cutover but **cannot** know
+    the successor's session id then -- the seeded successor is a fresh Copilot
+    whose id only materializes once it starts and registers. This finds the baton
+    a handoff left for the next session to pick up (newest-first; ``None`` when no
+    handoff is pending), so ``register_session`` can complete the two-way link at
+    the first moment both ids exist.
+
+    Only ``handed-off`` predecessors auto-adopt a successor. A plain
+    ``concluded`` (sunset / finished) session expects none, so it is skipped.
+    """
+    for entry in reversed(record.sessions or ()):
+        if entry.session_id == exclude:
+            continue
+        if entry.state == "handed-off" and entry.successor is None:
+            return entry
+    return None
+
+
 def register_session(
     worktree_id: str,
     session_id: str,
@@ -973,15 +996,30 @@ def register_session(
         # worktree (or one whose prior sessions all concluded) without moving an
         # existing active head.
         had_active_head = record.resolved_head_session is not None
-        record.sessions.append(SessionEntry(
+        new_entry = SessionEntry(
             session_id=session_id,
             started_at=_now_iso(),
             pid=pid,
-        ))
+        )
+        record.sessions.append(new_entry)
+        # session-lifecycle: complete a pending handoff's two-way link. When the
+        # prior current session was concluded via a HANDOFF (state
+        # ``handed-off``, successor not yet known -- e.g. context-handoff's live
+        # cutover), the fresh session registering next IS that handoff's
+        # successor. Stamp the durable predecessor<->successor link here, the
+        # first point the successor's id exists, so the lineage is traversable
+        # both ways. The ground layer owns this write; context-handoff only
+        # triggers it by concluding the predecessor at cutover (no rival store,
+        # per the vision's derive-dont-duplicate).
+        pending = _pending_handoff_predecessor(record, exclude=session_id)
+        if pending is not None:
+            pending.successor = session_id
+            new_entry.predecessor = pending.session_id
         # Never moves an existing active head -- a second session arriving while
         # one is still current is the contested case the agent-bridge creation
         # guard prevents upstream; here we only record it, leaving the asserted
-        # head untouched.
+        # head untouched. A handed-off predecessor is NOT active, so the head is
+        # (re)initialized to the successor above.
         if not had_active_head:
             record.head_session = session_id
         save_record(record)
