@@ -209,6 +209,66 @@ def _find_reusable_session(mgr, agent_name, caller_id):
     return None
 
 
+def _enforce_worktree_head_guard(worktree_id: str) -> None:
+    """Refuse (409) a create into a worktree with an ``active`` ground-layer head.
+
+    Derives the head from agent-worktrees (see :mod:`..worktree_head`). When the
+    worktree has a current, un-concluded head session, raises an ``HTTPException``
+    409 whose structured detail enumerates the three deliberate resolutions
+    (reuse / handoff / sunset) plus the ``reclaim`` break-glass. Fails **open**:
+    an untracked worktree or an unreadable ground layer yields ``active=False``
+    and this returns without raising, so create proceeds exactly as before.
+    """
+    from ..worktree_head import resolve_head
+
+    head = resolve_head(worktree_id)
+    if not head.active:
+        return
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "reason": "worktree_head_active",
+            "worktree_id": worktree_id,
+            "head_session": head.head_session,
+            "head_state": head.state,
+            "message": (
+                f"Worktree {worktree_id} already has a current session "
+                f"({head.head_session}); starting a new one would run in "
+                "parallel with it. Resolve the incumbent first (reuse / handoff "
+                "/ sunset), or pass reclaim=true to take over."
+            ),
+            "choices": [
+                {
+                    "action": "reuse",
+                    "preferred": True,
+                    "description": (
+                        "Continue the existing session in-context (resume it) "
+                        "rather than creating a new one -- the worktree is "
+                        "already yours to take responsibility for."
+                    ),
+                },
+                {
+                    "action": "handoff",
+                    "description": (
+                        "If context is high, have the current session produce a "
+                        "handoff, conclude it, then create a fresh session in "
+                        "this worktree seeded with that handoff."
+                    ),
+                },
+                {
+                    "action": "sunset",
+                    "description": (
+                        "If the current session is finished/irrelevant, drive it "
+                        "to conclusion (finalize); once concluded, a fresh "
+                        "create is permitted."
+                    ),
+                },
+            ],
+            "override": "reclaim=true",
+        },
+    )
+
+
 @router.post("", response_model=StartSessionResponse, status_code=201)
 async def start_session(req: StartSessionRequest, request: Request):
     mgr: SessionManager = request.app.state.session_manager
@@ -237,6 +297,25 @@ async def start_session(req: StartSessionRequest, request: Request):
                 name=existing.name,
                 status=existing.status,
             )
+
+    # Session-lifecycle head guard (agent-fabric
+    # `single-current-session-per-worktree`). Creating a session *into an
+    # existing worktree* (``worktree_id`` set -- e.g. a Neuron-Forge session
+    # roll) whose ground-layer head is still ``active`` would silently spawn a
+    # second, parallel session in a worktree that already has a current one.
+    # Refuse it: the caller must reuse (preferred), hand off, or sunset the
+    # incumbent -- ``reclaim=true`` is the deliberate break-glass take-over. The
+    # head is *derived* from agent-worktrees (the ground-layer owner); agent-
+    # bridge keeps no rival pointer (``derive-dont-duplicate``). Fails open: if
+    # the ground layer can't be read, ``active`` is False and create proceeds.
+    #
+    # This is the create-time sibling of the ``resume_worktree`` liveness guard
+    # (409 ``live_cli_holds_worktree``, also reclaim-bypassed): that one refuses
+    # owning a worktree a live *process* holds; this one refuses spawning atop a
+    # worktree an *asserted* head owns. Together they are one story -- a worktree
+    # has one current session, and taking it over is an explicit act.
+    if req.worktree_id and not req.reclaim:
+        _enforce_worktree_head_guard(req.worktree_id)
 
     if req.agent:
         # Resolve agent via registry

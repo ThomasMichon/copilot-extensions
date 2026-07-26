@@ -1884,6 +1884,11 @@ def _start_agent_session(
             sender_repo=_sender_repo(), force_new=force_new,
         )
     except BridgeClientError as exc:
+        # Session-lifecycle head guard: a create into an existing worktree whose
+        # ground-layer head is still active is refused (reuse / handoff / sunset,
+        # or reclaim to take over). Render the choices and stop.
+        if _render_head_guard_refusal(exc):
+            sys.exit(_SEND_BUSY_EXIT)
         # Server-side concurrency guard: this agent (e.g. a CodeSpace) already
         # has an active session under a different caller. CodeSpaces share one
         # checkout, so a second concurrent session is impossible.
@@ -1937,6 +1942,37 @@ def _start_agent_session(
         start_timeout = timeouts.session_start
     _wait_for_idle(client, sid, timeout=start_timeout)
     return sid
+
+
+def _render_head_guard_refusal(exc: "BridgeClientError") -> bool:
+    """Print the session-lifecycle head-guard refusal, if that's what ``exc`` is.
+
+    The server refuses a create into a worktree whose ground-layer head is still
+    ``active`` with a 409 ``reason: worktree_head_active`` carrying the three
+    deliberate resolutions (reuse / handoff / sunset) + the ``reclaim`` break-
+    glass. Renders them for a human and returns True when handled; False when
+    ``exc`` is some other error (caller keeps its normal handling).
+    """
+    if getattr(exc, "status", None) != 409:
+        return False
+    detail = getattr(exc, "detail", None)
+    if not isinstance(detail, dict) or detail.get("reason") != "worktree_head_active":
+        return False
+    wt = detail.get("worktree_id", "?")
+    head = detail.get("head_session", "?")
+    print(
+        f"[BLOCKED] Worktree {wt} already has a current session ({head}). "
+        "Starting a new one would run in parallel with it.",
+        file=sys.stderr,
+    )
+    for choice in detail.get("choices", []):
+        tag = " (preferred)" if choice.get("preferred") else ""
+        print(f"  - {choice.get('action')}{tag}: {choice.get('description', '')}",
+              file=sys.stderr)
+    override = detail.get("override", "reclaim=true")
+    print(f"  Break-glass: re-issue with {override} to take over the worktree.",
+          file=sys.stderr)
+    return True
 
 
 def _conflict_session_id(exc: "BridgeClientError") -> str | None:

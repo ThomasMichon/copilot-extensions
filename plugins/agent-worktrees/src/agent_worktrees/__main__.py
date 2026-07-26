@@ -9349,6 +9349,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true",
                     help="Emit JSON (default; accepted for caller compatibility)")
 
+    # head-session -- a worktree's asserted head session + lifecycle state (JSON)
+    sp = sub.add_parser(
+        "head-session",
+        help="Show a worktree's asserted head (current) session + state (JSON)",
+    )
+    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id",
+                    required=True, help="Worktree ID (full or 4-char suffix)")
+    sp.add_argument("--json", action="store_true",
+                    help="Emit JSON (default; accepted for caller compatibility)")
+
     # session-transcript -- emit a session's renderable events as JSON
     sp = sub.add_parser(
         "session-transcript",
@@ -9899,6 +9909,115 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
     return 0
 
 
+def _all_tracking_dirs() -> list[Path]:
+    """Every project's worktree-tracking dir on this machine (dedup, ordered).
+
+    The active project (resolved from CWD, when there is one) comes first, then
+    every project in the projects registry. This lets a **project-agnostic
+    caller** -- notably the agent-bridge daemon, whose CWD is unrelated to the
+    worktree it is guarding -- resolve a worktree by id without first knowing
+    which project owns it. Never raises: a project that cannot resolve a dir is
+    skipped.
+    """
+    dirs: list[Path] = []
+    seen: set[Path] = set()
+
+    def _add(d: Path | None) -> None:
+        if d is not None and d not in seen:
+            seen.add(d)
+            dirs.append(d)
+
+    try:
+        _add(cfg.tracking_dir())
+    except Exception:
+        pass
+    try:
+        projects = inst.read_projects_registry().get("projects", {})
+    except Exception:
+        projects = {}
+    for name in projects:
+        try:
+            _add(cfg.project_dir(name) / "worktrees")
+        except Exception:
+            continue
+    return dirs
+
+
+def _find_tracking_file(raw_id: str) -> Path | None:
+    """Locate a worktree's tracking YAML across **all** projects, or None.
+
+    Exact stem match wins globally; a unique 4-char (or longer) suffix match is
+    the fallback. An ambiguous suffix (or no match) returns None -- the caller
+    then treats the worktree as untracked (fail-open), never guessing.
+    """
+    import re
+    if re.search(r"[/\\]|\.\.", raw_id):
+        return None
+    tdirs = _all_tracking_dirs()
+    for tdir in tdirs:
+        exact = tdir / f"{raw_id}.yaml"
+        if exact.exists():
+            return exact
+    matches: list[Path] = []
+    for tdir in tdirs:
+        if not tdir.exists():
+            continue
+        matches += [p for p in tdir.glob("*.yaml") if p.stem.endswith(raw_id)]
+    return matches[0] if len(matches) == 1 else None
+
+
+def cmd_head_session(args: argparse.Namespace) -> int:
+    """Emit a worktree's **asserted head session** and its lifecycle state (JSON).
+
+    The ground-layer read that higher layers (agent-bridge's create guard,
+    context-handoff) **derive** the current session from -- the source of truth
+    for "which session is current in this worktree," so no other layer keeps a
+    rival pointer (agent-fabric ``derive-dont-duplicate``).
+
+    Output envelope::
+
+        {"version": 1, "worktree_id": "<id>", "tracked": bool,
+         "head_session": "<session-id>" | null, "active": bool,
+         "state": "active" | "handed-off" | "concluded" | null}
+
+    - ``head_session`` is ``WorktreeRecord.resolved_head_session`` -- the stored
+      head when it is still un-concluded, else the newest non-concluded session
+      (today's "latest is current" fallback), else null.
+    - ``active`` is ``head_session is not None`` -- i.e. the worktree has a
+      current, un-concluded session that a fresh create would collide with.
+    - ``tracked`` is False when no tracking record exists for the worktree (an
+      unknown / untracked worktree): a fail-open signal so a consumer treats it
+      as "no head to guard."
+
+    Resolves the worktree across **all** projects (see :func:`_find_tracking_file`)
+    so the agent-bridge daemon can call it from any CWD. An unknown worktree is
+    **not** an error (exit 0, ``tracked: false``): a guard that cannot find a
+    record must fail *open*, not refuse the create.
+    """
+    raw = args.worktree_id
+    yaml_path = _find_tracking_file(raw)
+    if yaml_path is None:
+        _json_output({
+            "worktree_id": raw,
+            "tracked": False,
+            "head_session": None,
+            "active": False,
+            "state": None,
+        })
+        return 0
+    record = tracking.load_record(yaml_path)
+    head = record.resolved_head_session
+    entry = record.session_entry(head) if head else None
+    _json_output({
+        "worktree_id": record.worktree_id or raw,
+        "tracked": True,
+        "head_session": head,
+        "active": head is not None,
+        "state": (entry.state if entry is not None else None),
+    })
+    return 0
+
+
 def cmd_session_transcript(args: argparse.Namespace) -> int:
     """Emit a single session's renderable transcript events as JSON.
 
@@ -10071,6 +10190,7 @@ COMMAND_MAP = {
     "backfill-sessions": cmd_backfill_sessions,
     "doctor": cmd_doctor,
     "list-sessions": cmd_list_sessions,
+    "head-session": cmd_head_session,
     "session-transcript": cmd_session_transcript,
     "recent-messages": cmd_recent_messages,
     "anchor-check": cmd_anchor_check,
@@ -10243,7 +10363,7 @@ def _git_toplevel(path: Path) -> Path | None:
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "install", "register", "hook",
     "picker", "reap-sessions", "status-updater", "restart", "register-session",
-    "config-migrate",
+    "head-session", "config-migrate",
 }
 
 
