@@ -4005,3 +4005,132 @@ def test_ctrl_space_alias_toggles_like_space():
             assert len(scr.wt_sel) == 0          # toggled it back OFF
 
     asyncio.run(run())
+
+
+# ---------------------------------------------------------------------------
+# Real-framework keyboard integration (pilot.press) -- the F3/F4 safety net.
+#
+# Unlike the tests above (which call scr.handle_key(...) directly), these drive
+# keys through Textual's ACTUAL input pipeline: pilot.press -> Key event ->
+# PickerScreen.on_key (event.stop / prevent_default) -> handle_key. They lock the
+# current keyboard behavior through the real dispatch so the native-focus rewires
+# (moving global keys to Textual BINDINGS in F3, overlays to ModalScreen in F4)
+# can be validated against genuine key events, not a bypass (#88).
+# ---------------------------------------------------------------------------
+
+def test_kbd_real_pipeline_space_toggles_row():
+    """Space through the real pipeline toggles the focused worktree row."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert scr._kind() == "worktrees" and scr.list_records()
+            scr.wt_sel.clear()
+            scr.sel = ("L", 0)
+            await pilot.press("space")
+            await pilot.pause()
+            assert len(scr.wt_sel) == 1          # real event toggled it ON
+            await pilot.press("space")
+            await pilot.pause()
+            assert len(scr.wt_sel) == 0          # and back OFF
+
+    asyncio.run(run())
+
+
+def test_kbd_real_pipeline_down_up_moves_within_list():
+    """↓/↑ through the real pipeline move the focus index within the list."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            if len(scr.list_records()) < 2:
+                return
+            scr.sel = ("L", 0)
+            await pilot.press("down")
+            await pilot.pause()
+            assert scr.sel == ("L", 1)
+            await pilot.press("up")
+            await pilot.pause()
+            assert scr.sel == ("L", 0)
+
+    asyncio.run(run())
+
+
+def test_kbd_real_pipeline_bracket_pivot_roundtrip():
+    """The pivot-rotate shortcut (]/[) survives the real pipeline (incl. the
+    left_square_bracket/right_square_bracket framework aliases) and round-trips
+    back to the starting pivot."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            start = scr.htab
+            await pilot.press("]")
+            await pilot.pause()
+            await pilot.press("[")
+            await pilot.pause()
+            assert scr.htab == start             # rotate there and back
+
+    asyncio.run(run())
+
+
+def test_kbd_real_pipeline_enter_opens_submenu_escape_closes():
+    """Enter on a worktree row opens its overlay and Escape closes it -- proving
+    the modal overlay captures REAL key events end-to-end (the property F4's
+    ModalScreen conversion must preserve)."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert scr.list_records()
+            scr.wt_sel.clear()
+            scr.sel = ("L", 0)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert scr.submenu is not None        # overlay opened via real event
+            await pilot.press("escape")
+            await pilot.pause()
+            assert scr.submenu is None            # and closed via real event
+
+    asyncio.run(run())
+
+
+def test_kbd_real_pipeline_escape_opens_quit_confirm_and_n_cancels():
+    """With nothing to collapse, Escape through the real pipeline raises the
+    quit-confirm overlay; 'n' cancels it -- the top-level guard against an
+    accidental exit, validated end-to-end."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            scr.wt_sel.clear()
+            scr.sel = ("BTN", 0)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert scr.quit_confirm is not None   # guard raised via real event
+            await pilot.press("n")
+            await pilot.pause()
+            assert scr.quit_confirm is None       # and dismissed
+
+    asyncio.run(run())
+
