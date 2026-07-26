@@ -19,6 +19,20 @@ from . import config as cfg
 
 WorktreeStatus = Literal["active", "complete", "pushed", "finalized", "orphaned"]
 
+# A Copilot session's asserted lifecycle state within its worktree
+# (session-lifecycle / agent-fabric vision `single-current-session-per-worktree`):
+#   * "active"     -- a current, resumable session (the default; a stopped or
+#                     ended session is still active/resumable until concluded).
+#   * "handed-off" -- concluded *into* a successor via a handoff cutover.
+#   * "concluded"  -- deliberately finished / sunset.
+# Conclusion is an ASSERTED act, never inferred from liveness. Absent (legacy
+# records) = "active", so no migration is needed.
+SessionState = Literal["active", "handed-off", "concluded"]
+
+# States that mean "no longer the current session" -- a head pointing at one of
+# these is stale and the resolved head advances past it.
+_CONCLUDED_SESSION_STATES: tuple[SessionState, ...] = ("handed-off", "concluded")
+
 # A worktree's owner class. "session" = an interactive agent session (the
 # default, shown in the launch Picker). "system" = a daemon-owned worktree
 # created per work-session by a background service. "bridge" = an
@@ -61,12 +75,26 @@ MANAGED_ORIGINS: tuple[WorktreeOrigin, ...] = ("system", "delegate")
 
 @dataclass
 class SessionEntry:
-    """A Copilot session associated with a worktree."""
+    """A Copilot session associated with a worktree.
+
+    ``state`` is the session's **asserted lifecycle** (session-lifecycle):
+    ``active`` (the default -- a current, resumable session), ``handed-off``
+    (concluded *into* a successor via a handoff cutover; ``successor`` names it),
+    or ``concluded`` (deliberately finished/sunset). Conclusion is an **asserted**
+    act, never inferred from liveness (a stopped/ended session is still ``active``
+    -- i.e. resumable -- until concluded). ``successor`` / ``predecessor`` form
+    the durable two-way chain of sessions in one worktree. All three default to
+    the legacy shape (``active`` / no links) and are omitted from YAML unless set,
+    so existing records stay byte-identical.
+    """
 
     session_id: str
     started_at: str
     pid: int | None = None
     ended_at: str | None = None
+    state: SessionState = "active"
+    successor: str | None = None
+    predecessor: str | None = None
 
 
 @dataclass
@@ -138,6 +166,14 @@ class WorktreeRecord:
     # PR/feedback worktree whose own ``sessions`` list is empty can still resume
     # with the source session's context instead of cold-starting.
     parent_session: str | None = None
+    # session-lifecycle: the worktree's CURRENT session -- its head pointer. An
+    # agent is a series of sessions in one worktree; this names the one that is
+    # current *now*. It is an ASSERTED pointer (moved by an explicit conclude /
+    # handoff / new-session), never inferred from timestamps. Absent (legacy) =
+    # derive the head from the sessions list (newest non-concluded) via
+    # ``resolved_head_session``, so existing YAMLs need no migration. Emitted
+    # only when set, keeping the common-case YAML byte-identical.
+    head_session: str | None = None
     # #2178: for a bridge-spawned worktree, the *caller* worktree that requested
     # it (agent-bridge's caller_id == the caller's WORKTREE_ID). Lets the Picker
     # "Jump to caller" from a bridge worktree back to the worktree that kicked it.
@@ -194,6 +230,39 @@ class WorktreeRecord:
         though it stays lifecycle-managed (see ``MANAGED_KINDS``).
         """
         return self.resolved_origin in MANAGED_ORIGINS
+
+    def session_entry(self, session_id: str) -> SessionEntry | None:
+        """Return the tracked ``SessionEntry`` for ``session_id``, or None."""
+        for entry in self.sessions or ():
+            if entry.session_id == session_id:
+                return entry
+        return None
+
+    @property
+    def resolved_head_session(self) -> str | None:
+        """The worktree's current session -- stored head, else derived.
+
+        Resolution (session-lifecycle):
+          1. the stored ``head_session`` when it names a session that still
+             exists and is **not** concluded/handed-off (a stale head that was
+             concluded without advancing does not win);
+          2. otherwise the **newest non-concluded** session in ``sessions``
+             (by list order -- registration order), preserving today's
+             "latest is current" behavior for un-annotated records;
+          3. otherwise None (no sessions, or all concluded).
+
+        This is the record-local head. Filesystem-precise "latest by
+        workspace.yaml mtime" resolution still lives in ``sessions.py``; this
+        derivation is authoritative for the *asserted* lifecycle.
+        """
+        if self.head_session:
+            entry = self.session_entry(self.head_session)
+            if entry is not None and entry.state not in _CONCLUDED_SESSION_STATES:
+                return self.head_session
+        for entry in reversed(self.sessions or ()):
+            if entry.state not in _CONCLUDED_SESSION_STATES:
+                return entry.session_id
+        return None
 
     def active_pr(self) -> PRRecord | None:
         """Return the PR a no-selector command should target.
@@ -360,11 +429,23 @@ def load_record(path: Path) -> WorktreeRecord:
                         ea = ea.isoformat()
                     elif ea == "null" or ea is None:
                         ea = None
+                    # session-lifecycle: state + two-way links. Unknown/absent
+                    # state degrades to "active" so a stray value never hides a
+                    # resumable session.
+                    st_raw = entry.get("state")
+                    st_val: SessionState = (
+                        st_raw if st_raw in ("active", "handed-off", "concluded")
+                        else "active")
+                    succ = entry.get("successor")
+                    pred = entry.get("predecessor")
                     sessions_list.append(SessionEntry(
                         session_id=str(entry["session_id"]),
                         started_at=str(sa),
                         pid=int(entry["pid"]) if entry.get("pid") else None,
                         ended_at=str(ea) if ea else None,
+                        state=st_val,
+                        successor=str(succ) if succ else None,
+                        predecessor=str(pred) if pred else None,
                     ))
 
     # Parse PR records -- the multi-PR ``prs:`` list (preferred) or a legacy
@@ -418,6 +499,8 @@ def load_record(path: Path) -> WorktreeRecord:
         origin=origin_val,
         parent_session=(str(data["parent_session"])
                         if data.get("parent_session") else None),
+        head_session=(str(data["head_session"])
+                      if data.get("head_session") else None),
         caller_worktree=(str(data["caller_worktree"])
                          if data.get("caller_worktree") else None),
         follow_up=bool(data.get("follow_up", False)),
@@ -514,6 +597,10 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
     # common-case session-record YAML stays byte-identical (no churn).
     if record.parent_session:
         content += f"parent_session: {record.parent_session}\n"
+    # session-lifecycle: the current-session head pointer. Emitted only when
+    # explicitly set (absent = derived), keeping legacy YAMLs byte-identical.
+    if record.head_session:
+        content += f"head_session: {record.head_session}\n"
     # #2178: bridge caller-worktree pointer. Emitted only when set.
     if record.caller_worktree:
         content += f"caller_worktree: {record.caller_worktree}\n"
@@ -545,6 +632,9 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
                 "started_at": s.started_at,
                 **({"pid": s.pid} if s.pid else {}),
                 **({"ended_at": s.ended_at} if s.ended_at else {}),
+                **({"state": s.state} if s.state != "active" else {}),
+                **({"successor": s.successor} if s.successor else {}),
+                **({"predecessor": s.predecessor} if s.predecessor else {}),
             }
             for s in record.sessions
         ]
@@ -657,6 +747,108 @@ def mark_resumed(record: WorktreeRecord) -> None:
     record.resume_count += 1
     record.last_resumed_at = _now_iso()
     save_record(record)
+
+
+# ---------------------------------------------------------------------------
+# Session lifecycle -- asserted head pointer + conclusion + two-way chain
+# (agent-fabric vision `single-current-session-per-worktree`). These are the
+# ground-layer PRIMITIVES; higher layers (agent-bridge creation guard,
+# context-handoff cutover) call them and DERIVE from ``resolved_head_session``
+# rather than keeping a rival notion of "current". Each persists via
+# ``save_record`` unless ``save=False`` (batch several then save once).
+# ---------------------------------------------------------------------------
+
+class SessionLifecycleError(ValueError):
+    """Raised when an asserted session transition names an unknown session."""
+
+
+def set_head_session(
+    record: WorktreeRecord, session_id: str, *, save: bool = True
+) -> None:
+    """Assert ``session_id`` as the worktree's current (head) session.
+
+    The session must already be tracked. This is the explicit head move a
+    caller makes when it adopts / takes over a worktree.
+    """
+    if record.session_entry(session_id) is None:
+        raise SessionLifecycleError(
+            f"session {session_id} is not tracked on worktree "
+            f"{record.worktree_id}"
+        )
+    record.head_session = session_id
+    if save:
+        save_record(record)
+
+
+def conclude_session(
+    record: WorktreeRecord,
+    session_id: str,
+    *,
+    state: SessionState = "concluded",
+    save: bool = True,
+) -> None:
+    """Assert a session's conclusion (``concluded`` or ``handed-off``).
+
+    Conclusion is a deliberate act, never inferred from liveness. When the
+    concluded session was the head, the head pointer is **advanced** to the
+    newest remaining non-concluded session (or cleared to None when none
+    remains), so a worktree never keeps a concluded session as its current one.
+    """
+    if state not in _CONCLUDED_SESSION_STATES:
+        raise SessionLifecycleError(
+            f"conclude state must be one of {_CONCLUDED_SESSION_STATES}, "
+            f"got {state!r}"
+        )
+    entry = record.session_entry(session_id)
+    if entry is None:
+        raise SessionLifecycleError(
+            f"session {session_id} is not tracked on worktree "
+            f"{record.worktree_id}"
+        )
+    entry.state = state
+    # Advance the head off a concluded session. ``head_session=None`` lets
+    # ``resolved_head_session`` derive the newest survivor.
+    if record.head_session == session_id:
+        record.head_session = None
+        record.head_session = record.resolved_head_session
+    if save:
+        save_record(record)
+
+
+def link_succession(
+    record: WorktreeRecord,
+    predecessor_id: str,
+    successor_id: str,
+    *,
+    predecessor_state: SessionState = "handed-off",
+    save: bool = True,
+) -> None:
+    """Record a handoff: chain predecessor -> successor and move the head.
+
+    Writes the durable **two-way link** (``predecessor.successor`` and
+    ``successor.predecessor``), concludes the predecessor (default
+    ``handed-off``), and moves the head to the successor. This is the primitive
+    context-handoff's cutover calls so the lineage of sessions in a worktree is
+    traversable in both directions. Both sessions must be tracked.
+    """
+    pred = record.session_entry(predecessor_id)
+    succ = record.session_entry(successor_id)
+    if pred is None:
+        raise SessionLifecycleError(
+            f"predecessor {predecessor_id} is not tracked on worktree "
+            f"{record.worktree_id}"
+        )
+    if succ is None:
+        raise SessionLifecycleError(
+            f"successor {successor_id} is not tracked on worktree "
+            f"{record.worktree_id}"
+        )
+    pred.successor = successor_id
+    pred.state = predecessor_state
+    succ.predecessor = predecessor_id
+    record.head_session = successor_id
+    if save:
+        save_record(record)
 
 
 def create_new_record(
@@ -776,11 +968,22 @@ def register_session(
                 save_record(record)
                 return
 
+        # session-lifecycle: capture whether the worktree already has a current
+        # session BEFORE appending, so we can initialize the head for a fresh
+        # worktree (or one whose prior sessions all concluded) without moving an
+        # existing active head.
+        had_active_head = record.resolved_head_session is not None
         record.sessions.append(SessionEntry(
             session_id=session_id,
             started_at=_now_iso(),
             pid=pid,
         ))
+        # Never moves an existing active head -- a second session arriving while
+        # one is still current is the contested case the agent-bridge creation
+        # guard prevents upstream; here we only record it, leaving the asserted
+        # head untouched.
+        if not had_active_head:
+            record.head_session = session_id
         save_record(record)
 
 
