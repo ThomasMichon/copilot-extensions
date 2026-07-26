@@ -350,13 +350,23 @@ _install_service() {
         cat > "$ENV_FILE" << 'ENVEOF'
 # agent-dispatch coordinator service environment (edit + `systemctl --user restart agent-dispatch`)
 AGENT_DISPATCH_HOST=127.0.0.1
-AGENT_DISPATCH_PORT=9847
+# AGENT_DISPATCH_PORT=9847  # unset = OS-assigned dynamic port (Stage C), advertised via the rendezvous file; uncomment to pin
 # AGENT_DISPATCH_DB=%h/.agent-dispatch/tasks.db   # default; uncomment to override
 # AGENT_DISPATCH_TOKEN=                            # set to require bearer auth
 ENVEOF
         _ok "Service env: $ENV_FILE (defaults; edit to expose on the network / add a token)"
     else
-        _skip "Service env already exists: $ENV_FILE"
+        # Migrate the stale old-default port pin (durable-service-transport Stage C):
+        # early installs wrote AGENT_DISPATCH_PORT=9847, which defeats the dynamic
+        # bind. The coordinator now binds an OS-assigned port and advertises it via
+        # the rendezvous file, so drop the old-default pin (discovery-capable clients
+        # follow the dynamic port). Leave any operator-chosen custom port untouched.
+        if grep -qE '^[[:space:]]*AGENT_DISPATCH_PORT[[:space:]]*=[[:space:]]*9847[[:space:]]*$' "$ENV_FILE"; then
+            sed -i -E 's|^[[:space:]]*AGENT_DISPATCH_PORT[[:space:]]*=[[:space:]]*9847[[:space:]]*$|# AGENT_DISPATCH_PORT=9847  # migrated (Stage C): unset = OS-assigned dynamic port advertised via the rendezvous file; uncomment to pin|' "$ENV_FILE"
+            _ok "Service env: migrated stale AGENT_DISPATCH_PORT=9847 pin (Stage C) -> OS-assigned dynamic port"
+        else
+            _skip "Service env already exists: $ENV_FILE"
+        fi
     fi
     cat > "$UNIT_DIR/$SYSTEMD_UNIT" << EOF
 [Unit]
