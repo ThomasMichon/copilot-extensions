@@ -153,6 +153,28 @@ Open **⚙ Configuration → Profiles** to Tab-cycle the Copilot backend profile
 declared in `copilot_profiles`, toggle a host→target mapping, and **Apply** (or
 **Reset**) the grid. These are user-local settings, never repo-managed.
 
+## Auditing & testing the render (headless)
+
+The Picker is a **deterministic renderer**: `PickerScreen.render()` composes the
+whole screen (topbar, pivots, machine tabs, borders, body, footer, and any modal
+overlay) into a single styled Rich `Text`, and the app takes an injected data
+`source`. Given the same data, the same grid comes out — so a state can be
+captured with no live terminal and no human watching:
+
+- **Screenshot for auditing** — `<project> picker screenshot` renders the current
+  picker headlessly and writes it out for review. `--format svg` (default) is a
+  standalone screenshot with colours preserved; `--format text` is the plain
+  character grid; `--format ansi` is the colour-aware grid. `--out FILE` writes a
+  file (else stdout), `--live` uses the multi-machine SSH source. Resolves the
+  project from the cwd like every other verb (or pass `--project`).
+- **Character-grid tests** — `picker_tui.capture` (`screen_to_text` /
+  `screen_to_ansi` / `screen_to_svg`, and `capture()` to spin the app headlessly
+  over a fixture fleet) lets tests assert *what the operator would see* — focus,
+  selection, state blocks, colour-as-semantics — as a golden character grid.
+  `tests/test_picker_capture.py` snapshots representative states
+  (`tests/goldens/picker/`); regenerate goldens with
+  `AGENT_WORKTREES_UPDATE_GOLDENS=1`.
+
 ## Keeping the list honest
 
 The Picker reflects **live** state, not a snapshot: rows carry git-derived

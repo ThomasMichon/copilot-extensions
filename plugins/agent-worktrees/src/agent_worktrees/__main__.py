@@ -5686,6 +5686,38 @@ def cmd_picker(args: argparse.Namespace) -> int:
             output.info(f"mock picker exited · decision: {decision!r}")
         return 0
 
+    if action == "screenshot":
+        # Deterministic headless capture of the picker for auditing: render the
+        # current worktree state to an SVG "screenshot" (or a character grid)
+        # with no live terminal and no human watching. Realizes visions/picker
+        # Features/auditable-testable-rendering.
+        import sys as _sys
+
+        from .picker_tui import capture as _capture
+
+        live = bool(getattr(args, "live", False))
+        fmt = getattr(args, "picker_format", "svg")
+        out = getattr(args, "out", None)
+        if live:
+            from .picker_tui import data_ssh as _source
+        else:
+            from .picker_tui import data_local as _source
+        caps = _capture.capture(_source, live=live)
+        content = caps[fmt]
+        if out:
+            Path(out).write_text(content, encoding="utf-8")
+            if as_json:
+                _json_output({"screenshot": out, "format": fmt,
+                              "bytes": len(content)})
+            else:
+                output.ok(f"picker {fmt} screenshot -> {out} "
+                          f"({len(content)} bytes)")
+        else:
+            _sys.stdout.write(content)
+            if not content.endswith("\n"):
+                _sys.stdout.write("\n")
+        return 0
+
     # status
     persisted = None
     try:
@@ -9130,7 +9162,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("picker",
                        help="Inspect / opt out of the Textual worktree picker "
                             "(the default) for this machine")
-    p.add_argument("picker_action", choices=["enable", "disable", "status", "mock"],
+    p.add_argument("picker_action",
+                   choices=["enable", "disable", "status", "mock", "screenshot"],
                    nargs="?", default="status",
                    help="the Textual picker is the default everywhere; "
                         "disable writes new_picker:false to opt this machine out "
@@ -9138,8 +9171,19 @@ def build_parser() -> argparse.ArgumentParser:
                         "(~/.agent-worktrees/config.yaml); status (default) "
                         "reports the effective value; mock launches the picker "
                         "in the mock dev sandbox (real data, simulated actions, "
-                        "no side effects)")
+                        "no side effects); screenshot renders the picker "
+                        "headlessly and captures it for auditing")
     p.add_argument("--json", action="store_true", help="Emit a JSON result")
+    p.add_argument("--out", default=None,
+                   help="screenshot: write the capture to this file "
+                        "(default: stdout)")
+    p.add_argument("--format", dest="picker_format",
+                   choices=["svg", "text", "ansi"], default="svg",
+                   help="screenshot format: svg (audit screenshot), text (plain "
+                        "character grid), ansi (colour-aware grid)")
+    p.add_argument("--live", action="store_true",
+                   help="screenshot: render the multi-machine SSH source "
+                        "instead of the local-only source")
 
     # validate
     p = sub.add_parser("validate", help="Validate core infrastructure files")
