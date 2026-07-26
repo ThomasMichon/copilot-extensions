@@ -1,5 +1,14 @@
 # copilot-extensions
 
+<p align="center">
+  <img src="docs/assets/worktree-picker.gif"
+       alt="The Worktree Picker: an interactive terminal front door listing worktree-backed agents across machines and environments, with live state, sync tags, and per-worktree actions"
+       width="900">
+</p>
+
+<p align="center"><em>The <strong>Worktree Picker</strong> — the front door to your fleet of
+worktree-backed agents, at a glance across every machine.</em></p>
+
 A [Copilot CLI](https://docs.github.com/copilot/how-tos/use-copilot-agents/use-copilot-cli)
 plugin suite that gives every session its **own isolated git worktree** and lets
 your agents **talk to each other** — across worktrees, across machines, and into
