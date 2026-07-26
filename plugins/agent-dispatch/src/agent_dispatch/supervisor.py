@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from .client import DispatchClient, DispatchError
 from .queue import SpawnState, Status
@@ -123,9 +123,14 @@ class Supervisor:
     ``max_concurrent`` caps the number of in-flight spawns (``reserving`` +
     ``spawned`` reservations). ``max_attempts`` bounds failed spawn attempts per
     task before it is **dead-lettered** (held, no longer auto-retried; 0 disables
-    the bound). ``repo`` scopes the lane; ``labels`` (if given) restricts spawning
-    to queued tasks carrying at least one of them -- the **opt-in** so a
-    supervisor only embodies work explicitly marked for autopilot.
+    the bound). ``label_max_attempts`` optionally overrides that bound **per
+    label** (agent type): a task carrying an overridden label uses the override
+    instead of the global ``max_attempts`` (the most-permissive override wins when
+    a task carries several). This decouples unrelated task classes -- e.g.
+    reviving one label's dead-lettered tasks (raise its bound) without also
+    reviving another label's stale tasks. ``repo`` scopes the lane; ``labels`` (if
+    given) restricts spawning to queued tasks carrying at least one of them -- the
+    **opt-in** so a supervisor only embodies work explicitly marked for autopilot.
     """
 
     def __init__(
@@ -137,6 +142,7 @@ class Supervisor:
         labels: Sequence[str] | None = None,
         max_concurrent: int = 1,
         max_attempts: int = 3,
+        label_max_attempts: Mapping[str, int] | None = None,
         supervisor_id: str | None = None,
         heartbeat: bool = True,
         liveness_fn: LivenessFn | None = None,
@@ -150,6 +156,12 @@ class Supervisor:
         #: Bound on failed spawn attempts per task before it is dead-lettered
         #: (held, no longer auto-retried). 0 disables the bound (retry forever).
         self.max_attempts = max(0, int(max_attempts))
+        #: Per-label override of ``max_attempts`` (0 = retry-forever for that
+        #: label). A task's effective bound is the max override across its labels,
+        #: falling back to the global ``max_attempts`` when none apply.
+        self.label_max_attempts = {
+            str(k): max(0, int(v)) for k, v in (label_max_attempts or {}).items()
+        }
         self.supervisor_id = supervisor_id or f"supervisor-{uuid.uuid4().hex[:8]}"
         self.heartbeat = heartbeat
         self.liveness_fn = liveness_fn or _default_liveness
@@ -247,20 +259,36 @@ class Supervisor:
                 pass
         return held
 
-    def _dead_lettered(self) -> set[str]:
-        """Task ids that have exhausted their spawn attempts (>= ``max_attempts``
-        failed reservations) and should no longer be auto-retried.
+    def _effective_max_attempts(self, task: dict) -> int:
+        """The dead-letter bound for ``task``: the most-permissive per-label
+        override across its labels, else the global ``max_attempts`` (0 = no
+        bound)."""
+        overrides = [
+            self.label_max_attempts[label]
+            for label in (task.get("labels") or [])
+            if label in self.label_max_attempts
+        ]
+        return max(overrides) if overrides else self.max_attempts
 
-        Held, not lost: the failed reservation history stays queryable
-        (``reservations list --state failed``) and an operator can intervene.
-        Returns an empty set when the bound is disabled (``max_attempts == 0``).
-        """
-        if not self.max_attempts:
-            return set()
+    def _failed_spawn_counts(self) -> dict[str, int]:
+        """Count FAILED spawn reservations per task id (the dead-letter signal)."""
         counts: dict[str, int] = {}
         for res in self.client.list_reservations(state=SpawnState.FAILED, limit=1000):
             counts[res["task_id"]] = counts.get(res["task_id"], 0) + 1
-        return {tid for tid, n in counts.items() if n >= self.max_attempts}
+        return counts
+
+    def _is_dead_lettered(self, task: dict, failed_counts: dict[str, int]) -> bool:
+        """Whether ``task`` has exhausted its (possibly per-label) spawn-attempt
+        bound and should no longer be auto-retried.
+
+        Held, not lost: the failed reservation history stays queryable
+        (``reservations list --state failed``) and an operator can intervene.
+        A bound of 0 (global or per-label) disables dead-lettering for the task.
+        """
+        cap = self._effective_max_attempts(task)
+        if not cap:
+            return False
+        return failed_counts.get(task["id"], 0) >= cap
 
     def poll_once(self, *, now: float | None = None) -> list[str]:
         """One supervision cycle: reconcile, hold live leases, then spawn eligible
@@ -272,16 +300,16 @@ class Supervisor:
         self.reconcile()
         if self.heartbeat:
             self.hold_live_leases()
-        dead_lettered = self._dead_lettered()
+        failed_counts = self._failed_spawn_counts()
         active = len(self._active_reservations())
         spawned: list[str] = []
         for task in self._eligible(now):
             if active >= self.max_concurrent:
                 break
-            if task["id"] in dead_lettered:
+            if self._is_dead_lettered(task, failed_counts):
                 log.warning(
                     "task %s dead-lettered (>= %d failed spawn attempts); skipping",
-                    task["id"], self.max_attempts,
+                    task["id"], self._effective_max_attempts(task),
                 )
                 continue
             if self.capacity_gate is not None and not self.capacity_gate(task):

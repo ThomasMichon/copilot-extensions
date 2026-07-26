@@ -84,6 +84,13 @@ UNIT_DIR="$HOME/.config/systemd/user"
 ENV_FILE="$INSTALL_DIR/service.env"
 SUPERVISOR_ENV_FILE="$INSTALL_DIR/supervisor.env"
 SUPERVISOR_LAUNCHER="$INSTALL_DIR/supervise-service.sh"
+# PATH baked into the supervisor unit + launcher so embody spawns can find
+# `agent-worktrees` and `copilot` (installed under ~/.local/bin and ~/.bun/bin).
+# A systemd --user unit's default PATH omits both, so every embody spawn failed
+# with "CLI not found on PATH" and dead-lettered the task (ThomasMichon/
+# copilot-extensions#89). Placed BEFORE the EnvironmentFile in the unit so an
+# operator can still override PATH in supervisor.env.
+SUPERVISOR_PATH="$LOCAL_BIN:$HOME/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # === install-contract:v3 source-kind -- keep byte-identical across plugins ===
 _source_kind() {
@@ -466,6 +473,10 @@ AGENT_DISPATCH_SUPERVISE_INTERVAL=30
 AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT=1
 # Max failed spawn attempts before a task is dead-lettered (default 3; 0=disable):
 AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS=3
+# Per-label overrides of MAX_ATTEMPTS (space- or comma-separated LABEL=N pairs),
+# e.g. "intelligence-dampener=3 coherence-adjudication-board=1" so raising one
+# label's bound never revives another label's stale tasks (N=0 = retry forever):
+AGENT_DISPATCH_SUPERVISE_LABEL_MAX_ATTEMPTS=
 # Extra raw flags appended to the invocation (advanced; e.g. fleet mode:
 #   --pool host-a,host-b --origin wheatley):
 AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=
@@ -485,11 +496,16 @@ ENVEOF
 # Do not edit; edit supervisor.env instead.
 set -euo pipefail
 export PYTHONUTF8=1
+# Guarantee the embody toolchain (agent-worktrees, copilot) is reachable even
+# if this launcher is run outside the unit (hand-enable / different invocation):
+# ~/.local/bin and ~/.bun/bin are prepended (copilot-extensions#89).
+export PATH="\$HOME/.local/bin:\$HOME/.bun/bin:\$PATH"
 
 labels="\${AGENT_DISPATCH_SUPERVISE_LABELS:-}"
 interval="\${AGENT_DISPATCH_SUPERVISE_INTERVAL:-30}"
 max_concurrent="\${AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT:-1}"
 max_attempts="\${AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS:-3}"
+label_max_attempts="\${AGENT_DISPATCH_SUPERVISE_LABEL_MAX_ATTEMPTS:-}"
 extra="\${AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS:-}"
 
 args=(supervise --all-repos --interval "\$interval" \\
@@ -509,6 +525,13 @@ if [[ "\$have_label" -eq 0 ]]; then
     exit 78  # EX_CONFIG
 fi
 
+# Per-label max-attempts overrides (LABEL=N pairs, comma- or space-separated).
+label_max_attempts="\${label_max_attempts//,/ }"
+for lm in \$label_max_attempts; do
+    [[ -n "\$lm" ]] || continue
+    args+=(--label-max-attempts "\$lm")
+done
+
 # shellcheck disable=SC2206
 [[ -n "\$extra" ]] && args+=(\$extra)
 
@@ -524,6 +547,7 @@ Wants=$SYSTEMD_UNIT
 
 [Service]
 Type=simple
+Environment=PATH=$SUPERVISOR_PATH
 EnvironmentFile=-$SUPERVISOR_ENV_FILE
 Environment=PYTHONUTF8=1
 ExecStart=$SUPERVISOR_LAUNCHER

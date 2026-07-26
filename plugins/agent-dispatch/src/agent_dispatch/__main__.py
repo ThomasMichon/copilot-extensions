@@ -997,6 +997,29 @@ def _cmd_webhook(args: argparse.Namespace) -> int:
     return 0
 
 
+def _parse_label_max_attempts(items: list[str] | None) -> dict[str, int]:
+    """Parse repeated ``LABEL=N`` flags into a ``{label: max_attempts}`` map.
+
+    Raises ``SystemExit`` on a malformed entry (bad shape or non-int N) so the
+    supervisor fails loudly at startup rather than silently ignoring a policy.
+    """
+    out: dict[str, int] = {}
+    for raw in items or []:
+        label, sep, num = str(raw).partition("=")
+        label = label.strip()
+        if not sep or not label:
+            raise SystemExit(
+                f"--label-max-attempts expects LABEL=N, got {raw!r}"
+            )
+        try:
+            out[label] = max(0, int(num.strip()))
+        except ValueError:
+            raise SystemExit(
+                f"--label-max-attempts: N must be an integer, got {num!r}"
+            )
+    return out
+
+
 def _cmd_supervise(args: argparse.Namespace) -> int:
     """Run the embody spawn supervisor over the lane (once, or as a loop).
 
@@ -1046,6 +1069,9 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             labels=args.label or None,
             max_concurrent=args.max_concurrent,
             max_attempts=args.max_attempts,
+            label_max_attempts=_parse_label_max_attempts(
+                getattr(args, "label_max_attempts", None)
+            ),
             heartbeat=not args.no_heartbeat,
             capacity_gate=capacity_gate,
         )
@@ -1501,6 +1527,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-attempts", type=int, default=3,
         help="dead-letter a task after this many failed spawn attempts "
              "(default: 3; 0 = retry forever)",
+    )
+    p.add_argument(
+        "--label-max-attempts", action="append", metavar="LABEL=N",
+        help="per-label override of --max-attempts (repeatable), e.g. "
+             "--label-max-attempts intelligence-dampener=3 so raising one "
+             "label's bound doesn't revive another label's stale tasks "
+             "(N=0 = retry forever for that label)",
     )
     p.add_argument(
         "--no-heartbeat", action="store_true",

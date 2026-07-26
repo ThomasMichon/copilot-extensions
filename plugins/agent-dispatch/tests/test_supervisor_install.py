@@ -49,6 +49,26 @@ def test_supervisor_unit_name_and_launcher_defined():
     assert "_install_supervisor_service()" in text
 
 
+def test_supervisor_unit_and_launcher_put_local_bin_on_path():
+    """The supervisor unit + launcher must place ~/.local/bin (and ~/.bun/bin)
+    on PATH so embody spawns can find agent-worktrees/copilot -- a systemd
+    --user unit's default PATH omits them (copilot-extensions#89)."""
+    text = _text()
+    # A PATH is defined and baked into the unit's [Service] block...
+    assert "SUPERVISOR_PATH=" in text
+    assert "Environment=PATH=$SUPERVISOR_PATH" in text
+    assert ".local/bin" in text and ".bun/bin" in text
+    # ...before the EnvironmentFile, so supervisor.env can still override it.
+    svc = text.index("Environment=PATH=$SUPERVISOR_PATH")
+    envfile = text.index("EnvironmentFile=-$SUPERVISOR_ENV_FILE")
+    assert svc < envfile, (
+        "Environment=PATH must precede EnvironmentFile so supervisor.env can "
+        "override PATH"
+    )
+    # ...and the launcher prepends them too (covers a hand-run launcher).
+    assert 'export PATH="\\$HOME/.local/bin:\\$HOME/.bun/bin:\\$PATH"' in text
+
+
 def test_supervise_invocation_is_all_repos_scoped():
     """The launcher must invoke ``supervise --all-repos`` -- never a bare
     short ``--repo`` form that silently filters every task out (the lane gotcha).
