@@ -9359,6 +9359,41 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true",
                     help="Emit JSON (default; accepted for caller compatibility)")
 
+    # conclude-session -- assert a session's conclusion (handed-off | concluded)
+    sp = sub.add_parser(
+        "conclude-session",
+        help="Assert a session concluded (handed-off|concluded); advances the "
+             "head off it (JSON) -- the durable write context-handoff's cutover "
+             "shells to",
+    )
+    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id",
+                    required=True, help="Worktree ID (full or 4-char suffix)")
+    sp.add_argument("--session", "--session-id", dest="session_id",
+                    required=True, help="Copilot session ID to conclude")
+    sp.add_argument("--state", choices=["handed-off", "concluded"],
+                    default="handed-off",
+                    help="Conclusion kind (default: handed-off)")
+    sp.add_argument("--json", action="store_true",
+                    help="Emit JSON (default; accepted for caller compatibility)")
+
+    # link-succession -- write the two-way predecessor<->successor handoff link
+    sp = sub.add_parser(
+        "link-succession",
+        help="Write the two-way predecessor<->successor link, conclude the "
+             "predecessor, and move the head to the successor (JSON)",
+    )
+    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id",
+                    required=True, help="Worktree ID (full or 4-char suffix)")
+    sp.add_argument("--predecessor", required=True,
+                    help="The outgoing session ID (marked handed-off)")
+    sp.add_argument("--successor", required=True,
+                    help="The incoming session ID (the new head)")
+    sp.add_argument("--predecessor-state", dest="predecessor_state",
+                    choices=["handed-off", "concluded"], default="handed-off",
+                    help="Predecessor conclusion kind (default: handed-off)")
+    sp.add_argument("--json", action="store_true",
+                    help="Emit JSON (default; accepted for caller compatibility)")
+
     # session-transcript -- emit a session's renderable events as JSON
     sp = sub.add_parser(
         "session-transcript",
@@ -10018,6 +10053,92 @@ def cmd_head_session(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_conclude_session(args: argparse.Namespace) -> int:
+    """Assert a session's conclusion (``handed-off`` | ``concluded``) -- JSON out.
+
+    The ground-layer WRITE that context-handoff's live cutover shells to so the
+    retired session leaves a durable, asserted lifecycle record -- not merely a
+    killed pane. Concluding the outgoing session ``handed-off`` advances the head
+    off it (``resolved_head_session`` derives the newest survivor, or None),
+    which is what closes the spent-baton replay: neither a stale replay nor the
+    agent-bridge create guard treats the worktree as still holding the concluded
+    session. The successor completes the two-way link when it registers
+    (:func:`tracking.register_session`).
+
+    Resolves the worktree across all projects (a higher-layer caller's CWD is
+    unrelated to the worktree). Unlike the read-only ``head-session``, an unknown
+    worktree or session is a real error here -- a mutation must not silently
+    no-op.
+    """
+    raw = args.worktree_id
+    yaml_path = _find_tracking_file(raw)
+    if yaml_path is None:
+        return _json_error(f"Worktree not found: {raw}")
+    state = getattr(args, "state", "handed-off")
+    with tracking._RecordLock(yaml_path):
+        record = tracking.load_record(yaml_path)
+        try:
+            tracking.conclude_session(
+                record, args.session_id, state=state, save=False)
+        except tracking.SessionLifecycleError as e:
+            return _json_error(str(e))
+        # Persist to the RESOLVED path, not ``record.yaml_path`` -- this verb is
+        # project-agnostic (``_find_tracking_file`` searches every project), and
+        # runs with no active project, so a bare ``save_record`` would recompute
+        # the wrong (or an unresolvable) path.
+        tracking.save_record(record, yaml_path)
+    record = tracking.load_record(yaml_path)
+    entry = record.session_entry(args.session_id)
+    _json_output({
+        "worktree_id": record.worktree_id or raw,
+        "session": args.session_id,
+        "state": (entry.state if entry is not None else None),
+        "head_session": record.resolved_head_session,
+    })
+    return 0
+
+
+def cmd_link_succession(args: argparse.Namespace) -> int:
+    """Write the durable two-way handoff link and move the head -- JSON out.
+
+    The explicit ground-layer form of ``tracking.link_succession``: chains
+    ``predecessor -> successor`` in both directions, concludes the predecessor
+    (default ``handed-off``), and moves the head to the successor. Both sessions
+    must already be tracked -- so this is for callers that know BOTH ids (e.g. an
+    explicit, non-cutover handoff or a manual repair). The live cutover instead
+    concludes the predecessor via ``conclude-session`` and lets
+    ``register_session`` stamp the successor half once its id exists.
+    """
+    raw = args.worktree_id
+    yaml_path = _find_tracking_file(raw)
+    if yaml_path is None:
+        return _json_error(f"Worktree not found: {raw}")
+    with tracking._RecordLock(yaml_path):
+        record = tracking.load_record(yaml_path)
+        try:
+            tracking.link_succession(
+                record, args.predecessor, args.successor,
+                predecessor_state=getattr(
+                    args, "predecessor_state", "handed-off"),
+                save=False,
+            )
+        except tracking.SessionLifecycleError as e:
+            return _json_error(str(e))
+        # Persist to the RESOLVED path (see cmd_conclude_session): this verb is
+        # project-agnostic and runs with no active project.
+        tracking.save_record(record, yaml_path)
+    record = tracking.load_record(yaml_path)
+    pred = record.session_entry(args.predecessor)
+    _json_output({
+        "worktree_id": record.worktree_id or raw,
+        "predecessor": args.predecessor,
+        "successor": args.successor,
+        "predecessor_state": (pred.state if pred is not None else None),
+        "head_session": record.resolved_head_session,
+    })
+    return 0
+
+
 def cmd_session_transcript(args: argparse.Namespace) -> int:
     """Emit a single session's renderable transcript events as JSON.
 
@@ -10191,6 +10312,8 @@ COMMAND_MAP = {
     "doctor": cmd_doctor,
     "list-sessions": cmd_list_sessions,
     "head-session": cmd_head_session,
+    "conclude-session": cmd_conclude_session,
+    "link-succession": cmd_link_succession,
     "session-transcript": cmd_session_transcript,
     "recent-messages": cmd_recent_messages,
     "anchor-check": cmd_anchor_check,
@@ -10363,7 +10486,7 @@ def _git_toplevel(path: Path) -> Path | None:
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "install", "register", "hook",
     "picker", "reap-sessions", "status-updater", "restart", "register-session",
-    "head-session", "config-migrate",
+    "head-session", "conclude-session", "link-succession", "config-migrate",
 }
 
 

@@ -254,6 +254,34 @@ function retireCutoverPane(cwd, pane) {
   }
 }
 
+// Durably conclude THIS (old) session as `handed-off` in the agent-worktrees
+// ground layer, so a live cutover leaves an ASSERTED lifecycle record -- not
+// merely a killed pane. This is the cutover's durable write: it advances the
+// worktree head off the retired session, which closes the spent-baton replay
+// (#2249-class) -- neither a stale replay nor agent-bridge's create guard then
+// treats the worktree as still holding the concluded session. The successor
+// stamps the other half of the two-way link when it registers (agent-worktrees
+// register_session auto-adopts a pending handoff), so the ground layer owns
+// both writes and no rival pointer is kept (derive-dont-duplicate). Best-effort:
+// never blocks or fails the cutover. Returns true when the conclusion landed.
+function concludeOldSessionHandedOff(cwd, sid) {
+  if (!sid) return false;
+  try {
+    const wtDir = agentWorktreesGet("worktree-dir", cwd);
+    const worktree = wtDir ? basename(wtDir) : null;
+    if (!worktree) return false;
+    runCli("agent-worktrees", [
+      "conclude-session",
+      "--worktree", worktree,
+      "--session", sid,
+      "--state", "handed-off",
+    ], { cwd, timeout: 10000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Store a handoff as a proposed, handoff-labeled agent-dispatch task pinned to
 // the current worktree; payload = the handoff markdown. Returns the task id, or
 // null if anything fails (the caller then falls back to a session file).
@@ -763,6 +791,13 @@ const session = await joinSession({
         // moment it is actually picked up, on every resume path, and a
         // never-consumed handoff correctly stays claimable for retry. The old
         // session therefore does NOT pre-complete the task here.
+        // Durably record the lineage: conclude THIS session as `handed-off` in
+        // the ground layer so the cutover writes an asserted lifecycle record,
+        // not just a killed pane. This advances the worktree head off this
+        // session (closing the #2249-class spent-baton replay); the successor
+        // stamps the two-way link's other half when it registers. Best-effort --
+        // the cutover already succeeded, so a failure here must not undo it.
+        concludeOldSessionHandedOff(cwd, state.sessionId);
         // Arm self-retire: this old session quits on the next session.idle
         // (agent-stop of this turn); the successor already holds the seed.
         state.cutover = { oldPane: result.old_pane || null, retired: false };

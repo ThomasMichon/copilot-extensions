@@ -242,6 +242,93 @@ class TestRegisterSessionHeadInit:
         assert rec.session_entry("sess-A").pid == 999
 
 
+class TestRegisterSessionCompletesHandoffLink:
+    """The successor half of the two-way link is stamped when the seeded
+    successor REGISTERS -- the first moment its (fresh) session id exists. A
+    live cutover concludes the predecessor ``handed-off`` (context-handoff
+    shelling ``conclude-session``); the ground layer then auto-adopts the next
+    session as its successor here.
+    """
+
+    def test_next_session_after_handoff_completes_link(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        # Cutover: the predecessor is concluded ``handed-off`` (successor unknown).
+        conclude_session(rec, "old", state="handed-off")
+        assert load_record(tmp_tracking_dir / "wt-1.yaml").resolved_head_session is None
+        # The seeded successor registers -> the link is completed both ways and
+        # the head moves to it.
+        tracking.register_session("wt-1", "new")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        old, new = rec.session_entry("old"), rec.session_entry("new")
+        assert old.state == "handed-off" and old.successor == "new"
+        assert new.predecessor == "old"
+        assert rec.head_session == "new"
+        assert rec.resolved_head_session == "new"
+
+    def test_concluded_predecessor_gets_no_auto_successor(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        # A ``concluded`` (sunset/finished) session expects no successor, so the
+        # next session must NOT auto-link to it -- only ``handed-off`` does.
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        conclude_session(rec, "old", state="concluded")
+        tracking.register_session("wt-1", "new")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.session_entry("old").successor is None
+        assert rec.session_entry("new").predecessor is None
+        # Head still initializes to the fresh session (the concluded one is not
+        # active), just without a lineage link.
+        assert rec.head_session == "new"
+
+    def test_active_predecessor_is_not_adopted(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        # A second session arriving while the incumbent is still ACTIVE is the
+        # contested case (guarded upstream); it must not be linked as a successor.
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "sess-A")
+        tracking.register_session("wt-1", "sess-B")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.session_entry("sess-A").successor is None
+        assert rec.session_entry("sess-B").predecessor is None
+        assert rec.head_session == "sess-A"
+
+    def test_only_most_recent_pending_handoff_is_adopted(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        # Two handed-off predecessors both awaiting a successor -> the newest one
+        # (registration order) adopts the fresh session; the older stays pending.
+        _rec(tmp_tracking_dir, sessions=[
+            SessionEntry("h1", "t", state="handed-off"),
+            SessionEntry("h2", "t", state="handed-off"),
+        ])
+        tracking.register_session("wt-1", "new")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.session_entry("h2").successor == "new"
+        assert rec.session_entry("new").predecessor == "h2"
+        assert rec.session_entry("h1").successor is None
+
+    def test_already_linked_handoff_not_readopted(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        # A handed-off session that ALREADY has a successor is not re-adopted by
+        # a later fresh session (its baton was already picked up).
+        _rec(tmp_tracking_dir, sessions=[
+            SessionEntry("old", "t", state="handed-off", successor="mid"),
+            SessionEntry("mid", "t"),
+        ])
+        tracking.register_session("wt-1", "new")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.session_entry("old").successor == "mid"
+        assert rec.session_entry("new").predecessor is None
+
+
 class TestHeadSessionCommand:
     """The ``head-session`` CLI read -- the ground-layer derive point that
     agent-bridge's create guard consumes (agent-fabric `derive-dont-duplicate`).
@@ -369,3 +456,91 @@ class TestFindTrackingFileAcrossProjects:
 
         # A traversal/glob id never touches the filesystem.
         assert m._find_tracking_file("../etc/passwd") is None
+
+
+class TestConcludeAndLinkCommands:
+    """The mutating ground-layer CLI verbs context-handoff shells to at cutover.
+    Both resolve the worktree project-agnostically and persist to the RESOLVED
+    path (they run with no active project, so a bare save would misfire).
+    """
+
+    @staticmethod
+    def _run(monkeypatch, tracking_dir: Path, fn_name: str, **ns) -> dict:
+        from agent_worktrees import __main__ as m
+
+        captured: dict = {}
+        monkeypatch.setattr(m, "_all_tracking_dirs", lambda: [tracking_dir])
+        monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
+        rc = getattr(m, fn_name)(argparse.Namespace(json=True, **ns))
+        captured["_rc"] = rc
+        return captured
+
+    def test_conclude_session_hands_off_and_clears_head(
+        self, tmp_tracking_dir: Path, monkeypatch
+    ):
+        _rec(tmp_tracking_dir, sessions=[SessionEntry("solo", "t")])
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        rec.head_session = "solo"
+        save_record(rec, tmp_tracking_dir / "wt-1.yaml")
+        out = self._run(
+            monkeypatch, tmp_tracking_dir, "cmd_conclude_session",
+            worktree_id="wt-1", session_id="solo", state="handed-off",
+        )
+        assert out["_rc"] == 0
+        assert out["state"] == "handed-off"
+        assert out["head_session"] is None
+        # Persisted to the resolved path.
+        r = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert r.session_entry("solo").state == "handed-off"
+
+    def test_conclude_unknown_session_errors(
+        self, tmp_tracking_dir: Path, monkeypatch
+    ):
+        _rec(tmp_tracking_dir, sessions=[SessionEntry("solo", "t")])
+        out = self._run(
+            monkeypatch, tmp_tracking_dir, "cmd_conclude_session",
+            worktree_id="wt-1", session_id="ghost", state="handed-off",
+        )
+        assert out["_rc"] != 0
+
+    def test_conclude_unknown_worktree_errors(
+        self, tmp_tracking_dir: Path, monkeypatch
+    ):
+        out = self._run(
+            monkeypatch, tmp_tracking_dir, "cmd_conclude_session",
+            worktree_id="nope", session_id="x", state="handed-off",
+        )
+        assert out["_rc"] != 0
+
+    def test_link_succession_writes_two_way_and_moves_head(
+        self, tmp_tracking_dir: Path, monkeypatch
+    ):
+        _rec(tmp_tracking_dir, sessions=[
+            SessionEntry("old", "t"), SessionEntry("new", "t"),
+        ])
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        rec.head_session = "old"
+        save_record(rec, tmp_tracking_dir / "wt-1.yaml")
+        out = self._run(
+            monkeypatch, tmp_tracking_dir, "cmd_link_succession",
+            worktree_id="wt-1", predecessor="old", successor="new",
+            predecessor_state="handed-off",
+        )
+        assert out["_rc"] == 0
+        assert out["head_session"] == "new"
+        r = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert r.session_entry("old").successor == "new"
+        assert r.session_entry("old").state == "handed-off"
+        assert r.session_entry("new").predecessor == "old"
+        assert r.head_session == "new"
+
+    def test_link_succession_unknown_session_errors(
+        self, tmp_tracking_dir: Path, monkeypatch
+    ):
+        _rec(tmp_tracking_dir, sessions=[SessionEntry("old", "t")])
+        out = self._run(
+            monkeypatch, tmp_tracking_dir, "cmd_link_succession",
+            worktree_id="wt-1", predecessor="old", successor="ghost",
+            predecessor_state="handed-off",
+        )
+        assert out["_rc"] != 0
