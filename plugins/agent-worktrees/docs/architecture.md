@@ -504,6 +504,17 @@ the registry is the seam that lets them convert one at a time. The real-framewor
 `pilot.press` harness validates the modal end-to-end (open on Esc/q, Stay/Quit,
 `app.exit` only on confirm).
 
+**Second overlay migrated: the Profiles Apply confirm (F4).** The
+`ProfConfirmScreen(ModalScreen[bool])` replaces the `prof_confirm` manual
+overlay by the same pattern: `_apply_profiles` computes the add/remove diff and
+`push_screen`s the modal with the diff payload; the screen renders the
+per-host `+`/`-` review and the destructive-regeneration caution, and returns
+via `dismiss(True|False)`. On `True` the callback runs `_start_profiles_run(cf)`
+(the diff is now passed as an argument rather than read back off picker state);
+on `False` it is a no-op. It too is *absent* from the overlay registry. The same
+`pilot.press` harness validates it end-to-end (Apply confirms and runs the
+per-host progress, Esc cancels without writing).
+
 **Global shortcuts are Textual `BINDINGS` (F3).** The truly-global pivot/machine
 shortcuts (`ctrl+shift+left/right`, `ctrl+left/right`) are owned by the
 framework's binding system, not the manual dispatcher: `PickerScreen.BINDINGS`

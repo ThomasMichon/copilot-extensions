@@ -34,6 +34,20 @@ def _quit_modal_open(scr):
     return any(isinstance(s, QuitConfirmScreen) for s in scr.app.screen_stack)
 
 
+def _prof_modal(scr):
+    """The F4 ProfConfirmScreen instance on the app's screen stack, or None."""
+    from agent_worktrees.picker_tui.engine import ProfConfirmScreen
+    for s in scr.app.screen_stack:
+        if isinstance(s, ProfConfirmScreen):
+            return s
+    return None
+
+
+def _prof_modal_open(scr):
+    """True when the F4 ProfConfirmScreen (Profiles Apply confirm) is stacked."""
+    return _prof_modal(scr) is not None
+
+
 def _fixture_source():
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
     local = ("lambda-core", "Win")
@@ -1614,11 +1628,12 @@ def test_profiles_apply_writes_changed_columns():
             assert scr.active_button() == "PA"
             scr._activate()
             await pilot.pause()
-            # Apply now opens a confirm dialog showing the add/remove diff.
-            assert scr.prof_confirm is not None
-            assert scr.prof_confirm["changed"]
-            scr._key_prof_confirm("enter")     # confirm -> runs the progress
+            # Apply now pushes a confirm ModalScreen showing the add/remove diff.
+            assert _prof_modal_open(scr)
+            assert _prof_modal(scr)._cf["changed"]
+            await pilot.press("enter")         # confirm -> runs the progress
             await pilot.pause()
+            assert not _prof_modal_open(scr)
             assert scr.progress is not None
             assert scr.progress["op"] == "profiles"
             # Drive the executor to completion, then close (Enter) to commit.
@@ -1656,13 +1671,13 @@ def test_profiles_apply_confirm_cancel_is_noop():
             scr.sel = ("BTN", 0)
             scr._activate()
             await pilot.pause()
-            assert scr.prof_confirm is not None
+            assert _prof_modal_open(scr)
             # Confirm shows the concrete add/remove diff for the changed host.
-            added, removed = scr.prof_confirm["diffs"][hi]
+            added, removed = _prof_modal(scr)._cf["diffs"][hi]
             assert added or removed
-            scr._key_prof_confirm("escape")    # cancel
+            await pilot.press("escape")        # cancel
             await pilot.pause()
-        assert scr.prof_confirm is None
+            assert not _prof_modal_open(scr)
         assert scr.progress is None
         assert src._applied_calls == []        # nothing written
         assert scr.grid_dirty()                # edit preserved, not applied
@@ -1714,7 +1729,8 @@ def test_profiles_unavailable_column_is_readonly():
             assert not scr.grid_dirty()
             # Apply finds nothing to change (the column is excluded).
             scr._apply_profiles()
-            assert scr.prof_confirm is None
+            await pilot.pause()
+            assert not _prof_modal_open(scr)
             # The legend keys the agent/shell rows and flags the unavailable col.
             body = "\n".join(v.text.plain for v in scr.build_body(118))
             assert "plain SSH login shell" in body
@@ -1741,8 +1757,9 @@ def test_profiles_apply_progress_carries_restart_summary():
             scr.pcol = hi
             scr._toggle_cell()
             scr._apply_profiles()
-            assert scr.prof_confirm is not None
-            scr._key_prof_confirm("enter")
+            await pilot.pause()
+            assert _prof_modal_open(scr)
+            await pilot.press("enter")
             await pilot.pause()
             assert scr.progress["op"] == "profiles"
             assert scr.progress["n_add"] + scr.progress["n_rem"] >= 1

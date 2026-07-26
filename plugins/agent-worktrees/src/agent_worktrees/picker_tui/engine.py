@@ -458,7 +458,6 @@ class PickerScreen(Widget):
                                          # settle before reconciling wt_sel (#2258 P3-7)
         self.maint_menu = None        # Maintenance actions menu modal (#1345)
         self.maint_menu_idx = 0
-        self.prof_confirm = None      # Profiles Apply confirm dialog (add/remove diff)
         self.progress = None          # cleanup/sync progress sub-dialog
         self.executor = None          # real maintenance executor
         # Real cleanup/sync ops are the DEFAULT: the Maintenance actions
@@ -1611,16 +1610,26 @@ class PickerScreen(Widget):
         if not changed:
             self.debug = "Apply · nothing changed"
             return
-        self.prof_confirm = {"changed": changed, "diffs": diffs, "idx": 0}
+        # Migrated to a native Textual ``ModalScreen`` (#88 F4): the confirm is a
+        # pushed screen that owns the stack, backdrop, focus, and key routing and
+        # returns its verdict via ``dismiss(True|False)``. Confirming runs the
+        # per-host progress dialog; cancelling is a no-op.
+        cf = {"changed": changed, "diffs": diffs}
 
-    def _start_profiles_run(self):
+        def _after(confirmed):
+            if confirmed:
+                self._start_profiles_run(cf)
+            else:
+                self.debug = "Apply cancelled"
+        self.app.push_screen(ProfConfirmScreen(cf, list(self.host_cols)), _after)
+
+    def _start_profiles_run(self, cf):
         """Execute the confirmed Apply: one progress item per changed host."""
         from . import maintenance
-        changed = self.prof_confirm["changed"]
-        diffs = self.prof_confirm.get("diffs", {})
+        changed = cf["changed"]
+        diffs = cf.get("diffs", {})
         n_add = sum(len(diffs[hi][0]) for hi in changed if hi in diffs)
         n_rem = sum(len(diffs[hi][1]) for hi in changed if hi in diffs)
-        self.prof_confirm = None
         items, tasks = [], []
         for hi in changed:
             _lbl, hm, he = self.host_cols[hi]
@@ -1640,13 +1649,6 @@ class PickerScreen(Widget):
             "n_add": n_add, "n_rem": n_rem,
         }
         self.executor.start()
-
-    def _key_prof_confirm(self, key):
-        if key in ("enter", "space"):
-            self._start_profiles_run()
-        elif key in ("escape", "q"):
-            self.prof_confirm = None
-            self.debug = "Apply cancelled"
 
     def _make_apply_task(self, machine, env, hi):
         """A progress task that writes one host column; ``ok`` drives ✓/✗."""
@@ -2654,8 +2656,6 @@ class PickerScreen(Widget):
         if self.progress:
             hints = ("Esc cancel" if not self.progress["done"]
                      else "Enter/Esc close")
-        elif self.prof_confirm:
-            hints = "Enter: apply (regenerates terminal profiles) · Esc cancel"
         elif self.submenu:
             cur = self.submenu["actions"][self.submenu_idx]
             wid = self.submenu["rec"].get("id4")
@@ -2950,60 +2950,6 @@ class PickerScreen(Widget):
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)
 
-    def _overlay_prof_confirm(self, lines, W, top_off, body_h):
-        """Confirm dialog for Profiles Apply: the exact terminal profiles each
-        changed host column will gain (+) or lose (-) before anything runs."""
-        cf = self.prof_confirm
-        changed = cf["changed"]
-        pw = min(W - 8, 72)
-        n_add = sum(len(cf["diffs"][hi][0]) for hi in changed)
-        n_rem = sum(len(cf["diffs"][hi][1]) for hi in changed)
-        header = f"─ Apply profiles · {len(changed)} host column(s) "
-        panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
-                      style=C_BAND)]
-        panel.append(self._prow(
-            f" Review: +{n_add} added, -{n_rem} removed", pw, style=C_HEADER))
-        panel.append(self._prow("", pw))
-
-        def _t(s):
-            return f"{s.machine} {s.env} · {s.kind}"
-
-        maxr = max(4, body_h - 9)
-        shown = 0
-        for hi in changed:
-            if shown >= maxr:
-                panel.append(self._prow(" …", pw, style=C_MUTED))
-                break
-            _lbl, hm, he = self.host_cols[hi]
-            added, removed = cf["diffs"][hi]
-            panel.append(self._prow(f" {hm} {he}", pw, style="bold grey85"))
-            shown += 1
-            for s in added:
-                if shown >= maxr:
-                    break
-                panel.append(self._prow(f"   + {_t(s)}", pw, style=C_READY))
-                shown += 1
-            for s in removed:
-                if shown >= maxr:
-                    break
-                panel.append(self._prow(f"   - {_t(s)}", pw, style=C_WARN))
-                shown += 1
-        panel.append(self._prow("", pw))
-        panel.append(self._prow(
-            " ⚠ Regenerates terminal profiles · fully restart the terminal to "
-            "see changes.", pw, style=C_CAUTION))
-        panel.append(self._prow("", pw))
-        brow = Text("│", style=C_DIM)
-        inner = Text("   ")
-        inner.append(" Apply ", style=C_BTN_SEL)
-        inner.append("   Cancel ", style=C_BTN)
-        inner.append(" " * max(0, pw - 2 - inner.cell_len))
-        brow.append_text(inner)
-        brow.append("│", style=C_DIM)
-        panel.append(brow)
-        panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
-        self._blit_panel(lines, W, panel, top_off, body_h)
-
     def _overlay_scopedlg(self, dlg, lines, W, top_off, body_h, om=False,
                           dock_bottom=False):
         opts = dlg["opts"]
@@ -3166,8 +3112,6 @@ class PickerScreen(Widget):
         return [
             ("progress", self._key_progress,
              lambda ln, W, o, b: self._overlay_progress(ln, W, o, b)),
-            ("prof_confirm", self._key_prof_confirm,
-             lambda ln, W, o, b: self._overlay_prof_confirm(ln, W, o, b)),
             ("submenu", self._key_submenu,
              lambda ln, W, o, b: self._overlay_submenu(ln, W, o, b)),
             ("msgview", self._key_msgview,
@@ -4528,6 +4472,97 @@ class QuitConfirmScreen(ModalScreen[bool]):
         elif key in ("enter", "space"):
             event.stop()
             self.dismiss(self.idx == 0)
+
+
+class ProfConfirmScreen(ModalScreen[bool]):
+    """Native modal confirm for a Profiles *Apply* (#88 F4).
+
+    The second picker overlay migrated off the manual render/dispatch model onto
+    a Textual ``ModalScreen``. It lists the exact terminal profiles each changed
+    host column will gain (``+``) or lose (``-``) before anything is written, and
+    returns its verdict via ``dismiss(True|False)`` -- ``True`` runs the per-host
+    Apply, ``False`` cancels. Key handling mirrors the former ``_key_prof_confirm``
+    exactly (Enter/Space apply, Esc/q cancel) and lives in ``on_key`` so it fires
+    as the active screen. The regeneration is destructive to the terminal app's
+    profile list, so the explicit add/remove diff is always shown first.
+    """
+
+    CSS = """
+    ProfConfirmScreen { align: center middle; background: $background 55%; }
+    ProfConfirmScreen > #prof-dialog { width: auto; height: auto; max-height: 90%; }
+    """
+
+    def __init__(self, cf, host_cols) -> None:
+        super().__init__()
+        self._cf = cf
+        self._host_cols = host_cols
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._panel(), id="prof-dialog")
+
+    def _panel(self) -> Panel:
+        cf = self._cf
+        changed = cf["changed"]
+        n_add = sum(len(cf["diffs"][hi][0]) for hi in changed)
+        n_rem = sum(len(cf["diffs"][hi][1]) for hi in changed)
+
+        def _t(s):
+            return f"{s.machine} {s.env} · {s.kind}"
+
+        # Cap the visible diff rows so a very large change set never overruns the
+        # terminal (mirrors the former overlay's ``maxr`` guard); Textual sizes
+        # the rest via ``max-height`` + auto.
+        try:
+            maxr = max(4, self.app.size.height - 12)
+        except Exception:
+            maxr = 24
+
+        body = Text()
+        body.append(f"\n Review: +{n_add} added, -{n_rem} removed\n\n",
+                    style=C_HEADER)
+        shown = 0
+        truncated = False
+        for hi in changed:
+            if shown >= maxr:
+                truncated = True
+                break
+            _lbl, hm, he = self._host_cols[hi]
+            added, removed = cf["diffs"][hi]
+            body.append(f" {hm} {he}\n", style="bold grey85")
+            shown += 1
+            for s in added:
+                if shown >= maxr:
+                    truncated = True
+                    break
+                body.append(f"   + {_t(s)}\n", style=C_READY)
+                shown += 1
+            for s in removed:
+                if shown >= maxr:
+                    truncated = True
+                    break
+                body.append(f"   - {_t(s)}\n", style=C_WARN)
+                shown += 1
+        if truncated:
+            body.append("   …\n", style=C_MUTED)
+        body.append("\n")
+        body.append(" ⚠ Regenerates terminal profiles · fully restart the "
+                    "terminal to see changes.\n\n", style=C_CAUTION)
+        btns = Text("   ")
+        btns.append(" Apply ", style=C_BTN_SEL)
+        btns.append("   Cancel ", style=C_BTN)
+        body.append_text(btns)
+        body.append("\n\n Enter: apply · Esc cancel", style=C_MUTED)
+        return Panel(body, title=f"Apply profiles · {len(changed)} host "
+                     f"column(s)", border_style=C_BAND, width=72)
+
+    def on_key(self, event) -> None:
+        key = event.key
+        if key in ("enter", "space"):
+            event.stop()
+            self.dismiss(True)
+        elif key in ("escape", "q"):
+            event.stop()
+            self.dismiss(False)
 
 
 class PickerApp(App):
