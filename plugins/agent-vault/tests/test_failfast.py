@@ -124,6 +124,40 @@ def test_provider_resolves_inline_even_when_failfast(empty_registry, monkeypatch
     assert stored[kpdb] == "broker-pw"
 
 
+def test_passwordless_unlock_runs_providers_silently(empty_registry, monkeypatch, kpdb):
+    """A bare `unlock` (no password, no prompt) runs the unlock-source providers
+    and unlocks silently -- the broker-first path for `vault unlock` on every
+    machine, matching get/has. No interactive prompt is consulted."""
+    svc = VaultService()
+    stored: dict = {}
+    monkeypatch.setattr(svc.cli, "has_password", lambda db=None: db in stored)
+    monkeypatch.setattr(svc.cli, "verify_password", lambda db, pw: pw == "broker-pw")
+    monkeypatch.setattr(svc.cli, "set_password", lambda db, pw: stored.__setitem__(db, pw))
+    _no_prompt(monkeypatch)
+
+    empty_registry.register_unlock_provider(lambda ctx: "broker-pw", name="broker")
+
+    resp = svc.handle_request({"action": "unlock", "kpdb": kpdb})
+    assert resp["ok"] is True
+    assert stored[kpdb] == "broker-pw"
+
+
+def test_passwordless_unlock_without_provider_returns_needs_unlock(
+    empty_registry, monkeypatch, kpdb
+):
+    """A bare `unlock` with no provider and no prompt fail-fasts to an actionable
+    needs_unlock (so the CLI falls back to a prompt), not the old flat
+    'No password provided' error."""
+    svc = VaultService()
+    monkeypatch.setattr(svc.cli, "has_password", lambda db=None: False)
+    _no_prompt(monkeypatch)
+
+    resp = svc.handle_request({"action": "unlock", "kpdb": kpdb})
+    assert resp["ok"] is False
+    assert resp["needs_unlock"] is True
+    assert "agent-vault unlock" in resp["error"]
+
+
 def test_provider_resolves_during_prompt_cooldown(empty_registry, monkeypatch, kpdb):
     """A prompt cooldown must NOT suppress the non-interactive providers.
 

@@ -14,6 +14,10 @@ import pytest
 
 from agent_vault import cli
 
+# The real implementation, captured before the autouse stub replaces the module
+# binding -- the unit test below exercises it directly.
+_REAL_PROVIDER_ONLY_UNLOCK = cli._provider_only_unlock
+
 
 @pytest.fixture(autouse=True)
 def _no_terminal_env(monkeypatch):
@@ -22,6 +26,53 @@ def _no_terminal_env(monkeypatch):
 
 def _boom(*_a, **_k):
     raise AssertionError("must not be called")
+
+
+@pytest.fixture(autouse=True)
+def _no_provider_unlock(monkeypatch):
+    """Default the broker-first provider unlock to a miss so the prompt-fallback
+    paths are exercised; the broker-first test overrides this explicitly."""
+    monkeypatch.setattr(cli, "_provider_only_unlock", lambda: False)
+
+
+# ---------------------------------------------------------------------------
+# Broker-first: a held provider password unlocks silently, before any prompt
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("is_wsl", [True, False])
+def test_provider_unlock_wins_before_any_prompt(monkeypatch, is_wsl):
+    """When an unlock-source provider (e.g. the operator-held broker deposit)
+    resolves, `auto_unlock` returns True without touching any prompt path."""
+    monkeypatch.setattr(cli, "IS_WSL", is_wsl)
+    monkeypatch.setattr(cli, "_provider_only_unlock", lambda: True)
+    monkeypatch.setattr(cli, "_has_controlling_tty", _boom)
+    monkeypatch.setattr(cli, "_terminal_unlock_local", _boom)
+    monkeypatch.setattr(cli, "_server_prompted_unlock", _boom)
+    monkeypatch.setattr(cli, "prompt_password", _boom)
+    assert cli.auto_unlock() is True
+
+
+def test_provider_only_unlock_sends_passwordless_unlock(monkeypatch):
+    """`_provider_only_unlock` sends a passwordless unlock (no prompt) and maps the
+    daemon's ok verdict to a bool -- the daemon runs its providers server-side."""
+    seen = {}
+
+    def _send(request, timeout=None):
+        seen["request"] = request
+        seen["timeout"] = timeout
+        return {"ok": True}
+
+    monkeypatch.setattr(cli, "_provider_only_unlock", _REAL_PROVIDER_ONLY_UNLOCK)
+    monkeypatch.setattr(cli, "send_command", _send)
+    assert cli._provider_only_unlock() is True
+    assert seen["request"] == {"action": "unlock"}
+    assert "password" not in seen["request"]
+    assert seen["request"].get("prompt") is None
+    # A needs_unlock / unreachable answer is a miss.
+    monkeypatch.setattr(cli, "send_command", lambda *a, **k: {"ok": False, "needs_unlock": True})
+    assert cli._provider_only_unlock() is False
+    monkeypatch.setattr(cli, "send_command", lambda *a, **k: None)
+    assert cli._provider_only_unlock() is False
 
 
 # ---------------------------------------------------------------------------
