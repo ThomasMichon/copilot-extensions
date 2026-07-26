@@ -42,7 +42,7 @@ import json
 import os
 import socket
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -114,6 +114,7 @@ class Endpoint:
     pid: int | None = None
     started_at: str | None = None
     source: str = "file"
+    alt: tuple[Endpoint, ...] = ()
 
     def __post_init__(self) -> None:
         if self.transport not in VALID_TRANSPORTS:
@@ -122,6 +123,25 @@ class Endpoint:
             )
         if not self.address:
             raise ValueError("endpoint address must be non-empty")
+
+    def usable(self, accept: Callable[[str], bool]) -> Endpoint | None:
+        """Pick the endpoint dialable in the caller's context.
+
+        Returns ``self`` when its transport passes ``accept``; otherwise the first
+        :attr:`alt` whose transport passes (a service that binds several transports
+        advertises the native one as primary and the cross-boundary one -- e.g. TCP
+        for a WSL guest that can't open the host's named pipe -- as an alternate);
+        else ``None``. The chosen alternate inherits this endpoint's ``source`` so
+        the caller keeps the resolved provenance.
+        """
+        if accept(self.transport):
+            return self
+        for e in self.alt:
+            if accept(e.transport):
+                return Endpoint(
+                    transport=e.transport, address=e.address, source=self.source
+                )
+        return None
 
     @classmethod
     def parse(cls, spec: str, *, source: str = "file") -> Endpoint:
@@ -150,23 +170,41 @@ class Endpoint:
         return host, int(port)
 
     def to_record(self) -> dict:
-        """The on-disk JSON record (keys per the pattern doc; ``endpoint`` = address)."""
-        return {
+        """The on-disk JSON record (keys per the pattern doc; ``endpoint`` = address).
+
+        A service that also listens on secondary transports advertises them in an
+        optional ``alt`` array (``[{transport, endpoint}, ...]``); the key is
+        omitted when there are none, so a single-endpoint record is byte-identical
+        to before and old readers ignore the field.
+        """
+        rec = {
             "schema": SCHEMA,
             "transport": self.transport,
             "endpoint": self.address,
             "pid": self.pid,
             "started_at": self.started_at,
         }
+        if self.alt:
+            rec["alt"] = [{"transport": e.transport, "endpoint": e.address} for e in self.alt]
+        return rec
 
     @classmethod
     def from_record(cls, data: dict, *, source: str = "file") -> Endpoint:
+        alt = tuple(
+            cls(transport=t, address=a, source=source)
+            for entry in (data.get("alt") or [])
+            for t, a in [
+                (str(entry.get("transport", "")).strip(), str(entry.get("endpoint", "")).strip())
+            ]
+            if t in VALID_TRANSPORTS and a
+        )
         return cls(
             transport=str(data["transport"]),
             address=str(data["endpoint"]),
             pid=int(data["pid"]) if data.get("pid") is not None else None,
             started_at=(str(data["started_at"]) if data.get("started_at") is not None else None),
             source=source,
+            alt=alt,
         )
 
 
@@ -187,18 +225,23 @@ def write_endpoint(
     *,
     pid: int | None = None,
     started_at: str | None = None,
+    alt: Iterable[tuple[str, str]] | None = None,
 ) -> Path:
     """Advertise a bound endpoint by writing the rendezvous file **atomically**.
 
     Writes a temp file in the same directory and ``os.replace()``\\ s it over the
     target, so a concurrent reader never sees a half-written record. Call it on
-    every bind (the port/pid may change; newest bind wins). Returns the file path.
+    every bind (the port/pid may change; newest bind wins). ``alt`` names any
+    secondary ``(transport, address)`` endpoints the service also listens on (for
+    cross-boundary discovery); pass ``None``/empty for the common single-endpoint
+    case. Returns the file path.
     """
     ep = Endpoint(
         transport=transport,
         address=address,
         pid=pid if pid is not None else os.getpid(),
         started_at=started_at or utc_now_iso(),
+        alt=tuple(Endpoint(transport=t, address=a) for t, a in (alt or ())),
     )
     d = Path(runtime_dir)
     d.mkdir(parents=True, exist_ok=True)

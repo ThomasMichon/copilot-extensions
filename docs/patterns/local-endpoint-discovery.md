@@ -81,7 +81,8 @@ client computes the path from the service name with no lookup:
   "transport": "unix" | "pipe" | "tcp",
   "endpoint": "/home/u/.agent-x/run/x.sock" | "\\\\.\\pipe\\agent-x" | "127.0.0.1:52731",
   "pid": 48213,
-  "started_at": "2026-07-16T22:41:09Z"
+  "started_at": "2026-07-16T22:41:09Z",
+  "alt": [ { "transport": "tcp", "endpoint": "127.0.0.1:52731" } ]
 }
 ```
 
@@ -90,6 +91,15 @@ client computes the path from the service name with no lookup:
 - `endpoint` is the concrete address for that transport.
 - `pid` + `started_at` let a client detect a **stale** file (no such process, or
   the socket no longer accepts) and fail loud rather than dial a ghost.
+- `alt` (optional) lists **secondary** endpoints the same service also listens on,
+  for a client that can't use the native primary. A service may bind more than one
+  transport (e.g. a Windows daemon on both a named pipe *and* a loopback TCP port);
+  it advertises the OS-native one as `transport`/`endpoint` and the rest under
+  `alt`, so a **cross-boundary** client — a WSL guest that can't open the host's
+  named pipe — falls to a dialable alternate instead of finding no endpoint. The
+  key is omitted when there are none (a single-endpoint record is unchanged), and
+  a reader that doesn't know `alt` simply ignores it, so the field is fully
+  backward-compatible with `schema: 1`.
 
 **Write/read discipline.**
 

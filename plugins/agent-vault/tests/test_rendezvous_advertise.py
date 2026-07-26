@@ -12,7 +12,7 @@ def test_posix_prefers_unix_socket():
         socket_path="/run/agent-vault-service.sock",
         tcp_bound=True,
         tcp_address="127.0.0.1:19999",
-    ) == ("unix", "/run/agent-vault-service.sock")
+    ) == ("unix", "/run/agent-vault-service.sock", [])
 
 
 def test_windows_uses_tcp():
@@ -22,10 +22,12 @@ def test_windows_uses_tcp():
         socket_path="/run/x.sock",
         tcp_bound=True,
         tcp_address="127.0.0.1:19999",
-    ) == ("tcp", "127.0.0.1:19999")
+    ) == ("tcp", "127.0.0.1:19999", [])
 
 
-def test_windows_prefers_named_pipe_over_tcp():
+def test_windows_prefers_named_pipe_and_carries_tcp_alt():
+    # #3426: the pipe stays primary, but the TCP endpoint rides along as an
+    # alternate so a WSL guest that can't open the pipe still finds a port.
     assert advertised_endpoint(
         is_windows=True,
         unix_bound=False,
@@ -33,11 +35,24 @@ def test_windows_prefers_named_pipe_over_tcp():
         pipe_bound=True,
         pipe_address=r"\\.\pipe\agent-vault",
         tcp_bound=True,
-        tcp_address="127.0.0.1:19999",
-    ) == ("pipe", r"\\.\pipe\agent-vault")
+        tcp_address="127.0.0.1:52731",
+    ) == ("pipe", r"\\.\pipe\agent-vault", [("tcp", "127.0.0.1:52731")])
+
+
+def test_windows_pipe_without_tcp_has_no_alt():
+    assert advertised_endpoint(
+        is_windows=True,
+        unix_bound=False,
+        socket_path="/run/x.sock",
+        pipe_bound=True,
+        pipe_address=r"\\.\pipe\agent-vault",
+        tcp_bound=False,
+        tcp_address=None,
+    ) == ("pipe", r"\\.\pipe\agent-vault", [])
 
 
 def test_posix_ignores_pipe_and_uses_unix():
+    # POSIX is unchanged: no TCP alt (WSL->Linux is not a facility path).
     assert advertised_endpoint(
         is_windows=False,
         unix_bound=True,
@@ -46,7 +61,7 @@ def test_posix_ignores_pipe_and_uses_unix():
         pipe_address=r"\\.\pipe\agent-vault",
         tcp_bound=True,
         tcp_address="127.0.0.1:19999",
-    ) == ("unix", "/run/agent-vault.sock")
+    ) == ("unix", "/run/agent-vault.sock", [])
 
 
 def test_posix_without_unix_falls_back_to_tcp():
@@ -56,7 +71,7 @@ def test_posix_without_unix_falls_back_to_tcp():
         socket_path="/run/x.sock",
         tcp_bound=True,
         tcp_address="127.0.0.1:52731",
-    ) == ("tcp", "127.0.0.1:52731")
+    ) == ("tcp", "127.0.0.1:52731", [])
 
 
 def test_nothing_bound_returns_none():

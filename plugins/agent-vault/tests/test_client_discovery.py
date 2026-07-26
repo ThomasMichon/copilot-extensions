@@ -69,6 +69,12 @@ def _write_tcp(directory, port, host="127.0.0.1"):
     return rendezvous.write_endpoint(directory, "tcp", f"{host}:{port}")
 
 
+def _write_pipe_with_tcp_alt(directory, port, pipe=r"\\.\pipe\agent-vault", host="127.0.0.1"):
+    return rendezvous.write_endpoint(
+        directory, "pipe", pipe, alt=[("tcp", f"{host}:{port}")]
+    )
+
+
 class _EchoServer:
     """A one-shot loopback server that replies with a canned JSON line."""
 
@@ -202,6 +208,29 @@ def test_discover_falls_back_to_windows_file_under_wsl(run_dir, monkeypatch, tmp
     assert ep is not None
     assert ep.source == "windows"
     assert ep.tcp_host_port == ("127.0.0.1", 65533)
+
+
+def test_wsl_discovers_pipe_primary_then_resolves_tcp_alt(run_dir, monkeypatch, tmp_path):
+    """#3426: a WSL guest reads the Windows daemon's *pipe-primary* record and,
+    unable to open the pipe, resolves the advertised TCP **alternate** -- the port
+    the interop relay dials. Before this fix the pipe-only record left WSL with no
+    port and the vault was unreachable."""
+    monkeypatch.setattr(cli, "IS_WSL", True)
+    winrun = tmp_path / "winrun"
+    winrun.mkdir()
+    _write_pipe_with_tcp_alt(winrun, 45454)
+    monkeypatch.setenv("AGENT_VAULT_WINDOWS_RUN_DIR", str(winrun))
+    ep = cli._discover_endpoint(config.resolve_context())
+    assert ep is not None
+    assert ep.transport == "pipe"
+    assert ep.source == "windows"
+    # The pipe is unusable from WSL; usable() yields the TCP alt with the source
+    # preserved so the caller keeps the cross-boundary host.
+    tcp = ep.usable(lambda t: t == "tcp")
+    assert tcp is not None
+    assert tcp.tcp_host_port == ("127.0.0.1", 45454)
+    assert tcp.source == "windows"
+
 
 
 # ---------------------------------------------------------------------------
