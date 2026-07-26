@@ -20,7 +20,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
-from . import __version__
+from . import __version__, telemetry
 from .events import EventBus, sse_format
 from .queue import SpawnReservation, Task, TaskError, TaskQueue, worker_id_for
 
@@ -247,6 +247,8 @@ def create_app(
 
     def _emit(event_type: str, task: dict) -> None:
         bus.publish({"type": event_type, "task": task})
+        # Generic telemetry seam (no-op unless a consumer registered a sink).
+        telemetry.emit(telemetry.task_lifecycle_event(event_type, task))
 
     def _guard(op, event_type: str | None = None) -> dict:
         """Run a queue mutation (TaskError -> 409 / missing -> 404), then emit."""
