@@ -495,33 +495,40 @@ function Install-CoordinatorTask {
 # AGENT_DISPATCH_HOST is resolved dynamically at startup by serve-service.ps1
 # (mirrored -> 127.0.0.1; NAT -> the vEthernet(WSL) IP). Uncomment only to pin it.
 # AGENT_DISPATCH_HOST=127.0.0.1
-AGENT_DISPATCH_PORT=$DefaultPort
+# AGENT_DISPATCH_PORT=$DefaultPort  # unset = OS-assigned dynamic port (Stage C), advertised via the rendezvous file; uncomment to pin
 # AGENT_DISPATCH_DB=%USERPROFILE%\.agent-dispatch\tasks.db   # default; uncomment to override
 # AGENT_DISPATCH_TOKEN=                                       # set to require bearer auth
 "@
         [System.IO.File]::WriteAllText($envFile, $envDefault, $utf8NoBom)
         Write-Ok "Service env: $envFile (defaults; edit to pin the bind host / add a token)"
     } else {
-        # Migrate a stale Phase-1 host pin (#2888). Early (dev39) installs wrote
-        # an ACTIVE `AGENT_DISPATCH_HOST=127.0.0.1` line into service.env. On a
-        # NAT box that pin makes the coordinator bind loopback -- unreachable
-        # from WSL -- because both the launcher and `serve` skip bind-host
-        # resolution whenever AGENT_DISPATCH_HOST is set. Comment out that exact
-        # old-default line so dynamic resolution takes over; leave any other
-        # (operator-chosen) AGENT_DISPATCH_HOST value untouched.
+        # Migrate stale old-default pins so dynamic resolution/binding takes over,
+        # leaving any operator-chosen value untouched:
+        #  - AGENT_DISPATCH_HOST=127.0.0.1 (#2888): early (dev39) installs pinned an
+        #    ACTIVE loopback host. On a NAT box that pin makes the coordinator bind
+        #    loopback -- unreachable from WSL -- because both the launcher and `serve`
+        #    skip bind-host resolution whenever AGENT_DISPATCH_HOST is set. The host
+        #    is now resolved at startup (mirrored -> 127.0.0.1; NAT -> vEthernet(WSL) IP).
+        #  - AGENT_DISPATCH_PORT=9847 (durable-service-transport Stage C): the fixed
+        #    default port pin defeats the dynamic bind. The coordinator now binds an
+        #    OS-assigned port and advertises it via the rendezvous file, so drop the
+        #    old-default pin (discovery-capable clients follow the dynamic port).
         $envLines = Get-Content $envFile
-        $migrated = $false
+        $migrations = @()
         $newEnvLines = foreach ($envLine in $envLines) {
             if ($envLine -match '^\s*AGENT_DISPATCH_HOST\s*=\s*127\.0\.0\.1\s*$') {
-                $migrated = $true
+                $migrations += 'AGENT_DISPATCH_HOST=127.0.0.1 (#2888)'
                 '# AGENT_DISPATCH_HOST=127.0.0.1  # migrated (#2888): now resolved dynamically at startup (mirrored -> 127.0.0.1; NAT -> vEthernet(WSL) IP)'
+            } elseif ($envLine -match '^\s*AGENT_DISPATCH_PORT\s*=\s*9847\s*$') {
+                $migrations += 'AGENT_DISPATCH_PORT=9847 (Stage C)'
+                '# AGENT_DISPATCH_PORT=9847  # migrated (Stage C): unset = OS-assigned dynamic port advertised via the rendezvous file; uncomment to pin'
             } else {
                 $envLine
             }
         }
-        if ($migrated) {
+        if ($migrations.Count -gt 0) {
             [System.IO.File]::WriteAllText($envFile, (($newEnvLines -join "`r`n") + "`r`n"), $utf8NoBom)
-            Write-Ok "Service env: migrated stale AGENT_DISPATCH_HOST=127.0.0.1 pin (#2888) -> dynamic bind-host resolution"
+            Write-Ok ("Service env: migrated stale pin(s) -> dynamic: " + ($migrations -join ', '))
         } else {
             Write-Skip "Service env already exists: $envFile"
         }
