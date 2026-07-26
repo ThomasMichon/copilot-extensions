@@ -20,6 +20,7 @@ import time
 
 from rich.text import Text
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.widget import Widget
 
 from .. import profiles as profiles_mod
@@ -399,6 +400,26 @@ def _resolve_mock_mode(explicit=None):
 
 class PickerScreen(Widget):
     can_focus = True
+
+    #: Truly-global shortcuts owned by Textual's binding system (#88 F3). When no
+    #: modal overlay is active, ``on_key`` lets these bubble to the framework,
+    #: which fires the matching ``action_*`` method below -- transferring
+    #: ownership of the global pivot/machine shortcuts OFF the hand-rolled
+    #: dispatcher and onto native bindings. ``show=False`` because the picker
+    #: draws its own footer. Region/row keys stay in the manual model until the
+    #: later F4/F5 slices (overlays -> ModalScreen, regions -> focusable widgets).
+    BINDINGS = [
+        Binding("ctrl+shift+right", "pivot_next", "next pivot", show=False),
+        Binding("ctrl+shift+left", "pivot_prev", "prev pivot", show=False),
+        Binding("ctrl+right", "machine_next", "next machine", show=False),
+        Binding("ctrl+left", "machine_prev", "prev machine", show=False),
+    ]
+    #: The keys ``BINDINGS`` owns -- ``on_key`` consults this to decide whether to
+    #: pass an event through to the binding system (no overlay) or route it to
+    #: the manual dispatcher (overlay active). Keep in lockstep with ``BINDINGS``.
+    BINDING_KEYS = frozenset({
+        "ctrl+shift+right", "ctrl+shift+left", "ctrl+right", "ctrl+left",
+    })
 
     def __init__(self, source, live=False, mock_mode=None):
         super().__init__()
@@ -3216,17 +3237,16 @@ class PickerScreen(Widget):
         if ov is not None:
             return ov[1](key)
 
-        # Global region shortcuts:
-        #   Ctrl+Shift+←/→  -> rotate the top View pivot
-        #   Ctrl+←/→ (and [ ]) -> rotate the machine picker
-        if key in ("ctrl+shift+left", "ctrl+shift+right"):
-            return self._switch_pivot(1 if key.endswith("right") else -1)
+        # Global pivot/machine shortcuts. The Ctrl+Shift+←/→ (pivot) and Ctrl+←/→
+        # (machine) combos are owned by Textual BINDINGS now (#88 F3) -- on_key
+        # passes them to the framework when no overlay is active, so they never
+        # reach here in the real path; the action_* methods do the work. Only the
+        # printable [ ] pivot shortcut stays in the manual dispatcher (on_key
+        # remaps its character, and a bare letter is an awkward binding).
         if key == "[":
             return self._switch_pivot(-1)
         if key == "]":
             return self._switch_pivot(1)
-        if key in ("ctrl+left", "ctrl+right"):
-            return self._rotate_machine(1 if key.endswith("right") else -1)
 
         zone = self.sel[0]
 
@@ -4433,11 +4453,38 @@ class PickerScreen(Widget):
             ],
         }
 
+    # ---- Textual BINDINGS actions (truly-global shortcuts, #88 F3) ----
+    # These fire only when on_key passed the event through to the framework,
+    # which it does exclusively when no modal overlay is active -- so they need
+    # no overlay guard of their own. Each mutates state then refreshes, since the
+    # pass-through path skips on_key's own self.refresh().
+    def action_pivot_next(self):
+        self._switch_pivot(1)
+        self.refresh()
+
+    def action_pivot_prev(self):
+        self._switch_pivot(-1)
+        self.refresh()
+
+    def action_machine_next(self):
+        self._rotate_machine(1)
+        self.refresh()
+
+    def action_machine_prev(self):
+        self._rotate_machine(-1)
+        self.refresh()
+
     # Textual entry point
     def on_key(self, event):
+        key = event.key
+        # Truly-global shortcuts are owned by Textual BINDINGS (#88 F3): with no
+        # overlay active, let them bubble to the framework's binding system (do
+        # NOT stop the event) so the matching action_* method fires. Everything
+        # else (and any key while an overlay is up) goes to the manual dispatcher.
+        if key in self.BINDING_KEYS and self._active_overlay() is None:
+            return
         event.stop()
         event.prevent_default()
-        key = event.key
         if event.character in ("[", "]"):
             key = event.character
         self.handle_key(key)
