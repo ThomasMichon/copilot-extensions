@@ -896,7 +896,51 @@ class TestWorktreeRoutes:
         args = mock_run.call_args.args[-1]
         assert args == ["list-sessions", "--worktree", wt_id, "--json"]
 
-    def test_list_worktree_sessions_unknown_worktree_404s(self, client) -> None:
+    def test_list_worktree_sessions_forwards_head_session(self, client, app) -> None:
+        # session-lifecycle Phase 4: the ground-layer envelope's asserted head is
+        # forwarded so Neuron Forge resolves the current session head-first and
+        # badges the rest "no longer current" (derive-dont-duplicate -- the bridge
+        # keeps no head of its own).
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "lambda-core-wsl-20250101-190500-head"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        payload = (
+            '{"head_session": "s2", "sessions": ['
+            '{"id": "s1", "is_head": false, "state": "handed-off"}, '
+            '{"id": "s2", "is_head": true, "state": "active"}]}'
+        )
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ):
+            resp = client.get(f"/api/v1/worktrees/{wt_id}/sessions")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["head_session"] == "s2"
+        by_id = {s["id"]: s for s in data["sessions"]}
+        assert by_id["s2"]["is_head"] is True
+        assert by_id["s1"]["state"] == "handed-off"
+
+    def test_list_worktree_sessions_head_absent_is_none(self, client, app) -> None:
+        # A legacy ground-layer envelope without head_session -> null, not a KeyError.
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "lambda-core-wsl-20250101-190600-nohead"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        payload = '{"sessions": [{"id": "s1"}]}'
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ):
+            resp = client.get(f"/api/v1/worktrees/{wt_id}/sessions")
+        assert resp.status_code == 200
+        assert resp.json()["head_session"] is None
         resp = client.get("/api/v1/worktrees/does-not-exist/sessions")
         assert resp.status_code == 404
 

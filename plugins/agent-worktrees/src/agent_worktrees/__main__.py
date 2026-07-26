@@ -9935,12 +9935,20 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
             return _json_error(f"No worktree found: {wt_id}")
 
     result: list[dict] = []
+    head_session: str | None = None
     for rec in records:
         for s in sessions.list_worktree_sessions(rec):
             s["worktree_id"] = rec.worktree_id
             result.append(s)
+    # session-lifecycle: when scoped to ONE worktree, surface its asserted head
+    # on the envelope so a consumer (agent-bridge -> Neuron Forge) can resolve
+    # the current session without re-deriving it. Per-session ``is_head`` (from
+    # list_worktree_sessions) covers the all-worktrees case. Derived from the
+    # ground-layer record; no rival pointer (agent-fabric derive-dont-duplicate).
+    if wt_id and records:
+        head_session = records[0].resolved_head_session
 
-    _json_output({"sessions": result})
+    _json_output({"sessions": result, "head_session": head_session})
     return 0
 
 

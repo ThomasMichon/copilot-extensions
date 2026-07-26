@@ -544,3 +544,50 @@ class TestConcludeAndLinkCommands:
             predecessor_state="handed-off",
         )
         assert out["_rc"] != 0
+
+
+class TestListSessionsEnvelopeHead:
+    """``list-sessions --worktree`` puts the asserted head on the envelope so a
+    consumer (agent-bridge -> Neuron Forge) resolves the current session without
+    re-deriving it (agent-fabric single-current-session-per-worktree, Phase 4).
+    """
+
+    def test_scoped_envelope_carries_head(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        from agent_worktrees import __main__ as m
+        from agent_worktrees import sessions as S
+
+        _rec(tmp_tracking_dir, sessions=[
+            SessionEntry("s1", "t"), SessionEntry("s2", "t"),
+        ])
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        set_head_session(rec, "s1")
+        # Stub the per-session meta scan (no real session-state on disk here);
+        # the envelope head is derived from the record, independently of it.
+        monkeypatch.setattr(
+            S, "list_worktree_sessions",
+            lambda record: [{"id": s.session_id} for s in record.sessions],
+        )
+        captured: dict = {}
+        monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
+        rc = m.cmd_list_sessions(argparse.Namespace(worktree_id="wt-1", json=True))
+        assert rc == 0
+        assert captured["head_session"] == "s1"
+        assert {s["id"] for s in captured["sessions"]} == {"s1", "s2"}
+
+    def test_unscoped_envelope_head_is_none(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        from agent_worktrees import __main__ as m
+        from agent_worktrees import sessions as S
+
+        _rec(tmp_tracking_dir, sessions=[SessionEntry("s1", "t")])
+        monkeypatch.setattr(S, "list_worktree_sessions", lambda record: [])
+        captured: dict = {}
+        monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
+        rc = m.cmd_list_sessions(argparse.Namespace(worktree_id=None, json=True))
+        assert rc == 0
+        # Per-session is_head covers the all-worktrees case; the envelope head is
+        # only meaningful when scoped to one worktree.
+        assert captured["head_session"] is None

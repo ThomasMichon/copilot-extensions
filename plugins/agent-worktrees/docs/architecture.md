@@ -222,7 +222,25 @@ the create, never refuse it. This is the sole sanctioned way for another layer
 to learn "which session is current here" — it derives, it does not keep a rival
 pointer (*derive-dont-duplicate*).
 
-### Two-Phase Completion
+**Enriched session listing — `agent-worktrees list-sessions`.** The session
+registry a consumer already reads to enumerate a worktree's sessions now carries
+the same derived lifecycle, so a top consumer (agent-bridge → Neuron Forge) can
+render a worktree **head-first** and badge the rest "no longer current" without a
+second call:
+
+```bash
+agent-worktrees list-sessions --worktree <id> --json
+# {"head_session": "<sid>"|null,
+#  "sessions": [{"id": "<sid>", "state": "active"|"handed-off"|"concluded",
+#                "is_head": <bool>, ...}, ...]}
+```
+
+Each session entry gains `state` (the asserted `SessionEntry.state`; `active`
+for legacy/backfill entries with no stamp) and `is_head` (marks the one session
+`resolved_head_session` derives as current). When scoped to a single worktree,
+`head_session` is also surfaced on the envelope. These are **derived** from the
+same ground-layer record — a consumer reads them, it never recomputes a head of
+its own.
 
 Worktree completion is split into two explicit steps:
 

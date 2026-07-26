@@ -900,6 +900,21 @@ def list_worktree_sessions(record) -> list[dict]:
             _add(sid)
 
     out.sort(key=lambda s: s.get("updated_at", ""), reverse=True)
+
+    # session-lifecycle: stamp the ASSERTED lifecycle onto each entry so a
+    # consumer (agent-bridge -> Neuron Forge) can resolve the head-first current
+    # session and badge the rest "no longer current" (agent-fabric
+    # single-current-session-per-worktree, Phase 4). ``state`` is the per-session
+    # SessionEntry.state (default ``active`` for legacy/backfill entries with no
+    # stamp); ``is_head`` marks the one session ``resolved_head_session``
+    # derives as current. Derived, not a rival store -- consumers read this, they
+    # do not recompute a head of their own.
+    head = record.resolved_head_session
+    for meta in out:
+        sid = meta.get("id")
+        entry = record.session_entry(sid) if sid else None
+        meta["state"] = entry.state if entry is not None else "active"
+        meta["is_head"] = sid is not None and sid == head
     return out
 
 

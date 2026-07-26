@@ -891,9 +891,16 @@ async def list_worktree_sessions(
         ) from exc
 
     sessions = data.get("sessions", data) if isinstance(data, dict) else data
+    # session-lifecycle: forward the ground-layer's asserted head so a consumer
+    # (Neuron Forge) resolves the current session head-first + badges the rest
+    # "no longer current" (agent-fabric single-current-session-per-worktree,
+    # Phase 4). Derived straight from the ground-layer envelope -- the bridge
+    # keeps no head of its own (derive-dont-duplicate).
+    head_session = data.get("head_session") if isinstance(data, dict) else None
     return {
         "worktree_id": worktree_id,
         "agent_name": agent_name,
+        "head_session": head_session if isinstance(head_session, str) else None,
         "sessions": sessions if isinstance(sessions, list) else [],
     }
 
