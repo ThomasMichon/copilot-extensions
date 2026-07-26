@@ -3822,3 +3822,75 @@ def test_contributed_worktree_action_in_submenu_and_runs(tmp_path, monkeypatch):
             assert captured["ctx"]["machine"]
 
     asyncio.run(run())
+
+
+def _write_config_sections(directory, sections):
+    import json
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "net.json").write_text(
+        json.dumps({"config_sections": sections}), encoding="utf-8")
+
+
+def test_contributed_config_section_in_cfgmenu_and_runs(tmp_path, monkeypatch):
+    """A manifest with only `config_sections` (no list pivot) augments the ⚙
+    Configuration menu after built-in Profiles; Enter runs it with a substituted
+    context and never displaces Profiles (#B slice 2)."""
+    from agent_worktrees.picker_tui import tasks
+
+    pv = tmp_path / "pivots"
+    _write_config_sections(pv, [
+        {"label": "SSH", "run": ["agent-ssh", "config", "--machine", "{machine}"]},
+        {"label": "MCP", "run": ["agent-mcp", "menu"]},
+    ])
+    monkeypatch.setenv("AGENT_WORKTREES_PIVOTS_DIR", str(pv))
+    monkeypatch.setenv("AGENT_WORKTREES_PLUGINS_DIR", str(tmp_path / "plugins"))
+    (tmp_path / "plugins").mkdir()
+
+    captured = {}
+
+    def fake_run(section, ctx):
+        captured["label"] = section.label
+        captured["source"] = section.source
+        captured["ctx"] = dict(ctx)
+        return (True, "opened")
+
+    monkeypatch.setattr(tasks, "run_config_section", fake_run)
+
+    src = _profiles_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert scr.config_sections, "config sections discovered"
+
+            # Open the Configuration menu from its top-row stop.
+            scr.sel = ("CFG", 0)
+            scr._activate()
+            assert scr.cfgmenu is not None
+            labels = [it["label"] for it in scr.cfgmenu["items"]]
+            # Built-in Profiles first, contributed sections after it.
+            assert labels[0] == "Profiles"
+            assert labels[1:] == ["SSH", "MCP"]
+
+            # Enter on a contributed section runs it (never switches pivot) with
+            # a substituted global context; the menu closes.
+            scr.cfgmenu_idx = labels.index("SSH")
+            scr._key_cfgmenu("enter")
+            assert scr.cfgmenu is None
+            assert scr._kind() == "worktrees"          # Profiles NOT selected
+            assert captured["label"] == "SSH"
+            assert captured["source"] == "net"
+            assert "machine" in captured["ctx"]
+
+            # Selecting Profiles still switches to that pivot (built-in intact).
+            scr.sel = ("CFG", 0)
+            scr._activate()
+            scr.cfgmenu_idx = 0                          # Profiles
+            scr._key_cfgmenu("enter")
+            assert scr.cfgmenu is None
+            assert scr._kind() == "profiles"
+
+    asyncio.run(run())
