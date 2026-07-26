@@ -994,19 +994,19 @@ class PickerScreen(Widget):
         return getattr(self, "update_state", "idle") == "available"
 
     def _v_stops(self):
-        """Top (View) region stops: the view pivot, the refresh icon ("V", 1)
-        when an update is staged, then the ⚙ Configuration entry ("CFG", 0) when
-        any pivot is hosted there (#1426)."""
-        out = [("V", 0)]
+        """Top-region vertical stops, in visual (top-to-bottom) order: the update
+        refresh icon ("UPD", 0) on the title line when an update is staged, then
+        the View pivot row ("V", 0). The ⚙ Configuration entry is NOT a vertical
+        stop -- it rides the pivot row's horizontal ◀▶ nav (#1426)."""
+        out = []
         if self._update_actionable():
-            out.append(("V", 1))
-        if self._config_pivots():
-            out.append(("CFG", 0))
+            out.append(("UPD", 0))
+        out.append(("V", 0))
         return out
 
     def stops(self):
-        """Vertical Up/Down flow. ("V",0)=View nav, ("V",1)=update refresh icon
-        (only when an update is staged), ("M",0)=machine picker,
+        """Vertical Up/Down flow. ("UPD",0)=update refresh icon (only when an
+        update is staged), ("V",0)=View pivot row, ("M",0)=machine picker,
         ("BTN",0)=button row, then the table/grid rows."""
         if self._kind() == "worktrees":
             out = [*self._v_stops(), ("M", 0), ("BTN", 0)]
@@ -1046,18 +1046,16 @@ class PickerScreen(Widget):
             return self._pr_head()
         if zone == "L":
             return self._l_head()
-        return {"V": ("V", 0), "CFG": ("CFG", 0), "M": ("M", 0),
+        return {"V": ("V", 0), "UPD": ("V", 0), "CFG": ("CFG", 0), "M": ("M", 0),
                 "BTN": ("BTN", 0), "L": ("L", 0), "SA": ("SA", 0),
                 "GH": ("GH", 0), "C": ("C", 0), "PR": ("PR", 0)}.get(
                     zone, ("V", 0))
 
     def region_heads(self):
         """Tab/Shift+Tab jump targets — the entry point of each major region.
-        The ⚙ Configuration entry joins the cycle (right after the View pivot)
-        whenever a pivot is hosted there, so Tab reaches it (#1426)."""
+        The View pivot row is one region; the ⚙ Configuration entry rides its
+        horizontal ◀▶ nav, so Tab lands on the pivots and ◀▶ reaches Config."""
         v = [("V", 0)]
-        if self._config_pivots():
-            v.append(("CFG", 0))
         if self._kind() == "worktrees":
             heads = [*v, ("M", 0), ("BTN", 0)]
             if self.list_records():
@@ -2466,7 +2464,7 @@ class PickerScreen(Widget):
         branch = getattr(self.src, "BRANCH", "") or ""
         present = {"update_text": True, "version": True, "repo": bool(repo),
                    "env": True, "branch": bool(branch)}
-        upd_focused = self.sel == ("V", 1)
+        upd_focused = self.sel[0] == "UPD"
 
         def build():
             left = Text(" Agent Worktrees", style="bold")
@@ -2538,14 +2536,15 @@ class PickerScreen(Widget):
         """Focus-specific footer hint: exactly what Enter/Space do for the
         current focus, naming the concrete target (#1344)."""
         zone = self.sel[0]
+        if zone == "UPD":
+            return ("Enter: apply staged update + restart the picker"
+                    " · ↑↓ move · Tab region")
         if zone == "V":
-            if self.sel == ("V", 1):
-                return ("Enter: apply staged update + restart the picker"
-                        " · ↑↓ move · Tab region")
-            return (f"◀▶ switch view (on {self.htabs[self.htab]}) · Enter: focus body"
-                    f" · Tab region · [ ] view")
+            return (f"◀▶ view / ⚙ Config (on {self.htabs[self.htab]})"
+                    f" · Enter: focus body · Tab region · [ ] view")
         if zone == "CFG":
-            return "Enter: open Configuration (Profiles) · ↑↓ move · Tab region"
+            return ("◀▶ back to pivots · Enter: open Configuration"
+                    " · ↑↓ move · Tab region")
         if zone == "M":
             m, e, _ = self.cur_machine()
             scope = "All machines" if self.is_all() else f"{m} {e}"
@@ -3187,8 +3186,8 @@ class PickerScreen(Widget):
         # Bare ←/→ move to the next item *within* the focused region.
         if key in ("left", "right"):
             d = 1 if key == "right" else -1
-            if zone == "V":
-                self._switch_pivot(d)            # stays in V
+            if zone in ("V", "CFG"):
+                self._nav_view_row(d)      # traverse pivots + ⚙ Configuration
             elif zone == "M":
                 self._rotate_machine(d)
             elif zone == "BTN":
@@ -3202,9 +3201,13 @@ class PickerScreen(Widget):
             return
 
         stops = self.stops()
-        if self.sel not in stops:
+        # ⚙ Configuration rides the View pivot row: for vertical up/down treat it
+        # as the ("V",0) row stop, so ↑/↓ leave it for the row's neighbours.
+        ref = ("V", 0) if self.sel[0] == "CFG" else self.sel
+        if ref not in stops:
             self.sel = self.default_sel()
-        idx = stops.index(self.sel)
+            ref = self.sel
+        idx = stops.index(ref)
         zone = self.sel[0]
 
         if key in ("shift+up", "shift+down"):
@@ -3313,6 +3316,33 @@ class PickerScreen(Widget):
         # Stay in the View nav if that's where focus was; otherwise land on the
         # new pivot's default body stop.
         self.sel = ("V", 0) if was_v else self.default_sel()
+
+    def _nav_view_row(self, d):
+        """Move focus across the top tab-row -- the left-rail pivots plus the
+        ⚙ Configuration entry -- with bare ◀▶. Landing on a pivot switches the
+        view (as a tab implies); landing on Configuration just focuses it (Enter
+        opens its menu). Configuration is thus part of the same row as the
+        pivots, not a separate stop (#1426)."""
+        left = self._left_pivots()
+        if not left:
+            return
+        row: list = list(left)
+        if self._config_pivots():
+            row.append("cfg")
+        if self.sel[0] == "CFG":
+            cur = len(row) - 1
+        elif self.htab in left:
+            cur = left.index(self.htab)
+        else:
+            cur = 0
+        target = row[(cur + d) % len(row)]
+        if target == "cfg":
+            self.sel = ("CFG", 0)
+        else:
+            self.htab = target
+            self.btn_idx = 0
+            self.top = 0
+            self.sel = ("V", 0)
 
     def _toggle_cell(self):
         if not self.host_cols:
@@ -3750,13 +3780,13 @@ class PickerScreen(Widget):
         if zone == "CFG":
             self._open_cfgmenu()
             return
+        if zone == "UPD":
+            # Refresh icon: apply the staged update and restart the picker on the
+            # new version. The picker can't swap its own runtime venv, so the
+            # launcher does it (action=refresh). #1430.
+            self._decide({"action": "refresh"})
+            return
         if zone == "V":
-            if self.sel == ("V", 1):
-                # Refresh icon: apply the staged update and restart the picker
-                # on the new version. The picker can't swap its own runtime
-                # venv, so the launcher does it (action=refresh). #1430.
-                self._decide({"action": "refresh"})
-                return
             self.sel = ("PR", 0) if self._kind() == "profiles" else ("M", 0)
         elif zone == "M":
             self.sel = ("BTN", 0)

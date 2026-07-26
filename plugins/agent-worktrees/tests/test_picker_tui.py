@@ -1064,17 +1064,10 @@ def test_worktrees_row_highlight_states():
     asyncio.run(run())
 
 
-def test_configuration_reachable_via_tab(monkeypatch):
-    """The ⚙ Configuration entry is in the Tab cycle (region_heads) and Tab from
-    the View pivot lands on it (operator feedback: couldn't reach it)."""
-    from agent_worktrees.picker_tui import engine
-
-    # Pin the update indicator to a non-actionable state. When a plugin update
-    # is staged on the host, an optional refresh icon ("V", 1) legitimately sits
-    # between the View pivot and Configuration in the Up/Down flow -- so without
-    # this, Down from ("V", 0) lands on ("V", 1) and the assertion below depends
-    # on the machine's update state (flaky on a box with an update staged).
-    monkeypatch.setattr(engine, "indicator_state", lambda: "current")
+def test_configuration_in_pivot_row_via_arrows(monkeypatch):
+    """The ⚙ Configuration entry rides the View pivot row's horizontal ◀▶ nav
+    (operator feedback: treat it as part of the same tab-row as the pivots) --
+    NOT a separate Tab region or vertical stop."""
     src = _profiles_source()
 
     async def run():
@@ -1082,14 +1075,28 @@ def test_configuration_reachable_via_tab(monkeypatch):
         async with app.run_test(size=(118, 40)) as pilot:
             scr = app.query_one(PickerScreen)
             await pilot.pause()
-            assert ("CFG", 0) in scr.region_heads()
+            scr.update_state = "current"          # no update stop in the way
+
+            # It is NOT in the Tab cycle, and Tab from the pivots skips it.
+            assert ("CFG", 0) not in scr.region_heads()
             scr.sel = ("V", 0)
             scr.handle_key("tab")
-            assert scr.sel == ("CFG", 0)
-            # And it is also reachable by arrowing down from the View pivot.
+            assert scr.sel == ("M", 0)            # Tab -> Machine, not Config
+
+            # From the last left-rail pivot, ◀▶ steps onto Configuration.
+            lefts = scr._left_pivots()
+            scr.htab = lefts[-1]
             scr.sel = ("V", 0)
-            scr.handle_key("down")
+            scr.handle_key("right")
             assert scr.sel == ("CFG", 0)
+            # ◀ steps back onto the pivot row.
+            scr.handle_key("left")
+            assert scr.sel == ("V", 0) and scr.htab == lefts[-1]
+
+            # Up/Down leave Configuration for the row's vertical neighbours.
+            scr.sel = ("CFG", 0)
+            scr.handle_key("down")
+            assert scr.sel == ("M", 0)
 
     asyncio.run(run())
 
@@ -1327,7 +1334,8 @@ def test_jump_to_caller_targets_caller_worktree():
 
 def test_profiles_hosted_under_configuration():
     """Profiles is placed under ⚙ Configuration: off the left cycle, in the
-    config set, and the ('CFG', 0) stop exists (#1426)."""
+    config set; ⚙ Configuration rides the pivot row's ◀▶ nav, so it is NOT a
+    vertical stop (#1426)."""
     src = _profiles_source()
 
     async def run():
@@ -1340,7 +1348,7 @@ def test_profiles_hosted_under_configuration():
             assert scr.pivots[prof]["placement"] == "config"
             assert prof in scr._config_pivots()
             assert prof not in scr._left_pivots()
-            assert ("CFG", 0) in scr._v_stops()
+            assert ("CFG", 0) not in scr._v_stops()   # rides the pivot row now
 
     asyncio.run(run())
 
@@ -2921,19 +2929,19 @@ def test_update_indicator_focus_glyph_and_refresh():
 
     # current: informational only -> no focus stop, checkmark glyph.
     s.update_state = "current"
-    assert ("V", 1) not in s.stops()
+    assert ("UPD", 0) not in s.stops()
     assert not s._update_actionable()
     assert "\u2713" in s._update_seg(False).plain          # ✓
 
     # available: focusable refresh stop, refresh glyph.
     s.update_state = "available"
-    assert ("V", 1) in s.stops()
+    assert ("UPD", 0) in s.stops()
     assert s._update_actionable()
     assert "\u21bb" in s._update_seg(False).plain          # ↻
 
     # checking: a spinner segment, still not a focus target.
     s.update_state = "checking"
-    assert ("V", 1) not in s.stops()
+    assert ("UPD", 0) not in s.stops()
     assert s._update_seg(False) is not None
 
     # idle: no segment at all.
@@ -2944,9 +2952,36 @@ def test_update_indicator_focus_glyph_and_refresh():
     captured = {}
     s._decide = lambda d: captured.update(d)
     s.update_state = "available"
-    s.sel = ("V", 1)
+    s.sel = ("UPD", 0)
     s._activate()
     assert captured == {"action": "refresh"}
+
+
+def test_update_icon_is_its_own_region_not_the_pivots():
+    """#g5 split-regions bug: the update refresh icon and the View pivots shared
+    zone 'V' and double-highlighted. Focusing the update icon ("UPD", 0) must
+    leave the pivot row rendered exactly as when it is unfocused, and only the
+    pivot stop ("V", 0) may light the pivots."""
+    from agent_worktrees.picker_tui.engine import PickerScreen
+
+    s = PickerScreen(_fixture_source(), live=False)
+    s.setup()
+    s.htab = 0
+    s.update_state = "available"      # the update icon is a real focus stop
+
+    def htab_styles(sel):
+        s.sel = sel
+        l2 = s.topbar(118)[1]         # the pivot (htabs) row
+        return [(sp.start, sp.end, str(sp.style)) for sp in l2.spans]
+
+    unfocused = htab_styles(("M", 0))     # nothing in the top row focused
+    update_focused = htab_styles(("UPD", 0))
+    pivots_focused = htab_styles(("V", 0))
+
+    # Focusing the update icon does NOT touch the pivot row (the bug).
+    assert update_focused == unfocused
+    # Only focusing the pivot stop highlights the pivots.
+    assert pivots_focused != unfocused
 
 
 def test_mock_mode_default_off_explicit_and_env(monkeypatch):
