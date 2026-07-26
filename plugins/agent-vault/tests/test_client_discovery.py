@@ -250,6 +250,50 @@ def test_send_command_discovers_tcp(run_dir, monkeypatch, empty_registry):
     assert result["_transport"] == "discovered-tcp"
 
 
+def test_send_command_omits_client_kpdb_for_windows_source(
+    run_dir, monkeypatch, tmp_path, empty_registry
+):
+    """#3426: a cross-boundary (windows-source) request must not forward the
+    guest's kpdb/group -- the host daemon owns its own DB, and the guest's Linux
+    path does not exist on the host (would fail 'KeePass database not found')."""
+    monkeypatch.setattr(cli, "IS_WSL", True)
+    monkeypatch.setenv("KPDB", "/home/guest/OneDrive/Personal.kdbx")
+    monkeypatch.setenv("VAULT_GROUP", "Guest")
+    winrun = tmp_path / "winrun"
+    winrun.mkdir()
+    _write_pipe_with_tcp_alt(winrun, 45999)  # no listener -> falls to the capture xport
+    monkeypatch.setenv("AGENT_VAULT_WINDOWS_RUN_DIR", str(winrun))
+    captured: dict = {}
+
+    def _capture(request, timeout, ctx):
+        captured.update(request)
+        return {"ok": True}
+
+    empty_registry.register_transport(_capture, name="capture")
+    resp = cli.send_command({"action": "has", "entry": "x"}, timeout=1.0)
+    assert resp and resp.get("ok")
+    assert "kpdb" not in captured
+    assert "group" not in captured
+    assert "vault" not in captured
+
+
+def test_send_command_injects_client_kpdb_for_local(run_dir, monkeypatch, empty_registry):
+    """A local daemon *does* receive the caller's vault selection (unchanged)."""
+    monkeypatch.setattr(cli, "IS_WSL", False)
+    monkeypatch.setenv("KPDB", "/local/db.kdbx")
+    captured: dict = {}
+
+    def _capture(request, timeout, ctx):
+        captured.update(request)
+        return {"ok": True}
+
+    empty_registry.register_transport(_capture, name="capture")
+    resp = cli.send_command({"action": "has", "entry": "x"}, timeout=1.0)
+    assert resp and resp.get("ok")
+    # kpdb is injected for a local daemon (exact value is path-normalized per OS).
+    assert captured.get("kpdb")
+
+
 def test_send_command_env_override_no_file(run_dir, monkeypatch, empty_registry):
     server = _EchoServer({"ok": True})
     try:

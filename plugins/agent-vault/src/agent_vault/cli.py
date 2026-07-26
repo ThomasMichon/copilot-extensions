@@ -158,9 +158,6 @@ def send_command(request: dict, timeout: float | None = 5.0) -> dict | None:
     """Send a JSON command to the vault service."""
     context = config.resolve_context()
     request = dict(request)
-    request.setdefault("kpdb", context.kpdb)
-    request.setdefault("group", context.group)
-    request.setdefault("vault", context.vault_name)
 
     def _tag(result: dict | None, transport: str) -> dict | None:
         if result is not None:
@@ -205,6 +202,17 @@ def send_command(request: dict, timeout: float | None = 5.0) -> dict | None:
                     host = d_host
             except ValueError:
                 discovered = None
+
+    # Inject the caller's vault selection for a LOCAL daemon only. A cross-
+    # boundary daemon reached over the WSL->Windows interop (endpoint source
+    # "windows") owns its OWN kpdb/group/vault; forwarding the guest's paths --
+    # which don't exist on the host -- would make the host daemon try to open a
+    # nonexistent database ("KeePass database not found"). Let the host daemon use
+    # its own configuration. See #3426.
+    if not (discovered is not None and discovered.source == "windows"):
+        request.setdefault("kpdb", context.kpdb)
+        request.setdefault("group", context.group)
+        request.setdefault("vault", context.vault_name)
 
     ext_ctx = TransportContext(
         kpdb=context.kpdb,
