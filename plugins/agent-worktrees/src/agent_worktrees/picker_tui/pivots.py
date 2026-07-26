@@ -66,6 +66,29 @@ class PivotAction:
 
 
 @dataclass(frozen=True)
+class WorktreeAction:
+    """A cross-plugin action contributed onto a *worktree row's* action menu.
+
+    Unlike :class:`PivotAction` (which rides a registered pivot's own entries),
+    a worktree action augments the built-in **Worktrees** view: any installed
+    layer can add a verb to a worktree's Enter sub-menu (e.g. a bridge's "Send
+    message", a dispatcher's "Dispatch task here") without agent-worktrees
+    importing its Python. ``run`` is an argv template substituted from the
+    worktree's context (``{worktree}`` / ``{machine}`` / ``{env}`` / ``{repo}``
+    / ``{id4}`` plus the record's fields). ``when`` optionally gates visibility
+    to worktrees whose normalized record matches every field (value or list).
+    """
+
+    key: str
+    label: str
+    run: tuple[str, ...]
+    source: str
+    confirm: bool = False
+    description: str = ""
+    when: Mapping[str, object] | None = None
+
+
+@dataclass(frozen=True)
 class RegisteredPivot:
     """A pivot contributed by another plugin via a filesystem manifest."""
 
@@ -205,6 +228,87 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
         actions=tuple(actions),
         source_path=source_path,
     )
+
+
+def parse_worktree_actions(
+    data: Mapping[str, object], *, name: str
+) -> tuple["WorktreeAction", ...]:
+    """Parse a manifest's optional ``worktree_actions`` array (independent of
+    whether the manifest also contributes a ``list`` pivot). A malformed entry
+    raises :class:`ManifestError` so the caller can skip the whole manifest's
+    worktree actions without aborting discovery."""
+    raw = data.get("worktree_actions", [])
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        raise ManifestError("`worktree_actions` must be an array when present")
+    out: list[WorktreeAction] = []
+    for i, a in enumerate(raw):
+        if not isinstance(a, Mapping):
+            raise ManifestError(f"`worktree_actions[{i}]` must be an object")
+        label = a.get("label")
+        if not isinstance(label, str) or not label.strip():
+            raise ManifestError(f"`worktree_actions[{i}].label` is required")
+        run = _as_argv(a.get("run"), where=f"`worktree_actions[{i}].run`")
+        key = a.get("key")
+        when = a.get("when")
+        if when is not None and not isinstance(when, Mapping):
+            raise ManifestError(f"`worktree_actions[{i}].when` must be an object")
+        out.append(
+            WorktreeAction(
+                key=str(key) if isinstance(key, str) and key else f"{name}{i}",
+                label=label.strip(),
+                run=run,
+                source=name,
+                confirm=bool(a.get("confirm", False)),
+                description=str(a.get("description", "")),
+                when=dict(when) if isinstance(when, Mapping) else None,
+            )
+        )
+    return tuple(out)
+
+
+def discover_worktree_actions(
+    base: str | os.PathLike[str] | None = None,
+) -> list["WorktreeAction"]:
+    """Scan the manifest directory and return all contributed worktree actions,
+    in stable (filename, declared) order. A manifest with **no** ``list`` pivot
+    is still honored here (a layer may contribute only worktree actions). Any
+    unreadable/malformed manifest is skipped -- never fatal."""
+    directory = pivots_dir(base)
+    try:
+        if not directory.is_dir():
+            return []
+        files = sorted(
+            p for p in directory.iterdir() if p.suffix == ".json" and p.is_file()
+        )
+    except OSError:
+        return []
+    out: list[WorktreeAction] = []
+    for path in files:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, Mapping):
+                continue
+            out.extend(parse_worktree_actions(data, name=path.stem))
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def worktree_action_matches(
+    action: "WorktreeAction", rec: Mapping[str, object]
+) -> bool:
+    """True when ``action`` should appear for worktree record ``rec``: its
+    ``when`` is empty, or every ``when`` field matches the record (the record's
+    value, stringified, is among the allowed value(s))."""
+    when = action.when
+    if not when:
+        return True
+    for field, allowed in when.items():
+        values = allowed if isinstance(allowed, (list, tuple)) else [allowed]
+        allowed_str = {str(v).lower() for v in values}
+        if str(rec.get(field)).lower() not in allowed_str:
+            return False
+    return True
 
 
 def pivots_dir(base: str | os.PathLike[str] | None = None) -> Path:
@@ -368,11 +472,15 @@ __all__ = [
     "ManifestError",
     "PivotAction",
     "RegisteredPivot",
+    "WorktreeAction",
     "discover_pivots",
+    "discover_worktree_actions",
     "ensure_pivots",
     "format_template",
     "installed_plugins_dir",
     "order_pivots",
     "parse_manifest",
+    "parse_worktree_actions",
     "pivots_dir",
+    "worktree_action_matches",
 ]

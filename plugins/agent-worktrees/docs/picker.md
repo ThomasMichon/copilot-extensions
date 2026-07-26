@@ -128,6 +128,12 @@ machine/environment**, then launches into it. (Programmatic equivalent:
 **Jump to host** for a bridge/system row (navigates to the owning machine tab and
 highlights the worktree by its stable id).
 
+Installed plugins can **contribute their own actions** onto this sub-menu (e.g. a
+bridge's "Send message", a dispatcher's "Dispatch task here") via a
+`worktree_actions` entry in their pivot manifest — so the more of the fabric you
+adopt, the more a worktree row can do. See
+[architecture.md § Picker Pivot Registry](architecture.md#picker-pivot-registry-cross-plugin).
+
 **Messages** (read-only) peeks the last few conversation turns of the worktree's
 latest session in an overlay, so you can tell what a worktree was doing — and
 whether it still needs follow-up — without opening it. This is the read-side
