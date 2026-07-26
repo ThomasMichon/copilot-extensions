@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from agent_worktrees.picker_tui import pivots
+
+#: Repo root (…/copilot-extensions), derived from this test's location:
+#: plugins/agent-worktrees/tests/test_pivots.py -> parents[3].
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _write(directory, name, data):
@@ -339,3 +344,45 @@ def test_discover_config_sections_independent_of_list(tmp_path):
 
 def test_discover_config_sections_missing_dir_is_empty(tmp_path):
     assert pivots.discover_config_sections(tmp_path / "nope") == []
+
+
+# ---- shipped-manifest contract guard ------------------------------------
+
+
+def _shipped_manifests():
+    """Every `plugins/*/pivots/*.json` manifest shipped in the repo."""
+    root = _REPO_ROOT / "plugins"
+    return sorted(root.glob("*/pivots/*.json")) if root.is_dir() else []
+
+
+def test_shipped_pivot_manifests_are_contract_valid():
+    """Every manifest a plugin ships in its `pivots/` dir must parse cleanly
+    against the current contract -- a `list` pivot (if declared), plus any
+    `worktree_actions` / `config_sections`. This guards the zero-engine-change
+    C-slice list pivots (Bridges, CodeSpaces, Tasks) from silently shipping a
+    malformed manifest that the picker would then skip at runtime."""
+    manifests = _shipped_manifests()
+    assert manifests, "expected at least one shipped pivot manifest"
+    for path in manifests:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        # A manifest may carry a list pivot, worktree actions, config sections,
+        # or any combination -- each parser must accept it without raising.
+        if "list" in data:
+            pivots.parse_manifest(data, name=path.stem, source_path=str(path))
+        pivots.parse_worktree_actions(data, name=path.stem)
+        pivots.parse_config_sections(data, name=path.stem)
+
+
+def test_shipped_list_pivots_have_runnable_argv():
+    """Each shipped `list` pivot names a non-empty argv whose first token looks
+    like a plugin binstub on PATH (not a placeholder), so the picker's runtime
+    can resolve and spawn it."""
+    for path in _shipped_manifests():
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if "list" not in data:
+            continue
+        reg = pivots.parse_manifest(data, name=path.stem, source_path=str(path))
+        assert reg.list_cmd, f"{path.name}: empty list argv"
+        assert reg.list_cmd[0].startswith("agent-"), (
+            f"{path.name}: list argv[0] {reg.list_cmd[0]!r} is not a plugin binstub"
+        )
