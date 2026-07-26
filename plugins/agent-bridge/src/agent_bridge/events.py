@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
+from . import telemetry
+
 if TYPE_CHECKING:
     from .db import Database
 
@@ -101,6 +103,12 @@ class EventLog:
         if self._db is not None and self._session_id is not None:
             self._db.append_event(
                 self._session_id, event_id, event_type, data, ts,
+            )
+        # Generic telemetry seam: forward only lifecycle/health transitions
+        # (no-op unless a consumer registered a sink; content events excluded).
+        if event_type in telemetry.LIFECYCLE_EVENTS:
+            telemetry.emit(
+                telemetry.session_lifecycle_event(event_type, self._session_id, data)
             )
         return evt
 
