@@ -171,6 +171,24 @@ head** — a second session arriving while one is still current is the contested
 case the agent-bridge creation guard prevents upstream; the ground layer only
 records it.
 
+**Cross-layer read interface — `agent-worktrees head-session`.** Because a
+higher layer (agent-bridge, context-handoff) runs in its *own* venv and cannot
+import `tracking.py`, the ground layer exposes its head derivation as a
+read-only CLI:
+
+```bash
+agent-worktrees head-session --worktree <id> --json
+# {"worktree_id": "...", "tracked": true, "head_session": "<sid>"|null,
+#  "active": <bool>, "state": "active"|"handed-off"|"concluded"|null}
+```
+
+`active` is `head_session is not None` — the single boolean a consumer's create
+guard keys on. An **unknown/untracked** worktree is not an error (`tracked:
+false`, exit 0): a guard that cannot find a record must **fail open** and permit
+the create, never refuse it. This is the sole sanctioned way for another layer
+to learn "which session is current here" — it derives, it does not keep a rival
+pointer (*derive-dont-duplicate*).
+
 ### Two-Phase Completion
 
 Worktree completion is split into two explicit steps:

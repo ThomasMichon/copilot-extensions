@@ -449,8 +449,17 @@ class BridgeClient:
         caller_id: str | None = None,
         sender_repo: str | None = None,
         force_new: bool = False,
+        worktree_id: str | None = None,
+        reclaim: bool = False,
     ) -> dict[str, Any]:
-        """POST /api/v1/sessions"""
+        """POST /api/v1/sessions
+
+        ``worktree_id`` targets an *existing* worktree (a session roll). When it
+        is set, the server enforces the session-lifecycle head guard: a create
+        into a worktree whose ground-layer head is still ``active`` is refused
+        (409 ``reason: worktree_head_active``) unless ``reclaim=true`` -- the
+        break-glass take-over (sibling of ``resume_worktree(reclaim=...)``).
+        """
         body: dict[str, Any] = {}
         if agent:
             body["agent"] = agent
@@ -462,6 +471,10 @@ class BridgeClient:
             body["sender_repo"] = sender_repo
         if force_new:
             body["force_new"] = True
+        if worktree_id:
+            body["worktree_id"] = worktree_id
+        if reclaim:
+            body["reclaim"] = True
         return self._request("POST", "/api/v1/sessions", body) or {}
 
     def submit_prompt(self, session_id: str, prompt: str) -> dict[str, Any]:

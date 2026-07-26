@@ -6,6 +6,7 @@ predecessor<->successor chain, and their YAML round-trip + backward compat.
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pytest
@@ -239,3 +240,132 @@ class TestRegisterSessionHeadInit:
         assert rec.head_session == "sess-A"
         assert len(rec.sessions) == 1
         assert rec.session_entry("sess-A").pid == 999
+
+
+class TestHeadSessionCommand:
+    """The ``head-session`` CLI read -- the ground-layer derive point that
+    agent-bridge's create guard consumes (agent-fabric `derive-dont-duplicate`).
+    """
+
+    @staticmethod
+    def _run(monkeypatch, worktree_id: str) -> dict:
+        from agent_worktrees import __main__ as m
+
+        captured: dict = {}
+        monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
+        args = argparse.Namespace(worktree_id=worktree_id, json=True)
+        rc = m.cmd_head_session(args)
+        captured["_rc"] = rc
+        return captured
+
+    def test_active_head_reported(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "sess-A")
+        out = self._run(monkeypatch, "wt-1")
+        assert out["_rc"] == 0
+        assert out["tracked"] is True
+        assert out["head_session"] == "sess-A"
+        assert out["active"] is True
+        assert out["state"] == "active"
+
+    def test_concluded_head_is_inactive(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "sess-A")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        conclude_session(rec, "sess-A")
+        out = self._run(monkeypatch, "wt-1")
+        # A worktree whose only session was concluded has no active head, so a
+        # fresh create is permitted (guard must not fire).
+        assert out["tracked"] is True
+        assert out["head_session"] is None
+        assert out["active"] is False
+        assert out["state"] is None
+
+    def test_handed_off_head_advances_to_successor(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "sess-A")
+        tracking.register_session("wt-1", "sess-B")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        # sess-A is head; hand it off into sess-B.
+        set_head_session(rec, "sess-A")
+        link_succession(rec, "sess-A", "sess-B")
+        out = self._run(monkeypatch, "wt-1")
+        assert out["head_session"] == "sess-B"
+        assert out["active"] is True
+        assert out["state"] == "active"
+
+    def test_untracked_worktree_fails_open(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        # An unknown worktree is not an error: exit 0, tracked False, no head --
+        # a fail-open signal so the create guard permits the session.
+        out = self._run(monkeypatch, "nonesuch")
+        assert out["_rc"] == 0
+        assert out["tracked"] is False
+        assert out["head_session"] is None
+        assert out["active"] is False
+
+
+class TestFindTrackingFileAcrossProjects:
+    """``_find_tracking_file`` resolves a worktree id **without** an active
+    project -- the project-agnostic lookup the agent-bridge daemon needs (its
+    CWD is unrelated to the worktree it guards). It searches every project's
+    tracking dir, prefers an exact id, and fails open on ambiguity/traversal.
+    """
+
+    def test_exact_match_found_via_registry_dir(
+        self, tmp_path: Path, monkeypatch
+    ):
+        from agent_worktrees import __main__ as m
+
+        proj = tmp_path / ".proj-a" / "worktrees"
+        proj.mkdir(parents=True)
+        _rec(proj)  # writes proj/wt-1.yaml
+        # No active-project fast path; resolution must come from the registry dir.
+        monkeypatch.setattr(m, "_all_tracking_dirs", lambda: [proj])
+        assert m._find_tracking_file("wt-1") == proj / "wt-1.yaml"
+
+    def test_unique_suffix_match(self, tmp_path: Path, monkeypatch):
+        from agent_worktrees import __main__ as m
+
+        proj = tmp_path / ".proj-a" / "worktrees"
+        proj.mkdir(parents=True)
+        rec = WorktreeRecord(
+            worktree_id="wheatley-linux-20260101-000000-abcd",
+            branch="b", worktree_path="/tmp/x", repo="r", machine="test",
+            platform="wsl", started_at="t", last_resumed_at="t", resume_count=0,
+            title=None, status="active", completed_at=None, sessions=[],
+        )
+        save_record(rec, proj / f"{rec.worktree_id}.yaml")
+        monkeypatch.setattr(m, "_all_tracking_dirs", lambda: [proj])
+        assert m._find_tracking_file("abcd") == proj / f"{rec.worktree_id}.yaml"
+
+    def test_ambiguous_suffix_fails_open(self, tmp_path: Path, monkeypatch):
+        from agent_worktrees import __main__ as m
+
+        a = tmp_path / ".proj-a" / "worktrees"
+        b = tmp_path / ".proj-b" / "worktrees"
+        for d, wid in ((a, "aaa-dup"), (b, "bbb-dup")):
+            d.mkdir(parents=True)
+            rec = WorktreeRecord(
+                worktree_id=wid, branch="b", worktree_path="/tmp/x", repo="r",
+                machine="test", platform="wsl", started_at="t",
+                last_resumed_at="t", resume_count=0, title=None,
+                status="active", completed_at=None, sessions=[],
+            )
+            save_record(rec, d / f"{wid}.yaml")
+        monkeypatch.setattr(m, "_all_tracking_dirs", lambda: [a, b])
+        # Two records end in "dup" -> ambiguous -> None (never guess).
+        assert m._find_tracking_file("dup") is None
+
+    def test_path_traversal_rejected(self, monkeypatch):
+        from agent_worktrees import __main__ as m
+
+        # A traversal/glob id never touches the filesystem.
+        assert m._find_tracking_file("../etc/passwd") is None
