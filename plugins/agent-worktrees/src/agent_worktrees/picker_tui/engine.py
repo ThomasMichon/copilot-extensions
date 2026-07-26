@@ -380,6 +380,7 @@ class PickerScreen(Widget):
         self.htabs = list(BUILTIN_PIVOTS)   # display labels (rebuilt in _load_pivots)
         self.registered_pivots = []   # RegisteredPivot list from the manifest scan
         self.wt_actions = []          # contributed WorktreeAction list (#B)
+        self.config_sections = []     # contributed ConfigSection list (#B slice 2)
         self.task_menu = None         # registered-pivot Enter action sub-menu
         self.cfgmenu = None           # ⚙ Configuration menu (hosts Profiles) (#1426)
         self.cfgmenu_idx = 0
@@ -461,16 +462,22 @@ class PickerScreen(Widget):
             registered = pivots_mod.discover_pivots()
             descriptors = pivots_mod.order_pivots(BUILTIN_PIVOTS, registered)
             wt_actions = pivots_mod.discover_worktree_actions()
+            config_sections = pivots_mod.discover_config_sections()
         except Exception:
             registered, descriptors, wt_actions = [], [
                 {"label": b, "kind": b.lower(), "pivot": None} for b in BUILTIN_PIVOTS
             ], []
+            config_sections = []
         self.registered_pivots = registered
         self.pivots = descriptors
         # Cross-plugin worktree-row actions (a layer augmenting the Worktrees
         # view's Enter sub-menu, e.g. a bridge's "Send message"): discovered
         # from the same manifests, independent of any list pivot (#B).
         self.wt_actions = wt_actions
+        # Cross-plugin Configuration sections (a layer augmenting the ⚙
+        # Configuration menu, e.g. an SSH or MCP settings home): discovered from
+        # the same manifests, independent of any list pivot (#B slice 2).
+        self.config_sections = config_sections
         # Tag each pivot with its placement (left cycle / config menu / hidden
         # anchor) so nav machinery can partition them without disturbing the
         # ``order_pivots`` weave that registered ``after`` hints rely on (#1426).
@@ -4156,15 +4163,35 @@ class PickerScreen(Widget):
         return True, f"opening …{str(wid)[-4:]} into a CLI session"
 
     # ---- ⚙ Configuration menu (hosts Profiles etc.) (#1426) ----
+    def _cfgmenu_items(self):
+        """The ⚙ Configuration menu entries, in display order: built-in
+        config-placed pivots (Profiles) first, then cross-plugin contributed
+        Configuration sections (#B slice 2). Each is a typed descriptor --
+        ``{"kind": "pivot", "idx", "label"}`` (switches to that pivot) or
+        ``{"kind": "section", "section", "label"}`` (runs a contributed command
+        on Enter)."""
+        items: list[dict] = [
+            {"kind": "pivot", "idx": i, "label": self.htabs[i]}
+            for i in self._config_pivots()
+        ]
+        for cs in getattr(self, "config_sections", []) or []:
+            items.append({"kind": "section", "section": cs, "label": cs.label})
+        return items
+
     def _open_cfgmenu(self):
         """Open the Configuration menu: the pivots placed under ⚙ Configuration
-        (currently Profiles). Selecting one switches to it and focuses its body.
-        User-local config only -- never repo-managed settings."""
-        items = self._config_pivots()
+        (Profiles) plus any contributed Configuration sections. Selecting a
+        pivot switches to it and focuses its body; selecting a section runs its
+        command. User-local config only -- never repo-managed settings."""
+        items = self._cfgmenu_items()
         if not items:
             return
         # If the current pivot is already config-hosted, pre-select it.
-        cur = items.index(self.htab) if self.htab in items else 0
+        cur = next(
+            (n for n, it in enumerate(items)
+             if it["kind"] == "pivot" and it["idx"] == self.htab),
+            0,
+        )
         self.cfgmenu = {"items": items}
         self.cfgmenu_idx = cur
 
@@ -4177,12 +4204,41 @@ class PickerScreen(Widget):
         elif key == "enter":
             target = items[self.cfgmenu_idx]
             self.cfgmenu = None
-            self.htab = target
+            if target["kind"] == "section":
+                # A cross-plugin contributed Configuration section (#B slice 2):
+                # run it and rescan (it may have changed config/session state).
+                self._run_config_section(target["section"])
+                return
+            self.htab = target["idx"]
             self.btn_idx = 0
             self.top = 0
             self.sel = self.default_sel()      # focus the hosted pivot's body
         elif key in ("escape", "q", "tab"):
             self.cfgmenu = None
+
+    def _config_section_ctx(self) -> dict:
+        """Placeholder context for a contributed config section's argv template:
+        the current machine identity and the picker's repo (config sections are
+        global -- there is no per-worktree context)."""
+        return {
+            "machine": self._pivot_machine_id() or "",
+            "repo": getattr(self.src, "REPO", "") or "",
+        }
+
+    def _run_config_section(self, section) -> None:
+        """Run a contributed Configuration section (subprocess), report the
+        outcome, and rescan (it may have changed config/session state)."""
+        from . import tasks
+
+        label, source = section.label, section.source
+        ok, msg = tasks.run_config_section(section, self._config_section_ctx())
+        self.debug = (f"{label} ({source}): {msg or 'done'}" if ok
+                      else f"{label} ({source}) failed: {msg}")
+        try:
+            self.setup()
+            self.sel = self.default_sel()
+        except Exception:
+            pass
 
     def _overlay_cfgmenu(self, lines, W, top_off, body_h):
         items = self.cfgmenu["items"]
@@ -4193,9 +4249,9 @@ class PickerScreen(Widget):
                       style=C_BAND)]
         panel.append(self._prow(" user-local settings", pw, style=C_DIM))
         panel.append(self._prow("", pw))
-        for n, i in enumerate(items):
+        for n, it in enumerate(items):
             mark = " ▸ " if n == idx else "   "
-            panel.append(self._prow(mark + self.htabs[i], pw, selected=(n == idx)))
+            panel.append(self._prow(mark + it["label"], pw, selected=(n == idx)))
         panel.append(self._prow("", pw))
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)

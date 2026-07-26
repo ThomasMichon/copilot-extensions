@@ -89,6 +89,28 @@ class WorktreeAction:
 
 
 @dataclass(frozen=True)
+class ConfigSection:
+    """A cross-plugin section contributed under the ⚙ **Configuration** menu.
+
+    Where :class:`WorktreeAction` augments a *worktree row's* Enter sub-menu,
+    a config section augments the right-aligned ⚙ Configuration menu (which
+    hosts built-in Profiles): any installed layer can add a settings entry
+    (e.g. an SSH layer an "SSH" home, an MCP layer an "MCP" home) without
+    agent-worktrees importing its Python. Selecting the section runs ``run`` --
+    an argv template substituted from picker context (``{machine}`` / ``{repo}``)
+    -- so a contributed config tool opens on its own terms on ``PATH``. Config
+    sections are global (not per-worktree), so there is no ``when`` gate.
+    """
+
+    key: str
+    label: str
+    run: tuple[str, ...]
+    source: str
+    confirm: bool = False
+    description: str = ""
+
+
+@dataclass(frozen=True)
 class RegisteredPivot:
     """A pivot contributed by another plugin via a filesystem manifest."""
 
@@ -311,6 +333,67 @@ def worktree_action_matches(
     return True
 
 
+def parse_config_sections(
+    data: Mapping[str, object], *, name: str
+) -> tuple["ConfigSection", ...]:
+    """Parse a manifest's optional ``config_sections`` array (independent of
+    whether the manifest also contributes a ``list`` pivot or ``worktree_actions``).
+    Each entry declares a ``label`` and a ``run`` argv template opened on Enter.
+    A malformed entry raises :class:`ManifestError` so the caller can skip the
+    whole manifest's config sections without aborting discovery."""
+    raw = data.get("config_sections", [])
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        raise ManifestError("`config_sections` must be an array when present")
+    out: list[ConfigSection] = []
+    for i, a in enumerate(raw):
+        if not isinstance(a, Mapping):
+            raise ManifestError(f"`config_sections[{i}]` must be an object")
+        label = a.get("label")
+        if not isinstance(label, str) or not label.strip():
+            raise ManifestError(f"`config_sections[{i}].label` is required")
+        run = _as_argv(a.get("run"), where=f"`config_sections[{i}].run`")
+        key = a.get("key")
+        out.append(
+            ConfigSection(
+                key=str(key) if isinstance(key, str) and key else f"{name}{i}",
+                label=label.strip(),
+                run=run,
+                source=name,
+                confirm=bool(a.get("confirm", False)),
+                description=str(a.get("description", "")),
+            )
+        )
+    return tuple(out)
+
+
+def discover_config_sections(
+    base: str | os.PathLike[str] | None = None,
+) -> list["ConfigSection"]:
+    """Scan the manifest directory and return all contributed config sections,
+    in stable (filename, declared) order. A manifest with **no** ``list`` pivot
+    is still honored here (a layer may contribute only config sections). Any
+    unreadable/malformed manifest is skipped -- never fatal."""
+    directory = pivots_dir(base)
+    try:
+        if not directory.is_dir():
+            return []
+        files = sorted(
+            p for p in directory.iterdir() if p.suffix == ".json" and p.is_file()
+        )
+    except OSError:
+        return []
+    out: list[ConfigSection] = []
+    for path in files:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, Mapping):
+                continue
+            out.extend(parse_config_sections(data, name=path.stem))
+        except (OSError, ValueError):
+            continue
+    return out
+
+
 def pivots_dir(base: str | os.PathLike[str] | None = None) -> Path:
     """The manifest directory: an explicit ``base``, else the env override,
     else ``~/.agent-worktrees/pivots``."""
@@ -469,16 +552,19 @@ def format_template(template: Sequence[str], ctx: Mapping[str, object]) -> list[
 # Kept for symmetry with maintenance.py's module layout; the engine imports the
 # functions above directly.
 __all__ = [
+    "ConfigSection",
     "ManifestError",
     "PivotAction",
     "RegisteredPivot",
     "WorktreeAction",
+    "discover_config_sections",
     "discover_pivots",
     "discover_worktree_actions",
     "ensure_pivots",
     "format_template",
     "installed_plugins_dir",
     "order_pivots",
+    "parse_config_sections",
     "parse_manifest",
     "parse_worktree_actions",
     "pivots_dir",

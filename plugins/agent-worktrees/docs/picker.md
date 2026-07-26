@@ -85,7 +85,9 @@ with `Tab`:
   `↑ahead`/`↓behind` sync tag. Same vocabulary as the status bar and
   [worktree-lifecycle.md § states](worktree-lifecycle.md#worktree-states).
 - **⚙ Configuration** menu — hosts **Profiles** (user-local Copilot backend
-  profiles; never repo-managed) and other settings.
+  profiles; never repo-managed) and other settings. Installed plugins can
+  **contribute their own sections** here (an SSH layer an "SSH" home, an MCP
+  layer an "MCP" home) via a `config_sections` entry in their pivot manifest.
 
 ### Navigating — read the footer
 
@@ -158,6 +160,16 @@ to an exact chosen set.
 Open **⚙ Configuration → Profiles** to Tab-cycle the Copilot backend profiles
 declared in `copilot_profiles`, toggle a host→target mapping, and **Apply** (or
 **Reset**) the grid. These are user-local settings, never repo-managed.
+
+### Contributed Configuration sections
+Beyond Profiles, installed plugins can add their own entries to the **⚙
+Configuration** menu via a `config_sections` entry in their pivot manifest —
+giving a settings-oriented layer a home (an SSH layer an "SSH" entry, an MCP
+layer an "MCP" entry) without owning a whole pivot. Profiles is always listed
+first; contributed sections follow. Selecting one runs the plugin's own
+configuration command (scoped to the current machine); selecting Profiles still
+opens the profiles grid. See
+[architecture.md § Picker Pivot Registry](architecture.md#picker-pivot-registry-cross-plugin).
 
 ## Auditing & testing the render (headless)
 

@@ -271,3 +271,71 @@ def test_ensure_pivots_restores_multiple_plugins(tmp_path):
 def test_installed_plugins_dir_env_override(tmp_path, monkeypatch):
     monkeypatch.setenv(pivots.PLUGINS_ROOT_ENV, str(tmp_path / "custom"))
     assert pivots.installed_plugins_dir() == tmp_path / "custom"
+
+
+# ---- config_sections (B slice 2) ----------------------------------------
+
+
+def test_parse_config_sections_minimal_and_full():
+    """A `config_sections` entry needs a label + a run argv; key/confirm/
+    description default sensibly and `source` is the manifest stem."""
+    out = pivots.parse_config_sections(
+        {
+            "config_sections": [
+                {"label": "SSH", "run": ["agent-ssh", "config"]},
+                {
+                    "key": "mcp",
+                    "label": "MCP",
+                    "run": ["agent-mcp", "menu", "--machine", "{machine}"],
+                    "confirm": True,
+                    "description": "MCP servers",
+                },
+            ]
+        },
+        name="net",
+    )
+    assert [s.label for s in out] == ["SSH", "MCP"]
+    assert out[0].key == "net0"          # defaulted from stem + index
+    assert out[0].source == "net"
+    assert out[0].run == ("agent-ssh", "config")
+    assert out[0].confirm is False
+    assert out[1].key == "mcp"           # explicit key honored
+    assert out[1].confirm is True
+    assert out[1].description == "MCP servers"
+
+
+def test_parse_config_sections_absent_is_empty():
+    assert pivots.parse_config_sections({}, name="x") == ()
+
+
+@pytest.mark.parametrize("bad", [
+    {"config_sections": "nope"},                       # not an array
+    {"config_sections": [42]},                          # entry not an object
+    {"config_sections": [{"run": ["x"]}]},              # missing label
+    {"config_sections": [{"label": " ", "run": ["x"]}]},  # blank label
+    {"config_sections": [{"label": "L"}]},              # missing run
+    {"config_sections": [{"label": "L", "run": []}]},   # empty run argv
+    {"config_sections": [{"label": "L", "run": "x"}]},  # run not an array
+])
+def test_parse_config_sections_malformed_raises(bad):
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_config_sections(bad, name="x")
+
+
+def test_discover_config_sections_independent_of_list(tmp_path):
+    """Config sections are discovered from a manifest that carries no `list`
+    pivot, in stable (filename, declared) order; a malformed manifest is
+    skipped, never fatal."""
+    _write(tmp_path, "net", {"config_sections": [
+        {"label": "SSH", "run": ["agent-ssh", "config"]},
+    ]})
+    _write(tmp_path, "mcp", {"config_sections": [
+        {"label": "MCP", "run": ["agent-mcp", "menu"]},
+    ]})
+    _write(tmp_path, "bad", {"config_sections": [{"label": "X"}]})  # no run
+    out = pivots.discover_config_sections(tmp_path)
+    assert [(s.source, s.label) for s in out] == [("mcp", "MCP"), ("net", "SSH")]
+
+
+def test_discover_config_sections_missing_dir_is_empty(tmp_path):
+    assert pivots.discover_config_sections(tmp_path / "nope") == []
