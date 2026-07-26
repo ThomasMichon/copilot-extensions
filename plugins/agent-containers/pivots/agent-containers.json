@@ -1,0 +1,12 @@
+{
+  "label": "Containers",
+  "after": "Worktrees",
+  "list": ["agent-containers", "fleet", "--json"],
+  "entry": {
+    "id": "name",
+    "title": "name",
+    "subtitle": "image",
+    "badges": ["state", "fleet"]
+  },
+  "empty_hint": "No fleet containers (run `agent-containers up <fleet>`)."
+}

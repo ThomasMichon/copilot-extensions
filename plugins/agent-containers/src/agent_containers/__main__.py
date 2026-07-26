@@ -44,7 +44,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("fleet", help="List fleet containers + lease status")
+    fleet_p = sub.add_parser("fleet", help="List fleet containers + lease status")
+    fleet_p.add_argument(
+        "--json", action="store_true", help="Emit the fleet as a JSON array."
+    )
 
     up_p = sub.add_parser("up", help="Provision/top-up a fleet")
     up_p.add_argument("fleet", help="Fleet name (from containers.yaml)")
@@ -102,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "fleet":
-            return _cmd_fleet()
+            return _cmd_fleet(args)
         if args.command == "up":
             return _cmd_up(args)
         if args.command in ("down", "start", "rm"):
@@ -136,12 +139,30 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _cmd_fleet() -> int:
+def _cmd_fleet(args: argparse.Namespace) -> int:
     from .lease import get_lease
     from .lifecycle import list_containers
 
     config = load_config()
     containers = list_containers(config)
+    if getattr(args, "json", False):
+        # Bare JSON array, one object per container, so the picker's Containers
+        # pivot (and any other machine-readable consumer) can render the fleet.
+        out = []
+        for c in containers:
+            lease = get_lease(c.name)
+            out.append({
+                "name": c.name,
+                "container_id": c.container_id,
+                "image": c.image,
+                "state": c.state,
+                "status": c.status,
+                "fleet": c.fleet,
+                "local_folder": c.local_folder,
+                "lease": lease.effort if lease else None,
+            })
+        print(json.dumps(out, indent=2, default=str))
+        return 0
     if not containers:
         print("No fleet containers found. Run `agent-containers up <fleet>`.")
         return 0
