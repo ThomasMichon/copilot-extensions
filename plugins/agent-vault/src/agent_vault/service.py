@@ -415,14 +415,18 @@ class VaultService:
 
         if action == "unlock":
             password = request.get("password", "")
-            if not password and request.get("prompt"):
-                # Explicit unlock-with-prompt opts into the interactive prompt.
-                if self.ensure_unlocked(kpdb, vault_name, reason, allow_prompt=True):
+            if not password:
+                # Passwordless unlock runs the unlock-source providers (e.g. the
+                # operator-held broker deposit) via ensure_unlocked. ``prompt``
+                # opts into the interactive dialog when no provider resolves;
+                # without it this is a *silent provider-only* unlock that
+                # fail-fasts to needs_unlock -- so a bare `unlock` is broker-first,
+                # matching the get/has path, instead of forcing a client prompt.
+                want_prompt = bool(request.get("prompt"))
+                if self.ensure_unlocked(kpdb, vault_name, reason, allow_prompt=want_prompt):
                     return {"ok": True}
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Unlock failed"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
-            if not password:
-                return {"ok": False, "error": "No password provided"}
             if not kpdb:
                 return {"ok": False, "error": "KeePass database path is not configured; set KPDB"}
             if self.cli.verify_password(kpdb, password):

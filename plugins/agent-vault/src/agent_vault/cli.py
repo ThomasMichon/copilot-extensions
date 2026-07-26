@@ -29,6 +29,11 @@ def _detect_wsl() -> bool:
 
 IS_WSL = _detect_wsl()
 
+# Timeout (seconds) for the silent provider-only unlock probe -- long enough for
+# the daemon to run its unlock providers (e.g. a ~3 s broker fetch + a KeePassXC
+# verify), short enough that a miss falls back to the interactive prompt promptly.
+PROVIDER_UNLOCK_TIMEOUT = 10.0
+
 
 # ---------------------------------------------------------------------------
 # IPC client
@@ -430,6 +435,20 @@ def _server_prompted_unlock() -> bool:
     return False
 
 
+def _provider_only_unlock() -> bool:
+    """Ask the daemon to unlock via its unlock-source providers, without prompting.
+
+    Sends a passwordless unlock with prompting left off: the daemon runs its
+    registered unlock providers (e.g. the operator-held Vault Broker deposit) and
+    unlocks silently if one resolves, otherwise returns ``needs_unlock``. Returns
+    ``False`` on any miss so the caller falls back to an interactive prompt --
+    never prompts, never blocks on a dialog. This makes a bare ``unlock``
+    broker-first (matching the get/has path) on every machine.
+    """
+    resp = send_command({"action": "unlock"}, timeout=PROVIDER_UNLOCK_TIMEOUT)
+    return bool(resp and resp.get("ok"))
+
+
 def _terminal_unlock_local() -> bool:
     """Read the master password on this terminal and unlock the local service."""
     pw = _read_password_from_tty("KeePass master password: ")
@@ -471,6 +490,12 @@ def auto_unlock() -> bool:
     """
     if os.environ.get("VAULT_UNLOCK_TERMINAL"):
         return _terminal_unlock_local()
+    # Broker-first: let the daemon resolve via its unlock-source providers (e.g.
+    # the operator-held Vault Broker deposit) with no prompt. When the master
+    # password is held, a bare `unlock` succeeds silently here -- on every machine
+    # -- matching the get/has path, before any interactive prompt is considered.
+    if _provider_only_unlock():
+        return True
     # Reach the operator where they are: a controlling terminal wins over the
     # (blocking) service-side GUI. This inline unlock sends the password directly,
     # so it never touches the daemon's prompt path or its prompt lock.
