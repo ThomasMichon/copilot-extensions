@@ -322,10 +322,24 @@ def start_service(tcp_port: int | None = None) -> bool:
 
 
 def ensure_service(tcp_port: int | None = None) -> bool:
-    """Ensure the service is running, starting it if needed."""
+    """Ensure the service is running, starting it if needed.
+
+    On WSL, when the daemon we must reach is the cross-boundary **Windows**
+    daemon (discovered via the Windows-side rendezvous file, ``source ==
+    "windows"``), never spawn a LOCAL daemon. A WSL interop consumer has no
+    local KeePass DB; a local daemon would bind the unix socket and write a
+    *local* rendezvous file that then **shadows** the Windows daemon (the local
+    file resolves ahead of the Windows-side one). Rely on the interop relay and
+    fail fast when the host daemon is unreachable, rather than starting a
+    shadowing local daemon (#3464).
+    """
     resp = send_command({"action": "ping"})
     if resp and resp.get("ok"):
         return True
+    if IS_WSL:
+        discovered = _discover_endpoint(config.resolve_context())
+        if discovered is not None and discovered.source == "windows":
+            return False
     return start_service(tcp_port)
 
 

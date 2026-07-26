@@ -333,6 +333,67 @@ def test_send_command_discovers_unix(run_dir, monkeypatch, empty_registry, tmp_p
 
 
 # ---------------------------------------------------------------------------
+# ensure_service -- WSL must never spawn a shadowing LOCAL daemon (#3464)
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_service_wsl_never_starts_local_for_windows_daemon(
+    run_dir, monkeypatch, tmp_path
+):
+    """#3464(b): on WSL, when the reachable daemon is the cross-boundary Windows
+    daemon (a pipe-primary Windows-side rendezvous record) but an interop ping
+    momentarily fails, ``ensure_service`` must NOT spawn a local daemon (which
+    would bind the unix socket + write a local rendezvous file that shadows the
+    Windows daemon). It fails fast instead."""
+    monkeypatch.setattr(cli, "IS_WSL", True)
+    winrun = tmp_path / "winrun"
+    winrun.mkdir()
+    _write_pipe_with_tcp_alt(winrun, 45999)  # no listener -> ping "fails"
+    monkeypatch.setenv("AGENT_VAULT_WINDOWS_RUN_DIR", str(winrun))
+    monkeypatch.setattr(cli, "send_command", lambda *a, **k: None)
+    started = {"called": False}
+
+    def _boom(*a, **k):
+        started["called"] = True
+        return True
+
+    monkeypatch.setattr(cli, "start_service", _boom)
+    assert cli.ensure_service() is False
+    assert started["called"] is False
+
+
+def test_ensure_service_wsl_starts_local_without_windows_daemon(
+    run_dir, monkeypatch
+):
+    """A generic WSL install with no cross-boundary Windows daemon still starts a
+    local daemon (the #3464 guard is scoped to windows-source endpoints only)."""
+    monkeypatch.setattr(cli, "IS_WSL", True)
+    monkeypatch.setattr(cli, "send_command", lambda *a, **k: None)
+    started = {"called": False}
+
+    def _start(*a, **k):
+        started["called"] = True
+        return True
+
+    monkeypatch.setattr(cli, "start_service", _start)
+    assert cli.ensure_service() is True
+    assert started["called"] is True
+
+
+def test_ensure_service_returns_true_when_ping_ok(run_dir, monkeypatch):
+    """When the daemon answers ping, ensure_service short-circuits to True and
+    never consults discovery or start_service."""
+    monkeypatch.setattr(cli, "IS_WSL", True)
+    monkeypatch.setattr(cli, "send_command", lambda *a, **k: {"ok": True})
+
+    def _boom(*a, **k):
+        raise AssertionError("start_service must not be called when ping succeeds")
+
+    monkeypatch.setattr(cli, "start_service", _boom)
+    assert cli.ensure_service() is True
+
+
+# ---------------------------------------------------------------------------
 # service.send_command (internal lifecycle client) integration
 # ---------------------------------------------------------------------------
 
