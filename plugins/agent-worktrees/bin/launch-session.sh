@@ -15,6 +15,19 @@ setup_log() {
     printf '[%s] [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$msg" >> "$SETUP_LOG" 2>/dev/null || true
 }
 
+# Launch-status line: always logged, and ALSO echoed to the terminal (stderr,
+# to stay clear of any stdout capture / ACP channel) during an interactive
+# launch so the operator understands what the otherwise-silent post-Picker /
+# pre-mux pause is waiting on -- the staged update join + apply, which can
+# block for up to 90s. Gated on _SHOW_LAUNCH_STATUS so machine/direct-dispatch
+# and JSON paths stay quiet (they never enable it).
+_SHOW_LAUNCH_STATUS=""
+setup_status() {
+    local level="$1" msg="$2"
+    setup_log "$level" "$msg"
+    [[ "$_SHOW_LAUNCH_STATUS" == "1" ]] && printf '  %s\n' "$msg" >&2 || true
+}
+
 # Write header
 {
     echo "# Worktree Manager — session launch log"
@@ -137,8 +150,10 @@ start_update_stage() {
 
 invoke_update_apply() {
     # $1 = "1" to also run plugin reconcile (Picker path); "0" otherwise.
+    # $2 = "1" to echo status to the terminal (interactive launch); "0" otherwise.
     # Idempotent: runs its body at most once per launch.
     local with_reconcile="${1:-0}"
+    _SHOW_LAUNCH_STATUS="${2:-0}"
     [[ -n "$_UPDATE_APPLIED" ]] && return 0
     _UPDATE_APPLIED=1
 
@@ -165,15 +180,19 @@ print('\t'.join([
     }
 
     if [[ "$_NO_UPDATE" != "1" ]]; then
-        # Join the background stage.
+        setup_status INFO 'Finalizing launch: applying any pending plugin and runtime updates...'
+        # Join the background stage. This is the step most likely to make the
+        # launch look "stuck": the marketplace download staged while the Picker
+        # was open is joined here, up to the stage's own timeout.
         if [[ -n "$_STAGE_PID" ]]; then
+            setup_status INFO 'Waiting for the background plugin-update download to finish...'
             wait "$_STAGE_PID" 2>/dev/null || true
         fi
         _parse_stage_status
         # No usable staged result (stage failed, or a peer launch held the
         # lock): stage inline so the marketplace pull still happens.
         if [[ "$stage_done" != "True" || "$skipped" == "locked" ]]; then
-            setup_log INFO 'No usable staged update result; staging inline'
+            setup_status INFO 'Background download unavailable; downloading the plugin update now...'
             "$PYTHON" -m agent_worktrees stage-update >/dev/null 2>&1 || true
             _parse_stage_status
         fi
@@ -181,7 +200,7 @@ print('\t'.join([
         # (1) Marketplace installer, iff the download changed the payload.
         #     NO re-exec: a launcher-script change applies on the next launch.
         if [[ "$plugin_changed" == "True" ]]; then
-            setup_log INFO 'Staged update changed the plugin payload -- running installer'
+            setup_status INFO 'A new plugin version was downloaded; installing the updated runtime...'
             local _installer="$plugin_dir/scripts/install.sh"
             if [[ -n "$plugin_dir" && -f "$_installer" ]]; then
                 local _inst_args=(update)
@@ -201,11 +220,11 @@ print('\t'.join([
         fi
 
         # (2) Pre-launch self-update (bootstrap-service staleness; two-pass).
-        setup_log INFO 'Running pre-launch staleness check'
+        setup_status INFO 'Checking bootstrap services for pending updates...'
         PRE_JSON=$("$PYTHON" -m agent_worktrees pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue","reason":"error"}'
         PRE_ACTION=$(echo "$PRE_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) || PRE_ACTION="continue"
         if [[ "$PRE_ACTION" == "self-update" ]]; then
-            setup_log INFO 'Self-update required -- running update commands'
+            setup_status INFO 'Bootstrap services are stale; updating them...'
             UPDATE_COUNT=$("$PYTHON" -c "import sys,json; print(len(json.load(sys.stdin).get('updates',[])))" <<< "$PRE_JSON" 2>/dev/null) || UPDATE_COUNT=0
             for (( i=0; i<UPDATE_COUNT; i++ )); do
                 SVC_NAME=$("$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['updates'][$i]['service'])" <<< "$PRE_JSON" 2>/dev/null) || SVC_NAME="unknown"
@@ -215,7 +234,8 @@ for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
     print(a)
 " <<< "$PRE_JSON" 2>/dev/null)
                 if [[ ${#UPDATE_ARGV[@]} -gt 0 ]]; then
-                    setup_log INFO "Updating $SVC_NAME: ${UPDATE_ARGV[*]}"
+                    setup_status INFO "Updating $SVC_NAME..."
+                    setup_log INFO "  command: ${UPDATE_ARGV[*]}"
                     "${UPDATE_ARGV[@]}" || setup_log WARN "Update failed for $SVC_NAME (exit $?)"
                 fi
             done
@@ -227,7 +247,7 @@ for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
             fi
         fi
     else
-        setup_log INFO 'Update apply skipped (WORKTREE_NO_UPDATE=1)'
+        setup_status INFO 'Skipping plugin update check (--no-update).'
     fi
 
     # (3) Plugin reconciliation (repo-configured payloads + gated runtimes).
@@ -245,7 +265,7 @@ for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
                 break
             fi
             REC_COUNT=$("$PYTHON" -c "import sys,json; print(len(json.load(sys.stdin).get('updates',[])))" <<< "$REC_JSON" 2>/dev/null) || REC_COUNT=0
-            setup_log INFO "Plugin reconcile pass $_rpass: $REC_COUNT action(s)"
+            setup_status INFO "Reconciling plugins (pass $_rpass): $REC_COUNT action(s)..."
             for (( _ri=0; _ri<REC_COUNT; _ri++ )); do
                 _RSVC=$("$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['updates'][$_ri].get('service','?'))" <<< "$REC_JSON" 2>/dev/null) || _RSVC="?"
                 mapfile -t _RARGV < <("$PYTHON" -c "
@@ -353,7 +373,7 @@ if [[ "$ACTION" == "refresh" ]]; then
         "$PYTHON" -m agent_worktrees update \
             || setup_log WARN 'Full update returned non-zero -- continuing to reconcile/relaunch'
     fi
-    invoke_update_apply 1
+    invoke_update_apply 1 1
     _RELAUNCH="$HOME/.agent-worktrees/bin/launch-session.sh"
     if [[ -x "$_RELAUNCH" ]]; then
         exec "$_RELAUNCH" "$@"
@@ -368,7 +388,7 @@ if [[ "$ACTION" == "exec" ]]; then
     # waits for the staged marketplace download, runs the installer if it
     # changed the payload (no re-exec -- a launcher change applies next launch),
     # then the pre-launch self-update and plugin reconcile.
-    invoke_update_apply 1
+    invoke_update_apply 1 1
 
     WORK_DIR=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('work_dir',''))")
     POST_EXIT=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('post_exit') else '0')")
