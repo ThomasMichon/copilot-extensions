@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Turn-key plugin test runner (enforcement automation).
+"""Turn-key plugin test runner (on-demand local development).
 
 Runs a plugin's ``pytest`` suite in a managed, cached dev virtualenv so the
 suites that guard the marketplace (the picker's overlay-registry / palette /
 keyboard-harness guards, the shipped-manifest contract, each plugin's unit
-tests) are enforced with ONE command instead of a hand-rolled ``uv venv`` +
-editable-install dance -- and so the pre-push hook can run them automatically.
+tests) can be run with ONE command instead of a hand-rolled ``uv venv`` +
+editable-install dance. There is intentionally no automatic push/PR gate wired
+to it yet -- run it yourself before pushing a runtime change.
 
 Usage::
 
@@ -165,9 +166,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--reinstall", action="store_true", help="rebuild the venv(s)")
     ap.add_argument("-k", dest="kexpr", default=None, help="pytest -k filter")
     ap.add_argument("--guards", action="store_true",
-                    help="run only @pytest.mark.guard tests (fast, for pre-push)")
+                    help="run only @pytest.mark.guard tests (fast structural/contract checks)")
     ap.add_argument("--pre-push", action="store_true",
-                    help="hook mode: skip (exit 0) if uv is absent")
+                    help="hook mode: skip (exit 0) if uv is absent instead of failing")
     args = ap.parse_args(argv)
 
     if args.all:
