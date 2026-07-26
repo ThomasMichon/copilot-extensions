@@ -48,6 +48,20 @@ def _prof_modal_open(scr):
     return _prof_modal(scr) is not None
 
 
+def _task_menu(scr):
+    """The F4 TaskMenuScreen instance on the app's screen stack, or None."""
+    from agent_worktrees.picker_tui.engine import TaskMenuScreen
+    for s in scr.app.screen_stack:
+        if isinstance(s, TaskMenuScreen):
+            return s
+    return None
+
+
+def _task_menu_open(scr):
+    """True when the F4 TaskMenuScreen (registered-pivot action menu) is stacked."""
+    return _task_menu(scr) is not None
+
+
 def _fixture_source():
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
     local = ("lambda-core", "Win")
@@ -3712,16 +3726,20 @@ def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch
             scr.sel = ("T", 0)
             await pilot.pause()
 
-            # Enter opens the action sub-menu with the manifest's actions.
+            # Enter opens the action sub-menu (ModalScreen) with the manifest's
+            # actions.
             scr._open_task_menu()
-            assert scr.task_menu is not None
-            assert [a.label for a in scr.task_menu["actions"]] == [
+            await pilot.pause()
+            menu = _task_menu(scr)
+            assert menu is not None
+            assert [a.label for a in menu._actions] == [
                 "Open into a CLI session", "Abandon"]
 
-            # Select "Abandon" and run it.
-            scr.task_menu_idx = 1
-            scr._key_task_menu("enter")
-            assert scr.task_menu is None
+            # Select "Abandon" (idx 1) and run it through the real pipeline.
+            await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not _task_menu_open(scr)
             assert rt.actions and rt.actions[0][0] == "abandon"
             # Placeholders resolved: {task_id} -> the entry id.
             _key, ctx = rt.actions[0]
