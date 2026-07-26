@@ -1148,7 +1148,7 @@ def validate_and_finalize(
             print("Permissions merged back to anchor and worktree entry removed.")
 
         if permissions.remove_trusted_folder(worktree_path):
-            print("Removed worktree path from trusted_folders.")
+            print("Removed worktree path from trustedFolders.")
 
         # Update tracking
         if record:
@@ -1246,7 +1246,7 @@ def _dry_run_finalize_preview(
         f"(no live session / not inside it): {worktree_path}"
     )
     output.dry_run("Would merge worktree permissions back to anchor")
-    output.dry_run("Would remove worktree path from trusted_folders")
+    output.dry_run("Would remove worktree path from trustedFolders")
     output.dry_run("Would update worktree YAML status: finalized")
     print()
     output.ok("Dry run complete -- no changes made")

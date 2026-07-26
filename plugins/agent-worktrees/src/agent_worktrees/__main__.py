@@ -641,7 +641,7 @@ def _create_worktree_core(
 
     # Trust the new worktree path
     if permissions.add_trusted_folder(worktree_path):
-        print("Added worktree path to trusted_folders.", file=sys.stderr)
+        print("Added worktree path to trustedFolders.", file=sys.stderr)
 
     # Build launch command (for caller to use)
     fake_args = argparse.Namespace(
@@ -2772,7 +2772,7 @@ def _resolve_new(
         output.dry_run(f"Would create worktree at {worktree_path} on branch {branch}")
         output.dry_run("Would write tracking YAML")
         output.dry_run("Would clone permissions")
-        output.dry_run("Would add worktree path to trusted_folders")
+        output.dry_run("Would add worktree path to trustedFolders")
         launch_cmd = _build_launch_cmd(config, args, worktree_path, profile=profile)
         merged_env = _build_env(profile, _repo_session_env(config, worktree_path))
         output.dry_run(f"Would launch: {' '.join(launch_cmd)}")

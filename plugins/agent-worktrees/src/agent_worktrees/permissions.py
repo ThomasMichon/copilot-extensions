@@ -137,7 +137,13 @@ def merge_permissions(anchor_path: str, worktree_path: str) -> list[str]:
 
 
 def add_trusted_folder(worktree_path: str) -> bool:
-    """Add a worktree path to trusted_folders in config.json.
+    """Add a worktree path to trustedFolders in config.json.
+
+    Pre-seeding the folder as trusted BEFORE the first launch suppresses
+    Copilot's startup folder-trust settle (which otherwise triggers an
+    extension reload during env-loading). The key is camelCase
+    ``trustedFolders`` to match what the Copilot CLI actually reads; an
+    earlier snake_case ``trusted_folders`` was silently ignored.
 
     Args:
         worktree_path: The worktree path to trust.
@@ -151,12 +157,12 @@ def add_trusted_folder(worktree_path: str) -> bool:
 
     try:
         data = json.loads(config_file.read_text())
-        folders: list[str] = data.get("trusted_folders", [])
+        folders: list[str] = data.get("trustedFolders", [])
         if worktree_path in folders:
             return False
 
         folders.append(worktree_path)
-        data["trusted_folders"] = folders
+        data["trustedFolders"] = folders
         _atomic_json_write(config_file, data)
         return True
     except Exception:
@@ -164,7 +170,11 @@ def add_trusted_folder(worktree_path: str) -> bool:
 
 
 def remove_trusted_folder(worktree_path: str) -> bool:
-    """Remove a worktree path from trusted_folders in config.json.
+    """Remove a worktree path from trustedFolders in config.json.
+
+    Uses the camelCase ``trustedFolders`` key the Copilot CLI reads (an
+    earlier snake_case ``trusted_folders`` was a no-op, so worktree trust
+    entries were never cleaned up on finalize).
 
     Args:
         worktree_path: The worktree path to remove.
@@ -178,12 +188,12 @@ def remove_trusted_folder(worktree_path: str) -> bool:
 
     try:
         data = json.loads(config_file.read_text())
-        folders: list[str] = data.get("trusted_folders", [])
+        folders: list[str] = data.get("trustedFolders", [])
         if worktree_path not in folders:
             return False
 
         folders.remove(worktree_path)
-        data["trusted_folders"] = folders
+        data["trustedFolders"] = folders
         _atomic_json_write(config_file, data)
         return True
     except Exception:
