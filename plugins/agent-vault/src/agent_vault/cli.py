@@ -181,6 +181,15 @@ def send_command(request: dict, timeout: float | None = 5.0) -> dict | None:
     discovered_unix: str | None = None
     discovered_pipe: str | None = None
     if discovered is not None:
+        # On WSL the daemon's native primary -- a Windows named pipe, or a Unix
+        # socket that isn't this guest's -- can't be dialed. Fall to a TCP
+        # alternate the daemon also advertises so the interop relay gets a real
+        # port instead of the legacy default (#3426). ``usable`` returns the
+        # primary when it's already dialable here, else the first matching alt.
+        if IS_WSL:
+            usable = discovered.usable(lambda t: t == "tcp")
+            if usable is not None:
+                discovered = usable
         if discovered.transport == "unix":
             discovered_unix = discovered.address
         elif discovered.transport == "pipe":

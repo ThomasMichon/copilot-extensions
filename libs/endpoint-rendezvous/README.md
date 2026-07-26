@@ -34,6 +34,19 @@ clients **discover** it, instead of hardcoding a constant on both ends.
 `transport` is one of `unix` (Unix domain socket path), `pipe` (Windows named
 pipe name), or `tcp` (`host:port`).
 
+An optional `alt` array lists **secondary** endpoints the service also listens on
+(`[{"transport": ..., "endpoint": ...}, ...]`), for a client that can't dial the
+native primary — e.g. a Windows daemon advertising its named `pipe` as primary and
+a loopback `tcp` port as an alternate so a WSL guest still finds a port. The key is
+omitted when empty (single-endpoint records are unchanged), and readers that don't
+know it ignore it. Use `Endpoint.usable(accept)` to pick the primary when its
+transport is accepted, else the first alternate that is:
+
+```python
+ep = read_endpoint(run_dir)                        # primary + any alts
+dialable = ep.usable(lambda t: t == "tcp")         # WSL: skip the pipe, take TCP
+```
+
 ## Service side — advertise on bind
 
 ```python

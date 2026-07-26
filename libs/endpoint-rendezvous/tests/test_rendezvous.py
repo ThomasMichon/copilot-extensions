@@ -245,3 +245,81 @@ def test_resolve_no_file_uses_legacy(tmp_path):
 def test_resolve_nothing_raises(tmp_path):
     with pytest.raises(EndpointUnavailable):
         resolve(tmp_path)
+
+
+# --- Alternate endpoints (multi-transport advertisement) -------------------
+
+
+def test_no_alt_record_omits_key():
+    """A single-endpoint record is byte-identical to before (no ``alt`` key)."""
+    rec = Endpoint(transport="tcp", address="127.0.0.1:5").to_record()
+    assert "alt" not in rec
+
+
+def test_alt_roundtrips_through_record():
+    ep = Endpoint(
+        transport="pipe",
+        address=r"\\.\pipe\agent-vault",
+        alt=(Endpoint(transport="tcp", address="127.0.0.1:52731"),),
+    )
+    rec = ep.to_record()
+    assert rec["alt"] == [{"transport": "tcp", "endpoint": "127.0.0.1:52731"}]
+    back = Endpoint.from_record(rec, source="windows")
+    assert back.transport == "pipe"
+    assert [(e.transport, e.address) for e in back.alt] == [("tcp", "127.0.0.1:52731")]
+
+
+def test_old_record_without_alt_reads_as_empty():
+    back = Endpoint.from_record(
+        {"schema": 1, "transport": "tcp", "endpoint": "127.0.0.1:5"}
+    )
+    assert back.alt == ()
+
+
+def test_from_record_skips_malformed_alt_entries():
+    """A bad alt entry is dropped; the primary and the valid alts survive."""
+    back = Endpoint.from_record(
+        {
+            "schema": 1,
+            "transport": "pipe",
+            "endpoint": r"\\.\pipe\y",
+            "alt": [
+                {"transport": "bogus", "endpoint": "x"},
+                {"transport": "tcp", "endpoint": ""},
+                {"transport": "tcp", "endpoint": "127.0.0.1:9"},
+            ],
+        }
+    )
+    assert [(e.transport, e.address) for e in back.alt] == [("tcp", "127.0.0.1:9")]
+
+
+def test_usable_returns_self_when_primary_accepted():
+    ep = Endpoint(transport="tcp", address="127.0.0.1:5")
+    assert ep.usable(lambda t: t == "tcp") is ep
+
+
+def test_usable_falls_to_matching_alt_and_keeps_source():
+    ep = Endpoint(
+        transport="pipe",
+        address=r"\\.\pipe\agent-vault",
+        source="windows",
+        alt=(Endpoint(transport="tcp", address="127.0.0.1:52731"),),
+    )
+    pick = ep.usable(lambda t: t == "tcp")
+    assert pick is not None
+    assert (pick.transport, pick.address) == ("tcp", "127.0.0.1:52731")
+    assert pick.source == "windows"
+
+
+def test_usable_none_when_nothing_accepted():
+    ep = Endpoint(transport="pipe", address=r"\\.\pipe\x")
+    assert ep.usable(lambda t: t == "tcp") is None
+
+
+def test_write_endpoint_persists_alt(tmp_path):
+    write_endpoint(tmp_path, "pipe", r"\\.\pipe\agent-vault", alt=[("tcp", "127.0.0.1:40404")])
+    back = read_endpoint(tmp_path)
+    assert back is not None
+    assert back.transport == "pipe"
+    assert [(e.transport, e.address) for e in back.alt] == [("tcp", "127.0.0.1:40404")]
+
