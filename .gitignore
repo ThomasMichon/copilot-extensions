@@ -30,3 +30,6 @@ build/
 /plugins/agent-bridge/libs/credential-relay/uv.lock
 /plugins/agent-codespaces/libs/credential-relay/uv.lock
 /plugins/agent-containers/libs/credential-relay/uv.lock
+
+# Cached per-plugin dev venvs built by tools/run-plugin-tests.py
+/.test-venvs/
