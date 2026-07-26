@@ -2825,6 +2825,34 @@ class PickerScreen(Widget):
         # Body rows: assemble the full list, then window by scroll offset.
         avail = max(3, body_h - 9)  # rows left for the message body
         body: list[Text] = []
+
+        # Sessions section (diagnostic): every session's FULL id + title, so the
+        # operator can copy an id out (terminal selection) to resume it by hand
+        # (`copilot --resume <id>`). The head is marked ``● current``.
+        sess = mv.get("sessions") or []
+        if sess:
+            body.append(self._prow(" Sessions (select an id to copy):",
+                                   pw, style=C_HEADER))
+            for s in sess:
+                sid = str(s.get("id", ""))
+                is_head = bool(s.get("is_head"))
+                marker = "●" if is_head else "○"
+                mark_style = "bold #7ee787" if is_head else C_DIM
+                tag = " current" if is_head else ""
+                state = str(s.get("state", "") or "")
+                if state and state != "active":
+                    tag = f" {state}"
+                body.append(self._prow(f" {marker} {sid}{tag}",
+                                       pw, style=mark_style))
+                title = str(s.get("name", "") or "").strip()
+                title_row = f"     {title}" if title else "     (untitled)"
+                for seg in self._wrap_text(title_row, pw - 2):
+                    body.append(self._prow(seg, pw,
+                                           style="white" if title else C_FAINT))
+            body.append(self._prow("", pw))
+            body.append(self._prow(" Recent messages (current session):",
+                                   pw, style=C_HEADER))
+
         if mv.get("loading"):
             spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[(self.frame // 2) % 10]
             body.append(self._prow(f" {spin} Loading recent messages…",
@@ -2861,7 +2889,9 @@ class PickerScreen(Widget):
         sid = mv.get("session_id") or ""
         foot = " Esc close · ↑/↓ scroll"
         if sid:
-            foot = f" session {sid[:8]} ·" + foot
+            # Full id (not truncated) so terminal selection copies a usable
+            # `copilot --resume <id>` argument.
+            foot = f" current session {sid} ·" + foot
         panel.append(self._prow(foot, pw, style=C_FAINT))
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)
@@ -3984,16 +4014,48 @@ class PickerScreen(Widget):
         self.msgview = {
             "rec": rec, "limit": limit, "loading": True,
             "messages": [], "error": None, "session_id": None, "scroll": 0,
+            "sessions": [],
         }
         threading.Thread(
             target=self._msgview_worker, args=(rec, limit),
             name="msgview-load", daemon=True,
         ).start()
 
+    def _load_worktree_sessions(self, rec, wt_id, m, e):
+        """Fetch the worktree's Copilot session registry (id + title + head).
+
+        Best-effort, off the render thread: local worktrees read the registry
+        in-process; remote worktrees run ``list-sessions`` over SSH. Returns a
+        list of session dicts (each carries ``id``, ``name``, ``is_head``,
+        ``state``) or ``[]`` on any error -- the session list is a diagnostic
+        aid, never worth failing the overlay over.
+        """
+        try:
+            if (m, e) == getattr(self.src, "LOCAL", None):
+                from .. import config as _cfg
+                from .. import sessions as _sessions
+                from .. import tracking as _tracking
+                records = _tracking.list_records(_cfg.tracking_dir())
+                record = next(
+                    (r for r in records if r.worktree_id == wt_id), None)
+                if record is None:
+                    return []
+                return _sessions.list_worktree_sessions(record)
+            from . import data_ssh, maintenance
+            argv = data_ssh.list_sessions_argv(m, e, wt_id)
+            if argv is None:
+                return []
+            payload = maintenance._ssh_json(argv)
+            sessions = payload.get("sessions", []) if isinstance(payload, dict) else []
+            return sessions if isinstance(sessions, list) else []
+        except Exception:
+            return []
+
     def _msgview_worker(self, rec, limit):
-        """Daemon-thread body: fetch recent messages and store the result."""
+        """Daemon-thread body: fetch recent messages + the session list."""
         wt_id = (rec.get("raw") or {}).get("id")
         m, e = rec.get("machine"), rec.get("env")
+        sessions_list: list = []
         try:
             if not wt_id:
                 payload = {"error": "no worktree id"}
@@ -4019,6 +4081,11 @@ class PickerScreen(Widget):
         except Exception as exc:  # never let the loader thread crash the UI
             payload = {"error": str(exc) or type(exc).__name__}
 
+        # The session list is a separate, best-effort fetch (diagnostic aid);
+        # a failure here never turns the overlay into an error.
+        if wt_id:
+            sessions_list = self._load_worktree_sessions(rec, wt_id, m, e)
+
         with self._msgview_lock:
             # A late result for a viewer the operator already closed / reopened
             # is dropped (identity check on the live overlay's rec).
@@ -4026,6 +4093,7 @@ class PickerScreen(Widget):
             if mv is None or mv.get("rec") is not rec:
                 return
             mv["loading"] = False
+            mv["sessions"] = sessions_list
             if payload.get("error"):
                 mv["error"] = payload["error"]
             else:
