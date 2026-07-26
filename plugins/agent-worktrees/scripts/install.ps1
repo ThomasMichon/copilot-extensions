@@ -502,6 +502,22 @@ function Deploy-Package {
         return $false
     }
 
+    # Purge stale in-tree build artifacts before building. A setuptools build
+    # writes build\lib\... (and *.egg-info) into the source tree; on the NEXT
+    # deploy an isolated build copies the whole source dir -- including that
+    # stale build\lib -- and repackages the OLD code from it instead of the
+    # fresh src\ tree (symptom: venv reports the new version yet imports old
+    # code). Removing these forces a clean rebuild from src\ on every deploy.
+    # Covers the plugin and its vendored libs.
+    foreach ($pat in @(
+            (Join-Path $PluginDir 'build'),
+            (Join-Path $PluginDir 'src\*.egg-info'),
+            (Join-Path $PluginDir 'libs\*\build'),
+            (Join-Path $PluginDir 'libs\*\src\*.egg-info'))) {
+        Get-Item $pat -ErrorAction SilentlyContinue |
+            ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
 

@@ -295,6 +295,23 @@ deploy_package() {
         return 1
     fi
 
+    # Purge stale in-tree build artifacts before building. A setuptools build
+    # writes ``build/lib/...`` (and ``*.egg-info``) into the source tree; on the
+    # NEXT deploy an isolated build still copies the *whole* source dir --
+    # including that stale ``build/lib`` -- and setuptools repackages the OLD
+    # code from it instead of the fresh ``src/`` tree. Symptom: the venv reports
+    # the new version yet imports old code (a version/code mismatch). Removing
+    # these forces a clean rebuild from ``src/`` on every deploy. Covers the
+    # plugin and its vendored libs.
+    local _art
+    for _art in \
+        "$PLUGIN_DIR/build" \
+        "$PLUGIN_DIR"/src/*.egg-info \
+        "$PLUGIN_DIR"/libs/*/build \
+        "$PLUGIN_DIR"/libs/*/src/*.egg-info; do
+        [[ -e "$_art" ]] && rm -rf "$_art"
+    done
+
     # Vendored config-schema-migration lib (agent-config-migrate / module
     # config_migrate). Install it first so the package's dependency is satisfied
     # from the local path on every deploy (install and update). It lives inside
