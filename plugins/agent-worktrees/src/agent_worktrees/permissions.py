@@ -35,11 +35,16 @@ def _config_path() -> Path:
     return _copilot_dir() / "config.json"
 
 
-def _atomic_json_write(path: Path, data: Any) -> None:
-    """Write JSON atomically via temp + rename."""
+def _atomic_json_write(path: Path, data: Any, header: str = "") -> None:
+    """Write JSON atomically via temp + rename.
+
+    ``header`` is an optional raw text prefix (e.g. the leading ``//`` comment
+    block that the Copilot CLI keeps at the top of its managed ``config.json``)
+    written verbatim before the JSON body so it survives the rewrite.
+    """
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
-        os.write(fd, json.dumps(data, indent=2).encode())
+        os.write(fd, (header + json.dumps(data, indent=2)).encode("utf-8"))
         os.close(fd)
         if path.exists():
             path.unlink()
@@ -50,6 +55,33 @@ def _atomic_json_write(path: Path, data: Any) -> None:
         except OSError:
             pass
         raise
+
+
+def _read_config_jsonc(config_file: Path) -> tuple[str, Any]:
+    """Read Copilot's ``config.json``, which is JSONC (a leading ``//`` header).
+
+    The Copilot CLI writes ``config.json`` with a managed leading comment block
+    (``// This file is managed automatically.``) that Python's stdlib ``json``
+    cannot parse. Split off the leading run of full-line ``//`` comments and
+    blank lines as an opaque header, parse the remaining JSON body, and return
+    ``(header, data)`` so callers can round-trip the header back out.
+
+    Only full-line comments before the first JSON token are stripped, so ``//``
+    inside string values (e.g. URLs) is never touched.
+    """
+    raw = config_file.read_text(encoding="utf-8")
+    lines = raw.splitlines(keepends=True)
+    header_lines: list[str] = []
+    body_start = 0
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("//") or stripped == "":
+            header_lines.append(line)
+            body_start = i + 1
+        else:
+            break
+    body = "".join(lines[body_start:])
+    return "".join(header_lines), json.loads(body)
 
 
 def clone_permissions(anchor_path: str, worktree_path: str) -> bool:
@@ -156,14 +188,14 @@ def add_trusted_folder(worktree_path: str) -> bool:
         return False
 
     try:
-        data = json.loads(config_file.read_text())
+        header, data = _read_config_jsonc(config_file)
         folders: list[str] = data.get("trustedFolders", [])
         if worktree_path in folders:
             return False
 
         folders.append(worktree_path)
         data["trustedFolders"] = folders
-        _atomic_json_write(config_file, data)
+        _atomic_json_write(config_file, data, header=header)
         return True
     except Exception:
         return False
@@ -187,14 +219,14 @@ def remove_trusted_folder(worktree_path: str) -> bool:
         return False
 
     try:
-        data = json.loads(config_file.read_text())
+        header, data = _read_config_jsonc(config_file)
         folders: list[str] = data.get("trustedFolders", [])
         if worktree_path not in folders:
             return False
 
         folders.remove(worktree_path)
         data["trustedFolders"] = folders
-        _atomic_json_write(config_file, data)
+        _atomic_json_write(config_file, data, header=header)
         return True
     except Exception:
         return False
