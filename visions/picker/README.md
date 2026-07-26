@@ -142,6 +142,17 @@ the front door, not an afterthought: the Picker's visual and interaction promise
 are only real if they can be verified, so the means to verify them is part of the
 subject, not external to it.
 
+The same capture seam serves **sharing**, not only auditing. Because the Picker
+renders deterministically from injected data (see `§Features/programmatic-parity`),
+a capture can be taken from **identity-obscured** data — real-shaped state with
+its identifying particulars scrubbed — so a faithful, safe-to-publish image can be
+produced without leaking private names. And because the render is driven through
+the same keyboard the operator uses, a capture can span a **sequence of states**
+(a scripted walkthrough — switching pivots, moving the selection, opening and
+dismissing a menu), not just a single frame. One rendering path yields a test
+assertion, an audit screenshot, a shareable still, and an animated walkthrough
+alike.
+
 ## Behaviors
 
 ### keyboard-first-navigation
@@ -256,3 +267,10 @@ regression is something a test can catch before an operator does.
   screenshot of any state, and a programmatic character-grid render that automated
   tests assert against — and framed as a deterministic-renderer property that
   rides on `programmatic-parity` (known inputs → known grid).
+- **2026-07-25** — Extended `§Features/auditable-testable-rendering` so the
+  capture seam also serves **sharing**: identity-**obscured** captures (real-shaped
+  state, scrubbed particulars) for safe-to-publish imagery, and **state-sequence**
+  captures (a scripted keyboard walkthrough) for animated demos. Mined from
+  producing a README hero image from real fleet data and the wish for an animated
+  pivot/selection/menu walkthrough — one deterministic render path serving test,
+  audit, still, and animation.
