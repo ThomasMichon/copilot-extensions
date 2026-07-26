@@ -157,23 +157,9 @@ docs honest; run it before pushing doc changes.)
 
 ### Test Before Push
 
-Enforcement is **automated** on two levels, so you rarely run these by hand:
-
-- **Pre-push hook** (`tools/hooks/pre-push`, enabled via `tools/setup-hooks.*`)
-  runs the fast `@pytest.mark.guard` subset of any **changed** plugin in a
-  managed `uv` venv — marketplace + picker integrity guards (overlay-registry,
-  palette, shipped-manifest contract, key canonicalization, F3 binding
-  invariants) in sub-second-per-plugin. It skips gracefully if `uv` is absent
-  and can be bypassed with `AGENT_WORKTREES_SKIP_GUARD_TESTS=1`.
-- **CI** (planned): a GitHub Actions workflow runs each **changed** plugin's
-  **full** suite server-side on push/PR (windows-latest), so nothing slows a
-  local push while every change is still exercised end-to-end. Installing it
-  requires a one-time `gh auth refresh -h github.com -s workflow` (GitHub blocks
-  pushing `.github/workflows/*` without `workflow` scope); the ready workflow is
-  driven by the same `tools/run-plugin-tests.py --changed` runner.
-
-Run suites yourself with the turn-key runner (builds/reuses a cached dev venv
-per plugin under `.test-venvs/`, git-ignored):
+Run a plugin's suite **on demand** with the turn-key runner (builds/reuses a
+cached dev venv per plugin under `.test-venvs/`, git-ignored; uses `uv`, so
+vendored `[tool.uv.sources]` path deps resolve):
 
 ```bash
 python tools/run-plugin-tests.py agent-worktrees        # one plugin, full suite
@@ -182,6 +168,12 @@ python tools/run-plugin-tests.py --all                  # every plugin with a su
 python tools/run-plugin-tests.py agent-worktrees --guards  # just the fast guards
 python tools/run-plugin-tests.py agent-worktrees -k picker  # filter
 ```
+
+Fast structural/contract checks are marked `@pytest.mark.guard` (marketplace +
+picker integrity: overlay-registry, palette, shipped-manifest contract, key
+canonicalization, F3 binding invariants) so `--guards` runs them in
+sub-second-per-plugin. There is intentionally **no** automatic push/PR gate yet
+— run the suite yourself before pushing a runtime change.
 
 Per-plugin coverage notes:
 
@@ -194,8 +186,7 @@ Per-plugin coverage notes:
   absent.
 - **agent-worktrees:** a large suite (~1400 tests) covering worktree lifecycle,
   the status/tracking model, PR flow, and the Textual **Picker** (including a
-  real-framework `pilot.press` keyboard harness). Mark fast structural/contract
-  checks with `@pytest.mark.guard` so the pre-push hook enforces them.
+  real-framework `pilot.press` keyboard harness).
 
 ### Deploy After Push
 

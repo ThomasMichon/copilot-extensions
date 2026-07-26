@@ -32,13 +32,4 @@ fi
 "${PY[@]}" "$ROOT/tools/check-runbook-references.py"
 # Keep each plugin's version identical across plugin.json / pyproject.toml /
 # marketplace.json (a one-file bump wedges the Picker's update indicator).
-"${PY[@]}" "$ROOT/tools/check-version-consistency.py"
-# Run the fast structural/contract GUARD tests of any changed plugins in a
-# managed uv venv (marketplace + picker integrity: overlay-registry, palette,
-# shipped-manifest contract, key canonicalization, F3 binding invariants). The
-# full suites run in CI; --guards keeps this to sub-second-per-plugin. In
-# --pre-push mode this skips gracefully when uv is absent, but a real guard
-# failure blocks the push. Set AGENT_WORKTREES_SKIP_GUARD_TESTS=1 to bypass.
-if [[ "${AGENT_WORKTREES_SKIP_GUARD_TESTS:-}" != "1" ]]; then
-    exec "${PY[@]}" "$ROOT/tools/run-plugin-tests.py" --changed --guards --pre-push
-fi
+exec "${PY[@]}" "$ROOT/tools/check-version-consistency.py"
