@@ -1,0 +1,12 @@
+{
+  "label": "CodeSpaces",
+  "after": "Worktrees",
+  "list": ["agent-codespaces", "list", "--json"],
+  "entry": {
+    "id": "name",
+    "title": "name",
+    "subtitle": "repository",
+    "badges": ["state"]
+  },
+  "empty_hint": "No CodeSpaces (is the GitHub CLI authenticated?)."
+}

@@ -338,6 +338,17 @@ does.
   back. Restore-only (never clobbers a locally-present manifest) and best-effort
   (any error is swallowed), so registration is idempotently ensured with no
   contributor involvement.
+- **Shipped list pivots (this repo).** Several plugins ship a manifest in their
+  own `pivots/` dir (installed to `<plugin>/pivots/*.json`, self-healed in by
+  `ensure_pivots`), each a **zero-engine-change** `list` pivot that appears only
+  when that layer is installed and its CLI is on `PATH`:
+  `agent-dispatch` -> **Tasks** (`agent-dispatch inbox --machine {machine}`),
+  `agent-bridge` -> **Bridges** (`agent-bridge agents --json`),
+  `agent-codespaces` -> **CodeSpaces** (`agent-codespaces list --json`). Each
+  CLI must print a **bare JSON array** of objects; the manifest's `entry` map
+  pulls id/title/subtitle/badges out of each. This is graceful-capability-scaling
+  in practice: adopt more of the fabric, get more pivots; adopt less, and the
+  picker is never burdened by a pivot for a layer you don't have.
 - **Data + actions** (`picker_tui/tasks.py`): the `list` command is run as a
   **subprocess** (argv[0] resolved on `PATH`) on a background thread, cached per
   machine, and expected to print a JSON array. `actions` argv templates are run

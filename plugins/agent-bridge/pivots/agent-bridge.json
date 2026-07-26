@@ -1,0 +1,12 @@
+{
+  "label": "Bridges",
+  "after": "Worktrees",
+  "list": ["agent-bridge", "agents", "--json"],
+  "entry": {
+    "id": "name",
+    "title": "name",
+    "subtitle": "description",
+    "badges": ["target_type"]
+  },
+  "empty_hint": "No bridge agents registered (is the bridge server running?)."
+}
