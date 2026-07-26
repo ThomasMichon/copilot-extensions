@@ -28,6 +28,12 @@ from agent_worktrees.picker_tui.engine import (  # noqa: E402
 from agent_worktrees.picker_tui.selection import ListSelection  # noqa: E402
 
 
+def _quit_modal_open(scr):
+    """True when the F4 QuitConfirmScreen modal is on the app's screen stack."""
+    from agent_worktrees.picker_tui.engine import QuitConfirmScreen
+    return any(isinstance(s, QuitConfirmScreen) for s in scr.app.screen_stack)
+
+
 def _fixture_source():
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
     local = ("lambda-core", "Win")
@@ -761,10 +767,10 @@ def test_escape_collapses_selection_before_quit():
         scr.handle_key("shift+down")      # rows 1..3 selected
         assert len(scr.wt_sel) == 3
         scr.handle_key("escape")          # collapse, not quit
-        assert scr.quit_confirm is None
+        assert not _quit_modal_open(scr)
         assert scr.wt_sel == {ids[scr.sel[1]]}
         scr.handle_key("escape")          # nothing left to collapse -> quit prompt
-        assert scr.quit_confirm is not None
+        assert _quit_modal_open(scr)
 
     _wt_scr(body)
 
@@ -779,7 +785,7 @@ def test_escape_outside_list_clears_to_nothing():
         assert len(scr.wt_sel) == 3
         scr.sel = ("BTN", 0)              # tabbed away; selection persists
         scr.handle_key("escape")
-        assert scr.quit_confirm is None
+        assert not _quit_modal_open(scr)
         assert not scr.wt_sel
 
     _wt_scr(body)
@@ -3194,35 +3200,43 @@ def test_live_loader_local_two_phase_fast_then_fill(monkeypatch):
 
 
 def test_escape_on_main_view_confirms_before_quit(monkeypatch):
-    """Esc/q on a main pivot view opens a quit-confirm instead of instant-quit;
-    Esc/n stays, y quits, Enter acts on the focused button (default Stay) (#1429)."""
+    """Esc/q on a main pivot view opens the quit-confirm ModalScreen instead of
+    instant-quit; Esc/n stays, y quits, Enter acts on the focused button
+    (default Stay) (#1429, migrated to a ModalScreen in #88 F4). Driven through
+    the real framework pipeline so keys route to the modal, not the picker."""
     src = _fixture_source()
 
     async def run():
         app = PickerApp(src, live=False)
-        async with app.run_test(size=(118, 36)):
+        async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             quit_called = {"v": False}
             monkeypatch.setattr(app, "exit",
                                 lambda *a, **k: quit_called.__setitem__("v", True))
 
-            assert scr.quit_confirm is None
-            scr.handle_key("escape")            # main view -> confirm, no exit
-            assert scr.quit_confirm is not None
+            assert not _quit_modal_open(scr)
+            await pilot.press("escape")         # main view -> confirm, no exit
+            await pilot.pause()
+            assert _quit_modal_open(scr)
             assert quit_called["v"] is False
 
-            scr.handle_key("escape")            # Esc in the confirm -> stay
-            assert scr.quit_confirm is None
+            await pilot.press("escape")         # Esc in the confirm -> stay
+            await pilot.pause()
+            assert not _quit_modal_open(scr)
             assert quit_called["v"] is False
 
-            scr.handle_key("q")                 # q also opens the confirm
-            assert scr.quit_confirm is not None
-            scr.handle_key("enter")             # default focus = Stay -> cancel
-            assert scr.quit_confirm is None
+            await pilot.press("q")              # q also opens the confirm
+            await pilot.pause()
+            assert _quit_modal_open(scr)
+            await pilot.press("enter")          # default focus = Stay -> cancel
+            await pilot.pause()
+            assert not _quit_modal_open(scr)
             assert quit_called["v"] is False
 
-            scr.handle_key("escape")            # open again
-            scr.handle_key("y")                 # y -> quit
+            await pilot.press("escape")         # open again
+            await pilot.pause()
+            await pilot.press("y")              # y -> quit
+            await pilot.pause()
             assert quit_called["v"] is True
 
     asyncio.run(run())
@@ -3949,19 +3963,23 @@ def test_overlay_registry_drives_dispatch_and_precedence():
                 assert scr._active_overlay()[0] == attr
 
             # (b') handle_key actually ROUTES through the active overlay's
-            # handler rather than the main nav: with quit_confirm open, a key
-            # is consumed by _key_quit_confirm (toggles its index) and never
-            # touches the main-view selection.
+            # handler rather than the main nav: with a worktree submenu open, a
+            # nav key is consumed by the overlay (it stays open) and never moves
+            # the main-view selection.
             for a2 in attrs:
                 setattr(scr, a2, None)
-            scr.sel = scr.default_sel()
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            assert scr.list_records()
+            scr.wt_sel.clear()
+            scr.sel = ("L", 0)
             sel_before = scr.sel
-            scr._open_quit_confirm()
-            before = scr.quit_confirm["idx"]
-            scr.handle_key("left")
-            assert scr.quit_confirm["idx"] != before   # overlay consumed it
-            assert scr.sel == sel_before                # main nav untouched
-            scr.quit_confirm = None
+            scr._open_submenu()
+            assert scr.submenu is not None
+            scr.handle_key("down")                     # consumed by the overlay
+            assert scr.submenu is not None             # overlay still has the keyboard
+            assert scr.sel == sel_before               # main nav untouched
+            scr.submenu = None
 
             # (c) Precedence: with the first two overlays both set, the earlier
             # one in registry order wins.
@@ -4115,9 +4133,10 @@ def test_kbd_real_pipeline_enter_opens_submenu_escape_closes():
 
 
 def test_kbd_real_pipeline_escape_opens_quit_confirm_and_n_cancels():
-    """With nothing to collapse, Escape through the real pipeline raises the
-    quit-confirm overlay; 'n' cancels it -- the top-level guard against an
-    accidental exit, validated end-to-end."""
+    """With nothing to collapse, Escape through the real pipeline pushes the
+    quit-confirm ModalScreen (F4); 'n' dismisses it -- the top-level guard
+    against an accidental exit, validated end-to-end through Textual's screen
+    stack."""
     src = _fixture_source()
 
     async def run():
@@ -4130,10 +4149,10 @@ def test_kbd_real_pipeline_escape_opens_quit_confirm_and_n_cancels():
             scr.sel = ("BTN", 0)
             await pilot.press("escape")
             await pilot.pause()
-            assert scr.quit_confirm is not None   # guard raised via real event
+            assert _quit_modal_open(scr)          # modal pushed via real event
             await pilot.press("n")
             await pilot.pause()
-            assert scr.quit_confirm is None       # and dismissed
+            assert not _quit_modal_open(scr)      # and dismissed
 
     asyncio.run(run())
 
