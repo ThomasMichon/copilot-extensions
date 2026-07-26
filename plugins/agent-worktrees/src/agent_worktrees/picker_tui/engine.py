@@ -69,6 +69,7 @@ C_SECTION = "bold grey70"
 # with the focus cursor; only the FOCUSED tab inverts.
 C_TAB_ACTIVE = "bold white on grey23"   # selected pivot, zone not focused
 C_TAB_FOCUS = "reverse bold"            # selected pivot, zone focused (cursor)
+C_TAB_FOCUS_ON = "reverse bold orange1"  # focused AND active view tab / ⚙ chip
 C_TABOFF = "grey58"
 C_SEL = "reverse"         # focused row -> invert (the cursor)
 # Worktrees multi-select highlight states (#2258 follow-up): the focus cursor
@@ -83,6 +84,15 @@ C_WARN = "red"
 C_PR_MERGED = "green"
 C_HINT = "grey46"         # scroll-hint arrows (subtle)
 C_HINT_ON = "orange1"     # scroll hint when there IS more content that way
+# Secondary-text shades (de-emphasized foreground). Named so the many ad-hoc
+# grey/style literals scattered through the render methods route through ONE
+# semantic vocabulary instead of bare shade codes (#85 item E). Exact values
+# preserved -- this is a naming pass, not a recolor.
+C_META = "grey70"         # secondary / metadata / hint text
+C_LABEL = "grey78"        # inline minor labels + counts
+C_FAINT = "grey62"        # fainter descriptive / panel-body text
+C_MUTED = "grey54"        # most de-emphasized (pending rows, ellipses, "…")
+C_CAUTION = "yellow"      # inline caution / warning (⚠) inside dialogs
 # Glowy pulse for live indicators (two phases, cycled by a timer).
 C_PULSE = ["green", "bold bright_green"]
 C_BTN = "bold white on grey27"   # button at rest
@@ -1646,27 +1656,27 @@ class PickerScreen(Widget):
         if code == "K":
             n = sum(1 for r in self.list_records() if self._cleanable(r))
             ctx.append("    cleans ", style=C_DIM)
-            ctx.append(f"{n}", style="grey78")
+            ctx.append(f"{n}", style=C_LABEL)
             ctx.append(f" merged / idle worktree{'' if n == 1 else 's'} in ",
                        style=C_DIM)
-            ctx.append(self._scope_label(), style="grey70")
+            ctx.append(self._scope_label(), style=C_META)
         elif code == "SY":
             n = sum(1 for r in self.list_records() if r.get("ff_eligible"))
             ctx.append("    fast-forwards ", style=C_DIM)
-            ctx.append(f"{n}", style="grey78")
+            ctx.append(f"{n}", style=C_LABEL)
             ctx.append(f" eligible worktree{'' if n == 1 else 's'} in ",
                        style=C_DIM)
-            ctx.append(self._scope_label(), style="grey70")
+            ctx.append(self._scope_label(), style=C_META)
         elif code == "TH":
             nh = self._hidden_count()
             ctx.append(f"    {'hides' if self.show_hidden else 'reveals'} ",
                        style=C_DIM)
-            ctx.append(f"{nh}", style="grey78")
+            ctx.append(f"{nh}", style=C_LABEL)
             ctx.append(" bridge / system worktree(s)", style=C_DIM)
         else:                                   # New worktree (default)
             ctx.append("    creates on ", style=C_DIM)
-            ctx.append(f"{tm} ", style="grey70")
-            ctx.append(te, style=C_ENV.get(te, "grey70"))
+            ctx.append(f"{tm} ", style=C_META)
+            ctx.append(te, style=C_ENV.get(te, C_META))
             if host_tag:
                 ctx.append(host_tag, style=C_DIM)
         return ctx
@@ -1737,13 +1747,13 @@ class PickerScreen(Widget):
             t.append(f"{self.spin()} ", style=C_LOAD)
             t.append(f"loading {reg.label.lower()} for {machine}…", style=C_LOAD)
         elif state == "error":
-            t.append("✗ ", style="red")
-            t.append(f"{reg.label} unavailable: {err or 'command failed'}", style="grey70")
+            t.append("✗ ", style=C_WARN)
+            t.append(f"{reg.label} unavailable: {err or 'command failed'}", style=C_META)
         elif not rows:
             t.append(reg.empty_hint, style=C_DIM)
         else:
             t.append("●", style=C_PULSE[self.pulse])
-            t.append(f" {len(rows)} on {machine}", style="grey78")
+            t.append(f" {len(rows)} on {machine}", style=C_LABEL)
         t.append(" " * max(0, width - t.cell_len))
         return t
 
@@ -1751,7 +1761,7 @@ class PickerScreen(Widget):
         """One task entry: title, then dim badges (labels) + subtitle."""
         title = str(rec.get(reg.title_field) or rec.get(reg.id_field) or "(untitled)")
         t = Text("    ")
-        t.append(title, style="grey85" if not selected else "bold white")
+        t.append(title, style="grey85" if not selected else C_HEADER)
         badges: list[str] = []
         for f in reg.badge_fields:
             v = rec.get(f)
@@ -1778,7 +1788,7 @@ class PickerScreen(Widget):
         t = Text("  ")
         t.append(glyph, style=gc)
         t.append("  ")
-        t.append("Select all", style="grey78")
+        t.append("Select all", style=C_LABEL)
         t.append(f"   ({nsel}/{len(ids)} selected)", style=C_DIM)
         t.append(" " * max(0, width - t.cell_len))
         if focus:
@@ -2063,10 +2073,10 @@ class PickerScreen(Widget):
         column) to plain language, so a round-trip edit doesn't silently drop
         the bare-SSH ``shell`` profiles (#1369)."""
         t = Text("  ")
-        t.append("agent", style="grey78")
+        t.append("agent", style=C_LABEL)
         t.append(" = launch worktree", style=C_DIM)
         t.append("   ")
-        t.append("shell", style="grey54")
+        t.append("shell", style=C_MUTED)
         t.append(" = plain SSH login shell", style=C_DIM)
         if self._prof_unavailable:
             t.append("   ")
@@ -2139,9 +2149,9 @@ class PickerScreen(Widget):
         _lbl, hm, he = self.host_cols[self.pcol]
         add(self._profiles_legend(width))
         head = Text(" HOST  ", style=C_HEADER)
-        head.append(hm, style=self._hl("bold white", True, False))
+        head.append(hm, style=self._hl(C_HEADER, True, False))
         head.append(" ", style=self._hl("", True, False))
-        head.append(he, style=self._hl(C_ENV.get(he, "bold white"), True, False))
+        head.append(he, style=self._hl(C_ENV.get(he, C_HEADER), True, False))
         head.append(f"   ‹ {self.pcol + 1}/{len(self.host_cols)} ›  ◀▶ host",
                     style=C_HINT)
         if self.pcol in self._prof_unavailable:
@@ -2270,37 +2280,37 @@ class PickerScreen(Widget):
             u = sum(n for lbl, n in secs.items() if lbl.startswith("Unowned"))
             t.append("●", style=C_PULSE[self.pulse])
             if compact:
-                t.append(f"{a} ", style="grey78")
-                t.append(f"◷{r} ✓{c}", style="grey62")
+                t.append(f"{a} ", style=C_LABEL)
+                t.append(f"◷{r} ✓{c}", style=C_FAINT)
                 if u:
-                    t.append(f" ?{u}", style="grey62")
+                    t.append(f" ?{u}", style=C_FAINT)
             else:
-                t.append(f" {a} active", style="grey78")
+                t.append(f" {a} active", style=C_LABEL)
                 t.append(" · ", style=C_DIM)
-                t.append(f"{r} recent", style="grey70")
+                t.append(f"{r} recent", style=C_META)
                 t.append(" · ", style=C_DIM)
-                t.append(f"{c} done", style="grey70")
+                t.append(f"{c} done", style=C_META)
                 if u:
                     t.append(" · ", style=C_DIM)
-                    t.append(f"{u} unowned", style="grey70")
+                    t.append(f"{u} unowned", style=C_META)
         elif self._kind() == "maintenance":
             rows = self.cleanup_rows()
             mib = sum(_size_mb(w) for w in rows)
             if compact:
-                t.append(f"⌫ {len(rows)}", style="grey70")
+                t.append(f"⌫ {len(rows)}", style=C_META)
             else:
-                t.append(f"{len(rows)} candidates · ~{mib} MiB", style="grey70")
+                t.append(f"{len(rows)} candidates · ~{mib} MiB", style=C_META)
         elif self._kind() == "registered":
             reg = self._reg_pivot()
             state, rows, _err = self._task_state()
             glyph = self.spin() if state == "loading" else "◆"
-            t.append(f"{glyph} ", style=C_LOAD if state == "loading" else "grey62")
+            t.append(f"{glyph} ", style=C_LOAD if state == "loading" else C_FAINT)
             label = reg.label if reg else "tasks"
-            t.append(f"{len(rows)}{'' if compact else ' ' + label.lower()}", style="grey78")
+            t.append(f"{len(rows)}{'' if compact else ' ' + label.lower()}", style=C_LABEL)
         else:
             n = self.profiles_present()
-            t.append("⚙ ", style="grey62")
-            t.append(f"{n}{' set' if not compact else ''}", style="grey78")
+            t.append("⚙ ", style=C_FAINT)
+            t.append(f"{n}{' set' if not compact else ''}", style=C_LABEL)
         # Live mode: surface how many machines are still loading / failed so the
         # All view's streaming fill-in is legible.
         if self.live and self.loader is not None and self._kind() == "worktrees":
@@ -2492,10 +2502,10 @@ class PickerScreen(Widget):
                     left.append(" Update available…",
                                 style=(C_BTN_SEL if upd_focused else C_HINT_ON))
             right = Text("host ", style=C_DIM)
-            right.append(host, style="grey70")
+            right.append(host, style=C_META)
             if present["env"]:
                 right.append(" · ", style=C_DIM)
-                right.append(e, style=C_ENV.get(e, "grey70"))
+                right.append(e, style=C_ENV.get(e, C_META))
             if present["repo"]:
                 right.append(f"  ·  {repo}", style=C_DIM)
             if present["branch"]:
@@ -2521,7 +2531,7 @@ class PickerScreen(Widget):
                 l2.append("     ")
             if i == self.htab:
                 l2.append(label.upper(),
-                          style="reverse bold orange1" if v_focus else C_BAND)
+                          style=C_TAB_FOCUS_ON if v_focus else C_BAND)
             else:
                 l2.append(label, style="white" if v_focus else C_TABOFF)
         # Right-aligned ⚙ Configuration entry hosting Profiles etc. (#1426). It
@@ -2531,7 +2541,7 @@ class PickerScreen(Widget):
         if cfg:
             cfg_focus = self.sel[0] == "CFG"
             cfg_active = self.htab in cfg
-            cstyle = ("reverse bold orange1" if cfg_focus
+            cstyle = (C_TAB_FOCUS_ON if cfg_focus
                       else C_TAB_ACTIVE if cfg_active else C_TABOFF)
             chip = Text("⚙ Configuration", style=cstyle)
             l2.append(" " * max(2, W - l2.cell_len - chip.cell_len - 1))
@@ -2663,7 +2673,7 @@ class PickerScreen(Widget):
                          f" · Esc cancel")
         else:
             hints = self._focus_hint()
-        f = Text(" " + hints, style="grey70")
+        f = Text(" " + hints, style=C_META)
         dbg = f"· {self.debug} "
         f.append(dbg.rjust(max(1, W - f.cell_len)), style=C_DIM)
         if f.cell_len > W:
@@ -2765,7 +2775,7 @@ class PickerScreen(Widget):
             panel.append(self._prow(mark + label, pw, selected=(i == idx)))
         panel.append(self._prow("", pw))
         desc = ACTION_DESC.get(acts[idx], "")
-        panel.append(self._prow(" " + desc, pw, style="grey62"))
+        panel.append(self._prow(" " + desc, pw, style=C_FAINT))
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)
 
@@ -2787,7 +2797,7 @@ class PickerScreen(Widget):
         header = "─ Recent messages "
         panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
                       style=C_BAND)]
-        panel.append(self._prow(title, pw, style="bold white"))
+        panel.append(self._prow(title, pw, style=C_HEADER))
         panel.append(self._prow(meta, pw, style=C_DIM))
         panel.append(self._prow("", pw))
 
@@ -2797,12 +2807,12 @@ class PickerScreen(Widget):
         if mv.get("loading"):
             spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[(self.frame // 2) % 10]
             body.append(self._prow(f" {spin} Loading recent messages…",
-                                   pw, style="grey62"))
+                                   pw, style=C_FAINT))
         elif mv.get("error"):
-            body.append(self._prow(f" ⚠ {mv['error']}", pw, style="yellow"))
+            body.append(self._prow(f" ⚠ {mv['error']}", pw, style=C_CAUTION))
         elif not mv.get("messages"):
             body.append(self._prow(" (no conversation messages in the latest "
-                                   "session)", pw, style="grey62"))
+                                   "session)", pw, style=C_FAINT))
         else:
             for m in mv["messages"]:
                 is_user = m.get("role") == "user"
@@ -2831,7 +2841,7 @@ class PickerScreen(Widget):
         foot = " Esc close · ↑/↓ scroll"
         if sid:
             foot = f" session {sid[:8]} ·" + foot
-        panel.append(self._prow(foot, pw, style="grey62"))
+        panel.append(self._prow(foot, pw, style=C_FAINT))
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)
 
@@ -2884,7 +2894,7 @@ class PickerScreen(Widget):
             sub_bits.append(str(rec.get(reg.subtitle_field)))
         header = f"─ {reg.label} "
         panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮", style=C_BAND)]
-        panel.append(self._prow(title, pw, style="bold white"))
+        panel.append(self._prow(title, pw, style=C_HEADER))
         if sub_bits:
             panel.append(self._prow(" " + " · ".join(sub_bits), pw, style=C_DIM))
         panel.append(self._prow("", pw))
@@ -2893,7 +2903,7 @@ class PickerScreen(Widget):
             panel.append(self._prow(mark + a.label, pw, selected=(i == idx)))
         panel.append(self._prow("", pw))
         desc = acts[idx].description if acts else ""
-        panel.append(self._prow(" " + desc, pw, style="grey62"))
+        panel.append(self._prow(" " + desc, pw, style=C_FAINT))
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)
 
@@ -2908,14 +2918,14 @@ class PickerScreen(Widget):
         panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
                       style=C_BAND)]
         panel.append(self._prow(" Action to apply to the selection:", pw,
-                                style="bold white"))
+                                style=C_HEADER))
         panel.append(self._prow("", pw))
         for i, a in enumerate(acts):
             mark = " ▸ " if i == idx else "   "
             panel.append(self._prow(mark + a, pw, selected=(i == idx)))
         panel.append(self._prow("", pw))
         desc = MAINT_ACTION_DESC.get(acts[idx], "")
-        panel.append(self._prow(" " + desc, pw, style="grey62"))
+        panel.append(self._prow(" " + desc, pw, style=C_FAINT))
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)
 
@@ -2928,7 +2938,7 @@ class PickerScreen(Widget):
                       style=C_BAND)]
         panel.append(self._prow("", pw))
         panel.append(self._prow(" Leave the worktree picker?", pw,
-                                style="bold white"))
+                                style=C_HEADER))
         panel.append(self._prow("", pw))
         brow = Text("│", style=C_DIM)
         inner = Text("   ")
@@ -2940,7 +2950,7 @@ class PickerScreen(Widget):
         brow.append("│", style=C_DIM)
         panel.append(brow)
         panel.append(self._prow(" y quit · n/Esc stay · ←/→ choose", pw,
-                                style="grey54"))
+                                style=C_MUTED))
         panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
         self._blit_panel(lines, W, panel, top_off, body_h)
 
@@ -2956,7 +2966,7 @@ class PickerScreen(Widget):
         panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
                       style=C_BAND)]
         panel.append(self._prow(
-            f" Review: +{n_add} added, -{n_rem} removed", pw, style="bold white"))
+            f" Review: +{n_add} added, -{n_rem} removed", pw, style=C_HEADER))
         panel.append(self._prow("", pw))
 
         def _t(s):
@@ -2966,7 +2976,7 @@ class PickerScreen(Widget):
         shown = 0
         for hi in changed:
             if shown >= maxr:
-                panel.append(self._prow(" …", pw, style="grey54"))
+                panel.append(self._prow(" …", pw, style=C_MUTED))
                 break
             _lbl, hm, he = self.host_cols[hi]
             added, removed = cf["diffs"][hi]
@@ -2985,7 +2995,7 @@ class PickerScreen(Widget):
         panel.append(self._prow("", pw))
         panel.append(self._prow(
             " ⚠ Regenerates terminal profiles · fully restart the terminal to "
-            "see changes.", pw, style="yellow"))
+            "see changes.", pw, style=C_CAUTION))
         panel.append(self._prow("", pw))
         brow = Text("│", style=C_DIM)
         inner = Text("   ")
@@ -3015,7 +3025,7 @@ class PickerScreen(Widget):
         panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
                       style=C_BAND)]
         panel.append(self._prow(f" {dlg.get('prompt', 'Select:')}", pw,
-                                style="bold white"))
+                                style=C_HEADER))
         panel.append(self._prow("", pw))
         opt_focus = section == 0
         for i, o in enumerate(opts):
@@ -3026,7 +3036,7 @@ class PickerScreen(Widget):
             inner = Text(mark)
             inner.append(box, style=boxc)
             inner.append(f" {o['label']:<12} ", style="white")
-            inner.append(o["hint"], style="grey70")
+            inner.append(o["hint"], style=C_META)
             s = inner.plain
             if len(s) > pw - 2:
                 inner = Text(s[:pw - 3] + "…", style="white")
@@ -3080,10 +3090,10 @@ class PickerScreen(Widget):
             substyle = "bold yellow"
         elif p["done"]:
             sub = f" done · {done}/{len(items)}" + (f" · {failed} failed" if failed else "")
-            substyle = "bold white"
+            substyle = C_HEADER
         else:
             sub = f" {self.spin()} working… {done}/{len(items)}"
-            substyle = "bold white"
+            substyle = C_HEADER
         panel.append(self._prow(sub, pw, style=substyle))
         panel.append(self._prow("", pw))
         # Window the list around the currently-running item if it's long.
@@ -3104,8 +3114,8 @@ class PickerScreen(Widget):
             row = Text("│", style=C_DIM)
             inner = Text("  ")
             inner.append(g, style=gc)
-            inner.append(f" {it['id4']} ", style="grey70")
-            inner.append(it["title"], style="white" if st != "pending" else "grey54")
+            inner.append(f" {it['id4']} ", style=C_META)
+            inner.append(it["title"], style="white" if st != "pending" else C_MUTED)
             s = inner.plain
             if len(s) > pw - 2:
                 inner = Text(s[:pw - 3] + "…", style="white")
@@ -3114,7 +3124,7 @@ class PickerScreen(Widget):
             row.append("│", style=C_DIM)
             panel.append(row)
         if len(items) > maxr:
-            panel.append(self._prow(f" … {len(items)} total", pw, style="grey54"))
+            panel.append(self._prow(f" … {len(items)} total", pw, style=C_MUTED))
         if p.get("op") == "profiles" and p["done"]:
             # #1368: after Apply the fragment is regenerated, but the terminal
             # app only re-reads it on a FULL restart -- spell out what changed
@@ -3122,10 +3132,10 @@ class PickerScreen(Widget):
             # expected, not as a silent failure.
             na, nr = p.get("n_add", 0), p.get("n_rem", 0)
             panel.append(self._prow(
-                f" +{na} added · -{nr} removed", pw, style="grey78"))
+                f" +{na} added · -{nr} removed", pw, style=C_LABEL))
             panel.append(self._prow(
                 " ⚠ Fully restart the terminal app (close all its windows) to "
-                "see the changes.", pw, style="yellow"))
+                "see the changes.", pw, style=C_CAUTION))
         panel.append(self._prow("", pw))
         brow = Text("│", style=C_DIM)
         inner = Text("   ")

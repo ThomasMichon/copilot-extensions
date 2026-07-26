@@ -3894,3 +3894,27 @@ def test_contributed_config_section_in_cfgmenu_and_runs(tmp_path, monkeypatch):
             assert scr._kind() == "profiles"
 
     asyncio.run(run())
+
+
+def test_palette_no_stray_shade_literals():
+    """Item E guardrail (#85): the render methods route de-emphasized text
+    through the named ``C_*`` palette, not bare shade codes. Assert no routed
+    shade literal survives inside a ``style=`` context outside the palette
+    definitions, so the semantic-visual-language stays coherent and new stray
+    literals can't silently creep back in."""
+    from pathlib import Path
+
+    from agent_worktrees.picker_tui import engine
+
+    routed = ("grey70", "grey78", "grey62", "grey54")
+    offenders = []
+    for i, ln in enumerate(
+        Path(engine.__file__).read_text(encoding="utf-8").splitlines(), 1
+    ):
+        if ln.lstrip().startswith("C_"):   # palette defs may name the raw shade
+            continue
+        if "style=" in ln and any(
+            f'"{s}"' in ln or f"'{s}'" in ln for s in routed
+        ):
+            offenders.append((i, ln.strip()))
+    assert not offenders, f"stray shade literals in style= contexts: {offenders}"
