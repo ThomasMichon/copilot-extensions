@@ -6,6 +6,7 @@ import logging
 import sys
 from pathlib import Path
 
+from . import telemetry
 from .config import Config, load_config, requires_token_bind, run_dir
 from .coordinator import create_app
 from .queue import TaskQueue
@@ -40,6 +41,9 @@ def check_bind_safety(cfg: Config) -> None:
 def build_app(cfg: Config | None = None):
     """Construct the coordinator app, ensuring the queue DB directory exists."""
     cfg = cfg or load_config()
+    # Install a telemetry sink if one is named in the environment (generic
+    # open hook; a no-op unless a consumer configured a sink). Fail-open.
+    telemetry.load_sink_from_env()
     Path(cfg.db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
     queue = TaskQueue(Path(cfg.db_path).expanduser())
     return create_app(queue, token=cfg.token, sweep_interval=cfg.sweep_interval)

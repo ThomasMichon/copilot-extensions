@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from . import __version__
+from . import __version__, telemetry
 from .agent_registry import build_resolver
 from .auth import BearerAuthMiddleware
 from .config import load_config, load_or_create_auth_token
@@ -479,6 +479,10 @@ def create_app(*, config=None, token: str | None = None) -> FastAPI:
     """Create and configure the FastAPI application."""
     cfg = config or load_config()
     auth_token = token or load_or_create_auth_token()
+
+    # Install a telemetry sink if one is named in the environment (generic open
+    # hook; a no-op unless a consumer configured a sink). Fail-open.
+    telemetry.load_sink_from_env()
 
     app = FastAPI(
         title="Agent Bridge",
