@@ -131,6 +131,17 @@ same data. The UX adds no state that a `--json` consumer could not also obtain �
 the Picker is a view over programmatically-accessible truth, never a privileged
 one.
 
+### auditable-testable-rendering
+The Picker's rendered output is **capturable and inspectable outside an
+interactive session**. Any state it can present can be exported as a
+human-auditable **screenshot** for review, and its rendered **character grid** is
+obtainable programmatically so automated tests can assert *what the operator would
+see* — focus, selection, status blocks, color-as-semantics, and scroll
+affordances — without a person watching. Testability is a first-class property of
+the front door, not an afterthought: the Picker's visual and interaction promises
+are only real if they can be verified, so the means to verify them is part of the
+subject, not external to it.
+
 ## Behaviors
 
 ### keyboard-first-navigation
@@ -176,6 +187,17 @@ door** — coarse but whole. Installing a higher fabric layer *adds* its pivot,
 actions, or configuration section without altering or breaking the base
 experience. Capability scales with what the operator has adopted; nothing a lower
 configuration relied on is removed by adding more.
+
+### renderable-and-assertable-headless
+The Picker can be instantiated **headlessly** — no live terminal, no human, no
+real fleet — fed a known context (its `--json`-shaped inputs), driven to a target
+state (a chosen pivot, machine scope, focused row, open dialog), and have its
+resulting render **captured for assertion**. Because the Picker is a
+*deterministic renderer over programmatically-accessible truth* (see
+`§Features/programmatic-parity`), the same inputs yield the same grid — so its
+states are **regression-guarded** by tests that compare rendered output, and any
+state is reproducible as a screenshot for audit. A visual or interaction
+regression is something a test can catch before an operator does.
 
 ## Non-Goals / Boundaries
 
@@ -227,3 +249,10 @@ configuration relied on is removed by adding more.
   agent-fabric because the Picker is that fabric's front-door presentation surface
   and spans every layer via pivots, while the fabric vision retains ownership of
   the underlying legibility model.
+- **2026-07-25** — Extended with a **testability & validation** pillar:
+  `§Features/auditable-testable-rendering` and
+  `§Behaviors/renderable-and-assertable-headless`. Mined from operator intent that
+  the Picker's visual/interaction promises must be *verifiable* — a human-auditable
+  screenshot of any state, and a programmatic character-grid render that automated
+  tests assert against — and framed as a deterministic-renderer property that
+  rides on `programmatic-parity` (known inputs → known grid).
