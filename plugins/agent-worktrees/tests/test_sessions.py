@@ -13,6 +13,7 @@ from agent_worktrees.sessions import (
     backfill_sessions,
     find_latest_session_id,
     find_latest_session_id_fast,
+    list_worktree_sessions,
     mux_seed_pane,
     recent_worktree_messages,
     scan_sessions,
@@ -1005,3 +1006,81 @@ def test_seed_pane_not_echoed_skips_enter():
     assert result["submitted"] is False
     assert result["reason"] == "seed-not-echoed"
     assert driver.enter_sent() is False
+
+
+class TestListWorktreeSessionsLifecycle:
+    """``list_worktree_sessions`` stamps the ASSERTED lifecycle (``state`` +
+    ``is_head``) onto each entry so a consumer (agent-bridge -> Neuron Forge)
+    can resolve the head-first current session and badge the rest "no longer
+    current" (agent-fabric single-current-session-per-worktree, Phase 4).
+    """
+
+    def test_stamps_state_and_is_head(self, tmp_session_state_dir: Path):
+        wt_path = "/tmp/wt-life"
+        for sid, ts in (("s1", "2026-06-01T10:00:00Z"),
+                        ("s2", "2026-06-01T10:00:01Z"),
+                        ("s3", "2026-06-01T10:00:02Z")):
+            make_session_dir(
+                tmp_session_state_dir, sid, wt_path, updated_at=ts,
+                events_lines=[_conv_event("user.message", "hi", ts)],
+            )
+        rec = _make_record("wt-life", wt_path, sessions=[
+            SessionEntry("s1", "t", state="handed-off", successor="s2"),
+            SessionEntry("s2", "t", predecessor="s1"),
+            SessionEntry("s3", "t"),
+        ])
+        rec.head_session = "s2"
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            out = list_worktree_sessions(rec)
+        by_id = {s["id"]: s for s in out}
+        assert by_id["s1"]["state"] == "handed-off"
+        assert by_id["s1"]["is_head"] is False
+        assert by_id["s2"]["state"] == "active"
+        assert by_id["s2"]["is_head"] is True  # the asserted head
+        assert by_id["s3"]["state"] == "active"
+        assert by_id["s3"]["is_head"] is False
+
+    def test_legacy_record_derives_newest_head(self, tmp_session_state_dir: Path):
+        # No head_session stamped, no per-session state -> derived head is the
+        # newest non-concluded session; every entry defaults to ``active``.
+        wt_path = "/tmp/wt-legacy"
+        for sid, ts in (("a", "2026-06-01T10:00:00Z"),
+                        ("b", "2026-06-01T10:00:05Z")):
+            make_session_dir(
+                tmp_session_state_dir, sid, wt_path, updated_at=ts,
+                events_lines=[_conv_event("user.message", "hi", ts)],
+            )
+        rec = _make_record("wt-legacy", wt_path, sessions=[
+            SessionEntry("a", "t"), SessionEntry("b", "t"),
+        ])
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            out = list_worktree_sessions(rec)
+        by_id = {s["id"]: s for s in out}
+        assert by_id["b"]["is_head"] is True   # newest survivor
+        assert by_id["a"]["is_head"] is False
+        assert all(s["state"] == "active" for s in out)
+
+    def test_all_concluded_has_no_head(self, tmp_session_state_dir: Path):
+        wt_path = "/tmp/wt-done"
+        for sid in ("x", "y"):
+            make_session_dir(
+                tmp_session_state_dir, sid, wt_path,
+                events_lines=[_conv_event("user.message", "hi",
+                                          "2026-06-01T10:00:00Z")],
+            )
+        rec = _make_record("wt-done", wt_path, sessions=[
+            SessionEntry("x", "t", state="concluded"),
+            SessionEntry("y", "t", state="handed-off"),
+        ])
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            out = list_worktree_sessions(rec)
+        assert all(s["is_head"] is False for s in out)
