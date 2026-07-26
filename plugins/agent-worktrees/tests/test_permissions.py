@@ -104,3 +104,72 @@ def test_add_then_remove_roundtrip(copilot_home: Path) -> None:
     data = json.loads(cfg.read_text())
     assert data["trustedFolders"] == []
     assert "trusted_folders" not in data
+
+
+# ── JSONC: config.json has a managed leading // comment header ────────────
+
+_JSONC_HEADER = (
+    "// User settings belong in settings.json.\n"
+    "// This file is managed automatically.\n"
+)
+
+
+def _write_jsonc_config(cop: Path, data: dict) -> Path:
+    p = cop / "config.json"
+    p.write_text(_JSONC_HEADER + json.dumps(data, indent=2), encoding="utf-8")
+    return p
+
+
+def test_add_trusted_folder_parses_jsonc(copilot_home: Path) -> None:
+    # Real Copilot config.json is JSONC (stdlib json.loads would choke on the
+    # // header) -- the seed must still succeed.
+    cfg = _write_jsonc_config(copilot_home, {"trustedFolders": []})
+
+    assert permissions.add_trusted_folder(r"D:\wt\a") is True
+
+    text = cfg.read_text(encoding="utf-8")
+    # Header preserved verbatim...
+    assert text.startswith(_JSONC_HEADER)
+    # ...and the JSON body (after the header) parses with the new entry.
+    body = json.loads(text[len(_JSONC_HEADER):])
+    assert body["trustedFolders"] == [r"D:\wt\a"]
+
+
+def test_remove_trusted_folder_parses_jsonc(copilot_home: Path) -> None:
+    cfg = _write_jsonc_config(
+        copilot_home, {"trustedFolders": [r"D:\wt\a", r"D:\wt\b"]}
+    )
+
+    assert permissions.remove_trusted_folder(r"D:\wt\a") is True
+
+    text = cfg.read_text(encoding="utf-8")
+    assert text.startswith(_JSONC_HEADER)
+    body = json.loads(text[len(_JSONC_HEADER):])
+    assert body["trustedFolders"] == [r"D:\wt\b"]
+
+
+def test_jsonc_preserves_unrelated_keys(copilot_home: Path) -> None:
+    cfg = _write_jsonc_config(
+        copilot_home,
+        {"firstLaunchAt": "2026-01-01", "trustedFolders": []},
+    )
+
+    assert permissions.add_trusted_folder(r"D:\wt\a") is True
+
+    body = json.loads(cfg.read_text(encoding="utf-8")[len(_JSONC_HEADER):])
+    assert body["firstLaunchAt"] == "2026-01-01"
+    assert body["trustedFolders"] == [r"D:\wt\a"]
+
+
+def test_jsonc_slashes_in_values_not_stripped(copilot_home: Path) -> None:
+    # A // inside a string value (e.g. a URL) must NOT be treated as a comment.
+    cfg = _write_jsonc_config(
+        copilot_home,
+        {"homepage": "https://example.com/x", "trustedFolders": []},
+    )
+
+    assert permissions.add_trusted_folder(r"D:\wt\a") is True
+
+    body = json.loads(cfg.read_text(encoding="utf-8")[len(_JSONC_HEADER):])
+    assert body["homepage"] == "https://example.com/x"
+    assert body["trustedFolders"] == [r"D:\wt\a"]
