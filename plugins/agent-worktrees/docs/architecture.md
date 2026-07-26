@@ -475,3 +475,14 @@ dispatch behind one registry *before* converting individual overlays to Textual
 `ModalScreen`s -- **extend, not rewrite**, per `visions/picker`'s stability bias.
 A guard test asserts the registry drives both dispatch and precedence.
 
+**Global shortcuts are Textual `BINDINGS` (F3).** The truly-global pivot/machine
+shortcuts (`ctrl+shift+left/right`, `ctrl+left/right`) are owned by the
+framework's binding system, not the manual dispatcher: `PickerScreen.BINDINGS`
+maps them to `action_pivot_*` / `action_machine_*`, and `on_key` lets those keys
+**bubble** to the binding system (returns without `event.stop()`) exactly when no
+modal overlay is active -- otherwise it routes them to the manual dispatcher,
+where the active overlay ignores them, preserving overlay precedence. Key names
+are folded through `canonical_key` (F2) first. A real-framework keyboard harness
+(`pilot.press`) validates the whole path end-to-end -- the binding fires the
+rotation, and is correctly suppressed while an overlay owns the keyboard.
+

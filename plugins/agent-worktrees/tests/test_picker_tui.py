@@ -4134,3 +4134,61 @@ def test_kbd_real_pipeline_escape_opens_quit_confirm_and_n_cancels():
 
     asyncio.run(run())
 
+
+def test_kbd_real_pipeline_ctrl_shift_rotates_pivot_via_binding():
+    """Ctrl+Shift+←/→ is owned by Textual BINDINGS (F3), no longer the manual
+    dispatcher. Driven through the real pipeline it must still rotate the pivot
+    (and round-trip) -- proving the binding action fires end-to-end (#88)."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            if len(scr._left_pivots()) < 2:
+                return                            # nothing to rotate between
+            start = scr.htab
+            await pilot.press("ctrl+shift+right")
+            await pilot.pause()
+            assert scr.htab != start              # the binding action fired
+            await pilot.press("ctrl+shift+left")
+            await pilot.pause()
+            assert scr.htab == start              # and rotates back
+
+    asyncio.run(run())
+
+
+def test_kbd_real_pipeline_binding_gated_by_overlay():
+    """A global binding must NOT fire while a modal overlay owns the keyboard:
+    on_key routes the combo to the manual dispatcher, where the active overlay
+    ignores it. With a submenu open, Ctrl+Shift+→ leaves the pivot unchanged
+    (#88 F3 -- the overlay-precedence invariant the registry guarantees)."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            if len(scr._left_pivots()) < 2 or not scr.list_records():
+                return
+            scr.wt_sel.clear()
+            scr.sel = ("L", 0)
+            await pilot.press("enter")            # open the worktree overlay
+            await pilot.pause()
+            assert scr.submenu is not None
+            htab_before = scr.htab
+            await pilot.press("ctrl+shift+right")  # must be swallowed, not rotate
+            await pilot.pause()
+            assert scr.submenu is not None         # overlay still up
+            assert scr.htab == htab_before         # pivot NOT rotated
+            await pilot.press("escape")
+            await pilot.pause()
+            assert scr.submenu is None
+
+    asyncio.run(run())
+
+
