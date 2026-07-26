@@ -133,6 +133,44 @@ Post-exit checks                   # detect completion markers
   +-- status: active  --> preserve worktree for later resume
 ```
 
+### Current session, conclusion, and succession (the head pointer)
+
+A worktree is a *series of sessions*, not a single one. The tracking record
+names the **current** session with an asserted **head pointer** and records each
+session's lifecycle state, per the agent-fabric vision's
+*single-current-session-per-worktree*:
+
+- **`head_session`** (worktree record) — the current session. It is an
+  **asserted** pointer (moved only by an explicit conclude / handoff / new
+  session), never inferred from timestamps. Absent (legacy records) → derived by
+  `WorktreeRecord.resolved_head_session` (the newest non-concluded session in the
+  list), preserving the historical "latest is current" behavior with no
+  migration. Emitted to YAML only when set.
+- **`SessionEntry.state`** — `active` (default; a stopped/ended session is still
+  *active* i.e. resumable until concluded), `handed-off` (concluded into a
+  successor), or `concluded` (deliberately finished / sunset). **Conclusion is an
+  asserted act, never inferred from liveness.**
+- **`SessionEntry.successor` / `predecessor`** — the durable **two-way chain**, so
+  the lineage of sessions in a worktree is traversable in both directions.
+
+Ground-layer transition primitives (in `tracking.py`) — higher layers call these
+and **derive** from `resolved_head_session` rather than keeping a rival "current"
+notion (per the vision's *derive-dont-duplicate*):
+
+- `set_head_session(record, sid)` — assert a tracked session as the head (used
+  when a caller adopts / takes over a worktree).
+- `conclude_session(record, sid, state=…)` — mark `concluded`/`handed-off`;
+  advances the head off the concluded session (to the newest survivor, or None).
+- `link_succession(record, old, new)` — write the two-way link, conclude the
+  predecessor (`handed-off`), and move the head to the successor. This is the
+  primitive the context-handoff cutover calls.
+
+`register_session` (the sessionStart hook) **initializes** the head for a
+worktree that has no current session yet, but **never moves an existing active
+head** — a second session arriving while one is still current is the contested
+case the agent-bridge creation guard prevents upstream; the ground layer only
+records it.
+
 ### Two-Phase Completion
 
 Worktree completion is split into two explicit steps:
