@@ -43,15 +43,28 @@ const FLUSH_THROTTLE_MS = 2500;
 // status core (single home), converging the operator-status nudge OFF the
 // ephemeral agent-bridge live-session progress beat (the retired 7c-2 nudge).
 //
-// Delivery: an **immediate steering interjection** (session.send mode
-// "immediate") injected INTO a running turn -- so the agent does the status
-// update in-band, before continuing, then resumes as normal (not a separate
-// nudge turn). It fires on either cadence: every Nth turn (checked at
+// Delivery caveat (why this is OPT-IN, not the vision's on-by-default):
+// `session.send()` -- the only injection primitive the copilot-sdk exposes --
+// ALWAYS materializes a *user-message turn*; there is no in-band "system
+// reminder" channel that rides the current turn without creating a conversation
+// entry. `mode: "immediate"` merely chooses *when* (mid-turn vs enqueued), not
+// *whether* a message is created. So every nudge appends a conversation stub,
+// and an immediate mid-turn send can fork a parallel response (observed as a
+// phantom "second agent" answering the same operator turn). Until the SDK offers
+// a non-forking reminder channel, the send-based disposition nudge is therefore
+// **OFF by default** and gated behind an explicit opt-in env var
+// (`AGENT_WORKTREES_STATUS_NUDGE=1|on|true|yes`); the passive live-pulse above
+// (sidecar writes only, never `session.send`) still provides zero-cost liveness
+// legibility with no stubs. This reconciles agent-fabric
+// §progress-is-legible-not-just-liveness: the *intent* (a gentle in-band
+// disposition prompt) is retained but its stub-creating delivery is disabled
+// rather than shipped broken.
+//
+// When opt-in ON, it fires on either cadence: every Nth turn (checked at
 // turn-start), or once a single turn has run long enough -- but ONLY when
 // meaningful work has accrued since the last nudge/status update, so it never
-// nags a session that is idle or just chatting. Ambient, not opt-in (per the
-// vision): ON by default, env-disable. At most once per turn.
-const NUDGE_ON = !/^(0|off|false|no)$/i.test(
+// nags a session that is idle or just chatting. At most once per turn.
+const NUDGE_ON = /^(1|on|true|yes)$/i.test(
   process.env.AGENT_WORKTREES_STATUS_NUDGE || "",
 );
 const NUDGE_EVERY_TURNS = 10;                 // nudge about every N root-agent turns
