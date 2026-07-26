@@ -330,8 +330,11 @@ degrades to the same claimable record, not to a silent no-op.
   transport layer the fabric's cross-machine reach rides on;
   [agent-dispatch](../plugins/agent-dispatch/README.md) — the delegation layer's
   task queue (production modes, fire-and-forget vs. driven, liveness-reconciled
-  recovery). Further per-plugin leaves live under `visions/plugins/<name>/` as
-  authored (e.g. a future `visions/plugins/agent-bridge/`).
+  recovery); [picker](../picker/README.md) — the fabric's **front-door
+  presentation surface**, which renders this vision's legibility model (disposition
+  vs. pulse) and lets each layer contribute a pivot. Further per-plugin leaves live
+  under `visions/plugins/<name>/` as authored (e.g. a future
+  `visions/plugins/agent-bridge/`).
 - Reality docs: [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/`.
