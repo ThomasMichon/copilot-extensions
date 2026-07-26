@@ -166,15 +166,24 @@ def svg_to_png(svg: str, out_png: str, browser: str, scale: int = 2) -> None:
 
 # ---- walkthrough (animation) ------------------------------------------------
 
-# A scripted keyboard tour: cycle the view pivot, drop into the list, arrow
-# through a few worktrees, open a row action sub-menu, then dismiss it.
-WALKTHROUGH: list[list[str] | None] = [
-    None, ["]"], ["["], ["down"], ["down"], ["down"],
-    ["down"], ["enter"], ["down"], ["escape"],
+# A scripted keyboard tour with per-frame dwell times (ms): linger longest on the
+# opening screen, speed through the row arrows, linger on the open action menu.
+# (keys, dwell_ms) -- keys None = capture the current state without input.
+WALKTHROUGH: list[tuple[list[str] | None, int]] = [
+    (None, 3000),        # opening screen -- longest linger
+    (["down"], 550),     # step into the list
+    (["down"], 500),     # speed through a few worktrees
+    (["down"], 450),
+    (["down"], 450),
+    (["enter"], 2800),   # open the worktree action menu -- long linger
+    (["down"], 1100),    # move through the menu options
+    (["down"], 1100),
+    (["escape"], 900),   # dismiss, back to the list
 ]
 
 
-def make_gif(frames_png: list[str], out_gif: str, ms: int = 900) -> bool:
+def make_gif(frames_png: list[str], out_gif: str,
+             durations: "int | list[int]" = 900) -> bool:
     try:
         from PIL import Image
     except ImportError:
@@ -185,7 +194,7 @@ def make_gif(frames_png: list[str], out_gif: str, ms: int = 900) -> bool:
     if not imgs:
         return False
     imgs[0].save(out_gif, save_all=True, append_images=imgs[1:],
-                 duration=ms, loop=0, optimize=True)
+                 duration=durations, loop=0, optimize=True)
     return True
 
 
@@ -220,6 +229,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--local", help="Substring of the machine/env to treat as local")
     ap.add_argument("--animate", action="store_true",
                     help="Capture a scripted walkthrough and write a GIF")
+    ap.add_argument("--frame-ms", type=int, default=0,
+                    help="Uniform per-frame duration for --animate (ms); "
+                         "0 (default) uses the per-step pacing")
     args = ap.parse_args(argv)
 
     print("Gathering...", file=sys.stderr)
@@ -263,8 +275,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.animate:
         print("Capturing walkthrough frames...", file=sys.stderr)
         import asyncio
+        steps = [keys for keys, _ms in WALKTHROUGH]
+        durations = ([args.frame_ms] * len(WALKTHROUGH) if args.frame_ms
+                     else [ms for _keys, ms in WALKTHROUGH])
         frames = asyncio.run(pcap.capture_frames_async(
-            source, WALKTHROUGH, view=args.view, size=args.size, settle=settle,
+            source, steps, view=args.view, size=args.size, settle=settle,
             update_state="current"))
         if not browser:
             print("! No Chromium-family browser found; cannot rasterize GIF.",
@@ -276,7 +291,7 @@ def main(argv: list[str] | None = None) -> int:
                 p = os.path.join(td, f"f{i:02d}.png")
                 svg_to_png(fr["svg"], p, browser)
                 pngs.append(p)
-            ok = make_gif(pngs, args.out)
+            ok = make_gif(pngs, args.out, durations)
         print(("Wrote " if ok else "Failed to write ") + args.out, file=sys.stderr)
         return 0 if ok else 3
 
