@@ -485,7 +485,7 @@ a truthy instance attribute, and each with a key handler (`_key_*`) and a render
 handler (`_overlay_*`). `PickerScreen._overlay_registry()` is the **single
 ordered table** of `(state_attr, key_handler, render_handler)`; `_active_overlay()`
 returns the first spec whose state is set. Three call sites derive from it --
-`handle_key` (dispatch), the background-dim decision, and the render dispatch --
+`_dispatch_key` (dispatch), the background-dim decision, and the render dispatch --
 where each used to hand-maintain its **own** parallel list that could silently
 drift when an overlay was added. This is the first slice of the incremental
 migration toward Textual-native focus (#85 F): consolidate the hand-rolled modal
@@ -498,7 +498,7 @@ dialog is no longer a manual render/dispatch overlay: `_open_quit_confirm`
 `push_screen`s a `QuitConfirmScreen(ModalScreen[bool])`, so Textual owns the
 screen stack, the dim backdrop, focus, and key routing; the screen returns its
 verdict via `dismiss(True|False)` and a callback runs `app.exit()` on quit. It
-is therefore *absent* from the overlay registry (Textual, not `handle_key`,
+is therefore *absent* from the overlay registry (Textual, not `_dispatch_key`,
 dispatches its keys). The remaining overlays stay on the manual model for now;
 the registry is the seam that lets them convert one at a time. The real-framework
 `pilot.press` harness validates the modal end-to-end (open on Esc/q, Stay/Quit,
@@ -524,6 +524,16 @@ action (`None` cancels). Navigation (`up`/`down`, wrapping) updates the
 highlight and the per-action description in place. It too is *absent* from the
 overlay registry, and the `pilot.press` harness drives it end-to-end (open,
 arrow to an action, Enter runs it; Esc/q/Tab cancel).
+
+**Fourth overlay migrated: the ⚙ Configuration menu (F4).** The
+`CfgMenuScreen(ModalScreen[int])` replaces the `cfgmenu` manual overlay by the
+same *list-menu* pattern: `_open_cfgmenu` builds the item list (config-hosted
+pivots first, then contributed Configuration sections), pre-selects the current
+config-hosted pivot, and `push_screen`s the modal, which returns the chosen item
+*index* via `dismiss(int|None)`; the callback switches to the selected pivot or
+runs the selected section (`None` cancels). It too is *absent* from the overlay
+registry, and the `pilot.press` harness drives it end-to-end (open, Enter selects
+Profiles / arrow to a contributed section and run it; Esc/q/Tab cancel).
 
 **Global shortcuts are Textual `BINDINGS` (F3).** The truly-global pivot/machine
 shortcuts (`ctrl+shift+left/right`, `ctrl+left/right`) are owned by the
