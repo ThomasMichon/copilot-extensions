@@ -140,7 +140,7 @@ def _secret_dump():
          "branch": "worktree/classified-branch", "path": "/secret/checkout/path",
          "live_intent": "exfiltrating the mainframe",
          "pr": {"state": "open", "number": 8472,
-                "url": "https://secret.example/tmichon/private/pulls/8472",
+                "url": "https://secret.example/exampleuser/private/pulls/8472",
                 "branch": "pr/secret-branch", "head_sha": "deadbeefcafef00d"}},
         {"id": "SECRETHOST-win-20260101-beef", "machine": "SECRET-HOST",
          "platform": "windows", "status": "finalized",
@@ -159,7 +159,7 @@ def test_obscured_source_scrubs_all_identifiers(monkeypatch, tmp_path):
     # alphabetic secrets must not appear anywhere (text/ansi/svg)
     for secret in ("SECRET-HOST", "Top Secret Roadmap", "Another Confidential",
                    "do not leak", "secret.example", "classified", "mainframe",
-                   "deadbeef", "/secret/checkout", "tmichon", "private"):
+                   "deadbeef", "/secret/checkout", "exampleuser", "private"):
         assert secret not in blob, secret
     # the real PR number is replaced (check text/ansi; SVG carries coord numbers)
     assert "8472" not in words

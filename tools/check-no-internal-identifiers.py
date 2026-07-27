@@ -49,7 +49,7 @@ SELF = {
 # paths ``onedrive`` is always the product. Prefixes are matched case-
 # insensitively against the repo-relative path.
 ALLOW: dict[str, tuple[str, ...]] = {
-    "onedrive": ("plugins/agent-logger/", "readme.md"),
+    "onedrive": ("plugins/agent-logger/", "plugins/agent-vault/tests/", "readme.md"),
 }
 
 
