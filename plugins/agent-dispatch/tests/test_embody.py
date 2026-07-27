@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import types
 
@@ -39,29 +40,62 @@ def test_autopilot_prompt_mentions_task_verbs_and_deferred_completion():
 
 
 def test_embody_available_false_without_cli(monkeypatch):
-    monkeypatch.setattr(embody.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: None)
     assert embody.embody_available() is False
 
 
 def test_spawn_embodied_worker_unavailable_when_no_cli(monkeypatch):
-    monkeypatch.setattr(embody.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: None)
     with pytest.raises(embody.EmbodyUnavailable):
         embody.spawn_embodied_worker(
             "t1", coordinator_url="http://c", worker_id="w1"
         )
 
 
+def test_launch_prefix_prefers_venv_python_over_cmd_shim(monkeypatch, tmp_path):
+    """The autopilot seed carries cmd.exe metacharacters (``&``, ``()``, ``<>``,
+    backtick). Launching the Windows ``agent-worktrees.cmd`` shim makes cmd.exe
+    re-parse ``%*`` and corrupt the seed (WinError 2, BatBadBut). So when the
+    agent-worktrees runtime venv exists, its interpreter + ``-m agent_worktrees``
+    is preferred, bypassing any ``.cmd`` shim entirely."""
+    venv_py = tmp_path / ".agent-worktrees" / ".venv" / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    venv_py.parent.mkdir(parents=True)
+    venv_py.write_text("")  # only needs to exist as a file
+    monkeypatch.setattr(embody.Path, "home", classmethod(lambda cls: tmp_path))
+    # Even with a .cmd binstub on PATH, the venv interpreter wins.
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: r"C:\bin\agent-worktrees.cmd")
+    prefix = embody._agent_worktrees_launch_prefix()
+    assert prefix == [str(venv_py), "-m", "agent_worktrees"]
+    # The launcher is a real interpreter, never a shell shim that re-parses args.
+    assert not prefix[0].lower().endswith((".cmd", ".bat"))
+
+
+def test_launch_prefix_falls_back_to_binstub_when_no_venv(monkeypatch, tmp_path):
+    """Without the runtime venv, fall back to the ``agent-worktrees`` binstub on
+    PATH (POSIX shims are plain exec scripts -- no cmd.exe re-parse)."""
+    monkeypatch.setattr(embody.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/agent-worktrees")
+    assert embody._agent_worktrees_launch_prefix() == ["/usr/bin/agent-worktrees"]
+
+
+def test_launch_prefix_none_when_unresolvable(monkeypatch, tmp_path):
+    monkeypatch.setattr(embody.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: None)
+    assert embody._agent_worktrees_launch_prefix() is None
+
+
 def test_spawn_embodied_worker_builds_embody_new_command(monkeypatch):
     captured = {}
-
-    def fake_which(_name):
-        return "/usr/bin/agent-worktrees"
 
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
         return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
 
-    monkeypatch.setattr(embody.shutil, "which", fake_which)
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
     monkeypatch.setattr(embody.subprocess, "run", fake_run)
 
     embody.spawn_embodied_worker(
@@ -82,7 +116,9 @@ def test_spawn_embodied_worker_builds_embody_new_command(monkeypatch):
 
 def test_spawn_embodied_worker_passes_verify_timeout(monkeypatch):
     captured = {}
-    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/agent-worktrees")
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
     monkeypatch.setattr(
         embody.subprocess, "run",
         lambda cmd, **kw: (captured.__setitem__("cmd", cmd)
@@ -99,7 +135,9 @@ def test_spawn_embodied_worker_threads_project_as_global(monkeypatch):
     """--project is an agent-worktrees GLOBAL option, so it must precede the
     `embody` subcommand -- letting a CWD-neutral caller name the project."""
     captured = {}
-    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/agent-worktrees")
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
     monkeypatch.setattr(
         embody.subprocess, "run",
         lambda cmd, **kw: (captured.__setitem__("cmd", cmd)
@@ -119,7 +157,9 @@ def test_spawn_embodied_worker_threads_project_as_global(monkeypatch):
 def test_spawn_embodied_worker_omits_project_when_none(monkeypatch):
     """No --project (back-compat): the command is unchanged from CWD-discovery."""
     captured = {}
-    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/agent-worktrees")
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
     monkeypatch.setattr(
         embody.subprocess, "run",
         lambda cmd, **kw: (captured.__setitem__("cmd", cmd)
