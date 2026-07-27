@@ -309,6 +309,17 @@ sibling plugins or modules.
 
 Skip with `--no-update` or `WORKTREE_NO_UPDATE=1`.
 
+During an interactive launch the join + apply prints a **status line at each
+waiting step** (joining the background download — the up-to-90s step most
+likely to look "stuck" — inline re-download, installer, bootstrap-service
+self-update, plugin reconcile) so the operator understands the otherwise-silent
+post-picker/pre-mux pause instead of staring at a frozen screen. The lines are
+gated to the interactive exec/refresh paths only: direct-dispatch subcommands
+and `--stdio`/`--json` callers stay quiet (in `--stdio` mode the launcher's
+`Write-Host` is already routed to stderr, off the ACP channel). Every step is
+still written to the per-PID setup log under `$TMPDIR/worktree-setup-logs`
+regardless.
+
 ### "Update available" -> the full update (picker refresh)
 
 When the picker's version indicator shows **Update available** and you press
