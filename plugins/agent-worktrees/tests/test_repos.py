@@ -249,6 +249,72 @@ def test_resolve_account_none_for_missing_entry():
     assert repos.resolve_account(None) is None
 
 
+# --- account_map (decoupled org -> gh login) --------------------------------
+
+
+def test_account_map_round_trips(home: Path):
+    repos.set_account_map("github", "ThomasMichon")
+    repos.set_account_map("odsp-microsoft", "tmichon_microsoft")
+    reg = repos.read_registry()
+    assert reg.account_map == {
+        "github": "ThomasMichon",
+        "odsp-microsoft": "tmichon_microsoft",
+    }
+
+
+def test_account_map_resolves_org_owned_repo(home: Path):
+    """An org-owned repo resolves to the mapped login, not the org name."""
+    repos.set_account_map("github", "ThomasMichon")
+    assert repos.account_for_github_slug("github/copilot-agent-runtime") == "ThomasMichon"
+    # A repo entry is not required for the map to apply.
+    assert repos.account_for_github_owner("github") == "ThomasMichon"
+
+
+def test_account_map_case_insensitive(home: Path):
+    repos.set_account_map("ODSP-Microsoft", "tmichon_microsoft")
+    assert repos.account_for_github_owner("odsp-microsoft") == "tmichon_microsoft"
+    assert repos.account_from_map("odsp-microsoft") == "tmichon_microsoft"
+
+
+def test_owner_fallback_when_unmapped(home: Path):
+    """Unmapped owner falls back to itself (owner == login for personal repos)."""
+    assert repos.account_for_github_slug("tmichon_microsoft/dotfiles") == "tmichon_microsoft"
+
+
+def test_explicit_repo_account_beats_map(home: Path):
+    """A per-repo account: override wins over the org map (finest grain)."""
+    repos.set_account_map("example-org", "map-login")
+    repos.add_repo(
+        "proj", str(home / "proj"), repo_class="worktree",
+        remote="https://github.com/example-org/proj.git",
+        account="explicit-login", plat="windows",
+    )
+    assert repos.account_for_github_owner("example-org") == "explicit-login"
+
+
+def test_resolve_account_uses_map_over_owner(home: Path):
+    repos.set_account_map("example-org", "mapped-acct")
+    entry = repos.RepoEntry(
+        name="proj", remote="https://github.com/example-org/proj.git",
+    )
+    assert repos.resolve_account(entry) == "mapped-acct"
+
+
+def test_set_account_map_replaces_case_variant(home: Path):
+    repos.set_account_map("github", "old")
+    repos.set_account_map("GitHub", "new")
+    reg = repos.read_registry()
+    # Only one entry survives (case-variant replaced, not duplicated).
+    assert list(reg.account_map.values()) == ["new"]
+
+
+def test_unset_account_map(home: Path):
+    repos.set_account_map("github", "ThomasMichon")
+    assert repos.unset_account_map("GITHUB") is True
+    assert repos.read_registry().account_map == {}
+    assert repos.unset_account_map("github") is False
+
+
 def test_account_for_github_slug_derives(home: Path):
     # No override registered -> the account is the slug owner.
     assert repos.account_for_github_slug("example-org/proj") == "example-org"

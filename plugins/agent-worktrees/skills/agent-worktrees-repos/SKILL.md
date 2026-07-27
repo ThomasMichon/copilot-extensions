@@ -126,6 +126,17 @@ repos srcroot [--set PATH] [--platform windows|wsl|linux]
 repos migrate [--default-class reference|singleton|worktree]
 repos status [--tag T] [--class C] [--json]
 repos sync [--tag T] [--class C]
+repos account [list|set <owner> <login>|unset <owner>]   # org->login map
+repos account-for <owner|owner/name>                     # print resolved login
+```
+
+The **accounts catalog** is a sibling top-level command:
+
+```
+accounts list
+accounts show <login>
+accounts set <login> [--host H] [--scopes a,b] [--login-flow CMD] [--notes T]
+accounts remove <login>
 ```
 
 ## Common Workflows
@@ -192,11 +203,14 @@ The registry lives at `~/.agent-worktrees/repos.yaml`. Full annotated example:
 srcroot:
   windows: D:\Src
   wsl: ~/src
+account_map:                       # decoupled GitHub owner/org -> gh login
+  github: ThomasMichon             #   org-owned repos resolve to the right
+  odsp-microsoft: tmichon_microsoft #   login (not the org name)
 repos:
   copilot-extensions:
     class: worktree                # reference | singleton | worktree
     remote: "https://github.com/ThomasMichon/copilot-extensions.git"
-    account: ThomasMichon          # optional; else derived from the remote owner
+    account: ThomasMichon          # optional; else account_map, else remote owner
     default_branch: main
     windows: D:\Src\copilot-extensions
     wsl: ~/src/copilot-extensions
@@ -208,11 +222,18 @@ repos:
 |-------|-------------|
 | `class` | `reference` \| `singleton` \| `worktree` (see above) |
 | `remote` | Git remote URL |
-| `account` | Preferred GitHub identity (a `gh` account login) this repo's git/gh ops run under. Optional — absent, it's **derived** from a `github.com` remote owner; a non-GitHub/underivable remote means no account (ambient auth). See *Repo-scoped identity* below. |
+| `account` | Preferred GitHub identity (a `gh` account login) this repo's git/gh ops run under. Optional — absent, it's resolved via `account_map` then the `github.com` remote owner; a non-GitHub/underivable remote means no account (ambient auth). See *Repo-scoped identity* below. |
 | `default_branch` | Branch `status`/`sync` track (default: current) |
 | `tags` | Filter tags for batch ops (`facility`, `work`, …) |
 | `contributing` | Path to CONTRIBUTING.md — read before editing |
 | `windows`/`wsl`/`linux` | Per-platform checkout paths |
+
+Top-level `account_map` (GitHub **owner/org → gh login**) is the decoupled
+identity layer: it maps an owner that is **not** itself a `gh` account — an org
+like `github` or `odsp-microsoft` — to the login that can access it. Manage it
+with `repos account set/list/unset`; the identities it points at (host, scopes,
+login flow) are catalogued separately in `~/.agent-worktrees/accounts.yaml`
+(`accounts …`).
 
 ### Repo-scoped identity (multi-account)
 
@@ -221,9 +242,16 @@ account vs. a personal account) otherwise forces manual `gh auth switch`.
 agent-worktrees resolves the **account from repo context** and applies it
 inline, so agents never hand-switch:
 
-- **Resolution** (`resolve_account`): explicit `account:` → owner derived from a
-  `github.com` remote → none. None = today's ambient-`gh` behavior (additive,
-  safe). GitHub-only in v1; ADO/gitea remotes resolve no account.
+- **Resolution** (`resolve_account` / `account_for_github_owner`): explicit
+  `account:` → top-level `account_map[owner]` → the remote owner itself →
+  none. None = today's ambient-`gh` behavior (additive, safe). The `account_map`
+  step is what makes an **org-owned** repo (`github/…`, `odsp-microsoft/…`)
+  resolve to the correct login instead of the org name. GitHub-only in v1;
+  ADO/gitea remotes resolve no account.
+- **Query primitive**: `repos account-for <owner|owner/name>` prints the
+  resolved login (exit 1 if none). Other tools (e.g. **agent-codespaces**, to
+  pick the `gh` account for `gh codespace …`) shell out to it rather than
+  importing agent-worktrees.
 - **gh/PR ops** (`create-pr`, `pr-merge`, `pr-ready`, `pr-status`, `pr-watch`,
   `pr-complete`, label/GraphQL): the resolved account mints a token
   (`gh auth token --user <account>` → `GH_TOKEN`); an explicit
@@ -233,8 +261,22 @@ inline, so agents never hand-switch:
   retry fallback.
 
 `repos list` and `related resolve` surface the resolved account (`explicit` vs
-`derived`). Set an explicit `account:` only when owner ≠ account (an EMU account
-spanning orgs); otherwise let it derive.
+`derived`). Prefer `account_map` for a whole org; set an explicit per-repo
+`account:` only for a one-off where a single repo under an owner needs a
+different login.
+
+### Accounts catalog (`accounts.yaml`)
+
+`~/.agent-worktrees/accounts.yaml` catalogs the gh account **identities** the
+`account_map` points at — login, host, expected OAuth scopes, and the
+(re)login flow — so a scope-preflight can tell you *which* account to fix and
+*how*. Manage with `accounts list|show|set|remove`:
+
+```
+agent-worktrees accounts set ThomasMichon --scopes codespace,repo,workflow \
+    --login-flow 'gh auth login -h github.com'
+```
+
 
 ## Integration Points
 

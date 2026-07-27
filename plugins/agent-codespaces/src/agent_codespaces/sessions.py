@@ -73,7 +73,9 @@ def find_session_sync() -> str | None:
 
 async def _connect_with_retry(manager, name: str, *, timeout: float) -> None:
     """ensure_connected with boot-patience retry (a Shutdown CS boots here)."""
-    source = CodespaceSource(name)
+    from .lifecycle import account_for_codespace
+    account = account_for_codespace(name)
+    source = CodespaceSource(name, account=account)
     deadline = time.monotonic() + timeout
     backoff = 3.0
     while True:

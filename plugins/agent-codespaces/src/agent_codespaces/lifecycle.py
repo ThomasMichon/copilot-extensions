@@ -57,6 +57,10 @@ class CodespaceInfo:
     branch: str
     state: str
     machine: str
+    # The gh account login under which this CodeSpace was discovered. Empty
+    # when listed under the ambient active account (no account_map). Per-name
+    # ops (stop/delete/ssh) run under this account's token. See gh_account.
+    account: str = ""
 
 
 def _creation_flags() -> int:
@@ -66,25 +70,71 @@ def _creation_flags() -> int:
 
 
 def list_codespaces() -> list[CodespaceInfo]:
-    """List active CodeSpaces via ``gh codespace list``."""
+    """List CodeSpaces across all mapped gh accounts, merged by name.
+
+    ``gh codespace list`` only returns the *active* account's CodeSpaces, so a
+    CodeSpace owned by another account (e.g. an ``odsp-microsoft`` CodeSpace
+    while ``ThomasMichon`` is active) is invisible. To discover + operate them
+    (#195/#190) we list under each account in the agent-worktrees
+    ``account_map`` -- pinning ``gh`` via ``GH_TOKEN`` -- plus the ambient
+    account, tagging each entry with the account it came from and de-duping by
+    name.
+
+    When no ``account_map`` exists this collapses to a single ambient
+    ``gh codespace list`` (today's behavior) -- additive and safe.
+    """
+    from . import gh_account
+
+    accounts = gh_account.mapped_accounts()
+    if not accounts:
+        return _list_codespaces_under(None)
+
+    merged: dict[str, CodespaceInfo] = {}
+    errors: list[str] = []
+    # Each mapped account, then the ambient active account (which may own
+    # CodeSpaces under an owner that isn't in the map).
+    for login in (*accounts, None):
+        try:
+            for cs in _list_codespaces_under(login):
+                merged.setdefault(cs.name, cs)
+        except RuntimeError as exc:
+            errors.append(str(exc))
+    if not merged and errors:
+        raise RuntimeError("; ".join(dict.fromkeys(errors)))
+    return list(merged.values())
+
+
+def _list_codespaces_under(login: str | None) -> list[CodespaceInfo]:
+    """Run ``gh codespace list`` under one account (or ambient when None)."""
+    from . import gh_account
+
     args = [
         "gh", "codespace", "list",
         "--json", "name,displayName,repository,gitStatus,state,machineName",
         "--limit", "50",
     ]
+    env = gh_account.env_for_account(login) if login else None
 
     try:
         result = subprocess.run(
             args, capture_output=True, text=True, timeout=30,
-            creationflags=_creation_flags(),
+            creationflags=_creation_flags(), env=env,
         )
     except FileNotFoundError:
         raise RuntimeError("gh CLI not found") from None
 
     if result.returncode != 0:
-        raise RuntimeError(f"gh codespace list failed: {result.stderr.strip()}")
+        who = f" (account {login})" if login else ""
+        raise RuntimeError(
+            f"gh codespace list failed{who}: {result.stderr.strip()}"
+        )
 
-    entries = json.loads(result.stdout) if result.stdout.strip() else []
+    try:
+        entries = json.loads(result.stdout) if result.stdout.strip() else []
+    except (ValueError, TypeError):
+        # A malformed/unexpected payload for one account must not sink the
+        # whole cross-account merge; treat it as "no CodeSpaces here".
+        return []
     codespaces = []
     for e in entries:
         git_status = e.get("gitStatus", {})
@@ -95,8 +145,25 @@ def list_codespaces() -> list[CodespaceInfo]:
             branch=git_status.get("ref", "") if isinstance(git_status, dict) else "",
             state=e.get("state", ""),
             machine=e.get("machineName", ""),
+            account=login or "",
         ))
     return codespaces
+
+
+def account_for_codespace(name: str) -> str | None:
+    """Return the gh account that owns CodeSpace ``name``, or None.
+
+    Resolved from the cross-account listing so per-name ops (stop/delete/ssh)
+    can pin ``gh`` to the owning account. None => use ambient auth. Any listing
+    failure degrades to ambient rather than propagating.
+    """
+    try:
+        for cs in list_codespaces():
+            if cs.name == name:
+                return cs.account or None
+    except Exception:
+        return None
+    return None
 
 
 def list_devcontainers(repo: str) -> list[str]:
@@ -111,10 +178,11 @@ def list_devcontainers(repo: str) -> list[str]:
         "gh", "api", f"repos/{repo}/codespaces/devcontainers",
         "--jq", ".devcontainers[].path",
     ]
+    from . import gh_account
     try:
         result = subprocess.run(
             args, capture_output=True, text=True, timeout=30,
-            creationflags=_creation_flags(),
+            creationflags=_creation_flags(), env=gh_account.env_for_repo(repo),
         )
     except (FileNotFoundError, subprocess.SubprocessError):
         return []
@@ -225,9 +293,10 @@ def create_codespace(
 
     log.info("Creating codespace: %s", " ".join(args))
 
+    from . import gh_account
     result = subprocess.run(
         args, capture_output=True, text=True, timeout=300,
-        creationflags=_creation_flags(),
+        creationflags=_creation_flags(), env=gh_account.env_for_repo(repo),
     )
 
     if result.returncode != 0:
@@ -305,24 +374,33 @@ def wait_for_available(name: str, timeout: float = 300.0, interval: float = 10.0
     return outcome == WaitOutcome.AVAILABLE
 
 
-def delete_codespace(name: str, force: bool = False) -> None:
-    """Delete a CodeSpace by name."""
+def delete_codespace(name: str, force: bool = False, account: str | None = None) -> None:
+    """Delete a CodeSpace by name.
+
+    ``account`` pins ``gh`` to the account that owns the CodeSpace; when None it
+    is resolved from the cross-account listing (falls back to ambient auth).
+    """
+    from . import gh_account
+
     args = ["gh", "codespace", "delete", "-c", name]
     if force:
         args.append("--force")
 
     log.info("Deleting codespace: %s", name)
 
+    if account is None:
+        account = account_for_codespace(name)
     result = subprocess.run(
         args, capture_output=True, text=True, timeout=60,
         creationflags=_creation_flags(),
+        env=gh_account.env_for_account(account) if account else None,
     )
 
     if result.returncode != 0:
         raise RuntimeError(f"gh codespace delete failed: {result.stderr.strip()}")
 
 
-def stop_codespace(name: str) -> bool:
+def stop_codespace(name: str, account: str | None = None) -> bool:
     """Gracefully stop (shut down) a CodeSpace, PRESERVING it for later resume.
 
     The pause-and-keep counterpart to ``delete_codespace`` -- the compute is
@@ -330,13 +408,23 @@ def stop_codespace(name: str) -> bool:
     the next connect. Returns ``True`` when a stop was issued, ``False`` when
     the CodeSpace was already ``Shutdown`` (idempotent no-op). Raises
     ``RuntimeError`` on an unexpected failure.
+
+    ``account`` pins ``gh`` to the owning account; when None it is resolved
+    from the cross-account listing (falls back to ambient auth).
     """
-    # Idempotency: skip the call if the CodeSpace is already shut down.
+    from . import gh_account
+
+    # Idempotency: skip the call if the CodeSpace is already shut down. Reuse
+    # the listing to also learn the owning account when not supplied.
     try:
         for cs in list_codespaces():
-            if cs.name == name and cs.state == _SHUTDOWN_STATE:
-                log.info("CodeSpace %s already Shutdown; nothing to stop", name)
-                return False
+            if cs.name == name:
+                if account is None:
+                    account = cs.account or None
+                if cs.state == _SHUTDOWN_STATE:
+                    log.info("CodeSpace %s already Shutdown; nothing to stop", name)
+                    return False
+                break
     except RuntimeError:
         # Can't list (auth/network) -- fall through and let `gh` decide.
         pass
@@ -347,6 +435,7 @@ def stop_codespace(name: str) -> bool:
     result = subprocess.run(
         args, capture_output=True, text=True, timeout=120,
         creationflags=_creation_flags(),
+        env=gh_account.env_for_account(account) if account else None,
     )
 
     if result.returncode != 0:

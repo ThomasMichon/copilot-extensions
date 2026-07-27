@@ -20,7 +20,20 @@ SSH_CONFIG_DIR = RUNTIME_DIR / "ssh"
 
 
 class CodespaceSource(CodespaceConfigSource):
-    """ConfigSource for one GitHub Codespace (delegates to the shared parser)."""
+    """ConfigSource for one GitHub Codespace (delegates to the shared parser).
 
-    def __init__(self, codespace_name: str) -> None:
-        super().__init__(codespace_name, config_dir=SSH_CONFIG_DIR)
+    Pins ``gh codespace ssh --config`` to the gh account that owns the
+    CodeSpace (multi-account: #195/#190) when an ``account`` is supplied.
+    Callers resolve the account (they usually already have a ``CodespaceInfo``
+    or can call :func:`lifecycle.account_for_codespace`); the source itself
+    stays side-effect-free at construction. Absent an account it uses ambient
+    auth -- today's behavior.
+    """
+
+    def __init__(self, codespace_name: str, *, account: str | None = None) -> None:
+        from . import gh_account
+
+        gh_env = gh_account.env_for_account(account) if account else None
+        super().__init__(
+            codespace_name, config_dir=SSH_CONFIG_DIR, gh_env=gh_env,
+        )

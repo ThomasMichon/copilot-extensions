@@ -494,7 +494,9 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     """SSH into a CodeSpace using ssh-manager."""
     from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
 
-    source = CodespaceSource(args.name)
+    from .lifecycle import account_for_codespace
+
+    source = CodespaceSource(args.name, account=account_for_codespace(args.name))
     config = load_merged_config()
     relay_port = config.credentials.relay_port
 
@@ -1242,10 +1244,16 @@ def _interactive_ssh(
     """Fall back to ``gh codespace ssh`` for interactive sessions."""
     import subprocess as sp
 
-    env = None
+    from . import gh_account, lifecycle
+
+    # Pin gh to the account that owns this CodeSpace (multi-account #195/#190),
+    # then overlay the relay vars. Start from the account env so GH_TOKEN is set
+    # even when no relay vars are present.
+    account = lifecycle.account_for_codespace(codespace_name)
+    env = gh_account.env_for_account(account) if account else None
     if relay_port is not None:
         env = {
-            **os.environ,
+            **(env if env is not None else os.environ),
             "LC_GIT_CREDENTIAL_RELAY": str(relay_port),
             "GIT_TERMINAL_PROMPT": "0",
         }
@@ -1276,6 +1284,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
                 "branch": cs.branch,
                 "state": cs.state,
                 "machine": cs.machine,
+                "account": cs.account,
                 "eligibility": marks.get(cs.name, "active"),
             }
             for cs in codespaces
@@ -1339,26 +1348,50 @@ def _resolve_repo_root() -> Path:
 
 
 def _list_codespaces_for_init() -> list[dict]:
-    """Return `gh codespace list` entries, or [] on any failure."""
+    """Return `gh codespace list` entries across all mapped accounts, or [].
+
+    Cross-account like :func:`lifecycle.list_codespaces` (#195/#190): lists
+    under each account in the agent-worktrees ``account_map`` plus the ambient
+    account, tagging each entry with its ``account`` and de-duping by name.
+    Falls back to a single ambient list when no map exists.
+    """
     import subprocess as sp
 
-    try:
-        result = sp.run(
-            ["gh", "codespace", "list", "--json",
-             "name,repository,machineName,displayName,state,lastUsedAt"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (FileNotFoundError, sp.TimeoutExpired):
-        return []
-    if result.returncode != 0:
-        return []
-    try:
-        data = json.loads(result.stdout or "[]")
-        return data if isinstance(data, list) else []
-    except json.JSONDecodeError:
-        return []
+    from . import gh_account
+
+    def _one(login: str | None) -> list[dict]:
+        env = gh_account.env_for_account(login) if login else None
+        try:
+            result = sp.run(
+                ["gh", "codespace", "list", "--json",
+                 "name,repository,machineName,displayName,state,lastUsedAt"],
+                capture_output=True, text=True, timeout=30, env=env,
+            )
+        except (FileNotFoundError, sp.TimeoutExpired):
+            return []
+        if result.returncode != 0:
+            return []
+        try:
+            data = json.loads(result.stdout or "[]")
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(data, list):
+            return []
+        for entry in data:
+            if isinstance(entry, dict):
+                entry.setdefault("account", login or "")
+        return data
+
+    accounts = gh_account.mapped_accounts()
+    if not accounts:
+        return _one(None)
+    merged: dict[str, dict] = {}
+    for login in (*accounts, None):
+        for entry in _one(login):
+            name = entry.get("name")
+            if name:
+                merged.setdefault(name, entry)
+    return list(merged.values())
 
 
 def _discover_workspace_folder(codespaces: list[dict], repository: str) -> str | None:
@@ -1372,6 +1405,8 @@ def _discover_workspace_folder(codespaces: list[dict], repository: str) -> str |
     """
     import subprocess as sp
 
+    from . import gh_account
+
     available = [
         c for c in codespaces
         if c.get("repository") == repository and c.get("state") == "Available"
@@ -1380,6 +1415,7 @@ def _discover_workspace_folder(codespaces: list[dict], repository: str) -> str |
         name = c.get("name")
         if not name:
             continue
+        env = gh_account.env_for_account(c.get("account") or None) if c.get("account") else None
         try:
             result = sp.run(
                 ["gh", "codespace", "ssh", "-c", name, "--",
@@ -1387,6 +1423,7 @@ def _discover_workspace_folder(codespaces: list[dict], repository: str) -> str |
                 capture_output=True,
                 text=True,
                 timeout=45,
+                env=env,
             )
         except (FileNotFoundError, sp.TimeoutExpired):
             return None
@@ -1522,10 +1559,41 @@ def _render_codespaces_yaml(defaults: dict | None) -> str:
     )
 
 
+def _parse_gh_account_scopes(status_text: str) -> dict[str, set[str]]:
+    """Parse ``gh auth status`` into ``{login: {scopes}}``.
+
+    ``gh auth status`` prints a block per authenticated account; each carries a
+    ``Token scopes: 'a', 'b', ...`` line. We attribute each scopes line to the
+    most recent ``account <login>`` seen so a per-account scope check is
+    possible (multi-account #247/#190).
+    """
+    import re
+
+    accounts: dict[str, set[str]] = {}
+    current: str | None = None
+    for line in status_text.splitlines():
+        m = re.search(r"account\s+([A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?)", line)
+        if m:
+            current = m.group(1)
+            accounts.setdefault(current, set())
+        if current and "token scopes" in line.lower():
+            scopes = set(re.findall(r"'([^']+)'", line))
+            accounts[current] |= scopes
+    return accounts
+
+
 def _gh_auth_preflight() -> list[str]:
     """Check gh auth + codespace scope. Returns a list of guidance messages
-    (empty if all good)."""
+    (empty if all good).
+
+    Beyond the ambient account, verifies every account in the agent-worktrees
+    ``account_map`` is logged in with the ``codespace`` scope, surfacing the
+    per-account remedy (its ``accounts.yaml`` login flow when recorded) so a
+    cross-account list/ssh doesn't fail with a misleading 403/404 (#247/#190).
+    """
     import subprocess as sp
+
+    from . import gh_account
 
     msgs: list[str] = []
     try:
@@ -1551,7 +1619,42 @@ def _gh_auth_preflight() -> list[str]:
             "gh token is missing the 'codespace' scope (needed for CodeSpace "
             "operations) -- run: gh auth refresh -h github.com -s codespace"
         )
+
+    # Per-account check for every account the account_map routes to.
+    per_account = _parse_gh_account_scopes(combined)
+    lowered = {login.casefold(): scopes for login, scopes in per_account.items()}
+    for login in gh_account.mapped_accounts():
+        scopes = lowered.get(login.casefold())
+        if scopes is None:
+            remedy = _account_login_remedy(login)
+            msgs.append(
+                f"mapped gh account '{login}' is not logged in -- {remedy}"
+            )
+        elif "codespace" not in {s.casefold() for s in scopes}:
+            msgs.append(
+                f"mapped gh account '{login}' is missing the 'codespace' scope "
+                f"-- run: gh auth refresh -h github.com -u {login} -s codespace"
+            )
     return msgs
+
+
+def _account_login_remedy(login: str) -> str:
+    """Return the recorded login flow for ``login``, or a sane default."""
+    try:
+        import shutil
+        aw = shutil.which("agent-worktrees")
+        if aw:
+            import subprocess as sp
+            r = sp.run([aw, "accounts", "show", login, "--json"],
+                       capture_output=True, text=True, timeout=10)
+            if r.returncode == 0:
+                data = json.loads(r.stdout or "{}")
+                flow = (data.get("login_flow") or "").strip()
+                if flow:
+                    return f"run: {flow}"
+    except Exception:
+        pass
+    return f"run: gh auth login -h github.com (account {login})"
 
 
 def _config_init(
@@ -2053,7 +2156,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
     # (including on_create extras).
     relay_port = config.credentials.relay_port
     port_forwards = [f"-R {relay_port}:127.0.0.1:{relay_port}"]
-    source = CodespaceSource(info.name)
+    source = CodespaceSource(info.name, account=info.account or None)
     manager = ConnectionManager()
 
     async def _run() -> int:
