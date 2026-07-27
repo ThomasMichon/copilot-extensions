@@ -535,6 +535,20 @@ runs the selected section (`None` cancels). It too is *absent* from the overlay
 registry, and the `pilot.press` harness drives it end-to-end (open, Enter selects
 Profiles / arrow to a contributed section and run it; Esc/q/Tab cancel).
 
+**Fifth overlay migrated: the Maintenance actions menu (`maint_menu`) → native
+`ModalScreen` (F4).** The `MaintMenuScreen(ModalScreen[int])` completes the trio
+of *list-menus*: it lists the actions available for the selected worktree set
+(Sync / Cleanup / Finalize / Stop) with a live per-action description and returns
+the chosen action *index* via `dismiss(int|None)`. Its **two** openers
+(`_open_maint_menu` for the maintenance selection, `_open_wt_action_menu` for the
+Worktrees-list bulk action) now share `_push_maint_menu` (pushes the modal) and
+`_run_maint_action` (runs the chosen action) -- they build the id set / action
+list differently but dispatch identically. Removed `self.maint_menu`/
+`maint_menu_idx`, its registry entry, footer branch, `_key_maint_menu` and
+`_overlay_maint_menu`. It too is *absent* from the overlay registry, and the
+`pilot.press` harness drives it end-to-end (open, arrow to an action, Enter runs
+it; Esc/q/Tab cancel).
+
 **Global shortcuts are Textual `BINDINGS` (F3).** The truly-global pivot/machine
 shortcuts (`ctrl+shift+left/right`, `ctrl+left/right`) are owned by the
 framework's binding system, not the manual dispatcher: `PickerScreen.BINDINGS`

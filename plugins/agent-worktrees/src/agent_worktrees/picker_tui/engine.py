@@ -455,8 +455,9 @@ class PickerScreen(Widget):
         self.last_l = 0               # remembered Worktrees list focus (Tab memory, #2258 P3)
         self._wt_reconcile_after = None  # live: (m,e) targets whose reload must
                                          # settle before reconciling wt_sel (#2258 P3-7)
-        self.maint_menu = None        # Maintenance actions menu modal (#1345)
-        self.maint_menu_idx = 0
+        # Maintenance actions menu is a native Textual ModalScreen now (#88 F4):
+        # no self.maint_menu / maint_menu_idx state attrs -- see MaintMenuScreen
+        # and _open_maint_menu. (The overlay left the manual registry entirely.)
         self.progress = None          # cleanup/sync progress sub-dialog
         self.executor = None          # real maintenance executor
         # Real cleanup/sync ops are the DEFAULT: the Maintenance actions
@@ -1219,7 +1220,12 @@ class PickerScreen(Widget):
 
     def _open_maint_menu(self):
         """Open the Maintenance actions menu for the selected set; if nothing
-        is selected, select the focused row and open it for that one (#1345)."""
+        is selected, select the focused row and open it for that one (#1345).
+
+        Migrated to a native Textual ``ModalScreen`` (#88 F4): ``push_screen``s a
+        ``MaintMenuScreen`` with the available actions and returns the chosen
+        action *index* via ``dismiss(int|None)``; ``_run_maint_action`` runs the
+        selection (``None`` cancels)."""
         if not self.maint_sel:
             rec = self._selected_record()
             if not rec:
@@ -1238,32 +1244,33 @@ class PickerScreen(Widget):
             self.debug = (f"no maintenance action for {len(chosen)} "
                           f"selected worktree(s)")
             return
-        self.maint_menu = {"ids": ids, "actions": acts, "count": len(chosen)}
-        self.maint_menu_idx = 0
+        self._push_maint_menu(ids, acts, len(chosen))
 
-    def _key_maint_menu(self, key):
-        m = self.maint_menu
-        acts = m["actions"]
-        if key == "down":
-            self.maint_menu_idx = (self.maint_menu_idx + 1) % len(acts)
-        elif key == "up":
-            self.maint_menu_idx = (self.maint_menu_idx - 1) % len(acts)
-        elif key == "enter":
-            act = acts[self.maint_menu_idx]
-            ids = m["ids"]
-            self.maint_menu = None
-            if act == "Sync":
-                self._open_sync(ids=ids)
-            elif act == "Cleanup":
-                self._open_cleanup(ids=ids)
-            elif act == "Finalize":
-                self._start_finalize(
-                    [r for r in self.list_records() if r["id4"] in ids])
-            elif act == "Stop":
-                self._start_stop(
-                    [r for r in self.list_records() if r["id4"] in ids])
-        elif key in ("escape", "q", "tab"):
-            self.maint_menu = None
+    def _push_maint_menu(self, ids, acts, count):
+        """Push the Maintenance actions ModalScreen for ``acts`` over the ``ids``
+        set (``count`` worktrees), running the chosen action on dismiss. Shared
+        by both openers (the maintenance selection and the Worktrees-list bulk
+        action menu), which build ``ids``/``acts`` differently but dispatch
+        identically (#88 F4)."""
+        def _after(choice):
+            if choice is None:
+                return
+            self._run_maint_action(acts[choice], ids)
+        self.app.push_screen(MaintMenuScreen(acts, count), _after)
+
+    def _run_maint_action(self, act, ids):
+        """Run one Maintenance action against the ``ids`` set. Mirrors the former
+        ``_key_maint_menu`` Enter branch exactly (#88 F4)."""
+        if act == "Sync":
+            self._open_sync(ids=ids)
+        elif act == "Cleanup":
+            self._open_cleanup(ids=ids)
+        elif act == "Finalize":
+            self._start_finalize(
+                [r for r in self.list_records() if r["id4"] in ids])
+        elif act == "Stop":
+            self._start_stop(
+                [r for r in self.list_records() if r["id4"] in ids])
 
     # ---- Worktrees list multi-select (#2228 Phase 2b, #2258 Phase 3) ----
     def _l_ids(self):
@@ -1473,8 +1480,7 @@ class PickerScreen(Widget):
             self.debug = (f"no bulk action for {len(chosen)} "
                           f"selected worktree(s)")
             return
-        self.maint_menu = {"ids": ids, "actions": acts, "count": len(chosen)}
-        self.maint_menu_idx = 0
+        self._push_maint_menu(ids, acts, len(chosen))
 
     # ---- Profiles matrix helpers ----
     def profile_col_widths(self):
@@ -2664,10 +2670,6 @@ class PickerScreen(Widget):
                          f" · Esc back")
             else:
                 hints = f"↑↓ choose · Enter: {cur.lower()} {wid} · Esc back"
-        elif self.maint_menu:
-            cur = self.maint_menu["actions"][self.maint_menu_idx]
-            n = self.maint_menu["count"]
-            hints = f"↑↓ choose · Enter: {cur.lower()} {n} worktree(s) · Esc back"
         elif dlg:
             live = self.cleanup is not None and self._kind() == "worktrees"
             n = len(self._cleanup_union()) if self.cleanup is not None else 0
@@ -2924,28 +2926,6 @@ class PickerScreen(Widget):
                 out.append(cur)
         return out or [""]
 
-    # Per-action descriptions for the Maintenance actions menu (#1345).
-    def _overlay_maint_menu(self, lines, W, top_off, body_h):
-        m = self.maint_menu
-        acts = m["actions"]
-        idx = self.maint_menu_idx
-        n = m["count"]
-        pw = min(W - 8, 64)
-        header = f"─ Maintenance · {n} selected "
-        panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
-                      style=C_BAND)]
-        panel.append(self._prow(" Action to apply to the selection:", pw,
-                                style=C_HEADER))
-        panel.append(self._prow("", pw))
-        for i, a in enumerate(acts):
-            mark = " ▸ " if i == idx else "   "
-            panel.append(self._prow(mark + a, pw, selected=(i == idx)))
-        panel.append(self._prow("", pw))
-        desc = MAINT_ACTION_DESC.get(acts[idx], "")
-        panel.append(self._prow(" " + desc, pw, style=C_FAINT))
-        panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
-        self._blit_panel(lines, W, panel, top_off, body_h)
-
     def _overlay_scopedlg(self, dlg, lines, W, top_off, body_h, om=False,
                           dock_bottom=False):
         opts = dlg["opts"]
@@ -3112,8 +3092,6 @@ class PickerScreen(Widget):
              lambda ln, W, o, b: self._overlay_submenu(ln, W, o, b)),
             ("msgview", self._key_msgview,
              lambda ln, W, o, b: self._overlay_msgview(ln, W, o, b)),
-            ("maint_menu", self._key_maint_menu,
-             lambda ln, W, o, b: self._overlay_maint_menu(ln, W, o, b)),
             ("cleanup", self._key_scopedlg,
              lambda ln, W, o, b: self._overlay_scopedlg(
                  self.cleanup, ln, W, o, b, om=False,
@@ -4687,6 +4665,66 @@ class CfgMenuScreen(ModalScreen[int]):
     def on_key(self, event) -> None:
         key = event.key
         n = len(self._items)
+        if key == "down":
+            self.idx = (self.idx + 1) % n
+            self._refresh()
+            event.stop()
+        elif key == "up":
+            self.idx = (self.idx - 1) % n
+            self._refresh()
+            event.stop()
+        elif key == "enter":
+            event.stop()
+            self.dismiss(self.idx)
+        elif key in ("escape", "q", "tab"):
+            event.stop()
+            self.dismiss(None)
+
+
+class MaintMenuScreen(ModalScreen[int]):
+    """Native modal Maintenance actions menu (#88 F4).
+
+    A picker overlay migrated off the manual render/dispatch model onto a Textual
+    ``ModalScreen``. It lists the maintenance actions available for the selected
+    worktree set (Sync / Cleanup / Finalize / Stop) and returns the chosen action
+    *index* via ``dismiss(int)``, or ``dismiss(None)`` on cancel; the caller runs
+    the selection. Navigation (``up``/``down``, wrapping) moves the highlight and
+    the per-action description in place, mirroring the former ``_key_maint_menu``
+    exactly (Enter selects, Esc/q/Tab cancel).
+    """
+
+    CSS = """
+    MaintMenuScreen { align: center middle; background: $background 55%; }
+    MaintMenuScreen > #maint-menu { width: auto; height: auto; }
+    """
+
+    def __init__(self, actions, count) -> None:
+        super().__init__()
+        self._actions = actions
+        self._count = count
+        self.idx = 0
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._panel(), id="maint-menu")
+
+    def _panel(self) -> Panel:
+        acts, idx = self._actions, self.idx
+        body = Text()
+        body.append("\n Action to apply to the selection:\n\n", style=C_HEADER)
+        for i, a in enumerate(acts):
+            mark = " ▸ " if i == idx else "   "
+            body.append(mark + a + "\n", style=C_SEL if i == idx else None)
+        desc = MAINT_ACTION_DESC.get(acts[idx], "") if acts else ""
+        body.append("\n " + desc + "\n", style=C_FAINT)
+        return Panel(body, title=f"Maintenance · {self._count} selected",
+                     border_style=C_BAND, width=64)
+
+    def _refresh(self) -> None:
+        self.query_one("#maint-menu", Static).update(self._panel())
+
+    def on_key(self, event) -> None:
+        key = event.key
+        n = len(self._actions)
         if key == "down":
             self.idx = (self.idx + 1) % n
             self._refresh()

@@ -76,6 +76,20 @@ def _cfg_menu_open(scr):
     return _cfg_menu(scr) is not None
 
 
+def _maint_menu(scr):
+    """The F4 MaintMenuScreen instance on the app's screen stack, or None."""
+    from agent_worktrees.picker_tui.engine import MaintMenuScreen
+    for s in scr.app.screen_stack:
+        if isinstance(s, MaintMenuScreen):
+            return s
+    return None
+
+
+def _maint_menu_open(scr):
+    """True when the F4 MaintMenuScreen (Maintenance actions menu) is stacked."""
+    return _maint_menu(scr) is not None
+
+
 def _fixture_source():
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
     local = ("lambda-core", "Win")
@@ -455,7 +469,7 @@ def test_worktrees_enter_with_single_selection_opens_submenu():
             scr._dispatch_key("space")               # select exactly one row
             assert len(scr.wt_sel) == 1
             scr._dispatch_key("enter")               # -> per-row submenu
-            assert scr.maint_menu is None
+            assert not _maint_menu_open(scr)
             assert scr.submenu is not None
             assert scr.submenu["actions"][0] in ("Open", "Resume")
 
@@ -481,9 +495,11 @@ def test_worktrees_enter_with_multi_selection_opens_bulk_menu():
                                 recs[cleanable[1]]["id4"]})
             scr.sel = ("L", cleanable[0])
             scr._dispatch_key("enter")               # -> bulk action menu
+            await pilot.pause()
             assert scr.submenu is None
-            assert scr.maint_menu is not None
-            assert "Cleanup" in scr.maint_menu["actions"]
+            menu = _maint_menu(scr)
+            assert menu is not None
+            assert "Cleanup" in menu._actions
 
     asyncio.run(run())
 
@@ -506,9 +522,14 @@ def test_worktrees_bulk_menu_routes_to_scoped_cleanup():
             scr.sel = ("L", cleanable[0])
             scr._dispatch_key("space")
             scr._open_wt_action_menu()
-            scr.maint_menu_idx = scr.maint_menu["actions"].index("Cleanup")
-            scr._key_maint_menu("enter")          # route to scoped cleanup
-            assert scr.maint_menu is None
+            await pilot.pause()
+            menu = _maint_menu(scr)
+            assert menu is not None
+            for _ in range(menu._actions.index("Cleanup")):
+                await pilot.press("down")
+            await pilot.press("enter")            # route to scoped cleanup
+            await pilot.pause()
+            assert not _maint_menu_open(scr)
             assert scr.cleanup is not None
             assert "selected" in scr.cleanup["scope"]
 
@@ -563,8 +584,11 @@ def test_bulk_menu_offers_stop_and_finalize():
             active["mux_live"] = True             # make it a live session
             scr.wt_sel.replace({convo["id4"], unused["id4"], active["id4"]})
             scr._open_wt_action_menu()
-            assert "Finalize" in scr.maint_menu["actions"]
-            assert "Stop" in scr.maint_menu["actions"]
+            await pilot.pause()
+            menu = _maint_menu(scr)
+            assert menu is not None
+            assert "Finalize" in menu._actions
+            assert "Stop" in menu._actions
 
     asyncio.run(run())
 
@@ -1558,20 +1582,24 @@ def test_maintenance_multiselect_and_actions_menu():
             ci = next(i for i, r in enumerate(recs) if scr._cleanable(r))
             scr.sel = ("C", ci)
             scr._activate()
-            assert scr.maint_menu is not None
-            assert scr.maint_menu["count"] == 1
+            await pilot.pause()
+            menu = _maint_menu(scr)
+            assert menu is not None
+            assert menu._count == 1
             # Only real actions are offered (the Diagnostics mock was removed).
-            assert "Diagnostics" not in scr.maint_menu["actions"]
-            assert set(scr.maint_menu["actions"]) <= {"Sync", "Cleanup"}
-            assert "Cleanup" in scr.maint_menu["actions"]
+            assert "Diagnostics" not in menu._actions
+            assert set(menu._actions) <= {"Sync", "Cleanup"}
+            assert "Cleanup" in menu._actions
             # Enter must NOT have produced a launch/resume decision.
             assert app.result is None
 
             # The menu's Cleanup action opens a scope dialog over the selection.
-            acts = scr.maint_menu["actions"]
+            acts = menu._actions
             if "Cleanup" in acts:
-                scr.maint_menu_idx = acts.index("Cleanup")
-                scr._key_maint_menu("enter")
+                for _ in range(acts.index("Cleanup")):
+                    await pilot.press("down")
+                await pilot.press("enter")
+                await pilot.pause()
                 assert scr.cleanup is not None
                 assert "selected" in scr.cleanup["scope"]
 
@@ -1595,7 +1623,7 @@ def test_maint_menu_no_actionable_selection_does_not_open():
             scr._cleanable = lambda rec: False   # nothing cleanable
             scr.maint_sel = ListSelection({"x1", "x2"})
             scr._open_maint_menu()
-            assert scr.maint_menu is None
+            assert not _maint_menu_open(scr)
             assert "no maintenance action" in scr.debug
 
     asyncio.run(run())
