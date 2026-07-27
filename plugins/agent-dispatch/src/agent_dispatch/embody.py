@@ -8,18 +8,21 @@ per-tool confirmation prompts), claims and starts the task, works it
 autonomously, and marks the task ``completed`` **explicitly** only when it judges
 the goal reached -- *deferred completion*, never stamped at spawn or pickup.
 
-agent-dispatch stays decoupled: it shells out to the ``agent-worktrees`` binstub
-when present and degrades gracefully (the caller falls back to the bridge
-backend, or leaves the task queued) when it is not -- so the plugin remains
-standalone on a host without agent-worktrees.
+agent-dispatch stays decoupled: it shells out to the ``agent-worktrees`` runtime
+(its venv interpreter via ``-m agent_worktrees`` when present, else the binstub
+on PATH) and degrades gracefully (the caller falls back to the bridge backend,
+or leaves the task queued) when it is not -- so the plugin remains standalone on
+a host without agent-worktrees.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import shutil
 import subprocess
+from pathlib import Path
 
 DEFAULT_DRIVER = "agent-dispatch"
 
@@ -80,9 +83,34 @@ class EmbodyUnavailable(RuntimeError):
     """Raised when the ``agent-worktrees`` CLI is not available on this host."""
 
 
+def _agent_worktrees_launch_prefix() -> list[str] | None:
+    """Resolve an argv prefix that runs the ``agent-worktrees`` CLI **without**
+    routing through a Windows ``.cmd``/``.bat`` shim.
+
+    The autopilot seed handed to ``embody --seed`` contains shell
+    metacharacters (``&``, ``(``, ``)``, ``<``, ``>``, backtick). On Windows a
+    ``subprocess`` launch of the ``agent-worktrees.cmd`` binstub runs it through
+    ``cmd.exe``, whose ``%*`` re-parse treats those characters as command
+    operators and corrupts the arguments -- the shim then fails with WinError 2
+    ("The system cannot find the file specified"). This is the BatBadBut class
+    of bug. Invoking the interpreter directly (``python -m agent_worktrees``)
+    bypasses ``cmd.exe`` entirely, so the seed is delivered verbatim.
+
+    Prefer the agent-worktrees runtime venv interpreter; fall back to the
+    ``agent-worktrees`` binstub on PATH when that venv isn't present (POSIX
+    shims are plain exec scripts and do not re-parse, so they are unaffected).
+    Returns ``None`` when neither is resolvable."""
+    venv = Path.home() / ".agent-worktrees" / ".venv"
+    py = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if py.is_file():
+        return [str(py), "-m", "agent_worktrees"]
+    exe = shutil.which("agent-worktrees")
+    return [exe] if exe else None
+
+
 def embody_available() -> bool:
-    """True if the ``agent-worktrees`` CLI is on PATH."""
-    return shutil.which("agent-worktrees") is not None
+    """True if the ``agent-worktrees`` CLI can be launched on this host."""
+    return _agent_worktrees_launch_prefix() is not None
 
 
 def autopilot_worker_prompt(
@@ -180,13 +208,13 @@ def spawn_embodied_worker(
     ``verify_timeout`` (seconds) optionally makes embody wait for the mux
     session to come up before returning (0 = don't wait).
     """
-    exe = shutil.which("agent-worktrees")
-    if exe is None:
+    exe_prefix = _agent_worktrees_launch_prefix()
+    if exe_prefix is None:
         raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
     seed = autopilot_worker_prompt(
         task_id, coordinator_url=coordinator_url, worker_id=worker_id
     )
-    cmd = [exe]
+    cmd = list(exe_prefix)
     if project:
         # `--project` is an agent-worktrees GLOBAL option -- it precedes the
         # `embody` subcommand. It lets a CWD-neutral caller name the target
@@ -195,7 +223,7 @@ def spawn_embodied_worker(
     cmd += ["embody", "--new", "--seed", seed, "--driver", driver, "--json"]
     if verify_timeout:
         cmd += ["--verify-timeout", str(verify_timeout)]
-    return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
+    return subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
         cmd, check=False, capture_output=True, text=True, timeout=timeout
     )
 
