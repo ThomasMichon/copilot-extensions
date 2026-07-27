@@ -443,8 +443,9 @@ class PickerScreen(Widget):
         self.machine_idx = 0          # selected machine sub-pivot (Worktrees/Maint)
         self.sel = ("N", 0)           # (zone, index) -> default New Worktree
         self.top = 0                  # scroll offset into body vrows
-        self.submenu = None           # worktree action modal
-        self.submenu_idx = 0
+        # Per-worktree action menu is a native Textual ModalScreen now (#88 F4):
+        # no self.submenu / submenu_idx state attrs -- see SubMenuScreen and
+        # _open_submenu. (The overlay left the manual registry entirely.)
         self.msgview = None           # recent-messages viewer overlay (#session-viewer)
         self._msgview_lock = threading.Lock()
         self.cleanup = None           # cleanup-scope modal (Maintenance)
@@ -2661,15 +2662,6 @@ class PickerScreen(Widget):
         if self.progress:
             hints = ("Esc cancel" if not self.progress["done"]
                      else "Enter/Esc close")
-        elif self.submenu:
-            cur = self.submenu["actions"][self.submenu_idx]
-            wid = self.submenu["rec"].get("id4")
-            if cur == "Open":
-                nm = "No-mux ON" if self.submenu.get("no_mux") else "No-mux"
-                hints = (f"↑↓ choose · Enter: open {wid} · Space: toggle {nm}"
-                         f" · Esc back")
-            else:
-                hints = f"↑↓ choose · Enter: {cur.lower()} {wid} · Esc back"
         elif dlg:
             live = self.cleanup is not None and self._kind() == "worktrees"
             n = len(self._cleanup_union()) if self.cleanup is not None else 0
@@ -2768,33 +2760,6 @@ class PickerScreen(Widget):
                 newt = Text(left, style=C_DIM)
                 newt.append_text(prow)
                 lines[yi] = newt
-
-    def _overlay_submenu(self, lines, W, top_off, body_h):
-        rec = self.submenu["rec"]
-        acts = self.submenu["actions"]
-        idx = self.submenu_idx
-        pw = min(W - 8, 72)
-        title = f" {rec.get('title', '')}"
-        meta1 = (f" {rec.get('id4')} · {rec.get('machine')} · {rec.get('env')}"
-                 f" · {rec.get('state')}")
-        meta2 = (f" age {rec.get('age')} · sess {rec.get('sess')}"
-                 f" · turns {rec.get('turns')} · PR {rec.get('pr')}")
-        panel = [Text("╭" + "─" * (pw - 2) + "╮", style=C_DIM)]
-        panel.append(self._prow(title, pw, style="bold"))
-        panel.append(self._prow(meta1, pw, style=C_DIM))
-        panel.append(self._prow(meta2, pw, style=C_DIM))
-        panel.append(self._prow("", pw))
-        for i, a in enumerate(acts):
-            mark = " ▸ " if i == idx else "   "
-            label = a
-            if a == "Open":
-                label = "Open · no-mux" if self.submenu.get("no_mux") else "Open"
-            panel.append(self._prow(mark + label, pw, selected=(i == idx)))
-        panel.append(self._prow("", pw))
-        desc = ACTION_DESC.get(acts[idx], "")
-        panel.append(self._prow(" " + desc, pw, style=C_FAINT))
-        panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
-        self._blit_panel(lines, W, panel, top_off, body_h)
 
     def _overlay_msgview(self, lines, W, top_off, body_h):
         """Render the recent-messages viewer overlay for a worktree.
@@ -3088,8 +3053,6 @@ class PickerScreen(Widget):
         return [
             ("progress", self._key_progress,
              lambda ln, W, o, b: self._overlay_progress(ln, W, o, b)),
-            ("submenu", self._key_submenu,
-             lambda ln, W, o, b: self._overlay_submenu(ln, W, o, b)),
             ("msgview", self._key_msgview,
              lambda ln, W, o, b: self._overlay_msgview(ln, W, o, b)),
             ("cleanup", self._key_scopedlg,
@@ -3336,56 +3299,6 @@ class PickerScreen(Widget):
             nxt = next((p for p in reversed(positions) if p < idx),
                        positions[0] if positions else idx)
         self.sel = stops[nxt]
-
-    def _key_submenu(self, key):
-        acts = self.submenu["actions"]
-        cur = acts[self.submenu_idx]
-        if key == "down":
-            self.submenu_idx = (self.submenu_idx + 1) % len(acts)
-        elif key == "up":
-            self.submenu_idx = (self.submenu_idx - 1) % len(acts)
-        elif key == "space":
-            # Space toggles the No-mux option, but only while Open is focused
-            # (#1343). Elsewhere it is a no-op (it no longer closes the menu).
-            if cur == "Open":
-                self.submenu["no_mux"] = not self.submenu["no_mux"]
-        elif key == "enter":
-            rec = self.submenu["rec"]
-            ext = self.submenu.get("ext", {})
-            if cur in ext:
-                # A cross-plugin contributed action (#B): run it and rescan.
-                self._run_wt_action(ext[cur], rec)
-                return
-            no_mux = self.submenu.get("no_mux", False)
-            self.submenu = None
-            if cur == "Open":
-                self._decide(self._resume_decision(rec, no_mux=no_mux))
-            elif cur == "Resume":
-                self._decide(self._resume_decision(rec))
-            elif cur == "Messages":
-                # Read-only peek at the worktree's latest session messages.
-                self._open_msgview(rec)
-            elif cur == "Jump to host":
-                # Internal navigation -- stay in the picker (#1424).
-                self._jump_to_worktree((rec.get("raw") or {}).get("id"))
-            elif cur == "Jump to caller":
-                # Navigate to the worktree that requested this bridge (#2178).
-                self._jump_to_worktree(
-                    (rec.get("raw") or {}).get("caller_worktree"))
-            elif cur == "Sync":
-                # Real per-worktree FF-sync via the shared dialog (#1427).
-                self._open_sync(ids={rec.get("id4")})
-            elif cur == "Cleanup":
-                self._open_cleanup(ids={rec.get("id4")})
-            elif cur == "Finalize":
-                # Wrap up a conversation-only / unused worktree (#2258 follow-up).
-                self._start_finalize([rec])
-            elif cur == "Stop":
-                # Stop the worktree's Mux/Copilot wrapper on demand (#1343),
-                # freeing it to be re-Opened/Resumed with a fresh Mux + Copilot.
-                self._start_stop(rec)
-        elif key in ("escape", "q", "tab"):
-            self.submenu = None
 
     def _key_scopedlg(self, key, om=False):
         dlg = self.optmenu if om else self.cleanup
@@ -3909,8 +3822,46 @@ class PickerScreen(Widget):
                     ext[act.label] = act
             except Exception:
                 continue
-        self.submenu = {"rec": rec, "actions": acts, "no_mux": False, "ext": ext}
-        self.submenu_idx = 0
+
+        # Migrated to a native Textual ``ModalScreen`` (#88 F4): ``push_screen``s a
+        # ``SubMenuScreen`` (which tracks the highlight + the No-mux toggle) and
+        # returns the chosen ``(action_label, no_mux)`` via ``dismiss`` -- or
+        # ``None`` on cancel; ``_after`` dispatches the selected verb.
+        def _after(result):
+            if result is None:
+                return
+            cur, no_mux = result
+            if cur in ext:
+                # A cross-plugin contributed action (#B): run it and rescan.
+                self._run_wt_action(ext[cur], rec)
+                return
+            if cur == "Open":
+                self._decide(self._resume_decision(rec, no_mux=no_mux))
+            elif cur == "Resume":
+                self._decide(self._resume_decision(rec))
+            elif cur == "Messages":
+                # Read-only peek at the worktree's latest session messages.
+                self._open_msgview(rec)
+            elif cur == "Jump to host":
+                # Internal navigation -- stay in the picker (#1424).
+                self._jump_to_worktree((rec.get("raw") or {}).get("id"))
+            elif cur == "Jump to caller":
+                # Navigate to the worktree that requested this bridge (#2178).
+                self._jump_to_worktree(
+                    (rec.get("raw") or {}).get("caller_worktree"))
+            elif cur == "Sync":
+                # Real per-worktree FF-sync via the shared dialog (#1427).
+                self._open_sync(ids={rec.get("id4")})
+            elif cur == "Cleanup":
+                self._open_cleanup(ids={rec.get("id4")})
+            elif cur == "Finalize":
+                # Wrap up a conversation-only / unused worktree (#2258 follow-up).
+                self._start_finalize([rec])
+            elif cur == "Stop":
+                # Stop the worktree's Mux/Copilot wrapper on demand (#1343),
+                # freeing it to be re-Opened/Resumed with a fresh Mux + Copilot.
+                self._start_stop(rec)
+        self.app.push_screen(SubMenuScreen(rec, acts), _after)
 
     def _wt_action_ctx(self, rec: dict) -> dict:
         """Placeholder context for a contributed worktree action's argv template:
@@ -3936,7 +3887,6 @@ class PickerScreen(Widget):
         from . import tasks
 
         label, source = action.label, action.source
-        self.submenu = None
         ok, msg = tasks.run_worktree_action(action, self._wt_action_ctx(rec))
         self.debug = (f"{label} ({source}): {msg or 'done'}" if ok
                       else f"{label} ({source}) failed: {msg}")
@@ -4618,6 +4568,84 @@ class TaskMenuScreen(ModalScreen[int]):
         elif key == "enter":
             event.stop()
             self.dismiss(self.idx)
+        elif key in ("escape", "q", "tab"):
+            event.stop()
+            self.dismiss(None)
+
+
+class SubMenuScreen(ModalScreen[tuple]):
+    """Native modal per-worktree action menu (#88 F4).
+
+    A picker overlay migrated off the manual render/dispatch model onto a Textual
+    ``ModalScreen``. It renders the focused worktree's header (title + meta) and
+    its available verbs (Open/Resume, Messages, Sync, Cleanup, Finalize, Stop,
+    Jump to host/caller, plus any contributed actions), tracks the highlight and
+    the **No-mux** toggle (Space, only while *Open* is focused), and returns the
+    chosen ``(action_label, no_mux)`` via ``dismiss(tuple)`` -- or ``dismiss(None)``
+    on cancel; the caller dispatches the verb. Mirrors the former ``_key_submenu``
+    exactly (Enter selects, Space toggles No-mux on Open, Esc/q/Tab cancel).
+    """
+
+    CSS = """
+    SubMenuScreen { align: center middle; background: $background 55%; }
+    SubMenuScreen > #sub-menu { width: auto; height: auto; }
+    """
+
+    def __init__(self, rec, actions) -> None:
+        super().__init__()
+        self._rec = rec
+        self._actions = actions
+        self.idx = 0
+        self.no_mux = False
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._panel(), id="sub-menu")
+
+    def _panel(self) -> Panel:
+        rec, acts, idx = self._rec, self._actions, self.idx
+        meta1 = (f" {rec.get('id4')} · {rec.get('machine')} · {rec.get('env')}"
+                 f" · {rec.get('state')}")
+        meta2 = (f" age {rec.get('age')} · sess {rec.get('sess')}"
+                 f" · turns {rec.get('turns')} · PR {rec.get('pr')}")
+        body = Text()
+        body.append(f" {rec.get('title', '')}\n", style="bold")
+        body.append(meta1 + "\n", style=C_DIM)
+        body.append(meta2 + "\n\n", style=C_DIM)
+        for i, a in enumerate(acts):
+            mark = " ▸ " if i == idx else "   "
+            label = a
+            if a == "Open":
+                label = "Open · no-mux" if self.no_mux else "Open"
+            body.append(mark + label + "\n", style=C_SEL if i == idx else None)
+        desc = ACTION_DESC.get(acts[idx], "") if acts else ""
+        body.append("\n " + desc + "\n", style=C_FAINT)
+        return Panel(body, border_style=C_DIM, width=72)
+
+    def _refresh(self) -> None:
+        self.query_one("#sub-menu", Static).update(self._panel())
+
+    def on_key(self, event) -> None:
+        key = event.key
+        n = len(self._actions)
+        cur = self._actions[self.idx]
+        if key == "down":
+            self.idx = (self.idx + 1) % n
+            self._refresh()
+            event.stop()
+        elif key == "up":
+            self.idx = (self.idx - 1) % n
+            self._refresh()
+            event.stop()
+        elif key == "space":
+            # Space toggles the No-mux option, but only while Open is focused
+            # (#1343). Elsewhere it is a consumed no-op (never closes the menu).
+            if cur == "Open":
+                self.no_mux = not self.no_mux
+                self._refresh()
+            event.stop()
+        elif key == "enter":
+            event.stop()
+            self.dismiss((cur, self.no_mux))
         elif key in ("escape", "q", "tab"):
             event.stop()
             self.dismiss(None)

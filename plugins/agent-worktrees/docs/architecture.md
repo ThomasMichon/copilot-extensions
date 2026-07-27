@@ -560,6 +560,22 @@ list differently but dispatch identically. Removed `self.maint_menu`/
 `pilot.press` harness drives it end-to-end (open, arrow to an action, Enter runs
 it; Esc/q/Tab cancel).
 
+**Sixth overlay migrated: the per-worktree action menu (`submenu`) → native
+`ModalScreen` (F4).** The `SubMenuScreen(ModalScreen[tuple])` is the last of the
+menu overlays. It renders the focused worktree's header (title + meta) and its
+state-driven verbs (Open/Resume, Messages, Sync, Cleanup, Finalize, Stop, Jump to
+host/caller, plus any contributed actions), tracks the highlight **and the No-mux
+toggle** (Space, only while *Open* is focused -- the one in-place mutation among
+the menus), and returns the chosen `(action_label, no_mux)` via `dismiss(tuple)`
+-- or `dismiss(None)` on cancel; `_open_submenu`'s callback dispatches the verb
+(built-in or contributed). Removed `self.submenu`/`submenu_idx`, its registry
+entry, footer branch, `_key_submenu`, `_overlay_submenu`, and the now-defunct
+`self.submenu = None` reset in `_run_wt_action`. With every menu overlay now
+native, the overlay-registry guard's routing proof moved to the still-manual
+`cleanup` (scopedlg) overlay. The `pilot.press` harness drives it end-to-end
+(open on Enter, Space toggles No-mux, arrow + Enter runs a verb, Esc/q/Tab
+cancel).
+
 **Global shortcuts are Textual `BINDINGS` (F3).** The truly-global pivot/machine
 shortcuts (`ctrl+shift+left/right`, `ctrl+left/right`) are owned by the
 framework's binding system, not the manual dispatcher: `PickerScreen.BINDINGS`
