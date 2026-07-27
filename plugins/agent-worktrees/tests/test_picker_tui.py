@@ -90,6 +90,20 @@ def _maint_menu_open(scr):
     return _maint_menu(scr) is not None
 
 
+def _sub_menu(scr):
+    """The F4 SubMenuScreen instance on the app's screen stack, or None."""
+    from agent_worktrees.picker_tui.engine import SubMenuScreen
+    for s in scr.app.screen_stack:
+        if isinstance(s, SubMenuScreen):
+            return s
+    return None
+
+
+def _sub_menu_open(scr):
+    """True when the F4 SubMenuScreen (per-worktree action menu) is stacked."""
+    return _sub_menu(scr) is not None
+
+
 def _fixture_source():
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
     local = ("lambda-core", "Win")
@@ -206,10 +220,15 @@ def test_submenu_cleanup_opens_scoped_dialog():
             ci = next(i for i, r in enumerate(recs) if scr._cleanable(r))
             scr.sel = ("L", ci)
             scr._open_submenu()
-            assert "Cleanup" in scr.submenu["actions"]
-            scr.submenu_idx = scr.submenu["actions"].index("Cleanup")
-            scr._key_submenu("enter")
-            assert scr.submenu is None
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            assert "Cleanup" in menu._actions
+            for _ in range(menu._actions.index("Cleanup")):
+                await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not _sub_menu_open(scr)
             assert scr.cleanup is not None            # real scoped dialog opened
 
     asyncio.run(run())
@@ -424,7 +443,7 @@ def test_worktrees_space_toggles_selection():
             scr.sel = ("L", 0)
             scr._dispatch_key("space")
             assert wid in scr.wt_sel
-            assert scr.submenu is None            # Space no longer opens submenu
+            assert not _sub_menu_open(scr)        # Space no longer opens submenu
             scr._dispatch_key("space")
             assert wid not in scr.wt_sel
 
@@ -446,8 +465,10 @@ def test_worktrees_enter_without_selection_opens_submenu():
             scr.sel = ("L", 0)
             assert not scr.wt_sel
             scr._dispatch_key("enter")
-            assert scr.submenu is not None
-            assert scr.submenu["actions"][0] in ("Open", "Resume")
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            assert menu._actions[0] in ("Open", "Resume")
 
     asyncio.run(run())
 
@@ -469,9 +490,11 @@ def test_worktrees_enter_with_single_selection_opens_submenu():
             scr._dispatch_key("space")               # select exactly one row
             assert len(scr.wt_sel) == 1
             scr._dispatch_key("enter")               # -> per-row submenu
+            await pilot.pause()
             assert not _maint_menu_open(scr)
-            assert scr.submenu is not None
-            assert scr.submenu["actions"][0] in ("Open", "Resume")
+            menu = _sub_menu(scr)
+            assert menu is not None
+            assert menu._actions[0] in ("Open", "Resume")
 
     asyncio.run(run())
 
@@ -496,7 +519,7 @@ def test_worktrees_enter_with_multi_selection_opens_bulk_menu():
             scr.sel = ("L", cleanable[0])
             scr._dispatch_key("enter")               # -> bulk action menu
             await pilot.pause()
-            assert scr.submenu is None
+            assert not _sub_menu_open(scr)
             menu = _maint_menu(scr)
             assert menu is not None
             assert "Cleanup" in menu._actions
@@ -553,14 +576,21 @@ def test_submenu_offers_finalize_for_convo_unused():
                 scr.sel = ("L", recs.index(rec))
                 scr.wt_sel.replace({rec["id4"]})
                 scr._open_submenu()
-                assert "Finalize" in scr.submenu["actions"]
-                scr.submenu = None
+                await pilot.pause()
+                menu = _sub_menu(scr)
+                assert menu is not None
+                assert "Finalize" in menu._actions
+                scr.app.pop_screen()
+                await pilot.pause()
             # A 'clean' (merged) worktree does NOT get Finalize.
             clean = next(r for r in recs if r["cleanup_bucket"] == "clean")
             scr.sel = ("L", recs.index(clean))
             scr.wt_sel.replace({clean["id4"]})
             scr._open_submenu()
-            assert "Finalize" not in scr.submenu["actions"]
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            assert "Finalize" not in menu._actions
 
     asyncio.run(run())
 
@@ -1246,11 +1276,18 @@ def test_jump_to_host_offered_only_for_managed(tmp_path):
             si = next(i for i, r in enumerate(recs) if r.get("kind") == "session")
             scr.sel = ("L", bi)
             scr._open_submenu()
-            assert "Jump to host" in scr.submenu["actions"]
-            scr.submenu = None
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            assert "Jump to host" in menu._actions
+            scr.app.pop_screen()
+            await pilot.pause()
             scr.sel = ("L", si)
             scr._open_submenu()
-            assert "Jump to host" not in scr.submenu["actions"]
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            assert "Jump to host" not in menu._actions
 
     asyncio.run(run())
 
@@ -1273,16 +1310,20 @@ def test_jump_to_host_switches_machine_and_highlights(tmp_path):
             bi = next(i for i, r in enumerate(recs) if r.get("kind") == "bridge")
             scr.sel = ("L", bi)
             scr._open_submenu()
-            scr.submenu_idx = scr.submenu["actions"].index("Jump to host")
-            scr._key_submenu("enter")
             await pilot.pause()
-        assert scr.submenu is None
-        assert scr.machine_idx == scr._machine_index_for("borealis", "Win")
-        assert scr.show_hidden is True
-        assert scr.sel[0] == "L"
-        landed = scr.list_records()[scr.sel[1]]
-        assert (landed.get("raw") or {}).get("id") == "borealis-win-bridge-2222"
-        assert app.result is None          # internal nav -- never exited
+            menu = _sub_menu(scr)
+            assert menu is not None
+            for _ in range(menu._actions.index("Jump to host")):
+                await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not _sub_menu_open(scr)
+            assert scr.machine_idx == scr._machine_index_for("borealis", "Win")
+            assert scr.show_hidden is True
+            assert scr.sel[0] == "L"
+            landed = scr.list_records()[scr.sel[1]]
+            assert (landed.get("raw") or {}).get("id") == "borealis-win-bridge-2222"
+            assert app.result is None          # internal nav -- never exited
 
     asyncio.run(run())
 
@@ -1389,17 +1430,21 @@ def test_jump_to_caller_targets_caller_worktree():
             bi = next(i for i, r in enumerate(recs) if r.get("kind") == "bridge")
             scr.sel = ("L", bi)
             scr._open_submenu()
-            # A resolvable caller wins over the own-host fallback.
-            assert "Jump to caller" in scr.submenu["actions"]
-            assert "Jump to host" not in scr.submenu["actions"]
-            scr.submenu_idx = scr.submenu["actions"].index("Jump to caller")
-            scr._key_submenu("enter")
             await pilot.pause()
-        # Landed on the CALLER worktree (lambda-core tab), not the bridge.
-        assert scr.machine_idx == scr._machine_index_for("lambda-core", "Win")
-        landed = scr.list_records()[scr.sel[1]]
-        assert (landed.get("raw") or {}).get("id") == "lambda-core-win-caller-9999"
-        assert app.result is None
+            menu = _sub_menu(scr)
+            assert menu is not None
+            # A resolvable caller wins over the own-host fallback.
+            assert "Jump to caller" in menu._actions
+            assert "Jump to host" not in menu._actions
+            for _ in range(menu._actions.index("Jump to caller")):
+                await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            # Landed on the CALLER worktree (lambda-core tab), not the bridge.
+            assert scr.machine_idx == scr._machine_index_for("lambda-core", "Win")
+            landed = scr.list_records()[scr.sel[1]]
+            assert (landed.get("raw") or {}).get("id") == "lambda-core-win-caller-9999"
+            assert app.result is None
 
     asyncio.run(run())
 
@@ -2080,8 +2125,11 @@ def test_picker_buckets_sessionless_into_unowned():
             oi = next(i for i, w in enumerate(recs) if w.get("sessionless"))
             scr.sel = ("L", oi)
             scr._open_submenu()
-            assert "Resume" not in scr.submenu["actions"]
-            assert "Open" in scr.submenu["actions"]
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            assert "Resume" not in menu._actions
+            assert "Open" in menu._actions
 
     asyncio.run(run())
 
@@ -2443,9 +2491,10 @@ def test_resume_decision_exits_with_worktree():
             scr.sel = ("L", 0)
             scr._activate()                 # opens the sub-menu, no exit
             await pilot.pause()
-            assert scr.submenu is not None
-            assert scr.submenu["actions"][0] == "Open"
-            scr._key_submenu("enter")       # default-focused Open -> resume
+            menu = _sub_menu(scr)
+            assert menu is not None
+            assert menu._actions[0] == "Open"
+            await pilot.press("enter")      # default-focused Open -> resume
             await pilot.pause()
         assert app.result is not None
         assert app.result["action"] == "resume"
@@ -2466,9 +2515,12 @@ def test_open_submenu_no_mux_toggle():
             scr.machine_idx = scr.local_index()
             scr.sel = ("L", 0)
             scr._open_submenu()
-            scr._key_submenu("space")       # toggle No-mux while Open focused
-            assert scr.submenu["no_mux"] is True
-            scr._key_submenu("enter")
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            await pilot.press("space")      # toggle No-mux while Open focused
+            assert menu.no_mux is True
+            await pilot.press("enter")
             await pilot.pause()
         assert app.result["action"] == "resume"
         assert app.result["options"]["no_mux"] is True
@@ -2523,23 +2575,34 @@ def test_submenu_verbs_track_session_liveness():
 
             scr.sel = ("L", by_id4["live"])
             scr._open_submenu()
-            acts = scr.submenu["actions"]
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            acts = menu._actions
             assert acts[0] == "Open"
             assert "Resume" not in acts
             assert "Stop" in acts
-            scr.submenu = None
+            scr.app.pop_screen()
+            await pilot.pause()
 
             scr.sel = ("L", by_id4["stop"])
             scr._open_submenu()
-            acts = scr.submenu["actions"]
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            acts = menu._actions
             assert acts[0] == "Resume"
             assert "Open" not in acts
             assert "Stop" not in acts     # nothing live to stop
-            scr.submenu = None
+            scr.app.pop_screen()
+            await pilot.pause()
 
             scr.sel = ("L", by_id4["none"])
             scr._open_submenu()
-            acts = scr.submenu["actions"]
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            acts = menu._actions
             assert acts[0] == "Open"      # cold start
             assert "Resume" not in acts
             assert "Stop" not in acts
@@ -2563,12 +2626,19 @@ def test_submenu_offers_messages_only_with_a_session():
             for tag in ("live", "stop"):
                 scr.sel = ("L", by_id4[tag])
                 scr._open_submenu()
-                assert "Messages" in scr.submenu["actions"], tag
-                scr.submenu = None
+                await pilot.pause()
+                menu = _sub_menu(scr)
+                assert menu is not None
+                assert "Messages" in menu._actions, tag
+                scr.app.pop_screen()
+                await pilot.pause()
 
             scr.sel = ("L", by_id4["none"])       # sessionless -> no peek
             scr._open_submenu()
-            assert "Messages" not in scr.submenu["actions"]
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            assert "Messages" not in menu._actions
 
     asyncio.run(run())
 
@@ -2603,9 +2673,14 @@ def test_msgview_local_load_populates_and_closes(monkeypatch):
             by_id4 = {w["id4"]: i for i, w in enumerate(scr.list_records())}
             scr.sel = ("L", by_id4["stop"])
             scr._open_submenu()
-            scr.submenu_idx = scr.submenu["actions"].index("Messages")
-            scr._key_submenu("enter")
-            assert scr.submenu is None
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            for _ in range(menu._actions.index("Messages")):
+                await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not _sub_menu_open(scr)
             assert scr.msgview is not None
             # Wait for the daemon loader thread to resolve.
             for _ in range(200):
@@ -2680,9 +2755,13 @@ def test_submenu_stop_starts_single_item_restart_run(monkeypatch):
             i = next(j for j, w in enumerate(recs) if w["id4"] == "live")
             scr.sel = ("L", i)
             scr._open_submenu()
-            si = scr.submenu["actions"].index("Stop")
-            scr.submenu_idx = si
-            scr._key_submenu("enter")
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            for _ in range(menu._actions.index("Stop")):
+                await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
             assert scr.progress is not None
             assert scr.progress["op"] == "restart"
             assert scr.progress["verb"] == "Stop"
@@ -3901,15 +3980,21 @@ def test_contributed_worktree_action_in_submenu_and_runs(tmp_path, monkeypatch):
                        if r["state"] != "FINAL")
             scr.sel = ("L", row)
             scr._open_submenu()
-            acts = scr.submenu["actions"]
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            acts = menu._actions
             assert "Send message" in acts             # unconditional action
             assert "Only when final" not in acts       # gated out by `when`
-            assert scr.submenu["ext"]["Send message"].source == "bridge"
+            send = next(a for a in scr.wt_actions if a.label == "Send message")
+            assert send.source == "bridge"
 
             # Enter runs it with a substituted worktree context.
-            scr.submenu_idx = acts.index("Send message")
-            scr._dispatch_key("enter")
-            assert scr.submenu is None
+            for _ in range(acts.index("Send message")):
+                await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not _sub_menu_open(scr)
             assert captured["label"] == "Send message"
             assert captured["ctx"]["worktree"]         # the worktree id
             assert captured["ctx"]["machine"]
@@ -4048,10 +4133,12 @@ def test_overlay_registry_drives_dispatch_and_precedence():
                     setattr(scr, a2, {"x": 1} if a2 == attr else None)
                 assert scr._active_overlay()[0] == attr
 
-            # (b') handle_key actually ROUTES through the active overlay's
-            # handler rather than the main nav: with a worktree submenu open, a
-            # nav key is consumed by the overlay (it stays open) and never moves
-            # the main-view selection.
+            # (b') _dispatch_key actually ROUTES through the active overlay's
+            # handler rather than the main nav: with a still-manual overlay open
+            # (the Clean/Sync scope dialog), a nav key is consumed by the overlay
+            # (it stays open) and never moves the main-view selection. (The menu
+            # overlays are native ModalScreens now (#88 F4); `cleanup` remains a
+            # manual registry overlay, so it proves the seam.)
             for a2 in attrs:
                 setattr(scr, a2, None)
             scr.machine_idx = scr.local_index()
@@ -4060,12 +4147,12 @@ def test_overlay_registry_drives_dispatch_and_precedence():
             scr.wt_sel.clear()
             scr.sel = ("L", 0)
             sel_before = scr.sel
-            scr._open_submenu()
-            assert scr.submenu is not None
-            scr._dispatch_key("down")                     # consumed by the overlay
-            assert scr.submenu is not None             # overlay still has the keyboard
+            scr._open_cleanup()
+            assert scr.cleanup is not None
+            scr._dispatch_key("down")                  # consumed by the overlay
+            assert scr.cleanup is not None             # overlay still has the keyboard
             assert scr.sel == sel_before               # main nav untouched
-            scr.submenu = None
+            scr.cleanup = None
 
             # (c) Precedence: with the first two overlays both set, the earlier
             # one in registry order wins.
@@ -4210,10 +4297,10 @@ def test_kbd_real_pipeline_enter_opens_submenu_escape_closes():
             scr.sel = ("L", 0)
             await pilot.press("enter")
             await pilot.pause()
-            assert scr.submenu is not None        # overlay opened via real event
+            assert _sub_menu_open(scr)            # modal opened via real event
             await pilot.press("escape")
             await pilot.pause()
-            assert scr.submenu is None            # and closed via real event
+            assert not _sub_menu_open(scr)        # and closed via real event
 
     asyncio.run(run())
 
@@ -4271,10 +4358,13 @@ def test_kbd_real_pipeline_ctrl_shift_rotates_pivot_via_binding():
 
 @pytest.mark.guard
 def test_kbd_real_pipeline_binding_gated_by_overlay():
-    """A global binding must NOT fire while a modal overlay owns the keyboard:
-    on_key routes the combo to the manual dispatcher, where the active overlay
-    ignores it. With a submenu open, Ctrl+Shift+→ leaves the pivot unchanged
-    (#88 F3 -- the overlay-precedence invariant the registry guarantees)."""
+    """A global binding must NOT fire while a modal overlay owns the keyboard.
+    With the per-worktree action menu (a native ModalScreen, #88 F4) on the
+    screen stack, *it* -- not the base PickerScreen -- is the active screen, so
+    Ctrl+Shift+→ reaches the modal (which ignores it) and never fires the base
+    screen's pivot-rotate BINDING. The pivot stays put -- the overlay-precedence
+    invariant, now enforced by Textual's own screen stack rather than the manual
+    dispatcher."""
     src = _fixture_source()
 
     async def run():
@@ -4287,17 +4377,17 @@ def test_kbd_real_pipeline_binding_gated_by_overlay():
                 return
             scr.wt_sel.clear()
             scr.sel = ("L", 0)
-            await pilot.press("enter")            # open the worktree overlay
+            await pilot.press("enter")            # open the worktree overlay (modal)
             await pilot.pause()
-            assert scr.submenu is not None
+            assert _sub_menu_open(scr)
             htab_before = scr.htab
             await pilot.press("ctrl+shift+right")  # must be swallowed, not rotate
             await pilot.pause()
-            assert scr.submenu is not None         # overlay still up
+            assert _sub_menu_open(scr)             # overlay still up
             assert scr.htab == htab_before         # pivot NOT rotated
             await pilot.press("escape")
             await pilot.pause()
-            assert scr.submenu is None
+            assert not _sub_menu_open(scr)
 
     asyncio.run(run())
 
