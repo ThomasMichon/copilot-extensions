@@ -466,6 +466,71 @@ function Remove-CoordinatorTask {
     return 'removed'
 }
 
+function Test-CoordinatorHealthy {
+    # True when a coordinator already answers on its rendezvous endpoint. Used to
+    # keep the non-elevated fallback idempotent (never start a second instance).
+    try {
+        $null = & $VenvPython -m agent_dispatch health 2>$null
+        return ($LASTEXITCODE -eq 0)
+    } catch { return $false }
+}
+
+function Remove-CoordinatorAutostart {
+    # Remove the non-elevated logon auto-start (HKCU Run) if present. Returns
+    # $true when one was removed. Idempotent.
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    try {
+        if (Get-ItemProperty -Path $runKey -Name $TaskName -ErrorAction SilentlyContinue) {
+            Remove-ItemProperty -Path $runKey -Name $TaskName -ErrorAction SilentlyContinue
+            return $true
+        }
+    } catch { }
+    return $false
+}
+
+function Start-CoordinatorNonElevatedFallback {
+    # Registration of the coordinator Scheduled Task needs elevation on this host
+    # (e.g. a locked-down Azure Dev Box, where even an S4U/Interactive task in the
+    # root folder is Access-denied non-elevated -- verified on cloud1). Rather than
+    # leave a coordinator HOST with the runtime deployed but nothing running (the
+    # deploy-but-don't-start gap, dotfiles #525), start it NOW as a detached
+    # background process and register a non-elevated logon auto-start so it also
+    # survives reboot without elevation. This makes `dotfiles update` yield a
+    # RUNNING coordinator instead of a silent WARN + exit 0.
+    param([Parameter(Mandatory)][string]$Launcher)
+    $taskArgs = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`""
+
+    if (Test-CoordinatorHealthy) {
+        Write-Ok 'Coordinator already running (health ok) -- not starting a second instance'
+    } else {
+        try {
+            Start-Process -FilePath 'conhost.exe' -ArgumentList $taskArgs -WindowStyle Hidden | Out-Null
+            Start-Sleep -Seconds 2
+            if (Test-CoordinatorHealthy) {
+                Write-Ok 'Coordinator started as a detached background process (health ok)'
+            } else {
+                Write-Ok 'Coordinator process launched (detached) -- give it a moment; see serve-service.log for bind status'
+            }
+        } catch {
+            Write-Warn "Could not start coordinator process: $($_.Exception.Message)"
+        }
+    }
+
+    # Durable, non-elevated auto-start at each logon (HKCU Run). Covers reboot on
+    # a box that can't register a Scheduled Task; true boot-before-logon coverage
+    # still needs the elevated task.
+    try {
+        $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+        New-ItemProperty -Path $runKey -Name $TaskName -Value "conhost.exe $taskArgs" `
+            -PropertyType String -Force | Out-Null
+        Write-Ok "Logon auto-start registered (HKCU Run '$TaskName') -- durable without elevation"
+    } catch {
+        Write-Warn "Could not register logon auto-start (HKCU Run): $($_.Exception.Message)"
+    }
+
+    Write-Step "For a true always-on boot service, run ONCE elevated:  powershell -File `"$PSCommandPath`" -Action install"
+}
+
 function Install-CoordinatorTask {
     # Windows OWNS the coordinator (Phase 2, issue #2818): the always-on Windows
     # host runs the full coordinator and the WSL guest is a client. This reverses
@@ -635,8 +700,17 @@ try {
     if ($regOk) { Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue }
     $ErrorActionPreference = $prevEAP
 
-    if ($regOk) { Write-Ok "Coordinator service installed + started (Scheduled Task '$TaskName')" }
-    else { Write-Warn "Coordinator service not registered (needs elevation) -- client is installed; run elevated, or 'agent-dispatch serve' to run the coordinator manually" }
+    if ($regOk) {
+        Write-Ok "Coordinator service installed + started (Scheduled Task '$TaskName')"
+        # The Scheduled Task now owns startup -- drop any non-elevated logon
+        # fallback from a prior unprivileged install so two coordinators don't race.
+        if (Remove-CoordinatorAutostart) {
+            Write-Step "Removed the non-elevated logon fallback -- the Scheduled Task supersedes it"
+        }
+    } else {
+        Write-Warn "Coordinator Scheduled Task not registered (registration needs elevation on this host)."
+        Start-CoordinatorNonElevatedFallback -Launcher $launcher
+    }
 }
 
 # -- Embody supervisor Scheduled Task (Windows; label-gated) ----------------
@@ -1015,6 +1089,7 @@ function Invoke-Uninstall {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
         Write-Ok 'Coordinator task removed'
     }
+    if (Remove-CoordinatorAutostart) { Write-Ok 'Coordinator logon auto-start (HKCU Run) removed' }
     if (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue) {
         $fwRule = 'agent-dispatch coordinator (WSL)'
         if (Get-NetFirewallRule -DisplayName $fwRule -ErrorAction SilentlyContinue) {
