@@ -62,6 +62,20 @@ def _task_menu_open(scr):
     return _task_menu(scr) is not None
 
 
+def _cfg_menu(scr):
+    """The F4 CfgMenuScreen instance on the app's screen stack, or None."""
+    from agent_worktrees.picker_tui.engine import CfgMenuScreen
+    for s in scr.app.screen_stack:
+        if isinstance(s, CfgMenuScreen):
+            return s
+    return None
+
+
+def _cfg_menu_open(scr):
+    """True when the F4 CfgMenuScreen (⚙ Configuration menu) is stacked."""
+    return _cfg_menu(scr) is not None
+
+
 def _fixture_source():
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
     local = ("lambda-core", "Win")
@@ -1399,10 +1413,12 @@ def test_configuration_menu_opens_profiles():
             await pilot.pause()
             assert scr._kind() == "worktrees"
             scr.sel = ("CFG", 0)
-            scr._activate()                 # opens the Configuration menu
-            assert scr.cfgmenu is not None
-            scr._key_cfgmenu("enter")       # selects Profiles (only item)
-            assert scr.cfgmenu is None
+            scr._activate()                 # opens the Configuration ModalScreen
+            await pilot.pause()
+            assert _cfg_menu_open(scr)
+            await pilot.press("enter")      # selects Profiles (only item)
+            await pilot.pause()
+            assert not _cfg_menu_open(scr)
             assert scr._kind() == "profiles"
             assert scr.sel[0] in ("PR", "BTN")   # focused the profiles body
 
@@ -3915,20 +3931,25 @@ def test_contributed_config_section_in_cfgmenu_and_runs(tmp_path, monkeypatch):
             await pilot.pause()
             assert scr.config_sections, "config sections discovered"
 
-            # Open the Configuration menu from its top-row stop.
+            # Open the Configuration ModalScreen from its top-row stop.
             scr.sel = ("CFG", 0)
             scr._activate()
-            assert scr.cfgmenu is not None
-            labels = [it["label"] for it in scr.cfgmenu["items"]]
+            await pilot.pause()
+            menu = _cfg_menu(scr)
+            assert menu is not None
+            labels = [it["label"] for it in menu._items]
             # Built-in Profiles first, contributed sections after it.
             assert labels[0] == "Profiles"
             assert labels[1:] == ["SSH", "MCP"]
 
             # Enter on a contributed section runs it (never switches pivot) with
-            # a substituted global context; the menu closes.
-            scr.cfgmenu_idx = labels.index("SSH")
-            scr._key_cfgmenu("enter")
-            assert scr.cfgmenu is None
+            # a substituted global context; the menu closes. Navigate to SSH
+            # (index 1) through the real pipeline, then select it.
+            for _ in range(labels.index("SSH")):
+                await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not _cfg_menu_open(scr)
             assert scr._kind() == "worktrees"          # Profiles NOT selected
             assert captured["label"] == "SSH"
             assert captured["source"] == "net"
@@ -3937,9 +3958,11 @@ def test_contributed_config_section_in_cfgmenu_and_runs(tmp_path, monkeypatch):
             # Selecting Profiles still switches to that pivot (built-in intact).
             scr.sel = ("CFG", 0)
             scr._activate()
-            scr.cfgmenu_idx = 0                          # Profiles
-            scr._key_cfgmenu("enter")
-            assert scr.cfgmenu is None
+            await pilot.pause()
+            assert _cfg_menu_open(scr)
+            await pilot.press("enter")                  # Profiles (idx 0)
+            await pilot.pause()
+            assert not _cfg_menu_open(scr)
             assert scr._kind() == "profiles"
 
     asyncio.run(run())

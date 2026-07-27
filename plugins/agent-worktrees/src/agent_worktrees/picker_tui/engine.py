@@ -435,8 +435,9 @@ class PickerScreen(Widget):
         self.registered_pivots = []   # RegisteredPivot list from the manifest scan
         self.wt_actions = []          # contributed WorktreeAction list (#B)
         self.config_sections = []     # contributed ConfigSection list (#B slice 2)
-        self.cfgmenu = None           # ⚙ Configuration menu (hosts Profiles) (#1426)
-        self.cfgmenu_idx = 0
+        # ⚙ Configuration menu is a native Textual ModalScreen now (#88 F4):
+        # no self.cfgmenu / cfgmenu_idx state attrs -- see CfgMenuScreen and
+        # _open_cfgmenu. (The overlay left the manual registry entirely.)
         self._pivot_runtimes = {}     # pivot name -> RegisteredPivotRuntime (lazy)
         self._load_pivots()
         self.machine_idx = 0          # selected machine sub-pivot (Worktrees/Maint)
@@ -2663,8 +2664,6 @@ class PickerScreen(Widget):
                          f" · Esc back")
             else:
                 hints = f"↑↓ choose · Enter: {cur.lower()} {wid} · Esc back"
-        elif self.cfgmenu:
-            hints = "↑↓ choose · Enter: open · Esc back"
         elif self.maint_menu:
             cur = self.maint_menu["actions"][self.maint_menu_idx]
             n = self.maint_menu["count"]
@@ -3113,8 +3112,6 @@ class PickerScreen(Widget):
              lambda ln, W, o, b: self._overlay_submenu(ln, W, o, b)),
             ("msgview", self._key_msgview,
              lambda ln, W, o, b: self._overlay_msgview(ln, W, o, b)),
-            ("cfgmenu", self._key_cfgmenu,
-             lambda ln, W, o, b: self._overlay_cfgmenu(ln, W, o, b)),
             ("maint_menu", self._key_maint_menu,
              lambda ln, W, o, b: self._overlay_maint_menu(ln, W, o, b)),
             ("cleanup", self._key_scopedlg,
@@ -4195,7 +4192,12 @@ class PickerScreen(Widget):
         """Open the Configuration menu: the pivots placed under ⚙ Configuration
         (Profiles) plus any contributed Configuration sections. Selecting a
         pivot switches to it and focuses its body; selecting a section runs its
-        command. User-local config only -- never repo-managed settings."""
+        command. User-local config only -- never repo-managed settings.
+
+        Migrated to a native Textual ``ModalScreen`` (#88 F4): ``push_screen``s a
+        ``CfgMenuScreen`` that owns the stack, focus, and key routing and returns
+        the chosen item index via ``dismiss(int|None)``; the callback acts on the
+        selection (``None`` cancels)."""
         items = self._cfgmenu_items()
         if not items:
             return
@@ -4205,18 +4207,11 @@ class PickerScreen(Widget):
              if it["kind"] == "pivot" and it["idx"] == self.htab),
             0,
         )
-        self.cfgmenu = {"items": items}
-        self.cfgmenu_idx = cur
 
-    def _key_cfgmenu(self, key):
-        items = self.cfgmenu["items"]
-        if key == "down":
-            self.cfgmenu_idx = (self.cfgmenu_idx + 1) % len(items)
-        elif key == "up":
-            self.cfgmenu_idx = (self.cfgmenu_idx - 1) % len(items)
-        elif key == "enter":
-            target = items[self.cfgmenu_idx]
-            self.cfgmenu = None
+        def _after(choice):
+            if choice is None:
+                return
+            target = items[choice]
             if target["kind"] == "section":
                 # A cross-plugin contributed Configuration section (#B slice 2):
                 # run it and rescan (it may have changed config/session state).
@@ -4226,8 +4221,7 @@ class PickerScreen(Widget):
             self.btn_idx = 0
             self.top = 0
             self.sel = self.default_sel()      # focus the hosted pivot's body
-        elif key in ("escape", "q", "tab"):
-            self.cfgmenu = None
+        self.app.push_screen(CfgMenuScreen(items, cur), _after)
 
     def _config_section_ctx(self) -> dict:
         """Placeholder context for a contributed config section's argv template:
@@ -4252,22 +4246,6 @@ class PickerScreen(Widget):
             self.sel = self.default_sel()
         except Exception:
             pass
-
-    def _overlay_cfgmenu(self, lines, W, top_off, body_h):
-        items = self.cfgmenu["items"]
-        idx = self.cfgmenu_idx
-        pw = min(W - 8, 56)
-        header = "─ ⚙ Configuration "
-        panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
-                      style=C_BAND)]
-        panel.append(self._prow(" user-local settings", pw, style=C_DIM))
-        panel.append(self._prow("", pw))
-        for n, it in enumerate(items):
-            mark = " ▸ " if n == idx else "   "
-            panel.append(self._prow(mark + it["label"], pw, selected=(n == idx)))
-        panel.append(self._prow("", pw))
-        panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
-        self._blit_panel(lines, W, panel, top_off, body_h)
 
     # ---- registered-pivot (Tasks) action sub-menu ----
     def _open_task_menu(self):
@@ -4651,6 +4629,64 @@ class TaskMenuScreen(ModalScreen[int]):
     def on_key(self, event) -> None:
         key = event.key
         n = len(self._actions)
+        if key == "down":
+            self.idx = (self.idx + 1) % n
+            self._refresh()
+            event.stop()
+        elif key == "up":
+            self.idx = (self.idx - 1) % n
+            self._refresh()
+            event.stop()
+        elif key == "enter":
+            event.stop()
+            self.dismiss(self.idx)
+        elif key in ("escape", "q", "tab"):
+            event.stop()
+            self.dismiss(None)
+
+
+class CfgMenuScreen(ModalScreen[int]):
+    """Native modal ⚙ Configuration menu (#88 F4).
+
+    A picker overlay migrated off the manual render/dispatch model onto a Textual
+    ``ModalScreen``. It lists the config-hosted pivots (Profiles) plus any
+    contributed Configuration sections and returns the chosen item *index* via
+    ``dismiss(int)``, or ``dismiss(None)`` on cancel; the caller acts on the
+    selection (switch to that pivot / run that section). Navigation
+    (``up``/``down``, wrapping) moves the highlight in place, mirroring the former
+    ``_key_cfgmenu`` exactly (Enter selects, Esc/q/Tab cancel).
+    """
+
+    CSS = """
+    CfgMenuScreen { align: center middle; background: $background 55%; }
+    CfgMenuScreen > #cfg-menu { width: auto; height: auto; }
+    """
+
+    def __init__(self, items, idx=0) -> None:
+        super().__init__()
+        self._items = items
+        self.idx = idx
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._panel(), id="cfg-menu")
+
+    def _panel(self) -> Panel:
+        body = Text()
+        body.append("\n user-local settings\n\n", style=C_DIM)
+        for n, it in enumerate(self._items):
+            mark = " ▸ " if n == self.idx else "   "
+            body.append(mark + it["label"] + "\n",
+                        style=C_SEL if n == self.idx else None)
+        body.append("\n ↑↓ choose · Enter open · Esc back", style=C_MUTED)
+        return Panel(body, title="⚙ Configuration", border_style=C_BAND,
+                     width=56)
+
+    def _refresh(self) -> None:
+        self.query_one("#cfg-menu", Static).update(self._panel())
+
+    def on_key(self, event) -> None:
+        key = event.key
+        n = len(self._items)
         if key == "down":
             self.idx = (self.idx + 1) % n
             self._refresh()
