@@ -319,7 +319,8 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 | Subcommand | Description |
 |------------|-------------|
 | `services` | Service discovery, staleness checks, passthrough to installers |
-| `repos` | Repos registry -- list, find, add, clone, srcroot management |
+| `repos` | Repos registry -- list, find, add, clone, srcroot, `account`/`account-for` (owner→gh-login map) |
+| `accounts` | gh account identity catalog (`accounts.yaml`) -- list/show/set/remove logins, scopes, login flows |
 | `validate` | Validate core infrastructure files |
 | `pre-launch` | Check bootstrap staleness (JSON output, for launch wrappers) |
 | `reconcile-plugins` | Reconcile repo-adopted plugin payloads + gated runtimes (JSON output, for launch wrappers) |

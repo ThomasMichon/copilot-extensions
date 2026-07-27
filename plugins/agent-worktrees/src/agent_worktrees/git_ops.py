@@ -760,7 +760,7 @@ def _active_gh_account() -> str | None:
     accounts: list[str] = []
     current: str | None = None
     for line in text.splitlines():
-        m = re.search(r"account\s+([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)", line)
+        m = re.search(r"account\s+([A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?)", line)
         if m:
             current = m.group(1)
             accounts.append(current)

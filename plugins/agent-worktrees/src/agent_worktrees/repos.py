@@ -104,6 +104,13 @@ class ReposRegistry:
     srcroot: dict[str, str] = field(default_factory=dict)
     # srcroot keys: "windows", "wsl", "linux"
     repos: dict[str, RepoEntry] = field(default_factory=dict)
+    # Decoupled GitHub owner -> account login map. The org-level identity layer:
+    # any repo hosted under ``owner`` uses the mapped ``gh`` account login, even
+    # when the owner is an *org* (no gh account is named after it) or when no
+    # repo under that owner is registered. Complements the per-repo ``account:``
+    # override (which stays the finest grain). See :func:`resolve_account` /
+    # :func:`account_for_github_owner`. Keys are compared case-insensitively.
+    account_map: dict[str, str] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +156,13 @@ def read_registry() -> ReposRegistry:
         if not isinstance(srcroot, dict):
             srcroot = {}
 
+        raw_map = data.get("account_map", {})
+        account_map: dict[str, str] = {}
+        if isinstance(raw_map, dict):
+            for owner, login in raw_map.items():
+                if owner and login:
+                    account_map[str(owner)] = str(login)
+
         repos: dict[str, RepoEntry] = {}
         raw_repos = data.get("repos", {})
         if isinstance(raw_repos, dict):
@@ -183,7 +197,7 @@ def read_registry() -> ReposRegistry:
                     paths=paths,
                 )
 
-        return ReposRegistry(srcroot=srcroot, repos=repos)
+        return ReposRegistry(srcroot=srcroot, repos=repos, account_map=account_map)
     except Exception:
         return ReposRegistry()
 
@@ -205,6 +219,13 @@ def write_registry(registry: ReposRegistry) -> None:
         for plat in ("windows", "wsl", "linux"):
             if plat in registry.srcroot:
                 lines.append(f"  {plat}: {_quote(registry.srcroot[plat])}")
+        lines.append("")
+
+    # account_map section (GitHub owner/org -> gh account login)
+    if registry.account_map:
+        lines.append("account_map:")
+        for owner in sorted(registry.account_map.keys()):
+            lines.append(f"  {_quote(owner)}: {_quote(registry.account_map[owner])}")
         lines.append("")
 
     # repos section
@@ -314,28 +335,62 @@ def github_owner(remote: str) -> str | None:
     return None
 
 
+def account_from_map(owner: str | None) -> str | None:
+    """Return the ``account_map`` login for a GitHub ``owner``, or None.
+
+    The decoupled org->account layer: a top-level ``account_map:`` in
+    repos.yaml maps a GitHub owner/org to the ``gh`` account login its repos
+    authenticate as. Case-insensitive on the owner key. Returns None when no
+    map entry matches (callers then fall back to the owner itself).
+    """
+    if not owner:
+        return None
+    try:
+        registry = read_registry()
+    except Exception:
+        return None
+    for key, login in registry.account_map.items():
+        if key.casefold() == owner.casefold():
+            return login or None
+    return None
+
+
 def resolve_account(entry: RepoEntry | None) -> str | None:
     """Resolve the preferred GitHub account for a repo entry.
 
-    Order: explicit ``account:`` -> owner derived from a github.com remote ->
-    None.  None means "no account preference" -- git/gh operations use the
-    ambient ``gh`` account exactly as before (additive + safe).
+    Order: explicit ``account:`` -> ``account_map`` (owner->login) -> owner
+    derived from a github.com remote -> None.  None means "no account
+    preference" -- git/gh operations use the ambient ``gh`` account exactly as
+    before (additive + safe).
     """
     if entry is None:
         return None
     if entry.account:
         return entry.account
-    return github_owner(entry.remote)
+    owner = github_owner(entry.remote)
+    mapped = account_from_map(owner)
+    if mapped:
+        return mapped
+    return owner
 
 
 def account_for_github_owner(owner: str | None) -> str | None:
     """Resolve the effective account for a github ``owner`` (from a repo slug).
 
-    Honors an explicit ``account:`` override on any registered repo whose
-    github remote is owned by ``owner`` (owner != account is possible for EMU
-    accounts spanning orgs); otherwise the account *is* the owner.  Returns
-    None only for an empty owner.  Used at gh/git touch-sites that know the
-    hosting ``owner/name`` slug but not the registry name.
+    Order (highest wins):
+
+    1. an explicit ``account:`` override on any registered repo whose github
+       remote is owned by ``owner`` (finest grain; owner != account is possible
+       for EMU accounts spanning orgs);
+    2. the decoupled ``account_map`` (owner->login) in repos.yaml -- the org
+       identity layer, which resolves org-owned repos (``github/...``,
+       ``odsp-microsoft/...``) to the correct login even when no gh account is
+       named after the org and no repo under it is registered;
+    3. the owner itself (correct when owner == login, e.g. a personal/EMU
+       user's own repos).
+
+    Returns None only for an empty owner.  Used at gh/git touch-sites that know
+    the hosting ``owner/name`` slug but not the registry name.
     """
     if not owner:
         return None
@@ -349,6 +404,9 @@ def account_for_github_owner(owner: str | None) -> str | None:
         eowner = github_owner(entry.remote)
         if eowner and eowner.casefold() == owner.casefold():
             return entry.account
+    for key, login in registry.account_map.items():
+        if key.casefold() == owner.casefold() and login:
+            return login
     return owner
 
 
@@ -358,6 +416,35 @@ def account_for_github_slug(slug: str | None) -> str | None:
         return None
     owner = slug.split("/", 1)[0] if "/" in slug else slug
     return account_for_github_owner(owner)
+
+
+def set_account_map(owner: str, login: str) -> None:
+    """Set the ``account_map`` entry for a GitHub owner (case-preserving key).
+
+    Replaces any existing entry for the same owner case-insensitively so a
+    re-set with different casing does not leave a duplicate.
+    """
+    registry = read_registry()
+    for key in list(registry.account_map.keys()):
+        if key.casefold() == owner.casefold():
+            del registry.account_map[key]
+    registry.account_map[owner] = login
+    write_registry(registry)
+    output.ok(f"account_map: {owner} -> {login}")
+
+
+def unset_account_map(owner: str) -> bool:
+    """Remove the ``account_map`` entry for a GitHub owner. Case-insensitive."""
+    registry = read_registry()
+    removed = False
+    for key in list(registry.account_map.keys()):
+        if key.casefold() == owner.casefold():
+            del registry.account_map[key]
+            removed = True
+    if removed:
+        write_registry(registry)
+        output.ok(f"account_map: removed {owner}")
+    return removed
 
 
 def add_repo(

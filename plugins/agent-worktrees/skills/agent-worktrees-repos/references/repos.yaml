@@ -7,11 +7,20 @@ srcroot:
   windows: D:\Src
   wsl: ~/src
 
+# Decoupled GitHub owner/org -> gh account login. Applies to any repo hosted
+# under the owner -- including *orgs* that are not themselves gh accounts
+# (github, odsp-microsoft) -- so their repos resolve to the right login instead
+# of the org name. Manage with `repos account set/list/unset`. The identities
+# below are catalogued in ~/.agent-worktrees/accounts.yaml.
+account_map:
+  github: ThomasMichon
+  odsp-microsoft: tmichon_microsoft
+
 repos:
   copilot-extensions:
     class: worktree                # reference | singleton | worktree
     remote: "https://github.com/ThomasMichon/copilot-extensions.git"
-    account: ThomasMichon          # optional; else derived from the remote owner
+    account: ThomasMichon          # optional; else account_map, else remote owner
     default_branch: main
     tags: [facility]               # filter tags for batch ops
     contributing: CONTRIBUTING.md  # read before editing

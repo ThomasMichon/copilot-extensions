@@ -101,6 +101,30 @@ agent-codespaces bridge unregister [--bridge-url <url>]
 > default `--bridge-url` to `http://127.0.0.1:9280`. On Linux/WSL pass
 > `--bridge-url http://127.0.0.1:9281` explicitly.
 
+## Multi-account gh (per-repo identity)
+
+Host-side `gh` operations (`gh codespace list/create/delete/stop/ssh`, `gh api`,
+and the `gh codespace ssh --config` fetch) run under the `gh` account that can
+access the **target repo's org** — not whatever account is active in the `gh`
+keyring. With two accounts backing different orgs (e.g. `ThomasMichon` for
+`github/*` and `tmichon_microsoft` for `odsp-microsoft/*`), the active-account
+default would hide or `403`/`404` the other org's CodeSpaces entirely.
+
+- The owner→login mapping is owned by **agent-worktrees** (its `repos.yaml`
+  `account_map` + `accounts.yaml` catalog). agent-codespaces shells out to
+  `agent-worktrees repos account-for <owner/name>` (loose coupling — separate
+  venvs) and mints a per-account `GH_TOKEN` for each `gh` subprocess.
+- **Cross-account discovery:** `gh codespace list` only returns the active
+  account's CodeSpaces, so `list` (and status/resolve) enumerate under **every**
+  mapped account plus the ambient one and merge, tagging each CodeSpace with its
+  owning account. Per-CodeSpace ops (stop/delete/ssh) then pin `gh` to that
+  account.
+- **Auth preflight** verifies each mapped account is logged in with the
+  `codespace` scope, surfacing the account's recorded `accounts.yaml` login flow
+  as the remedy.
+- **Fully additive:** with no `account_map` configured, everything collapses to
+  a single ambient `gh` call — today's behavior.
+
 ## Credential relay: fail-fast & auth verification
 
 The relay forwards git-credential requests from a CodeSpace back to the host

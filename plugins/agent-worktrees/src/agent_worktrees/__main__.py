@@ -7710,6 +7710,9 @@ def _repos_usage() -> None:
     print("  status [--tag T] [--class C]        Show branch/dirty/ahead-behind")
     print("  sync [--tag T] [--class C]          Fetch + fast-forward (skips dirty)")
     print("  doctor [--fix] [--json]             Reconcile projects.yaml <-> repos.yaml")
+    print("  account [list|set <owner> <login>|unset <owner>]")
+    print("                                      Decoupled owner->gh-login map (account_map)")
+    print("  account-for <owner|owner/name>      Print the resolved gh login (exit 1 if none)")
     print()
     print("Repo classes:")
     print("  reference   read-only; resolve/clone/index only; never edited")
@@ -8031,8 +8034,185 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         ]
         return 1 if unresolved else 0
 
+    if sub == "account-for":
+        # Resolve the effective gh account for an owner or owner/name slug.
+        # Prints the login on stdout (exit 0); prints nothing + exit 1 when no
+        # preference resolves (caller then uses ambient auth). The programmatic
+        # primitive agent-codespaces (and other tools) shell out to.
+        target = rest[0] if rest and not rest[0].startswith("-") else None
+        json_out = "--json" in rest
+        if not target:
+            output.err("Usage: repos account-for <owner|owner/name>")
+            return 1
+        login = repos.account_for_github_slug(target)
+        # Suppress the bare-owner echo: when the owner isn't a github owner or
+        # maps to itself with no catalog/registry backing, that's still a valid
+        # login (owner==account). Only treat empty as "no preference".
+        if json_out:
+            _json_output({"target": target, "account": login})
+            return 0 if login else 1
+        if login:
+            print(login)
+            return 0
+        return 1
+
+    if sub == "account":
+        # Manage the decoupled owner->login map (account_map in repos.yaml).
+        acsub = rest[0] if rest else "list"
+        acrest = rest[1:] if rest else []
+        if acsub == "list":
+            registry = repos.read_registry()
+            json_out = "--json" in acrest
+            if json_out:
+                _json_output({"account_map": dict(registry.account_map)})
+                return 0
+            if not registry.account_map:
+                print("No account_map entries.")
+                print("Add one with: repos account set <owner> <login>")
+                return 0
+            output.header("Account map (owner -> gh login)")
+            for owner in sorted(registry.account_map.keys()):
+                print(f"  {owner:<24} -> {registry.account_map[owner]}")
+            return 0
+        if acsub == "set":
+            if len(acrest) < 2:
+                output.err("Usage: repos account set <owner> <login>")
+                return 1
+            repos.set_account_map(acrest[0], acrest[1])
+            return 0
+        if acsub in ("unset", "remove", "rm"):
+            if not acrest:
+                output.err("Usage: repos account unset <owner>")
+                return 1
+            if repos.unset_account_map(acrest[0]):
+                return 0
+            output.err(f"No account_map entry for '{acrest[0]}'")
+            return 1
+        output.err(f"Unknown 'repos account' subcommand: {acsub}")
+        output.info("Usage: repos account [list|set <owner> <login>|unset <owner>]")
+        return 1
+
     output.err(f"Unknown repos subcommand: {sub}")
     _repos_usage()
+    return 1
+
+
+def _accounts_usage() -> None:
+    try:
+        project = cfg.project_name()
+    except Exception:
+        project = "agent-worktrees"
+    print(f"Usage: {project} accounts <command>")
+    print()
+    print("Catalog of gh account identities and their (re)login flows")
+    print("(~/.agent-worktrees/accounts.yaml). The owner->account MAP lives in")
+    print("repos.yaml (see 'repos account'); this catalog describes the logins")
+    print("that map points at -- host, expected scopes, and how to (re)login.")
+    print()
+    print("Commands:")
+    print("  list                                List catalogued accounts")
+    print("  show <login>                        Show one account's details")
+    print("  set <login> [--host H] [--scopes a,b] [--login-flow CMD] [--notes T]")
+    print("                                      Add or update an account entry")
+    print("  remove <login>                      Remove an account entry")
+    print()
+    print("Examples:")
+    print(f"  {project} accounts set ThomasMichon --scopes codespace,repo,workflow \\")
+    print("      --login-flow 'gh auth login -h github.com'")
+    print(f"  {project} accounts list")
+
+
+def cmd_accounts_dispatch(argv: list[str]) -> int:
+    """Route the top-level ``accounts`` catalog subcommands."""
+    from . import accounts
+
+    if argv and argv[0] in ("--help", "-h"):
+        _accounts_usage()
+        return 0
+    sub = argv[0] if argv else "list"
+    rest = argv[1:] if argv else []
+    if "--help" in rest or "-h" in rest:
+        _accounts_usage()
+        return 0
+
+    def _opt(flag: str) -> str | None:
+        if flag in rest:
+            idx = rest.index(flag)
+            if idx + 1 < len(rest):
+                return rest[idx + 1]
+        return None
+
+    if sub == "list":
+        entries = accounts.list_accounts()
+        if "--json" in rest:
+            _json_output({"accounts": [
+                {"login": e.login, "host": e.host, "scopes": e.scopes,
+                 "login_flow": e.login_flow, "notes": e.notes}
+                for e in entries]})
+            return 0
+        if not entries:
+            print("No accounts catalogued.")
+            print("Add one with: accounts set <login> [--scopes ...] [--login-flow ...]")
+            return 0
+        output.header("Accounts catalog")
+        for e in entries:
+            scopes = ",".join(e.scopes) if e.scopes else "(none)"
+            print(f"  {e.login:<20} host={e.host}  scopes={scopes}")
+            if e.login_flow:
+                print(f"  {'':20} login: {e.login_flow}")
+        return 0
+
+    if sub == "show":
+        if not rest or rest[0].startswith("-"):
+            output.err("Usage: accounts show <login>")
+            return 1
+        e = accounts.find_account(rest[0])
+        if not e:
+            output.err(f"No account '{rest[0]}' in accounts.yaml")
+            return 1
+        if "--json" in rest:
+            _json_output({"login": e.login, "host": e.host, "scopes": e.scopes,
+                          "login_flow": e.login_flow, "notes": e.notes})
+            return 0
+        output.header(f"Account: {e.login}")
+        print(f"  host:       {e.host}")
+        print(f"  scopes:     {','.join(e.scopes) if e.scopes else '(none)'}")
+        print(f"  login_flow: {e.login_flow or '(none)'}")
+        if e.notes:
+            print(f"  notes:      {e.notes}")
+        return 0
+
+    if sub == "set":
+        if not rest or rest[0].startswith("-"):
+            output.err("Usage: accounts set <login> [--host H] [--scopes a,b] "
+                       "[--login-flow CMD] [--notes T]")
+            return 1
+        login = rest[0]
+        raw_scopes = _opt("--scopes")
+        scopes = (
+            [s.strip() for s in raw_scopes.split(",") if s.strip()]
+            if raw_scopes is not None else None
+        )
+        accounts.set_account(
+            login,
+            host=_opt("--host"),
+            scopes=scopes,
+            login_flow=_opt("--login-flow"),
+            notes=_opt("--notes"),
+        )
+        return 0
+
+    if sub in ("remove", "rm"):
+        if not rest or rest[0].startswith("-"):
+            output.err("Usage: accounts remove <login>")
+            return 1
+        if accounts.remove_account(rest[0]):
+            return 0
+        output.err(f"No account '{rest[0]}' in accounts.yaml")
+        return 1
+
+    output.err(f"Unknown accounts subcommand: {sub}")
+    _accounts_usage()
     return 1
 
 
@@ -9287,6 +9467,9 @@ def build_parser() -> argparse.ArgumentParser:
     # repos -- dispatched pre-argparse (see cmd_repos_dispatch)
     sub.add_parser("repos", help="Repos registry and source roots (run 'repos' for usage)")
 
+    # accounts -- dispatched pre-argparse (see cmd_accounts_dispatch)
+    sub.add_parser("accounts", help="gh account identity catalog (run 'accounts' for usage)")
+
     # related -- dispatched pre-argparse (see cmd_related_dispatch)
     sub.add_parser("related", help="Per-project related repos (run 'related' for usage)")
 
@@ -10509,7 +10692,7 @@ def _git_toplevel(path: Path) -> Path | None:
 # its own project from the sessionStart payload's cwd instead (see
 # cmd_register_session -> _activate_project_for_path).
 _NO_PROJECT_COMMANDS = {
-    "--version", "-V", "--help", "-h", "repos", "install", "register", "hook",
+    "--version", "-V", "--help", "-h", "repos", "accounts", "install", "register", "hook",
     "picker", "reap-sessions", "status-updater", "restart", "register-session",
     "head-session", "conclude-session", "link-succession", "config-migrate",
 }
@@ -11465,6 +11648,14 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] == "repos":
         try:
             return cmd_repos_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # Accounts (gh identity catalog) -- manual dispatch.
+    if args_list[0] == "accounts":
+        try:
+            return cmd_accounts_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
