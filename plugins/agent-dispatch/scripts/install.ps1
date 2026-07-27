@@ -475,6 +475,97 @@ function Test-CoordinatorHealthy {
     } catch { return $false }
 }
 
+function Stop-DispatchProcess {
+    # Terminate any RUNNING agent_dispatch process for the given subcommand
+    # ('serve' = coordinator, 'supervise' = embody supervisor), regardless of how
+    # it was launched. The launcher runs under `conhost.exe --headless`, which
+    # DETACHES the powershell+python from the Scheduled Task's tracked process
+    # tree, so `Stop-ScheduledTask` does NOT kill the actual `python -m
+    # agent_dispatch <subcommand>` process -- a stop/update otherwise leaves the
+    # OLD build running and still holding the rendezvous endpoint (#3602). Resolve
+    # the live coordinator PID from the rendezvous file (serve only) AND match the
+    # `-m agent_dispatch <subcommand>` command line, kill each, then (serve) clear
+    # the stale endpoint file so a client doesn't chase a dead endpoint and the
+    # fresh coordinator writes a clean one. Returns the count terminated.
+    param([Parameter(Mandatory)][ValidateSet('serve', 'supervise')][string]$Subcommand)
+    if ($env:OS -ne 'Windows_NT') { return 0 }
+
+    $pidsToKill = New-Object System.Collections.Generic.List[int]
+    $endpointFile = Join-Path (Join-Path $InstallDir 'run') 'endpoint.json'
+
+    # 1) The rendezvous-advertised PID (the coordinator that owns the endpoint).
+    if ($Subcommand -eq 'serve' -and (Test-Path $endpointFile)) {
+        try {
+            $ep = Get-Content $endpointFile -Raw | ConvertFrom-Json
+            if (($ep.PSObject.Properties.Name -contains 'pid') -and $ep.pid) {
+                [void]$pidsToKill.Add([int]$ep.pid)
+            }
+        } catch { }
+    }
+    # 2) Any matching `-m agent_dispatch <subcommand>` process (the detached child
+    #    + orphans not reflected in the rendezvous file). '\bserve\b' never matches
+    #    'supervise' (and vice-versa), so the two never cross-terminate.
+    try {
+        $needle = '\b' + [regex]::Escape($Subcommand) + '\b'
+        Get-CimInstance Win32_Process -Filter "Name LIKE 'python%.exe'" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.CommandLine -and
+                ($_.CommandLine -match 'agent_dispatch') -and
+                ($_.CommandLine -match $needle)
+            } |
+            ForEach-Object { [void]$pidsToKill.Add([int]$_.ProcessId) }
+    } catch { }
+
+    $killed = 0
+    foreach ($procId in ($pidsToKill | Select-Object -Unique)) {
+        try {
+            Stop-Process -Id $procId -Force -ErrorAction Stop
+            $killed++
+        } catch { }
+    }
+    if ($Subcommand -eq 'serve' -and (Test-Path $endpointFile)) {
+        Remove-Item $endpointFile -Force -ErrorAction SilentlyContinue
+    }
+    return $killed
+}
+
+function Confirm-CoordinatorRunning {
+    # After a start/update, verify a coordinator actually answers AND runs the
+    # just-installed build -- catching the "reports success but the old detached
+    # build is still serving the rendezvous endpoint" drift (#3602). Compares the
+    # running coordinator's health version against the freshly-installed package
+    # __version__ (identical string source, so no normalization mismatch). Polls
+    # briefly to let a fresh coordinator bind + advertise.
+    if (-not (Test-Path $VenvPython)) { return }
+    $installed = $null
+    try {
+        $installed = (& $VenvPython -c 'import agent_dispatch; print(agent_dispatch.__version__)' 2>$null).Trim()
+    } catch { $installed = $null }
+
+    $running = $null
+    for ($i = 0; $i -lt 12; $i++) {
+        try {
+            $out = & $VenvPython -m agent_dispatch health 2>$null
+            if (($LASTEXITCODE -eq 0) -and $out) {
+                $h = ($out | Out-String) | ConvertFrom-Json
+                if ($h.PSObject.Properties.Name -contains 'version') { $running = $h.version }
+                if ($running) { break }
+            }
+        } catch { }
+        Start-Sleep -Seconds 1
+    }
+
+    if (-not $running) {
+        Write-Warn 'Coordinator did not answer health after start -- check serve-service.log'
+        return
+    }
+    if ($installed -and ($running -ne $installed)) {
+        Write-Warn "Coordinator is serving $running but $installed is installed -- a stale build may still hold the endpoint. Re-run: install.ps1 -Action stop; then -Action start"
+    } else {
+        Write-Ok "Coordinator running (version $running)"
+    }
+}
+
 function Remove-CoordinatorAutostart {
     # Remove the non-elevated logon auto-start (HKCU Run) if present. Returns
     # $true when one was removed. Idempotent.
@@ -1007,6 +1098,7 @@ function Invoke-Install {
     Install-CoordinatorTask
     if (-not $NoService) { Add-CoordinatorFirewallRule }
     Install-SupervisorTask
+    if (-not $NoService) { Confirm-CoordinatorRunning }
     Write-Host ''; Write-Host '=== agent-dispatch install complete ===' -ForegroundColor Cyan
 }
 
@@ -1014,18 +1106,46 @@ function Invoke-Update {
     Write-Host ''; Write-Host '=== agent-dispatch update ===' -ForegroundColor Cyan; Write-Host ''
     Invoke-DowngradeGuard
     Install-Runtime
+    # Cycle the running services so the freshly-rebuilt venv build actually takes
+    # over: `conhost --headless` detaches the coordinator/supervisor from the
+    # Scheduled Task, so re-registering + Start-ScheduledTask alone leaves the OLD
+    # build serving (MultipleInstances=IgnoreNew no-ops against the survivor, and
+    # the non-elevated fallback sees a healthy old build and declines) -- the exact
+    # version-drift symptom of #3602. Terminate the old process(es) first; the
+    # (re)install below then starts a clean one.
+    if (-not $NoService) {
+        $stoppedCoord = Stop-DispatchProcess -Subcommand serve
+        if ($stoppedCoord -gt 0) {
+            Write-Step "Stopped $stoppedCoord stale coordinator process(es) before restart"
+        }
+    }
+    $stoppedSup = Stop-DispatchProcess -Subcommand supervise
+    if ($stoppedSup -gt 0) {
+        Write-Step "Stopped $stoppedSup stale supervisor process(es) before restart"
+    }
     Install-CoordinatorTask
     if (-not $NoService) { Add-CoordinatorFirewallRule }
     Install-SupervisorTask
+    if (-not $NoService) { Confirm-CoordinatorRunning }
     Write-Host ''; Write-Host '=== agent-dispatch update complete ===' -ForegroundColor Cyan
 }
 
 function Invoke-Start {
-    if (-not (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
-        Write-Fail "No coordinator task installed -- run: install.ps1 -Action install"; exit 1
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($task) {
+        Start-ScheduledTask -TaskName $TaskName
+        Write-Ok 'Coordinator started'
+    } else {
+        # Non-elevated host: no Scheduled Task was registrable, so the coordinator
+        # runs from the detached fallback launcher. Start that rather than hard-
+        # failing (the client is installed; #3602).
+        $launcher = Join-Path $InstallDir 'serve-service.ps1'
+        if (Test-Path $launcher) {
+            Start-CoordinatorNonElevatedFallback -Launcher $launcher
+        } else {
+            Write-Fail "No coordinator task or launcher installed -- run: install.ps1 -Action install"; exit 1
+        }
     }
-    Start-ScheduledTask -TaskName $TaskName
-    Write-Ok 'Coordinator started'
     # Start the supervisor too, but only if it is enabled (label-gated). A
     # disabled/inert supervisor is left alone.
     $sup = Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
@@ -1033,18 +1153,27 @@ function Invoke-Start {
         Start-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
         Write-Ok 'Embody supervisor started'
     }
+    Confirm-CoordinatorRunning
 }
 
 function Invoke-Stop {
+    # Supervisor first (it spawns work), then the coordinator. Stop the Scheduled
+    # Task AND terminate the detached process -- Stop-ScheduledTask alone leaves the
+    # `conhost --headless`-detached python alive (#3602).
     if (Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue) {
         Stop-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
-        Write-Ok 'Embody supervisor stopped'
     }
+    $killedSup = Stop-DispatchProcess -Subcommand supervise
+    if ($killedSup -gt 0) { Write-Ok "Embody supervisor stopped ($killedSup process(es))" }
+
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        Write-Ok 'Coordinator stopped'
+    }
+    $killedCoord = Stop-DispatchProcess -Subcommand serve
+    if ($killedCoord -gt 0) {
+        Write-Ok "Coordinator stopped ($killedCoord process(es) terminated; rendezvous cleared)"
     } else {
-        Write-Skip 'Coordinator task not installed'
+        Write-Skip 'No running coordinator process found'
     }
 }
 
