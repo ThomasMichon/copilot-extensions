@@ -109,6 +109,16 @@ async def lifespan(app: FastAPI):
     """Application lifespan -- initialize DB, topology, and session manager."""
     cfg = app.state.config
 
+    # Record the *actually-running* daemon version so the launch-path reconciler
+    # can detect a daemon lagging its installed plugin even when the on-disk
+    # deploy manifest already matches (dotfiles #533). Only the **primary** daemon
+    # writes it: the elevated sub-daemon (enable_credential_relay=False) shares the
+    # runtime dir and would otherwise clobber the marker with a non-primary pid.
+    if getattr(cfg, "enable_credential_relay", True):
+        from .runtime_version import write_running_version
+
+        write_running_version()
+
     db_path = Path(cfg.db_path).expanduser()
     db = Database(db_path)
     db.start_writer()
