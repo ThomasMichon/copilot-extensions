@@ -86,3 +86,33 @@ def test_lazy_start_spawns_when_absent(monkeypatch, tmp_path):
     monkeypatch.setattr(m, "_spawn_coordinator_process", lambda: spawned.append(True))
     assert m._lazy_start_coordinator(timeout=0.5) is False
     assert spawned == [True]
+
+
+def test_spawn_coordinator_uses_c_entry_not_runpy(monkeypatch, tmp_path):
+    """Regression: the detached coordinator launch must use a ``-c`` entry, not
+    ``python -m agent_dispatch serve``. Under a Windows venv the ``-m`` runpy form
+    re-execs the base interpreter, spawning a redundant system-Python coordinator
+    child of an idle venv launcher (see ``_SERVE_ENTRY``)."""
+    captured: list[list[str]] = []
+
+    class _FakePopen:
+        def __init__(self, argv, **kwargs):
+            captured.append(argv)
+
+    monkeypatch.setattr(m.subprocess, "Popen", _FakePopen)
+    # A home without a venv -> python resolves to sys.executable (deterministic);
+    # the log open + service.env read land under the temp install dir.
+    monkeypatch.setattr(m.Path, "home", staticmethod(lambda: tmp_path))
+    (tmp_path / ".agent-dispatch").mkdir()
+
+    m._spawn_coordinator_process()
+
+    assert captured, "expected a detached coordinator Popen launch"
+    argv = captured[0]
+    assert argv[1] == "-c" and argv[2] == m._SERVE_ENTRY, (
+        f"coordinator must launch via `-c _SERVE_ENTRY`, got {argv!r}"
+    )
+    assert "-m" not in argv, (
+        "coordinator must not launch via `-m` (Windows venv runpy re-exec)"
+    )
+    assert "main(['serve'])" in m._SERVE_ENTRY

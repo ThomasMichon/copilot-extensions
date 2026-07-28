@@ -800,7 +800,12 @@ try {
 # on Lambda-Core: task launched, banner written, no listener). Drop to
 # 'Continue' for the serve invocation so stderr is captured, never fatal.
 `$ErrorActionPreference = 'Continue'
-& '$VenvPython' -m agent_dispatch serve 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+# Launch via a direct ``-c`` entry, NOT ``-m agent_dispatch serve``: under a
+# Windows venv the ``-m`` runpy form re-execs the *base* interpreter, so the
+# coordinator ends up running under system Python as a child of an otherwise-idle
+# venv-launcher process. The ``-c`` form runs serve in-process under the venv
+# interpreter -- one correct process. Keep in sync with _SERVE_ENTRY in __main__.py.
+& '$VenvPython' -c "from agent_dispatch.__main__ import main; main(['serve'])" 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
 
@@ -827,8 +832,9 @@ try {
     # task's powershell as a visible window/tab when Terminal is the default
     # terminal app. -WindowStyle Hidden alone is ignored by Windows Terminal, so
     # a bare `powershell -WindowStyle Hidden` task surfaces a real console window
-    # -- and because the launcher runs the long-lived `-m agent_dispatch serve`
-    # in-process, that window persists for the life of the coordinator.
+    # -- and because the launcher runs the long-lived serve entry (`python -c
+    # ...main(['serve'])`) in-process, that window persists for the life of the
+    # coordinator.
     $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
         -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`""
     # Two triggers: -AtStartup makes the coordinator a true always-on service that
