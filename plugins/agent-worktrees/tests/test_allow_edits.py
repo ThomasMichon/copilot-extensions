@@ -66,6 +66,17 @@ def test_list_prunes_expired(home: Path, clock):
     assert list(data["grants"].keys()) == ["b"]
 
 
+def test_new_grant_gcs_expired(home: Path, clock):
+    """A new entrant garbage-collects already-expired grants (keeps live ones)."""
+    allow_edits.grant("old", "will expire soon", 1)
+    allow_edits.grant("live", "stays alive a while", 30)
+    clock["ms"] += 2 * 60_000  # 'old' now expired, 'live' still valid
+    allow_edits.grant("new", "adding this should prune 'old'", 10)
+    data = json.loads((home / ".agent-worktrees" / "allow-edits.json").read_text())
+    assert sorted(data["grants"].keys()) == ["live", "new"]
+    assert "old" not in data["grants"]
+
+
 def test_revoke(home: Path, clock):
     allow_edits.grant("a", "reason aaa", 30)
     assert allow_edits.revoke("a") is True
