@@ -37,18 +37,30 @@ def build_relay_env(
     return env
 
 
-def build_relay_launch_env(codespace_name: str) -> tuple[str, int]:
+def build_relay_launch_env(
+    codespace_name: str, relay_port: int | None = None
+) -> tuple[str, int]:
     """Return ``(prelude_env, relay_port)`` for a detached CodeSpace launch.
 
-    Mints/reuses the per-codespace relay token and reads the configured relay
-    port, so a Session Host launched detached on the CS inherits working ADO/git
-    auth over the relay (the ``-R`` reverse-forward that carries it is stood up by
-    the caller's persistent forward). Raises if config is unavailable.
+    Mints/reuses the per-codespace relay token and resolves the relay port, so a
+    Session Host launched detached on the CS inherits working ADO/git auth over
+    the relay (the ``-R`` reverse-forward that carries it is stood up by the
+    caller's persistent forward). Raises if config is unavailable.
+
+    ``relay_port`` lets an in-daemon caller (agent-bridge) inject the relay's
+    *actually-bound* port from ``relay_state.get_live_relay_port`` so the CS env
+    + ``-R`` follow the live relay rather than the statically declared config
+    port (dotfiles #489/#540 pt3). When ``None`` (e.g. the standalone
+    ``agent-codespaces`` path, which cannot see the daemon's process-local live
+    port) it falls back to the configured ``credentials.relay_port``.
     """
     from .config import load_merged_config
     from .relay_token import token_for
 
-    cfg = load_merged_config()
-    port = int(cfg.credentials.relay_port)
+    if relay_port is not None:
+        port = int(relay_port)
+    else:
+        cfg = load_merged_config()
+        port = int(cfg.credentials.relay_port)
     token = token_for(codespace_name)
     return build_relay_env(port, token, use_relay=True), port
