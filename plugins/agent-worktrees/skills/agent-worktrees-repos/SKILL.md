@@ -303,6 +303,16 @@ agent-worktrees accounts set ThomasMichon --scopes codespace,repo,workflow \
     --login-flow 'gh auth login -h github.com'
 ```
 
+> **Running a `login_flow` over SSH?** `gh`/`az`/`devtunnel` device-code auth is
+> interactive and polls for a minute-plus. A Windows SSH session is a **network
+> logon** that (with its child process tree) is torn down on disconnect — so a
+> foreground command, *or* a `Start-Process -Hidden` child, dies mid-poll and the
+> code expires. Launch it under **Task Scheduler** (`schtasks /Create /Run`,
+> output → a file) and poll that file over fresh SSH connections. `gh auth
+> refresh` also targets the **active** account (no `-u/--user` on many builds), so
+> `gh auth switch` first, then restore. Full recipe: agent-codespaces README
+> (*Authenticating an account over SSH*).
+
 
 ## Integration Points
 

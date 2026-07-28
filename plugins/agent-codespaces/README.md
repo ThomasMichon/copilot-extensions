@@ -125,6 +125,39 @@ default would hide or `403`/`404` the other org's CodeSpaces entirely.
 - **Fully additive:** with no `account_map` configured, everything collapses to
   a single ambient `gh` call — today's behavior.
 
+### Authenticating an account over SSH (device-code flows)
+
+Setting up a second account on a remote box — `gh auth login` / `gh auth refresh
+-s codespace`, and likewise `az login` / `devtunnel user login` — runs an
+**interactive device-code flow** that polls for a minute-plus while a human
+authorizes in a browser. **Do not run it as a foreground command over SSH.** A
+Windows SSH session is a **network logon** whose session (and its entire child
+process tree) is torn down the moment the connection drops — and a
+`Start-Process … -WindowStyle Hidden` child launched from that SSH shell is
+*still* parented to it, so it dies too. Any tunnel blip (acute on dtssh, and on
+hibernate-prone cloud dev boxes) kills the poller and the code silently expires
+(`context deadline exceeded`).
+
+Run the auth under **Task Scheduler**, which owns the process in a session that
+outlives the SSH connection:
+
+```powershell
+# over ssh: write a runner, register+run a one-shot task, redirect output to a file
+Set-Content $env:USERPROFILE\ghauth.ps1 'gh auth refresh -h github.com -s codespace *> "$env:USERPROFILE\ghauth.out"'
+schtasks /Create /TN ghauth /TR "pwsh -NoProfile -File $env:USERPROFILE\ghauth.ps1" /SC ONCE /ST 00:00 /F
+schtasks /Run /TN ghauth
+# then, over FRESH ssh connections, poll the file for the device code + completion:
+#   Get-Content $env:USERPROFILE\ghauth.out
+# clean up: schtasks /Delete /TN ghauth /F ; Remove-Item $env:USERPROFILE\ghauth.ps1,$env:USERPROFILE\ghauth.out
+```
+
+Surface the device code from the output file, have the human authorize it (in an
+**incognito** window signed in as the **target** account — otherwise the code
+authorizes whatever account the browser is already on), then poll the same file
+for `✓ Authentication complete`. Note `gh auth refresh` targets the **active**
+account (no `-u/--user` on many `gh` builds), so `gh auth switch --user <login>`
+first and restore afterward.
+
 ## Credential relay: fail-fast & auth verification
 
 The relay forwards git-credential requests from a CodeSpace back to the host
