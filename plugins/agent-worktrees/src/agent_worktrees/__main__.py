@@ -63,7 +63,7 @@ from pathlib import Path
 
 import yaml
 
-from . import activity, git_ops, output, permissions, pr_ops, procs, prune, sessions, tracking
+from . import activity, git_ops, output, permissions, pr_ops, procs, prune, reclaim, sessions, tracking
 from . import config as cfg
 from . import finalize as fin
 from . import installer as inst
@@ -4973,6 +4973,120 @@ def cmd_reap_sessions(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reclaim(args: argparse.Namespace) -> int:
+    """``reclaim`` -- free the exact Copilot process(es) bound to a session.
+
+    Resolves the authoritative pid<->session<->worktree binding from Copilot's
+    own ``inuse.<pid>.lock`` files (see :mod:`agent_worktrees.reclaim`) and
+    terminates *only* the matched process(es) and their Copilot child tree --
+    never a sibling session, never an unrelated process that merely shares a
+    working directory. The reclaim primitive for **bare** orphans (a Copilot
+    launched straight in a terminal, invisible to the ``wt-<id>`` mux fleet
+    view) whose terminal was closed or wedged; freeing one loses nothing, since
+    the session stays resumable from its on-disk state.
+
+    Target selection (at least one, else cwd is inferred):
+      * ``--session-id <id>``  -- one session (exact or unambiguous prefix);
+      * ``--worktree-id <id>`` -- every session bound to that worktree;
+      * ``--all``              -- every bound Copilot on the machine.
+    ``--bare-only`` restricts to un-muxed orphans (the common intent).
+
+    Safety: the process subtree containing *this* command is never reaped, and
+    without ``--yes`` the command is a dry run (prints the plan, kills nothing)
+    -- confirm-before-destroy. JSON out with ``--json``.
+    """
+    session_id = getattr(args, "session_id", None)
+    raw_wt = getattr(args, "worktree_id", None)
+    want_all = getattr(args, "all", False)
+    as_json = getattr(args, "json", False)
+
+    wt_id: str | None = None
+    wt_path: str | None = None
+
+    def _wt_path(wid: str) -> str | None:
+        yaml_path = cfg.tracking_dir() / f"{wid}.yaml"
+        if yaml_path.exists():
+            try:
+                return tracking.load_record(yaml_path).worktree_path
+            except Exception:
+                return None
+        return None
+
+    if raw_wt:
+        wt_id = _resolve_worktree_id(raw_wt)
+        wt_path = _wt_path(wt_id)
+    elif not session_id and not want_all:
+        # No explicit target -- infer the worktree from the current directory.
+        wt_id = _infer_worktree_id_from_cwd()
+        if not wt_id:
+            return _json_error(
+                "no --session-id/--worktree-id/--all and cwd is not a worktree",
+                exit_code=2,
+            )
+        wt_path = _wt_path(wt_id)
+
+    table = reclaim.build_process_table()
+    found = reclaim.resolve_bound_copilots(
+        session_id=session_id, worktree_id=wt_id,
+        worktree_path=wt_path, table=table,
+    )
+    if getattr(args, "bare_only", False):
+        found = [f for f in found if f["homing"] == "bare"]
+
+    # Safety guard: never reap the process subtree that contains this very
+    # command (it runs as a child of the orchestrating Copilot).
+    me = os.getpid()
+    targets: list[dict] = []
+    self_skipped: list[dict] = []
+    for f in found:
+        subtree = {f["pid"]} | reclaim.descendants_of(f["pid"], table)
+        (self_skipped if me in subtree else targets).append(f)
+
+    do_kill = getattr(args, "yes", False)
+    reaped: list[dict] = []
+    if do_kill and targets:
+        reaped = reclaim.reap_bound_copilots(targets, table=table)
+
+    payload = {
+        "ok": True,
+        "action": "reclaim" if do_kill else "dry-run",
+        "filters": {
+            "session_id": session_id, "worktree_id": wt_id,
+            "all": want_all, "bare_only": getattr(args, "bare_only", False),
+        },
+        "targets": targets,
+        "self_skipped": self_skipped,
+        "reaped": reaped,
+    }
+
+    if as_json:
+        _json_output(payload)
+        return 0
+
+    if not targets:
+        print("No live Copilot process matched (nothing to reclaim).")
+        for s in self_skipped:
+            print(f"  (skipped self: {s['session_id'][:8]} pid {s['pid']})")
+        return 0
+
+    verb = "Reclaimed" if do_kill else "Would reclaim"
+    print(f"{verb} {len(targets)} bound Copilot process(es):")
+    for t in targets:
+        wt = t["worktree_id"] or "?"
+        line = f"  {t['session_id'][:8]}  pid {t['pid']:<6} [{t['homing']}]  {wt}"
+        if do_kill:
+            r = next((x for x in reaped if x["pid"] == t["pid"]), None)
+            if r:
+                mark = "killed" if r["killed"] else "FAILED"
+                line += f"  -> {mark} (+{r['children_killed']} children)"
+        print(line)
+    for s in self_skipped:
+        print(f"  (skipped self: {s['session_id'][:8]} pid {s['pid']})")
+    if not do_kill:
+        print("\nDry run -- pass --yes to actually terminate these processes.")
+    return 0
+
+
 def cmd_restart(args: argparse.Namespace) -> int:
     """``restart <id>`` -- stop a worktree's interactive Copilot, keep the worktree.
 
@@ -9413,6 +9527,33 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true",
                    help="Emit a single JSON result object")
 
+    # reclaim (free the exact Copilot process bound to a session/worktree)
+    p = sub.add_parser(
+        "reclaim",
+        help="Free the exact Copilot process(es) bound to a session/worktree, "
+             "resolved from Copilot's own inuse.<pid>.lock claim -- precise, "
+             "never splashing onto a sibling session or a worktree that merely "
+             "shares a cwd. The primitive for BARE orphans (a Copilot launched "
+             "straight in a terminal, invisible to the wt-<id> mux fleet view). "
+             "Dry-run by default; pass --yes to terminate. Freeing an idle "
+             "orphan loses nothing -- the session stays resumable.")
+    p.add_argument("--session-id", default=None,
+                   help="Target one session (exact dir name or unambiguous "
+                        "prefix)")
+    p.add_argument("--worktree-id", default=None,
+                   help="Target every session bound to this worktree id "
+                        "(default: infer from cwd)")
+    p.add_argument("--all", action="store_true",
+                   help="Target every bound Copilot on the machine")
+    p.add_argument("--bare-only", action="store_true",
+                   help="Restrict to un-muxed (bare) orphans -- the common "
+                        "intent; leaves mux-homed sessions to restart/reap")
+    p.add_argument("--yes", action="store_true",
+                   help="Actually terminate the matched processes (without it, "
+                        "the command is a dry run that kills nothing)")
+    p.add_argument("--json", action="store_true",
+                   help="Emit a single JSON result object")
+
     # sync (fast-forward worktrees to the default branch, FF-only)
     p = sub.add_parser("sync", help="Fast-forward worktrees to the default branch")
     p.add_argument("--worktree-id", default=None,
@@ -10582,6 +10723,7 @@ COMMAND_MAP = {
     "cleanup": cmd_cleanup,
     "gc": cmd_gc,
     "reap-sessions": cmd_reap_sessions,
+    "reclaim": cmd_reclaim,
     "restart": cmd_restart,
     "sync": cmd_sync,
     "profiles": cmd_profiles,

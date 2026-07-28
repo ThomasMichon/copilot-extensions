@@ -19,7 +19,11 @@ import os
 import platform
 from pathlib import Path
 
-__all__ = ["processes_with_cwd_under", "terminate_processes_under"]
+__all__ = [
+    "processes_with_cwd_under",
+    "terminate_processes_under",
+    "terminate_pid",
+]
 
 
 def _norm(p: str) -> str:
@@ -219,6 +223,26 @@ def _terminate_windows(k32, pid: int) -> bool:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+def terminate_pid(pid: int) -> bool:
+    """Terminate a single process by pid. Best-effort; returns success.
+
+    A dependency-free, platform-aware wrapper over the same terminators used by
+    :func:`terminate_processes_under`, exposed for callers (e.g. the session
+    reaper) that have already resolved an *exact* pid and must not re-scan by
+    cwd. Never raises: an unopenable/already-gone pid returns ``False``.
+    """
+    try:
+        if platform.system() == "Windows":
+            try:
+                k32 = _win_kernel32()
+            except OSError:
+                return False
+            return _terminate_windows(k32, pid)
+        return _terminate_posix(pid)
+    except OSError:
+        return False
+
 
 def processes_with_cwd_under(
     root: str, *, exclude_pids: set[int] | None = None,
