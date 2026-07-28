@@ -1874,11 +1874,23 @@ class SessionManager:
                 # relay; the per-codespace token is minted by agent-codespaces).
                 # Guarded: if agent-codespaces isn't importable, the Host runs
                 # auth-light (fine for ACP + non-ADO turns).
+                #
+                # Source the port from the daemon's *actually-bound* relay
+                # (get_live_relay_port) rather than agent-codespaces' static
+                # config port, so the CS env + the persistent forward's ``-R``
+                # follow the live relay -- mirroring the mesh path (commit
+                # 8a8bd8f8) and fixing CodeSpace ADO auth when the relay isn't on
+                # the declared 9857 (dotfiles #489/#540 pt3). None -> the callee
+                # falls back to the config port.
                 relay_prelude = ""
                 relay_port = None
                 try:
                     from agent_codespaces.relay_launch import build_relay_launch_env
-                    relay_prelude, relay_port = build_relay_launch_env(cs_target["name"])
+
+                    from .relay_state import get_live_relay_port
+                    relay_prelude, relay_port = build_relay_launch_env(
+                        cs_target["name"], relay_port=get_live_relay_port()
+                    )
                 except Exception:
                     log.info(
                         "CodeSpace relay env unavailable for %s -- launching "
