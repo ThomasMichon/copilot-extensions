@@ -1,0 +1,351 @@
+#Requires -Version 7.0
+<#
+.SYNOPSIS
+    Self-healing launcher for `dtssh host` — exposes THIS machine's user-side
+    interactive sessions (agent-worktrees / psmux / copilot) over SSH-via-DevTunnel
+    so they can be joined and driven from other mesh boxes, and keeps that reach
+    alive.
+
+.DESCRIPTION
+    Runs as the interactive user (launched by a Startup-folder shortcut at logon,
+    or manually via `install-host.ps1 start`), NOT as a scheduled task or Windows
+    service. This is deliberate on two counts:
+
+      1. What we reach is user-side. The psmux sessions and the copilot agents
+         inside them only exist within the user's interactive logon and need the
+         user's own ADO/GitHub credentials. A headless/SYSTEM host would have
+         nothing to attach and none of the user's auth — so binding the host to
+         the interactive session is correct, not a limitation.
+      2. Corp policy blocks non-elevated scheduled-task creation on these Dev
+         Boxes, so a Startup-folder launcher is the reproducible no-admin
+         mechanism.
+
+    dtssh hosts a dedicated loopback sshd (default port 2222) that authenticates
+    THIS interactive Entra user, so a remote `ssh <alias>` lands as the same user
+    and can attach the running psmux server. `--persist` reuses a stable client
+    identity + tunnel + host key across logons so the client-side alias and pinned
+    host key stay valid.
+
+    SELF-HEALING WATCHDOG. Bare `dtssh host --persist` does NOT always recover when
+    the Azure relay silently drops the tunnel: the process keeps running and :2222
+    keeps listening locally, but `devtunnel show` reports **0 host connections**, so
+    remote clients can no longer reach the box. To fix that, this launcher runs
+    `dtssh host` as a MONITORED child and, every -HealthCheckSec, queries the
+    tunnel's relay host-connection count. If it reads 0 for -ConsecutiveFailures
+    checks in a row (or the child exits), it restarts the child. Because of
+    `--persist`, a restart REUSES the same tunnel id + host key (no rotation, no
+    client re-`discover` needed).
+
+    The tunnel id is resolved from dtssh's own persisted record
+    (`%LOCALAPPDATA%\dtssh\host\service-<alias>.tunnel`), falling back to matching
+    the alias against `devtunnel list` descriptions. If no tunnel id can be
+    resolved, the launcher degrades to process-only monitoring (restart on child
+    exit) so it never becomes worse than the old one-shot behavior.
+
+    HEADLESS. The `dtssh host` child is started with a detached, redirected
+    `Start-Process -WindowStyle Hidden` — NOT in-process (`& $dtssh`). Invoking a
+    long-running console app in-process from a `-WindowStyle Hidden` pwsh re-shows
+    the launcher's console, popping a visible dtssh/pwsh window at logon. Redirected
+    hidden Start-Process keeps the host fully headless.
+
+    Idempotent / single-instance: a named mutex + a running-host check ensure a
+    second launch at logon (or a manual start) never double-hosts.
+
+.PARAMETER Alias
+    Client-side alias to publish — the canonical machine name, i.e. the machine's
+    `machines.yaml` registry key (default: the lowercased COMPUTERNAME). Machines
+    whose COMPUTERNAME differs from their desired alias MUST pass `-Alias`
+    explicitly.
+
+.PARAMETER Port
+    Loopback port for the dedicated sshd (default 2222).
+
+.PARAMETER Tunnel
+    Optional explicit Dev Tunnel id to host (passed through to `dtssh host
+    --tunnel`). Normally omitted — `--persist` reuses the recorded tunnel.
+
+.PARAMETER User
+    Optional user override passed through to `dtssh host --user`.
+
+.PARAMETER HealthCheckSec
+    Seconds between relay health checks (default 120).
+
+.PARAMETER ConsecutiveFailures
+    Number of consecutive 0-host-connection checks before restarting the child
+    (default 2). With the default interval that heals a wedged tunnel in ~4 min.
+
+.PARAMETER GracePeriodSec
+    Seconds to wait after (re)starting `dtssh host` before the first health check
+    (default 45) — lets the relay register the host before we judge it.
+
+.PARAMETER NoMonitor
+    Legacy one-shot mode: start `dtssh host` hidden and exit, with no health
+    monitoring. Kept as a fallback.
+
+.NOTES
+    Requires: dtssh on PATH or at %LOCALAPPDATA%\dtssh\bin\dtssh.exe, and a
+    logged-in devtunnel session (`dtssh login`).
+#>
+param(
+    [string]$Alias = "$(($env:COMPUTERNAME).ToLowerInvariant())",
+    [int]$Port                = 2222,
+    [string]$Tunnel,
+    [string]$User,
+    [int]$HealthCheckSec      = 120,
+    [int]$ConsecutiveFailures = 2,
+    [int]$GracePeriodSec      = 45,
+    [switch]$NoMonitor
+)
+
+$ErrorActionPreference = 'Stop'
+
+# ── Paths, logging ───────────────────────────────────────────────────────
+
+$dtExe = if (Get-Command dtssh -ErrorAction SilentlyContinue) {
+    (Get-Command dtssh).Source
+} else {
+    Join-Path $env:LOCALAPPDATA 'dtssh\bin\dtssh.exe'
+}
+
+# Make sure dtssh + the no-admin OpenSSH sshd are resolvable even when launched
+# from a bare Startup pwsh that didn't inherit the prepped PATH.
+foreach ($d in @((Join-Path $env:LOCALAPPDATA 'dtssh\bin'), (Join-Path $env:LOCALAPPDATA 'OpenSSH-Win64'))) {
+    if ((Test-Path $d) -and ($env:Path -notlike "*$d*")) { $env:Path = "$d;$env:Path" }
+}
+
+$logDir   = Join-Path $env:LOCALAPPDATA 'agent-ssh-dtssh'
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$log      = Join-Path $logDir 'dtssh-host.log'
+$childOut = Join-Path $logDir 'dtssh-host.out.log'
+$childErr = Join-Path $logDir 'dtssh-host.err.log'
+$MaxLogSizeBytes = 5MB
+
+function Write-Log {
+    param([string]$m, [string]$Level = 'INFO')
+    $line = "$(Get-Date -Format o)  [$Level] $m"
+    try {
+        if ((Test-Path $log) -and (Get-Item $log).Length -gt $MaxLogSizeBytes) {
+            $archive = "$log.1"
+            if (Test-Path $archive) { Remove-Item $archive -Force -ErrorAction SilentlyContinue }
+            Rename-Item $log $archive -ErrorAction SilentlyContinue
+        }
+        Add-Content -LiteralPath $log -Value $line -ErrorAction SilentlyContinue
+    } catch { }
+}
+
+function Test-DevTunnelLogin {
+    # dtssh has no `login --status` subcommand; query the bundled devtunnel CLI.
+    param([Parameter(Mandatory)][string]$DtsshPath)
+    $devtunnel = Join-Path (Split-Path $DtsshPath -Parent) 'devtunnel.exe'
+    if (-not (Test-Path $devtunnel)) {
+        $cmd = Get-Command devtunnel -ErrorAction SilentlyContinue
+        if (-not $cmd) { return $false }
+        $devtunnel = $cmd.Source
+    }
+    try {
+        $json = & $devtunnel user show --json 2>$null | Out-String
+        return ($json -match '"status"\s*:\s*"Logged in"')
+    } catch { return $false }
+}
+
+if (-not (Test-Path $dtExe)) { Write-Log "ERROR: dtssh not found at $dtExe" 'ERROR'; exit 1 }
+
+# ── Scrub inherited terminal-multiplexer session vars (nesting guard) ─────
+# If this launcher was started from inside a psmux/tmux pane (e.g. a manual
+# `install-host.ps1 start` from the operator's own terminal), it inherits
+# TMUX / TMUX_PANE / PSMUX_SESSION[_NAME] pointing at that pane's session.
+# Those propagate down to the `dtssh host` child, its dedicated sshd, and thus
+# EVERY incoming SSH session -- which then believes it is nested inside a psmux
+# session, so `psmux new` / create-attach refuses ("sessions should be nested
+# with care, unset PSMUX_SESSION to force"). Clear them so hosted SSH sessions
+# start with a clean, un-nested multiplexer environment.
+$scrubbed = @()
+foreach ($v in @('TMUX', 'TMUX_PANE', 'PSMUX_SESSION', 'PSMUX_SESSION_NAME')) {
+    if (Test-Path "Env:$v") { Remove-Item "Env:$v" -ErrorAction SilentlyContinue; $scrubbed += $v }
+}
+if ($scrubbed.Count) { Write-Log "scrubbed inherited multiplexer session vars for hosted SSH sessions: $($scrubbed -join ', ')" }
+
+# ── Tunnel-id resolution (for relay health checks) ───────────────────────
+
+function Resolve-TunnelId {
+    <#
+      dtssh persists the tunnel id per alias at
+      %LOCALAPPDATA%\dtssh\host\service-<alias>.tunnel. Prefer that; fall back to
+      matching the alias against `devtunnel list` descriptions. Returns $null if
+      it cannot be determined (→ process-only monitoring).
+    #>
+    param([string]$AliasName)
+
+    $rec = Join-Path $env:LOCALAPPDATA "dtssh\host\service-$AliasName.tunnel"
+    if (Test-Path $rec) {
+        $id = (Get-Content $rec -Raw -ErrorAction SilentlyContinue).Trim()
+        if ($id) { return $id }
+    }
+
+    # Fallback: scan devtunnel list for a dtssh tunnel advertising this alias.
+    try {
+        $raw = & devtunnel list 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            foreach ($line in ($raw -split "`r?`n")) {
+                if ($line -match '^\s*(\S+\.usw2|\S+\.\w{3,4})\s' -and $line -match 'dtssh') {
+                    $cand = $Matches[1]
+                    $desc = & devtunnel show $cand 2>&1 | Out-String
+                    if ($desc -match "`"a`"\s*:\s*`"$([regex]::Escape($AliasName))`"") { return $cand }
+                }
+            }
+        }
+    } catch { }
+    return $null
+}
+
+function Get-HostConnections {
+    <# -1 = check failed/unknown, 0+ = relay host-connection count #>
+    param([string]$TunnelId)
+    try {
+        $raw = & devtunnel show $TunnelId 2>&1
+        if ($LASTEXITCODE -ne 0) { Write-Log "devtunnel show failed (exit $LASTEXITCODE): $raw" 'WARN'; return -1 }
+        $text = $raw -join "`n"
+        if ($text -match 'Host connections\s*:\s*(\d+)') { return [int]$Matches[1] }
+        Write-Log "could not parse host connections from devtunnel show" 'WARN'
+        return -1
+    } catch { Write-Log "health check exception: $_" 'WARN'; return -1 }
+}
+
+# ── dtssh host process management ────────────────────────────────────────
+
+function Get-RunningHostProc {
+    Get-CimInstance Win32_Process -Filter "Name='dtssh.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match '\bhost\b' } | Select-Object -First 1
+}
+
+function Clear-DedicatedSshd {
+    # dtssh spawns a dedicated child sshd on :$Port that it does NOT reap when the
+    # host process dies. An orphaned listener then blocks the next start (it can't
+    # bind :$Port, so the new host exits). Reap any sshd still listening on the
+    # dedicated loopback port. Scoped to :$Port + Name='sshd' so the SYSTEM sshd
+    # (:22) is never touched.
+    try {
+        $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+        foreach ($spid in @($listeners.OwningProcess | Sort-Object -Unique | Where-Object { $_ })) {
+            $sp = Get-Process -Id $spid -ErrorAction SilentlyContinue
+            if ($sp -and $sp.Name -eq 'sshd') {
+                Stop-Process -Id $spid -Force -ErrorAction SilentlyContinue
+                Write-Log "reaped orphaned dedicated sshd (pid $spid) on :$Port"
+            }
+        }
+    } catch { Write-Log "sshd reap failed: $_" 'WARN' }
+}
+
+function Start-HostProc {
+    <# Start `dtssh host --persist` as a hidden monitored child; return the Process. #>
+    Clear-DedicatedSshd   # free :$Port — a prior child may have orphaned its sshd
+    $dtArgs = @('host', '--persist', '--alias', $Alias, '--port', "$Port")
+    if ($Tunnel) { $dtArgs += @('--tunnel', $Tunnel) }
+    if ($User)   { $dtArgs += @('--user', $User) }
+    Write-Log "starting: dtssh $($dtArgs -join ' ')"
+    # Hidden + redirected stdio keeps the host fully headless (see .DESCRIPTION).
+    $proc = Start-Process -FilePath $dtExe -ArgumentList $dtArgs -WindowStyle Hidden -PassThru `
+        -RedirectStandardOutput $childOut -RedirectStandardError $childErr -ErrorAction Stop
+    Write-Log "dtssh host started hidden (pid $($proc.Id))"
+    return $proc
+}
+
+function Stop-HostProc {
+    <#
+      Stop a dtssh host process and the dedicated loopback sshd it spawned (so
+      :$Port is freed for the restart). The sshd reap is port-scoped and never
+      touches the separate Windows OpenSSH service sshd (:22).
+    #>
+    param([int]$HostPid)
+    if ($HostPid) {
+        try { Stop-Process -Id $HostPid -Force -ErrorAction SilentlyContinue; Write-Log "stopped dtssh host (pid $HostPid)" }
+        catch { Write-Log "failed to stop dtssh host pid ${HostPid}: $_" 'WARN' }
+    }
+    Clear-DedicatedSshd
+}
+
+# ── Devtunnel login sanity (non-fatal) ───────────────────────────────────
+
+if (-not (Test-DevTunnelLogin -DtsshPath $dtExe)) {
+    Write-Log "WARNING: no signed-in devtunnel session detected; run 'dtssh login'. Continuing anyway." 'WARN'
+}
+
+# ── Legacy one-shot mode (no monitoring) ─────────────────────────────────
+
+if ($NoMonitor) {
+    if (Get-RunningHostProc) { Write-Log "dtssh host already running; nothing to do (NoMonitor)"; exit 0 }
+    Write-Log "NoMonitor: hidden 'dtssh host --persist --alias $Alias --port $Port'"
+    $null = Start-HostProc
+    exit 0
+}
+
+# ── Single-instance (named mutex) ────────────────────────────────────────
+
+$mutexName = "Global\DtsshHostLauncher_$Alias"
+$mutex = $null
+try {
+    $created = $false
+    $mutex = [System.Threading.Mutex]::new($true, $mutexName, [ref]$created)
+    if (-not $created) {
+        if (-not $mutex.WaitOne(0)) {
+            Write-Log "another launcher instance already running (mutex $mutexName); exiting"
+            exit 0
+        }
+        Write-Log "acquired orphaned mutex — previous launcher crashed" 'WARN'
+    }
+} catch [System.Threading.AbandonedMutexException] {
+    Write-Log "acquired abandoned mutex — previous launcher crashed" 'WARN'
+}
+
+# ── Monitor loop ─────────────────────────────────────────────────────────
+
+$tunnelId = Resolve-TunnelId $Alias
+if ($tunnelId) { Write-Log "monitoring tunnel '$tunnelId' (alias $Alias): every ${HealthCheckSec}s, restart after $ConsecutiveFailures zero-connection checks" }
+else { Write-Log "could not resolve tunnel id for alias '$Alias' — process-only monitoring (restart on child exit)" 'WARN' }
+
+# Adopt an already-running host (e.g. from a prior boot) instead of duplicating.
+$hostProc = $null
+$existing = Get-RunningHostProc
+if ($existing) {
+    $hostProc = Get-Process -Id $existing.ProcessId -ErrorAction SilentlyContinue
+    if ($hostProc) { Write-Log "adopted existing dtssh host (pid $($hostProc.Id))" }
+}
+
+$failCount = 0
+try {
+    while ($true) {
+        if ($null -eq $hostProc -or $hostProc.HasExited) {
+            if ($hostProc -and $hostProc.HasExited) { Write-Log "dtssh host exited (code $($hostProc.ExitCode)); restarting" 'WARN' }
+            $hostProc = Start-HostProc
+            $failCount = 0
+            if (-not $tunnelId) { $tunnelId = Resolve-TunnelId $Alias; if ($tunnelId) { Write-Log "resolved tunnel id after start: $tunnelId" } }
+            Start-Sleep -Seconds $GracePeriodSec
+            continue
+        }
+
+        if ($tunnelId) {
+            $conns = Get-HostConnections $tunnelId
+            if ($conns -gt 0) {
+                if ($failCount -ne 0) { Write-Log "recovered: $conns host connection(s)" }
+                $failCount = 0
+            } elseif ($conns -eq 0) {
+                $failCount++
+                Write-Log "STALE: 0 host connections (consecutive $failCount/$ConsecutiveFailures)" 'WARN'
+                if ($failCount -ge $ConsecutiveFailures) {
+                    Write-Log "restarting dtssh host after $failCount stale checks" 'WARN'
+                    Stop-HostProc $hostProc.Id
+                    Start-Sleep -Seconds 3
+                    $hostProc = Start-HostProc
+                    $failCount = 0
+                    Start-Sleep -Seconds $GracePeriodSec
+                    continue
+                }
+            }
+            # $conns -eq -1: transient/unknown — do not count.
+        }
+
+        Start-Sleep -Seconds $HealthCheckSec
+    }
+} finally {
+    if ($mutex) { try { $mutex.ReleaseMutex() } catch { }; $mutex.Dispose() }
+}

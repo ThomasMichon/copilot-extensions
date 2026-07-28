@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ThomasMichon/copilot-extensions/plugins/agent-ssh/transports/dtssh/schema/config.schema.json",
+  "title": "agent-ssh dtssh transport normalized registry",
+  "description": "dtssh transport extension for agent-ssh's normalized registry. The live dtssh tunnel id is represented as machine.hostname because the public agent-ssh module contract exposes {hostname} to proxy_command templates.",
+  "allOf": [
+    {
+      "$ref": "https://github.com/ThomasMichon/copilot-extensions/plugins/agent-ssh/contract/registry-record.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "transport": { "const": "dtssh" },
+        "topology": { "const": "per-machine" },
+        "proxy_command_binary": {
+          "type": "string",
+          "description": "Optional absolute dtssh binary path. When omitted, module.yaml's proxy_binary_default ('dtssh') is used."
+        },
+        "machines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string", "description": "Canonical machine alias exposed to SSH clients, usually the machines.yaml key or dtssh.alias." },
+              "hostname": { "type": "string", "description": "LIVE dtssh tunnel id, resolved from dtssh discover/list rather than static registry fields." },
+              "user": { "type": "string", "description": "SSH user advertised by dtssh for this host." },
+              "port": { "type": ["integer", "string"], "description": "Loopback sshd port hosted through dtssh, usually 2222." },
+              "identity_file": { "type": "string", "description": "dtssh-managed client key for this alias." },
+              "options": {
+                "type": "object",
+                "properties": {
+                  "IdentitiesOnly": { "type": "string", "enum": ["yes", "no"] },
+                  "UserKnownHostsFile": { "type": "string" },
+                  "StrictHostKeyChecking": { "type": "string" },
+                  "ServerAliveInterval": { "type": ["integer", "string"] }
+                },
+                "additionalProperties": { "type": ["string", "number", "boolean"] }
+              }
+            },
+            "required": ["name", "hostname", "port", "identity_file"]
+          }
+        }
+      },
+      "required": ["transport", "machines"]
+    }
+  ]
+}

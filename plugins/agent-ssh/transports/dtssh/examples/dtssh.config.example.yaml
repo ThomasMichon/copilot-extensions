@@ -1,0 +1,17 @@
+# Placeholder-only example. Do not commit real tunnel ids, aliases, or account
+# names here; generate a concrete registry with deploy/emit-registry.*.
+transport: dtssh
+topology: per-machine
+proxy_command_binary: dtssh
+machines:
+  - name: <my-alias>-devbox
+    hostname: <live-dtssh-tunnel-id>.<region>
+    user: <my-alias>
+    port: 2222
+    identity_file: <dtssh-client-dir>/<my-alias>-devbox.key
+    via: direct
+    options:
+      IdentitiesOnly: "yes"
+      UserKnownHostsFile: <dtssh-client-dir>/known_hosts
+      StrictHostKeyChecking: "yes"
+      ServerAliveInterval: 30

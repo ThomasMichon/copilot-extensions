@@ -1,9 +1,23 @@
 # Transport-provider contract
 
-How a transport plugs into agent-ssh. A transport is its own plugin (in its
-audience's marketplace) that ships a `module.yaml` conforming to
-`contract/module.schema.json`. The agent-ssh core consumes it; the transport
-never re-implements profile rendering, coexistence, or verification.
+How a transport plugs into agent-ssh. A transport ships a `module.yaml`
+conforming to `contract/module.schema.json`; the agent-ssh core consumes it and
+the transport never re-implements profile rendering, coexistence, or
+verification.
+
+**Two homes, one contract.** A transport lives in-box or external on a single
+axis — **does it carry non-public provider/facility config?**
+
+- **In-box** (`transports/<module>/`, this plugin): self-contained transports with
+  no non-public config — `direct` (plain SSH) and `dtssh` (real-user reach over
+  the public Microsoft Dev Tunnels service; the operator's identity and live
+  tunnel ids are injected at deploy time, not baked in).
+- **External** (its own plugin in its audience's marketplace): transports needing
+  facility/provider config or credentials — e.g. Cloudflare (Access org / SSO /
+  facility hostnames). These keep their concrete values out of this public core
+  and register against this same contract.
+
+Either way, the recipe shape and the core's obligations are identical.
 
 ## Division of labor
 
@@ -69,11 +83,11 @@ binary into a transport-owned dir that it prepends to the **User PATH ahead of**
 copy the real exe out of `WinGet\Packages\…`). Prefer this even when a winget
 package exists, so the tool resolves shim-free both interactively and over SSH.
 
-> **Worked example — the `dtssh` transport.** dtssh shells out to `devtunnel`.
-> `winget install Microsoft.devtunnel` lands only the Links shim, so `dtssh
-> discover` fails when run over SSH. The dtssh `install-client` must instead drop
-> the standalone `devtunnel.exe` (`aka.ms/TunnelsCliDownload/win-x64`) into its
-> bin dir on PATH ahead of the shim. Reference implementation: the dotfiles
-> `services/dtssh-host/install.ps1` `Install-Devtunnel` step (the pre-graduation
-> home of this transport). The same caution applies to any Windows helper a
-> transport installs (e.g. `cloudflared` for the Cloudflare transport).
+> **Worked example — the in-box `dtssh` transport.** dtssh shells out to
+> `devtunnel`. `winget install Microsoft.devtunnel` lands only the Links shim, so
+> `dtssh discover` fails when run over SSH. The dtssh `install-client` instead
+> drops the standalone `devtunnel.exe` (`aka.ms/TunnelsCliDownload/win-x64`) into
+> its bin dir on PATH ahead of the shim. Reference implementation:
+> `transports/dtssh/scripts/install-client.ps1` (and `install-host.ps1` for the
+> host side). The same caution applies to any Windows helper a transport installs
+> (e.g. `cloudflared` for the external Cloudflare transport).
