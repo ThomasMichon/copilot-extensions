@@ -83,6 +83,17 @@ def env(tmp_path: Path, monkeypatch):
             encoding="utf-8",
         )
 
+    def deploy_running(name: str, version: str, pid: int = 4321):
+        rdir = home / f".{name}"
+        rdir.mkdir(parents=True, exist_ok=True)
+        (rdir / "running-version.json").write_text(
+            json.dumps({
+                "version": version, "pid": pid,
+                "started_at": "2026-01-01T00:00:00+00:00",
+            }),
+            encoding="utf-8",
+        )
+
     def write_gate(mapping: dict[str, list[str]]):
         services = [{"name": n, "deploy_machines": m} for n, m in mapping.items()]
         doc = {"repos": {"copilot-extensions": {"services": services}}}
@@ -94,6 +105,7 @@ def env(tmp_path: Path, monkeypatch):
     e.write_settings = write_settings
     e.install_payload = install_payload
     e.deploy_runtime = deploy_runtime
+    e.deploy_running = deploy_running
     e.write_gate = write_gate
     return e
 
@@ -308,3 +320,85 @@ def test_payload_before_runtime_ordering(env):
     phases = [u["phase"] for u in plan["updates"]
               if u["service"] == "context-handoff"]
     assert phases == ["payload", "runtime"]
+
+
+# ---------------------------------------------------------------------------
+# Running-version awareness (dotfiles #533): a live daemon can lag its installed
+# plugin even when the on-disk deploy-manifest already matches the payload.
+# ---------------------------------------------------------------------------
+
+def _runtime_updates(plan):
+    return [u for u in plan.get("updates", []) if u.get("phase") == "runtime"]
+
+
+def test_running_drift_emits_even_when_ondisk_matches(env, monkeypatch):
+    """On-disk == payload but the *live* process lags -> redeploy anyway."""
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"context-handoff@{MKT}": True})
+    env.install_payload("context-handoff", "2.0.0", scope="universal")
+    env.deploy_runtime("context-handoff", "2.0.0")   # on-disk looks current
+    env.deploy_running("context-handoff", "1.0.0")   # live process is stale
+    plan = reconcile.build_plan(env.repo, machine="anywhere", cache={}, save=False)
+    rt = _runtime_updates(plan)
+    assert len(rt) == 1
+    assert rt[0]["reason"] == "runtime-running-drift"
+    assert rt[0]["from_version"] == "1.0.0"
+    assert rt[0]["to_version"] == "2.0.0"
+
+
+def test_running_current_suppresses_ondisk_drift(env, monkeypatch):
+    """The live process is already current -> no redeploy even if on-disk is stale."""
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"context-handoff@{MKT}": True})
+    env.install_payload("context-handoff", "2.0.0", scope="universal")
+    env.deploy_runtime("context-handoff", "1.0.0")   # stale on-disk manifest
+    env.deploy_running("context-handoff", "2.0.0")   # live process is current
+    plan = reconcile.build_plan(env.repo, machine="anywhere", cache={}, save=False)
+    assert _runtime_updates(plan) == []
+
+
+def test_running_dead_pid_falls_back_to_ondisk(env, monkeypatch):
+    """A stale running-version.json (dead pid) is ignored -> on-disk decides."""
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: False)
+    env.write_settings({f"context-handoff@{MKT}": True})
+    env.install_payload("context-handoff", "2.0.0", scope="universal")
+    env.deploy_runtime("context-handoff", "2.0.0")   # on-disk current
+    env.deploy_running("context-handoff", "1.0.0")   # but pid is dead -> ignored
+    plan = reconcile.build_plan(env.repo, machine="anywhere", cache={}, save=False)
+    assert _runtime_updates(plan) == []
+
+
+def test_runtime_running_version_pid_and_content(tmp_path, monkeypatch):
+    """runtime_running_version: live pid -> version; dead/absent/malformed -> None."""
+    home = tmp_path / "home"
+    (home / ".svc").mkdir(parents=True)
+    monkeypatch.setattr(reconcile, "_home", lambda: home)
+    rvf = home / ".svc" / "running-version.json"
+
+    # absent
+    assert reconcile.runtime_running_version("svc") is None
+    # live pid -> version
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    rvf.write_text(json.dumps({"version": "9.9.9", "pid": 1234}), encoding="utf-8")
+    assert reconcile.runtime_running_version("svc") == "9.9.9"
+    # dead pid -> None
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: False)
+    assert reconcile.runtime_running_version("svc") is None
+    # malformed (no version) -> None even if alive
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    rvf.write_text(json.dumps({"pid": 1234}), encoding="utf-8")
+    assert reconcile.runtime_running_version("svc") is None
+
+
+def test_pid_alive_basic():
+    """_pid_alive is truthy for our own live pid, falsy for invalid inputs.
+
+    Runs the real per-OS branch (no platform pin): safe on both -- Windows uses
+    OpenProcess, POSIX uses os.kill(pid, 0)."""
+    import os
+
+    assert reconcile._pid_alive(os.getpid()) is True
+    assert reconcile._pid_alive(0) is False
+    assert reconcile._pid_alive(-1) is False
+    assert reconcile._pid_alive("nope") is False  # type: ignore[arg-type]
+
