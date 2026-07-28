@@ -425,3 +425,28 @@ def test_running_normalized_spelling_is_not_false_drift(env, monkeypatch):
     plan = reconcile.build_plan(env.repo, machine="anywhere", cache={}, save=False)
     assert _runtime_updates(plan) == []
 
+
+def test_idle_gated_restart_appends_defer_flag(tmp_path, monkeypatch):
+    """A plugin declaring idleGatedRestart carries -DeferRestartIfBusy into its
+    reconcile-driven install.ps1 update (Windows); absence -> no flag (#533 B)."""
+    monkeypatch.setattr(reconcile.platform, "system", lambda: "Windows")
+    pdir = tmp_path / "plug"
+    (pdir / "scripts").mkdir(parents=True)
+    (pdir / "scripts" / "install.ps1").write_text("", encoding="utf-8")
+
+    # No idleGatedRestart -> plain `update`, no defer flag.
+    (pdir / "plugin.json").write_text(
+        json.dumps({"name": "x", "version": "1"}), encoding="utf-8"
+    )
+    _, argv = reconcile.runtime_installer_argv(pdir)
+    assert "-DeferRestartIfBusy" not in argv
+    assert argv[:3] == ["pwsh", "-File", str(pdir / "scripts" / "install.ps1")]
+
+    # idleGatedRestart: true -> the flag is appended after `update`.
+    (pdir / "plugin.json").write_text(
+        json.dumps({"name": "x", "version": "1", "idleGatedRestart": True}),
+        encoding="utf-8",
+    )
+    _, argv = reconcile.runtime_installer_argv(pdir)
+    assert argv[-2:] == ["update", "-DeferRestartIfBusy"]
+

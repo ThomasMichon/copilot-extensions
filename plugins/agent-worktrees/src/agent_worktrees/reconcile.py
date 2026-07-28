@@ -258,20 +258,40 @@ def runtime_running_version(name: str, home: Path | None = None) -> str | None:
     return str(ver)
 
 
+def _idle_gated_restart(plugin_dir: Path) -> bool:
+    """Whether the plugin declares an idle-gated runtime restart (#533 Part B).
+
+    A daemon whose restart would interrupt live work sets
+    ``"idleGatedRestart": true`` in its plugin.json.
+    """
+    data = _read_json(plugin_dir / "plugin.json") or {}
+    return bool(data.get("idleGatedRestart"))
+
+
 def runtime_installer_argv(plugin_dir: Path) -> tuple[str, list[str]] | None:
     """Build the (display, argv) to deploy/update a plugin's runtime.
 
     Prefers ``scripts/install.{sh,ps1} update``; falls back to
     ``scripts/init.{sh,ps1}`` (idempotent bootstrap) for plugins that ship
     only an init script. Platform-appropriate interpreter is chosen.
+
+    A plugin whose daemon restart would interrupt live work declares
+    ``"idleGatedRestart": true`` in its plugin.json; the reconcile-driven
+    ``install.ps1 update`` then carries ``-DeferRestartIfBusy`` so a routine
+    version bump defers rather than collapsing a live dispatch (#533 Part B). An
+    operator's manual ``update`` never passes the flag, so its behavior is
+    unchanged.
     """
     scripts = plugin_dir / "scripts"
+    idle_gated = _idle_gated_restart(plugin_dir)
     if platform.system() == "Windows":
         order = (("install.ps1", True), ("init.ps1", False))
         for fname, has_update in order:
             p = scripts / fname
             if p.is_file():
                 argv = ["pwsh", "-File", str(p)] + (["update"] if has_update else [])
+                if has_update and idle_gated:
+                    argv.append("-DeferRestartIfBusy")
                 return " ".join(argv), argv
         return None
     order = (("install.sh", True), ("init.sh", False))

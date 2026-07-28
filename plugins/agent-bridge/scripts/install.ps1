@@ -38,7 +38,14 @@ param(
     # workstation accessed over SSH/RDP with no persistent interactive session.
     # Can also be set via AGENT_BRIDGE_NONINTERACTIVE=1. Never forced; an
     # existing non-interactive task is preserved across updates.
-    [switch]$NonInteractive
+    [switch]$NonInteractive,
+
+    # Idle-gate the update's daemon restart (dotfiles #533 Part B). Set by the
+    # launch-path reconciler for a routine version-bump redeploy: if the daemon
+    # is actively dispatching, DEFER the swap + emit a nudge instead of
+    # collapsing a live session. An operator's `update` (without this switch)
+    # keeps the force-drain-and-swap behavior.
+    [switch]$DeferRestartIfBusy
 )
 
 Set-StrictMode -Version 2.0
@@ -1280,6 +1287,28 @@ function Invoke-Update {
     # Stop running instance first -- a rebuild/repair of the venv (below) must
     # not race a live bridge holding python.exe open.
     $wasRunning = $null -ne (Get-RunningProcess)
+
+    # Idle-gate (dotfiles #533 Part B): on a reconcile-driven update
+    # (-DeferRestartIfBusy), never collapse a live dispatch for a routine version
+    # bump. If the daemon is actively dispatching, defer the whole swap + emit a
+    # loud nudge; the version drift stays visible (venv untouched) so the next
+    # reconcile retries when idle. exit 2 == busy; anything else (idle, or the
+    # probe failed / daemon unreachable) proceeds with the swap.
+    if ($DeferRestartIfBusy -and $wasRunning) {
+        $bridgeExe = Join-Path $VenvDir 'Scripts\agent-bridge.exe'
+        if (Test-Path $bridgeExe) {
+            & $bridgeExe service is-busy 2>&1 | Out-Null
+            # Exit 3 == actively dispatching (deliberately not 2, which argparse
+            # returns for an unknown subcommand -- so an OLDER installed CLI that
+            # predates `is-busy` falls through here and upgrades instead of
+            # deferring forever).
+            if ($LASTEXITCODE -eq 3) {
+                Write-Warn 'agent-bridge is actively dispatching -- deferring the runtime restart for this version bump.'
+                Write-Warn 'The daemon keeps serving the current build; run `agent-bridge service restart` (or re-run update) when idle to pick it up.'
+                return
+            }
+        }
+    }
 
     # Snapshot the current healthy venv so a failed install can roll back to the
     # previous-good runtime instead of leaving the service DOWN with a broken/
