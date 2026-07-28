@@ -72,24 +72,11 @@ def _client(args: argparse.Namespace, *, ensure: bool = True) -> DispatchClient:
 
 _AUTOSTART_ENV_OPT_OUT = "AGENT_DISPATCH_NO_AUTOSTART"
 
-# Coordinator launch entry. The coordinator is started as ``<python> -c
-# _SERVE_ENTRY`` rather than ``<python> -m agent_dispatch serve``: under a
-# **Windows venv** the ``-m`` runpy form re-execs the *base* interpreter, so the
-# coordinator ends up running under system Python as a child of an otherwise-idle
-# venv-launcher process -- doubling the process count and leaving the real server
-# dependent on the parent's inherited ``sys.path`` (system Python cannot import
-# ``agent_dispatch`` on its own). The ``-c`` direct-entry form runs ``serve``
-# **in-process** under the venv interpreter: one correct, single process. Neutral
-# on POSIX, where ``-m`` already runs in-process. Keep this in sync with the
-# generated ``serve-service.ps1`` launcher in ``scripts/install.ps1``.
-_SERVE_ENTRY = "import sys; from agent_dispatch.__main__ import main; sys.exit(main(['serve']))"
-
 
 def _spawn_coordinator_process() -> None:
     """Launch the local coordinator **detached** (best effort, no wait).
 
-    Runs the coordinator directly via ``<python> -c`` (see :data:`_SERVE_ENTRY`
-    for why a ``-c`` entry and not ``-m agent_dispatch serve``) under
+    Runs the coordinator directly as ``<python> -m agent_dispatch serve`` under
     ``DETACHED_PROCESS`` (Windows) / a new session (POSIX) so it outlives this CLI
     process -- a later session then finds it already up. It appends output to
     ``serve-service.log`` and honors ``service.env`` (token / host-port pins) for
@@ -100,6 +87,15 @@ def _spawn_coordinator_process() -> None:
     proved flaky on Windows (the wrapper exited before ``serve`` bound a listener,
     so no rendezvous was written and discovery never converged). Running the
     interpreter directly is the reliable path.
+
+    NB (Windows/venv): the venv ``python.exe`` is a launcher *stub* that re-execs
+    the *base* interpreter, so the running coordinator shows up as a
+    base-``python.exe`` **child** of an otherwise-idle venv-launcher process. That
+    child still runs with the venv environment (``sys.executable`` is the venv, via
+    ``__PYVENV_LAUNCHER__``) -- the pair is **expected and benign**, NOT a duplicate
+    coordinator. (``-c`` vs ``-m`` makes no difference; both exhibit it. Teardown
+    matches ``\bserve\b`` + ``agent_dispatch`` on the command line, so it reaps both
+    the stub and the base child.)
     """
     install_dir = Path.home() / ".agent-dispatch"
     if os.name == "nt":
@@ -137,7 +133,7 @@ def _spawn_coordinator_process() -> None:
     else:
         kwargs["start_new_session"] = True
     try:
-        subprocess.Popen([python, "-c", _SERVE_ENTRY], **kwargs)  # noqa: S603
+        subprocess.Popen([python, "-m", "agent_dispatch", "serve"], **kwargs)  # noqa: S603
     finally:
         if log is not subprocess.DEVNULL:
             try:
