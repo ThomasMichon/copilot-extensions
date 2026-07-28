@@ -498,6 +498,30 @@ function Save-ServiceMode {
     try { [System.IO.File]::WriteAllText($marker, $Mode, $utf8NoBom) } catch { }
 }
 
+function Set-ServiceEnvLoopback {
+    # Pin the coordinator to loopback (127.0.0.1) in service.env for interactive
+    # mode. Interactive mode targets the Windows-interactive user and ignores the
+    # WSL guest, so the NAT vEthernet(WSL) bind -- which needs an elevation-gated
+    # firewall rule to be reachable -- is unwanted. Loopback is reachable from the
+    # host session with NO elevation on both mirrored and NAT boxes (verified: a
+    # NAT box's coordinator was unreachable on its vEthernet IP without the
+    # firewall rule, but answered immediately on 127.0.0.1). Idempotent: drops any
+    # existing AGENT_DISPATCH_HOST line (active or commented) and appends one
+    # ACTIVE pin. The loopback-strip migration above is skipped in interactive
+    # mode so this pin survives re-runs.
+    $envFile = Join-Path $InstallDir 'service.env'
+    $pin = 'AGENT_DISPATCH_HOST=127.0.0.1'
+    $kept = @()
+    if (Test-Path $envFile) {
+        foreach ($l in @(Get-Content $envFile)) {
+            if ($l -notmatch '^\s*#?\s*AGENT_DISPATCH_HOST\s*=') { $kept += $l }
+        }
+    }
+    $kept += $pin
+    [System.IO.File]::WriteAllText($envFile, (($kept -join "`r`n") + "`r`n"), $utf8NoBom)
+    Write-Ok 'Coordinator pinned to loopback 127.0.0.1 (interactive mode: no firewall/elevation; WSL ignored)'
+}
+
 function Test-CoordinatorHealthy {
     # True when a coordinator already answers on its rendezvous endpoint. Used to
     # keep the non-elevated fallback idempotent (never start a second instance).
@@ -718,7 +742,7 @@ function Install-CoordinatorTask {
         $envLines = Get-Content $envFile
         $migrations = @()
         $newEnvLines = foreach ($envLine in $envLines) {
-            if ($envLine -match '^\s*AGENT_DISPATCH_HOST\s*=\s*127\.0\.0\.1\s*$') {
+            if ($envLine -match '^\s*AGENT_DISPATCH_HOST\s*=\s*127\.0\.0\.1\s*$' -and (Get-ServiceMode) -ne 'interactive') {
                 $migrations += 'AGENT_DISPATCH_HOST=127.0.0.1 (#2888)'
                 '# AGENT_DISPATCH_HOST=127.0.0.1  # migrated (#2888): now resolved dynamically at startup (mirrored -> 127.0.0.1; NAT -> vEthernet(WSL) IP)'
             } elseif ($envLine -match '^\s*AGENT_DISPATCH_PORT\s*=\s*9847\s*$') {
@@ -788,6 +812,7 @@ try {
     # interactive-service-mode design.
     if ((Get-ServiceMode) -eq 'interactive') {
         if ($Interactive) { Save-ServiceMode 'interactive' }
+        Set-ServiceEnvLoopback
         if ($haveSchedMod) {
             switch (Remove-CoordinatorTask) {
                 'removed' { Write-Step 'Removed prior boot Scheduled Task (interactive mode: logon auto-start owns startup)' }
