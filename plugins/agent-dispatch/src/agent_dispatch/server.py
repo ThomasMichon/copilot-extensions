@@ -105,6 +105,12 @@ def serve(cfg: Config | None = None) -> None:
     # and docs/patterns/local-endpoint-discovery.md). Additive: discovery-capable
     # clients resolve this dynamic port from the rendezvous file.
     advertise_endpoint(replace(cfg, port=bound_port))
+    # Record the *actually-running* version so the launch-path reconciler can tell
+    # a lagging live coordinator from an up-to-date on-disk manifest (dotfiles
+    # #533). Best-effort; a dead-pid/missing file is treated as absent by readers.
+    from .runtime_version import write_running_version
+
+    write_running_version()
     try:
         uvicorn.Server(uvicorn.Config(build_app(cfg), log_level="info")).run(sockets=[sock])
     finally:

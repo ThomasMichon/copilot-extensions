@@ -172,6 +172,64 @@ def runtime_deployed_version(name: str, home: Path | None = None) -> str | None:
     return str(v) if v else None
 
 
+def _pid_alive(pid: int) -> bool:
+    """Best-effort: is a process with ``pid`` currently running?
+
+    Used to treat a stale ``running-version.json`` (whose process has exited) as
+    absent. Errs toward *alive* on ambiguity (e.g. a permission error querying a
+    foreign process) so we never wrongly redeploy over a live daemon.
+    """
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+
+            process_query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
+            still_active = 259  # STILL_ACTIVE
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(process_query, False, pid)
+            if not handle:
+                return False
+            try:
+                code = ctypes.c_ulong()
+                ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+                return bool(ok) and code.value == still_active
+            finally:
+                kernel32.CloseHandle(handle)
+        except Exception:
+            return True  # ambiguous -> assume alive; never redeploy over a live daemon
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists but not ours
+    except OSError:
+        return False
+
+
+def runtime_running_version(name: str, home: Path | None = None) -> str | None:
+    """Version the *running* runtime reported on boot, if its pid is still alive.
+
+    Reads ``~/.<plugin>/running-version.json`` (``{version, pid, started_at}``),
+    which a runtime service writes on startup. Returns the version only when the
+    recorded pid is still alive; a missing file, malformed content, or a dead pid
+    all yield ``None`` so callers fall back to the on-disk deploy manifest. This is
+    the truthful "what is actually serving" signal -- a live daemon can lag its
+    installed plugin while the on-disk manifest already matches (dotfiles #533).
+    """
+    data = _read_json(runtime_dir(name, home) / "running-version.json")
+    if not data:
+        return None
+    ver = data.get("version")
+    pid = data.get("pid")
+    if not ver or not _pid_alive(pid):
+        return None
+    return str(ver)
+
+
 def runtime_installer_argv(plugin_dir: Path) -> tuple[str, list[str]] | None:
     """Build the (display, argv) to deploy/update a plugin's runtime.
 
@@ -359,16 +417,28 @@ def build_plan(
         # Runtime reconciliation (local, version-keyed, gated).
         scope = manifest_runtime_scope(pdir) or "none"
         if scope != "none" and runtime_allowed(scope, name, machine, gate):
-            rver = runtime_deployed_version(name)
+            rdep = runtime_deployed_version(name)
+            rrun = runtime_running_version(name)
+            # Prefer the *running* version when a live service reports one, so a
+            # daemon that lags its installed plugin is healed even though the
+            # on-disk manifest already matches the payload (dotfiles #533). No
+            # running-version.json (or a dead pid) -> fall back to on-disk.
+            rver = rrun if rrun is not None else rdep
             if pver is None or rver != pver:
                 built = runtime_installer_argv(pdir)
                 if built is not None:
                     cmd, argv = built
+                    if rver is None:
+                        reason = "runtime-missing"
+                    elif rrun is not None and rdep == pver:
+                        # on-disk looks current; the live process is the laggard.
+                        reason = "runtime-running-drift"
+                    else:
+                        reason = "runtime-version-drift"
                     updates.append({
                         "service": name,
                         "phase": "runtime",
-                        "reason": "runtime-missing" if rver is None
-                        else "runtime-version-drift",
+                        "reason": reason,
                         "from_version": rver,
                         "to_version": pver,
                         "scope": scope,
