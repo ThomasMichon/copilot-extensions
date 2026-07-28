@@ -12,8 +12,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
+import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 from . import __version__
@@ -59,9 +63,136 @@ def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
     return client_url(), (token or client_token())
 
 
-def _client(args: argparse.Namespace) -> DispatchClient:
+def _client(args: argparse.Namespace, *, ensure: bool = True) -> DispatchClient:
+    if ensure:
+        _ensure_local_coordinator(args)
     url, token = _resolve_client_target(args)
     return DispatchClient(url, token=token)
+
+
+_AUTOSTART_ENV_OPT_OUT = "AGENT_DISPATCH_NO_AUTOSTART"
+# DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+_WIN_DETACHED = 0x00000008 | 0x00000200 | 0x08000000
+
+
+def _spawn_coordinator_process() -> None:
+    """Launch the local coordinator **detached** (best effort, no wait).
+
+    Prefers the deployed launcher (``~/.agent-dispatch/serve-service.ps1`` on
+    Windows) so the coordinator loads ``service.env`` (token/pins) and logs to
+    ``serve-service.log``; otherwise runs ``<python> -m agent_dispatch serve``.
+    The child outlives this CLI process so a later session finds it already up.
+    """
+    quiet = dict(
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, close_fds=True,
+    )
+    if os.name == "nt":
+        launcher = Path.home() / ".agent-dispatch" / "serve-service.ps1"
+        if launcher.is_file():
+            subprocess.Popen(  # noqa: S603 -- fixed argv
+                [
+                    "conhost.exe", "--headless", "powershell.exe", "-NoProfile",
+                    "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+                    "-File", str(launcher),
+                ],
+                creationflags=_WIN_DETACHED, **quiet,
+            )
+            return
+        subprocess.Popen(  # noqa: S603 -- fixed argv
+            [sys.executable, "-m", "agent_dispatch", "serve"],
+            creationflags=_WIN_DETACHED, **quiet,
+        )
+        return
+    subprocess.Popen(  # noqa: S603 -- fixed argv
+        [sys.executable, "-m", "agent_dispatch", "serve"],
+        start_new_session=True, **quiet,
+    )
+
+
+def _lazy_start_coordinator(*, timeout: float = 20.0) -> bool:
+    """Start a local coordinator if none answers, then wait until it does.
+
+    Serialized across concurrent CLI processes via an exclusive lock file so a
+    burst of commands can't spawn a *herd* of coordinators (the SQLite queue is
+    single-writer). A non-starter waits for whoever holds the lock to bring one
+    up. Returns True if a live coordinator is available when we return.
+    """
+    from . import config
+
+    if config.has_live_local_coordinator():
+        return True
+    rd = config.run_dir()
+    try:
+        rd.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    lock = rd / "autostart.lock"
+    starter = False
+    try:
+        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        try:
+            os.write(fd, str(os.getpid()).encode())
+        finally:
+            os.close(fd)
+        starter = True
+    except FileExistsError:
+        # Another CLI is starting one. Steal a stale lock (older than the timeout
+        # with still no coordinator) so a crashed starter can't wedge autostart.
+        try:
+            if time.time() - lock.stat().st_mtime > timeout:
+                lock.unlink()
+                fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
+                starter = True
+        except OSError:
+            starter = False
+    try:
+        if starter and not config.has_live_local_coordinator():
+            print(
+                "agent-dispatch: no local coordinator answering; starting one...",
+                file=sys.stderr,
+            )
+            _spawn_coordinator_process()
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if config.has_live_local_coordinator():
+                return True
+            time.sleep(0.4)
+        return config.has_live_local_coordinator()
+    finally:
+        if starter:
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+
+
+def _ensure_local_coordinator(args: argparse.Namespace) -> None:
+    """Best-effort: ensure a local coordinator is reachable before a client
+    command runs, lazily starting one if not.
+
+    No-op for an explicit ``--url``/``--shared`` target (remote/operator choice),
+    on a WSL guest (the Windows host owns the coordinator), or when opted out via
+    ``AGENT_DISPATCH_NO_AUTOSTART``. Every failure is swallowed -- the command then
+    fails loudly on its own if the coordinator really is unreachable, so autostart
+    never converts a hard error into a silent hang.
+    """
+    if getattr(args, "url", None) or getattr(args, "shared", False):
+        return
+    if os.environ.get(_AUTOSTART_ENV_OPT_OUT):
+        return
+    try:
+        from .netinfo import is_wsl
+
+        if is_wsl():
+            return
+    except Exception:
+        pass
+    try:
+        _lazy_start_coordinator()
+    except Exception:
+        pass
 
 
 def _parse_affinity(pairs: list[str] | None) -> dict[str, str]:
@@ -1061,7 +1192,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         spawn_fn = make_embody_spawn(
             coordinator_url, verify_timeout=getattr(args, "verify_timeout", 0) or 0
         )
-    with _client(args) as c:
+    with _client(args, ensure=False) as c:
         sup = Supervisor(
             c,
             spawn_fn=spawn_fn,
@@ -1586,7 +1717,7 @@ def build_parser() -> argparse.ArgumentParser:
     rp.set_defaults(func=_cmd_reservations)
 
     p = sub.add_parser("health", help="check coordinator health")
-    p.set_defaults(func=lambda args: _emit(_client(args).health()))
+    p.set_defaults(func=lambda args: _emit(_client(args, ensure=False).health()))
 
     return parser
 

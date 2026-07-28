@@ -319,7 +319,7 @@ def test_cli_supervise_once(monkeypatch, q, client):
 
     t = q.create("work")
     spawn = _ok_spawn()
-    monkeypatch.setattr(m, "_client", lambda _args: client)
+    monkeypatch.setattr(m, "_client", lambda _args, **_kw: client)
     monkeypatch.setattr(m, "client_url", lambda: "http://coord")
     monkeypatch.setattr(m, "_scope_repo", lambda _args: TEST_REPO)
     monkeypatch.setattr(sup_mod, "make_embody_spawn", lambda _url, **_kw: spawn)
