@@ -73,6 +73,8 @@ async def _start_credential_relay(app: FastAPI):
         relay_server = builder.build()
         await relay_server.start()
         app.state.credential_relay = relay_server
+        from .relay_state import set_live_relay_port
+        set_live_relay_port(relay_server.port)
         log.info(
             "Credential relay started on port %d (%d sources)",
             relay_server.port, len(builder.sources),

@@ -135,6 +135,15 @@ This is how shared auth services such as the credential relay are made
 available to remote agents. The relay server runs automatically as part
 of agent-bridge, so hooks only describe how to forward it over SSH.
 
+> **The `git-credential-relay` port is sourced from the live relay.** For the
+> hook named `git-credential-relay`, agent-bridge overrides the declared
+> `local_port`/`remote_port` and `LC_GIT_CREDENTIAL_RELAY` with the port the
+> daemon's credential relay is **actually bound to** at spawn time. The declared
+> port is only a fallback (used when this daemon does not host a relay, e.g. an
+> elevated sub-daemon reusing the primary's). So the port need not be hardcoded
+> here — a machine may omit the hook entirely and, when this daemon hosts a
+> relay, the forward + env are synthesized from the live port automatically.
+
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Hook identifier for diagnostics and future extensibility |
@@ -163,8 +172,9 @@ machines:
 ```
 
 In this example, agent-bridge adds an SSH `-R` reverse port forward for
-`127.0.0.1:9857` and exports `LC_GIT_CREDENTIAL_RELAY=9857` for the
-remote agent process.
+`127.0.0.1:<relay-port>` and exports `LC_GIT_CREDENTIAL_RELAY=<relay-port>` for
+the remote agent process, where `<relay-port>` is the daemon's live relay port
+(the declared `9857` is the fallback).
 
 ### File Locations
 

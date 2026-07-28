@@ -26,8 +26,15 @@ from ssh_manager import SSHProfileSource, get_default_manager
 
 from .connect import ConnectError, ConnectStage, ConnectTracker
 from .procgroup import safe_killpg
+from .relay_state import get_live_relay_port
 
 log = logging.getLogger("agent-bridge")
+
+# Auth hook that reverse-forwards the credential relay over SSH. Its port is
+# sourced from the daemon's *live* relay (get_live_relay_port) rather than a
+# static machines.yaml value, so the relay's actually-bound port is honored and
+# machines.yaml need not hardcode the port per machine.
+RELAY_HOOK_NAME = "git-credential-relay"
 
 # Max bytes for a single newline-delimited ACP JSON-RPC frame read from an agent
 # subprocess's stdout. asyncio's StreamReader defaults to 64 KiB per line, which
@@ -642,6 +649,55 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
     return " && ".join(parts)
 
 
+def _effective_auth_hooks(hooks: list[dict]) -> list[dict]:
+    """Return auth hooks with the credential-relay port resolved to the live one.
+
+    The daemon's actually-bound relay port (``get_live_relay_port``) takes
+    precedence for the ``git-credential-relay`` hook -- both its ``-R`` forward
+    ports and its ``LC_GIT_CREDENTIAL_RELAY`` env -- so the live port is honored
+    and ``machines.yaml`` need not hardcode the port. Behavior is unchanged when
+    the live port equals the declared one (the common case).
+
+    Fallbacks:
+    - No live relay (e.g. an elevated sub-daemon reusing the primary's) but a
+      hook is declared -> use the declared port (legacy behavior preserved).
+    - No live relay and no declared hook -> emit nothing (never synthesize a
+      forward to a relay this daemon doesn't host).
+    - Live relay but no declared hook -> synthesize the hook from the live port,
+      so dispatch works even after ``machines.yaml`` drops the declaration.
+
+    Non-relay hooks pass through untouched.
+    """
+    live = get_live_relay_port()
+    result: list[dict] = []
+    saw_relay = False
+    for hook in hooks:
+        if hook.get("name") == RELAY_HOOK_NAME:
+            saw_relay = True
+            eff = live or hook.get("local_port")
+            if not eff:
+                result.append(hook)
+                continue
+            env = dict(hook.get("env") or {})
+            env["LC_GIT_CREDENTIAL_RELAY"] = str(eff)
+            result.append({
+                "name": RELAY_HOOK_NAME,
+                "local_port": eff,
+                "remote_port": eff,
+                "env": env,
+            })
+        else:
+            result.append(hook)
+    if not saw_relay and live:
+        result.append({
+            "name": RELAY_HOOK_NAME,
+            "local_port": live,
+            "remote_port": live,
+            "env": {"LC_GIT_CREDENTIAL_RELAY": str(live)},
+        })
+    return result
+
+
 async def spawn_ssh(
     target: SpawnTarget,
     *,
@@ -682,7 +738,7 @@ async def spawn_ssh(
     port_forwards: list[str] = []
     auth_env: dict[str, str] = {}
     dead_ports: list[int] = []
-    for hook in target.auth_hooks:
+    for hook in _effective_auth_hooks(target.auth_hooks):
         local_port = hook.get("local_port", 0)
         remote_port = hook.get("remote_port") or local_port
         hook_name = hook.get("name", "unknown")
