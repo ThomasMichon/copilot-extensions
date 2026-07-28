@@ -128,7 +128,23 @@ repos status [--tag T] [--class C] [--json]
 repos sync [--tag T] [--class C]
 repos account [list|set <owner> <login>|unset <owner>]   # org->login map
 repos account-for <owner|owner/name>                     # print resolved login
+repos allow-edits <repo> --reason <why> [--minutes N]    # break-glass grant
+repos allow-edits --list                                 # show active grants
+repos allow-edits <repo> --revoke                        # end a grant early
 ```
+
+### `allow-edits` -- break-glass edit grants
+
+Some repos are *agent-guarded*: a delegation policy (e.g. a harness's
+`cross-repo-guard` hook) blocks direct edits to their checkouts so work is
+routed to the repo's own in-repo agent. When a direct edit is genuinely
+unavoidable -- maintaining the target agent's OWN instructions/skills, or a
+direct action to unblock -- `allow-edits` records a **time-boxed, per-repo**
+grant (default 10m, max 60m; `--reason` required) that the guard reads to
+temporarily permit edits. The store lives at
+`~/.agent-worktrees/allow-edits.json` with epoch-millisecond timestamps so a
+JS/TS or shell hook can read it without unit ambiguity. It's a deliberate,
+logged last resort -- prefer delegation (`related resolve <repo>`).
 
 The **accounts catalog** is a sibling top-level command:
 

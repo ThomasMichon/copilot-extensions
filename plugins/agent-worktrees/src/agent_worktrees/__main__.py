@@ -7849,6 +7849,8 @@ def _repos_usage() -> None:
     print("  account [list|set <owner> <login>|unset <owner>]")
     print("                                      Decoupled owner->gh-login map (account_map)")
     print("  account-for <owner|owner/name>      Print the resolved gh login (exit 1 if none)")
+    print("  allow-edits <repo> --reason <why>   Break-glass: temporarily allow direct edits")
+    print("     [--minutes N] | --list | <repo> --revoke   to a guarded repo (default 10m, max 60m)")
     print()
     print("Repo classes:")
     print("  reference   read-only; resolve/clone/index only; never edited")
@@ -8292,6 +8294,93 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         output.err(f"Unknown 'repos account' subcommand: {acsub}")
         output.info("Usage: repos account [list|set <owner> <login>|unset <owner>]")
         return 1
+
+    if sub == "allow-edits":
+        from . import allow_edits
+
+        json_out = "--json" in rest
+        do_list = "--list" in rest
+        do_revoke = "--revoke" in rest
+        reason = None
+        minutes = None
+        positional: list[str] = []
+        i = 0
+        while i < len(rest):
+            tok = rest[i]
+            if tok == "--reason" and i + 1 < len(rest):
+                reason = rest[i + 1]
+                i += 2
+                continue
+            if tok == "--minutes" and i + 1 < len(rest):
+                minutes = rest[i + 1]
+                i += 2
+                continue
+            if tok in ("--json", "--list", "--revoke"):
+                i += 1
+                continue
+            positional.append(tok)
+            i += 1
+
+        # --list: show active grants (no repo needed)
+        if do_list:
+            grants = allow_edits.list_active()
+            if json_out:
+                _json_output({"grants": [
+                    {"repo": g.repo, "expires_at_ms": g.expires_at_ms,
+                     "remaining_seconds": g.remaining_seconds, "minutes": g.minutes,
+                     "reason": g.reason, "session": g.session}
+                    for g in grants
+                ]})
+            elif not grants:
+                print("No active edit grants.")
+            else:
+                output.header("Active edit grants (break-glass)")
+                for g in grants:
+                    mins = max(0, g.remaining_seconds // 60)
+                    print(f"  {g.repo:<25} {mins}m left   {g.reason}")
+            return 0
+
+        repo = positional[0] if positional else None
+        if not repo:
+            output.err(
+                "Usage: repos allow-edits <repo> --reason <why> [--minutes N] "
+                "| --list | <repo> --revoke")
+            return 1
+
+        # --revoke <repo>
+        if do_revoke:
+            removed = allow_edits.revoke(repo)
+            if json_out:
+                _json_output({"repo": repo, "revoked": removed})
+            elif removed:
+                output.ok(f"Revoked edit grant for '{repo}'.")
+            else:
+                output.info(f"No active edit grant for '{repo}'.")
+            return 0
+
+        # grant: requires a real reason
+        if not reason or len(reason.strip()) < allow_edits.MIN_REASON_LEN:
+            msg = (f"repos allow-edits requires --reason (>= {allow_edits.MIN_REASON_LEN} chars) "
+                   "explaining why delegation cannot be used.")
+            return _json_error(msg) if json_out else (output.err(msg) or 1)
+
+        entry = repos.find_repo(repo)
+        g = allow_edits.grant(repo, reason.strip(), minutes)
+        note = "" if entry else (
+            f" (note: '{repo}' is not in the repos registry — nothing may be guarding it)")
+        if json_out:
+            _json_output({"repo": repo, "expires_at_ms": g.expires_at_ms,
+                          "minutes": g.minutes, "reason": g.reason,
+                          "known": entry is not None})
+        else:
+            output.warn(
+                f"BREAK-GLASS: direct edits to '{repo}' allowed for "
+                f"{g.minutes}m — reason: {g.reason}")
+            expires = datetime.fromtimestamp(g.expires_at_ms / 1000).strftime("%H:%M:%S")
+            output.info(
+                f"Grant expires at {expires}. Prefer delegation for anything "
+                f"the repo's own agent could do.{note}")
+        return 0
 
     output.err(f"Unknown repos subcommand: {sub}")
     _repos_usage()
