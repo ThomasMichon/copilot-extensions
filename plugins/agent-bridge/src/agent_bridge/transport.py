@@ -659,12 +659,14 @@ def _effective_auth_hooks(hooks: list[dict]) -> list[dict]:
     the live port equals the declared one (the common case).
 
     Fallbacks:
-    - No live relay (e.g. an elevated sub-daemon reusing the primary's) but a
+    - No live port available at all (relay not up and nothing published) but a
       hook is declared -> use the declared port (legacy behavior preserved).
-    - No live relay and no declared hook -> emit nothing (never synthesize a
-      forward to a relay this daemon doesn't host).
-    - Live relay but no declared hook -> synthesize the hook from the live port,
-      so dispatch works even after ``machines.yaml`` drops the declaration.
+    - No live port and no declared hook -> emit nothing (never synthesize a
+      forward to a relay this daemon doesn't host and can't discover).
+    - Live port but no declared hook -> synthesize the hook from it, so dispatch
+      works even after ``machines.yaml`` drops the declaration. A sibling/elevated
+      sub-daemon that reuses the primary's relay discovers the primary's
+      *published* port here (see ``relay_state``), so it synthesizes too.
 
     Non-relay hooks pass through untouched.
     """
