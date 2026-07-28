@@ -139,10 +139,12 @@ of agent-bridge, so hooks only describe how to forward it over SSH.
 > hook named `git-credential-relay`, agent-bridge overrides the declared
 > `local_port`/`remote_port` and `LC_GIT_CREDENTIAL_RELAY` with the port the
 > daemon's credential relay is **actually bound to** at spawn time. The declared
-> port is only a fallback (used when this daemon does not host a relay, e.g. an
-> elevated sub-daemon reusing the primary's). So the port need not be hardcoded
-> here — a machine may omit the hook entirely and, when this daemon hosts a
-> relay, the forward + env are synthesized from the live port automatically.
+> port is only a fallback (used when no live port is available — neither hosted
+> nor discovered). So the port need not be hardcoded here — a machine may omit
+> the hook entirely and the forward + env are synthesized from the live port
+> automatically. A **sibling/elevated sub-daemon** that reuses the primary's
+> relay (and so hosts none itself) discovers the primary's live port from a file
+> the primary publishes to its config dir, so it too forwards the correct port.
 
 | Field | Required | Description |
 |-------|----------|-------------|
