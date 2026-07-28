@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -313,6 +314,84 @@ def test_unset_account_map(home: Path):
     assert repos.unset_account_map("GITHUB") is True
     assert repos.read_registry().account_map == {}
     assert repos.unset_account_map("github") is False
+
+
+# --- resolve_registration_account (#537) ------------------------------------
+
+_AUTHED = ("ThomasMichon", "tmichon_microsoft")
+
+
+def _fake_token(login):
+    return "tok" if login in _AUTHED else None
+
+
+def test_registration_org_owner_needs_clarify(home: Path):
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"):
+        r = repos.resolve_registration_account(
+            "https://github.com/github/copilot-agent-runtime.git")
+    assert r.source == "owner-fallback"
+    assert r.owner == "github"
+    assert r.needs_clarify is True
+
+
+def test_registration_personal_owner_is_clean(home: Path):
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"):
+        r = repos.resolve_registration_account(
+            "https://github.com/tmichon_microsoft/dotfiles.git")
+    assert r.login == "tmichon_microsoft"
+    assert r.needs_clarify is False
+
+
+def test_registration_account_map_resolves(home: Path):
+    repos.set_account_map("github", "ThomasMichon")
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"):
+        r = repos.resolve_registration_account(
+            "https://github.com/github/copilot-agent-runtime.git")
+    assert r.source == "account_map"
+    assert r.login == "ThomasMichon"
+    assert r.needs_clarify is False
+
+
+def test_registration_explicit_account_is_clean(home: Path):
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"):
+        r = repos.resolve_registration_account(
+            "https://github.com/github/x.git", "someacct")
+    assert r.source == "explicit"
+    assert r.needs_clarify is False
+
+
+def test_registration_sibling_explicit_resolves(home: Path):
+    repos.add_repo(
+        "sib", str(home / "sib"), repo_class="worktree",
+        remote="https://github.com/github/other.git",
+        account="ThomasMichon", plat="windows",
+    )
+    with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
+         patch("agent_worktrees.repos.shutil.which", return_value="gh"):
+        r = repos.resolve_registration_account(
+            "https://github.com/github/copilot-agent-runtime.git")
+    assert r.source == "sibling"
+    assert r.login == "ThomasMichon"
+    assert r.needs_clarify is False
+
+
+def test_registration_non_github_is_none(home: Path):
+    r = repos.resolve_registration_account(
+        "https://onedrive.visualstudio.com/x/_git/y")
+    assert r.source == "none"
+    assert r.needs_clarify is False
+
+
+def test_registration_no_gh_never_nags(home: Path):
+    # gh unavailable -> can't verify -> assume authenticated -> no clarify.
+    with patch("agent_worktrees.repos.shutil.which", return_value=None):
+        r = repos.resolve_registration_account(
+            "https://github.com/github/copilot-agent-runtime.git")
+    assert r.needs_clarify is False
 
 
 def test_account_for_github_slug_derives(home: Path):

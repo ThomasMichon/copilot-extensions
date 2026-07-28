@@ -6370,6 +6370,28 @@ def cmd_register(args: argparse.Namespace) -> int:
         wsl_path=wsl_path,
     )
 
+    # #537: adopting a repo is the moment to pin its gh account. If the account
+    # only resolves by falling back to an org owner that isn't an authenticated
+    # gh account, clarify it (prompt / persist an account_map entry) now rather
+    # than letting a later gh/CodeSpace op fail on an unusable derived login.
+    try:
+        _reg_remote = ""
+        _rr = subprocess.run(
+            ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if _rr.returncode == 0:
+            _reg_remote = _rr.stdout.strip()
+        if _reg_remote:
+            from . import repos as _repos_acct
+            _explicit = ""
+            _entry_acct = _repos_acct.find_repo(project)
+            if _entry_acct is not None:
+                _explicit = _entry_acct.account
+            _clarify_registration_account(_reg_remote, project, _explicit)
+    except Exception:
+        pass
+
     # PR-workflow git hooks -- an ADOPT concern. Adopting a repo (which you own)
     # is the one flow permitted to mutate its git: clear a stale core.hooksPath
     # that would shadow the managed shims, then inject/refresh them into the
@@ -7727,6 +7749,68 @@ def _repos_usage() -> None:
     print(f"  {project} repos sync --tag facility")
 
 
+def _clarify_registration_account(
+    remote: str, name: str, explicit_account: str = "",
+) -> None:
+    """Ensure a repo's gh account is unambiguous at register/adopt/add time.
+
+    When the account resolves only by falling back to a github *owner* that is
+    not an authenticated ``gh`` account (i.e. an org), interactively prompt for
+    the account and persist it as an ``account_map`` entry; headless, warn with
+    the exact remedy. No-op when the account already resolves (explicit / map /
+    sibling) or the remote is non-GitHub. See dotfiles #537.
+    """
+    from . import git_ops, repos
+
+    try:
+        res = repos.resolve_registration_account(remote, explicit_account)
+    except Exception:
+        return
+
+    if not res.needs_clarify:
+        # Surface a resolved non-owner account for transparency.
+        if res.source in ("account_map", "sibling") and res.login:
+            output.info(f"  account:  {res.login} (via {res.source})")
+        return
+
+    owner = res.owner or ""
+    accounts = git_ops.list_gh_accounts()
+    interactive = sys.stdin is not None and sys.stdin.isatty()
+
+    if not interactive:
+        remedy = f"repos account set {owner} <login>"
+        extra = f"  (authenticated: {', '.join(accounts)})" if accounts else ""
+        output.warn(
+            f"'{name}': owner '{owner}' is not an authenticated gh account "
+            f"(likely an org); its gh/CodeSpace ops would use an unusable "
+            f"derived login. Pin one: {remedy}{extra}"
+        )
+        return
+
+    output.warn(
+        f"Repo owner '{owner}' is not an authenticated gh account (likely an "
+        f"org). Which gh account should repos under '{owner}' use?"
+    )
+    for i, a in enumerate(accounts, 1):
+        print(f"    {i}) {a}")
+    if accounts:
+        print("    (enter a number or a login; blank to skip)")
+    try:
+        choice = input(f"  Account for '{owner}': ").strip()
+    except EOFError:
+        choice = ""
+    if not choice:
+        output.warn(
+            f"Skipped -- set later with: repos account set {owner} <login>"
+        )
+        return
+    if choice.isdigit() and accounts:
+        idx = int(choice) - 1
+        if 0 <= idx < len(accounts):
+            choice = accounts[idx]
+    repos.set_account_map(owner, choice)
+
+
 def cmd_repos_dispatch(argv: list[str]) -> int:
     """Route repos subcommands."""
     from . import repos
@@ -7863,6 +7947,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             account=account,
             agent=agent_flag,
         )
+        _clarify_registration_account(remote, name, account)
         return 0
 
     if sub == "remove":
@@ -7890,6 +7975,8 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             if idx + 1 < len(rest):
                 target = rest[idx + 1]
         entry = repos.clone_repo(remote, name=name, target=target)
+        if entry:
+            _clarify_registration_account(entry.remote, entry.name, entry.account)
         return 0 if entry else 1
 
     if sub == "srcroot":
