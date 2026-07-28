@@ -31,7 +31,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update-config', 'update')]
+    [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update-config', 'update', 'refresh-profiles')]
     [string]$Action = 'status',
 
     [string]$ProjectName,
@@ -1405,6 +1405,49 @@ function Build-TerminalFragment {
             }
         }
 
+        # Local Windows *shell* profile -- a plain login shell on this host, as
+        # opposed to the self·agent launch above. Gated by a 'shell' selection
+        # and deduplicated across projects: the local shell is project-
+        # independent, so multiple projects selecting it emit a single profile
+        # (dotfiles#564 -- local-host 'shell' rows used to be silently dropped).
+        if (Test-ProfileSelected $pSel $localDisplay 'Win' 'shell') {
+            $localWinShellGuid = New-StableGuid "shell-local-${Machine}-windows"
+            if (-not $emittedSshGuids.ContainsKey("{$localWinShellGuid}")) {
+                $profiles += @{
+                    guid              = "{$localWinShellGuid}"
+                    name              = $localDisplay
+                    commandline       = "pwsh.exe"
+                    icon              = $iconPath
+                    startingDirectory = "%USERPROFILE%"
+                    colorScheme       = 'Aperture Science'
+                    hidden            = $false
+                }
+                $emittedSshGuids["{$localWinShellGuid}"] = $true
+            }
+        }
+
+        # Local WSL *shell* profile -- a plain WSL login shell. Unlike the WSL
+        # *agent* profile it does not require a registry-recorded distro (bare
+        # `wsl.exe` opens the default distro), so a WSL/shell selection is
+        # honored even without wsl_info; the recorded distro is used when known.
+        # Deduplicated across projects (dotfiles#564).
+        if (Test-ProfileSelected $pSel $localDisplay 'WSL' 'shell') {
+            $localWslShellGuid = New-StableGuid "shell-local-${Machine}-wsl"
+            if (-not $emittedSshGuids.ContainsKey("{$localWslShellGuid}")) {
+                $wslShellCmd = if ($wslDistro) { "wsl.exe -d $wslDistro" } else { "wsl.exe" }
+                $profiles += @{
+                    guid              = "{$localWslShellGuid}"
+                    name              = "$localDisplay (WSL)"
+                    commandline       = $wslShellCmd
+                    icon              = $wslIconPath
+                    startingDirectory = "%USERPROFILE%"
+                    colorScheme       = 'Aperture Science'
+                    hidden            = $false
+                }
+                $emittedSshGuids["{$localWslShellGuid}"] = $true
+            }
+        }
+
         # SSH profiles from this project's machines.yaml
         if ($rosterData) {
             try {
@@ -2376,6 +2419,33 @@ switch ($Action) {
             Write-ServiceSkipped "Config is machine-generated - use -Force to regenerate"
             Write-Host "    Current: $configPath"
         }
+    }
+
+    'refresh-profiles' {
+        # Narrow, fast mirror path (dotfiles#563): regenerate ONLY the Windows
+        # Terminal fragment from the current terminal-profile selection. The
+        # profile mirror used to invoke the full 'update' (venv redeploy, pip
+        # install, binstub reconcile, psmux, instruction deploy -- ~60s+) under
+        # the caller's 30s subprocess timeout, so it was killed before the
+        # fragment (Deploy-Shortcuts) ever ran and the failure was swallowed.
+        # This action runs only the fragment regen; a non-zero exit lets the
+        # caller report mirror success honestly.
+        if (-not (Test-Path $BinDir)) {
+            Write-ServiceErr "Not installed - run 'install' first"
+            exit 1
+        }
+        $refreshMachine = Resolve-Machine
+        if ($HasProject) {
+            $configPath = Join-Path $ProjectDir 'config.yaml'
+            if (Test-Path $configPath) {
+                try {
+                    $cfgRaw = & $VenvPython -c "import yaml, json, sys; data = yaml.safe_load(open(sys.argv[1], encoding='utf-8')); print(json.dumps(data))" $configPath 2>$null
+                    $cfgObj = $cfgRaw | ConvertFrom-Json
+                    if ($cfgObj.machine) { $refreshMachine = $cfgObj.machine }
+                } catch { }
+            }
+        }
+        Deploy-Shortcuts -Machine $refreshMachine
     }
 
     'update' {

@@ -5803,13 +5803,14 @@ def _mirror_terminal_profiles() -> bool:
 
     Mirroring is a Windows-only concern today (Windows Terminal fragment via
     the installer); on WSL/Linux hosts it is a no-op (Tabby/Linux mirroring is
-    future work). Returns True when a mirror actually ran.
+    future work). Returns True only when a mirror actually ran **and succeeded**
+    (the fragment was regenerated) -- so ``profiles apply`` / the Picker report
+    ``mirrored`` honestly rather than masking a failed refresh (dotfiles#563).
     """
     if platform.system() != "Windows":
         return False
     try:
-        _refresh_terminal_profiles()
-        return True
+        return _refresh_terminal_profiles()
     except Exception:
         return False
 
@@ -6362,12 +6363,18 @@ def _resolve_terminal_install_script() -> Path | None:
     return None
 
 
-def _refresh_terminal_profiles() -> None:
-    """Re-run the install.ps1 terminal-profile generator if available.
+def _refresh_terminal_profiles() -> bool:
+    """Regenerate the Windows Terminal fragment from the saved selection.
 
-    After adopting a new project, the WT fragment needs to be regenerated to
-    include (or drop) the project's profile.  Delegates to the PowerShell
-    installer's Deploy-Shortcuts function via the ``update`` action.
+    Delegates to the PowerShell installer's narrow ``refresh-profiles`` action
+    (dotfiles#563), which regenerates **only** the WT fragment (Deploy-Shortcuts)
+    for the active project. The old path shelled the whole ``update`` action
+    (venv redeploy, pip install, binstub reconcile, psmux, instruction deploy --
+    ~60s+ in practice) under a 30s subprocess timeout, so it was killed long
+    before the fragment was rebuilt and the ``TimeoutExpired`` was swallowed into
+    a warning. Returns ``True`` only when the refresh actually succeeded (exit
+    code 0) so callers (the Picker Apply, ``profiles apply``) report mirror
+    status honestly instead of a blanket ``mirrored: true``.
 
     The installer script is resolved via :func:`_resolve_terminal_install_script`
     so an empty deploy-manifest ``plugin_source`` (marketplace install) no longer
@@ -6380,17 +6387,39 @@ def _refresh_terminal_profiles() -> None:
             "Could not refresh Windows Terminal profiles: install.ps1 not found "
             "(checked deploy-manifest plugin_source and installed-plugin dir)"
         )
-        return
+        return False
+
+    cmd = ["pwsh", "-NoProfile", "-File", str(install_script),
+           "refresh-profiles"]
+    # Pass the active project explicitly so the installer regenerates the
+    # fragment for the right context instead of relying on CWD/env inference in
+    # the subprocess: the mirror often runs from a worktree dir whose basename
+    # does not map to a project config.
+    try:
+        cmd += ["-ProjectName", cfg.project_name()]
+    except Exception:
+        pass
 
     try:
-        # The install script's "update" action regenerates terminal profiles.
-        subprocess.run(
-            ["pwsh", "-NoProfile", "-File", str(install_script), "update"],
-            capture_output=True, text=True, timeout=30,
+        # A fragment-only regen is fast; the generous timeout only guards a cold
+        # PowerShell start + YAML parse and (unlike the old 30s cap on the full
+        # ``update``) comfortably outlasts the work, so we never kill it
+        # mid-write.
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=180,
         )
-        output.ok("Windows Terminal profiles refreshed")
     except Exception:
         output.warn("Could not refresh Windows Terminal profiles")
+        return False
+
+    if result.returncode != 0:
+        output.warn(
+            "Could not refresh Windows Terminal profiles "
+            f"(installer exited {result.returncode})"
+        )
+        return False
+    output.ok("Windows Terminal profiles refreshed")
+    return True
 
 
 def cmd_register(args: argparse.Namespace) -> int:
