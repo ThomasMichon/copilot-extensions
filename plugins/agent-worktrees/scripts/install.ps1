@@ -333,6 +333,21 @@ function Resolve-Machine {
     if ($HostnameMap.ContainsKey($hostname)) {
         return $HostnameMap[$hostname]
     }
+    # Parity with the Python `detect_machine` (dotfiles#572): consult
+    # machines.yaml (keys, the explicit `hostname` field, and aliases) so a box
+    # whose COMPUTERNAME differs from its roster key still resolves to the
+    # canonical machine name instead of the raw hostname. Best-effort -- needs
+    # the venv and a repo dir with a machines.yaml; otherwise falls through to
+    # the lowercase-hostname default below.
+    if ($RepoDir -and $VenvPython -and (Test-Path $VenvPython)) {
+        try {
+            $detected = & $VenvPython -c "import sys; from agent_worktrees.config import detect_machine; print(detect_machine(sys.argv[1]))" $RepoDir 2>$null
+            if ($LASTEXITCODE -eq 0 -and $detected) {
+                $detected = "$detected".Trim()
+                if ($detected) { return $detected }
+            }
+        } catch { }
+    }
     # Unknown machine -- use lowercase hostname as machine name
     return $hostname.ToLower()
 }
@@ -1456,7 +1471,29 @@ function Build-TerminalFragment {
                     foreach ($mProp in $machinesData.machines.PSObject.Properties) {
                         $key = $mProp.Name
                         $mEntry = $mProp.Value
-                        if ($key -eq $Machine) { continue }  # skip self
+                        # Skip self robustly (dotfiles#572): a drifted/stale
+                        # checkout may key the local machine under an old name,
+                        # so match the local identity against the entry's key,
+                        # display_name, hostname AND its SSH aliases -- otherwise
+                        # the box emits SSH-to-itself profiles. Property access is
+                        # guarded: under Set-StrictMode -Latest, reading an absent
+                        # property (e.g. the optional `hostname`) throws.
+                        $entryIds = @($key)
+                        if ($mEntry.PSObject.Properties['display_name'] -and $mEntry.display_name) { $entryIds += $mEntry.display_name }
+                        if ($mEntry.PSObject.Properties['hostname'] -and $mEntry.hostname) { $entryIds += $mEntry.hostname }
+                        if ($mEntry.PSObject.Properties['ssh'] -and $mEntry.ssh -and $mEntry.ssh.PSObject.Properties['environments'] -and $mEntry.ssh.environments) {
+                            foreach ($e in $mEntry.ssh.environments) {
+                                if ($e.PSObject.Properties['alias'] -and $e.alias) { $entryIds += $e.alias }
+                            }
+                        }
+                        $isSelf = $false
+                        foreach ($lid in @($Machine, $env:COMPUTERNAME.ToLower())) {
+                            foreach ($eid in $entryIds) {
+                                if ($lid -and $eid -and ("$lid".ToLower() -eq "$eid".ToLower())) { $isSelf = $true; break }
+                            }
+                            if ($isSelf) { break }
+                        }
+                        if ($isSelf) { continue }  # skip self
                         if (-not $mEntry.ssh -or -not $mEntry.ssh.ready) { continue }
 
                         foreach ($sshEnv in $mEntry.ssh.environments) {
