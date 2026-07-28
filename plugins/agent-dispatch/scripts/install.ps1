@@ -56,6 +56,7 @@ param(
     [string]$InstallDir,
     [switch]$NoService,
     [switch]$NoSupervisor,
+    [switch]$Interactive,
     [switch]$Purge,
     [switch]$Force
 )
@@ -466,6 +467,37 @@ function Remove-CoordinatorTask {
     return 'removed'
 }
 
+function Get-ServiceMode {
+    # Resolve the service auto-start mode for this host:
+    #   'interactive' -- an interactive (RDP/console) logon is required before the
+    #                    box is usable (verified: dev6/cloud1/augloop1 must be
+    #                    RDP-kicked before SSH works). Such a logon ALWAYS precedes
+    #                    dispatch, so the non-elevated HKCU logon auto-start is the
+    #                    first-class coordinator service -- no elevated boot task.
+    #   'boot'        -- default: a true always-on boot service via an elevated S4U
+    #                    Scheduled Task (for a genuinely headless box). Degrades to
+    #                    the logon auto-start when registration needs elevation.
+    # Precedence: the -Interactive switch > the persisted marker > 'boot'.
+    if ($Interactive) { return 'interactive' }
+    $marker = Join-Path $InstallDir 'service-mode'
+    if (Test-Path $marker) {
+        try {
+            $m = ((Get-Content $marker -Raw -ErrorAction Stop)).Trim().ToLowerInvariant()
+            if ($m -eq 'interactive') { return 'interactive' }
+        } catch { }
+    }
+    return 'boot'
+}
+
+function Save-ServiceMode {
+    # Persist the service mode so a later `update` (which may not re-pass
+    # -Interactive) keeps installing the logon auto-start instead of reverting to
+    # the elevated boot task. Kept across a non-purge uninstall (it is config).
+    param([Parameter(Mandatory)][ValidateSet('interactive', 'boot')][string]$Mode)
+    $marker = Join-Path $InstallDir 'service-mode'
+    try { [System.IO.File]::WriteAllText($marker, $Mode, $utf8NoBom) } catch { }
+}
+
 function Test-CoordinatorHealthy {
     # True when a coordinator already answers on its rendezvous endpoint. Used to
     # keep the non-elevated fallback idempotent (never start a second instance).
@@ -580,15 +612,25 @@ function Remove-CoordinatorAutostart {
 }
 
 function Start-CoordinatorNonElevatedFallback {
-    # Registration of the coordinator Scheduled Task needs elevation on this host
-    # (e.g. a locked-down Azure Dev Box, where even an S4U/Interactive task in the
-    # root folder is Access-denied non-elevated -- verified on cloud1). Rather than
-    # leave a coordinator HOST with the runtime deployed but nothing running (the
-    # deploy-but-don't-start gap, dotfiles #525), start it NOW as a detached
-    # background process and register a non-elevated logon auto-start so it also
-    # survives reboot without elevation. This makes `dotfiles update` yield a
-    # RUNNING coordinator instead of a silent WARN + exit 0.
-    param([Parameter(Mandatory)][string]$Launcher)
+    # Non-elevated coordinator service: start it NOW as a detached background
+    # process (idempotent via a health probe) and register an HKCU Run key so it
+    # (re)starts at each interactive (RDP/console) logon.
+    #
+    # This is used two ways:
+    #   (a) FIRST-CLASS on an -Interactive host (`-Primary`): the box requires an
+    #       RDP/console logon before SSH works, so a logon always precedes
+    #       dispatch and the Run key always fires -- no boot task, no elevation.
+    #   (b) FALLBACK in boot mode when the elevated Scheduled Task can't be
+    #       registered (Access denied non-elevated; dotfiles #525).
+    # `-Primary` selects the interactive-mode messaging (intended service, not a
+    # degraded fallback) and suppresses the "needs elevation" warning.
+    param(
+        [Parameter(Mandatory)][string]$Launcher,
+        [switch]$Primary
+    )
+    if (-not $Primary) {
+        Write-Warn "Coordinator Scheduled Task not registered (registration needs elevation on this host)."
+    }
     $taskArgs = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`""
 
     if (Test-CoordinatorHealthy) {
@@ -607,9 +649,7 @@ function Start-CoordinatorNonElevatedFallback {
         }
     }
 
-    # Durable, non-elevated auto-start at each logon (HKCU Run). Covers reboot on
-    # a box that can't register a Scheduled Task; true boot-before-logon coverage
-    # still needs the elevated task.
+    # Durable, non-elevated auto-start at each logon (HKCU Run).
     try {
         $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
         New-ItemProperty -Path $runKey -Name $TaskName -Value "conhost.exe $taskArgs" `
@@ -619,7 +659,12 @@ function Start-CoordinatorNonElevatedFallback {
         Write-Warn "Could not register logon auto-start (HKCU Run): $($_.Exception.Message)"
     }
 
-    Write-Step "For a true always-on boot service, run ONCE elevated:  powershell -File `"$PSCommandPath`" -Action install"
+    if ($Primary) {
+        Write-Ok 'Coordinator installed as an interactive logon service (no elevation; starts at each RDP/console logon)'
+    } else {
+        Write-Step 'This box looks interactive-required. Re-run with -Interactive to make the logon auto-start the intended mode (silences the warning above).'
+        Write-Step "Or for a true boot service, run ONCE elevated:  powershell -File `"$PSCommandPath`" -Action install"
+    }
 }
 
 function Install-CoordinatorTask {
@@ -639,7 +684,8 @@ function Install-CoordinatorTask {
         return
     }
     if ($env:OS -ne 'Windows_NT') { return }
-    if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
+    $haveSchedMod = [bool](Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)
+    if (-not $haveSchedMod -and (Get-ServiceMode) -ne 'interactive') {
         Write-Skip 'ScheduledTasks module unavailable -- skipping service (run: agent-dispatch serve)'
         return
     }
@@ -734,6 +780,24 @@ try {
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
 
+    # -- Interactive-required host: the logon auto-start IS the service ----------
+    # On a box that requires an RDP/console logon before it is usable (and where
+    # Task Scheduler registration is admin-gated), an interactive logon always
+    # precedes dispatch, so the non-elevated HKCU logon auto-start is the
+    # first-class coordinator service -- no boot task, no elevation. See the
+    # interactive-service-mode design.
+    if ((Get-ServiceMode) -eq 'interactive') {
+        if ($Interactive) { Save-ServiceMode 'interactive' }
+        if ($haveSchedMod) {
+            switch (Remove-CoordinatorTask) {
+                'removed' { Write-Step 'Removed prior boot Scheduled Task (interactive mode: logon auto-start owns startup)' }
+                default   { }
+            }
+        }
+        Start-CoordinatorNonElevatedFallback -Launcher $launcher -Primary
+        return
+    }
+
     # Use conhost --headless to prevent Windows Terminal from capturing the
     # task's powershell as a visible window/tab when Terminal is the default
     # terminal app. -WindowStyle Hidden alone is ignored by Windows Terminal, so
@@ -799,7 +863,6 @@ try {
             Write-Step "Removed the non-elevated logon fallback -- the Scheduled Task supersedes it"
         }
     } else {
-        Write-Warn "Coordinator Scheduled Task not registered (registration needs elevation on this host)."
         Start-CoordinatorNonElevatedFallback -Launcher $launcher
     }
 }
@@ -841,6 +904,40 @@ function Remove-SupervisorTask {
     return 'removed'
 }
 
+function Remove-SupervisorAutostart {
+    # Remove the supervisor's non-elevated logon auto-start (HKCU Run) if present.
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    try {
+        if (Get-ItemProperty -Path $runKey -Name $SupervisorTaskName -ErrorAction SilentlyContinue) {
+            Remove-ItemProperty -Path $runKey -Name $SupervisorTaskName -ErrorAction SilentlyContinue
+            return $true
+        }
+    } catch { }
+    return $false
+}
+
+function Install-SupervisorLogonAutostart {
+    # Interactive-mode supervisor: start it now (detached) and register an HKCU
+    # Run key so it (re)starts at each interactive logon. An interactive logon
+    # station is actually the RIGHT fit for the supervisor (it spawns embody CLI
+    # sessions that need one), so this is a clean first-class path, not a fallback.
+    param([Parameter(Mandatory)][string]$Launcher)
+    $taskArgs = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`""
+    try {
+        Start-Process -FilePath 'conhost.exe' -ArgumentList $taskArgs -WindowStyle Hidden | Out-Null
+    } catch {
+        Write-Warn "Could not start supervisor process: $($_.Exception.Message)"
+    }
+    try {
+        $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+        New-ItemProperty -Path $runKey -Name $SupervisorTaskName -Value "conhost.exe $taskArgs" `
+            -PropertyType String -Force | Out-Null
+        Write-Ok "Embody supervisor installed as an interactive logon service (HKCU Run '$SupervisorTaskName'; no elevation)"
+    } catch {
+        Write-Warn "Could not register supervisor logon auto-start (HKCU Run): $($_.Exception.Message)"
+    }
+}
+
 function Install-SupervisorTask {
     # Install only where the full coordinator lives (a client-only host has no
     # local coordinator for the supervisor to talk to). -NoSupervisor opts a full
@@ -852,6 +949,7 @@ function Install-SupervisorTask {
             'blocked' { Write-Skip 'Supervisor task present but not removable without elevation -- run elevated to remove it' }
             default   { Write-Skip 'Embody supervisor skipped (client-only / -NoSupervisor)' }
         }
+        if (Remove-SupervisorAutostart) { Write-Ok 'Removed supervisor logon auto-start (HKCU Run)' }
         return
     }
     if ($env:OS -ne 'Windows_NT') { return }
@@ -947,6 +1045,24 @@ try {
 & '$VenvPython' -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
+
+    # Interactive-required host: use the non-elevated logon auto-start (HKCU Run)
+    # instead of a Scheduled Task -- registration is admin-gated here, and an
+    # interactive station is the right fit for the supervisor anyway. Only when a
+    # label opt-in is configured (else stay inert, like the disabled-task case).
+    if ((Get-ServiceMode) -eq 'interactive') {
+        switch (Remove-SupervisorTask) {
+            'removed' { Write-Step 'Removed prior supervisor Scheduled Task (interactive mode)' }
+            default   { }
+        }
+        if (Test-SupervisorLabelsConfigured) {
+            Install-SupervisorLogonAutostart -Launcher $launcher
+        } else {
+            if (Remove-SupervisorAutostart) { Write-Step 'Removed supervisor logon auto-start (no opt-in label)' }
+            Write-Ok "Embody supervisor INERT (no opt-in label). Set AGENT_DISPATCH_SUPERVISE_LABELS in $envFile + re-run update to enable."
+        }
+        return
+    }
 
     $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
         -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`""
@@ -1141,7 +1257,7 @@ function Invoke-Start {
         # failing (the client is installed; #3602).
         $launcher = Join-Path $InstallDir 'serve-service.ps1'
         if (Test-Path $launcher) {
-            Start-CoordinatorNonElevatedFallback -Launcher $launcher
+            Start-CoordinatorNonElevatedFallback -Launcher $launcher -Primary:((Get-ServiceMode) -eq 'interactive')
         } else {
             Write-Fail "No coordinator task or launcher installed -- run: install.ps1 -Action install"; exit 1
         }
@@ -1188,11 +1304,18 @@ function Invoke-Status {
     } else {
         Write-Skip 'No deploy manifest -- not installed?'
     }
+    Write-Ok "Service mode: $(Get-ServiceMode)"
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($task) {
         Write-Ok "Coordinator task: $($task.State)"
     } else {
-        Write-Skip 'No coordinator task (client-only host)'
+        $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+        $auto = Get-ItemProperty -Path $runKey -Name $TaskName -ErrorAction SilentlyContinue
+        if ($auto) {
+            Write-Ok 'Coordinator: interactive logon auto-start (HKCU Run; no boot task)'
+        } else {
+            Write-Skip 'No coordinator task (client-only host)'
+        }
     }
     $sup = Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
     if ($sup) {
@@ -1202,7 +1325,13 @@ function Invoke-Status {
             Write-Ok "Embody supervisor task: $($sup.State) (INERT: no opt-in label set)"
         }
     } else {
-        Write-Skip 'No embody supervisor task (client-only host, -NoSupervisor, or unavailable)'
+        $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+        $supAuto = Get-ItemProperty -Path $runKey -Name $SupervisorTaskName -ErrorAction SilentlyContinue
+        if ($supAuto) {
+            Write-Ok 'Embody supervisor: interactive logon auto-start (HKCU Run)'
+        } else {
+            Write-Skip 'No embody supervisor task (client-only host, -NoSupervisor, inert, or unavailable)'
+        }
     }
 }
 
@@ -1219,6 +1348,7 @@ function Invoke-Uninstall {
         Write-Ok 'Coordinator task removed'
     }
     if (Remove-CoordinatorAutostart) { Write-Ok 'Coordinator logon auto-start (HKCU Run) removed' }
+    if (Remove-SupervisorAutostart) { Write-Ok 'Embody supervisor logon auto-start (HKCU Run) removed' }
     if (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue) {
         $fwRule = 'agent-dispatch coordinator (WSL)'
         if (Get-NetFirewallRule -DisplayName $fwRule -ErrorAction SilentlyContinue) {

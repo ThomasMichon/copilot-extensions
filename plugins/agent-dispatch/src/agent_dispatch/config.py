@@ -21,6 +21,9 @@ lone dev box or against a designated coordinator host on a shared network:
 - ``AGENT_DISPATCH_SHARED_TOKEN`` -- bearer token for the shared coordinator
   (independent of the local ``AGENT_DISPATCH_TOKEN``; per-client, as the shared
   endpoint is exposed only through the gateway/secured mesh).
+- ``AGENT_DISPATCH_NO_AUTOSTART`` -- set to any value to disable the CLI's
+  lazy on-demand coordinator start (a client command that finds no live local
+  coordinator otherwise starts one detached, then proceeds).
 """
 
 from __future__ import annotations
@@ -161,6 +164,16 @@ def _discover_local_endpoint():
         return rendezvous.resolve(run_dir(), override=override, probe=rendezvous.connect_probe)
     except rendezvous.EndpointUnavailable:
         return None
+
+
+def has_live_local_coordinator() -> bool:
+    """True if a local coordinator is discoverable **and** answering its probe.
+
+    Wraps the local discovery ladder (``AGENT_DISPATCH_ENDPOINT`` -> the rendezvous
+    file, probed for a live listener). The CLI's lazy-start uses this to decide
+    whether it must spawn a local coordinator before a client command runs.
+    """
+    return _discover_local_endpoint() is not None
 
 
 def client_url() -> str:
