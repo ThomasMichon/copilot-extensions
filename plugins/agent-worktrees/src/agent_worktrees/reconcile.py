@@ -87,6 +87,34 @@ def _copilot_home() -> Path:
     return _home() / ".copilot"
 
 
+def _versions_equal(a: str | None, b: str | None) -> bool:
+    """Compare two version strings for PEP 440 equality, tolerating spelling.
+
+    A runtime service reports its version via ``importlib.metadata`` (PEP 440
+    *normalized*, e.g. ``0.4.0.dev176``) while a ``plugin.json`` payload version
+    keeps the source spelling (``0.4.0-dev176``). These are the **same** version,
+    so a raw string compare would wrongly see drift and redeploy on every launch
+    (found deploying agent-bridge's running-version marker, dotfiles #533). Fast
+    path on exact match; then ``packaging`` semantics when available; else a
+    separator-canonical fallback (``-``/``_`` -> ``.``) so this needs no hard dep.
+    """
+    if a == b:
+        return True
+    if not a or not b:
+        return False
+    try:
+        from packaging.version import InvalidVersion, Version
+        try:
+            return Version(a) == Version(b)
+        except InvalidVersion:
+            pass
+    except ImportError:
+        pass
+    na = a.strip().lower().replace("-", ".").replace("_", ".")
+    nb = b.strip().lower().replace("-", ".").replace("_", ".")
+    return na == nb
+
+
 # --------------------------------------------------------------------------
 # Repo settings -> enabled copilot-extensions plugins
 # --------------------------------------------------------------------------
@@ -424,13 +452,13 @@ def build_plan(
             # on-disk manifest already matches the payload (dotfiles #533). No
             # running-version.json (or a dead pid) -> fall back to on-disk.
             rver = rrun if rrun is not None else rdep
-            if pver is None or rver != pver:
+            if pver is None or not _versions_equal(rver, pver):
                 built = runtime_installer_argv(pdir)
                 if built is not None:
                     cmd, argv = built
                     if rver is None:
                         reason = "runtime-missing"
-                    elif rrun is not None and rdep == pver:
+                    elif rrun is not None and _versions_equal(rdep, pver):
                         # on-disk looks current; the live process is the laggard.
                         reason = "runtime-running-drift"
                     else:
