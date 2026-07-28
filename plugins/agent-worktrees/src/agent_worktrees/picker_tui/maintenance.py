@@ -67,6 +67,10 @@ def _result_ok(op, res):
         # stopped a live session (method graceful/hard) or found nothing running
         # (method none) -- either way the worktree is now free to re-Open.
         return bool(res.get("ok"))
+    if op == "reclaim":
+        # reclaim_one's ``ok`` is authoritative: True when every targeted bound
+        # process was terminated (or there was nothing bound to reclaim).
+        return bool(res.get("ok"))
     if op == "finalize":
         # validate_and_finalize / `finalize --json`: ``success`` is authoritative
         # (False when content is unpushed, but the picker only offers Finalize on
@@ -116,6 +120,8 @@ def _make_task(op, wt_id, machine, env, is_local, *, include_unused,
             if op == "restart":
                 from .. import sessions
                 return sessions.restart_worktree_copilot(wt_id)
+            if op == "reclaim":
+                return cli.reclaim_one(wt_id)
             if op == "finalize":
                 return cli.finalize_one(wt_id)
             return cli.sync_one(wt_id)

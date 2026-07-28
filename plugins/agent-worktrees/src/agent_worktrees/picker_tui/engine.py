@@ -345,6 +345,13 @@ ACTION_DESC = {
     "Stop": "Stop this worktree's Mux/Copilot wrapper now (graceful "
             "double-Ctrl-C, then a hard mux kill) so a following Open "
             "starts a fresh TMux/PSMux + Copilot.",
+    "Bare resume": "Two-step restore: create this worktree's Mux, but launch "
+                   "Copilot in HOME with no --resume (dodges a CLI bug that "
+                   "fails to start in a repo/worktree cwd). Finish with a "
+                   "manual /resume <id> (id shown above).",
+    "Reclaim": "Kill the exact Copilot process holding this session's lock "
+               "(bare orphans a mux Stop cannot reach), so it can be re-Opened "
+               "or Bare-resumed cleanly.",
     "Jump to host": "Switch to this worktree's host machine tab and highlight "
                     "it (reveals hidden bridge/system worktrees).",
     "Jump to caller": "Jump to the worktree that requested this bridge worktree "
@@ -3536,6 +3543,25 @@ class PickerScreen(Widget):
             return
         self._run_op_progress("Stop", "restart", live, armed=True)
 
+    def _start_reclaim(self, recs):
+        """Reclaim the bound Copilot process(es) of one or more worktrees (the
+        two-step-restore 'Reclaim' action).
+
+        Runs the same maintenance progress path as Stop, but drives the
+        ``reclaim`` op (kill the exact Copilot process holding the session's
+        ``inuse.<pid>.lock``, bare orphans only) instead of a mux quit. Offered
+        whenever a live lock exists -- including a **bare** Copilot with no mux
+        session, which Stop cannot touch. After it finishes the touched machines
+        reload, so the row re-renders without the stale bound process -- ready
+        for a fresh Open / Bare resume.
+        """
+        recs = [recs] if isinstance(recs, dict) else list(recs)
+        live = [r for r in recs if r.get("session_lock_live")]
+        if not live:
+            self.debug = "no bound session process to reclaim"
+            return
+        self._run_op_progress("Reclaim", "reclaim", live, armed=True)
+
     def _start_finalize(self, recs):
         """Finalize one or more conversation-only / unused worktrees (the
         'Finalize' action -- solo or aggregate, #2258 follow-up).
@@ -3635,11 +3661,14 @@ class PickerScreen(Widget):
         self.app.result = decision
         self.app.exit()
 
-    def _resume_decision(self, rec, no_mux=False):
+    def _resume_decision(self, rec, no_mux=False, bare_resume=False):
         """Build the resume decision for a worktree row/submenu selection.
 
         ``no_mux`` (the Open sub-menu toggle, #1343) launches directly without
-        the PSMux/TMux wrapper.
+        the PSMux/TMux wrapper. ``bare_resume`` (two-step restore) creates the
+        worktree's mux but launches Copilot in HOME with no --resume, so a CLI
+        bug that fails to start in a repo/worktree cwd is dodged; the operator
+        finishes with a manual ``/resume <id>``.
         """
         raw = rec.get("raw") or {}
         m, e = rec.get("machine"), rec.get("env")
@@ -3652,8 +3681,13 @@ class PickerScreen(Widget):
             "title": rec.get("title"),
             "is_local": (m, e) == self.src.LOCAL,
         }
+        opts = {}
         if no_mux:
-            decision["options"] = {"no_mux": True}
+            opts["no_mux"] = True
+        if bare_resume:
+            opts["bare_resume"] = True
+        if opts:
+            decision["options"] = opts
         return decision
 
     def _activate(self):
@@ -3779,6 +3813,13 @@ class PickerScreen(Widget):
             acts = ["Open"]
         else:
             acts = ["Resume"]
+        # two-step-restore "Bare resume": offered when there is a session to
+        # restore. Creates the worktree's mux but launches Copilot in HOME with
+        # no --resume (dodges a CLI bug that fails to start inside a repo/
+        # worktree cwd); the operator finishes with a manual ``/resume <id>``
+        # (the id is shown in this menu's header).
+        if rec.get("last_session_id"):
+            acts.append("Bare resume")
         # A worktree we don't positively know to be sessionless can show its
         # latest session's recent messages -- a read-only peek at what it was
         # doing, independent of whether the disposition summary ever accumulated.
@@ -3795,6 +3836,12 @@ class PickerScreen(Widget):
             acts.append("Finalize")
         if rec.get("mux_live"):
             acts.append("Stop")
+        # two-step-restore "Reclaim": offered whenever a live ``inuse.<pid>.lock``
+        # binds a Copilot process -- including a **bare** Copilot with no mux
+        # session, which Stop cannot reach. Kills the exact bound process so the
+        # session can be re-Opened / Bare-resumed cleanly.
+        if rec.get("session_lock_live"):
+            acts.append("Reclaim")
         # #1424/#2178: a bridge/system worktree is host-owned. Prefer jumping to
         # the *caller* worktree that requested it (the "caller-id"), when that
         # worktree is loaded; otherwise fall back to jumping to its own host tab.
@@ -3839,6 +3886,9 @@ class PickerScreen(Widget):
                 self._decide(self._resume_decision(rec, no_mux=no_mux))
             elif cur == "Resume":
                 self._decide(self._resume_decision(rec))
+            elif cur == "Bare resume":
+                # Two-step restore: mux + Copilot in HOME, no --resume (#outage).
+                self._decide(self._resume_decision(rec, bare_resume=True))
             elif cur == "Messages":
                 # Read-only peek at the worktree's latest session messages.
                 self._open_msgview(rec)
@@ -3861,6 +3911,10 @@ class PickerScreen(Widget):
                 # Stop the worktree's Mux/Copilot wrapper on demand (#1343),
                 # freeing it to be re-Opened/Resumed with a fresh Mux + Copilot.
                 self._start_stop(rec)
+            elif cur == "Reclaim":
+                # Kill the exact Copilot process holding the session's lock
+                # (bare orphans Stop cannot reach); then re-Open / Bare resume.
+                self._start_reclaim(rec)
         self.app.push_screen(SubMenuScreen(rec, acts), _after)
 
     def _wt_action_ctx(self, rec: dict) -> dict:
@@ -4610,7 +4664,14 @@ class SubMenuScreen(ModalScreen[tuple]):
         body = Text()
         body.append(f" {rec.get('title', '')}\n", style="bold")
         body.append(meta1 + "\n", style=C_DIM)
-        body.append(meta2 + "\n\n", style=C_DIM)
+        body.append(meta2 + "\n", style=C_DIM)
+        # two-step-restore: show the full session id so the operator can type
+        # ``/resume <id>`` after a Bare resume; flag a live bound lock.
+        sid = rec.get("last_session_id")
+        if sid:
+            lock = " · bound (lock live)" if rec.get("session_lock_live") else ""
+            body.append(f" session {sid}{lock}\n", style=C_DIM)
+        body.append("\n")
         for i, a in enumerate(acts):
             mark = " ▸ " if i == idx else "   "
             label = a

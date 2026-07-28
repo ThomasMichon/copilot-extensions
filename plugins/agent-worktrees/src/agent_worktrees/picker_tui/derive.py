@@ -332,6 +332,11 @@ def norm(w, machine, env):
         "attached": bool(w.get("mux_attached")),
         "mux_live": bool(w.get("mux_session") or w.get("mux_attached")),
         "active": w.get("status") == "active",
+        # two-step-restore: the most-recent session id (shown in the row
+        # sub-menu so the operator can ``/resume`` it), and whether a live
+        # ``inuse.<pid>.lock`` binds a Copilot process right now (gates Reclaim).
+        "last_session_id": w.get("last_session_id"),
+        "session_lock_live": bool(w.get("session_lock_live")),
         "hidden": bool(kind in ("system", "bridge")),
         "raw": w,
     }

@@ -329,6 +329,11 @@ def remote_op_argv(machine, env, op, worktree_id, *, include_unused=False,
                 # --worktree-id); the remote graceful double-Ctrl-C / mux
                 # kill-session runs there and reports a single JSON object.
                 inner = f"{project} restart {worktree_id} --json"
+            elif op == "reclaim":
+                # ``reclaim`` reaps the bound Copilot process(es) for the
+                # worktree's session (bare orphans only), reported as JSON.
+                inner = (f"{project} reclaim --worktree-id {worktree_id} "
+                         f"--bare-only --yes --json")
             elif op == "finalize":
                 # ``finalize`` takes the worktree id positionally (like
                 # ``restart``), not --worktree-id.
