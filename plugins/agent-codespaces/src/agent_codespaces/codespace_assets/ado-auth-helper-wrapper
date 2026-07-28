@@ -3,7 +3,8 @@
  * ado/azure-auth-helper -- smart wrapper deployed by agent-codespaces.
  *
  * Relay-first: when the SSH credential relay is active (LC_GIT_CREDENTIAL_RELAY
- * set, or the default relay port is reachable) this delegates to the relay
+ * set and live, a published port-mapping file points at a live channel, or the
+ * default relay port is reachable) this delegates to the relay
  * client (~/.local/bin/ado-auth-helper-relay), so ADO auth resolves over the
  * SSH RemoteForward tunnel back to the host Git Credential Manager.
  *
@@ -42,6 +43,7 @@ const path = require("path");
 const HOME = os.homedir();
 const DEFAULT_RELAY_PORT = 9857;
 const RELAY_CLIENT = path.join(HOME, ".local", "bin", "ado-auth-helper-relay");
+const RELAY_PORTS_DIR = path.join(HOME, ".agent-bridge", "relay-ports");
 const EXT_PREFIX = "ms-codespaces-tools.ado-codespaces-auth";
 
 // When neither the relay nor the VS Code helper is available yet, callers like
@@ -67,26 +69,91 @@ function sleepMs(ms) {
   }
 }
 
-// Resolve the active relay port: explicit env var, else probe the default
-// port (the tunnel may be up without this shell inheriting the env var, e.g.
-// postCreateCommand / cron). Returns "" when no relay is available.
-function relayPort() {
-  const env = process.env.LC_GIT_CREDENTIAL_RELAY;
-  if (env) return env;
+// True if a credential-relay channel accepts on 127.0.0.1:<port>. The tunnel
+// may be up without this shell inheriting the env var (postCreateCommand / cron
+// / a dispatched tool shell), and an inherited port may be a since-torn-down
+// forward -- so liveness, not mere presence, is the signal.
+function isLive(port) {
+  if (!port) return false;
   const probe = cp.spawnSync(
-    "bash", ["-c", "exec 3<>/dev/tcp/127.0.0.1/" + DEFAULT_RELAY_PORT],
+    "bash", ["-c", "exec 3<>/dev/tcp/127.0.0.1/" + port],
     { stdio: "ignore" }
   );
-  return probe.status === 0 ? String(DEFAULT_RELAY_PORT) : "";
+  return probe.status === 0;
 }
 
-// Delegate to the relay client, passing through argv/stdio and exit code.
-function useRelay(port) {
-  const env = Object.assign({}, process.env, { LC_GIT_CREDENTIAL_RELAY: port });
-  const r = cp.spawnSync(RELAY_CLIENT, process.argv.slice(2), {
+// Discover a working relay from the port-mapping files the launch prelude
+// publishes under RELAY_PORTS_DIR: newest first, probe each for a live channel,
+// adopt the first that accepts, and prune a dead channel's stale mapping.
+// Returns { port, token, adoHost } or null. Mirrors ado-auth-helper-relay so
+// the wrapper picks the relay path (vs the VS Code helper) whenever a live
+// channel exists even if this shell never inherited LC_GIT_CREDENTIAL_RELAY
+// (dotfiles #489/#187/#19).
+function discoverFromMappings() {
+  let entries;
+  try {
+    entries = fs.readdirSync(RELAY_PORTS_DIR)
+      .filter((n) => n.endsWith(".json"))
+      .map((n) => {
+        const p = path.join(RELAY_PORTS_DIR, n);
+        let mtime = 0;
+        try { mtime = fs.statSync(p).mtimeMs; } catch (e) { /* ignore */ }
+        return { p: p, mtime: mtime };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+  } catch (e) {
+    return null; // dir absent -- no mappings published
+  }
+  for (const e of entries) {
+    let m;
+    try { m = JSON.parse(fs.readFileSync(e.p, "utf8")); } catch (err) { continue; }
+    const port = m && m.port ? String(m.port) : "";
+    if (!port) continue;
+    if (!isLive(port)) {
+      try { fs.unlinkSync(e.p); } catch (err) { /* best-effort prune */ }
+      continue;
+    }
+    return { port: port, token: m.token || "", adoHost: m.ado_host || "" };
+  }
+  return null;
+}
+
+// Resolve a live relay: the inherited env port (if its channel is live), else a
+// discovered port-mapping, else the legacy default port. Returns
+// { port, token, adoHost } or null when no relay channel is reachable.
+function resolveRelay() {
+  const env = process.env.LC_GIT_CREDENTIAL_RELAY;
+  if (env && isLive(env)) {
+    return {
+      port: env,
+      token: process.env.LC_GIT_CREDENTIAL_RELAY_TOKEN || "",
+      adoHost: process.env.LC_GIT_CREDENTIAL_RELAY_ADO_HOST || "",
+    };
+  }
+  const disc = discoverFromMappings();
+  if (disc) return disc;
+  if (isLive(DEFAULT_RELAY_PORT)) {
+    return { port: String(DEFAULT_RELAY_PORT), token: "", adoHost: "" };
+  }
+  return null;
+}
+
+// Delegate to the relay client, passing through argv/stdio and exit code. The
+// resolved token/host are injected only when this shell did not already carry
+// them, so a discovered mapping restores the secret the gated get-azure-token
+// path needs even when the env was not inherited.
+function useRelay(r) {
+  const env = Object.assign({}, process.env, { LC_GIT_CREDENTIAL_RELAY: r.port });
+  if (r.token && !env.LC_GIT_CREDENTIAL_RELAY_TOKEN) {
+    env.LC_GIT_CREDENTIAL_RELAY_TOKEN = r.token;
+  }
+  if (r.adoHost && !env.LC_GIT_CREDENTIAL_RELAY_ADO_HOST) {
+    env.LC_GIT_CREDENTIAL_RELAY_ADO_HOST = r.adoHost;
+  }
+  const rr = cp.spawnSync(RELAY_CLIENT, process.argv.slice(2), {
     stdio: "inherit", env,
   });
-  process.exit(typeof r.status === "number" ? r.status : 1);
+  process.exit(typeof rr.status === "number" ? rr.status : 1);
 }
 
 // Find the REAL extension auth-helper.js at runtime.
@@ -156,9 +223,9 @@ function failQuietly(msg) {
 const deadline = Date.now() + WAIT_DEADLINE_MS;
 let waited = false;
 for (;;) {
-  const port = relayPort();
-  if (port && isExecutable(RELAY_CLIENT)) {
-    useRelay(port); // exits
+  const relay = resolveRelay();
+  if (relay && isExecutable(RELAY_CLIENT)) {
+    useRelay(relay); // exits
   }
   try {
     if (tryRealHelper()) return; // ran the real helper (usually exits)

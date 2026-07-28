@@ -16,6 +16,35 @@ from __future__ import annotations
 # never relies on a stale/expired token instead of the credential relay.
 SCRUB_ENV_VARS: tuple[str, ...] = ("MS_ADO_PAT",)
 
+# Directory on the CodeSpace where the launch prelude publishes credential-relay
+# port-mapping files (one JSON per live relay port). The ADO auth helpers
+# discover a working relay by enumerating these and probing each for a live TCP
+# channel -- so a dispatched tool shell that never inherited
+# ``LC_GIT_CREDENTIAL_RELAY`` (or inherited a since-torn-down port) can still
+# find an active channel back to the caller (dotfiles #489/#187/#19). Kept under
+# the same ``~/.agent-bridge`` dir the connect breadcrumb uses.
+RELAY_PORTMAP_DIR = "$HOME/.agent-bridge/relay-ports"
+
+
+def build_relay_portmap_write(relay_port: int) -> str:
+    """POSIX snippet that publishes a relay port-mapping file (best-effort).
+
+    Writes ``<RELAY_PORTMAP_DIR>/<port>.json`` = ``{"port","token","ts"}`` with a
+    restrictive umask, reading the secret from the just-exported
+    ``LC_GIT_CREDENTIAL_RELAY_TOKEN`` (never re-interpolated). Never aborts the
+    prelude (``|| true``). Keyed by port so repeat launches to the same relay are
+    idempotent; a stale file whose channel later dies is pruned by the auth
+    helpers' liveness probe (the discovery reader), not here.
+    """
+    d = RELAY_PORTMAP_DIR
+    return (
+        f'mkdir -p "{d}" 2>/dev/null; '
+        '( umask 177; printf \'{"port":%s,"token":"%s","ts":%s}\\n\' '
+        f'{relay_port} "$LC_GIT_CREDENTIAL_RELAY_TOKEN" '
+        '"$(date +%s 2>/dev/null || echo 0)" '
+        f'> "{d}/{relay_port}.json" ) 2>/dev/null || true; '
+    )
+
 
 def build_relay_env(
     relay_port: int, relay_token: str | None, *, use_relay: bool
@@ -25,7 +54,9 @@ def build_relay_env(
     ALWAYS prepends the PAT scrub (so it can never be clobbered by the relay
     exports); appends the relay exports when ``use_relay``. ``GIT_TERMINAL_PROMPT=0``
     keeps git from blocking on an interactive prompt when a credential can't be
-    resolved.
+    resolved. When ``use_relay``, also publishes a port-mapping file so the auth
+    helpers can rediscover this relay channel by liveness probe even if the env
+    is not inherited by a later tool shell (see :func:`build_relay_portmap_write`).
     """
     env = "".join(f"unset {v}; " for v in SCRUB_ENV_VARS)
     if use_relay:
@@ -34,6 +65,7 @@ def build_relay_env(
             f"export LC_GIT_CREDENTIAL_RELAY_TOKEN={relay_token}; "
             "export GIT_TERMINAL_PROMPT=0; "
         )
+        env += build_relay_portmap_write(relay_port)
     return env
 
 

@@ -84,3 +84,27 @@ def test_build_relay_launch_env_none_falls_back_to_config(monkeypatch):
     env, port = rl.build_relay_launch_env("cs-foo", relay_port=None)
     assert port == 9999
     assert "export LC_GIT_CREDENTIAL_RELAY=9999;" in env
+
+
+def test_prelude_publishes_port_mapping_file():
+    """When the relay is in use, the prelude publishes a discoverable
+    port-mapping file keyed by port (Stage 2 port-discovery)."""
+    from agent_codespaces.relay_launch import RELAY_PORTMAP_DIR, build_relay_env
+
+    env = build_relay_env(51234, "tok", use_relay=True)
+    assert RELAY_PORTMAP_DIR in env
+    assert "relay-ports/51234.json" in env
+    assert "|| true" in env  # best-effort; never aborts the prelude
+    # Not published when the relay is disabled.
+    assert "relay-ports" not in build_relay_env(51234, "tok", use_relay=False)
+
+
+def test_build_relay_portmap_write_shape():
+    from agent_codespaces.relay_launch import build_relay_portmap_write
+
+    snip = build_relay_portmap_write(51234)
+    assert '"$HOME/.agent-bridge/relay-ports/51234.json"' in snip
+    assert "umask 177" in snip                       # 600 perms on the CS
+    assert '"port":%s' in snip
+    assert "$LC_GIT_CREDENTIAL_RELAY_TOKEN" in snip   # token not re-interpolated
+    assert snip.rstrip().endswith("|| true;") or "|| true" in snip

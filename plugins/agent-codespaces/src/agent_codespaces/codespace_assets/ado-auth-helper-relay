@@ -17,20 +17,72 @@
 # The SSH session must set LC_GIT_CREDENTIAL_RELAY=<port> and forward
 # that port with -R <port>:localhost:<port>.
 #
-# If LC_GIT_CREDENTIAL_RELAY is not set (e.g., in a VS Code session),
-# this helper exits immediately, letting the VS Code extension handle auth.
+# If no relay is set in the env AND no port-mapping file / default-port forward
+# is live (e.g., a plain VS Code session), this helper exits non-zero, letting
+# the VS Code extension handle auth.
 
 ACTION="${1:-}"
 SCOPE="${2:-}"
 DEFAULT_RELAY_PORT=9857
+RELAY_PORTS_DIR="$HOME/.agent-bridge/relay-ports"
 RELAY_PORT="${LC_GIT_CREDENTIAL_RELAY:-}"
 RELAY_TOKEN="${LC_GIT_CREDENTIAL_RELAY_TOKEN:-}"
 
-# If env var is not set, probe the default port (SSH RemoteForward may be
-# active from a codespace-ssh session even though this shell doesn't have
-# the env var — e.g., postCreateCommand, cron, systemd, etc.)
+# True (0) if a credential-relay channel is accepting on 127.0.0.1:<port>.
+_relay_live() { (echo >"/dev/tcp/127.0.0.1/${1:-0}") 2>/dev/null; }
+
+# Port-discovery: if this shell never inherited LC_GIT_CREDENTIAL_RELAY, or the
+# inherited port's channel is dead (a since-torn-down forward), find a working
+# relay from the port-mapping files the launch prelude publishes under
+# RELAY_PORTS_DIR. Probe each recorded port for a live channel, adopt the first
+# that accepts (plus its token/host), and prune a dead channel's stale mapping.
+# This is how a dispatched tool shell finds an active channel back to the caller
+# (dotfiles #489/#187/#19). Falls through to the legacy default-port probe.
+if [ -z "$RELAY_PORT" ] || ! _relay_live "$RELAY_PORT"; then
+    _disc="$(python3 - "$RELAY_PORTS_DIR" <<'PY'
+import glob, json, os, socket, sys
+
+d = sys.argv[1]
+files = sorted(glob.glob(os.path.join(d, "*.json")),
+               key=os.path.getmtime, reverse=True)
+for f in files:
+    try:
+        with open(f) as fh:
+            m = json.load(fh)
+        port = int(m["port"])
+    except Exception:
+        continue
+    s = socket.socket()
+    s.settimeout(0.5)
+    try:
+        s.connect(("127.0.0.1", port))
+    except OSError:
+        try:
+            os.unlink(f)  # prune a dead channel's stale mapping
+        except OSError:
+            pass
+        continue
+    finally:
+        s.close()
+    print("%d\t%s\t%s" % (port, m.get("token", ""), m.get("ado_host", "")))
+    sys.exit(0)
+sys.exit(1)
+PY
+)"
+    if [ -n "$_disc" ]; then
+        IFS=$'\t' read -r _dport _dtoken _dhost <<< "$_disc"
+        RELAY_PORT="$_dport"
+        [ -z "$RELAY_TOKEN" ] && RELAY_TOKEN="$_dtoken"
+        if [ -z "${LC_GIT_CREDENTIAL_RELAY_ADO_HOST:-}" ] && [ -n "$_dhost" ]; then
+            export LC_GIT_CREDENTIAL_RELAY_ADO_HOST="$_dhost"
+        fi
+    fi
+fi
+
+# Final fallback: probe the legacy default port (a codespace-ssh session may
+# have a RemoteForward active even without an env var or mapping file).
 if [ -z "$RELAY_PORT" ]; then
-    if (echo >/dev/tcp/localhost/$DEFAULT_RELAY_PORT) 2>/dev/null; then
+    if _relay_live "$DEFAULT_RELAY_PORT"; then
         RELAY_PORT="$DEFAULT_RELAY_PORT"
     else
         exit 1
