@@ -72,3 +72,19 @@ def test_uninstall_removes_logon_autostart():
     text = _text()
     assert "Remove-CoordinatorAutostart" in text
     assert "Remove-SupervisorAutostart" in text
+
+
+def test_interactive_mode_pins_loopback():
+    """Interactive mode ignores WSL and pins the coordinator to 127.0.0.1 so it is
+    reachable non-elevated on a NAT box (no elevation-gated firewall rule)."""
+    text = _text()
+    assert "function Set-ServiceEnvLoopback" in text
+    assert "AGENT_DISPATCH_HOST=127.0.0.1" in text
+    m = re.search(r"function\s+Install-CoordinatorTask\s*\{", text)
+    rest = text[m.end():]
+    nxt = re.search(r"\n function |\nfunction ", rest)
+    body = rest[: nxt.start()] if nxt else rest
+    interactive_block = body[body.index("(Get-ServiceMode) -eq 'interactive'"):body.index("Register-ScheduledTask -TaskName")]
+    assert "Set-ServiceEnvLoopback" in interactive_block, (
+        "interactive mode must pin loopback before starting the coordinator"
+    )
