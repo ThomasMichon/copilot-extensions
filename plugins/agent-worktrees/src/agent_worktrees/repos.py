@@ -24,6 +24,7 @@ from __future__ import annotations
 import os
 import platform
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -445,6 +446,72 @@ def unset_account_map(owner: str) -> bool:
         write_registry(registry)
         output.ok(f"account_map: removed {owner}")
     return removed
+
+
+@dataclass
+class AccountResolution:
+    """How a repo's gh account resolves at registration time.
+
+    ``needs_clarify`` is the actionable signal: it is True only for the
+    **owner-fallback** case where the owner is a github org that is *not* an
+    authenticated ``gh`` account (so the derived login can't actually auth) --
+    the moment a register/adopt flow should ask the operator to pin an account.
+    """
+
+    owner: str | None
+    login: str | None
+    source: str  # "explicit" | "account_map" | "sibling" | "owner-fallback" | "none"
+    authenticated: bool
+    needs_clarify: bool
+
+
+def resolve_registration_account(
+    remote: str, explicit_account: str = "",
+) -> AccountResolution:
+    """Resolve the account for a repo being registered, flagging ambiguity.
+
+    Mirrors :func:`account_for_github_owner`'s order (explicit → account_map →
+    sibling repo's explicit → owner) but additionally reports the resolution
+    *source* and whether the owner-fallback landed on a login that isn't an
+    authenticated ``gh`` account. GitHub remotes only; non-GitHub/underivable
+    remotes resolve to ``none`` (ambient auth, never clarified). When ``gh`` is
+    unavailable, authentication can't be checked -- we assume authenticated so a
+    register never nags on a box without ``gh``.
+    """
+    owner = github_owner(remote)
+
+    def _authed(login: str | None) -> bool:
+        if not login:
+            return False
+        try:
+            from . import git_ops
+            if shutil.which("gh") is None:
+                return True  # can't verify -> don't nag
+            return git_ops.gh_token_for_account(login) is not None
+        except Exception:
+            return True
+
+    if explicit_account:
+        return AccountResolution(
+            owner, explicit_account, "explicit", _authed(explicit_account), False,
+        )
+    if not owner:
+        return AccountResolution(None, None, "none", False, False)
+
+    mapped = account_from_map(owner)
+    if mapped:
+        return AccountResolution(owner, mapped, "account_map", _authed(mapped), False)
+
+    # A sibling repo under the same owner with an explicit account: counts as
+    # resolved (account_for_github_owner returns it when != owner).
+    effective = account_for_github_owner(owner)
+    if effective and effective.casefold() != owner.casefold():
+        return AccountResolution(owner, effective, "sibling", _authed(effective), False)
+
+    # Owner-fallback: the login *is* the owner. Fine when the owner is itself a
+    # gh account (personal/EMU repo); needs clarification when it is not (org).
+    authed = _authed(owner)
+    return AccountResolution(owner, owner, "owner-fallback", authed, not authed)
 
 
 def add_repo(

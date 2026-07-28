@@ -265,6 +265,16 @@ inline, so agents never hand-switch:
 `account:` only for a one-off where a single repo under an owner needs a
 different login.
 
+**Clarified at registration.** When `repos add`, `repos clone`, or `register`
+(adopt) would leave a repo's account resolving *only* by falling back to a
+github **owner that isn't an authenticated `gh` account** (i.e. an org like
+`github`/`odsp-microsoft`), the flow clarifies it then and there — interactively
+it lists the authenticated `gh` logins and persists your pick as an
+`account_map` entry; headless it warns with the exact remedy
+(`repos account set <owner> <login>`). A repo whose owner **is** a `gh` account
+(a personal/EMU repo) is left silent, and nothing prompts once an
+`account:`/`account_map` already resolves. (dotfiles #537)
+
 ### Accounts catalog (`accounts.yaml`)
 
 `~/.agent-worktrees/accounts.yaml` catalogs the gh account **identities** the

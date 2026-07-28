@@ -769,6 +769,33 @@ def _active_gh_account() -> str | None:
     return accounts[0] if len(accounts) == 1 else None
 
 
+def list_gh_accounts() -> list[str]:
+    """Return the logins of all authenticated ``gh`` accounts (may be empty).
+
+    Parsed from ``gh auth status`` (no network call). Used at registration time
+    to offer the operator a concrete set of accounts when a repo's owner is an
+    org (not itself a ``gh`` account).
+    """
+    if shutil.which("gh") is None:
+        return []
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "status"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:
+        return []
+    text = result.stdout + result.stderr
+    seen: list[str] = []
+    for line in text.splitlines():
+        if "Logged in to" not in line:
+            continue
+        m = re.search(r"account\s+([A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?)", line)
+        if m and m.group(1) not in seen:
+            seen.append(m.group(1))
+    return seen
+
+
 def _auth_config_args(remote: str, *, cwd: str | Path) -> list[str]:
     """Build ``-c http.extraheader=...`` args to auth as the remote's owner.
 

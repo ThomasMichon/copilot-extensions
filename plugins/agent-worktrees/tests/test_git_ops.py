@@ -208,6 +208,28 @@ class TestCrossAccountAuth:
         assert go._active_gh_account() == "Solo"
         go._active_gh_account.cache_clear()
 
+    def test_list_gh_accounts_parses_all(self, monkeypatch):
+        out = (
+            "github.com\n"
+            "  \u2713 Logged in to github.com account ThomasMichon (keyring)\n"
+            "  - Active account: true\n"
+            "  - Token scopes: 'repo'\n"
+            "  \u2713 Logged in to github.com account tmichon_microsoft (keyring)\n"
+            "  - Active account: false\n"
+        )
+        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(
+            go.subprocess, "run",
+            lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=out, stderr=""),
+        )
+        # EMU logins with underscores must survive.
+        assert go.list_gh_accounts() == ["ThomasMichon", "tmichon_microsoft"]
+
+    def test_list_gh_accounts_empty_without_gh(self, monkeypatch):
+        monkeypatch.setattr(go.shutil, "which", lambda _: None)
+        assert go.list_gh_accounts() == []
+
+
     def test_push_falls_back_to_plain_when_injected_auth_403s(self, monkeypatch):
         """#900: a token-injected push that fails must retry once *without* the
         override so the default credential helper can authenticate."""
