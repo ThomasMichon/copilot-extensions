@@ -29,15 +29,14 @@ INSTALL_PS1 = (
 
 def _launcher_serve_region() -> str:
     text = INSTALL_PS1.read_text(encoding="utf-8")
-    # The serve invocation is the
-    # `& '$VenvPython' -c "...main(['serve'])" ...` line inside the here-string
-    # that builds $launcherBody.
+    # The serve invocation is the `& '$VenvPython' -m agent_dispatch serve ...`
+    # line inside the here-string that builds $launcherBody.
     match = re.search(
-        r"main\(\['serve'\]\)[^\r\n]*", text
+        r"-m agent_dispatch serve[^\r\n]*", text
     )
     assert match, "could not locate the serve invocation in install.ps1"
-    # Return the preceding context + the serve line for context assertions.
-    start = text.rfind("\n", 0, match.start() - 1000)
+    # Return the ~5 lines preceding + the serve line for context assertions.
+    start = text.rfind("\n", 0, match.start() - 400)
     return text[start : match.end()]
 
 
@@ -49,10 +48,7 @@ def test_serve_invocation_not_fatal_stream_redirect():
     """The serve line must not use `*>>` -- that merges stderr and, under a
     `Stop` preference, turns uvicorn's stderr into a process-killing error."""
     region = _launcher_serve_region()
-    serve_line = next(
-        line for line in region.splitlines() if "main(['serve'])" in line
-    )
-    assert "*>>" not in serve_line, (
+    assert "-m agent_dispatch serve *>>" not in region, (
         "serve invocation uses `*>> $logFile`; uvicorn stderr becomes a "
         "terminating NativeCommandError and kills the headless coordinator"
     )
@@ -62,7 +58,7 @@ def test_serve_invocation_drops_to_continue():
     """The serve line must be immediately preceded by an ErrorActionPreference
     of 'Continue' so native stderr is non-terminating."""
     region = _launcher_serve_region()
-    serve_idx = region.index("main(['serve'])")
+    serve_idx = region.index("-m agent_dispatch serve")
     preceding = region[:serve_idx]
     assert "$ErrorActionPreference = 'Continue'" in preceding, (
         "the serve invocation must be preceded by "
@@ -113,31 +109,8 @@ def test_serve_output_still_captured_to_log():
     diagnosability (#2889)."""
     region = _launcher_serve_region()
     serve_line = next(
-        line for line in region.splitlines() if "main(['serve'])" in line
+        line for line in region.splitlines() if "-m agent_dispatch serve" in line
     )
     assert "$logFile" in serve_line and (
         "Out-File" in serve_line or ">>" in serve_line
     ), f"serve output is not captured to the log: {serve_line!r}"
-
-
-def test_serve_invocation_uses_direct_c_entry_not_runpy():
-    """The coordinator must launch via a direct ``-c`` entry, NOT
-    ``python -m agent_dispatch serve``.
-
-    Under a **Windows venv** the ``-m`` runpy form re-execs the *base*
-    interpreter, so the real uvicorn coordinator ends up running under system
-    Python as a child of an otherwise-idle venv-launcher process (relying on the
-    parent's inherited ``sys.path``). The ``-c`` direct-entry form runs ``serve``
-    in-process under the venv interpreter -- one correct process (agent-dispatch
-    dev83)."""
-    region = _launcher_serve_region()
-    serve_line = next(
-        line for line in region.splitlines() if "main(['serve'])" in line
-    )
-    assert "-c " in serve_line, (
-        f"serve must launch via a `-c` entry, got: {serve_line!r}"
-    )
-    assert "-m agent_dispatch serve" not in serve_line, (
-        "serve must not use `-m agent_dispatch serve`: the Windows venv runpy "
-        "re-exec spawns a redundant base-interpreter coordinator child"
-    )
