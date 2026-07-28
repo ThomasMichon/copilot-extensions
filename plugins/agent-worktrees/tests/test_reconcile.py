@@ -402,3 +402,26 @@ def test_pid_alive_basic():
     assert reconcile._pid_alive(-1) is False
     assert reconcile._pid_alive("nope") is False  # type: ignore[arg-type]
 
+
+def test_versions_equal_tolerates_pep440_spelling():
+    """importlib's `0.4.0.dev176` and plugin.json's `0.4.0-dev176` are equal."""
+    assert reconcile._versions_equal("0.4.0.dev176", "0.4.0-dev176")
+    assert reconcile._versions_equal("1.5.3-dev261", "1.5.3-dev261")
+    assert not reconcile._versions_equal("0.4.0-dev176", "0.4.0-dev177")
+    assert not reconcile._versions_equal(None, "1.0.0")
+    assert not reconcile._versions_equal("1.0.0", None)
+
+
+def test_running_normalized_spelling_is_not_false_drift(env, monkeypatch):
+    """A daemon whose importlib version is PEP440-normalized must not thrash.
+
+    Running `2.0.0.dev1` (importlib) vs payload `2.0.0-dev1` (plugin.json) is the
+    same version -> no redeploy (regression for the agent-bridge marker, #533)."""
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"context-handoff@{MKT}": True})
+    env.install_payload("context-handoff", "2.0.0-dev1", scope="universal")
+    env.deploy_runtime("context-handoff", "2.0.0-dev1")
+    env.deploy_running("context-handoff", "2.0.0.dev1")  # importlib spelling
+    plan = reconcile.build_plan(env.repo, machine="anywhere", cache={}, save=False)
+    assert _runtime_updates(plan) == []
+
