@@ -510,6 +510,19 @@ def _worktree_to_dict(
         norm = _normalize_path(rec.worktree_path)
         d["turn_count"] = session_ctx.turn_count.get(norm, 0)
         d["session_count"] = session_ctx.session_count.get(norm, 0)
+        # two-step-restore: the session id(s) currently held by a live
+        # ``inuse.<pid>.lock`` (a bound Copilot process -- mux OR bare), and the
+        # most-recent session id for this worktree. The Picker shows the id (so
+        # the operator can ``/resume`` it manually) and gates the Reclaim action
+        # on a live lock. Both stay off the dict when absent to keep it lean.
+        _live_ids = session_ctx.active_sessions.get(norm) or []
+        if _live_ids:
+            d["live_session_ids"] = list(_live_ids)
+            d["session_lock_live"] = True
+        _last_sid = sessions.find_latest_session_id_fast(
+            rec.worktree_path, rec.sessions)
+        if _last_sid:
+            d["last_session_id"] = _last_sid
         # worktree-status-core: the live activity pulse (derived from the
         # agent's assistant.intent stream by the live-pulse extension). Emitted
         # only when present so un-annotated worktrees stay lean; the picker
@@ -2619,6 +2632,8 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
                 remote_args = ["--worktree-id", str(wt_id)]
                 if opts.get("no_mux"):
                     remote_args.append("--no-mux")
+                if opts.get("bare_resume"):
+                    remote_args.append("--bare-resume")
         elif action == "new":
             remote_args = ["--new"]
             if opts.get("no_mux"):
@@ -2640,8 +2655,15 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
             return 1
         # The Open sub-menu's No-mux toggle (picker #1343) launches without the
         # PSMux/TMux wrapper.
-        if (decision.get("options") or {}).get("no_mux"):
+        opts = decision.get("options") or {}
+        if opts.get("no_mux"):
             args.no_mux = True
+        # two-step-restore "Bare resume": create the worktree's mux, but launch
+        # Copilot in the HOME dir with no --resume (dodges a CLI bug that fails
+        # to start Copilot inside a repo/worktree cwd). The operator finishes
+        # with a manual ``/resume <id>`` (the sub-menu shows the id).
+        if opts.get("bare_resume"):
+            args.bare_resume = True
         wt_id = _resolve_worktree_id(wt_id)
         yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
         if not yaml_path.exists():
@@ -2712,9 +2734,21 @@ def _resolve_resume(
     launch_cmd = _build_launch_cmd(config, args, record.worktree_path, profile=profile)
     merged_env = _build_env(profile, _repo_session_env(config, record.worktree_path))
 
+    # two-step-restore "Bare resume": launch Copilot in the HOME dir instead of
+    # the worktree cwd, and skip --resume, so a CLI bug that fails to start
+    # Copilot inside a repo/worktree directory is dodged. The mux session is
+    # still named ``wt-<id>`` (correct worktree identity + status bar); the
+    # operator restores the conversation with a manual ``/resume <id>``.
+    bare_resume = getattr(args, "bare_resume", False)
+    plan_work_dir = record.worktree_path
+    if bare_resume:
+        plan_work_dir = os.path.expanduser("~")
+        launch_cmd = _build_launch_cmd(config, args, plan_work_dir, profile=profile)
+        merged_env = _build_env(profile, _repo_session_env(config, plan_work_dir))
+
     # Auto-resume: find the most recent Copilot session for this worktree
     # and pass --resume=<session-id> so the user picks up where they left off.
-    no_resume = getattr(args, "no_resume", False)
+    no_resume = getattr(args, "no_resume", False) or bare_resume
     if not no_resume:
         last_session = sessions.find_latest_session_id_fast(
             record.worktree_path, record.sessions,
@@ -2731,6 +2765,16 @@ def _resolve_resume(
             # would adopt its persisted cwd and launch this tab in the
             # parent's directory (worktree id/path mismatch). Hint only.
             _emit_parent_context_hint(record)
+    elif bare_resume:
+        # Surface the id the operator will type: the live-locked session (if a
+        # bound process still holds it) else the most-recent one.
+        last_session = sessions.find_latest_session_id_fast(
+            record.worktree_path, record.sessions,
+        )
+        print(f"   Bare resume: launching Copilot in {plan_work_dir} "
+              f"(no auto-resume, dodges the worktree-cwd start bug).")
+        if last_session:
+            print(f"   Inside Copilot, run:  /resume {last_session}")
 
     print()
 
@@ -2744,7 +2788,7 @@ def _resolve_resume(
 
     _emit_plan({
         "action": "exec",
-        "work_dir": record.worktree_path,
+        "work_dir": plan_work_dir,
         "cmd": launch_cmd,
         "env": merged_env,
         "worktree_id": record.worktree_id,
@@ -5085,6 +5129,34 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
     if not do_kill:
         print("\nDry run -- pass --yes to actually terminate these processes.")
     return 0
+
+
+def reclaim_one(worktree_id: str, *, bare_only: bool = True) -> dict:
+    """Reap the bound Copilot process(es) for one worktree (Picker "Reclaim").
+
+    The in-process executor behind the Picker's per-row **Reclaim** action:
+    resolves the exact Copilot process(es) bound to *worktree_id*'s session(s)
+    via :func:`reclaim.resolve_bound_copilots` and terminates them (and their
+    Copilot child tree). ``bare_only`` (default) restricts to un-muxed orphans
+    so a healthy muxed sibling is left to the graceful ``restart``/Stop path.
+    Never reaps the process subtree containing this command. Returns a JSON-able
+    ``{ok, worktree_id, targets, reaped}``.
+    """
+    table = reclaim.build_process_table()
+    found = reclaim.resolve_bound_copilots(worktree_id=worktree_id, table=table)
+    if bare_only:
+        found = [f for f in found if f["homing"] == "bare"]
+    me = os.getpid()
+    targets = [
+        f for f in found
+        if me not in ({f["pid"]} | reclaim.descendants_of(f["pid"], table))
+    ]
+    reaped = reclaim.reap_bound_copilots(targets, table=table) if targets else []
+    ok = all(r["killed"] for r in reaped) if reaped else True
+    return {
+        "ok": ok, "worktree_id": worktree_id,
+        "targets": len(targets), "reaped": reaped,
+    }
 
 
 def cmd_restart(args: argparse.Namespace) -> int:
@@ -9190,6 +9262,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--recovery", action="store_true")
     p.add_argument("--no-resume", action="store_true",
                    help="Don't auto-resume the last Copilot session")
+    p.add_argument("--bare-resume", action="store_true",
+                   help="Two-step restore: create the worktree's mux, but launch "
+                        "Copilot in the HOME dir with no --resume (dodges a CLI "
+                        "bug that fails to start Copilot inside a repo/worktree "
+                        "cwd). Finish with a manual '/resume <id>' inside.")
     p.add_argument("--no-mux", action="store_true",
                    help="Bypass tmux/psmux multiplexer (launch directly)")
     p.add_argument("--no-fast-forward", action="store_true",

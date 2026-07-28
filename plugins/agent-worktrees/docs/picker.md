@@ -144,6 +144,28 @@ session's `events.jsonl` even when the agent-asserted summary never accumulated.
 `↑`/`↓` scroll; `Esc` closes. Local worktrees load in-process; a remote worktree's
 messages are fetched over SSH. (Backed by the `recent-messages` CLI verb.)
 
+### Two-step restore (Bare resume + Reclaim)
+A workaround for a Copilot-CLI outage in which starting Copilot **inside a
+repo/worktree directory** fails, and the only way in is to launch from the home
+directory and `/resume <id>` manually. While that outage is live, a worktree
+row's sub-menu cooperates so the manual restore keeps the correct mux identity:
+
+- **The session id is shown** in the sub-menu header (with a *bound (lock live)*
+  flag when a Copilot process currently holds the session's `inuse.<pid>.lock`),
+  so you can copy it for the `/resume`.
+- **Bare resume** creates the worktree's `wt-<id>` mux (correct identity + status
+  bar) but launches Copilot in the **home** directory with **no `--resume`** —
+  dodging the cwd start bug. It prints the `/resume <id>` line to run inside.
+  (CLI: `resolve --worktree-id <id> --bare-resume`.)
+- **Reclaim** appears whenever a live `inuse.<pid>.lock` binds a Copilot process —
+  including a **bare** Copilot with no mux session, which **Stop** cannot reach.
+  It kills the exact bound process (bare orphans only; a healthy muxed sibling is
+  left to Stop) so the session can be re-Opened or Bare-resumed cleanly. (Backed
+  by the `reclaim` CLI verb.)
+
+Typical flow during the outage: **Reclaim** the wedged/bare process, then **Bare
+resume** and `/resume <id>` inside.
+
 ### Bulk Cleanup and Sync
 The **Cleanup** and **Sync** buttons on the Worktrees row open dialogs that act
 across worktrees:
