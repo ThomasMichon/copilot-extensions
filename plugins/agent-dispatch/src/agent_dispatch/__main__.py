@@ -71,43 +71,66 @@ def _client(args: argparse.Namespace, *, ensure: bool = True) -> DispatchClient:
 
 
 _AUTOSTART_ENV_OPT_OUT = "AGENT_DISPATCH_NO_AUTOSTART"
-# DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
-_WIN_DETACHED = 0x00000008 | 0x00000200 | 0x08000000
 
 
 def _spawn_coordinator_process() -> None:
     """Launch the local coordinator **detached** (best effort, no wait).
 
-    Prefers the deployed launcher (``~/.agent-dispatch/serve-service.ps1`` on
-    Windows) so the coordinator loads ``service.env`` (token/pins) and logs to
-    ``serve-service.log``; otherwise runs ``<python> -m agent_dispatch serve``.
-    The child outlives this CLI process so a later session finds it already up.
+    Runs the coordinator directly as ``<python> -m agent_dispatch serve`` under
+    ``DETACHED_PROCESS`` (Windows) / a new session (POSIX) so it outlives this CLI
+    process -- a later session then finds it already up. It appends output to
+    ``serve-service.log`` and honors ``service.env`` (token / host-port pins) for
+    parity with the installed launcher.
+
+    NB: this deliberately does NOT shell out to ``serve-service.ps1`` via
+    ``conhost``/``powershell``. That indirection, launched detached from Python,
+    proved flaky on Windows (the wrapper exited before ``serve`` bound a listener,
+    so no rendezvous was written and discovery never converged). Running the
+    interpreter directly is the reliable path.
     """
-    quiet = dict(
-        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL, close_fds=True,
+    install_dir = Path.home() / ".agent-dispatch"
+    if os.name == "nt":
+        venv_py = install_dir / ".venv" / "Scripts" / "python.exe"
+    else:
+        venv_py = install_dir / ".venv" / "bin" / "python"
+    python = str(venv_py) if venv_py.is_file() else sys.executable
+
+    # Honor service.env (token, host/port pins) if present -- parity with the
+    # installed launcher, which loads it before running `serve`.
+    env = dict(os.environ)
+    env.setdefault("PYTHONUTF8", "1")
+    env_file = install_dir / "service.env"
+    if env_file.is_file():
+        try:
+            for line in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
+                s = line.strip()
+                if not s or s.startswith("#") or "=" not in s:
+                    continue
+                k, v = s.split("=", 1)
+                env[k.strip()] = os.path.expandvars(v.strip())
+        except OSError:
+            pass
+
+    try:
+        log: Any = open(install_dir / "serve-service.log", "ab")  # noqa: SIM115
+    except OSError:
+        log = subprocess.DEVNULL
+
+    kwargs: dict[str, Any] = dict(
+        stdin=subprocess.DEVNULL, stdout=log, stderr=log, close_fds=True, env=env,
     )
     if os.name == "nt":
-        launcher = Path.home() / ".agent-dispatch" / "serve-service.ps1"
-        if launcher.is_file():
-            subprocess.Popen(  # noqa: S603 -- fixed argv
-                [
-                    "conhost.exe", "--headless", "powershell.exe", "-NoProfile",
-                    "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-                    "-File", str(launcher),
-                ],
-                creationflags=_WIN_DETACHED, **quiet,
-            )
-            return
-        subprocess.Popen(  # noqa: S603 -- fixed argv
-            [sys.executable, "-m", "agent_dispatch", "serve"],
-            creationflags=_WIN_DETACHED, **quiet,
-        )
-        return
-    subprocess.Popen(  # noqa: S603 -- fixed argv
-        [sys.executable, "-m", "agent_dispatch", "serve"],
-        start_new_session=True, **quiet,
-    )
+        kwargs["creationflags"] = 0x00000008  # DETACHED_PROCESS
+    else:
+        kwargs["start_new_session"] = True
+    try:
+        subprocess.Popen([python, "-m", "agent_dispatch", "serve"], **kwargs)  # noqa: S603
+    finally:
+        if log is not subprocess.DEVNULL:
+            try:
+                log.close()
+            except OSError:
+                pass
 
 
 def _lazy_start_coordinator(*, timeout: float = 20.0) -> bool:
