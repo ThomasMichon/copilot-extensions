@@ -149,3 +149,30 @@ class TestProvisioningAndClient:
         # The discovered host is sent as a request field and passed to python.
         assert "'host=' + host" in client
         assert '"$RELAY_PORT" "$ADO_HOST"' in client
+
+    def test_relay_client_discovers_live_port_from_mappings(self):
+        """The relay client resolves a *live* relay via the port-mapping files
+        the launch prelude publishes -- so a dispatched tool shell that never
+        inherited LC_GIT_CREDENTIAL_RELAY (or inherited a dead port) still finds
+        an active channel back to the caller (dotfiles #489/#187/#19)."""
+        client = asset_text("ado-auth-helper-relay")
+        assert 'RELAY_PORTS_DIR="$HOME/.agent-bridge/relay-ports"' in client
+        assert "_relay_live()" in client
+        # The inherited env port is re-validated for liveness, not trusted.
+        assert '! _relay_live "$RELAY_PORT"' in client
+        # Discovery enumerates mappings and prunes a dead channel's stale file.
+        assert "glob.glob" in client
+        assert "os.unlink" in client
+        # Legacy default-port probe remains as the final fallback.
+        assert "DEFAULT_RELAY_PORT" in client
+
+    def test_wrapper_discovers_live_port_from_mappings(self):
+        """The Node wrapper mirrors the relay client's discovery so it picks the
+        relay path (vs the VS Code helper) whenever a live channel exists."""
+        wrapper = asset_text("ado-auth-helper-wrapper")
+        assert "RELAY_PORTS_DIR" in wrapper
+        assert "discoverFromMappings" in wrapper
+        assert "resolveRelay" in wrapper
+        assert "unlinkSync" in wrapper  # prune a dead channel's stale mapping
+        # A discovered token/host is restored into the relay client's env.
+        assert "LC_GIT_CREDENTIAL_RELAY_TOKEN" in wrapper
