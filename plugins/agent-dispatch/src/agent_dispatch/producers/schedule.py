@@ -195,6 +195,38 @@ def run_tick(client: DispatchClient, spec: dict[str, Any], now: float | None = N
     return {"created": created, "errors": errors}
 
 
+def register_from_spec(client, spec: dict[str, Any]) -> dict:
+    """Register every schedule in a loaded ``spec`` into the coordinator's
+    registry (the migration path from a hand-edited spec file). The spec-level
+    ``default_repo`` is baked into any entry lacking its own ``repo`` so each
+    registered schedule is self-contained. Returns
+    ``{"registered": [...], "errors": [...]}``."""
+    default_repo = spec.get("default_repo")
+    registered: list[dict] = []
+    errors: list[dict] = []
+    for entry in spec.get("schedules", []):
+        resolved = dict(entry)
+        if not resolved.get("repo") and default_repo:
+            resolved["repo"] = default_repo
+        try:
+            registered.append(client.register_schedule(resolved))
+        except Exception as exc:
+            errors.append({"id": resolved.get("id"), "error": str(exc)})
+    return {"registered": registered, "errors": errors}
+
+
+def registry_spec(client) -> dict[str, Any]:
+    """Assemble a :func:`run_tick` spec from the coordinator's registered,
+    non-paused schedules -- so the registry is the single source of truth for
+    what a tick produces (no spec file needed)."""
+    return {"schedules": [rec["entry"] for rec in client.list_schedules(include_paused=False)]}
+
+
+def run_registry_tick(client, now: float | None = None) -> dict:
+    """:func:`run_tick` over the coordinator's registered schedules."""
+    return run_tick(client, registry_spec(client), now=now)
+
+
 def serve(
     spec_path: str | Path,
     *,
@@ -227,6 +259,70 @@ def serve(
             return
         except Exception as exc:
             print(f"agent-dispatch schedule: tick failed: {exc}", file=sys.stderr)
+        try:
+            time.sleep(interval)
+        except KeyboardInterrupt:
+            return
+
+
+def serve_registry(
+    *,
+    url: str,
+    token: str | None = None,
+    interval: float = 60.0,
+    lease_scope: str,
+    holder: str,
+    holder_session: str | None = None,
+    lease_ttl: float | None = None,
+    on_tick=None,
+) -> None:
+    """Lease-gated registry timer -- the fleet chronicler's producer loop.
+
+    Every ``interval`` seconds this attempts to acquire/renew the job-lease for
+    ``lease_scope`` as ``holder`` (pin-not-failover) and, **only while it holds
+    the lease**, ticks the coordinator's registered schedules. A machine that
+    does not hold the lease idles. So N machines may run this identical loop and
+    exactly one (the lease holder -- e.g. the designated chronicler host)
+    produces occurrences; if that host sleeps, ticking simply pauses and
+    resumes on wake, with the schedules' own lookback windows replaying any
+    just-missed occurrences (idempotent via ``dedup_key``). No wall-clock
+    takeover ever moves the lease to another host.
+    """
+    import sys
+
+    def _default_on_tick(result: dict) -> None:
+        if result.get("held"):
+            print(
+                f"agent-dispatch schedule[registry]: held created="
+                f"{len(result.get('created', []))} errors={len(result.get('errors', []))}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"agent-dispatch schedule[registry]: lease {lease_scope!r} held by "
+                f"{result.get('lease', {}).get('holder')!r} -- idling",
+                file=sys.stderr,
+            )
+
+    on_tick = on_tick or _default_on_tick
+    while True:
+        try:
+            with DispatchClient(url, token=token) as client:
+                lease = client.acquire_schedule_lease(
+                    lease_scope,
+                    holder,
+                    holder_session=holder_session,
+                    ttl=lease_ttl,
+                )
+                if lease.get("granted"):
+                    result = run_registry_tick(client)
+                    on_tick({"held": True, "lease": lease.get("lease"), **result})
+                else:
+                    on_tick({"held": False, "lease": lease.get("lease")})
+        except KeyboardInterrupt:
+            return
+        except Exception as exc:
+            print(f"agent-dispatch schedule[registry]: tick failed: {exc}", file=sys.stderr)
         try:
             time.sleep(interval)
         except KeyboardInterrupt:

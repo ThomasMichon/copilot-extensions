@@ -159,6 +159,17 @@ class ReservationDetailBody(BaseModel):
     detail: str | None = None
 
 
+class ScheduleLeaseBody(BaseModel):
+    holder: str
+    holder_session: str | None = None
+    ttl: float | None = None
+
+
+class ReleaseLeaseBody(BaseModel):
+    holder: str
+    force: bool = False
+
+
 def _task_dict(task: Task) -> dict:
     return asdict(task)
 
@@ -501,6 +512,73 @@ def create_app(
         if reservation is None:
             raise HTTPException(status_code=404, detail="no such reservation")
         return _reservation_dict(reservation)
+
+    # -- schedule registry ---------------------------------------------------
+
+    @app.post("/schedules")
+    def register_schedule(entry: dict) -> dict:
+        """Register (or upsert) a recurring schedule. 400 on a malformed entry."""
+        try:
+            return asdict(queue.register_schedule(entry))
+        except TaskError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/schedules")
+    def list_schedules(include_paused: bool = True) -> list[dict]:
+        return [asdict(r) for r in queue.list_schedules(include_paused=include_paused)]
+
+    @app.get("/schedules/{sid}")
+    def get_schedule(sid: str) -> dict:
+        rec = queue.get_schedule(sid)
+        if rec is None:
+            raise HTTPException(status_code=404, detail="no such schedule")
+        return asdict(rec)
+
+    @app.delete("/schedules/{sid}")
+    def remove_schedule(sid: str) -> dict:
+        if not queue.remove_schedule(sid):
+            raise HTTPException(status_code=404, detail="no such schedule")
+        return {"removed": True, "id": sid}
+
+    @app.post("/schedules/{sid}/pause")
+    def pause_schedule(sid: str) -> dict:
+        try:
+            return asdict(queue.set_schedule_paused(sid, True))
+        except TaskError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/schedules/{sid}/resume")
+    def resume_schedule(sid: str) -> dict:
+        try:
+            return asdict(queue.set_schedule_paused(sid, False))
+        except TaskError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    # -- schedule job-leases -------------------------------------------------
+
+    @app.post("/schedule-leases/{scope}/acquire")
+    def acquire_lease(scope: str, body: ScheduleLeaseBody) -> dict:
+        lease, granted = queue.acquire_schedule_lease(
+            scope, body.holder, holder_session=body.holder_session, ttl=body.ttl
+        )
+        return {"granted": granted, "lease": asdict(lease)}
+
+    @app.post("/schedule-leases/{scope}/release")
+    def release_lease(scope: str, body: ReleaseLeaseBody) -> dict:
+        try:
+            released = queue.release_schedule_lease(scope, body.holder, force=body.force)
+        except TaskError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"released": released, "scope": scope}
+
+    @app.get("/schedule-leases")
+    def list_leases() -> list[dict]:
+        return [asdict(lease) for lease in queue.list_schedule_leases()]
+
+    @app.get("/schedule-leases/{scope}")
+    def get_lease(scope: str) -> dict | None:
+        lease = queue.get_schedule_lease(scope)
+        return asdict(lease) if lease else None
 
     if mcp_app is not None:
         # Mounted last so the coordinator's own routes take precedence.

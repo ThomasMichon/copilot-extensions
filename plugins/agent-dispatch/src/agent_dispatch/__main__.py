@@ -1130,22 +1130,98 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
 def _cmd_schedule(args: argparse.Namespace) -> int:
     from .producers import schedule
 
-    if args.schedule_command == "serve":
+    cmd = args.schedule_command
+
+    if cmd == "serve":
         _url, _token = _resolve_client_target(args)
-        schedule.serve(
-            args.spec,
-            url=_url,
-            token=_token,
-            interval=args.interval,
-        )
+        if getattr(args, "registry", False):
+            if not args.lease_scope or not args.holder:
+                raise SystemExit(
+                    "schedule serve --registry: --lease-scope and --holder are required"
+                )
+            schedule.serve_registry(
+                url=_url,
+                token=_token,
+                interval=args.interval,
+                lease_scope=args.lease_scope,
+                holder=args.holder,
+                holder_session=getattr(args, "holder_session", None),
+                lease_ttl=getattr(args, "lease_ttl", None),
+            )
+        else:
+            if not args.spec:
+                raise SystemExit("schedule serve: pass a SPEC path or --registry")
+            schedule.serve(args.spec, url=_url, token=_token, interval=args.interval)
         return 0
-    spec = schedule.load_spec(args.spec)
-    with _client(args) as c:
-        result = schedule.run_tick(c, spec)
-    return _emit({
-        "created": [_enrich(t) for t in result["created"]],
-        "errors": result["errors"],
-    })
+
+    if cmd == "tick":
+        with _client(args) as c:
+            if getattr(args, "registry", False):
+                result = schedule.run_registry_tick(c)
+            else:
+                if not args.spec:
+                    raise SystemExit("schedule tick: pass a SPEC path or --registry")
+                result = schedule.run_tick(c, schedule.load_spec(args.spec))
+        return _emit({
+            "created": [_enrich(t) for t in result["created"]],
+            "errors": result["errors"],
+        })
+
+    if cmd == "register":
+        with _client(args) as c:
+            result = schedule.register_from_spec(c, schedule.load_spec(args.spec))
+        return _emit(result)
+
+    if cmd == "list":
+        with _client(args) as c:
+            return _emit(c.list_schedules(include_paused=not args.active))
+
+    if cmd == "inspect":
+        import time as _time
+
+        with _client(args) as c:
+            rec = c.get_schedule(args.id)
+            try:
+                occ = schedule.due_occurrences(rec["entry"], now=_time.time())
+            except schedule.ScheduleError:
+                occ = []
+            lease = c.get_schedule_lease(args.id)
+        return _emit({"schedule": rec, "next_occurrences": occ, "lease": lease})
+
+    if cmd == "remove":
+        with _client(args) as c:
+            return _emit(c.remove_schedule(args.id))
+
+    if cmd in ("pause", "resume"):
+        with _client(args) as c:
+            return _emit(c.set_schedule_paused(args.id, cmd == "pause"))
+
+    if cmd == "lease-list":
+        with _client(args) as c:
+            return _emit(c.list_schedule_leases())
+
+    if cmd == "lease-show":
+        with _client(args) as c:
+            return _emit(c.get_schedule_lease(args.scope))
+
+    if cmd == "lease-acquire":
+        with _client(args) as c:
+            return _emit(
+                c.acquire_schedule_lease(
+                    args.scope,
+                    args.holder,
+                    holder_session=args.holder_session,
+                    ttl=args.ttl,
+                )
+            )
+
+    if cmd == "lease-release":
+        with _client(args) as c:
+            return _emit(
+                c.release_schedule_lease(args.scope, args.holder, force=args.force)
+            )
+
+    raise SystemExit(f"unknown schedule command: {cmd!r}")
 
 
 def _cmd_webhook(args: argparse.Namespace) -> int:
@@ -1640,7 +1716,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "schedule",
         help="scheduler/timer producer: turn a JSON schedule spec into deferred "
-             "tasks (idempotent per occurrence via not_before + dedup_key)",
+             "tasks (idempotent per occurrence via not_before + dedup_key), and "
+             "manage a persisted registry of recurring jobs + single-producer leases",
     )
     sched_sub = p.add_subparsers(dest="schedule_command", required=True)
     sp = sched_sub.add_parser(
@@ -1648,14 +1725,91 @@ def build_parser() -> argparse.ArgumentParser:
         help="create every currently-due occurrence once, then exit (drive from "
              "cron / a systemd timer / manage_schedule)",
     )
-    sp.add_argument("spec", help="path to the JSON schedule spec")
+    sp.add_argument(
+        "spec", nargs="?",
+        help="path to the JSON schedule spec (omit with --registry to tick the "
+             "coordinator's registered schedules)",
+    )
+    sp.add_argument(
+        "--registry", action="store_true",
+        help="tick the coordinator's registered schedules instead of a spec file",
+    )
     sp.set_defaults(func=_cmd_schedule)
     sp = sched_sub.add_parser(
         "serve", help="built-in timer: reload the spec and tick every --interval seconds"
     )
-    sp.add_argument("spec", help="path to the JSON schedule spec")
+    sp.add_argument(
+        "spec", nargs="?",
+        help="path to the JSON schedule spec (omit with --registry)",
+    )
     sp.add_argument(
         "--interval", type=float, default=60.0, help="seconds between ticks (default: 60)"
+    )
+    sp.add_argument(
+        "--registry", action="store_true",
+        help="lease-gated registry mode: tick the coordinator's registered "
+             "schedules only while this host holds the job-lease",
+    )
+    sp.add_argument(
+        "--lease-scope", help="job-lease scope to hold in --registry mode (required)"
+    )
+    sp.add_argument(
+        "--holder", help="this producer's identity (the machine) in --registry mode"
+    )
+    sp.add_argument("--holder-session", help="optional live-session handle of the holder")
+    sp.add_argument(
+        "--lease-ttl", type=float,
+        help="observability-only lease expiry seconds (never auto-steals)",
+    )
+    sp.set_defaults(func=_cmd_schedule)
+    sp = sched_sub.add_parser(
+        "register",
+        help="register (upsert) every schedule in a spec file into the "
+             "coordinator's persisted registry",
+    )
+    sp.add_argument("spec", help="path to the JSON schedule spec to register")
+    sp.set_defaults(func=_cmd_schedule)
+    sp = sched_sub.add_parser("list", help="list registered schedules")
+    sp.add_argument(
+        "--active", action="store_true", help="only non-paused schedules"
+    )
+    sp.set_defaults(func=_cmd_schedule)
+    sp = sched_sub.add_parser(
+        "inspect", help="show one registered schedule + its next occurrences + lease"
+    )
+    sp.add_argument("id", help="the schedule id")
+    sp.set_defaults(func=_cmd_schedule)
+    sp = sched_sub.add_parser("remove", help="delete a registered schedule")
+    sp.add_argument("id", help="the schedule id")
+    sp.set_defaults(func=_cmd_schedule)
+    sp = sched_sub.add_parser("pause", help="pause a registered schedule (keep its definition)")
+    sp.add_argument("id", help="the schedule id")
+    sp.set_defaults(func=_cmd_schedule)
+    sp = sched_sub.add_parser("resume", help="resume a paused schedule")
+    sp.add_argument("id", help="the schedule id")
+    sp.set_defaults(func=_cmd_schedule)
+    sp = sched_sub.add_parser("lease-list", help="list held schedule job-leases")
+    sp.set_defaults(func=_cmd_schedule)
+    sp = sched_sub.add_parser("lease-show", help="show the job-lease for a scope")
+    sp.add_argument("scope", help="the lease scope")
+    sp.set_defaults(func=_cmd_schedule)
+    sp = sched_sub.add_parser(
+        "lease-acquire",
+        help="acquire/renew a job-lease (pin-not-failover: never steals a lease "
+             "held by another holder)",
+    )
+    sp.add_argument("scope", help="the lease scope")
+    sp.add_argument("--holder", required=True, help="this holder's identity (the machine)")
+    sp.add_argument("--holder-session", help="optional live-session handle")
+    sp.add_argument("--ttl", type=float, help="observability-only expiry seconds")
+    sp.set_defaults(func=_cmd_schedule)
+    sp = sched_sub.add_parser(
+        "lease-release", help="release a job-lease (use --force to reassign a stuck one)"
+    )
+    sp.add_argument("scope", help="the lease scope")
+    sp.add_argument("--holder", required=True, help="the releasing holder's identity")
+    sp.add_argument(
+        "--force", action="store_true", help="reassign a lease held by another holder"
     )
     sp.set_defaults(func=_cmd_schedule)
 

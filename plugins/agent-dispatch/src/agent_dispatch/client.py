@@ -259,6 +259,57 @@ class DispatchClient:
     def get_reservation(self, key: str) -> dict:
         return self._unwrap(self._http.get(f"/spawn-reservations/{key}"))
 
+    # -- schedule registry + job-leases -------------------------------------
+
+    def register_schedule(self, entry: dict) -> dict:
+        return self._unwrap(self._http.post("/schedules", json=entry))
+
+    def list_schedules(self, *, include_paused: bool = True) -> list[dict]:
+        return self._unwrap(
+            self._http.get("/schedules", params={"include_paused": include_paused})
+        )
+
+    def get_schedule(self, sid: str) -> dict:
+        return self._unwrap(self._http.get(f"/schedules/{sid}"))
+
+    def remove_schedule(self, sid: str) -> dict:
+        return self._unwrap(self._http.delete(f"/schedules/{sid}"))
+
+    def set_schedule_paused(self, sid: str, paused: bool) -> dict:
+        verb = "pause" if paused else "resume"
+        return self._unwrap(self._http.post(f"/schedules/{sid}/{verb}"))
+
+    def acquire_schedule_lease(
+        self,
+        scope: str,
+        holder: str,
+        *,
+        holder_session: str | None = None,
+        ttl: float | None = None,
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/schedule-leases/{scope}/acquire",
+                json={"holder": holder, "holder_session": holder_session, "ttl": ttl},
+            )
+        )
+
+    def release_schedule_lease(
+        self, scope: str, holder: str, *, force: bool = False
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/schedule-leases/{scope}/release",
+                json={"holder": holder, "force": force},
+            )
+        )
+
+    def list_schedule_leases(self) -> list[dict]:
+        return self._unwrap(self._http.get("/schedule-leases"))
+
+    def get_schedule_lease(self, scope: str) -> dict | None:
+        return self._unwrap(self._http.get(f"/schedule-leases/{scope}"))
+
     def stream_events(self) -> Iterator[dict]:
         """Yield task events from the coordinator's SSE stream (blocking)."""
         with self._http.stream("GET", "/events") as resp:

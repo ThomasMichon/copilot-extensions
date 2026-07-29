@@ -305,6 +305,69 @@ class SpawnReservation:
         )
 
 
+@dataclass
+class ScheduleRecord:
+    """A read-only snapshot of a registered recurring-schedule row.
+
+    ``entry`` is the schedule dict the timer producer consumes verbatim (the
+    same shape a hand-authored spec's ``schedules[]`` entry has). Persisting it
+    turns the formerly hand-edited JSON spec into a managed registry the
+    coordinator owns, so recurring jobs can be registered / listed / inspected /
+    removed as first-class objects.
+    """
+
+    id: str
+    entry: dict
+    paused: bool = False
+    created_at: float = 0.0
+    updated_at: float = 0.0
+
+    @classmethod
+    def _from_row(cls, row: sqlite3.Row) -> ScheduleRecord:
+        return cls(
+            id=row["id"],
+            entry=json.loads(row["spec"]),
+            paused=bool(row["paused"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
+@dataclass
+class ScheduleLease:
+    """A read-only snapshot of a schedule *job-lease* row.
+
+    The job-lease elects a **single producer** for a scope (e.g. the fleet
+    chronicler) -- the axis of "which machine runs the timer", distinct from the
+    engine's per-task claim. It is **pin-not-failover**: a first writer wins the
+    scope and renews it; a different caller is refused and must NOT steal it,
+    even if the recorded lease looks stale. This deliberately does *not*
+    reintroduce a wall-clock TTL takeover (the complement of the engine's
+    liveness-not-lease task recovery); reassignment is an explicit operator act
+    (:meth:`TaskQueue.release_schedule_lease` with ``force``). ``expires_at`` /
+    ``renewed_at`` are recorded for *observability* only -- staleness is
+    reported, never auto-transferred.
+    """
+
+    scope: str
+    holder: str
+    holder_session: str | None = None
+    acquired_at: float = 0.0
+    renewed_at: float = 0.0
+    expires_at: float | None = None
+
+    @classmethod
+    def _from_row(cls, row: sqlite3.Row) -> ScheduleLease:
+        return cls(
+            scope=row["scope"],
+            holder=row["holder"],
+            holder_session=row["holder_session"],
+            acquired_at=row["acquired_at"],
+            renewed_at=row["renewed_at"],
+            expires_at=row["expires_at"],
+        )
+
+
 # Column name -> DDL type, applied additively so existing DBs upgrade in place.
 _COLUMNS: dict[str, str] = {
     "id": "TEXT PRIMARY KEY",
@@ -456,6 +519,32 @@ class TaskQueue:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_spawn_res_state "
                 "ON spawn_reservations(state)"
+            )
+            # Recurring-schedule registry -- the persisted form of the timer
+            # producer's spec entries, so recurring jobs are managed first-class
+            # (register/list/inspect/remove/pause) instead of a hand-edited JSON
+            # file. ``spec`` is the JSON schedule dict the producer consumes.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS schedules ("
+                "  id TEXT PRIMARY KEY,"
+                "  spec TEXT NOT NULL,"
+                "  paused INTEGER NOT NULL DEFAULT 0,"
+                "  created_at REAL NOT NULL,"
+                "  updated_at REAL NOT NULL"
+                ")"
+            )
+            # Schedule job-leases -- single-producer election per scope
+            # (pin-not-failover; see :class:`ScheduleLease`). A row's mere
+            # presence pins the scope to ``holder``; no wall-clock takeover.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS schedule_leases ("
+                "  scope TEXT PRIMARY KEY,"
+                "  holder TEXT NOT NULL,"
+                "  holder_session TEXT,"
+                "  acquired_at REAL NOT NULL,"
+                "  renewed_at REAL NOT NULL,"
+                "  expires_at REAL"
+                ")"
             )
 
     # -- helpers -------------------------------------------------------------
@@ -1593,3 +1682,186 @@ class TaskQueue:
                 params,
             ).fetchall()
         return [SpawnReservation._from_row(r) for r in rows]
+
+    # -- schedule registry ---------------------------------------------------
+
+    def register_schedule(self, entry: dict, *, now: float | None = None) -> ScheduleRecord:
+        """Register (or update) a recurring schedule by its ``id``.
+
+        ``entry`` is a timer-producer schedule dict; it is validated eagerly
+        (id + title + a resolvable lane + exactly one valid cadence) so a
+        malformed schedule is rejected at register time rather than silently
+        failing every tick. Re-registering the same ``id`` upserts the spec
+        (preserving ``created_at`` and the ``paused`` flag).
+        """
+        from .producers.schedule import ScheduleError, due_occurrences
+
+        sid = entry.get("id")
+        if not sid or not str(sid).strip():
+            raise TaskError("schedule needs a non-empty 'id'")
+        if not str(entry.get("title") or "").strip():
+            raise TaskError(f"schedule {sid!r} needs a 'title'")
+        if not entry.get("repo"):
+            raise TaskError(f"schedule {sid!r} needs a 'repo' (the task lane)")
+        try:
+            due_occurrences(entry, now=self._now(now))
+        except ScheduleError as exc:
+            raise TaskError(str(exc)) from exc
+
+        ts = self._now(now)
+        spec = json.dumps(entry)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            exists = conn.execute(
+                "SELECT id FROM schedules WHERE id = ?", (sid,)
+            ).fetchone()
+            if exists:
+                conn.execute(
+                    "UPDATE schedules SET spec = ?, updated_at = ? WHERE id = ?",
+                    (spec, ts, sid),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO schedules (id, spec, paused, created_at, updated_at) "
+                    "VALUES (?, ?, 0, ?, ?)",
+                    (sid, spec, ts, ts),
+                )
+            row = conn.execute("SELECT * FROM schedules WHERE id = ?", (sid,)).fetchone()
+            conn.execute("COMMIT")
+        return ScheduleRecord._from_row(row)
+
+    def list_schedules(self, *, include_paused: bool = True) -> list[ScheduleRecord]:
+        """List registered schedules, ordered by id."""
+        query = "SELECT * FROM schedules"
+        if not include_paused:
+            query += " WHERE paused = 0"
+        query += " ORDER BY id"
+        with self._connect() as conn:
+            rows = conn.execute(query).fetchall()
+        return [ScheduleRecord._from_row(r) for r in rows]
+
+    def get_schedule(self, sid: str) -> ScheduleRecord | None:
+        """Return one registered schedule by id, or ``None``."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM schedules WHERE id = ?", (sid,)).fetchone()
+        return ScheduleRecord._from_row(row) if row else None
+
+    def remove_schedule(self, sid: str) -> bool:
+        """Delete a registered schedule; return whether a row was removed."""
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM schedules WHERE id = ?", (sid,))
+        return cur.rowcount > 0
+
+    def set_schedule_paused(
+        self, sid: str, paused: bool, *, now: float | None = None
+    ) -> ScheduleRecord:
+        """Pause/resume a schedule (a paused schedule is skipped by the registry
+        tick but retains its definition). Raises if the schedule is unknown."""
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT id FROM schedules WHERE id = ?", (sid,)).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such schedule: {sid}")
+            conn.execute(
+                "UPDATE schedules SET paused = ?, updated_at = ? WHERE id = ?",
+                (1 if paused else 0, ts, sid),
+            )
+            row = conn.execute("SELECT * FROM schedules WHERE id = ?", (sid,)).fetchone()
+            conn.execute("COMMIT")
+        return ScheduleRecord._from_row(row)
+
+    # -- schedule job-leases (single-producer election) ----------------------
+
+    def acquire_schedule_lease(
+        self,
+        scope: str,
+        holder: str,
+        *,
+        holder_session: str | None = None,
+        ttl: float | None = None,
+        now: float | None = None,
+    ) -> tuple[ScheduleLease, bool]:
+        """Acquire or renew the job-lease for ``scope`` (pin-not-failover).
+
+        Returns ``(lease, granted)``. A first writer wins the scope
+        (``granted=True``); the same ``holder`` renews it (``granted=True``,
+        refreshing ``renewed_at``/``expires_at``); a **different** caller is
+        refused (``granted=False``) and MUST NOT run the scope's producer --
+        the recorded lease is never auto-stolen, even when stale. This elects a
+        single producer machine (e.g. the fleet chronicler on one host) without
+        a wall-clock takeover. ``ttl`` only sets ``expires_at`` for
+        observability; it does not enable a takeover.
+        """
+        ts = self._now(now)
+        expires_at = (ts + ttl) if ttl else None
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM schedule_leases WHERE scope = ?", (scope,)
+            ).fetchone()
+            if row is None:
+                conn.execute(
+                    "INSERT INTO schedule_leases "
+                    "(scope, holder, holder_session, acquired_at, renewed_at, expires_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (scope, holder, holder_session, ts, ts, expires_at),
+                )
+                granted = True
+            elif row["holder"] == holder:
+                conn.execute(
+                    "UPDATE schedule_leases SET "
+                    "holder_session = COALESCE(?, holder_session), "
+                    "renewed_at = ?, expires_at = ? WHERE scope = ?",
+                    (holder_session, ts, expires_at, scope),
+                )
+                granted = True
+            else:
+                granted = False
+            row = conn.execute(
+                "SELECT * FROM schedule_leases WHERE scope = ?", (scope,)
+            ).fetchone()
+            conn.execute("COMMIT")
+        return ScheduleLease._from_row(row), granted
+
+    def release_schedule_lease(
+        self, scope: str, holder: str, *, force: bool = False, now: float | None = None
+    ) -> bool:
+        """Release the job-lease for ``scope``. The current holder may release
+        its own lease; ``force=True`` lets an operator reassign a lease held by
+        a different (e.g. retired) holder. Returns whether a lease was removed;
+        raises if a non-holder tries to release without ``force``."""
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT holder FROM schedule_leases WHERE scope = ?", (scope,)
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                return False
+            if not force and row["holder"] != holder:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"lease {scope!r} is held by {row['holder']!r}, not {holder!r} "
+                    "(use force to reassign)"
+                )
+            conn.execute("DELETE FROM schedule_leases WHERE scope = ?", (scope,))
+            conn.execute("COMMIT")
+        return True
+
+    def get_schedule_lease(self, scope: str) -> ScheduleLease | None:
+        """Return the job-lease for ``scope``, or ``None`` if unheld."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM schedule_leases WHERE scope = ?", (scope,)
+            ).fetchone()
+        return ScheduleLease._from_row(row) if row else None
+
+    def list_schedule_leases(self) -> list[ScheduleLease]:
+        """List all held job-leases, ordered by scope."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM schedule_leases ORDER BY scope"
+            ).fetchall()
+        return [ScheduleLease._from_row(r) for r in rows]
