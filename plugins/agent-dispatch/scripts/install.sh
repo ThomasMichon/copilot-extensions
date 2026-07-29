@@ -92,6 +92,71 @@ SUPERVISOR_LAUNCHER="$INSTALL_DIR/supervise-service.sh"
 # operator can still override PATH in supervisor.env.
 SUPERVISOR_PATH="$LOCAL_BIN:$HOME/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
+# === install-contract:v3 versioned-venv (agent-dispatch: .venv-as-symlink) ===
+# Immutable per-version runtime (#581): build the venv into versions/<version>
+# and make the historical `.venv` path a symlink into it, so the binstub, the
+# coordinator + supervisor systemd units, and the deploy-manifest resolve through
+# the link unchanged. LINK_DIR is the stable `.venv` path (runtime-facing, never a
+# versions/<v> absolute a `gc` could remove); VENV_DIR is the versions/<v> slot
+# (build + health-gate). Legacy mode: LINK_DIR == VENV_DIR. Gated behind
+# AGENT_DISPATCH_VERSIONED=1 (default off); scripts/versioned_runtime.py owns the
+# swap + migration + gc.
+LINK_DIR="$VENV_DIR"
+LINK_PYTHON="$VENV_PYTHON"
+VERSIONED_RUNTIME=0
+SRC_VERSION=""
+if [[ "${AGENT_DISPATCH_VERSIONED:-}" =~ ^(1|true|yes|on)$ && "${COPILOT_EXT_NO_VERSIONED:-}" != "1" ]]; then
+    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+        SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
+    fi
+    if [[ -n "$SRC_VERSION" ]]; then
+        VERSIONED_RUNTIME=1
+        VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+        VENV_PYTHON="$VENV_DIR/bin/python"
+    fi
+fi
+
+_versioned_activate() {
+    # Swap the stable `.venv` symlink to this version's freshly-built slot, moving
+    # a legacy real `.venv` aside on first migration (--replace-nonlink). No-op in
+    # legacy mode. On POSIX a rename tolerates the daemons' open files, and
+    # _install_service / _install_supervisor_service `systemctl restart` onto the
+    # new slot, so no stop is needed.
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink; then
+        _fail "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
+        return 1
+    fi
+    _ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+}
+
+_versioned_current() {
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || { echo ""; return 0; }
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py="$LINK_DIR/bin/python"
+    [[ -x "$py" ]] || py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || { echo ""; return 0; }
+    "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo ""
+}
+
+_versioned_gc() {
+    local keep_prev="${1:-}"
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py="$LINK_DIR/bin/python"
+    [[ -x "$py" ]] || py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || return 0
+    if [[ -n "$keep_prev" ]]; then
+        "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$keep_prev" 2>&1 | sed 's/^/  ...    gc: /' || true
+    else
+        "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  ...    gc: /' || true
+    fi
+}
+# === end install-contract:v3 versioned-venv ===
+
 # === install-contract:v3 source-kind -- keep byte-identical across plugins ===
 _source_kind() {
     case "$(printf '%s' "$1" | tr '\\' '/')" in
@@ -103,9 +168,10 @@ _source_kind() {
 
 # -- Version helpers + downgrade guard (parity with agent-bridge #1790) ------
 _installed_version() {
-    [[ -x "$VENV_PYTHON" ]] || return 1
+    # The version currently ACTIVE (via the `.venv` link), for the downgrade guard.
+    [[ -x "$LINK_PYTHON" ]] || return 1
     local v
-    v="$("$VENV_PYTHON" -c \
+    v="$("$LINK_PYTHON" -c \
         'from importlib.metadata import version; print(version("agent-dispatch"))' \
         2>/dev/null)" || return 1
     [[ -n "$v" ]] || return 1
@@ -232,13 +298,32 @@ STUBEOF
     chmod +x "$STUB"
     _ok "Binstub: $STUB"
 
+    # Versioned layout (#581): health-gate the freshly-built slot in isolation,
+    # then swap the stable `.venv` symlink onto it. Everything below (manifest,
+    # systemd units, binstub) resolves through `.venv` (the link). No-op in legacy
+    # mode. Remember the previous active version as the gc keep target.
+    local prev_version=""
+    if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+        prev_version="$(_versioned_current)"
+        if ! "$VENV_PYTHON" -c 'import agent_dispatch' 2>/dev/null; then
+            _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
+            exit 1
+        fi
+        _versioned_activate || exit 1
+    fi
+
     _write_manifest
 
-    if "$VENV_PYTHON" -c 'import agent_dispatch' 2>/dev/null; then
+    if "$LINK_PYTHON" -c 'import agent_dispatch' 2>/dev/null; then
         _ok 'Verification: module imports successfully'
     else
         _fail 'Verification: module import failed'
         exit 1
+    fi
+
+    # Versioned: prune old slots, keeping current + previous-good + live-pinned.
+    if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+        _versioned_gc "$prev_version"
     fi
 
     case ":$PATH:" in
@@ -286,7 +371,7 @@ _write_manifest() {
     "branch": $branch,
     "dirty": $dirty
   },
-  "venv": "$VENV_DIR",
+  "venv": "$LINK_DIR",
   "runtime": "python"
 }
 EOF
@@ -385,7 +470,7 @@ After=network.target
 Type=simple
 EnvironmentFile=-$ENV_FILE
 Environment=PYTHONUTF8=1
-ExecStart=$VENV_PYTHON -m agent_dispatch serve
+ExecStart=$LINK_PYTHON -m agent_dispatch serve
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$INSTALL_DIR
@@ -535,7 +620,7 @@ done
 # shellcheck disable=SC2206
 [[ -n "\$extra" ]] && args+=(\$extra)
 
-exec "$VENV_PYTHON" -m agent_dispatch "\${args[@]}"
+exec "$LINK_PYTHON" -m agent_dispatch "\${args[@]}"
 LAUNCHEOF
     chmod +x "$SUPERVISOR_LAUNCHER"
 
@@ -679,7 +764,15 @@ do_uninstall() {
     if [[ "$PURGE" -eq 1 ]]; then
         rm -rf "$INSTALL_DIR"; _ok "Runtime purged: $INSTALL_DIR (config + DB deleted)"
     else
-        rm -rf "$VENV_DIR"; _ok "Venv removed (config + DB kept; --purge to delete)"
+        # Versioned: the `.venv` link + the versions/ tree; else the real venv dir.
+        if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+            [[ -L "$LINK_DIR" ]] && rm -f "$LINK_DIR"
+            [[ -d "$LINK_DIR" && ! -L "$LINK_DIR" ]] && rm -rf "$LINK_DIR"
+            [[ -d "$INSTALL_DIR/versions" ]] && rm -rf "$INSTALL_DIR/versions"
+        else
+            rm -rf "$VENV_DIR"
+        fi
+        _ok "Venv removed (config + DB kept; --purge to delete)"
     fi
 }
 

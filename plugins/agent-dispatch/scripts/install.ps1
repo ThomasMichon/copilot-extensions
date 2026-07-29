@@ -95,7 +95,94 @@ $TaskName = 'agent-dispatch'
 $SupervisorTaskName = 'agent-dispatch-supervisor'
 $DefaultPort = 9847
 
-# === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
+# === install-contract:v3 versioned-venv (agent-dispatch: .venv-as-junction) ===
+# Immutable per-version runtime (#581). Build the venv into versions/<version>
+# and make the historical `.venv` path a junction (Windows) / symlink (POSIX)
+# into it, so the binstubs, the coordinator + supervisor task launchers, and the
+# deploy-manifest -- all of which reference `.venv` -- resolve through the link
+# unchanged. LinkDir/LinkPython is the stable `.venv` path (runtime-facing, never
+# a versions/<v> absolute a `gc` could remove); VenvDir/VenvPython is the
+# versions/<v> slot (build + health-gate + the firewall -Program, which needs the
+# RESOLVED image path the running daemon reports). Legacy mode: Link == Venv.
+# Gated behind AGENT_DISPATCH_VERSIONED=1 (default off); COPILOT_EXT_NO_VERSIONED=1
+# force-disables. scripts/versioned_runtime.py owns the swap + migration + gc.
+$LinkDir          = $VenvDir
+$LinkPython       = $VenvPython
+$VersionedRuntime = $false
+$SrcVersion       = $null
+if (($env:AGENT_DISPATCH_VERSIONED -in @('1', 'true', 'yes', 'on')) -and
+    ($env:COPILOT_EXT_NO_VERSIONED -ne '1')) {
+    $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
+    if (Test-Path $pyprojForVer) {
+        $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
+        if ($vl) { $SrcVersion = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
+    }
+    if ($SrcVersion) {
+        $VersionedRuntime = $true
+        $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+        if ($env:OS -eq 'Windows_NT') { $VenvPython = Join-Path $VenvDir 'Scripts\python.exe' }
+        else { $VenvPython = Join-Path $VenvDir 'bin/python' }
+    }
+}
+# === end install-contract:v3 versioned-venv ===
+
+# === install-contract:v3 versioned-venv helpers (agent-dispatch) ===
+function Test-VenvIsLink {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return $false }
+    try { return [bool]((Get-Item $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) }
+    catch { return $false }
+}
+
+function Invoke-VersionedActivate {
+    <# Swap the stable `.venv` link to this version's freshly-built slot. No-op in
+       legacy mode. First migration: the `.venv` path is still a REAL dir the
+       running coordinator + supervisor hold open -- Windows can't rename it aside
+       while a loaded python.exe locks it, so stop BOTH daemons first (the task
+       re-register below restarts them on the new slot). A later version-bump swaps
+       only the link (the daemons run from their own immutable slot until Invoke-
+       Update cycles them). #>
+    if (-not $VersionedRuntime) { return $true }
+    if ((Test-Path $LinkDir) -and -not (Test-VenvIsLink $LinkDir)) {
+        Write-Step 'Releasing legacy .venv for versioned migration (stopping coordinator + supervisor)...'
+        try { Stop-DispatchProcess -Subcommand serve | Out-Null } catch {}
+        try { Stop-DispatchProcess -Subcommand supervise | Out-Null } catch {}
+    }
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
+    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --replace-nonlink 2>&1 |
+        ForEach-Object { Write-Step $_ }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
+        return $false
+    }
+    Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
+    return $true
+}
+
+function Get-VersionedCurrent {
+    if (-not $VersionedRuntime) { return '' }
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = if (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
+    if (-not $py) { return '' }
+    $out = & $py $vr --root $InstallDir --link-name '.venv' current 2>$null
+    return ("$out").Trim()
+}
+
+function Invoke-VersionedGc {
+    param([string]$KeepPrev)
+    if (-not $VersionedRuntime) { return }
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = if (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
+    if (-not $py) { return }
+    $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids')
+    if ($KeepPrev) { $gcArgs += @('--keep', $KeepPrev) }
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $py @gcArgs 2>&1 | ForEach-Object { Write-Step "gc: $_" }
+    $ErrorActionPreference = $prevEAP
+}
+# === end install-contract:v3 versioned-venv helpers ===
 function Remove-ConsoleTrampolines {
     <# Strip the uv-regenerated Scripts\<name>.exe console-script trampolines from
        the venv after install. They are unsigned, zero-reputation PEs that Smart
@@ -152,9 +239,9 @@ function Get-GitInfo {
 # -- Version helpers + downgrade guard (parity with agent-bridge #1790) ------
 
 function Get-InstalledVersion {
-    if (-not (Test-Path $VenvPython)) { return $null }
+    if (-not (Test-Path $LinkPython)) { return $null }
     try {
-        $v = & $VenvPython -c 'from importlib.metadata import version; print(version("agent-dispatch"))' 2>$null
+        $v = & $LinkPython -c 'from importlib.metadata import version; print(version("agent-dispatch"))' 2>$null
         if ($LASTEXITCODE -eq 0 -and $v) { return $v.Trim() }
     } catch {}
     return $null
@@ -364,20 +451,44 @@ exec "`$HOME/.agent-dispatch/.venv/bin/python" -m agent_dispatch "`$@"
     }
     Write-Ok "Binstub: $stubPath"
 
+    # Versioned layout (#581): health-gate the freshly-built slot in isolation,
+    # then swap the stable `.venv` link onto it. Everything below (manifest, task
+    # launchers, binstub) resolves through `.venv` (the link). No-op in legacy
+    # mode. Remember the previously-active version as the gc keep target (a
+    # not-yet-cycled daemon may still run it).
+    $prevVersion = ''
+    if ($VersionedRuntime) {
+        $prevVersion = Get-VersionedCurrent
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & $VenvPython -c 'import agent_dispatch' 2>$null
+        $slotOk = ($LASTEXITCODE -eq 0)
+        $ErrorActionPreference = $prevEAP
+        if (-not $slotOk) {
+            Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
+            exit 1
+        }
+        if (-not (Invoke-VersionedActivate)) { exit 1 }
+    }
+
     Write-Manifest
 
-    # -- verify --
+    # -- verify (through the stable `.venv` link) --
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     $importOk = $false
     for ($i = 0; $i -lt 3; $i++) {
-        & $VenvPython -c 'import agent_dispatch' 2>$null
+        & $LinkPython -c 'import agent_dispatch' 2>$null
         if ($LASTEXITCODE -eq 0) { $importOk = $true; break }
         Start-Sleep -Seconds 1
     }
     $ErrorActionPreference = $prevEAP
     if ($importOk) { Write-Ok 'Verification: module imports successfully' }
     else { Write-Fail 'Verification: module import failed'; exit 1 }
+
+    # Versioned layout: prune old slots, keeping current + the previous-good (the
+    # slot a not-yet-cycled daemon may still run from) + any live-pid-pinned slot.
+    if ($VersionedRuntime) { Invoke-VersionedGc -KeepPrev $prevVersion }
 
     # -- PATH --
     $pathDirs = $env:PATH -split ';'
@@ -425,7 +536,7 @@ function Write-Manifest {
             branch  = $branch
             dirty   = $dirty
         }
-        venv           = ($VenvDir -replace '\\', '/')
+        venv           = ($LinkDir -replace '\\', '/')
         runtime        = 'python'
     }
     $tmp = "$manifestPath.tmp"
@@ -804,7 +915,7 @@ try {
 # interpreter, so the coordinator runs as a base-python.exe child of this (idle)
 # venv-launcher process -- with the venv environment. Expected/benign, not a
 # duplicate coordinator.
-& '$VenvPython' -m agent_dispatch serve 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+& '$LinkPython' -m agent_dispatch serve 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
 
@@ -1071,7 +1182,7 @@ try {
 "[`$(Get-Date -Format o)] agent-dispatch supervisor launch (labels=`$labels interval=`$interval)" |
     Out-File -FilePath `$logFile -Append -Encoding utf8
 `$ErrorActionPreference = 'Continue'
-& '$VenvPython' -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+& '$LinkPython' -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
 
@@ -1396,7 +1507,16 @@ function Invoke-Uninstall {
         if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
         Write-Ok "Runtime purged: $InstallDir (config + DB deleted)"
     } else {
-        if (Test-Path $VenvDir) { Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue }
+        # Remove the runtime venv. Versioned: the `.venv` link + the versions/
+        # tree; otherwise the single real venv dir.
+        if ($VersionedRuntime) {
+            if (Test-VenvIsLink $LinkDir) { & cmd /c rmdir "$LinkDir" 2>$null }
+            elseif (Test-Path $LinkDir) { Remove-Item -Recurse -Force $LinkDir -ErrorAction SilentlyContinue }
+            $verRoot = Join-Path $InstallDir 'versions'
+            if (Test-Path $verRoot) { Remove-Item -Recurse -Force $verRoot -ErrorAction SilentlyContinue }
+        } elseif (Test-Path $VenvDir) {
+            Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue
+        }
         Write-Ok 'Venv removed (config + DB kept; -Purge to delete)'
     }
 }
