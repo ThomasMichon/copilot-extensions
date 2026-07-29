@@ -98,6 +98,12 @@
       "description": "Set up and troubleshoot WSL2 as a first-class development and service-hosting environment - install a distro, choose the networking mode (NAT + localhostForwarding vs mirrored + dnsTunneling), keep the distro alive for hosted services, and diagnose corp-network egress and host<->WSL loopback failures. Composes with agent-worktrees' agent-worktrees-wsl-provision; ships the setting-up-wsl and troubleshooting-wsl-networking skills",
       "version": "0.1.0-dev1",
       "source": "plugins/wsl-setup"
+    },
+    {
+      "name": "agent-index",
+      "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
+      "version": "0.1.0-dev1",
+      "source": "plugins/agent-index"
     }
   ]
 }
