@@ -14,7 +14,7 @@ import socket
 from pathlib import Path
 
 from .. import config as cfg
-from .. import sessions, tracking
+from .. import reclaim, sessions, tracking
 from . import derive, roster
 
 bucket = derive.bucket
@@ -143,6 +143,13 @@ def load(machine: str | None = None, env: str | None = None,
     if not records:
         return []
     session_ctx = sessions.scan_sessions_fast(records)
+    # #93: one machine-wide pass to find worktrees hosting a bare (un-muxed)
+    # bound Copilot, so each row can be marked as an orphan. Best-effort: a
+    # process-enumeration hiccup must never break the picker render.
+    try:
+        bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
+    except Exception:
+        bare_orphan_wts = set()
     mux_map = sessions.mux_status_many([r.worktree_id for r in records])
     state_map = _classify_records(records, session_ctx) if classify else {}
     machine = machine if machine is not None else LOCAL[0]
@@ -152,6 +159,7 @@ def load(machine: str | None = None, env: str | None = None,
         raw = _worktree_to_dict(
             rec, mux_info=mux_map.get(rec.worktree_id),
             session_ctx=session_ctx, state_info=state_map.get(rec.worktree_id),
+            bare_orphan_wts=bare_orphan_wts,
         )
         out.append(derive.norm(raw, machine, env))
     return out

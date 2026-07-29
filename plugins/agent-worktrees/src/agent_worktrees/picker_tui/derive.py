@@ -294,6 +294,8 @@ def norm(w, machine, env):
     # after the title. ``state`` stays pure (bucket()/prune key off it); the
     # not-auto-prune-SAFE behavior comes from the ``follow-up`` cleanup bucket.
     follow_up = bool(w.get("follow_up"))
+    # #93: a bare (un-muxed) bound Copilot -- invisible to the mux fleet view.
+    bare_orphan = bool(w.get("session_bare_orphan"))
     summary = (w.get("summary") or "").strip()
     disp_title = title
     if summary:
@@ -301,6 +303,10 @@ def norm(w, machine, env):
                       else f"{title} — {summary}")
     if follow_up:
         disp_title = f"✚ {disp_title}"
+    # #93: the orphan marker rides outermost (leftmost) -- most scannable, and
+    # a bound-but-un-muxed Copilot is the more urgent signal than a follow-up.
+    if bare_orphan:
+        disp_title = f"⚠ {disp_title}"
     return {
         "id4": w["id"][-4:],
         "machine": machine,
@@ -337,6 +343,8 @@ def norm(w, machine, env):
         # ``inuse.<pid>.lock`` binds a Copilot process right now (gates Reclaim).
         "last_session_id": w.get("last_session_id"),
         "session_lock_live": bool(w.get("session_lock_live")),
+        # #93: worktree hosts a bare (un-muxed) bound Copilot -> orphan marker.
+        "session_bare_orphan": bare_orphan,
         "hidden": bool(kind in ("system", "bridge")),
         "raw": w,
     }

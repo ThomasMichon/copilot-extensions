@@ -432,6 +432,7 @@ def _worktree_to_dict(
     state_info: git_ops.WorktreeStateInfo | None = None,
     mux_info: sessions.MuxInfo | None = None,
     session_ctx: sessions.SessionContext | None = None,
+    bare_orphan_wts: set[str] | None = None,
 ) -> dict:
     """Serialize a WorktreeRecord to a JSON-friendly dict.
 
@@ -443,6 +444,11 @@ def _worktree_to_dict(
 
     If ``session_ctx`` is provided, includes session-derived metrics
     (turn_count, session_count, latest_summary).
+
+    If ``bare_orphan_wts`` is provided (the set of worktree ids that host a
+    **bare**/un-muxed bound Copilot, from :func:`reclaim.bare_orphan_worktree_ids`),
+    a matching record is flagged ``session_bare_orphan`` so the picker can mark
+    the row -- a Copilot invisible to the mux fleet view (#93).
     """
     d: dict = {
         "id": rec.worktree_id,
@@ -552,6 +558,11 @@ def _worktree_to_dict(
         d["pr"] = pr_ops._pr_to_dict(active) if active is not None else None
         d["prs"] = [pr_ops._pr_to_dict(p) for p in rec.prs]
         d["pr_count"] = len(rec.prs)
+    # #93: mark a worktree hosting a bare (un-muxed) bound Copilot so the picker
+    # can annotate its row with an orphan marker (a Copilot the mux fleet view
+    # cannot see). Set only when true, to keep the dict lean.
+    if bare_orphan_wts and rec.worktree_id in bare_orphan_wts:
+        d["session_bare_orphan"] = True
     return d
 
 

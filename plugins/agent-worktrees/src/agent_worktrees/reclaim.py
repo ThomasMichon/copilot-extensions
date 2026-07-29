@@ -38,6 +38,7 @@ __all__ = [
     "descendants_of",
     "resolve_bound_copilots",
     "find_bare_orphans",
+    "bare_orphan_worktree_ids",
     "reap_bound_copilots",
 ]
 
@@ -370,6 +371,24 @@ def find_bare_orphans(
             "cwd": f["cwd"],
         })
     return out
+
+
+def bare_orphan_worktree_ids(
+    *, table: dict[int, dict] | None = None, self_pid: int | None = None,
+) -> set[str]:
+    """The set of worktree ids that currently host a **bare** bound Copilot.
+
+    A convenience over :func:`find_bare_orphans` for row-level surfacing (the
+    picker): reduces the machine-wide bare-orphan list to the distinct worktree
+    ids so a caller can annotate each worktree's row with an "orphan" marker in
+    one pass. Orphans whose cwd resolves to no worktree id are dropped (nothing
+    to annotate). Best-effort; empty set when nothing is bound.
+    """
+    return {
+        o["worktree_id"]
+        for o in find_bare_orphans(table=table, self_pid=self_pid)
+        if o.get("worktree_id")
+    }
 
 
 # ---------------------------------------------------------------------------
