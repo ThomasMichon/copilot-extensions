@@ -107,10 +107,51 @@ See [deployment-topologies.md](deployment-topologies.md). In short: a local
 skill (on demand), a local sync timer (self-serve one machine), or a fleet
 hub (many machines sync to one shared folder).
 
-## Coming soon
+## Background chronicling (`agent_logger.chronicle`)
 
-A scheduled **orchestrator daemon** — the automated "sessions → committed
-logs" service (scan → digest → batch → spawn the writer agent → commit/merge)
-with pluggable session-source and log-sink seams — is planned but not yet
-shipped. Today the same end result is achievable manually via the
-`process-backlog` skill; the daemon will automate it on a schedule.
+The **orchestrator daemon** — the automated "sessions → committed logs"
+service — turns the *synced* Copilot session corpus into objective,
+matter-of-fact **daily** logs landed in a target harness repo. It is the
+scheduled, fleet-wide, single-elected chronicler: `agent-dispatch`'s schedule
+management + single-producer job-lease drives *when* and *where-once* (pinned to
+one machine, idempotent catch-up); `agent_logger.chronicle` supplies *what* and
+*how-once-per-segment*.
+
+One `Chronicler.run_once` pass is `scan → digest (daily) → reserve → manifest →
+writer → land`, running between two pluggable seams so a consumer can adopt the
+daemon without re-implementing scan/digest:
+
+**Session-source seam** (`chronicle.source`) — discovers loggable units and
+enforces the idempotency locks:
+
+- **Settle gate** — never claim a session whose synced state changed within
+  `settle_seconds` (~10 min); it may be mid-sync.
+- **Already-journaled skip** — a journaled segment is never rescanned, so
+  multi-day gaps and catch-up replays never re-file a day.
+- **Continuation-segment reservation** (`ReservationStore`) — a chronicle unit
+  reserves the exact `(parent_session_id, segment_index)` segments it will log
+  via a compare-and-set, with a downgrade guard. The work-locked mesh fences a
+  task *record* (atomic claim + unique dedup_key) but **not** a task's *inputs*;
+  the session segments live outside the mesh, so the reservation is carried in
+  this seam. The mesh task's `dedup_key` (`chronicle:<parent>:<index>`) and the
+  reservation key derive from the **same** identity, so the two fences can never
+  disagree about "same segment".
+
+**Log-sink seam** (`chronicle.sink`) — `{router, profile, landing-policy}`:
+
+- **Router** (`OriginRepoRouter`) — routes a session to a sink by its recorded
+  origin repo (`workspace.yaml` `repository`), machine-default fallback.
+- **Profile** — the output voice/shape; `narration_style` defaults to
+  `objective` (neutral, factual; consumers may layer a character voice on their
+  own sink) plus a compact daily-digest template distinct from the per-session
+  Summary/Key-Changes shape.
+- **Landing-policy** — how a produced log commits, pluggable per sink so the
+  daemon core never hardcodes landing: `DirectCommitLanding` (dotfiles: one
+  scoped daily commit), `SquashPRLanding`, or a consumer-supplied strategy (e.g.
+  a governed single-flight merge-queue).
+
+CLI: `agent-logger chronicle status | scan | tick`. Only the elected host sets
+`chronicle.enabled`; its scheduled `chronicle tick` is the recurring job the
+`agent-dispatch` registry + job-lease pins fleet-wide. See the
+[manifest contract](manifest-contract.md) for the `mode: digest` manifest the
+daemon produces for the writer agent.

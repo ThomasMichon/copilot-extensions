@@ -38,7 +38,7 @@ batch). This document is the contract between them and the agent.
 
 | Field | Required | Meaning |
 |-------|----------|---------|
-| `mode` | yes | `single` writes the one session; `batch` triages + writes many. |
+| `mode` | yes | `single` writes the one session; `batch` triages + writes many; `digest` collapses a day's sessions into **one** compact daily log (background chronicle). |
 | `return` | yes | `result` = short human summary (+ remark); `json` = machine-parseable results. |
 | `sessions[].session_id` | yes | Session UUID. |
 | `sessions[].machine` | yes | Base machine name (no `-wsl`); used in paths/frontmatter. |
@@ -53,6 +53,44 @@ batch). This document is the contract between them and the agent.
 | `narration_style` | no | `null` (default) or caller-injected instructions for **interleaved** personality woven through the narrative body (primary voice seam). |
 | `exemplars` | no | `null` (default) or a list of short few-shot tone/depth reference passages (or a path to them). |
 | `closing_remark` | no | `null` (default) or caller-injected instructions for an **end-of-log** sign-off (end-only complement to `narration_style`). |
+
+## The daily-digest manifest (`mode: digest`)
+
+The background chronicler (`agent_logger.chronicle`) produces a **distinct**
+manifest shape: one compact **daily** log per `(sink, day)`, not one log per
+session. It sets `mode: "digest"` and adds three fields:
+
+| Field | Meaning |
+|-------|---------|
+| `digest_date` | The `YYYY-MM-DD` day the listed sessions are chronicled under. |
+| `sink` | The routed sink id (target harness repo) this digest lands in. |
+| `digest_template` | The compact daily-digest body template — **distinct** from the per-session `Summary / Key-Changes / Commits / Open-Items` shape. Tokens: `{date} {machine} {sink} {session_count} {sessions}`. |
+| `sessions[].segment_ref` | The `<parent_session_id>:<segment_index>` identity the daemon reserved for this unit (the reservation/dedup identity). |
+
+The writer renders **one** log for the whole day from `digest_template`, listing
+the day's sessions tersely. The voice seam is unchanged: `narration_style`
+defaults to the resolved **objective** instruction (neutral, factual — the
+retrieval-corpus baseline); a consumer sink may set it to voice-skill
+instructions to layer a character voice on its own target. `exemplars` and
+`closing_remark` behave exactly as in the per-session contract.
+
+```json
+{
+  "mode": "digest",
+  "return": "json",
+  "digest_date": "2026-07-28",
+  "sink": "dotfiles",
+  "sessions": [
+    {"session_id": "abc-123", "machine": "book2",
+     "session_path": "/…/sessions/book2/session-state/abc-123",
+     "repository": "owner/dotfiles", "segment_ref": "abc-123:0"}
+  ],
+  "output_root": "logs",
+  "log_path_template": "{year}/{month}/{day} chronicle.md",
+  "narration_style": "Write in an objective, matter-of-fact chronicle voice: …",
+  "digest_template": "# Chronicle -- {date}\n\n**Sink:** {sink}\n…"
+}
+```
 
 ## Output contract
 
