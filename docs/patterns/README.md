@@ -91,6 +91,17 @@ core of the principles above; a reviewer checks a change against these.
 - **Deploy through the pipeline, never edit the deployed copy.** Source lives in
   the repo; changes reach a runtime only via the installer + version bump. Editing
   `~/.copilot/installed-plugins/…` or a runtime dir is forbidden.
+- **Runtime installs are immutable and versioned.** An installer never mutates a
+  runtime venv in place. A new version is built into its **own** directory beside
+  the old one and the active version is selected by an **atomic** `current`
+  junction (Windows) / symlink (POSIX) swap; a running service keeps serving its
+  own immutable files until it is cut over or retired, and rollback is a swap back,
+  not a rebuild. Concurrent live versions are reconciled by drain-and-cutover +
+  shared routing/port state, never by racing to overwrite one install — so a
+  concurrent-update corruption (duplicate/broken daemons) cannot happen by
+  construction. Realized by the versioned-runtime primitive (`versioned_runtime.py`).
+  (Serves *Vision plugin-services §Behaviors/immutable-versioned-runtime*; tracked
+  in dotfiles #581.)
 - **A version bump ships the change.** Every plugin change bumps its version in the
   same commit (see `CONTRIBUTING.md`); an un-bumped push is silently ignored.
 - **Repo mutation is an adopt-only power.** `install`/`update` act on

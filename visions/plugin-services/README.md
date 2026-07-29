@@ -66,6 +66,18 @@ Every runtime plugin owns a complete, standalone runtime (venv + binstub +
 service) that its own installer deploys and updates. Nothing a service needs to
 run is borrowed from a sibling plugin or from a git checkout of this repo.
 
+### immutable-versioned-runtime
+A runtime install is **immutable**: once a version's venv is built it is never
+edited in place. A new version is installed **beside** the old one (its own
+directory), and the active version is selected **atomically** (a `current`
+junction/symlink swap), never by mutating a shared venv. Switching versions —
+forward or a rollback — is a selection, not a rewrite; a running service keeps
+serving its own immutable files until it is cut over or retired, and two live
+versions are reconciled by drain-and-cutover + shared routing/port state rather
+than by racing to overwrite one install. This makes a concurrent-update
+corruption (two installers mutating one venv → duplicate/broken daemons)
+impossible by construction, and rollback a swap rather than a rebuild.
+
 ### discoverable-local-endpoint
 A client reaches a service by **resolving the service's current endpoint from
 the service's own runtime state**, not by hardcoding a constant it must keep in
@@ -210,3 +222,13 @@ repo-altering effect appears only after an explicit adopt / re-adopt.
   tunnel-over-trusted-transport as the opt-in boundary-crossing mechanism,
   consistent with the standing non-goal that no such tunnel is ever *required*.
   Realized by the `service-transport` and `local-endpoint-discovery` patterns.
+
+- **2026-07-28** — Added the **immutable-versioned-runtime** behavior: a runtime
+  install is never mutated in place; versions install side-by-side and the active
+  one is selected by an atomic `current` junction/symlink swap, with concurrent
+  live versions reconciled by drain-and-cutover rather than by overwriting a
+  shared venv. Motivated by a class of failures where parallel installers mutating
+  one venv spawned duplicate/broken daemons, and by a running daemon silently
+  lagging its installed version. Realized by the versioned-runtime primitive
+  (`versioned_runtime.py`); tracked in dotfiles #581 (structural successor to the
+  #533 incremental lag fixes, root-cause fix for #123).

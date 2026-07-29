@@ -140,6 +140,17 @@ binstub  ~/.local/bin/<name>.ps1 (+ .cmd fallback)  →  signed venv python -m
 write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 ```
 
+> **Immutable-versioned target (dotfiles #581, rolling out).** The single
+> `~/.<runtime>/.venv` above is evolving into an **immutable, versioned** layout:
+> each version is built into `~/.<runtime>/versions/<version>/` and the runtime
+> path is a `current` junction (Windows) / symlink (POSIX) into the active one, so
+> `update` builds a new version dir and **atomically swaps** `current` instead of
+> mutating a live venv (binding invariant *Runtime installs are immutable and
+> versioned* — see [`patterns/README.md`](patterns/README.md)). The venv is still
+> `uv pip install`ed exactly as below; only *where* it lives and *how* it is
+> activated change. The `versioned_runtime.py` primitive owns the layout; the
+> per-plugin installer points its venv/binstub/manifest at the slot it returns.
+
 ### Hard rules
 
 1. **No file-copy of the package** into `~/.<runtime>/lib`. Install via
