@@ -625,6 +625,30 @@ to one, and its routing proof still exercises `msgview`. The `pilot.press`
 harness drives the modal end-to-end (a gated run's Esc cancels without executing;
 an armed run advances to done and Enter closes it).
 
+**Ninth migration -- the recent-messages viewer (`msgview`) → native
+`ModalScreen`, and the registry becomes an empty vestige (F4).** The
+`MsgViewScreen(ModalScreen[None])` replaces the manual `msgview` overlay -- the
+**last** one. Like `ProgressScreen` it is live: the payload loads on a daemon
+thread (`_msgview_worker`) that populates the engine-owned `self.msgview` dict
+under `_msgview_lock` (a late result for a closed/reopened viewer is dropped by
+`rec` identity), and an `on_mount` interval repaints while `loading` -- plus once
+more on the loading→loaded transition -- so the result appears without churning a
+settled viewer. `_open_msgview` builds the dict, starts the thread, then
+`push_screen`s the `MsgViewScreen`; the screen delegates keys to `_key_msgview`
+(↑/↓ scroll, Esc/q/Tab/Enter close, mirroring it exactly) and dismisses itself
+once the engine clears `msgview`. **With every overlay now native, the manual
+overlay registry is empty.** `_overlay_registry()` returns `[]` and
+`_active_overlay()` is always `None`; the three former consumers (the
+`_dispatch_key` dispatch chain, the background-dim decision in `render`, and the
+`on_key` binding gate) still consult it and simply see "no manual overlay is ever
+active" -- exactly right now that Textual's screen stack owns every modal. The
+seam is kept as a **documented vestige** (fully retiring it, and simplifying
+those call sites, is a clean follow-up). The overlay-registry guard was rewritten
+to assert this inert end-state (empty table; `_active_overlay()` stays `None`
+even with a stale state attr; a nav key drives the main selection rather than any
+overlay handler). The `pilot.press` harness drives the viewer end-to-end (Enter
+on *Messages* opens it, the loader thread resolves, Esc closes).
+
 **Global shortcuts are Textual `BINDINGS` (F3).** The truly-global pivot/machine
 shortcuts (`ctrl+shift+left/right`, `ctrl+left/right`) are owned by the
 framework's binding system, not the manual dispatcher: `PickerScreen.BINDINGS`

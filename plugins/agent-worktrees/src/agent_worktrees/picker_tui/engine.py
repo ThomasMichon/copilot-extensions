@@ -734,14 +734,12 @@ class PickerScreen(Widget):
             self._poll_update_state()
         if self.update_state == "checking":
             busy = True
-        # The cleanup/sync/profiles progress run drives itself now: it is a
-        # native Textual ``ModalScreen`` (``ProgressScreen``, #88 F4) that ticks
-        # its own advancement on an interval, so the background tick no longer
-        # advances it (that would double-step the mock walker).
-        # Keep the tick lively while the recent-messages viewer is still loading
-        # so its result appears promptly (the load runs on a daemon thread).
-        if self.msgview and self.msgview.get("loading"):
-            busy = True
+        # The cleanup/sync/profiles progress run and the recent-messages viewer
+        # drive themselves now: both are native Textual ``ModalScreen``s
+        # (``ProgressScreen`` / ``MsgViewScreen``, #88 F4) that tick their own
+        # advancement / load-repaint on an interval, so the background tick no
+        # longer nudges them (advancing progress here would double-step the mock
+        # walker; the viewer repaints itself while its loader thread resolves).
         # Full 10 fps only while something is actually animating (the SSH
         # connect spinner or a running progress dialog). When idle, throttle to
         # ~2 fps: keystrokes already repaint synchronously (on_key -> refresh),
@@ -2746,102 +2744,6 @@ class PickerScreen(Widget):
                 newt.append_text(prow)
                 lines[yi] = newt
 
-    def _overlay_msgview(self, lines, W, top_off, body_h):
-        """Render the recent-messages viewer overlay for a worktree.
-
-        A read-only peek: header (title + id/machine), then the last few
-        conversation turns of the latest session (role-labeled, word-wrapped),
-        or a loading spinner / error / empty line. ``↑/↓`` scroll long content;
-        ``Esc`` closes. The body is windowed to fit, so a long transcript never
-        overflows the panel.
-        """
-        mv = self.msgview
-        rec = mv["rec"]
-        pw = min(W - 6, 88)
-        title = f" {rec.get('title', '')}"
-        meta = (f" {rec.get('id4')} · {rec.get('machine')} · {rec.get('env')}"
-                f" · {rec.get('state')}")
-        header = "─ Recent messages "
-        panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
-                      style=C_BAND)]
-        panel.append(self._prow(title, pw, style=C_HEADER))
-        panel.append(self._prow(meta, pw, style=C_DIM))
-        panel.append(self._prow("", pw))
-
-        # Body rows: assemble the full list, then window by scroll offset.
-        avail = max(3, body_h - 9)  # rows left for the message body
-        body: list[Text] = []
-
-        # Sessions section (diagnostic): every session's FULL id + title, so the
-        # operator can copy an id out (terminal selection) to resume it by hand
-        # (`copilot --resume <id>`). The head is marked ``● current``.
-        sess = mv.get("sessions") or []
-        if sess:
-            body.append(self._prow(" Sessions (select an id to copy):",
-                                   pw, style=C_HEADER))
-            for s in sess:
-                sid = str(s.get("id", ""))
-                is_head = bool(s.get("is_head"))
-                marker = "●" if is_head else "○"
-                mark_style = "bold #7ee787" if is_head else C_DIM
-                tag = " current" if is_head else ""
-                state = str(s.get("state", "") or "")
-                if state and state != "active":
-                    tag = f" {state}"
-                body.append(self._prow(f" {marker} {sid}{tag}",
-                                       pw, style=mark_style))
-                title = str(s.get("name", "") or "").strip()
-                title_row = f"     {title}" if title else "     (untitled)"
-                for seg in self._wrap_text(title_row, pw - 2):
-                    body.append(self._prow(seg, pw,
-                                           style="white" if title else C_FAINT))
-            body.append(self._prow("", pw))
-            body.append(self._prow(" Recent messages (current session):",
-                                   pw, style=C_HEADER))
-
-        if mv.get("loading"):
-            spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[(self.frame // 2) % 10]
-            body.append(self._prow(f" {spin} Loading recent messages…",
-                                   pw, style=C_FAINT))
-        elif mv.get("error"):
-            body.append(self._prow(f" ⚠ {mv['error']}", pw, style=C_CAUTION))
-        elif not mv.get("messages"):
-            body.append(self._prow(" (no conversation messages in the latest "
-                                   "session)", pw, style=C_FAINT))
-        else:
-            for m in mv["messages"]:
-                is_user = m.get("role") == "user"
-                who = "you" if is_user else "agent"
-                glyph = "▍"
-                who_style = "bold #4aa3ff" if is_user else "bold #7ee787"
-                body.append(self._prow(f" {glyph} {who}", pw, style=who_style))
-                for seg in self._wrap_text(m.get("text", ""), pw - 5):
-                    body.append(self._prow("   " + seg, pw, style="white"))
-                body.append(self._prow("", pw))
-
-        total = len(body)
-        max_scroll = max(0, total - avail)
-        scroll = min(mv.get("scroll", 0), max_scroll)
-        mv["scroll"] = scroll
-        window = body[scroll:scroll + avail]
-        panel.extend(window)
-        if total > avail:
-            more = total - avail - scroll
-            panel.append(self._prow(
-                f"   … {more} more line(s) below" if more > 0
-                else "   (end)", pw, style=C_DIM))
-
-        panel.append(self._prow("", pw))
-        sid = mv.get("session_id") or ""
-        foot = " Esc close · ↑/↓ scroll"
-        if sid:
-            # Full id (not truncated) so terminal selection copies a usable
-            # `copilot --resume <id>` argument.
-            foot = f" current session {sid} ·" + foot
-        panel.append(self._prow(foot, pw, style=C_FAINT))
-        panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
-        self._blit_panel(lines, W, panel, top_off, body_h)
-
     @staticmethod
     def _wrap_text(text: str, width: int) -> list[str]:
         """Word-wrap ``text`` to ``width`` columns; collapse blank lines.
@@ -2876,31 +2778,31 @@ class PickerScreen(Widget):
                 out.append(cur)
         return out or [""]
 
-    # ---- modal-overlay registry (single source of truth) --------------------
+    # ---- modal-overlay registry (now-empty vestigial seam) ------------------
     def _overlay_registry(self):
-        """The modal overlays, in dispatch-precedence order. Each entry is
-        ``(state_attr, key_handler, render_handler)``. Overlays are mutually
-        exclusive; the first whose ``state_attr`` is truthy owns the keyboard
-        and the foreground.
+        """The manual modal-overlay table -- now **empty**. Each entry was
+        ``(state_attr, key_handler, render_handler)``; the first whose
+        ``state_attr`` was truthy owned the keyboard and the foreground.
 
-        This table is the **single source of truth** consumed by three call
+        This table was the **single source of truth** consumed by three call
         sites that previously each hand-maintained their own parallel list --
         ``_dispatch_key``'s dispatch chain, the background-dim decision, and the
-        render dispatch chain -- which had to be kept in sync by hand and could
-        silently drift when an overlay was added (#85 F1, the first
-        native-focus-migration slice: consolidate before converting individual
-        overlays to Textual ``ModalScreen``s). As overlays migrate to native
-        ``ModalScreen``s they leave this table; ``progress`` was the latest to go
-        (#88 F4), so only the still-manual ``msgview`` remains."""
-        return [
-            ("msgview", self._key_msgview,
-             lambda ln, W, o, b: self._overlay_msgview(ln, W, o, b)),
-        ]
+        render dispatch chain (#85 F1, the first native-focus-migration slice:
+        consolidate before converting individual overlays to Textual
+        ``ModalScreen``s). Every overlay has since migrated to a native
+        ``ModalScreen`` -- ``msgview`` was the last to go (#88 F4) -- so nothing
+        remains here. It is kept as a **documented vestige**: ``_active_overlay``
+        (and its three call sites) still consult it and simply see "no manual
+        overlay is ever active," which is exactly right now that Textual's screen
+        stack owns every modal. Fully retiring the seam (and simplifying the
+        call sites + the ``on_key`` binding gate) is a clean follow-up."""
+        return []
 
     def _active_overlay(self):
         """The ``(state_attr, key_handler, render_handler)`` spec for the first
         active overlay in precedence order, or ``None`` when a top-level view
-        has the keyboard."""
+        has the keyboard. Always ``None`` now that the registry is empty (every
+        overlay is a native ``ModalScreen`` -- see ``_overlay_registry``)."""
         for spec in self._overlay_registry():
             if getattr(self, spec[0]):
                 return spec
@@ -3698,6 +3600,13 @@ class PickerScreen(Widget):
         the summary layer in-process; remote worktrees run ``recent-messages``
         over SSH. Never blocks or crashes the UI: a failure resolves to an error
         line in the overlay.
+
+        Migrated to a native Textual ``ModalScreen`` (#88 F4): this builds the
+        engine-owned ``self.msgview`` dict, starts the daemon loader thread
+        (which populates it under ``_msgview_lock``), then pushes the
+        ``MsgViewScreen`` that renders it, repaints while it loads, and mirrors
+        the old ``_key_msgview`` (scroll + close). The screen holds no state of
+        its own and needs no callback.
         """
         self.msgview = {
             "rec": rec, "limit": limit, "loading": True,
@@ -3708,6 +3617,7 @@ class PickerScreen(Widget):
             target=self._msgview_worker, args=(rec, limit),
             name="msgview-load", daemon=True,
         ).start()
+        self.app.push_screen(MsgViewScreen(self))
 
     def _load_worktree_sessions(self, rec, wt_id, m, e):
         """Fetch the worktree's Copilot session registry (id + title + head).
@@ -4872,6 +4782,158 @@ class ProgressScreen(ModalScreen[None]):
         # place (unarmed-arm keeps the dialog up, now working).
         eng._key_progress(canonical_key(event.key))
         if eng.progress is None:
+            self.dismiss(None)
+        else:
+            self._refresh()
+
+
+class MsgViewScreen(ModalScreen[None]):
+    """Native modal recent-messages viewer (#88 F4) -- the last overlay migrated.
+
+    A read-only peek at a worktree's latest-session conversation tail plus its
+    session registry (every session's FULL id + title, so the operator can copy
+    an id out for a manual ``copilot --resume <id>``). Like ``ProgressScreen`` it
+    is **live**: the payload loads on a daemon thread (``_msgview_worker``) that
+    populates the engine-owned ``self.msgview`` dict under a lock, and an
+    ``on_mount`` interval repaints while ``loading`` (plus once more on the
+    loading -> loaded transition) so the result appears promptly. It mirrors the
+    former ``_key_msgview`` exactly (↑/↓ scroll; Esc/q/Tab/Enter close).
+
+    The state + loader stay on the engine because the worker references
+    ``self.msgview`` by identity (a late result for a viewer the operator already
+    closed / reopened is dropped). This screen is the native shell that renders
+    and scrolls that state, dismissing itself once the engine clears it.
+    """
+
+    CSS = """
+    MsgViewScreen { align: center middle; background: $background 55%; }
+    MsgViewScreen > #msgview { width: auto; height: auto; max-height: 90%; }
+    """
+
+    def __init__(self, eng) -> None:
+        super().__init__()
+        self._eng = eng
+        self._loading_last = True
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._panel(), id="msgview")
+
+    def on_mount(self) -> None:
+        self.set_interval(0.1, self._on_tick)
+
+    def _on_tick(self) -> None:
+        mv = self._eng.msgview
+        if mv is None:
+            # A direct engine poke (e.g. a unit test) cleared the viewer out from
+            # under us -- close if we're still the top screen.
+            if self.app.screen is self:
+                self.dismiss(None)
+            return
+        loading = bool(mv.get("loading"))
+        # Repaint while the loader thread is resolving, plus exactly one final
+        # repaint on the loading -> loaded transition so the result renders; a
+        # settled viewer is static, so we then stop churning (scroll keys
+        # repaint synchronously in on_key).
+        if loading or self._loading_last:
+            self._refresh()
+        self._loading_last = loading
+
+    def _refresh(self) -> None:
+        if self._eng.msgview is not None:
+            self.query_one("#msgview", Static).update(self._panel())
+
+    def _panel(self) -> Panel:
+        eng = self._eng
+        mv = eng.msgview
+        if mv is None:
+            # Cleared before this screen finished mounting; render empty and let
+            # the interval dismiss us on its next tick.
+            return Panel(Text(""), border_style=C_DIM, width=92)
+        rec = mv["rec"]
+        pw = 88
+        title = f" {rec.get('title', '')}"
+        meta = (f" {rec.get('id4')} · {rec.get('machine')} · {rec.get('env')}"
+                f" · {rec.get('state')}")
+
+        # Assemble the scrollable body, then window it by the scroll offset.
+        body: list[Text] = []
+        # Sessions section (diagnostic): every session's FULL id + title so the
+        # operator can copy an id out (terminal selection) to resume it by hand.
+        # The head is marked ``● current``.
+        sess = mv.get("sessions") or []
+        if sess:
+            body.append(Text(" Sessions (select an id to copy):", style=C_HEADER))
+            for s in sess:
+                sid = str(s.get("id", ""))
+                is_head = bool(s.get("is_head"))
+                marker = "●" if is_head else "○"
+                mark_style = "bold #7ee787" if is_head else C_DIM
+                tag = " current" if is_head else ""
+                state = str(s.get("state", "") or "")
+                if state and state != "active":
+                    tag = f" {state}"
+                body.append(Text(f" {marker} {sid}{tag}", style=mark_style))
+                stitle = str(s.get("name", "") or "").strip()
+                title_row = f"     {stitle}" if stitle else "     (untitled)"
+                for seg in eng._wrap_text(title_row, pw - 2):
+                    body.append(Text(seg, style="white" if stitle else C_FAINT))
+            body.append(Text(""))
+            body.append(Text(" Recent messages (current session):",
+                             style=C_HEADER))
+
+        if mv.get("loading"):
+            spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[(eng.frame // 2) % 10]
+            body.append(Text(f" {spin} Loading recent messages…", style=C_FAINT))
+        elif mv.get("error"):
+            body.append(Text(f" ⚠ {mv['error']}", style=C_CAUTION))
+        elif not mv.get("messages"):
+            body.append(Text(" (no conversation messages in the latest session)",
+                             style=C_FAINT))
+        else:
+            for m in mv["messages"]:
+                is_user = m.get("role") == "user"
+                who = "you" if is_user else "agent"
+                who_style = "bold #4aa3ff" if is_user else "bold #7ee787"
+                body.append(Text(f" ▍ {who}", style=who_style))
+                for seg in eng._wrap_text(m.get("text", ""), pw - 5):
+                    body.append(Text("   " + seg, style="white"))
+                body.append(Text(""))
+
+        avail = 18
+        total = len(body)
+        max_scroll = max(0, total - avail)
+        scroll = min(mv.get("scroll", 0), max_scroll)
+        mv["scroll"] = scroll
+        window = body[scroll:scroll + avail]
+
+        out = Text()
+        out.append(title + "\n", style=C_HEADER)
+        out.append(meta + "\n\n", style=C_DIM)
+        for ln in window:
+            out.append_text(ln)
+            out.append("\n")
+        if total > avail:
+            more = total - avail - scroll
+            out.append("   … %d more line(s) below" % more if more > 0
+                       else "   (end)", style=C_DIM)
+            out.append("\n")
+        out.append("\n")
+        sid = mv.get("session_id") or ""
+        foot = " Esc close · ↑/↓ scroll"
+        if sid:
+            # Full id (not truncated) so terminal selection copies a usable
+            # `copilot --resume <id>` argument.
+            foot = f" current session {sid} ·" + foot
+        out.append(foot, style=C_FAINT)
+        return Panel(out, title="Recent messages", border_style=C_BAND, width=92)
+
+    def on_key(self, event) -> None:
+        event.stop()
+        eng = self._eng
+        # Delegate the scroll/close transition to the engine's tested core, then
+        # close once it clears the viewer or repaint the new scroll position.
+        eng._key_msgview(canonical_key(event.key))
+        if eng.msgview is None:
             self.dismiss(None)
         else:
             self._refresh()

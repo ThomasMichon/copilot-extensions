@@ -132,6 +132,20 @@ def _progress_open(scr):
     return _progress_screen(scr) is not None
 
 
+def _msgview_screen(scr):
+    """The F4 MsgViewScreen instance on the app's screen stack, or None."""
+    from agent_worktrees.picker_tui.engine import MsgViewScreen
+    for s in scr.app.screen_stack:
+        if isinstance(s, MsgViewScreen):
+            return s
+    return None
+
+
+def _msgview_open(scr):
+    """True when the F4 MsgViewScreen (recent-messages viewer) is stacked."""
+    return _msgview_screen(scr) is not None
+
+
 def _fixture_source():
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
     local = ("lambda-core", "Win")
@@ -2699,6 +2713,7 @@ def test_msgview_local_load_populates_and_closes(monkeypatch):
             await pilot.pause()
             assert not _sub_menu_open(scr)
             assert scr.msgview is not None
+            assert _msgview_open(scr)          # native viewer modal is up
             # Wait for the daemon loader thread to resolve.
             for _ in range(200):
                 if scr.msgview and not scr.msgview["loading"]:
@@ -2710,9 +2725,12 @@ def test_msgview_local_load_populates_and_closes(monkeypatch):
             assert [m["text"] for m in scr.msgview["messages"]] == [
                 "do the thing", "done"]
             assert scr.msgview["session_id"] == "sess-abc12345"
-            # A repaint with the overlay populated must not raise.
-            scr.render()
-            scr._key_msgview("escape")
+            await pilot.pause()                # let the viewer repaint the result
+            # Esc through the real keyboard pipeline closes it: the screen
+            # dismisses and the engine clears the viewer.
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not _msgview_open(scr)
             assert scr.msgview is None
 
     asyncio.run(run())
@@ -4142,11 +4160,16 @@ def test_palette_no_stray_shade_literals():
 
 
 @pytest.mark.guard
-def test_overlay_registry_drives_dispatch_and_precedence():
-    """Item F1 (#85): the modal-overlay registry is the single source of truth
-    for key dispatch AND render. Assert (a) no overlay -> _active_overlay() is
-    None; (b) each overlay's state selects its own registry spec and routes
-    _dispatch_key to that spec's handler; (c) precedence follows registry order."""
+def test_overlay_registry_is_empty_and_seam_is_inert():
+    """Item F1 (#85) consolidated the modal overlays into a single registry so
+    dispatch + render shared one source of truth; F4 then migrated every overlay
+    to a native Textual ``ModalScreen``. With the last one (`msgview`, #88 F4)
+    gone the registry is now **empty** and the manual seam is a documented
+    vestige. Assert (a) the registry is empty; (b) `_active_overlay()` is always
+    None -- even with a stale overlay-shaped state attr set, since nothing routes
+    through the table anymore; (c) `_dispatch_key` no longer routes a nav key to
+    any overlay handler (it drives the main nav), because Textual's screen stack
+    owns every modal now."""
     src = _fixture_source()
 
     async def run():
@@ -4155,57 +4178,28 @@ def test_overlay_registry_drives_dispatch_and_precedence():
             scr = app.query_one(PickerScreen)
             await pilot.pause()
 
-            attrs = [spec[0] for spec in scr._overlay_registry()]
+            # (a) Every overlay migrated -> the registry table is empty.
+            assert scr._overlay_registry() == []
 
-            # (a) A top-level view has no active overlay.
-            for a in attrs:
-                setattr(scr, a, None)
+            # (b) No manual overlay is ever active, even with a stale
+            # overlay-shaped state attr set: nothing consults it via the table.
             assert scr._active_overlay() is None
+            scr.msgview = {"scroll": 0}
+            assert scr._active_overlay() is None
+            scr.msgview = None
 
-            # (b) Each overlay's state attr selects its own registry spec.
-            for attr in attrs:
-                for a2 in attrs:
-                    setattr(scr, a2, {"x": 1} if a2 == attr else None)
-                assert scr._active_overlay()[0] == attr
-
-            # (b') _dispatch_key actually ROUTES through the active overlay's
-            # handler rather than the main nav: with a still-manual overlay open
-            # (the recent-messages viewer), a nav key is consumed by the overlay
-            # (it scrolls the viewer) and never moves the main-view selection.
-            # (The menu/confirm AND the Clean/Sync scope overlays are native
-            # ModalScreens now (#88 F4); `msgview` remains a manual registry
-            # overlay, so it proves the seam.)
-            for a2 in attrs:
-                setattr(scr, a2, None)
+            # (c) A nav key drives the main-view selection rather than being
+            # consumed by a (now non-existent) manual overlay handler.
             scr.machine_idx = scr.local_index()
             await pilot.pause()
             assert scr.list_records()
             scr.wt_sel.clear()
             scr.sel = ("L", 0)
-            sel_before = scr.sel
-            scr.msgview = {"scroll": 0}
-            scr._dispatch_key("down")                  # consumed by the overlay
-            assert scr.msgview is not None             # overlay still has the keyboard
-            assert scr.msgview["scroll"] == 1          # routed to _key_msgview
-            assert scr.sel == sel_before               # main nav untouched
-            scr.msgview = None
-
-            # (c) Precedence: with the first two overlays both set, the earlier
-            # one in registry order wins. As overlays migrate to native
-            # ModalScreens the registry shrinks; ``progress`` left in #88 F4, so
-            # only ``msgview`` remains and there is no longer a second manual
-            # overlay to order against. Keep the ordering proof exercised while
-            # ever there are two, and skip it cleanly once the table is down to
-            # one (the (b')/(b) checks above still prove per-overlay routing).
-            if len(attrs) >= 2:
-                setattr(scr, attrs[0], {"x": 1})
-                setattr(scr, attrs[1], {"x": 1})
-                assert scr._active_overlay()[0] == attrs[0]
-
-            # Reset the fake overlay state so the app teardown tick doesn't read
-            # a malformed overlay dict (e.g. progress without its "done" key).
-            for a in attrs:
-                setattr(scr, a, None)
+            stops = scr.stops()
+            assert ("L", 0) in stops
+            idx = stops.index(("L", 0))
+            scr._dispatch_key("down")
+            assert scr.sel == stops[min(idx + 1, len(stops) - 1)]  # main nav moved
 
     asyncio.run(run())
 
@@ -4470,7 +4464,11 @@ def test_msgview_overlay_lists_full_session_ids_and_titles():
                      "is_head": False, "state": "handed-off"},
                 ],
             }
-            out = str(scr.render())
+            # The viewer is a native MsgViewScreen now (#88 F4): its panel
+            # renders the engine-owned msgview state. Inspect the panel text
+            # directly (PickerScreen.render no longer draws the overlay).
+            from agent_worktrees.picker_tui.engine import MsgViewScreen
+            out = MsgViewScreen(scr)._panel().renderable.plain
             # Full ids are present (untruncated) for terminal copy.
             assert full_head in out
             assert full_old in out
