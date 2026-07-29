@@ -4384,13 +4384,10 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
     # #93: the Picker's SSH consumer always requests --mux-details; derive the
     # bare (un-muxed) orphan worktrees in the same enriched pass so a *remote*
     # row carries the orphan marker. Gated on mux_details so a plain streaming
-    # list never pays for the machine-wide process scan.
+    # list never pays for the machine-wide process scan. Derived *after* the
+    # begin frame (below) so the roster frame streams immediately; the name is
+    # initialized here for the to_dict closure's late binding.
     bare_orphan_wts: set[str] | None = None
-    if getattr(args, "mux_details", False):
-        try:
-            bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
-        except Exception:
-            bare_orphan_wts = None
 
     def to_dict(rec, state_info):
         wt = _worktree_to_dict(
@@ -4404,6 +4401,15 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
         return wt
 
     emit({"type": "begin", "version": _JSON_SCHEMA_VERSION, "count": len(records)})
+    # #93: derive the bare (un-muxed) orphan worktree set now -- after the roster
+    # frame, so streaming's first paint is never blocked by the scan. Gated on
+    # --mux-details (the Picker's flag); cheap (skips historical dirs) but kept
+    # off the critical path regardless.
+    if getattr(args, "mux_details", False):
+        try:
+            bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
+        except Exception:
+            bare_orphan_wts = None
     for rec in records:
         emit({"type": "worktree", "phase": "fast", "wt": to_dict(rec, None)})
     if getattr(args, "classify", False):

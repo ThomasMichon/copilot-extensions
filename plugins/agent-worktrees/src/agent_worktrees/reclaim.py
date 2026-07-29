@@ -303,11 +303,26 @@ def resolve_bound_copilots(
     for entry in sorted(state_dir.iterdir()):
         if not entry.is_dir():
             continue
-        if sessions._is_detached_session(entry):
-            continue
 
         sid = entry.name
         if session_id and not (sid == session_id or sid.startswith(session_id)):
+            continue
+
+        # Cheap gate FIRST: only a dir with a live bound Copilot is of interest.
+        # The vast majority of session-state dirs are historical (no live lock),
+        # so resolve the lock pids -- a cheap glob -- before paying for the
+        # workspace.yaml read + worktree-id resolution below. This keeps the
+        # scan O(live sessions) instead of O(all sessions ever), which matters
+        # on the picker/list hot path where hundreds of dirs accumulate.
+        live_pids = [
+            pid for pid in _lock_pids(entry)
+            if sessions._is_process_alive(pid)
+            and sessions._is_copilot_process(pid)
+        ]
+        if not live_pids:
+            continue
+
+        if sessions._is_detached_session(entry):
             continue
 
         cwd = _session_cwd(entry)
@@ -318,11 +333,7 @@ def resolve_bound_copilots(
         if worktree_path and not _cwd_under(cwd, worktree_path):
             continue
 
-        for pid in _lock_pids(entry):
-            if not sessions._is_process_alive(pid):
-                continue
-            if not sessions._is_copilot_process(pid):
-                continue
+        for pid in live_pids:
             results.append({
                 "session_id": sid,
                 "pid": pid,
