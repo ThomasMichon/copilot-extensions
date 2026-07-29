@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from agent_codespaces.codespace_config import SSH_CONFIG_DIR, CodespaceSource
 
