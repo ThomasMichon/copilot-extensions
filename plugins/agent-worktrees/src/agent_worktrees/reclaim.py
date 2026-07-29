@@ -26,6 +26,7 @@ from its recovered on-disk state (agent-fabric vision, reclaim-idle-process).
 
 from __future__ import annotations
 
+import os
 import platform
 from pathlib import Path
 
@@ -36,6 +37,7 @@ __all__ = [
     "homing_of",
     "descendants_of",
     "resolve_bound_copilots",
+    "find_bare_orphans",
     "reap_bound_copilots",
 ]
 
@@ -328,6 +330,46 @@ def resolve_bound_copilots(
                 "homing": homing_of(pid, table),
             })
     return results
+
+
+# ---------------------------------------------------------------------------
+# Surfacing -- read-only bare-orphan discovery (derive-don't-duplicate)
+# ---------------------------------------------------------------------------
+
+def find_bare_orphans(
+    *, table: dict[int, dict] | None = None, self_pid: int | None = None,
+) -> list[dict]:
+    """Machine-wide **bare** (un-muxed) bound Copilots, minus this process's tree.
+
+    A read-only convenience over :func:`resolve_bound_copilots` for *surfacing*
+    orphans (e.g. ``doctor``, the picker): returns every bound Copilot whose
+    ``homing`` is ``bare`` -- a session launched straight in a terminal, so it is
+    invisible to the ``wt-<id>`` mux fleet view and lingers un-reapable when its
+    terminal is closed or wedged. The caller's own session subtree is excluded
+    (never report *this* Copilot, or one of its ancestors, as an orphan), mirroring
+    the self-guard in ``cmd_reclaim``. Each item::
+
+        {session_id, pid, worktree_id, cwd}
+
+    Stores no state; everything is derived at read time. Best-effort: an empty
+    list when nothing is bound (or enumeration failed).
+    """
+    table = build_process_table() if table is None else table
+    me = os.getpid() if self_pid is None else self_pid
+    out: list[dict] = []
+    for f in resolve_bound_copilots(table=table):
+        if f.get("homing") != "bare":
+            continue
+        subtree = {f["pid"]} | descendants_of(f["pid"], table)
+        if me in subtree:
+            continue
+        out.append({
+            "session_id": f["session_id"],
+            "pid": f["pid"],
+            "worktree_id": f["worktree_id"],
+            "cwd": f["cwd"],
+        })
+    return out
 
 
 # ---------------------------------------------------------------------------
