@@ -681,3 +681,38 @@ itself, so `on_key` only ever runs for the top-level views (the old
 path end-to-end -- the binding fires the rotation, and is correctly suppressed
 while a modal owns the keyboard (Textual's screen stack, not a manual gate).
 
+### Body componentization (F5) -- carving sub-views out of `build_body`
+
+With every dialog native (F4) and the manual overlay seam retired, F5 tackles the
+picker *body*. The original F5 framing -- convert the `sel=(zone,index)` +
+`stops()` focus model to focusable widgets -- turned out to be a rewrite trap, not
+an incremental slice: the picker paints its whole body as **one monolithic
+`render()` / `build_body()` Rich-`Text` blob** with `sel == ("ZONE", i)` compared
+inline for every tab/button/row (87 engine refs, 121 test couplings, a golden
+snapshot). Textual focus is container-level, so the body can't be flipped to
+widgets region-by-region -- there's no per-region seam the way F4 had the overlay
+registry.
+
+So F5 is **incremental componentization under a moratorium on new
+full-screen-at-once renders**: peel cohesive sub-views off the God-object one at a
+time, each into a component that owns its own render (and, over successive slices,
+its state + focus), until the shared `sel`/`stops` model shrinks to just the
+chrome -- at which point converting *that* to widgets is a small, bounded final
+step.
+
+**First component -- the Profiles configurator (`ProfilesView`).** The Profiles
+pivot body (the host×target grid + its narrow-terminal transposed fallback) is the
+most self-contained sub-view (its confirm dialog was already a native
+`ProfConfirmScreen`), so it goes first. `PickerScreen.build_body`'s profiles branch
+now calls `self.profiles_view.build(add, width, sel)` on a `ProfilesView` component
+(instantiated in `__init__`) instead of the inline `_build_profiles` /
+`_build_profiles_transposed` (both deleted). This slice moves the *body rendering*
+behind the component boundary; the profiles *state* (`grid` / `pcol` / `targets` /
+`host_cols` / `applied`) and behaviour (toggle, Apply plumbing) still live on the
+engine and are read through the component's back-reference, to be pulled in by a
+follow-up slice (and a later slice makes `ProfilesView` a focusable Textual
+widget). Behaviour is unchanged -- the same VRows with the same `("PR", i)` /
+`("BTN", 0)` stops are emitted; a guard test (`test_profiles_view_component_renders_body`)
+asserts the component renders the body and the inline methods are gone.
+
+

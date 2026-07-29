@@ -1873,6 +1873,40 @@ def test_profiles_unavailable_column_is_readonly():
     asyncio.run(run())
 
 
+@pytest.mark.guard
+def test_profiles_view_component_renders_body():
+    """F5 slice 1: the Profiles pivot body is rendered by an encapsulated
+    ``ProfilesView`` component, not inlined in ``build_body``. Assert (a) the
+    engine exposes a ``profiles_view`` component and the old inline render
+    methods are gone; (b) the Profiles pivot's body rows (the ``("PR", i)``
+    target stops + the ``("BTN", 0)`` Apply row) are emitted -- i.e. build_body
+    routes through the component and it produces the grid."""
+    from agent_worktrees.picker_tui.engine import ProfilesView
+    src = _profiles_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 2                          # Profiles pivot
+            await pilot.pause()
+
+            # (a) The component exists; the inline render methods are gone.
+            assert isinstance(scr.profiles_view, ProfilesView)
+            assert not hasattr(scr, "_build_profiles")
+            assert not hasattr(scr, "_build_profiles_transposed")
+
+            # (b) build_body routes the Profiles body through the component,
+            # which emits the target rows + the Apply button row.
+            stops = {getattr(v, "stop", None) for v in scr.build_body(118)}
+            assert ("BTN", 0) in stops
+            assert any(s and s[0] == "PR" for s in stops)
+            assert len(scr.targets) == sum(
+                1 for s in stops if s and s[0] == "PR")
+
+    asyncio.run(run())
+
+
 def test_profiles_apply_progress_carries_restart_summary():
     """After confirming an Apply, the progress dict carries the add/remove
     counts the done-state surfaces alongside the restart reminder (#1368)."""
