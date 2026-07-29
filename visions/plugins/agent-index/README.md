@@ -52,7 +52,12 @@ A single retrieval index that fuses **vector similarity** with **full-text
 search**, so a query is answered by *meaning and lexical match together* rather
 than forcing a choice between concept and exact term. The index is a
 **materialized view** — derived from, and rebuildable from, the source systems it
-mirrors.
+mirrors. It lives in a **durable data location kept separate from the plugin's
+immutable, versioned runtime**: the executable logic is swapped by version
+cutover (per [`plugin-services`](../../plugin-services/README.md)
+§immutable-versioned-runtime), while the index **persists across cutovers and
+restarts** and is never at risk from a runtime swap — with source-backed rebuild
+as the safety net beneath it.
 
 ### The embedding engine
 The component that turns text into vectors, at both index time and query time.
@@ -200,12 +205,25 @@ triggers (a redelivered webhook does not re-embed the world), and **visible
 enough** that an agent or operator can tell what is queued, running, failed,
 current, or stale — without spelunking logs.
 
+### zero-downtime-cutover
+Deploying a new version of the engine is **zero-downtime**, honoring the
+[`plugin-services`](../../plugin-services/README.md) §zero-downtime-cutover
+behavior: the new version is health-gated, the client-followed routing record
+flips atomically, in-flight **searches** drain, and **scheduled/queued indexing
+work is handed off** to the new version rather than dropped or run twice — then
+the old version retires (reversible up to a commit point). The **durable index is
+untouched** by the swap (it lives outside the versioned runtime), so an upgrade or
+rollback never rebuilds it or interrupts search.
+
 ### local-first-standalone
 The service is machine-local by default and reachable using only what its own
-installer deployed — no external proxy, mesh, or registry required. Exposing it
-beyond the local machine, or fronting it with shared routing, is an explicit,
-opt-in **consumer** choice, never a prerequisite the plugin bakes in. (The
-[plugin-services](../../plugin-services/README.md) posture, applied here.)
+installer deployed — no external proxy, mesh, or registry required. When a client
+is on **another host**, it reaches the service over an explicit, opt-in **trusted
+transport** — an **SSH port-forward** of the service's own local endpoint (the
+[`plugin-services`](../../plugin-services/README.md) minimal-network-exposure
+posture, rung 4 of the service-transport ladder) — so the service still opens no
+new inbound port of its own. Fronting it with shared routing is likewise an
+explicit **consumer** choice, never a prerequisite the plugin bakes in.
 
 ### engine-stays-generic
 The engine does not grow product opinions. Branding, a house web experience,
@@ -260,3 +278,14 @@ generic is what lets many different products reuse it.
   (incremental, event-driven, rate-aware, small-footprint). The engine is framed
   as a reusable core a richer downstream product **consumes and extends** via a
   stable connector/query seam, rather than a product that replaces it.
+
+- **2026-07-29** — Added the **zero-downtime-cutover** behavior, separated the
+  **durable index** from the immutable/versioned runtime (§The index & store), and
+  sharpened **local-first-standalone** to name **SSH port-forwarding** as the
+  opt-in cross-host reach. Mined from an operator directive: the engine's
+  executable logic installs as an immutable, junction-selected versioned runtime
+  with ZDD/cutover for scheduled indexing and in-flight requests; the index lives
+  in a durable location that survives cutovers; and in a multi-machine deployment
+  other hosts reach the single service over SSH. Honors the `plugin-services`
+  §zero-downtime-cutover / §minimal-network-exposure behaviors; realized at intent
+  level by the shared `zdd` cutover library.
