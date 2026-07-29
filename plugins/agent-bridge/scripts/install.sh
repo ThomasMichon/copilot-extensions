@@ -58,6 +58,30 @@ fi
 RELAY_PORT=9857   # integrated credential relay (in-process with the bridge)
 SYSTEMD_UNIT="agent-bridge.service"
 
+# === install-contract:v3 versioned-venv (agent-bridge: venv-as-symlink) ===
+# Immutable per-version runtime (#581): build the venv into versions/<version>
+# and make the historical `venv` path a symlink into it, so the binstub, systemd
+# unit, deploy-manifest, and `agent-bridge deploy` cutover -- all of which
+# reference `venv` -- resolve through the link unchanged. LINK_DIR is the stable
+# `venv` path (runtime-facing, never a versions/<v> absolute a `gc` could
+# remove); VENV_DIR is redirected to the versions/<v> slot (build + health-gate).
+# In legacy mode LINK_DIR == VENV_DIR (byte-for-byte the old behavior). Gated
+# behind AGENT_BRIDGE_VERSIONED=1 (default off) until validated; the stdlib-only
+# scripts/versioned_runtime.py owns the swap + legacy migration + gc.
+LINK_DIR="$VENV_DIR"
+VERSIONED_RUNTIME=0
+SRC_VERSION=""
+if [[ "${AGENT_BRIDGE_VERSIONED:-}" =~ ^(1|true|yes|on)$ && "${COPILOT_EXT_NO_VERSIONED:-}" != "1" ]]; then
+    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+        SRC_VERSION="$(grep -m1 '^version' "$PLUGIN_DIR/pyproject.toml" | sed 's/.*"\(.*\)".*/\1/')"
+    fi
+    if [[ -n "$SRC_VERSION" ]]; then
+        VERSIONED_RUNTIME=1
+        VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+    fi
+fi
+# === end install-contract:v3 versioned-venv ===
+
 # Ensure ~/.local/bin is on PATH
 if [[ ":$PATH:" != *":$LOCAL_BIN:"* ]]; then
     export PATH="$LOCAL_BIN:$PATH"
@@ -89,6 +113,51 @@ _skip() { echo "  [SKIP] $*"; }
 _fail() { echo "  [FAIL] $*" >&2; }
 _step() { echo "  ...    $*"; }
 _warn() { echo "  [WARN] $*" >&2; }
+
+# === install-contract:v3 versioned-venv helpers (agent-bridge) ===
+_versioned_activate() {
+    # Swap the stable `venv` symlink to this version's freshly-built slot, moving
+    # a legacy real `venv` aside on first migration (--replace-nonlink). No-op in
+    # legacy mode. The caller must have stopped/cut over any daemon holding the
+    # old venv first.
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name "venv" activate "$SRC_VERSION" --replace-nonlink; then
+        _fail "Failed to activate versioned venv (venv -> versions/$SRC_VERSION)"
+        return 1
+    fi
+    _ok "Runtime version $SRC_VERSION active (venv -> versions/$SRC_VERSION)"
+}
+
+_versioned_current() {
+    # The version the `venv` link currently points at (empty for a legacy real
+    # venv or a fresh box).
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || { echo ""; return 0; }
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py="$LINK_DIR/bin/python"
+    [[ -x "$py" ]] || py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || { echo ""; return 0; }
+    "$py" "$vr" --root "$INSTALL_DIR" --link-name "venv" current 2>/dev/null || echo ""
+}
+
+_versioned_gc() {
+    # Prune old version slots, keeping current + the given previous-good +
+    # live-pid-pinned slots. Best-effort. No-op in legacy mode.
+    local keep_prev="${1:-}"
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py="$LINK_DIR/bin/python"
+    [[ -x "$py" ]] || py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || return 0
+    if [[ -n "$keep_prev" ]]; then
+        "$py" "$vr" --root "$INSTALL_DIR" --link-name "venv" gc --protect-pids --keep "$keep_prev" 2>&1 | sed 's/^/  ...    gc: /' || true
+    else
+        "$py" "$vr" --root "$INSTALL_DIR" --link-name "venv" gc --protect-pids 2>&1 | sed 's/^/  ...    gc: /' || true
+    fi
+}
+# === end install-contract:v3 versioned-venv helpers ===
 
 _get_pid() {
     if [[ -f "$PID_FILE" ]]; then
@@ -133,9 +202,10 @@ _wait_port_free() {
 # indefinitely. Non-fatal -- the stop that follows is the backstop.
 _drain_service() {
     local timeout="${1:-120}"
-    [[ -x "$VENV_DIR/bin/agent-bridge" ]] || return 0
+    # Drain the RUNNING daemon, resolved through the stable `venv` link.
+    [[ -x "$LINK_DIR/bin/agent-bridge" ]] || return 0
     _step "Draining in-flight sessions (up to ${timeout}s)..."
-    if "$VENV_DIR/bin/agent-bridge" drain --timeout "$timeout" --force \
+    if "$LINK_DIR/bin/agent-bridge" drain --timeout "$timeout" --force \
             > /dev/null 2>&1; then
         _ok "Drain window complete"
     else
@@ -351,8 +421,10 @@ EOF
 }
 
 _write_deploy_manifest() {
+    # The manifest `venv` field records the stable `venv` link ($LINK_DIR), never
+    # a versions/<v> slot.
     _write_deploy_manifest_for "agent-bridge" "agent-bridge" \
-        "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR"
+        "$INSTALL_DIR" "$PLUGIN_DIR" "$LINK_DIR"
 }
 
 _install_systemd_unit() {
@@ -365,7 +437,10 @@ _install_systemd_unit() {
     local unit_dir="$HOME/.config/systemd/user"
     mkdir -p "$unit_dir"
 
-    local venv_bridge="$VENV_DIR/bin/agent-bridge"
+    # Resolve the daemon through the stable `venv` link (a symlink to the active
+    # versions/<v> slot in the immutable-versioned layout), never a versions/<v>
+    # absolute a `gc` could remove.
+    local venv_bridge="$LINK_DIR/bin/agent-bridge"
 
     cat > "$unit_dir/$SYSTEMD_UNIT" << EOF
 [Unit]
@@ -519,6 +594,17 @@ do_install() {
     fi
     _ok "Package installed"
 
+    # Versioned layout (#581): health-gate the freshly-built slot in isolation,
+    # then swap the stable `venv` symlink onto it. Everything below resolves
+    # through `venv` (the link). No-op in legacy mode.
+    if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+        if ! _runtime_healthy; then
+            _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
+            exit 1
+        fi
+        _versioned_activate || exit 1
+    fi
+
     # Machine-local config schema migration (idempotent + atomic; never touches
     # repo config). Non-fatal.
     if PYTHONUTF8=1 "$VENV_DIR/bin/python" -m agent_bridge config migrate 2>/dev/null; then
@@ -581,7 +667,14 @@ do_uninstall() {
 
     _remove_sibling_binstubs
 
-    if [[ -d "$VENV_DIR" ]]; then
+    # Remove the runtime venv. In the versioned layout this means the `venv`
+    # symlink AND the whole versions/ tree; otherwise the single real venv dir.
+    if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+        [[ -L "$LINK_DIR" ]] && rm -f "$LINK_DIR"
+        [[ -d "$LINK_DIR" && ! -L "$LINK_DIR" ]] && rm -rf "$LINK_DIR"
+        [[ -d "$INSTALL_DIR/versions" ]] && rm -rf "$INSTALL_DIR/versions"
+        _ok "Venv removed"
+    elif [[ -d "$VENV_DIR" ]]; then
         rm -rf "$VENV_DIR"
         _ok "Venv removed"
     fi
@@ -602,7 +695,7 @@ do_start() {
         return 0
     fi
 
-    if [[ ! -x "$VENV_DIR/bin/agent-bridge" ]]; then
+    if [[ ! -x "$LINK_DIR/bin/agent-bridge" ]]; then
         _fail "agent-bridge not installed. Run: install.sh install"
         exit 1
     fi
@@ -624,8 +717,8 @@ do_start() {
         _warn "systemd start failed -- falling back to direct start"
     fi
 
-    # Direct start
-    nohup "$VENV_DIR/bin/agent-bridge" start > "$INSTALL_DIR/agent-bridge.log" 2>&1 &
+    # Direct start -- launch through the stable `venv` link.
+    nohup "$LINK_DIR/bin/agent-bridge" start > "$INSTALL_DIR/agent-bridge.log" 2>&1 &
     local pid=$!
     echo "$pid" > "$PID_FILE"
     sleep 2
@@ -709,10 +802,10 @@ do_status() {
         fi
     fi
 
-    # Install state
-    if [[ -x "$VENV_DIR/bin/agent-bridge" ]]; then
+    # Install state -- the currently-active runtime (via the `venv` link).
+    if [[ -x "$LINK_DIR/bin/agent-bridge" ]]; then
         local version
-        version=$("$VENV_DIR/bin/agent-bridge" version 2>/dev/null || echo "unknown")
+        version=$("$LINK_DIR/bin/agent-bridge" version 2>/dev/null || echo "unknown")
         _ok "Installed: $version"
     else
         _step "Not installed"
@@ -739,7 +832,7 @@ do_status() {
     fi
 
     # Exit non-zero when not installed (used by module update orchestrator)
-    if [[ ! -x "$VENV_DIR/bin/agent-bridge" ]]; then
+    if [[ ! -x "$LINK_DIR/bin/agent-bridge" ]]; then
         exit 1
     fi
 }
@@ -757,9 +850,10 @@ _runtime_healthy() {
 # Prints the version to stdout; returns 1 if it cannot be determined (e.g. no
 # venv, or a broken install) so the caller can skip the downgrade guard.
 _installed_version() {
-    [[ -x "$VENV_DIR/bin/python" ]] || return 1
+    # The version currently ACTIVE (via the `venv` link), for the downgrade guard.
+    [[ -x "$LINK_DIR/bin/python" ]] || return 1
     local v
-    v="$("$VENV_DIR/bin/python" -c \
+    v="$("$LINK_DIR/bin/python" -c \
         'from importlib.metadata import version; print(version("agent-bridge"))' \
         2>/dev/null)" || return 1
     [[ -n "$v" ]] || return 1
@@ -847,8 +941,18 @@ _remove_venv_backup() {
 # on any failure WITHOUT exiting, so the caller can roll back. The service must
 # already be stopped before this runs.
 _update_core() {
-    # Repair venv if python binary is missing
-    if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+    # Build/repair the venv. Versioned layout: $VENV_DIR is a FRESH per-version
+    # slot (never the running daemon's), so an absent slot is normal -- always
+    # build it. Legacy layout: repair the single venv in place if python is gone.
+    if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+        if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+            _step "Building runtime slot versions/$SRC_VERSION..."
+            if ! uv venv "$VENV_DIR" --python 3.10 --allow-existing; then
+                uv venv "$VENV_DIR" --allow-existing || { _fail "Venv build failed (versions/$SRC_VERSION)"; return 1; }
+            fi
+            _ok "Built runtime slot versions/$SRC_VERSION"
+        fi
+    elif [[ ! -x "$VENV_DIR/bin/python" ]]; then
         if [[ -d "$VENV_DIR" ]]; then
             _step "Repairing venv (python binary missing)..."
         else
@@ -964,17 +1068,25 @@ do_update() {
         was_running=true
     fi
 
+    # Versioned layout: remember the currently-active version (rollback + gc keep).
+    local prev_version=""
+    if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+        prev_version="$(_versioned_current)"
+    fi
+
     # Snapshot the current healthy venv so a failed install can roll back to the
     # previous-good runtime instead of leaving the service DOWN with a broken/
-    # empty venv (#52). Only snapshot a venv that actually works.
+    # empty venv (#52). Only snapshot a venv that actually works. Skipped in the
+    # versioned layout: rollback there is "leave the `venv` link on the previous
+    # slot" (the link is only swapped after a healthy build).
     local have_backup=false
-    if _runtime_healthy; then
+    if [[ "$VERSIONED_RUNTIME" != 1 ]] && _runtime_healthy; then
         if _backup_venv; then have_backup=true; fi
     fi
 
     # Decide the swap strategy:
     #   - Zero-downtime cutover (opt-in via AGENT_BRIDGE_ZERO_DOWNTIME=1): leave
-    #     the old daemon RUNNING, reinstall the venv, then `agent-bridge deploy`
+    #     the old daemon RUNNING, build the new venv, then `agent-bridge deploy`
     #     stands the new daemon up beside it on a fresh port, flips the routing
     #     table, drains the old daemon, and retires it. No API-unavailable
     #     window and no hard-killed turns. EXPERIMENTAL: the survivor runs
@@ -983,8 +1095,20 @@ do_update() {
     #   - Default (drain-then-swap): drain in-flight work for a grace window,
     #     then stop/reinstall/start. No active turn is hard-killed up to the
     #     drain timeout, though a brief API-unavailable window remains.
+    #
+    # Versioned layout: the new version builds into its OWN slot, so cutover no
+    # longer needs the (new) venv to pre-exist -- gate only on "running".
     local cutover=false
-    if [[ "${AGENT_BRIDGE_ZERO_DOWNTIME:-0}" == "1" && "$was_running" == true \
+    if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+        if [[ "${AGENT_BRIDGE_ZERO_DOWNTIME:-0}" == "1" && "$was_running" == true ]]; then
+            cutover=true
+            # Cutover onto the same slot is impossible; downgrade to stop-and-rebuild.
+            if [[ "$SRC_VERSION" == "$prev_version" ]]; then
+                _step "Cutover skipped: version $SRC_VERSION is already active; using classic stop-and-rebuild"
+                cutover=false
+            fi
+        fi
+    elif [[ "${AGENT_BRIDGE_ZERO_DOWNTIME:-0}" == "1" && "$was_running" == true \
           && -x "$VENV_DIR/bin/agent-bridge" ]]; then
         cutover=true
     fi
@@ -1000,7 +1124,20 @@ do_update() {
     # Run the protected update; on any failure, roll back to the snapshot.
     if ! _update_core; then
         _fail "Update failed"
-        if [[ "$have_backup" == true ]]; then
+        if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+            # The `venv` link was never swapped (activate runs only after a healthy
+            # build), so the previous slot is still active. Discard the half-built
+            # new slot (unless it IS the active one) and restart the previous
+            # version if the classic path stopped it.
+            if [[ -n "$SRC_VERSION" && "$SRC_VERSION" != "$prev_version" ]]; then
+                rm -rf "$INSTALL_DIR/versions/$SRC_VERSION"
+            fi
+            if [[ "$was_running" == true && "$cutover" == false ]]; then
+                _step "Restarting the previous version..."
+                do_start
+            fi
+            _warn "Update failed; kept the previous runtime (venv -> versions/${prev_version:-<previous>})."
+        elif [[ "$have_backup" == true ]]; then
             _step "Rolling back to the previous venv..."
             if _restore_venv; then
                 _ok "Previous venv restored"
@@ -1017,6 +1154,13 @@ do_update() {
             _warn "No healthy venv snapshot to roll back to -- run install.sh install to rebuild"
         fi
         exit 1
+    fi
+
+    # Versioned layout: the new slot is built + verified; atomically swap the
+    # stable `venv` symlink onto it. In cutover mode the old daemon keeps serving
+    # from its own immutable slot until drained. No-op in legacy mode.
+    if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+        _versioned_activate || { _fail "Versioned activate failed"; exit 1; }
     fi
 
     # Success: discard the rollback snapshot.
@@ -1039,10 +1183,10 @@ STUB
     # Update deploy manifest
     _write_deploy_manifest
 
-    # Bring the new version into service.
+    # Bring the new version into service. Launch through the stable `venv` link.
     if [[ "$cutover" == true ]]; then
         _step "Zero-downtime cutover (agent-bridge deploy)..."
-        if "$VENV_DIR/bin/agent-bridge" deploy \
+        if "$LINK_DIR/bin/agent-bridge" deploy \
                 --drain-timeout "${AGENT_BRIDGE_DRAIN_TIMEOUT:-300}"; then
             _ok "Cutover complete -- new daemon active, old retired"
         else
@@ -1054,6 +1198,12 @@ STUB
     else
         _step "Starting service..."
         do_start
+    fi
+
+    # Versioned layout: prune old version slots now that the new one is healthy
+    # and active, keeping current + the previous-good + any live-pid-pinned slot.
+    if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+        _versioned_gc "$prev_version"
     fi
 
     _ok "Update complete"
