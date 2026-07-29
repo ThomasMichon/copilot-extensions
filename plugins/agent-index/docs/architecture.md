@@ -59,3 +59,22 @@ Phase 2 will introduce the indexing engine core, source connectors, durable work
 state, embedding/retrieval surfaces, and good-citizen ingestion controls. The
 Phase 1 `/status` response intentionally reports `index.chunks = 0` until that
 engine exists.
+
+## Ported core (Phase 2)
+
+Phase 2 ports the reusable indexing/search core into `agent_index` while keeping
+it generic and separate from the Phase 1 service shell:
+
+- `chunking` — code, Markdown, YAML, and fallback chunkers.
+- `index_config` — generic index/model configuration (`IndexConfig` and `ModelProfile`).
+- `store` — content, vector, multi-model, repair, and clustering stores.
+- `embedding` — embedding pipeline and in-process query embedder.
+- `search` — reusable query/search engine.
+- `indexing` — indexing runner, task state, manifests, GC, backups, and cluster pass.
+- `engine` — on-demand embedding-engine subprocess and shim.
+- `sources` — generic connector protocol and registry.
+
+Deployment-specific connectors, secrets bootstrap, and server surfaces from the
+source service are intentionally excluded; a downstream superset provides those
+on top of this reusable engine.
+
