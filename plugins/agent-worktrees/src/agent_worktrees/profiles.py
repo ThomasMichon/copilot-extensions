@@ -65,8 +65,48 @@ def self_diagonal(machine: str, env: str) -> TargetSel:
 
 
 def seed_selection(machine: str, env: str) -> list[TargetSel]:
-    """Initial column at adoption: the self.agent diagonal only (self-only)."""
+    """Initial column at adoption: the self.agent diagonal only (self-only).
+
+    Unmanaged projects (no persisted column) are rendered with the *default
+    column* at generation time -- minimal per-agent + bare cross-machine (see
+    :func:`is_default_on`) -- so a project need not be explicitly seeded to get
+    its cross-machine shells.
+    """
     return [self_diagonal(machine, env)]
+
+
+def is_default_on(target: TargetSel, self_machine: str, self_env: str) -> bool:
+    """Canonical DEFAULT rule for an unmanaged host column (no persisted key).
+
+    The default is **minimal per-agent + bare cross-machine**, and is the single
+    source of truth mirrored by the installer's PowerShell generator
+    (``Get-DefaultSelection`` in ``install.ps1``):
+
+    - ``agent`` target -> ON only for the **self diagonal** (this host launching
+      itself in its native env). No remote agent-launch combos; no local WSL
+      launcher.
+    - ``shell`` target -> ON for every **other** (remote) machine, i.e. a plain
+      ``ssh <machine>`` login shell. No local (self-machine) shells.
+
+    This replaces the retired "unmanaged emits every candidate profile"
+    behavior.
+    """
+    if target.kind == "agent":
+        return target.machine == self_machine and target.env == self_env
+    return target.machine != self_machine
+
+
+def default_selection(
+    candidates, self_machine: str, self_env: str
+) -> list[TargetSel]:
+    """The default column: ``candidates`` filtered by :func:`is_default_on`.
+
+    ``candidates`` is any iterable of :class:`TargetSel` (the full host x target
+    grid for the roster). The locked self.agent diagonal is always included even
+    when absent from ``candidates``.
+    """
+    chosen = [c for c in candidates if is_default_on(c, self_machine, self_env)]
+    return normalize_selection(chosen, self_machine, self_env)
 
 
 def _coerce(raw) -> list[TargetSel]:
@@ -100,8 +140,10 @@ def _coerce(raw) -> list[TargetSel]:
 def load_selection(config_path: Path) -> list[TargetSel]:
     """Read this machine's terminal-profile column from ``config.yaml``.
 
-    Returns ``[]`` when the file or key is absent (never raises): an empty
-    column means "no profiles selected yet" (pre-adoption-seed legacy configs).
+    Returns ``[]`` when the file or key is absent (never raises). An empty
+    result does not distinguish "unmanaged" from "explicit empty" -- use
+    :func:`has_selection` for that. An unmanaged project is rendered with the
+    default column (:func:`default_selection`) at generation time.
     """
     try:
         if not config_path.exists():
@@ -119,10 +161,12 @@ def has_selection(config_path: Path) -> bool:
     """Whether ``config.yaml`` carries an explicit ``terminal_profiles`` key.
 
     Distinguishes a **managed** column (the key is present -- adoption seeded it
-    or the Picker wrote it) from a **legacy/unmanaged** config (no key). The
+    or the Picker wrote it) from an **unmanaged** config (no key). The
     distinction matters because absent must mean the same thing to the Picker
-    and the installer's mirror: legacy = "all targets" (the historical
-    emit-everything behavior), managed = exactly the listed selection.
+    and the installer's mirror: unmanaged = the **default column** (minimal
+    per-agent + bare cross-machine; see :func:`is_default_on`), managed =
+    exactly the listed selection. (Historically unmanaged meant "all targets" /
+    emit-everything; that behavior is retired.)
     """
     try:
         if not config_path.exists():
