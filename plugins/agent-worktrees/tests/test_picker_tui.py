@@ -4160,16 +4160,16 @@ def test_palette_no_stray_shade_literals():
 
 
 @pytest.mark.guard
-def test_overlay_registry_is_empty_and_seam_is_inert():
-    """Item F1 (#85) consolidated the modal overlays into a single registry so
-    dispatch + render shared one source of truth; F4 then migrated every overlay
-    to a native Textual ``ModalScreen``. With the last one (`msgview`, #88 F4)
-    gone the registry is now **empty** and the manual seam is a documented
-    vestige. Assert (a) the registry is empty; (b) `_active_overlay()` is always
-    None -- even with a stale overlay-shaped state attr set, since nothing routes
-    through the table anymore; (c) `_dispatch_key` no longer routes a nav key to
-    any overlay handler (it drives the main nav), because Textual's screen stack
-    owns every modal now."""
+def test_manual_overlay_seam_is_retired():
+    """Item F1 (#85) consolidated the modal overlays into one registry so
+    dispatch + render shared a single source of truth; F4 then migrated every
+    overlay to a native Textual ``ModalScreen`` and (this slice) **retired the
+    now-empty seam**. Assert (a) the seam methods are gone -- ``_overlay_registry``
+    / ``_active_overlay`` no longer exist on ``PickerScreen``; (b) a nav key
+    drives the main-view selection (nothing intercepts it -- Textual's screen
+    stack owns every modal now). (That a global BINDING key still bubbles, and is
+    correctly swallowed while a modal is up, is covered by the F3 keyboard
+    guards.)"""
     src = _fixture_source()
 
     async def run():
@@ -4178,18 +4178,11 @@ def test_overlay_registry_is_empty_and_seam_is_inert():
             scr = app.query_one(PickerScreen)
             await pilot.pause()
 
-            # (a) Every overlay migrated -> the registry table is empty.
-            assert scr._overlay_registry() == []
+            # (a) The manual seam is gone -- no vestigial registry/active-overlay.
+            assert not hasattr(scr, "_overlay_registry")
+            assert not hasattr(scr, "_active_overlay")
 
-            # (b) No manual overlay is ever active, even with a stale
-            # overlay-shaped state attr set: nothing consults it via the table.
-            assert scr._active_overlay() is None
-            scr.msgview = {"scroll": 0}
-            assert scr._active_overlay() is None
-            scr.msgview = None
-
-            # (c) A nav key drives the main-view selection rather than being
-            # consumed by a (now non-existent) manual overlay handler.
+            # (b) A nav key drives the main-view selection directly.
             scr.machine_idx = scr.local_index()
             await pilot.pause()
             assert scr.list_records()
