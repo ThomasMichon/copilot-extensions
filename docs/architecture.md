@@ -1,7 +1,7 @@
 # Architecture Overview
 
-How the fifteen copilot-extensions plugins fit together — install topology,
-runtimes, ports, and the credential relay. **Nine ship a runtime** (a `uv`-built
+How the sixteen copilot-extensions plugins fit together — install topology,
+runtimes, ports, and the credential relay. **Ten ship a runtime** (a `uv`-built
 venv under `~/.agent-*` plus a `~/.local/bin` binstub, deployed by the plugin's
 own installer); **six are payload-only** — `efforts` (skills), `visions`
 (skills), `context-handoff` (a session extension), `customizing-copilot`
@@ -23,6 +23,7 @@ internals, follow the links in each section.
 | [agent-ssh](../plugins/agent-ssh/) | SSH profile emitter + verifier | `~/.agent-ssh/` | `~/.local/bin/agent-ssh` | On-demand CLI; owns the transport-provider contract for SSH profile modules |
 | [agent-logger](../plugins/agent-logger/) | Session-logging CLI + writer agent + sync task | `~/.agent-logger/` | `~/.local/bin/agent-logger` | On-demand CLI + a scheduled `session-sync` (Windows task / Linux systemd timer) |
 | [agent-dispatch](../plugins/agent-dispatch/) | Task-queue engine + per-host coordinator + CLI/MCP | `~/.agent-dispatch/` | `~/.local/bin/agent-dispatch` | On-demand CLI + optional always-on coordinator (Windows task / Linux systemd unit) |
+| [agent-index](../plugins/agent-index/) | Indexing/search service shell | `~/.agent-index/` | `~/.local/bin/agent-index` | Phase 1 always-on service shell (Windows task / Linux systemd user unit); indexing engine arrives in later slices |
 | [agent-vault](../plugins/agent-vault/) | Local secret store: CLI + vault service | `~/.agent-vault/` | `~/.local/bin/agent-vault` | On-demand CLI + a persistent vault daemon (Windows scheduled task / Linux systemd user unit); ships a `vault-askpass` SUDO_ASKPASS helper |
 
 ### Payload-only plugins (no installer, no runtime)
