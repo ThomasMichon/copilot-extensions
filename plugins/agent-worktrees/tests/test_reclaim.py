@@ -91,9 +91,27 @@ class TestResolveBoundCopilots:
         monkeypatch.setattr(reclaim, "_resolve_worktree_id_for_cwd",
                             lambda cwd: wt_map.get(cwd))
         monkeypatch.setattr(reclaim, "build_process_table", lambda: table)
+        # Neutralize the POSIX tty-upgrade by default (no tmux panes) so these
+        # tests stay deterministic on Linux runners; a specific test overrides it.
+        from agent_worktrees import remux
+        monkeypatch.setattr(remux, "tmux_pane_ttys", lambda mux_bin=None: set())
 
-    def test_bare_vs_mux_split_same_session(self, monkeypatch, tmp_path):
-        # One session dir double-locked: a bare pid and a mux pid.
+    def test_bare_by_ppid_upgraded_to_mux_when_tty_is_a_pane(
+            self, monkeypatch, tmp_path):
+        # A reptyr-adopted Copilot keeps a bare ppid ancestry but its controlling
+        # tty is now a tmux pane -> homing must upgrade bare -> mux.
+        _mk_session(tmp_path, "sess", "/w/wtA", [777])
+        table = {777: {"ppid": 10, "name": "copilot"},
+                 10: {"ppid": 1, "name": "bash"}}
+        self._patch(monkeypatch, tmp_path, alive={777}, copilots={777},
+                    wt_map={"/w/wtA": "wtA"}, table=table)
+        monkeypatch.setattr(reclaim.platform, "system", lambda: "Linux")
+        from agent_worktrees import remux
+        monkeypatch.setattr(remux, "tmux_pane_ttys",
+                            lambda mux_bin=None: {"/dev/pts/9"})
+        monkeypatch.setattr(remux, "process_tty", lambda pid: "/dev/pts/9")
+        rows = reclaim.resolve_bound_copilots()
+        assert [r["homing"] for r in rows] == ["mux"]
         _mk_session(tmp_path, "sessA", "/w/wtA", [5668, 35156])
         table = {
             5668: {"ppid": 10, "name": "copilot.exe"},
