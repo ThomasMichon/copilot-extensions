@@ -46,6 +46,60 @@ LOCAL_BIN="$HOME/.local/bin"
 VENV_DIR="$INSTALL_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
 VENV_BIN="$VENV_DIR/bin/agent-codespaces"
+
+# === install-contract:v3 versioned-venv (agent-codespaces: .venv-as-symlink) ===
+# Immutable per-version runtime (#581): build the venv into versions/<version>
+# and make the historical `.venv` path a symlink into it, so the binstub and
+# deploy-manifest resolve through the link unchanged. agent-codespaces is a CLI
+# (its SSH masters are ssh, not python), so no process to drain. LINK_DIR is the
+# stable `.venv` path; VENV_DIR is the versions/<v> slot (build + health-gate).
+# Legacy mode: LINK_DIR == VENV_DIR. Gated behind AGENT_CODESPACES_VERSIONED=1
+# (default off); scripts/versioned_runtime.py owns the swap + migration + gc.
+LINK_DIR="$VENV_DIR"
+LINK_PYTHON="$VENV_PYTHON"
+VERSIONED_RUNTIME=0
+SRC_VERSION=""
+if [[ "${AGENT_CODESPACES_VERSIONED:-}" =~ ^(1|true|yes|on)$ && "${COPILOT_EXT_NO_VERSIONED:-}" != "1" ]]; then
+    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+        SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
+    fi
+    if [[ -n "$SRC_VERSION" ]]; then
+        VERSIONED_RUNTIME=1
+        VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+        VENV_PYTHON="$VENV_DIR/bin/python"
+        VENV_BIN="$VENV_DIR/bin/agent-codespaces"
+    fi
+fi
+
+_versioned_activate() {
+    # CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
+    # symlink onto it (first migration moves a legacy real `.venv` aside), then gc
+    # old slots keeping current + previous-good. Returns non-zero on failure. No-op
+    # in legacy mode.
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
+    [[ -x "$py" ]] || return 0
+    if ! "$VENV_PYTHON" -c 'import agent_codespaces' 2>/dev/null; then
+        _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
+        return 1
+    fi
+    local prev
+    prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink; then
+        _fail "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
+        return 1
+    fi
+    _ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+    if [[ -n "$prev" ]]; then
+        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  gc: /' || true
+    else
+        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  gc: /' || true
+    fi
+    return 0
+}
+# === end install-contract:v3 versioned-venv ===
 # ssh-manager dir (contains pyproject.toml): plugin-vendored (marketplace
 # layout) or repo-root (git checkout layout).
 SSH_MGR_DIR="$PLUGIN_DIR/libs/ssh-manager"
@@ -225,7 +279,7 @@ write_deploy_manifest() {
     "branch": $branch,
     "dirty": $dirty
   },
-  "venv": "$VENV_DIR",
+  "venv": "$LINK_DIR",
   "runtime": "python"
 }
 MANIFEST
@@ -247,6 +301,9 @@ do_install() {
     # Deploy package
     deploy_package || return 1
 
+    # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
+    _versioned_activate || return 1
+
     # Deploy binstub
     deploy_binstub
 
@@ -260,7 +317,7 @@ do_install() {
 
     # Verify (import from the venv -- no PYTHONPATH)
     local check
-    check="$("$VENV_PYTHON" -c 'import agent_codespaces; print("OK")' 2>/dev/null || true)"
+    check="$("$LINK_PYTHON" -c 'import agent_codespaces; print("OK")' 2>/dev/null || true)"
     if [[ "$check" == "OK" ]]; then
         _ok "Verification: module imports successfully"
     else
@@ -322,21 +379,21 @@ do_status() {
     fi
 
     # Venv
-    if [[ -f "$VENV_PYTHON" ]]; then
-        _ok "Venv: $VENV_DIR"
+    if [[ -f "$LINK_PYTHON" ]]; then
+        _ok "Venv: $LINK_DIR"
     else
         _fail "Venv missing"
     fi
 
     # Package (installed into the venv)
-    if "$VENV_PYTHON" -c 'import agent_codespaces' 2>/dev/null; then
+    if "$LINK_PYTHON" -c 'import agent_codespaces' 2>/dev/null; then
         _ok "Package: agent_codespaces importable in venv"
     else
         _fail "Package not importable in venv"
     fi
 
     # ssh-manager
-    if "$VENV_PYTHON" -c 'import ssh_manager' 2>/dev/null; then
+    if "$LINK_PYTHON" -c 'import ssh_manager' 2>/dev/null; then
         _ok "ssh-manager: importable in venv"
     else
         _fail "ssh-manager not importable in venv"
@@ -411,6 +468,9 @@ do_update() {
 
     # Re-deploy package
     deploy_package
+
+    # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
+    _versioned_activate || return 1
 
     # Re-deploy binstub
     deploy_binstub
