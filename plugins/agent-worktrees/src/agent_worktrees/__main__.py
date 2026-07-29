@@ -10454,6 +10454,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     # 5. Alignment audit (report-only)
     misaligned = health.audit_alignment(records, session_dir)
 
+    # 6. Bare (un-muxed) Copilot orphans -- machine-wide surfacing (report-only).
+    #    Reclaiming stays operator-initiated: a bare session may be a live,
+    #    actively-used non-mux terminal with no safe auto-reap signal, so doctor
+    #    only *surfaces* it and points at the `reclaim` verb.
+    bare_orphans = reclaim.find_bare_orphans()
+
     try:
         proj_name = cfg.project_name()
     except Exception:
@@ -10477,6 +10483,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                          "ids": [r.worktree_id for r in stale]},
         "empty_sessions": gc_result,
         "misaligned": {"count": len(misaligned), "worktrees": misaligned},
+        "bare_orphans": {"count": len(bare_orphans), "items": bare_orphans},
     }
 
     if json_mode:
@@ -10539,6 +10546,18 @@ def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> N
               f"(resume handled by Fix; informational)")
     else:
         print("  \u2713 No worktree/path misalignment")
+
+    bo = report.get("bare_orphans", {"count": 0, "items": []})
+    if bo["count"]:
+        print(f"  \u2022 Bare (un-muxed) Copilot orphan(s): {bo['count']} "
+              f"machine-wide (invisible to the mux fleet view)")
+        for o in bo["items"][:8]:
+            wt = o.get("worktree_id") or "?"
+            print(f"      - {o['session_id'][:8]}  pid {o['pid']:<6} {wt}")
+        print("      reclaim: agent-worktrees reclaim --worktree-id <id> "
+              "--bare-only  (or --all)")
+    else:
+        print("  \u2713 No bare (un-muxed) Copilot orphans")
 
 
 def cmd_list_sessions(args: argparse.Namespace) -> int:

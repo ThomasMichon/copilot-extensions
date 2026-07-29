@@ -257,3 +257,35 @@ class TestCmdReclaim:
         rc = m.cmd_reclaim(_ns())
         assert rc == 2
         assert "not a worktree" in capfd.readouterr().out
+
+
+# ── find_bare_orphans (surfacing helper) ────────────────────────────────────
+class TestFindBareOrphans:
+    def test_returns_only_bare_excluding_self_subtree(self, monkeypatch):
+        rows = [
+            {"session_id": "bareA", "pid": 200, "cwd": "/w/a",
+             "worktree_id": "wtA", "homing": "bare"},
+            {"session_id": "muxB", "pid": 201, "cwd": "/w/b",
+             "worktree_id": "wtB", "homing": "mux"},
+            {"session_id": "self", "pid": 300, "cwd": "/w/c",
+             "worktree_id": "wtC", "homing": "bare"},
+        ]
+        # 350 (this doctor command) is a child of the bare self-session 300, so
+        # 300 must be excluded; 201 is mux; only the true orphan 200 remains.
+        table = {
+            200: {"ppid": 1, "name": "copilot"},
+            201: {"ppid": 2, "name": "copilot"},
+            300: {"ppid": 1, "name": "copilot"},
+            350: {"ppid": 300, "name": "pwsh"},
+        }
+        monkeypatch.setattr(reclaim, "resolve_bound_copilots",
+                            lambda **k: list(rows))
+        out = reclaim.find_bare_orphans(table=table, self_pid=350)
+        assert [o["pid"] for o in out] == [200]
+        assert out[0] == {"session_id": "bareA", "pid": 200,
+                          "worktree_id": "wtA", "cwd": "/w/a"}
+        assert "homing" not in out[0]
+
+    def test_empty_when_none_bound(self, monkeypatch):
+        monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **k: [])
+        assert reclaim.find_bare_orphans(table={}, self_pid=1) == []
