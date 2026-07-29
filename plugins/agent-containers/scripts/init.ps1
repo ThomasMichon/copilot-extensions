@@ -47,6 +47,33 @@ if ($env:OS -eq 'Windows_NT') {
 } else {
     $VenvPython = Join-Path $VenvDir 'bin/python'
 }
+
+# === install-contract:v3 versioned-venv -- keep byte-identical across plugins ===
+# Immutable per-version runtime (#581): build the venv into versions/<version>
+# and make the historical `.venv` path a junction (Windows) / symlink (POSIX) into
+# it, so the binstub + deploy-manifest (which reference `.venv`) resolve through
+# the link unchanged -- only *where* the venv physically lives and *how* it is
+# activated change. `.venv` stays the stable reference; a version bump builds a new
+# slot beside the old one and atomically swaps the link (never mutates a live
+# venv). Opt out with COPILOT_EXT_NO_VERSIONED=1 (falls back to a plain in-place
+# `.venv`). The scripts/versioned_runtime.py primitive owns the swap + migration.
+$LinkDir = $VenvDir                       # stable path the binstub/manifest reference
+$VersionedRuntime = $env:COPILOT_EXT_NO_VERSIONED -ne '1'
+$SrcVersion = $null
+$pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
+if (Test-Path $pyprojForVer) {
+    $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
+    if ($vl) { $SrcVersion = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
+}
+if ($VersionedRuntime -and $SrcVersion) {
+    $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+    if ($env:OS -eq 'Windows_NT') { $VenvPython = Join-Path $VenvDir 'Scripts\python.exe' }
+    else { $VenvPython = Join-Path $VenvDir 'bin/python' }
+} else {
+    $VersionedRuntime = $false
+}
+# === end install-contract:v3 versioned-venv ===
+
 # credential-relay dir (vendored like the other plugins): plugin-vendored
 # (marketplace layout) or repo-root (git checkout layout). Force-reinstalled
 # below so a local code change propagates even without a version bump.
@@ -267,6 +294,22 @@ if ($pkgResult -ne 0) {
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 Write-Ok 'Package installed: agent-containers'
 
+# === install-contract:v3 versioned-venv activate -- keep byte-identical across plugins ===
+if ($VersionedRuntime) {
+    # Point the stable `.venv` link at this version's freshly-built slot, moving a
+    # legacy real `.venv` aside on the first migration. Run via the slot's own
+    # python (stdlib-only helper); a CLI plugin has no daemon holding the link, so
+    # the swap is immediately safe.
+    $VrScript = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    & $VenvPython $VrScript --root $InstallDir --link-name '.venv' activate $SrcVersion --replace-nonlink 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
+        exit 1
+    }
+    Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
+}
+# === end install-contract:v3 versioned-venv activate ===
+
 # -- 4. Deploy binstub -------------------------------------------------
 
 $stubName = 'agent-containers'
@@ -335,7 +378,7 @@ $manifest = [ordered]@{
         branch  = $branch
         dirty   = $dirty
     }
-    venv           = ($VenvDir -replace '\\', '/')
+    venv           = ($LinkDir -replace '\\', '/')
     runtime        = 'python'
 }
 $tmp = "$manifestPath.tmp"
