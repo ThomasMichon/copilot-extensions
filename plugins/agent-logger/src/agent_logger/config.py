@@ -93,6 +93,32 @@ DEFAULTS: dict[str, Any] = {
     "machine": {
         "name": None,
     },
+    # Background chronicling -- the scheduled orchestrator daemon. Off by
+    # default; only the single elected chronicler host (fleet-wide, one machine)
+    # enables it. See agent_logger.chronicle. All paths default under <home>.
+    "chronicle": {
+        "enabled": False,
+        # Never chronicle a session synced within this window (settle gate).
+        "settle_seconds": 600,
+        # Reservation-holder identity; None -> the machine name.
+        "holder": None,
+        # Root of the synced corpus to chronicle (<root>/<machine>/session-state/).
+        # None -> the local sync target root (sync_path).
+        "corpus_root": None,
+        # Reservation store; None -> <home>/chronicle.db.
+        "db_path": None,
+        # Where the daemon writes digest manifests for the writer harness;
+        # None -> <home>/chronicle-manifests.
+        "manifests_dir": None,
+        # Sink id for the machine-default fallback route (this machine's own
+        # harness repo). None -> route only explicitly-matched sessions.
+        "default_sink": None,
+        # Origin-repo -> sink id rules (first substring match wins).
+        "routes": [],
+        # Named sinks. Each: {repo_path, output_root, log_path_template,
+        # narration_style, exemplars, closing_remark, landing, push}.
+        "sinks": {},
+    },
 }
 
 REPO_CONFIG_FILENAMES: tuple[str, ...] = (
@@ -112,6 +138,32 @@ REPO_LOG_FIELDS = {
     "exemplars",
     "closing_remark",
 }
+# The background chronicle's first-class narration style. When
+# ``narration_style`` is exactly this keyword the writer produces a neutral,
+# factual chronicle; :func:`resolve_narration_style` expands it to the canonical
+# instruction so the writer agent needs no special-casing. Any other string is
+# free-form voice instructions (a consumer layering a character voice).
+NARRATION_STYLE_OBJECTIVE = "objective"
+OBJECTIVE_NARRATION_INSTRUCTION = (
+    "Write in an objective, matter-of-fact chronicle voice: factual, terse, and "
+    "third-person, with no persona, asides, or editorializing. State what "
+    "happened, what changed, and what was decided; omit filler and flourish. "
+    "The purpose is a retrieval corpus later agents can get topic/issue hits "
+    "from, not a narrative read."
+)
+
+
+def resolve_narration_style(value: str | None) -> str | None:
+    """Expand the ``objective`` keyword to its canonical instruction.
+
+    Any other value (including None) is returned unchanged, so a consumer's
+    free-form voice instructions pass through untouched.
+    """
+    if isinstance(value, str) and value.strip().lower() == NARRATION_STYLE_OBJECTIVE:
+        return OBJECTIVE_NARRATION_INSTRUCTION
+    return value
+
+
 PATH_TEMPLATE_FIELDS = {"year", "month", "day", "hhmmss", "machine", "title"}
 LOG_TEMPLATE_FIELDS = {
     "title",
@@ -528,6 +580,46 @@ class Config:
     @property
     def machine_name(self) -> str | None:
         return self._data.get("machine", {}).get("name")
+
+    # -- background chronicle -------------------------------------------
+
+    @property
+    def chronicle(self) -> dict[str, Any]:
+        """The resolved ``chronicle`` block (raw dict, defaults applied)."""
+        return copy.deepcopy(self._data.get("chronicle", {}) or {})
+
+    @property
+    def chronicle_enabled(self) -> bool:
+        return bool(self._data.get("chronicle", {}).get("enabled", False))
+
+    @property
+    def chronicle_settle_seconds(self) -> int:
+        raw = self._data.get("chronicle", {}).get("settle_seconds", 600)
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return 600
+
+    @property
+    def chronicle_corpus_root(self) -> Path:
+        configured = self._data.get("chronicle", {}).get("corpus_root")
+        if configured:
+            return Path(configured).expanduser()
+        return self.sync_path
+
+    @property
+    def chronicle_db_path(self) -> Path:
+        configured = self._data.get("chronicle", {}).get("db_path")
+        if configured:
+            return Path(configured).expanduser()
+        return self.home / "chronicle.db"
+
+    @property
+    def chronicle_manifests_dir(self) -> Path:
+        configured = self._data.get("chronicle", {}).get("manifests_dir")
+        if configured:
+            return Path(configured).expanduser()
+        return self.home / "chronicle-manifests"
 
     def get(self, key: str, default: Any = None) -> Any:
         return self._data.get(key, default)
