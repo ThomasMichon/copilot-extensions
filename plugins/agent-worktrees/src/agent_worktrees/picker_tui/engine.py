@@ -2421,18 +2421,9 @@ class PickerScreen(Widget):
         bottom_border = self._border_row(W, "▼", below > 0)
         stats = self._stats_row(W)
         lines = list(top) + [header_border, stats] + body_lines + [bottom_border, foot]
-        # body offset = title+htabs+header_border+stats = len(top)+2
-        ov = self._active_overlay()
-        modal = ov is not None
-        if modal:
-            # Gray out ALL background content behind the dialog. (The Clean/Sync
-            # live-filter-over-the-list model was retired with #88 F4 -- that
-            # dialog is a native centered ScopeDlgScreen now, with its own
-            # impact list, so no manual overlay dims the list in place.)
-            lines = [Text((ln if isinstance(ln, Text) else Text(str(ln))).plain,
-                          style="grey35") for ln in lines]
-            off, bh = len(top) + 2, body_h
-            ov[2](lines, W, off, bh)
+        # Every modal is a native Textual ``ModalScreen`` now (#88 F4): the
+        # framework's screen stack draws + dims them above this widget, so there
+        # is no manual overlay to blit or background to gray out here.
         out = Text()
         for i, ln in enumerate(lines):
             if i:
@@ -2710,40 +2701,6 @@ class PickerScreen(Widget):
         t.stylize("on grey15")  # subtle pinned background
         return t
 
-    # ---- modal panels ----
-    def _prow(self, content, pw, selected=False, style=None, border=True):
-        s = content if isinstance(content, str) else str(content)
-        if len(s) > pw - 2:
-            s = s[: pw - 3] + "…"
-        inner = Text(s.ljust(pw - 2), style=style or "white")
-        if selected:
-            inner.stylize(C_SEL)
-        if not border:
-            return inner
-        row = Text("│", style=C_DIM)
-        row.append_text(inner)
-        row.append("│", style=C_DIM)
-        return row
-
-    def _blit_panel(self, lines, W, panel, top_off, body_h, dock_bottom=False):
-        pw = panel[0].cell_len
-        x = max(0, (W - pw) // 2)
-        if dock_bottom:
-            # Sit the panel at the bottom of the body so the (live-filtered)
-            # list above it stays fully visible (#2179).
-            y0 = top_off + max(0, body_h - len(panel))
-        else:
-            y0 = top_off + max(0, (body_h - len(panel)) // 2)
-        for j, prow in enumerate(panel):
-            yi = y0 + j
-            if 0 <= yi < len(lines):
-                base = lines[yi]
-                bp = (base if isinstance(base, Text) else Text(str(base))).plain
-                left = bp[:x] if len(bp) >= x else bp + " " * (x - len(bp))
-                newt = Text(left, style=C_DIM)
-                newt.append_text(prow)
-                lines[yi] = newt
-
     @staticmethod
     def _wrap_text(text: str, width: int) -> list[str]:
         """Word-wrap ``text`` to ``width`` columns; collapse blank lines.
@@ -2778,36 +2735,6 @@ class PickerScreen(Widget):
                 out.append(cur)
         return out or [""]
 
-    # ---- modal-overlay registry (now-empty vestigial seam) ------------------
-    def _overlay_registry(self):
-        """The manual modal-overlay table -- now **empty**. Each entry was
-        ``(state_attr, key_handler, render_handler)``; the first whose
-        ``state_attr`` was truthy owned the keyboard and the foreground.
-
-        This table was the **single source of truth** consumed by three call
-        sites that previously each hand-maintained their own parallel list --
-        ``_dispatch_key``'s dispatch chain, the background-dim decision, and the
-        render dispatch chain (#85 F1, the first native-focus-migration slice:
-        consolidate before converting individual overlays to Textual
-        ``ModalScreen``s). Every overlay has since migrated to a native
-        ``ModalScreen`` -- ``msgview`` was the last to go (#88 F4) -- so nothing
-        remains here. It is kept as a **documented vestige**: ``_active_overlay``
-        (and its three call sites) still consult it and simply see "no manual
-        overlay is ever active," which is exactly right now that Textual's screen
-        stack owns every modal. Fully retiring the seam (and simplifying the
-        call sites + the ``on_key`` binding gate) is a clean follow-up."""
-        return []
-
-    def _active_overlay(self):
-        """The ``(state_attr, key_handler, render_handler)`` spec for the first
-        active overlay in precedence order, or ``None`` when a top-level view
-        has the keyboard. Always ``None`` now that the registry is empty (every
-        overlay is a native ``ModalScreen`` -- see ``_overlay_registry``)."""
-        for spec in self._overlay_registry():
-            if getattr(self, spec[0]):
-                return spec
-        return None
-
     def _dispatch_key(self, key):
         # NOTE: this MUST NOT be named ``handle_key`` -- Textual's
         # ``Widget.handle_key`` is an ``async`` coroutine its ``_on_key``
@@ -2817,8 +2744,7 @@ class PickerScreen(Widget):
         # global BINDING key (Ctrl+←/→, F3/F4/F5) bubbles to the framework.
         # Keeping a distinct name lets Textual's native binding dispatch run.
         # Fold framework key-name aliases to canonical tokens once, up front, so
-        # every downstream match (here and in the overlay handlers) is declarative
-        # and alias-free (#88 F2).
+        # every downstream match is declarative and alias-free (#88 F2).
         key = canonical_key(key)
         # Remember the grid row before any navigation, so Tab out/in restores it.
         if self.sel and self.sel[0] == "PR":
@@ -2827,16 +2753,17 @@ class PickerScreen(Widget):
         # (#2258 P3-6).
         if self.sel and self.sel[0] == "L":
             self.last_l = self.sel[1]
-        ov = self._active_overlay()
-        if ov is not None:
-            return ov[1](key)
+        # (Every modal overlay is a native ModalScreen now (#88 F4): while one is
+        # up it sits above this widget on Textual's screen stack and owns the
+        # keyboard, so _dispatch_key only ever runs for the top-level views --
+        # there is no manual overlay to route to first.)
 
         # Global pivot/machine shortcuts. The Ctrl+Shift+←/→ (pivot) and Ctrl+←/→
         # (machine) combos are owned by Textual BINDINGS now (#88 F3) -- on_key
-        # passes them to the framework when no overlay is active, so they never
-        # reach here in the real path; the action_* methods do the work. Only the
-        # printable [ ] pivot shortcut stays in the manual dispatcher (on_key
-        # remaps its character, and a bare letter is an awkward binding).
+        # passes them to the framework, so they never reach here in the real
+        # path; the action_* methods do the work. Only the printable [ ] pivot
+        # shortcut stays in the manual dispatcher (on_key remaps its character,
+        # and a bare letter is an awkward binding).
         if key == "[":
             return self._switch_pivot(-1)
         if key == "]":
@@ -4041,11 +3968,14 @@ class PickerScreen(Widget):
     # Textual entry point
     def on_key(self, event):
         key = event.key
-        # Truly-global shortcuts are owned by Textual BINDINGS (#88 F3): with no
-        # overlay active, let them bubble to the framework's binding system (do
-        # NOT stop the event) so the matching action_* method fires. Everything
-        # else (and any key while an overlay is up) goes to the manual dispatcher.
-        if key in self.BINDING_KEYS and self._active_overlay() is None:
+        # Truly-global shortcuts are owned by Textual BINDINGS (#88 F3): let them
+        # bubble to the framework's binding system (do NOT stop the event) so the
+        # matching action_* method fires. This ``on_key`` only ever runs for the
+        # top-level views -- every modal is a native ModalScreen (#88 F4) that
+        # sits above this widget on the screen stack and consumes keys itself --
+        # so there is no overlay-active case to guard against. Everything else
+        # goes to the manual dispatcher.
+        if key in self.BINDING_KEYS:
             return
         event.stop()
         event.prevent_default()

@@ -486,23 +486,34 @@ in-process Python. The CLI-over-manifest seam is the cross-venv-correct answer t
 "each plugin installs in its own venv"; richer per-module rendering is explicitly
 out of scope (#1425).
 
-### Modal-overlay registry (single source of truth)
+### Modal-overlay registry → native `ModalScreen`s (the F4 migration, now complete)
 
 The picker's dialogs (quit-confirm, the per-worktree submenu, the message peek,
 the registered-pivot action menu, the ⚙ Configuration menu, the maintenance
 menu, the Clean/Sync scope dialog, the options menu, the profile-apply confirm,
-the progress spinner) are **modal overlays**: mutually exclusive, each stored as
-a truthy instance attribute, and each with a key handler (`_key_*`) and a render
-handler (`_overlay_*`). `PickerScreen._overlay_registry()` is the **single
-ordered table** of `(state_attr, key_handler, render_handler)`; `_active_overlay()`
-returns the first spec whose state is set. Three call sites derive from it --
-`_dispatch_key` (dispatch), the background-dim decision, and the render dispatch --
-where each used to hand-maintain its **own** parallel list that could silently
-drift when an overlay was added. This is the first slice of the incremental
-migration toward Textual-native focus (#85 F): consolidate the hand-rolled modal
-dispatch behind one registry *before* converting individual overlays to Textual
-`ModalScreen`s -- **extend, not rewrite**, per `visions/picker`'s stability bias.
-A guard test asserts the registry drives both dispatch and precedence.
+the progress spinner) *were* hand-rolled **modal overlays**: mutually exclusive,
+each stored as a truthy instance attribute, and each with a key handler
+(`_key_*`) and a render handler (`_overlay_*`). `PickerScreen._overlay_registry()`
+was the **single ordered table** of `(state_attr, key_handler, render_handler)`,
+and `_active_overlay()` returned the first spec whose state was set. Three call
+sites derived from it -- `_dispatch_key` (dispatch), the background-dim decision,
+and the render dispatch -- where each had previously hand-maintained its **own**
+parallel list that could silently drift when an overlay was added. Consolidating
+that behind one registry was the first slice of the incremental migration toward
+Textual-native focus (#85 F): a single seam *before* converting individual
+overlays to Textual `ModalScreen`s -- **extend, not rewrite**, per
+`visions/picker`'s stability bias.
+
+**That migration is now complete: all nine overlays are native `ModalScreen`s,
+and the manual seam has been retired.** `_overlay_registry()` / `_active_overlay()`
+are gone; `_dispatch_key` only ever runs for the top-level views (a native modal
+sits above `PickerScreen` on Textual's screen stack and consumes keys itself),
+`render` no longer dims/blits a manual overlay, and `on_key` lets global BINDING
+keys bubble unconditionally. The dead manual-panel helpers (`_prow`,
+`_blit_panel`) went with it. A guard test (`test_manual_overlay_seam_is_retired`)
+asserts the seam methods no longer exist and that a nav key drives the main-view
+selection directly. The slice-by-slice history below records how each overlay was
+converted.
 
 **First overlay migrated to a native `ModalScreen` (F4).** The quit-confirm
 dialog is no longer a manual render/dispatch overlay: `_open_quit_confirm`
@@ -637,26 +648,36 @@ settled viewer. `_open_msgview` builds the dict, starts the thread, then
 `push_screen`s the `MsgViewScreen`; the screen delegates keys to `_key_msgview`
 (↑/↓ scroll, Esc/q/Tab/Enter close, mirroring it exactly) and dismisses itself
 once the engine clears `msgview`. **With every overlay now native, the manual
-overlay registry is empty.** `_overlay_registry()` returns `[]` and
-`_active_overlay()` is always `None`; the three former consumers (the
-`_dispatch_key` dispatch chain, the background-dim decision in `render`, and the
-`on_key` binding gate) still consult it and simply see "no manual overlay is ever
-active" -- exactly right now that Textual's screen stack owns every modal. The
-seam is kept as a **documented vestige** (fully retiring it, and simplifying
-those call sites, is a clean follow-up). The overlay-registry guard was rewritten
-to assert this inert end-state (empty table; `_active_overlay()` stays `None`
-even with a stale state attr; a nav key drives the main selection rather than any
-overlay handler). The `pilot.press` harness drives the viewer end-to-end (Enter
+overlay registry became empty** -- and a follow-up slice then **retired it**
+(next paragraph). The `pilot.press` harness drives the viewer end-to-end (Enter
 on *Messages* opens it, the loader thread resolves, Esc closes).
+
+**Tenth slice -- retire the now-empty manual overlay seam (F4 cleanup).** With
+all nine overlays native, `_overlay_registry()` returned `[]` and
+`_active_overlay()` was always `None` -- pure dead weight. Both methods are now
+deleted, along with their three consumers' vestigial branches: `render` drops the
+dim/`ov[2]` blit block (Textual's screen stack draws + dims modals above the
+widget), `_dispatch_key` drops its `_active_overlay()` route (it only ever runs
+for the top-level views now, since a native modal above `PickerScreen` consumes
+keys itself), and `on_key`'s binding gate simplifies from
+`key in BINDING_KEYS and self._active_overlay() is None` to just
+`key in BINDING_KEYS`. The dead manual-panel helpers `_prow` / `_blit_panel`
+(used only by the deleted `_overlay_*` renderers) go too. The guard test was
+rewritten as `test_manual_overlay_seam_is_retired`: asserts the seam methods no
+longer exist and that a nav key drives the main-view selection directly (the F3
+keyboard guards already cover binding bubble + overlay swallowing). Behaviour is
+unchanged -- the overlay precedence the registry once enforced is now enforced by
+Textual's screen stack.
 
 **Global shortcuts are Textual `BINDINGS` (F3).** The truly-global pivot/machine
 shortcuts (`ctrl+shift+left/right`, `ctrl+left/right`) are owned by the
 framework's binding system, not the manual dispatcher: `PickerScreen.BINDINGS`
 maps them to `action_pivot_*` / `action_machine_*`, and `on_key` lets those keys
-**bubble** to the binding system (returns without `event.stop()`) exactly when no
-modal overlay is active -- otherwise it routes them to the manual dispatcher,
-where the active overlay ignores them, preserving overlay precedence. Key names
-are folded through `canonical_key` (F2) first. A real-framework keyboard harness
-(`pilot.press`) validates the whole path end-to-end -- the binding fires the
-rotation, and is correctly suppressed while an overlay owns the keyboard.
+**bubble** to the binding system (returns without `event.stop()`) -- it now does
+so unconditionally, because a native modal on the screen stack consumes keys
+itself, so `on_key` only ever runs for the top-level views (the old
+`_active_overlay()` guard is gone). Key names are folded through `canonical_key`
+(F2) first. A real-framework keyboard harness (`pilot.press`) validates the whole
+path end-to-end -- the binding fires the rotation, and is correctly suppressed
+while a modal owns the keyboard (Textual's screen stack, not a manual gate).
 
