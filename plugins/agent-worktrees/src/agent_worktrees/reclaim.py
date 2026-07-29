@@ -300,6 +300,9 @@ def resolve_bound_copilots(
     if not state_dir.exists():
         return results
 
+    _posix = platform.system() != "Windows"
+    _pane_ttys: list = [None]  # lazy, memoized tmux pane-tty set (POSIX only)
+
     for entry in sorted(state_dir.iterdir()):
         if not entry.is_dir():
             continue
@@ -334,12 +337,28 @@ def resolve_bound_copilots(
             continue
 
         for pid in live_pids:
+            homing = homing_of(pid, table)
+            if homing == "bare" and _posix:
+                # reptyr adopts a bare Copilot into a tmux pane by moving its
+                # controlling terminal (not its ppid), so a ppid-only walk still
+                # reads it as bare. Upgrade to mux when its tty is a tmux pane.
+                # Fetch pane ttys ONCE, lazily, and only when a bare-by-ppid
+                # candidate actually appears -- keeping the common (all-mux) case
+                # off the tmux subprocess on the hot path.
+                if _pane_ttys[0] is None:
+                    from . import remux
+                    _pane_ttys[0] = remux.tmux_pane_ttys()
+                if _pane_ttys[0]:
+                    from . import remux
+                    tty = remux.process_tty(pid)
+                    if tty and tty in _pane_ttys[0]:
+                        homing = "mux"
             results.append({
                 "session_id": sid,
                 "pid": pid,
                 "cwd": cwd,
                 "worktree_id": wt_id,
-                "homing": homing_of(pid, table),
+                "homing": homing,
             })
     return results
 

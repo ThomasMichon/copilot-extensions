@@ -5170,6 +5170,65 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_remux(args: argparse.Namespace) -> int:
+    """``remux`` -- reparent a bare Copilot into its ``wt-<id>`` tmux pane.
+
+    Linux/WSL only (delegates to :func:`agent_worktrees.remux.remux_bare_copilot`).
+    Target selection mirrors ``reclaim``: ``--session-id``, ``--worktree-id``, or
+    inferred from the current worktree cwd. The bound-but-BARE Copilot is adopted
+    into a tmux pane via ``reptyr`` (no conversation lost) instead of being
+    reaped-and-resumed. JSON with ``--json``; a hard, clear no-op on Windows.
+    """
+    from . import remux as _remux
+
+    session_id = getattr(args, "session_id", None)
+    raw_wt = getattr(args, "worktree_id", None)
+    as_json = getattr(args, "json", False)
+
+    def _wt_path(wid: str) -> str | None:
+        yaml_path = cfg.tracking_dir() / f"{wid}.yaml"
+        if yaml_path.exists():
+            try:
+                return tracking.load_record(yaml_path).worktree_path
+            except Exception:
+                return None
+        return None
+
+    wt_id: str | None = None
+    wt_path: str | None = None
+    if raw_wt:
+        wt_id = _resolve_worktree_id(raw_wt)
+        wt_path = _wt_path(wt_id)
+    elif not session_id:
+        wt_id = _infer_worktree_id_from_cwd()
+        if not wt_id:
+            return _json_error(
+                "no --session-id/--worktree-id and cwd is not a worktree",
+                exit_code=2)
+        wt_path = _wt_path(wt_id)
+
+    result = _remux.remux_bare_copilot(
+        worktree_id=wt_id, session_id=session_id, worktree_path=wt_path,
+        force_sudo=getattr(args, "force_sudo", None))
+
+    if as_json:
+        _json_output(result)
+        return 0 if result.get("ok") else 1
+
+    if not result.get("ok"):
+        output.err(result.get("reason", "re-mux failed"))
+        return 1
+    sess, pid = result.get("session"), result.get("pid")
+    if result.get("verified"):
+        output.ok(f"Re-muxed pid {pid} into {sess} (pane {result.get('pane')}). "
+                  f"Attach:  tmux attach -t {sess}")
+    else:
+        output.info(f"Opened a reptyr pane in {sess} for pid {pid} -- "
+                    f"{result.get('reason')}. Attach to check:  "
+                    f"tmux attach -t {sess}")
+    return 0
+
+
 def reclaim_one(worktree_id: str, *, bare_only: bool = True) -> dict:
     """Reap the bound Copilot process(es) for one worktree (Picker "Reclaim").
 
@@ -9788,6 +9847,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true",
                    help="Emit a single JSON result object")
 
+    # remux (Linux/WSL: adopt a bare Copilot into its wt-<id> tmux pane)
+    p = sub.add_parser(
+        "remux",
+        help="Linux/WSL only: reparent a running BARE (un-muxed) Copilot into "
+             "its wt-<id> tmux pane via reptyr, so no conversation is lost and "
+             "the session rejoins the mux fleet. Companion to `reclaim` (which "
+             "reaps-and-resumes). A clear no-op on Windows (ConPTY cannot adopt "
+             "a running process).")
+    p.add_argument("--session-id", default=None,
+                   help="Target one session (exact dir name or unambiguous "
+                        "prefix)")
+    p.add_argument("--worktree-id", default=None,
+                   help="Target the bare Copilot bound to this worktree id "
+                        "(default: infer from cwd)")
+    p.add_argument("--sudo", dest="force_sudo",
+                   action=argparse.BooleanOptionalAction, default=None,
+                   help="Force (--sudo) or forbid (--no-sudo) running reptyr "
+                        "under sudo -A. Needed when the yama ptrace_scope "
+                        "forbids attaching a non-descendant; auto-detected by "
+                        "default.")
+    p.add_argument("--json", action="store_true",
+                   help="Emit a single JSON result object")
+
     # sync (fast-forward worktrees to the default branch, FF-only)
     p = sub.add_parser("sync", help="Fast-forward worktrees to the default branch")
     p.add_argument("--worktree-id", default=None,
@@ -11004,6 +11086,7 @@ COMMAND_MAP = {
     "gc": cmd_gc,
     "reap-sessions": cmd_reap_sessions,
     "reclaim": cmd_reclaim,
+    "remux": cmd_remux,
     "restart": cmd_restart,
     "sync": cmd_sync,
     "profiles": cmd_profiles,
