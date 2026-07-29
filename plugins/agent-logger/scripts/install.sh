@@ -26,6 +26,57 @@ ok()   { log "OK" "$1"; }
 chg()  { log "->" "$1"; }
 warn() { log "WARN" "$1"; }
 
+# === install-contract:v3 versioned-venv (agent-logger: .venv-as-symlink) ===
+# Immutable per-version runtime (#581): build the venv into versions/<version> and
+# make the `.venv` path a symlink into it, so the binstub symlinks, the systemd
+# timer unit, and the deploy-manifest resolve through the link. LINK_DIR is the
+# stable `.venv` path; VENV is redirected to the versions/<v> slot (build +
+# health-gate). Legacy mode: LINK_DIR == VENV. Gated behind
+# AGENT_LOGGER_VERSIONED=1 (default off); scripts/versioned_runtime.py owns the
+# swap + migration + gc.
+LINK_DIR="$VENV"
+VERSIONED_RUNTIME=0
+SRC_VERSION=""
+if [[ "${AGENT_LOGGER_VERSIONED:-}" =~ ^(1|true|yes|on)$ && "${COPILOT_EXT_NO_VERSIONED:-}" != "1" ]]; then
+    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+        SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
+    fi
+    if [[ -n "$SRC_VERSION" ]]; then
+        VERSIONED_RUNTIME=1
+        VENV="$INSTALL_DIR/versions/$SRC_VERSION"
+    fi
+fi
+
+_versioned_activate() {
+    # Health-gate the slot, swap the `.venv` symlink onto it (first migration moves
+    # a legacy real `.venv` aside), gc keeping current + previous-good. POSIX rename
+    # tolerates the timer's open files, and systemd restarts on the new slot.
+    # Returns non-zero on failure. No-op in legacy mode.
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py="$VENV/bin/python"
+    [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
+    [[ -x "$py" ]] || return 0
+    if ! "$VENV/bin/python" -c 'import agent_logger' 2>/dev/null; then
+        warn "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
+        return 1
+    fi
+    local prev
+    prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink; then
+        warn "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
+        return 1
+    fi
+    ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+    if [[ -n "$prev" ]]; then
+        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  gc: /' || true
+    else
+        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  gc: /' || true
+    fi
+    return 0
+}
+# === end install-contract:v3 versioned-venv ===
+
 # === install-contract:v3 source-kind -- keep byte-identical across plugins ===
 # A runtime footprint's source is inferred from where the installer runs.
 # Vendored under the Copilot CLI installed-plugins dir => marketplace;
@@ -90,7 +141,7 @@ _write_deploy_manifest() {
     "branch": $branch,
     "dirty": $dirty
   },
-  "venv": "$VENV",
+  "venv": "$LINK_DIR",
   "runtime": "python"
 }
 EOF
@@ -126,12 +177,16 @@ install_package() {
   uv pip install --python "${VENV}/bin/python" "${PLUGIN_DIR}" --quiet
   ok "installed agent-logger package"
 
+  # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
+  _versioned_activate || exit 1
+
   # Binstubs on PATH -> venv console scripts (the sanctioned POSIX launch path).
   # Both the service CLIs and the segmenter tools the log-session skill and
   # session-log-writer agent invoke, so they resolve on PATH rather than assuming
-  # a bare command that was never deployed.
+  # a bare command that was never deployed. Point at the stable `.venv` link
+  # ($LINK_DIR), never a versions/<v> absolute a `gc` could remove.
   for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
-    ln -sf "${VENV}/bin/${name}" "${LOCAL_BIN}/${name}"
+    ln -sf "${LINK_DIR}/bin/${name}" "${LOCAL_BIN}/${name}"
   done
   ok "linked binstubs into ${LOCAL_BIN}"
 
@@ -153,7 +208,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=${VENV}/bin/session-sync run --prune
+ExecStart=${LINK_DIR}/bin/session-sync run --prune
 # Generous start timeout: the FIRST sync cold-copies the entire session
 # history (potentially thousands of sessions over a CIFS mount) and can take
 # 10+ minutes; 120s killed it mid-copy. Incremental runs finish in seconds.
@@ -206,9 +261,9 @@ case "${ACTION}" in
     chg "binstubs removed from ${LOCAL_BIN}"
     ;;
   status)
-    if [ -x "${VENV}/bin/session-sync" ]; then
-      ok "installed: $("${VENV}/bin/agent-logger" version 2>/dev/null || echo unknown)"
-      "${VENV}/bin/session-sync" status || true
+    if [ -x "${LINK_DIR}/bin/session-sync" ]; then
+      ok "installed: $("${LINK_DIR}/bin/agent-logger" version 2>/dev/null || echo unknown)"
+      "${LINK_DIR}/bin/session-sync" status || true
     else
       warn "not installed (run: bash scripts/install.sh install)"
     fi

@@ -35,6 +35,67 @@ if ($env:OS -eq 'Windows_NT') {
 $ManifestPath = Join-Path $InstallDir 'deploy-manifest.json'
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
+# === install-contract:v3 versioned-venv (agent-ssh: .venv-as-junction) ===
+# Immutable per-version runtime (#581). Build the venv into versions/<version>
+# and make the historical `.venv` path a junction into it, so the binstubs and
+# deploy-manifest resolve through the link unchanged. agent-ssh is a CLI (no
+# daemon). LinkDir/LinkPython is the stable `.venv` path; VenvDir/VenvPython is the
+# versions/<v> slot (build + health-gate). Legacy mode: Link == Venv. Gated behind
+# AGENT_SSH_VERSIONED=1 (default off); COPILOT_EXT_NO_VERSIONED=1 force-disables.
+# scripts/versioned_runtime.py owns the swap + migration + gc.
+$LinkDir          = $VenvDir
+$LinkPython       = $VenvPython
+$VersionedRuntime = $false
+$SrcVersion       = $null
+if (($env:AGENT_SSH_VERSIONED -in @('1', 'true', 'yes', 'on')) -and
+    ($env:COPILOT_EXT_NO_VERSIONED -ne '1')) {
+    $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
+    if (Test-Path $pyprojForVer) {
+        $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
+        if ($vl) { $SrcVersion = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
+    }
+    if ($SrcVersion) {
+        $VersionedRuntime = $true
+        $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+        if ($env:OS -eq 'Windows_NT') { $VenvPython = Join-Path $VenvDir 'Scripts\python.exe' }
+        else { $VenvPython = Join-Path $VenvDir 'bin/python' }
+    }
+}
+
+function Invoke-VersionedActivate {
+    <# CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
+       junction onto it (first migration moves a legacy real `.venv` aside), then
+       gc old slots keeping current + the previous-good. Returns $false on failure.
+       No-op ($true) in legacy mode. #>
+    if (-not $VersionedRuntime) { return $true }
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
+    if (-not (Test-Path $py)) { return $true }
+    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    & $VenvPython -c 'import agent_ssh' 2>$null
+    $slotOk = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prevEAP
+    if (-not $slotOk) {
+        Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
+        return $false
+    }
+    $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
+    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --replace-nonlink 2>&1 |
+        ForEach-Object { Write-Step $_ }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
+        return $false
+    }
+    Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
+    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids')
+    if ($prev) { $gcArgs += @('--keep', $prev) }
+    & $LinkPython @gcArgs 2>&1 | ForEach-Object { Write-Step "gc: $_" }
+    $ErrorActionPreference = $prevEAP
+    return $true
+}
+# === end install-contract:v3 versioned-venv ===
+
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
 function Remove-ConsoleTrampolines {
     <# Strip the uv-regenerated Scripts\<name>.exe console-script trampolines from
@@ -91,7 +152,7 @@ function Get-GitInfo {
 
 if ($Action -eq 'status') {
     Write-Host '=== agent-ssh status ===' -ForegroundColor Cyan
-    if (Test-Path $VenvPython) { Write-Ok "Venv: $VenvDir" } else { Write-Skip "Venv missing: $VenvDir" }
+    if (Test-Path $LinkPython) { Write-Ok "Venv: $LinkDir" } else { Write-Skip "Venv missing: $LinkDir" }
     $ps1 = Join-Path $LocalBin 'agent-ssh.ps1'
     $cmd = Join-Path $LocalBin 'agent-ssh.cmd'
     if (Test-Path $ps1) { Write-Ok "Binstub: $ps1 (+ .cmd fallback)" } elseif (Test-Path $cmd) { Write-Skip "Only fallback binstub exists: $cmd" } else { Write-Skip "Binstub missing: $ps1" }
@@ -218,6 +279,9 @@ if ($pkgResult -ne 0) {
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 Write-Ok 'Package installed: agent-ssh'
 
+# Versioned layout (#581): health-gate the slot + swap the `.venv` junction.
+if (-not (Invoke-VersionedActivate)) { exit 1 }
+
 $stubName = 'agent-ssh'
 if ($env:OS -eq 'Windows_NT') {
     $ps1Path = Join-Path $LocalBin "$stubName.ps1"
@@ -275,7 +339,7 @@ $manifest = [ordered]@{
         branch  = $branch
         dirty   = $dirty
     }
-    venv           = ($VenvDir -replace '\\', '/')
+    venv           = ($LinkDir -replace '\\', '/')
     runtime        = 'python'
 }
 $tmp = "$ManifestPath.tmp"
@@ -288,7 +352,7 @@ $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 $importOk = $false
 for ($i = 0; $i -lt 3; $i++) {
-    & $VenvPython -c 'import agent_ssh' 2>$null
+    & $LinkPython -c 'import agent_ssh' 2>$null
     if ($LASTEXITCODE -eq 0) { $importOk = $true; break }
     Start-Sleep -Seconds 1
 }

@@ -31,6 +31,56 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 STUB="$LOCAL_BIN/agent-ssh"
 MANIFEST_PATH="$INSTALL_DIR/deploy-manifest.json"
 
+# === install-contract:v3 versioned-venv (agent-ssh: .venv-as-symlink) ===
+# Immutable per-version runtime (#581): build into versions/<version> and make the
+# `.venv` path a symlink into it, so the binstub + manifest resolve through the
+# link. CLI (no daemon). LINK_DIR = stable `.venv`; VENV_DIR = the versions/<v>
+# slot. Legacy mode: LINK_DIR == VENV_DIR. Gated behind AGENT_SSH_VERSIONED=1
+# (default off); scripts/versioned_runtime.py owns the swap + migration + gc.
+LINK_DIR="$VENV_DIR"
+LINK_PYTHON="$VENV_PYTHON"
+VERSIONED_RUNTIME=0
+SRC_VERSION=""
+if [[ "${AGENT_SSH_VERSIONED:-}" =~ ^(1|true|yes|on)$ && "${COPILOT_EXT_NO_VERSIONED:-}" != "1" ]]; then
+    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+        SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
+    fi
+    if [[ -n "$SRC_VERSION" ]]; then
+        VERSIONED_RUNTIME=1
+        VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+        VENV_PYTHON="$VENV_DIR/bin/python"
+    fi
+fi
+
+_versioned_activate() {
+    # CLI (no daemon): health-gate the slot, swap the `.venv` symlink onto it
+    # (first migration moves a legacy real `.venv` aside), gc keeping current +
+    # previous-good. Returns non-zero on failure. No-op in legacy mode.
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
+    [[ -x "$py" ]] || return 0
+    if ! "$VENV_PYTHON" -c 'import agent_ssh' 2>/dev/null; then
+        _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
+        return 1
+    fi
+    local prev
+    prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink; then
+        _fail "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
+        return 1
+    fi
+    _ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+    if [[ -n "$prev" ]]; then
+        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  gc: /' || true
+    else
+        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  gc: /' || true
+    fi
+    return 0
+}
+# === end install-contract:v3 versioned-venv ===
+
 # === install-contract:v3 source-kind -- keep byte-identical across plugins ===
 _source_kind() {
     case "$(printf '%s' "$1" | tr '\\' '/')" in
@@ -50,7 +100,7 @@ _git_info() {
 
 if [[ "$ACTION" == "status" ]]; then
     echo '=== agent-ssh status ==='
-    [[ -x "$VENV_PYTHON" ]] && _ok "Venv: $VENV_DIR" || _skip "Venv missing: $VENV_DIR"
+    [[ -x "$LINK_PYTHON" ]] && _ok "Venv: $LINK_DIR" || _skip "Venv missing: $LINK_DIR"
     [[ -x "$STUB" ]] && _ok "Binstub: $STUB" || _skip "Binstub missing: $STUB"
     [[ -f "$MANIFEST_PATH" ]] && _ok "Deploy manifest: $MANIFEST_PATH" || _skip "Deploy manifest missing"
     exit 0
@@ -126,6 +176,9 @@ else
 fi
 _ok 'Package installed: agent-ssh'
 
+# Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
+_versioned_activate || exit 1
+
 cat > "$STUB" << 'STUBEOF'
 #!/usr/bin/env bash
 export PYTHONUTF8=1
@@ -159,7 +212,7 @@ cat > "$TMP" << EOF
     "branch": $BRANCH,
     "dirty": $DIRTY
   },
-  "venv": "$VENV_DIR",
+  "venv": "$LINK_DIR",
   "runtime": "python"
 }
 EOF
@@ -167,7 +220,7 @@ mv -f "$TMP" "$MANIFEST_PATH"
 _ok "Deploy manifest written (source: $KIND)"
 
 echo ''
-if "$VENV_PYTHON" -c 'import agent_ssh' 2>/dev/null; then
+if "$LINK_PYTHON" -c 'import agent_ssh' 2>/dev/null; then
     _ok 'Verification: module imports successfully'
 else
     _fail 'Verification: module import failed'

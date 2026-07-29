@@ -5,7 +5,12 @@ Each plugin with a runtime installer must, per language variant:
   1. install the package via `uv pip install` (no file-copy of the package),
   2. emit no binstub that sets PYTHONPATH to a runtime lib/ dir,
   3. write a schema_version 3 deploy manifest with a `source` block,
-  4. carry a source-kind resolver identical (per language) across plugins.
+  4. carry a source-kind resolver identical (per language) across plugins,
+  5. adopt the immutable-versioned venv layout (dotfiles #581): ship the
+     byte-identical `scripts/versioned_runtime.py` primitive AND wire it in the
+     installer (the `install-contract:v3 versioned-venv` block), so a version
+     bump builds a fresh versions/<v> slot and swaps a `.venv`/`venv` link
+     instead of ever mutating a live runtime's venv.
 
 The enforced entrypoint pair is the plugin's *canonical* installer: `install.*`
 when present (it carries an `update` action), otherwise `init.*` for plugins
@@ -22,12 +27,22 @@ Exit code 0 = conformant, 1 = violations (suitable for a pre-push hook).
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
+
+# Immutable-versioned-runtime invariant (dotfiles #581): every Python runtime
+# plugin ships the byte-identical scripts/versioned_runtime.py primitive AND
+# wires it in its installer (the block bearing this marker). The layout builds
+# each version into versions/<v> and points a `.venv`/`venv` junction/symlink at
+# the active one, so a version bump never mutates a live runtime's venv. See
+# docs/patterns/README.md § "Runtime installs are immutable and versioned".
+VERSIONED_MARKER = "install-contract:v3 versioned-venv"
+VERSIONED_RUNTIME_FILE = "versioned_runtime.py"
 
 # A binstub/install script must not point PYTHONPATH at a runtime lib/ dir.
 FORBIDDEN_PYTHONPATH = re.compile(r"PYTHONPATH[^\n]*\.agent-[a-z]+[\\/]lib", re.IGNORECASE)
@@ -90,6 +105,7 @@ def check() -> int:
     violations: list[str] = []
     ps1_resolvers: dict[str, str | None] = {}
     sh_resolvers: dict[str, str | None] = {}
+    vrt_hashes: dict[str, str] = {}
 
     plugins = sorted(
         p for p in PLUGINS_DIR.iterdir()
@@ -108,6 +124,19 @@ def check() -> int:
         # and carry the shared source-kind resolver. See docs/install-contract.md
         # § "Payload runtime (non-Python)".
         is_payload = not (plugin / "pyproject.toml").exists()
+        # Immutable-versioned-runtime invariant (#581): every Python runtime plugin
+        # (pyproject + an installer) MUST ship the byte-identical
+        # versioned_runtime.py primitive. Payload (non-Python) runtimes are exempt
+        # -- they build no venv.
+        if not is_payload:
+            vrt = plugin / "scripts" / VERSIONED_RUNTIME_FILE
+            if not vrt.exists():
+                violations.append(
+                    f"{name}: missing scripts/{VERSIONED_RUNTIME_FILE} -- every Python "
+                    f"runtime must adopt the immutable-versioned venv layout (#581)"
+                )
+            else:
+                vrt_hashes[name] = hashlib.sha256(vrt.read_bytes()).hexdigest()
         # Enforce the canonical entrypoint pair (install.* if present, else
         # init.*). Both language variants of that base must exist and conform.
         base = _entrypoint_base(plugin)
@@ -121,6 +150,11 @@ def check() -> int:
 
             if not is_payload and "uv pip install" not in text:
                 violations.append(f"{name}/{script}: no 'uv pip install' (package must not be file-copied)")
+            if not is_payload and VERSIONED_MARKER not in text:
+                violations.append(
+                    f"{name}/{script}: missing the '{VERSIONED_MARKER}' block -- the "
+                    f"installer must wire the immutable-versioned venv layout (#581)"
+                )
             if FORBIDDEN_PYTHONPATH.search(text):
                 violations.append(f"{name}/{script}: binstub sets PYTHONPATH to a runtime lib/ dir")
             if "schema_version" not in text or '"source"' not in text and "source " not in text:
@@ -141,6 +175,17 @@ def check() -> int:
 
     _check_identical("Get-SourceKind (ps1)", ps1_resolvers, violations)
     _check_identical("_source_kind (sh)", sh_resolvers, violations)
+
+    # The versioned_runtime.py primitive is a self-contained per-plugin copy kept
+    # byte-identical across every Python runtime (plugins are pulled independently
+    # from the marketplace, so it cannot be a shared runtime import). Enforce that.
+    distinct_vrt = set(vrt_hashes.values())
+    if len(distinct_vrt) > 1:
+        detail = ", ".join(f"{k}={v[:8]}" for k, v in sorted(vrt_hashes.items()))
+        violations.append(
+            f"scripts/{VERSIONED_RUNTIME_FILE} differs across plugins (must be "
+            f"byte-identical): {detail}"
+        )
 
     if violations:
         print("Install-contract violations:", file=sys.stderr)
