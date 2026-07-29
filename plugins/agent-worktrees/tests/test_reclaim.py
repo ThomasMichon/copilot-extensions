@@ -289,3 +289,20 @@ class TestFindBareOrphans:
     def test_empty_when_none_bound(self, monkeypatch):
         monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **k: [])
         assert reclaim.find_bare_orphans(table={}, self_pid=1) == []
+
+    def test_bare_orphan_worktree_ids_derives_deduped_set(self, monkeypatch):
+        rows = [
+            {"session_id": "a", "pid": 1, "cwd": "/w/a",
+             "worktree_id": "wtA", "homing": "bare"},
+            {"session_id": "b", "pid": 2, "cwd": "/w/b",
+             "worktree_id": "wtB", "homing": "mux"},   # mux -> excluded
+            {"session_id": "c", "pid": 3, "cwd": "/w/a2",
+             "worktree_id": "wtA", "homing": "bare"},  # dupe wtA
+            {"session_id": "d", "pid": 4, "cwd": "/w/d",
+             "worktree_id": None, "homing": "bare"},    # no wt -> dropped
+        ]
+        table = {p: {"ppid": 0, "name": "copilot"} for p in (1, 2, 3, 4)}
+        monkeypatch.setattr(reclaim, "resolve_bound_copilots",
+                            lambda **k: list(rows))
+        ids = reclaim.bare_orphan_worktree_ids(table=table, self_pid=999)
+        assert ids == {"wtA"}

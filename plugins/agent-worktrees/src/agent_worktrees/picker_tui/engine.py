@@ -4669,7 +4669,12 @@ class SubMenuScreen(ModalScreen[tuple]):
         # ``/resume <id>`` after a Bare resume; flag a live bound lock.
         sid = rec.get("last_session_id")
         if sid:
-            lock = " · bound (lock live)" if rec.get("session_lock_live") else ""
+            if rec.get("session_bare_orphan"):
+                lock = " · bound (⚠ bare orphan — Reclaim frees it)"
+            elif rec.get("session_lock_live"):
+                lock = " · bound (lock live)"
+            else:
+                lock = ""
             body.append(f" session {sid}{lock}\n", style=C_DIM)
         body.append("\n")
         for i, a in enumerate(acts):
