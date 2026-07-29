@@ -81,7 +81,95 @@ if ($env:OS -eq 'Windows_NT') {
     $VenvPython = Join-Path $VenvDir 'bin/python'
 }
 
+# === install-contract:v3 versioned-venv (agent-bridge: venv-as-junction) ===
+# Immutable per-version runtime (#581). Build the venv into versions/<version>
+# and make the historical `venv` path a junction (Windows) / symlink (POSIX) into
+# it, so the binstubs, scheduled task, deploy-manifest, and `agent-bridge deploy`
+# cutover -- all of which reference `venv` -- resolve through the link unchanged.
+# Only *where* the venv physically lives and *when* the link is swapped change; a
+# version bump builds a fresh slot beside the serving one and atomically swaps the
+# link (never mutates a live daemon's venv), and rollback is a link swap.
+#
+# $LinkDir / $LinkPython  -> the stable `venv` path the binstubs/task/manifest
+#                            resolve THROUGH (runtime-facing; never a versions/<v>
+#                            absolute a `gc` could later remove).
+# $VenvDir / $VenvPython   -> the build+health-gate target (the versions/<v> slot).
+#
+# In legacy mode Link == Venv, so every reference is byte-for-byte the old
+# behavior. Gated behind AGENT_BRIDGE_VERSIONED=1 (default off) until validated on
+# an idle box; COPILOT_EXT_NO_VERSIONED=1 force-disables. The stdlib-only
+# scripts/versioned_runtime.py primitive owns the swap + legacy migration + gc.
+$LinkDir          = $VenvDir
+$LinkPython       = $VenvPython
+$VersionedRuntime = $false
+$SrcVersion       = $null
+$vrGateOn = ($env:AGENT_BRIDGE_VERSIONED -in @('1', 'true', 'yes', 'on')) -and
+            ($env:COPILOT_EXT_NO_VERSIONED -ne '1')
+if ($vrGateOn) {
+    $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
+    if (Test-Path $pyprojForVer) {
+        $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
+        if ($vl) { $SrcVersion = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
+    }
+    if ($SrcVersion) {
+        $VersionedRuntime = $true
+        $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+        if ($env:OS -eq 'Windows_NT') { $VenvPython = Join-Path $VenvDir 'Scripts\python.exe' }
+        else { $VenvPython = Join-Path $VenvDir 'bin/python' }
+    }
+}
+# === end install-contract:v3 versioned-venv ===
+
 # -- Helpers -----------------------------------------------------------------
+
+# === install-contract:v3 versioned-venv helpers (agent-bridge) ===
+function Invoke-VersionedActivate {
+    <# Swap the stable `venv` link to this version's freshly-built slot. Runs the
+       stdlib-only primitive via the slot's own python. First migration moves a
+       legacy real `venv` aside to venv.legacy-<ts> (--replace-nonlink); the
+       caller MUST have stopped/cut-over any daemon holding the old venv first.
+       No-op (returns $true) in legacy mode. #>
+    if (-not $VersionedRuntime) { return $true }
+    $vr = Join-Path $ScriptDir 'versioned_runtime.py'
+    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
+    & $py $vr --root $InstallDir --link-name 'venv' activate $SrcVersion --replace-nonlink 2>&1 |
+        ForEach-Object { Write-Step $_ }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Failed to activate versioned venv (venv -> versions/$SrcVersion)"
+        return $false
+    }
+    Write-Ok "Runtime version $SrcVersion active (venv -> versions/$SrcVersion)"
+    return $true
+}
+
+function Get-VersionedCurrent {
+    <# The version the `venv` link currently points at (empty for a legacy real
+       venv or a fresh box). Used to remember the previous-good slot as a gc
+       keep + rollback target. #>
+    if (-not $VersionedRuntime) { return '' }
+    $vr = Join-Path $ScriptDir 'versioned_runtime.py'
+    $py = if (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
+    if (-not $py) { return '' }
+    $out = & $py $vr --root $InstallDir --link-name 'venv' current 2>$null
+    return ("$out").Trim()
+}
+
+function Invoke-VersionedGc {
+    <# Prune old version slots, keeping current + the given previous-good +
+       any live-pid-pinned slot. No-op in legacy mode. Best-effort (warns only). #>
+    param([string]$KeepPrev)
+    if (-not $VersionedRuntime) { return }
+    $vr = Join-Path $ScriptDir 'versioned_runtime.py'
+    $py = if (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
+    if (-not $py) { return }
+    $gcArgs = @($vr, '--root', $InstallDir, '--link-name', 'venv', 'gc', '--protect-pids')
+    if ($KeepPrev) { $gcArgs += @('--keep', $KeepPrev) }
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $py @gcArgs 2>&1 | ForEach-Object { Write-Step "gc: $_" }
+    $ErrorActionPreference = $prevEAP
+}
+# === end install-contract:v3 versioned-venv helpers ===
 
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
 function Remove-ConsoleTrampolines {
@@ -312,9 +400,15 @@ function Get-RunningProcess {
         }
     }
     # Fallback: find by executable path. The service now runs as the venv's
-    # python.exe (`-m agent_bridge`); match that. Legacy installs that still ran
-    # the agent-bridge.exe trampoline are also matched for clean migration.
-    foreach ($exe in @($VenvPython, (Join-Path $VenvDir 'Scripts\agent-bridge.exe'))) {
+    # python.exe (`-m agent_bridge`); match that. In the versioned layout the
+    # daemon is launched via the `venv` junction, so its image path may resolve
+    # to either the junction ($LinkPython) or the slot ($VenvPython) -- match
+    # both. Legacy installs that still ran the agent-bridge.exe trampoline are
+    # also matched for clean migration. (Any miss here is caught by the port
+    # fallback below, which finds the live daemon regardless of image path -- key
+    # during an update where the old daemon runs a *different* slot.)
+    $matchExes = @($VenvPython, $LinkPython, (Join-Path $VenvDir 'Scripts\agent-bridge.exe')) | Select-Object -Unique
+    foreach ($exe in $matchExes) {
         if ($exe -and (Test-Path $exe)) {
             $proc = Get-Process | Where-Object { $_.Path -eq $exe } | Select-Object -First 1
             if ($proc) { return $proc }
@@ -375,11 +469,16 @@ function Stop-DaemonProcesses {
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         $victims = New-Object 'System.Collections.Generic.HashSet[int]'
 
-        # Every process running THIS venv's python (the `-m agent_bridge` daemons).
-        if (Test-Path $VenvPython) {
-            foreach ($p in (Get-Process -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Path -eq $VenvPython })) {
-                [void]$victims.Add([int]$p.Id)
+        # Every process running THIS venv's python (the `-m agent_bridge`
+        # daemons). Match both the junction ($LinkPython) and the slot
+        # ($VenvPython) image paths in the versioned layout; the port sweep below
+        # is the backstop for any daemon on a different slot.
+        foreach ($exe in (@($VenvPython, $LinkPython) | Select-Object -Unique)) {
+            if ($exe -and (Test-Path $exe)) {
+                foreach ($p in (Get-Process -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Path -eq $exe })) {
+                    [void]$victims.Add([int]$p.Id)
+                }
             }
         }
         # Every occupant of the service port and the (in-process) relay port.
@@ -451,8 +550,10 @@ function Get-SourceKind {
 # === end install-contract:v3 source-kind ===
 
 function Write-DeployManifest {
+    # The manifest `venv` field records the stable `venv` link ($LinkDir), never
+    # a versions/<v> slot -- consumers resolve the runtime through the link.
     Write-DeployManifestFor -Service 'agent-bridge' -Plugin 'agent-bridge' `
-        -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $VenvDir
+        -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir
 }
 
 # Unified schema_version 3 manifest writer. Self-contained per plugin (no shared
@@ -568,7 +669,7 @@ function Remove-RegisteredTask {
 }
 
 function Register-ScheduledTask_ {
-    if (-not (Test-Path $VenvPython)) {
+    if (-not (Test-Path $LinkPython)) {
         Write-Warn "agent-bridge venv not found -- skipping scheduled task"
         return
     }
@@ -581,7 +682,10 @@ function Register-ScheduledTask_ {
 # Start agent-bridge service -- called by scheduled task at logon.
 # Launch via the venv's signed python (-m), never the unsigned console-script
 # trampoline .exe -- Smart App Control blocks unsigned, zero-reputation exes.
-`$launchPy = '$($VenvPython -replace "'", "''")'
+# This is the stable `venv` path (a junction to the active versions/<v> slot in
+# the immutable-versioned layout), never a versions/<v> absolute a `gc` could
+# remove.
+`$launchPy = '$($LinkPython -replace "'", "''")'
 `$pidFile = '$($PidFile -replace "'", "''")'
 `$logFile = Join-Path (Split-Path `$pidFile) 'agent-bridge.log'
 `$errFile = Join-Path (Split-Path `$pidFile) 'agent-bridge-err.log'
@@ -900,10 +1004,24 @@ function Invoke-Install {
     # also clears sibling agent-*.exe pulled into this venv by Install-SiblingPlugins.
     Remove-ConsoleTrampolines -VenvDir $VenvDir
 
+    # Versioned layout (#581): health-gate the freshly-built slot IN ISOLATION,
+    # then swap the stable `venv` junction onto it. Everything below resolves
+    # through `venv` (the link), so the binstubs/task/manifest never change path
+    # across versions. No-op in legacy mode (Link == Venv, nothing built a slot).
+    if ($VersionedRuntime) {
+        if (-not (Test-RuntimeHealthy $VenvPython)) {
+            Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
+            throw 'Versioned slot health gate failed'
+        }
+        if (-not (Invoke-VersionedActivate)) { throw 'Versioned activate failed' }
+    }
+
     # Create binstub -- launch via the venv's signed python (`-m`), never the
     # unsigned console-script trampoline .exe (Smart App Control blocks it).
-    if (Test-Path $VenvPython) {
-        Write-Binstubs -PythonExe $VenvPython
+    # Point it at the stable `venv` link ($LinkPython), never a versions/<v>
+    # absolute path a later `gc` could remove.
+    if (Test-Path $LinkPython) {
+        Write-Binstubs -PythonExe $LinkPython
     }
 
     # Generate default config
@@ -997,7 +1115,7 @@ function Invoke-Start {
     # freshly-installed code and gate success on an actual health response.
     param([switch]$Fresh)
 
-    if (-not (Test-Path $VenvPython)) {
+    if (-not (Test-Path $LinkPython)) {
         Write-Fail 'agent-bridge not installed. Run: install.ps1 install'
         exit 1
     }
@@ -1073,7 +1191,7 @@ function Invoke-Start {
     # explicit working dir it would hold the payload folder open and a later
     # ``copilot plugin update agent-bridge`` would fail (os error 32) and empty it.
     $inner = @"
-`$p = Start-Process -FilePath '$($VenvPython -replace "'", "''")' -ArgumentList '-m','agent_bridge','start' -WorkingDirectory '$($InstallDir -replace "'", "''")' -NoNewWindow -PassThru -RedirectStandardOutput '$($logFile -replace "'", "''")' -RedirectStandardError '$($errFile -replace "'", "''")'
+`$p = Start-Process -FilePath '$($LinkPython -replace "'", "''")' -ArgumentList '-m','agent_bridge','start' -WorkingDirectory '$($InstallDir -replace "'", "''")' -NoNewWindow -PassThru -RedirectStandardOutput '$($logFile -replace "'", "''")' -RedirectStandardError '$($errFile -replace "'", "''")'
 Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
 "@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
@@ -1183,10 +1301,10 @@ function Invoke-Status {
         Write-Step 'agent-bridge is not running'
     }
 
-    if (Test-Path $VenvPython) {
+    if (Test-Path $LinkPython) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        $version = & $VenvPython -m agent_bridge version 2>$null
+        $version = & $LinkPython -m agent_bridge version 2>$null
         $ErrorActionPreference = $prevEAP
         Write-Ok "Installed: $version"
     } else {
@@ -1290,22 +1408,42 @@ function Invoke-Update {
     $wasRunning = $null -ne (Get-RunningProcess)
 
     # Zero-downtime path (dotfiles #533 Part B): when the reconciler asks for it
-    # and a healthy venv is already serving, update the package IN PLACE (no
-    # stop) and hand off via `agent-bridge deploy` (ZDD cutover) at the end,
-    # instead of the classic drain -> stop -> rebuild -> restart (which blips a
-    # live dispatch). Requires the venv to already exist -- we must not rebuild
-    # python.exe under a running daemon; otherwise fall back to the classic swap.
-    $useCutover = $ZeroDowntime -and $wasRunning -and (Test-Path $VenvPython)
+    # and a healthy venv is already serving, hand off via `agent-bridge deploy`
+    # (ZDD cutover) at the end instead of the classic drain -> stop -> rebuild ->
+    # restart (which blips a live dispatch).
+    #
+    # Legacy layout: the venv is updated IN PLACE, so cutover requires the venv to
+    # already exist (we must not rebuild python.exe under a running daemon).
+    # Versioned layout (#581): the new version builds into its OWN slot beside the
+    # serving one, so the old daemon's files are never touched -- cutover no longer
+    # needs the slot to pre-exist, and we can always build fresh. Remember the
+    # currently-active version as the rollback + gc-keep target.
+    $prevVersion = ''
+    if ($VersionedRuntime) {
+        $prevVersion = Get-VersionedCurrent
+        $useCutover = $ZeroDowntime -and $wasRunning
+        # Cutover onto the *same* slot is impossible (there is only one dir of that
+        # name and the live daemon holds it). A same-version refresh downgrades to
+        # the classic stop-and-rebuild.
+        if ($useCutover -and $SrcVersion -eq $prevVersion) {
+            Write-Step "Cutover skipped: version $SrcVersion is already active; using classic stop-and-rebuild"
+            $useCutover = $false
+        }
+    } else {
+        $useCutover = $ZeroDowntime -and $wasRunning -and (Test-Path $VenvPython)
+    }
     if ($useCutover) {
-        Write-Step 'Zero-downtime mode: updating the venv in place; will cut over (no stop)'
+        Write-Step 'Zero-downtime mode: building the new runtime; will cut over (no stop)'
     }
 
     # Snapshot the current healthy venv so a failed install can roll back to the
     # previous-good runtime instead of leaving the service DOWN with a broken/
     # empty venv (#52). Only snapshot a venv that actually works -- no point
-    # backing up an already-broken one.
+    # backing up an already-broken one. Skipped in the versioned layout: rollback
+    # there is "leave the `venv` link on the previous slot" (the link is only
+    # swapped after a healthy build), so no copy is needed.
     $haveBackup = $false
-    if (Test-RuntimeHealthy $VenvPython) {
+    if ((-not $VersionedRuntime) -and (Test-RuntimeHealthy $VenvPython)) {
         $haveBackup = Backup-Venv
     }
 
@@ -1321,7 +1459,16 @@ function Invoke-Update {
         # Repair venv if python binary is missing (or rebuild if unsigned for SAC).
         # Skipped in cutover mode: the running daemon is holding this venv, so a
         # rebuild would break it -- an in-place package update is enough.
-        if ((-not $useCutover) -and ((-not (Test-Path $VenvPython)) -or ($env:OS -eq 'Windows_NT'))) {
+        #
+        # Versioned layout: $VenvDir is a FRESH per-version slot (never the running
+        # daemon's), so we always build it -- cutover included -- and the immutable
+        # guarantee holds by construction.
+        if ($VersionedRuntime) {
+            if (-not (New-SignedVenv)) { throw "Venv build failed (versions/$SrcVersion)" }
+            if (-not (Test-Path $VenvPython)) { throw "Venv build failed (versions/$SrcVersion)" }
+            Write-Ok "Built runtime slot versions/$SrcVersion"
+        }
+        elseif ((-not $useCutover) -and ((-not (Test-Path $VenvPython)) -or ($env:OS -eq 'Windows_NT'))) {
             if ((Test-Path $VenvDir) -or (Get-SignedBasePython)) {
                 if (-not (Test-Path $VenvPython)) { Write-Step 'Repairing venv (python binary missing)...' }
                 if (-not (New-SignedVenv)) {
@@ -1432,7 +1579,23 @@ function Invoke-Update {
     }
     catch {
         Write-Fail "Update failed: $_"
-        if ($haveBackup) {
+        if ($VersionedRuntime) {
+            # The `venv` link was never swapped (activate runs only after a healthy
+            # build), so the previous slot is still active. Discard the half-built
+            # new slot (unless it IS the active one -- a same-version refresh) and
+            # restart the previous version if the classic path stopped it.
+            if ($SrcVersion -and $SrcVersion -ne $prevVersion) {
+                $failedSlot = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+                if (Test-Path $failedSlot) { Remove-Item -Recurse -Force $failedSlot -ErrorAction SilentlyContinue }
+            }
+            if ($wasRunning -and -not $useCutover) {
+                Write-Step 'Restarting the previous version...'
+                Invoke-Start
+            }
+            $prevLabel = if ($prevVersion) { "versions/$prevVersion" } else { 'the previous runtime' }
+            Write-Warn "Update failed; kept the previous runtime (venv -> $prevLabel)."
+        }
+        elseif ($haveBackup) {
             Write-Step 'Rolling back to the previous venv...'
             if (Restore-Venv) {
                 Write-Ok 'Previous venv restored'
@@ -1459,10 +1622,22 @@ function Invoke-Update {
     # also clears sibling agent-*.exe pulled into this venv by Install-SiblingPlugins.
     Remove-ConsoleTrampolines -VenvDir $VenvDir
 
+    # Versioned layout (#581): the new slot is built + verified; now atomically
+    # swap the stable `venv` junction onto it. In cutover mode this makes `venv`
+    # (which the scheduled-task launcher resolves through) point at the new slot,
+    # so the daemon `agent-bridge deploy` brings up runs the new code -- while the
+    # OLD daemon keeps serving from its own immutable slot until drained. No-op in
+    # legacy mode.
+    if ($VersionedRuntime) {
+        if (-not (Invoke-VersionedActivate)) { throw 'Versioned activate failed' }
+    }
+
     # Update binstub -- launch via the venv's signed python (`-m`), never the
     # unsigned console-script trampoline .exe (Smart App Control blocks it).
-    if (Test-Path $VenvPython) {
-        Write-Binstubs -PythonExe $VenvPython
+    # Point it at the stable `venv` link ($LinkPython), never a versions/<v>
+    # absolute a later `gc` could remove.
+    if (Test-Path $LinkPython) {
+        Write-Binstubs -PythonExe $LinkPython
     }
 
     # Update scheduled task
@@ -1475,10 +1650,11 @@ function Invoke-Update {
     # ZDD cutover (`agent-bridge deploy`: new daemon on a fresh port -> flip the
     # routing table -> drain + retire the old one), so a live dispatch is never
     # collapsed. The classic path just (re)starts -- the old daemon was already
-    # stopped above.
+    # stopped above. Launch via the `venv` link ($LinkPython) so the process
+    # resolves through the junction (never a versions/<v> absolute).
     if ($useCutover) {
         Write-Step 'Cutting over to the new build (zero-downtime)...'
-        & $VenvPython -m agent_bridge deploy --force 2>&1 | ForEach-Object { Write-Host "  $_" }
+        & $LinkPython -m agent_bridge deploy --force 2>&1 | ForEach-Object { Write-Host "  $_" }
         if ($LASTEXITCODE -eq 0) {
             Write-Ok 'Cutover complete (zero-downtime)'
         } else {
@@ -1489,6 +1665,13 @@ function Invoke-Update {
     } else {
         Write-Step 'Starting service...'
         Invoke-Start
+    }
+
+    # Versioned layout: prune old version slots now that the new one is healthy
+    # and active, keeping current + the previous-good (rollback) + any live-pid-
+    # pinned slot (a daemon still draining mid-cutover). Best-effort.
+    if ($VersionedRuntime) {
+        Invoke-VersionedGc -KeepPrev $prevVersion
     }
 
     Write-Ok 'Update complete'
