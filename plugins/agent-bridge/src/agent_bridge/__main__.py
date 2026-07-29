@@ -523,6 +523,35 @@ def _read_pid_file() -> int | None:
         return None
 
 
+def _reconcile_service_marker(pid: int, version: str | None) -> None:
+    """Point the service-management side files at the post-cutover active daemon.
+
+    ``agent-bridge deploy`` cuts over to a **new** daemon on a fresh (ephemeral)
+    port, detached from the scheduled-task launcher that started the retired one.
+    Two markers are then left describing the *dead* old daemon:
+
+    * ``agent-bridge.pid`` -- still the retired daemon's pid, so ``service
+      stop``/``status`` and the launcher's already-running guard miss the live
+      daemon (and the launcher can double-spawn a second daemon on the canonical
+      port, orphaning the cut-over one).
+    * ``running-version.json`` -- the cut-over daemon is a relay-disabled passive
+      that never writes its own marker, so the reconciler loses the running
+      version signal (falls back to on-disk) until the next ``service restart``.
+
+    Rewriting both to the new active daemon converges the service surface with
+    the live process (dotfiles #533 caveat #1). Best-effort: a failure only
+    degrades these signals, never the just-completed cutover.
+    """
+    from .runtime_version import write_running_version
+
+    try:
+        with open(_PID_FILE, "w", encoding="utf-8") as fh:
+            fh.write(str(pid))
+    except OSError:
+        pass
+    write_running_version(pid=pid, version=version)
+
+
 def _pid_on_port(port: int) -> int | None:
     """Best-effort: find the PID listening on *port* (cross-platform)."""
     import subprocess as sp
@@ -926,6 +955,7 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
     from .client import BridgeClient
     from .config import config_dir, load_config, load_or_create_auth_token
     from zdd import breadcrumb
+    from zdd import routing
     from zdd.cutover import CutoverOrchestrator
 
     cfg = load_config()
@@ -994,6 +1024,20 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
         drain_timeout=args.drain_timeout,
         force=args.force,
     )
+
+    # Caveat #1 (dotfiles #533): the cutover retired the scheduled-task-managed
+    # daemon and stood the new active up on a fresh, detached port. Converge the
+    # service-management side files (pid-file + running-version.json) with the
+    # now-active daemon, read straight from the routing table the cutover just
+    # published. Gated on res.ok so a rollback (old daemon restored) is untouched.
+    if res.ok:
+        active = routing.read_active_endpoint(config_dir(), verify_listener=False)
+        if active is not None and active.pid:
+            _reconcile_service_marker(active.pid, active.version)
+            res.steps.append(
+                f"service marker reconciled -> pid {active.pid} "
+                f"(port {active.port})"
+            )
 
     if args.json:
         _json_out(res.to_dict())

@@ -33,8 +33,19 @@ def install_dir() -> Path:
     return Path.home() / ".agent-bridge"
 
 
-def write_running_version(directory: Path | None = None) -> None:
+def write_running_version(
+    directory: Path | None = None,
+    *,
+    pid: int | None = None,
+    version: str | None = None,
+) -> None:
     """Record the running daemon's version + pid on boot (best-effort).
+
+    On the normal boot path both ``pid`` and ``version`` default to *this*
+    process (``os.getpid()`` / ``__version__``). The cutover reconciler passes
+    them explicitly to point the marker at the freshly cut-over daemon, whose pid
+    differs from the deploy process's and which -- being a relay-disabled passive
+    -- never wrote its own marker (dotfiles #533 caveat #1).
 
     Never raises: a write failure only degrades the reconciler's running-version
     signal (it falls back to the on-disk manifest), never the daemon.
@@ -43,8 +54,8 @@ def write_running_version(directory: Path | None = None) -> None:
     try:
         d.mkdir(parents=True, exist_ok=True)
         payload = {
-            "version": __version__,
-            "pid": os.getpid(),
+            "version": version or __version__,
+            "pid": pid if pid is not None else os.getpid(),
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
         (d / RUNNING_VERSION_FILE).write_text(
