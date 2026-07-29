@@ -5822,8 +5822,21 @@ def cmd_profiles(args: argparse.Namespace) -> int:
 
     if action == "get":
         managed = profiles_mod.has_selection(cfg_path)
-        sels = profiles_mod.normalize_selection(
-            profiles_mod.load_selection(cfg_path), machine, env)
+        if managed:
+            sels = profiles_mod.normalize_selection(
+                profiles_mod.load_selection(cfg_path), machine, env)
+        else:
+            # Unmanaged -> report the DEFAULT column (minimal per-agent + bare
+            # cross-machine), computed from the roster candidates. The Picker
+            # keys off ``managed`` (False) and renders the default itself, so
+            # these targets are for human/JSON legibility.
+            from .picker_tui import roster
+            candidates = [
+                profiles_mod.TargetSel(m, e, kind)
+                for (m, e) in roster.target_envs()
+                for kind in ("agent", "shell")
+            ]
+            sels = profiles_mod.default_selection(candidates, machine, env)
         payload = {
             "machine": machine,
             "env": env,
@@ -5833,7 +5846,8 @@ def cmd_profiles(args: argparse.Namespace) -> int:
         if as_json:
             _json_output(payload)
         else:
-            state = "managed" if managed else "legacy (all profiles)"
+            state = ("managed" if managed
+                     else "default (minimal + bare cross-machine)")
             print(f"Terminal profiles for {machine} {env} [{state}]:")
             for s in sels:
                 lock = " (self, locked)" if (
@@ -9341,17 +9355,19 @@ def _write_config(
     ``no_terminal_profile`` seeds an explicit empty ``terminal_profiles: []`` so
     the Windows-Terminal generator emits **no** profile for this project (used
     for a ``--no-agent`` adoption: worktree-managed + binstub, but nothing to
-    launch from the terminal dropdown). An *absent* key means "legacy / emit
-    everything", so the empty list must be written explicitly to suppress.
+    launch from the terminal dropdown). An *absent* key applies the **default
+    column** (minimal per-agent + bare cross-machine), so the empty list must be
+    written explicitly to suppress.
     """
     wt_root = f"{repo_dir}.worktrees"
 
     headless_line = "headless: true\n" if headless else ""
     # Explicit empty selection = "no terminal profile for this project".
-    # Absent would mean legacy (emit everything), so it must be written out.
+    # Absent would apply the default column (self launcher + remote shells), so
+    # it must be written out to suppress.
     terminal_block = (
         "\n# No Windows Terminal profile for this project (--no-agent adoption):\n"
-        "# an empty selection suppresses generation (absent would emit all).\n"
+        "# an empty selection suppresses generation (absent applies the default).\n"
         "terminal_profiles: []\n"
         if no_terminal_profile else ""
     )

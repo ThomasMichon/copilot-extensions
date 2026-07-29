@@ -1520,7 +1520,7 @@ class PickerScreen(Widget):
                 try:
                     cols[hi] = self._prof_load(hm, he)
                 except Exception:
-                    cols[hi] = None   # treat a load failure as legacy (all-on)
+                    cols[hi] = None   # load failure -> unmanaged (default column)
             with self._prof_lock:
                 # Don't clobber edits the user already started before the load
                 # resolved -- only project columns onto a pristine grid.
@@ -1538,11 +1538,17 @@ class PickerScreen(Widget):
                                 self.grid[(ti, hi)] = self.cell_locked(ti, hi)
                             continue
                         if sels is None:
-                            # Legacy/unmanaged host: every target is "on" (the
-                            # mirror's historical emit-everything behavior), so
-                            # the grid matches reality until the user prunes.
+                            # Unmanaged host: render the DEFAULT column
+                            # (minimal per-agent + bare cross-machine; see
+                            # profiles.is_default_on), replacing the retired
+                            # emit-everything default. The user can still curate
+                            # from here and Apply.
+                            _hlbl, hm, he = self.host_cols[hi]
                             for ti in range(len(self.targets)):
-                                self.grid[(ti, hi)] = True
+                                self.grid[(ti, hi)] = (
+                                    profiles_mod.is_default_on(
+                                        self._target_sel(ti), hm, he)
+                                    or self.cell_locked(ti, hi))
                             continue
                         keys = {s.key for s in sels}
                         for ti in range(len(self.targets)):
@@ -4886,7 +4892,7 @@ class ProfilesView:
             rstyle = eng._btn_style(focus, active_idx == 1)
         t.append(" ↺ Reset ", style=rstyle)
         suffix = ("proposed changes are NOT active yet" if dirty
-                  else "all profiles active · Enter applies from anywhere")
+                  else "selection active · Enter applies from anywhere")
         if t.cell_len + 4 + len(suffix) <= width:
             t.append("    " + suffix, style=C_DIM)
         t.append(" " * max(0, width - t.cell_len))

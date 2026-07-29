@@ -1221,8 +1221,10 @@ function Build-TerminalFragment {
     # Helper: load a project's terminal-profile SELECTION (own-column model).
     # Reads top-level ``terminal_profiles`` from ~/.<project>/config.yaml and
     # returns a hashtable keyed "machine|env|kind". Returns $null when the file
-    # or key is absent -- the caller treats $null as "legacy, emit everything"
-    # so existing installs (no selection yet) are unaffected.
+    # or key is absent (UNMANAGED) -- the caller then substitutes the computed
+    # DEFAULT column (minimal per-agent + bare cross-machine; see
+    # Get-DefaultSelection). The retired legacy behavior emitted every candidate
+    # profile for an unmanaged project; that is no longer done.
     function Get-TerminalSelection {
         param([string]$ProjName)
         $cfg = Join-Path $env:USERPROFILE ".$ProjName\config.yaml"
@@ -1230,11 +1232,11 @@ function Build-TerminalFragment {
         try {
             # The one-liner prints '' when the key is ABSENT (v is None) and a
             # JSON array (e.g. '[]') when it is PRESENT -- so $raw distinguishes
-            # "legacy/unselected" from "explicit empty selection".
+            # "unmanaged" ($null -> default column) from "explicit empty selection".
             $raw = & $VenvPython -c "import yaml,json,sys; d=yaml.safe_load(open(sys.argv[1],encoding='utf-8')) or {}; v=d.get('terminal_profiles'); print(json.dumps(v) if v is not None else '')" $cfg 2>$null
             if ($null -eq $raw) { return $null }
             $trimmed = $raw.Trim()
-            if ($trimmed -eq '') { return $null }        # key absent -> legacy (emit all)
+            if ($trimmed -eq '') { return $null }        # key absent -> unmanaged (use default column)
             # Explicit empty list = "no terminal profiles for this project". Note
             # '[]' | ConvertFrom-Json yields $null (not @()), so this MUST be
             # special-cased before the parse -- otherwise it would be mistaken
@@ -1255,7 +1257,10 @@ function Build-TerminalFragment {
     }
 
     # Helper: is a (machine, env, kind) target in this project's selection?
-    # A $null selection means "legacy / unselected" -> emit everything.
+    # By the time this is called the caller has already substituted the DEFAULT
+    # column for an unmanaged project, so $Selection is normally a concrete set.
+    # A $null selection is treated defensively as "everything on" (only reachable
+    # if a caller skips the default substitution).
     function Test-ProfileSelected {
         param($Selection, [string]$Machine, [string]$Env, [string]$Kind)
         if ($null -eq $Selection) { return $true }
@@ -1271,6 +1276,53 @@ function Build-TerminalFragment {
             'linux'   { 'Linux' }
             default   { $Name }
         }
+    }
+
+    # Helper: compute the DEFAULT terminal-profile column for a project that has
+    # no explicit ``terminal_profiles`` selection (unmanaged). The default is
+    # **minimal per-agent + bare cross-machine**, matching the canonical rule in
+    # ``agent_worktrees.profiles.is_default_on``:
+    #   - self.agent diagonal  -> the local host's own launcher (native env)
+    #   - a ``shell`` target    -> for every OTHER (remote) machine x env
+    # It deliberately omits remote agent-launch combos and local non-self shells.
+    # This replaces the retired "unmanaged emits every candidate profile" behavior.
+    function Get-DefaultSelection {
+        param($RosterData, [string]$Machine, [string]$LocalDisplay)
+        $set = @{}
+        # Minimal per-agent: this host's local launcher (Windows-native here --
+        # install.ps1 only runs on Windows). No local WSL launcher by default.
+        $set["$LocalDisplay|Win|agent"] = $true
+        if ($RosterData -and $RosterData.machines) {
+            foreach ($mProp in $RosterData.machines.PSObject.Properties) {
+                $key = $mProp.Name
+                $mEntry = $mProp.Value
+                # Robust self-skip (mirrors the SSH loop below): match the local
+                # identity against key / display_name / hostname / ssh aliases.
+                $entryIds = @($key)
+                if ($mEntry.PSObject.Properties['display_name'] -and $mEntry.display_name) { $entryIds += $mEntry.display_name }
+                if ($mEntry.PSObject.Properties['hostname'] -and $mEntry.hostname) { $entryIds += $mEntry.hostname }
+                if ($mEntry.PSObject.Properties['ssh'] -and $mEntry.ssh -and $mEntry.ssh.PSObject.Properties['environments'] -and $mEntry.ssh.environments) {
+                    foreach ($e in $mEntry.ssh.environments) {
+                        if ($e.PSObject.Properties['alias'] -and $e.alias) { $entryIds += $e.alias }
+                    }
+                }
+                $isSelf = $false
+                foreach ($lid in @($Machine, $env:COMPUTERNAME.ToLower())) {
+                    foreach ($eid in $entryIds) {
+                        if ($lid -and $eid -and ("$lid".ToLower() -eq "$eid".ToLower())) { $isSelf = $true; break }
+                    }
+                    if ($isSelf) { break }
+                }
+                if ($isSelf) { continue }
+                if (-not $mEntry.ssh -or -not $mEntry.ssh.ready) { continue }
+                # Bare cross-machine: a plain-shell target per remote env.
+                foreach ($sshEnv in $mEntry.ssh.environments) {
+                    $selEnv = Get-SelEnvLabel $sshEnv.name
+                    $set["$($mEntry.display_name)|$selEnv|shell"] = $true
+                }
+            }
+        }
+        return $set
     }
 
     # Helper: extract WSL info from a registry entry
@@ -1346,8 +1398,9 @@ function Build-TerminalFragment {
         $pMachinesYaml = $proj.machines_yaml
         $pWslInfo = $proj.wsl_info
 
-        # This project's terminal-profile selection (own-column). $null = legacy
-        # (no selection persisted yet) -> emit every candidate (no regression).
+        # This project's terminal-profile selection (own-column). $null = the
+        # project is UNMANAGED (no selection persisted yet); the default column
+        # is substituted below, once the roster + local display are known.
         $pSel = Get-TerminalSelection $pName
 
         # Parse this project's machines.yaml once (local display name + SSH loop).
@@ -1365,6 +1418,14 @@ function Build-TerminalFragment {
         if ($rosterData -and $rosterData.machines -and $rosterData.machines.PSObject.Properties[$Machine]) {
             $dn = $rosterData.machines.$Machine.display_name
             if ($dn) { $localDisplay = $dn }
+        }
+
+        # Unmanaged project ($pSel is $null): substitute the DEFAULT column
+        # (minimal per-agent + bare cross-machine) instead of the retired
+        # emit-everything behavior. A managed selection (including an explicit
+        # empty '[]') is honored as-is.
+        if ($null -eq $pSel) {
+            $pSel = Get-DefaultSelection $rosterData $Machine $localDisplay
         }
 
         # Icon: prefer project-specific, fall back to agent-worktrees default
