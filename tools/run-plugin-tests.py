@@ -35,6 +35,7 @@ Design notes:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
 import shutil
@@ -133,15 +134,17 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
 
 
 def run_plugin(name: str, uv: str, *, reinstall: bool, kexpr: str | None,
-               guards: bool = False) -> int:
+               guards: bool = False, collect_only: bool = False) -> int:
     if not _has_suite(name):
         print(f"[SKIP] {name}: no test suite")
         return 0
-    label = "guard tests" if guards else "pytest"
+    label = "collect-only" if collect_only else ("guard tests" if guards else "pytest")
     print(f"[RUN ] {name}: preparing venv + {label} ...")
     py = _ensure_venv(name, uv, reinstall=reinstall)
     basetemp = Path(os.environ.get("TEMP", "/tmp")) / f"ce-bt-{name}-{random.randint(0, 1_000_000)}"
     cmd = [str(py), "-m", "pytest", "-q", f"--basetemp={basetemp}"]
+    if collect_only:
+        cmd.append("--collect-only")
     if guards:
         cmd += ["-m", "guard"]
     if kexpr:
@@ -167,6 +170,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("-k", dest="kexpr", default=None, help="pytest -k filter")
     ap.add_argument("--guards", action="store_true",
                     help="run only @pytest.mark.guard tests (fast structural/contract checks)")
+    ap.add_argument("--collect-only", dest="collect_only", action="store_true",
+                    help="build the venv and collect tests but do not run them "
+                         "(cheap import/collection smoke)")
+    ap.add_argument("--exclude", action="append", default=[], metavar="PLUGIN",
+                    help="drop a plugin from the resolved set (repeatable)")
+    ap.add_argument("--list", dest="list_only", action="store_true",
+                    help="print the resolved target plugins as a JSON array and exit "
+                         "(feeds a CI matrix); honors --all/--changed/names and --exclude")
     ap.add_argument("--pre-push", action="store_true",
                     help="hook mode: skip (exit 0) if uv is absent instead of failing")
     args = ap.parse_args(argv)
@@ -177,6 +188,14 @@ def main(argv: list[str] | None = None) -> int:
         targets = list(args.plugins)
     else:
         targets = changed_plugins(args.base)
+
+    excluded = set(args.exclude)
+    if excluded:
+        targets = [t for t in targets if t not in excluded]
+
+    if args.list_only:
+        print(json.dumps(targets))
+        return 0
 
     if not targets:
         print("No plugin suites to run.")
@@ -196,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in targets:
         try:
             rc = run_plugin(name, uv, reinstall=args.reinstall, kexpr=args.kexpr,
-                            guards=args.guards)
+                            guards=args.guards, collect_only=args.collect_only)
         except subprocess.CalledProcessError as exc:
             print(f"[FAIL] {name}: venv/install failed ({exc})", file=sys.stderr)
             rc = 1
