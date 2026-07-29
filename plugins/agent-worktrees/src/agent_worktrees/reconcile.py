@@ -52,11 +52,23 @@ CACHE_NAME = "plugin-reconcile-cache.json"
 VALID_SCOPES = ("universal", "machine-gated", "none")
 
 # Machine-gate source (pluggable). The reconciler reads the per-plugin allowed
-# machine set from a control-harness manifest. Both the manifest filename and an
+# machine set from a control-harness manifest. The manifest filename(s) and an
 # optional anchor repo (searched via the repos registry when the current repo
 # lacks the manifest) are overridable so any control harness can supply its own
 # gate; the defaults match this repo's reference (facility) convention.
-GATE_MANIFEST = os.environ.get("WORKTREE_GATE_MANIFEST", "external-repos.yaml")
+#
+# The preferred name is ``services.yaml`` -- a coherently-named plugin/service
+# runtime-placement registry -- with ``external-repos.yaml`` kept as a legacy
+# alias read for backward compatibility, so a harness migrates without a flag
+# day (both may briefly coexist; ``services.yaml`` wins). An explicit
+# ``WORKTREE_GATE_MANIFEST`` pins a single filename and disables the search list.
+DEFAULT_GATE_MANIFESTS = ("services.yaml", "external-repos.yaml")
+_GATE_MANIFEST_OVERRIDE = os.environ.get("WORKTREE_GATE_MANIFEST")
+GATE_MANIFESTS = (
+    (_GATE_MANIFEST_OVERRIDE,) if _GATE_MANIFEST_OVERRIDE else DEFAULT_GATE_MANIFESTS
+)
+# Back-compat alias (the preferred name); external callers referenced this.
+GATE_MANIFEST = GATE_MANIFESTS[0]
 GATE_ANCHOR = os.environ.get("WORKTREE_GATE_ANCHOR", "aperture-labs")
 
 # Throttle (hours) for the network payload refresh (`copilot plugin update`).
@@ -349,28 +361,77 @@ def runtime_installer_argv(plugin_dir: Path) -> tuple[str, list[str]] | None:
 # Machine gate (control-harness manifest -> per-plugin deploy_machines)
 # --------------------------------------------------------------------------
 
+def _ingest_gate_entries(entries: Any, gate: dict[str, set[str]]) -> None:
+    """Merge a list of ``{name, deploy_machines}`` service entries into ``gate``.
+
+    Best-effort: malformed entries (non-dict, missing name, non-list machines)
+    are skipped so a partially-bad manifest degrades to a smaller gate rather
+    than raising.
+    """
+    if not isinstance(entries, list):
+        return
+    for svc in entries:
+        if not isinstance(svc, dict):
+            continue
+        nm = svc.get("name")
+        dm = svc.get("deploy_machines")
+        if nm and isinstance(dm, list):
+            gate.setdefault(str(nm), set()).update(str(m) for m in dm)
+
+
+def _parse_gate_manifest(raw: Any, gate: dict[str, set[str]]) -> None:
+    """Populate ``gate`` from one parsed manifest, accepting either schema.
+
+    * **Native** (``services.yaml``): a top-level ``plugins:`` list of
+      ``{name, deploy_machines}`` -- the coherently-named shape.
+    * **Legacy** (``external-repos.yaml``): ``repos.<group>.services[]`` --
+      whose top-level ``repos``/``<group>`` keys are a free-form bucket the
+      reconciler flattens (grouped by concern, not by source repo).
+
+    A top-level ``services:`` key is deliberately NOT read as a gate list: it is
+    reserved for a future non-plugin (dotfiles-service) section so the two
+    concerns never collide.
+    """
+    if not isinstance(raw, dict):
+        return
+    _ingest_gate_entries(raw.get("plugins"), gate)  # native services.yaml shape
+    repos_block = raw.get("repos")
+    if isinstance(repos_block, dict):
+        for _repo, rdata in repos_block.items():
+            if isinstance(rdata, dict):
+                _ingest_gate_entries(rdata.get("services"), gate)
+
+
 def load_runtime_gate(repo_dir: Path) -> dict[str, set[str]]:
     """Map plugin name -> allowed machine set from a control-harness manifest.
 
-    Looks for the gate manifest (``GATE_MANIFEST``, default
-    ``external-repos.yaml``; override with ``WORKTREE_GATE_MANIFEST``) in the
-    current repo first, then -- if an anchor repo is configured
-    (``GATE_ANCHOR``; override with ``WORKTREE_GATE_ANCHOR``) -- in that repo as
-    resolved via the repos registry. Parses
-    ``repos.<repo>.services[].{name, deploy_machines}``. Returns ``{}`` when no
-    manifest is found, which makes every ``machine-gated`` runtime skip (the
-    safe default).
+    Looks for a gate manifest -- ``services.yaml`` (preferred) or the legacy
+    ``external-repos.yaml`` (both overridable to a single name via
+    ``WORKTREE_GATE_MANIFEST``) -- in the current repo first, then -- if an
+    anchor repo is configured (``GATE_ANCHOR``; override with
+    ``WORKTREE_GATE_ANCHOR``) -- in that repo as resolved via the repos
+    registry. Accepts either the native top-level ``plugins:`` schema or the
+    legacy ``repos.<group>.services[].{name, deploy_machines}`` schema. Returns
+    ``{}`` when no manifest is found, which makes every ``machine-gated`` runtime
+    skip (the safe default).
+
+    Precedence: within a directory ``services.yaml`` is tried before
+    ``external-repos.yaml``, and the current repo before the anchor; the first
+    manifest that yields a non-empty gate wins (so a migrated ``services.yaml``
+    shadows a lingering legacy file during transition).
     """
-    candidates = [repo_dir / GATE_MANIFEST]
+    search_dirs = [repo_dir]
     if GATE_ANCHOR:
         try:
             from . import repos as _repos
 
             anchor = _repos.resolve_path(GATE_ANCHOR)
             if anchor:
-                candidates.append(Path(anchor) / GATE_MANIFEST)
+                search_dirs.append(Path(anchor))
         except Exception:
             pass
+
+    candidates = [d / name for d in search_dirs for name in GATE_MANIFESTS]
 
     gate: dict[str, set[str]] = {}
     for path in candidates:
@@ -381,19 +442,7 @@ def load_runtime_gate(repo_dir: Path) -> dict[str, set[str]]:
                 raw = yaml.safe_load(f) or {}
         except Exception:
             continue
-        repos_block = raw.get("repos") or {}
-        if not isinstance(repos_block, dict):
-            continue
-        for _repo, rdata in repos_block.items():
-            if not isinstance(rdata, dict):
-                continue
-            for svc in rdata.get("services") or []:
-                if not isinstance(svc, dict):
-                    continue
-                nm = svc.get("name")
-                dm = svc.get("deploy_machines")
-                if nm and isinstance(dm, list):
-                    gate.setdefault(str(nm), set()).update(str(m) for m in dm)
+        _parse_gate_manifest(raw, gate)
         if gate:
             break
     return gate

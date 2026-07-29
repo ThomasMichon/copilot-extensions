@@ -102,11 +102,20 @@ def env(tmp_path: Path, monkeypatch):
             yaml.safe_dump(doc), encoding="utf-8"
         )
 
+    def write_gate_services(mapping: dict[str, list[str]]):
+        """Write the native ``services.yaml`` gate schema (top-level ``plugins:``)."""
+        plugins = [{"name": n, "deploy_machines": m} for n, m in mapping.items()]
+        import yaml
+        (repo / "services.yaml").write_text(
+            yaml.safe_dump({"plugins": plugins}), encoding="utf-8"
+        )
+
     e.write_settings = write_settings
     e.install_payload = install_payload
     e.deploy_runtime = deploy_runtime
     e.deploy_running = deploy_running
     e.write_gate = write_gate
+    e.write_gate_services = write_gate_services
     return e
 
 
@@ -302,6 +311,45 @@ def test_load_runtime_gate_parses_deploy_machines(env):
     gate = reconcile.load_runtime_gate(env.repo)
     assert gate["agent-bridge"] == {"lambda-core", "borealis"}
     assert gate["agent-codespaces"] == {"host-book2"}
+
+
+def test_load_runtime_gate_parses_plugins_schema(env):
+    # Native services.yaml shape: a top-level ``plugins:`` list.
+    env.write_gate_services({
+        "agent-mcp": ["lambda-core", "borealis"],
+        "agent-dispatch": ["host-book2"],
+    })
+    gate = reconcile.load_runtime_gate(env.repo)
+    assert gate["agent-mcp"] == {"lambda-core", "borealis"}
+    assert gate["agent-dispatch"] == {"host-book2"}
+
+
+def test_load_runtime_gate_prefers_services_over_external(env):
+    # Both files present (migration window): services.yaml must win.
+    env.write_gate({"agent-mcp": ["legacy-host"]})           # external-repos.yaml
+    env.write_gate_services({"agent-mcp": ["new-host"]})     # services.yaml
+    gate = reconcile.load_runtime_gate(env.repo)
+    assert gate["agent-mcp"] == {"new-host"}
+
+
+def test_load_runtime_gate_falls_back_to_external_when_no_services(env):
+    # Only the legacy file exists -> still parsed (back-compat).
+    env.write_gate({"agent-mcp": ["legacy-host"]})
+    gate = reconcile.load_runtime_gate(env.repo)
+    assert gate["agent-mcp"] == {"legacy-host"}
+
+
+def test_gate_manifest_override_pins_single_filename(env, monkeypatch):
+    # An explicit WORKTREE_GATE_MANIFEST pins one name; the other is ignored.
+    monkeypatch.setattr(reconcile, "GATE_MANIFESTS", ("services.yaml",))
+    env.write_gate({"agent-mcp": ["legacy-host"]})       # external-repos.yaml: ignored
+    env.write_gate_services({"agent-mcp": ["new-host"]})  # services.yaml: read
+    gate = reconcile.load_runtime_gate(env.repo)
+    assert gate["agent-mcp"] == {"new-host"}
+
+    monkeypatch.setattr(reconcile, "GATE_MANIFESTS", ("external-repos.yaml",))
+    gate = reconcile.load_runtime_gate(env.repo)
+    assert gate["agent-mcp"] == {"legacy-host"}
 
 
 # ---------------------------------------------------------------------------
