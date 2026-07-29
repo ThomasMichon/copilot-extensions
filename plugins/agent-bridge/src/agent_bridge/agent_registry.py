@@ -39,6 +39,16 @@ _PROJECTS_YAML_DEFAULT = "~/.agent-worktrees/projects.yaml"
 _REPOS_YAML_DEFAULT = "~/.agent-worktrees/repos.yaml"
 
 
+def _normalize_repo_basename(name: str) -> str:
+    """Normalize a repo name/key to its comparable basename.
+
+    Strips any ``owner/`` prefix, lowercases, and folds ``.`` to ``-`` so that
+    registry keys and lookups match regardless of case or ``.``/``-`` spelling
+    (e.g. ``your-org/Example.Marketplace`` matches ``example-marketplace``).
+    """
+    return name.strip().lower().split("/")[-1].replace(".", "-")
+
+
 def resolve_repo_remote(repo: str) -> str | None:
     """Resolve a logical repo name to its git remote URL.
 
@@ -50,7 +60,8 @@ def resolve_repo_remote(repo: str) -> str | None:
 
     Matching is exact on the registry key first, then a case-insensitive fallback
     on the key's basename (so ``example-web`` matches an ``example-web`` entry regardless
-    of case). Returns ``None`` when the registry is absent/unparseable or the repo
+    of case, and ``.``/``-`` spellings are folded together). Returns ``None`` when the
+    registry is absent/unparseable or the repo
     (or its ``remote``) is unknown -- the caller decides whether that is fatal
     (for a pre-populated venue folder it is not; for a clone-if-missing it is).
     """
@@ -79,11 +90,11 @@ def resolve_repo_remote(repo: str) -> str | None:
 
     entry = repos.get(repo)
     if not isinstance(entry, dict):
-        want = repo.strip().lower().split("/")[-1]
+        want = _normalize_repo_basename(repo)
         for key, val in repos.items():
             if not isinstance(val, dict):
                 continue
-            if str(key).strip().lower().split("/")[-1] == want:
+            if _normalize_repo_basename(str(key)) == want:
                 entry = val
                 break
     if not isinstance(entry, dict):
