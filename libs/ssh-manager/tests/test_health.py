@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from ssh_manager.config_sources import SSHProfileSource
 from ssh_manager.health import HealthStatus, check_health, ensure_healthy
-from ssh_manager.manager import ConnectionInfo, ConnectionManager
+from ssh_manager.manager import ConnectionManager
 from ssh_manager.platform import MultiplexMode, PlatformInfo
 
 

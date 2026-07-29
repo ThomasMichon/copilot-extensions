@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ssh_manager.config_sources import SSHConfig, SSHProfileSource
+from ssh_manager.config_sources import SSHProfileSource
 from ssh_manager.manager import (
     CommandResult,
-    ConnectionInfo,
     ConnectionManager,
     get_default_manager,
 )
@@ -149,7 +146,7 @@ class TestConnectionManagerIdentity:
     async def test_reconnects_on_port_forward_change(self, win_platform, source):
         """Changing port forwards triggers reconnect."""
         manager = ConnectionManager(platform=win_platform)
-        info1 = await manager.ensure_connected("test-host", source, ["-R 9847:localhost:9847"])
+        await manager.ensure_connected("test-host", source, ["-R 9847:localhost:9847"])
         info2 = await manager.ensure_connected("test-host", source, ["-R 9999:localhost:9999"])
         assert info2.port_forwards == ["-R 9999:localhost:9999"]
 
