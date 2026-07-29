@@ -426,27 +426,27 @@ def test_running_normalized_spelling_is_not_false_drift(env, monkeypatch):
     assert _runtime_updates(plan) == []
 
 
-def test_idle_gated_restart_appends_defer_flag(tmp_path, monkeypatch):
-    """A plugin declaring idleGatedRestart carries -DeferRestartIfBusy into its
+def test_zero_downtime_appends_flag(tmp_path, monkeypatch):
+    """A plugin declaring zeroDowntimeUpdate carries -ZeroDowntime into its
     reconcile-driven install.ps1 update (Windows); absence -> no flag (#533 B)."""
     monkeypatch.setattr(reconcile.platform, "system", lambda: "Windows")
     pdir = tmp_path / "plug"
     (pdir / "scripts").mkdir(parents=True)
     (pdir / "scripts" / "install.ps1").write_text("", encoding="utf-8")
 
-    # No idleGatedRestart -> plain `update`, no defer flag.
+    # No zeroDowntimeUpdate -> plain `update`, no flag.
     (pdir / "plugin.json").write_text(
         json.dumps({"name": "x", "version": "1"}), encoding="utf-8"
     )
     _, argv = reconcile.runtime_installer_argv(pdir)
-    assert "-DeferRestartIfBusy" not in argv
+    assert "-ZeroDowntime" not in argv
     assert argv[:3] == ["pwsh", "-File", str(pdir / "scripts" / "install.ps1")]
 
-    # idleGatedRestart: true -> the flag is appended after `update`.
+    # zeroDowntimeUpdate: true -> the flag is appended after `update`.
     (pdir / "plugin.json").write_text(
-        json.dumps({"name": "x", "version": "1", "idleGatedRestart": True}),
+        json.dumps({"name": "x", "version": "1", "zeroDowntimeUpdate": True}),
         encoding="utf-8",
     )
     _, argv = reconcile.runtime_installer_argv(pdir)
-    assert argv[-2:] == ["update", "-DeferRestartIfBusy"]
+    assert argv[-2:] == ["update", "-ZeroDowntime"]
 

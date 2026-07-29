@@ -700,23 +700,9 @@ def _cmd_service(args: argparse.Namespace) -> None:
         if pid:
             print(f"  PID:  {pid}")
         print(f"  Port: {_service_port()}")
-    elif action == "is-busy":
-        # Read-only restart-readiness probe for the idle-gated reconcile restart
-        # (#533 Part B): exit 2 when the daemon is actively dispatching so the
-        # installer defers a version-bump swap; exit 0 when idle/unreachable.
-        from .runtime_restart import BUSY_EXIT_CODE, daemon_busy_sessions
-
-        busy = daemon_busy_sessions(_get_client())
-        if getattr(args, "json", False):
-            _json_out({"busy": bool(busy), "busy_sessions": busy})
-        elif busy:
-            print(f"BUSY: {len(busy)} active dispatch(es): {', '.join(busy)}")
-        else:
-            print("IDLE: no active dispatches")
-        sys.exit(BUSY_EXIT_CODE if busy else 0)
     else:
         print(
-            "Usage: agent-bridge service {start|stop|restart|status|is-busy}",
+            "Usage: agent-bridge service {start|stop|restart|status}",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -2739,11 +2725,6 @@ def build_parser() -> argparse.ArgumentParser:
         ("status", "Show daemon status, port, and PID"),
     ):
         service_sub.add_parser(_act, help=_help)
-    _busy_p = service_sub.add_parser(
-        "is-busy",
-        help="Read-only: exit 2 if the daemon is actively dispatching, else 0",
-    )
-    _busy_p.add_argument("--json", action="store_true", help="Emit JSON.")
     service_p.set_defaults(func=_cmd_service)
 
     ver_p = sub.add_parser("version", help="Print version")
