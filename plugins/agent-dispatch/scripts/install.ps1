@@ -104,14 +104,14 @@ $DefaultPort = 9847
 # a versions/<v> absolute a `gc` could remove); VenvDir/VenvPython is the
 # versions/<v> slot (build + health-gate + the firewall -Program, which needs the
 # RESOLVED image path the running daemon reports). Legacy mode: Link == Venv.
-# Gated behind AGENT_DISPATCH_VERSIONED=1 (default off); COPILOT_EXT_NO_VERSIONED=1
+# Gated behind AGENT_DISPATCH_VERSIONED=0 (default ON); COPILOT_EXT_NO_VERSIONED=1
 # force-disables. scripts/versioned_runtime.py owns the swap + migration + gc.
 $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false
 $SrcVersion       = $null
-if (($env:AGENT_DISPATCH_VERSIONED -in @('1', 'true', 'yes', 'on')) -and
-    ($env:COPILOT_EXT_NO_VERSIONED -ne '1')) {
+if (($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
+    ($env:AGENT_DISPATCH_VERSIONED -notin @('0', 'false', 'no', 'off'))) {
     $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyprojForVer) {
         $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1

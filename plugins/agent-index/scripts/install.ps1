@@ -38,13 +38,13 @@ $Launcher = Join-Path $InstallDir 'service.ps1'
 # === install-contract:v3 versioned-venv (agent-index: .venv-as-junction) ===
 # Build each version into versions/<version> and make the historical `.venv`
 # path a junction into the active slot. Disabled by default until callers opt in
-# with AGENT_INDEX_VERSIONED=1; COPILOT_EXT_NO_VERSIONED=1 force-disables.
+# by default (set AGENT_INDEX_VERSIONED=0 or COPILOT_EXT_NO_VERSIONED=1 to opt out); COPILOT_EXT_NO_VERSIONED=1 force-disables.
 $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false
 $SrcVersion       = $null
-if (($env:AGENT_INDEX_VERSIONED -in @('1', 'true', 'yes', 'on')) -and
-    ($env:COPILOT_EXT_NO_VERSIONED -ne '1')) {
+if (($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
+    ($env:AGENT_INDEX_VERSIONED -notin @('0', 'false', 'no', 'off'))) {
     $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyprojForVer) {
         $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1

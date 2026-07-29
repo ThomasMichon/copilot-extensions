@@ -64,7 +64,7 @@ $BinstubNames = @('session-sync', 'agent-logger', 'collate-session', 'read-sessi
 # scheduled sync task (which launches the windowless pythonw.exe) resolve through
 # the link unchanged. LinkDir/LinkPython/LinkPythonw are the stable `.venv` paths;
 # VenvDir/VenvPython(w) are the versions/<v> slot (build + health-gate). Legacy
-# mode: Link == Venv. Gated behind AGENT_LOGGER_VERSIONED=1 (default off);
+# mode: Link == Venv. Gated behind AGENT_LOGGER_VERSIONED=0 (default ON);
 # COPILOT_EXT_NO_VERSIONED=1 force-disables. scripts/versioned_runtime.py owns the
 # swap + migration + gc.
 $LinkDir          = $VenvDir
@@ -72,8 +72,8 @@ $LinkPython       = $VenvPython
 $LinkPythonw      = $VenvPythonw
 $VersionedRuntime = $false
 $SrcVersion       = $null
-if (($env:AGENT_LOGGER_VERSIONED -in @('1', 'true', 'yes', 'on')) -and
-    ($env:COPILOT_EXT_NO_VERSIONED -ne '1')) {
+if (($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
+    ($env:AGENT_LOGGER_VERSIONED -notin @('0', 'false', 'no', 'off'))) {
     $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyprojForVer) {
         $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1

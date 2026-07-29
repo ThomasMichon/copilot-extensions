@@ -41,14 +41,14 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 # deploy-manifest resolve through the link unchanged. agent-ssh is a CLI (no
 # daemon). LinkDir/LinkPython is the stable `.venv` path; VenvDir/VenvPython is the
 # versions/<v> slot (build + health-gate). Legacy mode: Link == Venv. Gated behind
-# AGENT_SSH_VERSIONED=1 (default off); COPILOT_EXT_NO_VERSIONED=1 force-disables.
+# AGENT_SSH_VERSIONED=0 (default ON); COPILOT_EXT_NO_VERSIONED=1 force-disables.
 # scripts/versioned_runtime.py owns the swap + migration + gc.
 $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false
 $SrcVersion       = $null
-if (($env:AGENT_SSH_VERSIONED -in @('1', 'true', 'yes', 'on')) -and
-    ($env:COPILOT_EXT_NO_VERSIONED -ne '1')) {
+if (($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
+    ($env:AGENT_SSH_VERSIONED -notin @('0', 'false', 'no', 'off'))) {
     $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyprojForVer) {
         $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1

@@ -32,12 +32,12 @@ warn() { log "WARN" "$1"; }
 # timer unit, and the deploy-manifest resolve through the link. LINK_DIR is the
 # stable `.venv` path; VENV is redirected to the versions/<v> slot (build +
 # health-gate). Legacy mode: LINK_DIR == VENV. Gated behind
-# AGENT_LOGGER_VERSIONED=1 (default off); scripts/versioned_runtime.py owns the
+# AGENT_LOGGER_VERSIONED=0 (default ON); scripts/versioned_runtime.py owns the
 # swap + migration + gc.
 LINK_DIR="$VENV"
 VERSIONED_RUNTIME=0
 SRC_VERSION=""
-if [[ "${AGENT_LOGGER_VERSIONED:-}" =~ ^(1|true|yes|on)$ && "${COPILOT_EXT_NO_VERSIONED:-}" != "1" ]]; then
+if [[ "${COPILOT_EXT_NO_VERSIONED:-}" != "1" && ! "${AGENT_LOGGER_VERSIONED:-}" =~ ^(0|false|no|off)$ ]]; then
     if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
         SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
     fi

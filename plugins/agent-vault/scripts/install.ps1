@@ -76,15 +76,15 @@ $utf8NoBom   = New-Object System.Text.UTF8Encoding $false
 # the stable `.venv` path (runtime-facing, never a versions/<v> absolute a `gc`
 # could remove); VenvDir/VenvPython is redirected to the versions/<v> slot
 # (build + health-gate). Legacy mode: Link == Venv (byte-for-byte old behavior).
-# Gated behind AGENT_VAULT_VERSIONED=1 (default off) until validated;
+# Gated behind AGENT_VAULT_VERSIONED=0 (default ON) until validated;
 # COPILOT_EXT_NO_VERSIONED=1 force-disables. scripts/versioned_runtime.py owns
 # the swap + legacy migration + gc.
 $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false
 $SrcVersion       = $null
-if (($env:AGENT_VAULT_VERSIONED -in @('1', 'true', 'yes', 'on')) -and
-    ($env:COPILOT_EXT_NO_VERSIONED -ne '1')) {
+if (($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
+    ($env:AGENT_VAULT_VERSIONED -notin @('0', 'false', 'no', 'off'))) {
     $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyprojForVer) {
         $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
