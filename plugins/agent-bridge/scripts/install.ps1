@@ -40,12 +40,13 @@ param(
     # existing non-interactive task is preserved across updates.
     [switch]$NonInteractive,
 
-    # Idle-gate the update's daemon restart (dotfiles #533 Part B). Set by the
-    # launch-path reconciler for a routine version-bump redeploy: if the daemon
-    # is actively dispatching, DEFER the swap + emit a nudge instead of
-    # collapsing a live session. An operator's `update` (without this switch)
-    # keeps the force-drain-and-swap behavior.
-    [switch]$DeferRestartIfBusy
+    # Zero-downtime update (dotfiles #533 Part B). Set by the launch-path
+    # reconciler for a routine version-bump redeploy: update the venv in place
+    # (no stop) and hand off via `agent-bridge deploy` (ZDD active/passive
+    # cutover: new daemon on a fresh port -> flip routing -> drain + retire the
+    # old one), so a live dispatch is never collapsed. Falls back to the classic
+    # stop-and-swap if the cutover can't run or fails.
+    [switch]$ZeroDowntime
 )
 
 Set-StrictMode -Version 2.0
@@ -1288,26 +1289,15 @@ function Invoke-Update {
     # not race a live bridge holding python.exe open.
     $wasRunning = $null -ne (Get-RunningProcess)
 
-    # Idle-gate (dotfiles #533 Part B): on a reconcile-driven update
-    # (-DeferRestartIfBusy), never collapse a live dispatch for a routine version
-    # bump. If the daemon is actively dispatching, defer the whole swap + emit a
-    # loud nudge; the version drift stays visible (venv untouched) so the next
-    # reconcile retries when idle. exit 2 == busy; anything else (idle, or the
-    # probe failed / daemon unreachable) proceeds with the swap.
-    if ($DeferRestartIfBusy -and $wasRunning) {
-        $bridgeExe = Join-Path $VenvDir 'Scripts\agent-bridge.exe'
-        if (Test-Path $bridgeExe) {
-            & $bridgeExe service is-busy 2>&1 | Out-Null
-            # Exit 3 == actively dispatching (deliberately not 2, which argparse
-            # returns for an unknown subcommand -- so an OLDER installed CLI that
-            # predates `is-busy` falls through here and upgrades instead of
-            # deferring forever).
-            if ($LASTEXITCODE -eq 3) {
-                Write-Warn 'agent-bridge is actively dispatching -- deferring the runtime restart for this version bump.'
-                Write-Warn 'The daemon keeps serving the current build; run `agent-bridge service restart` (or re-run update) when idle to pick it up.'
-                return
-            }
-        }
+    # Zero-downtime path (dotfiles #533 Part B): when the reconciler asks for it
+    # and a healthy venv is already serving, update the package IN PLACE (no
+    # stop) and hand off via `agent-bridge deploy` (ZDD cutover) at the end,
+    # instead of the classic drain -> stop -> rebuild -> restart (which blips a
+    # live dispatch). Requires the venv to already exist -- we must not rebuild
+    # python.exe under a running daemon; otherwise fall back to the classic swap.
+    $useCutover = $ZeroDowntime -and $wasRunning -and (Test-Path $VenvPython)
+    if ($useCutover) {
+        Write-Step 'Zero-downtime mode: updating the venv in place; will cut over (no stop)'
     }
 
     # Snapshot the current healthy venv so a failed install can roll back to the
@@ -1320,7 +1310,7 @@ function Invoke-Update {
     }
 
     try {
-        if ($wasRunning) {
+        if ($wasRunning -and -not $useCutover) {
             $drainTimeout = if ($env:AGENT_BRIDGE_DRAIN_TIMEOUT) {
                 [int]$env:AGENT_BRIDGE_DRAIN_TIMEOUT
             } else { 120 }
@@ -1328,8 +1318,10 @@ function Invoke-Update {
             Invoke-Stop
         }
 
-        # Repair venv if python binary is missing (or rebuild if unsigned for SAC)
-        if ((-not (Test-Path $VenvPython)) -or ($env:OS -eq 'Windows_NT')) {
+        # Repair venv if python binary is missing (or rebuild if unsigned for SAC).
+        # Skipped in cutover mode: the running daemon is holding this venv, so a
+        # rebuild would break it -- an in-place package update is enough.
+        if ((-not $useCutover) -and ((-not (Test-Path $VenvPython)) -or ($env:OS -eq 'Windows_NT'))) {
             if ((Test-Path $VenvDir) -or (Get-SignedBasePython)) {
                 if (-not (Test-Path $VenvPython)) { Write-Step 'Repairing venv (python binary missing)...' }
                 if (-not (New-SignedVenv)) {
@@ -1479,9 +1471,25 @@ function Invoke-Update {
     # Update deploy manifest
     Write-DeployManifest
 
-    # (Re)start service -- always ensure running after update
-    Write-Step 'Starting service...'
-    Invoke-Start
+    # Bring the new build into service. The zero-downtime path hands off via the
+    # ZDD cutover (`agent-bridge deploy`: new daemon on a fresh port -> flip the
+    # routing table -> drain + retire the old one), so a live dispatch is never
+    # collapsed. The classic path just (re)starts -- the old daemon was already
+    # stopped above.
+    if ($useCutover) {
+        Write-Step 'Cutting over to the new build (zero-downtime)...'
+        & $VenvPython -m agent_bridge deploy --force 2>&1 | ForEach-Object { Write-Host "  $_" }
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok 'Cutover complete (zero-downtime)'
+        } else {
+            Write-Warn 'Cutover failed -- falling back to a stop-and-restart swap'
+            Invoke-Stop
+            Invoke-Start
+        }
+    } else {
+        Write-Step 'Starting service...'
+        Invoke-Start
+    }
 
     Write-Ok 'Update complete'
 }
