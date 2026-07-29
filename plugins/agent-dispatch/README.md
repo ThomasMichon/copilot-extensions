@@ -201,6 +201,42 @@ agent-dispatch schedule tick  schedules.json          # one pass (cron / systemd
 agent-dispatch schedule serve schedules.json --interval 60   # built-in timer loop
 ```
 
+#### Managed registry + single-producer job-lease
+
+Instead of driving a hand-edited spec file, recurring schedules can be
+**registered** with the coordinator as first-class objects, then listed,
+inspected, paused, and removed. A **job-lease** elects a single producer for a
+scope so one host (e.g. a fleet chronicler) runs the registry tick while others
+idle -- *pin-not-failover*: a first writer wins the scope and renews it, a
+different holder is refused and the lease is never auto-stolen (reassignment is
+an explicit `lease-release --force`). This is distinct from the engine's
+per-task claim/recovery; it only picks *which machine* ticks.
+
+```bash
+agent-dispatch schedule register schedules.json        # upsert every entry into the registry
+agent-dispatch schedule list [--active]                # registered schedules
+agent-dispatch schedule inspect <id>                   # entry + next occurrences + lease
+agent-dispatch schedule pause|resume <id>
+agent-dispatch schedule remove <id>
+
+# tick / serve the *registry* (no spec file); serve is lease-gated:
+agent-dispatch schedule tick  --registry
+agent-dispatch schedule serve --registry --lease-scope chronicle --holder $(hostname) --interval 300
+
+# manage the job-lease directly:
+agent-dispatch schedule lease-list
+agent-dispatch schedule lease-show    <scope>
+agent-dispatch schedule lease-acquire <scope> --holder <machine> [--ttl N]
+agent-dispatch schedule lease-release <scope> --holder <machine> [--force]
+```
+
+A registered entry is the same schedule dict, but self-contained (it carries its
+own `repo`; `register` bakes in a spec's `default_repo`). Registry ticks reuse
+the same `not_before` + `sched:<id>:<epoch>` idempotency, so a lease holder that
+sleeps and wakes simply replays just-missed occurrences via each schedule's
+lookback window without double-creating.
+
+
 ### Reactive webhook producer (`agent-dispatch webhook`)
 
 A small HTTP app that maps two generic, forge-neutral event shapes onto tasks:
