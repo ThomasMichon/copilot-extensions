@@ -258,6 +258,47 @@ def runtime_running_version(name: str, home: Path | None = None) -> str | None:
     return str(ver)
 
 
+def running_version_lag(repo_dir: Path) -> list[dict[str, Any]]:
+    """Enabled runtime plugins whose *live* process lags the installed payload.
+
+    Part C (#533): the launch path already heals runtime drift (running-aware
+    reconcile + the Part B zero-downtime cutover), but a running session can't
+    restart/cut-over its own daemon mid-turn -- so a `copilot plugin update`
+    applied *during* a session leaves the daemon lagging until the next launch.
+    This read-only diagnostic surfaces that gap for ``doctor``/``status`` so the
+    operator can `service restart` sooner rather than lag silently.
+
+    For each enabled copilot-extensions plugin that exposes a *live*
+    running-version signal, report ``{service, running, payload}`` when the
+    running version differs from the installed payload (PEP 440-aware, so the
+    ``0.4.0-dev5`` vs ``0.4.0.dev5`` spelling never reads as a false lag).
+    Plugins with no live process (dead/absent running-version) are omitted --
+    there is nothing serving to nudge about. Never raises.
+    """
+    lags: list[dict[str, Any]] = []
+    try:
+        names = read_enabled_plugins(repo_dir)
+    except Exception:
+        return lags
+    for name in names:
+        try:
+            pdir = installed_payload_dir(name)
+            if pdir is None:
+                continue
+            payload = payload_version(pdir)
+            running = runtime_running_version(name)
+            if (running is not None and payload is not None
+                    and not _versions_equal(running, payload)):
+                lags.append({
+                    "service": name,
+                    "running": running,
+                    "payload": payload,
+                })
+        except Exception:
+            continue
+    return lags
+
+
 def _zero_downtime_update(plugin_dir: Path) -> bool:
     """Whether the plugin supports a zero-downtime in-place update (#533 Part B).
 
