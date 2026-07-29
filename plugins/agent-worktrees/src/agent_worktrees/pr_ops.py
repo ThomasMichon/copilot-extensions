@@ -410,9 +410,44 @@ def create_pr(
             record.prs.append(target_pr)
         tracking.save_record(record)
 
-    # 1. Squash all worktree commits into one (always, regardless of strategy).
     squash_msg = (record.title if record and record.title else None) \
         or (eff_title if eff_title != worktree_id else f"{worktree_id} changes")
+
+    # 1. Rebase the worktree commits onto the upstream default branch FIRST,
+    #    with the individual commits intact -- BEFORE squashing. This lets
+    #    ``git rebase`` drop any commit already present on upstream by patch-id.
+    #    The case that matters (#546): a REUSED worktree whose prior PR was
+    #    already **squash-merged**. Because every agent-worktrees PR is a single
+    #    squashed commit, that prior commit's patch-id matches the squash-merge
+    #    on upstream, so the rebase drops it cleanly and only the new work
+    #    survives. Squashing *first* (the old order) fused the already-merged
+    #    commit with the new work into one patch that no longer matched
+    #    upstream, forcing a spurious conflict that aborted create-pr.
+    base_sha = ""
+    if git_ops.ref_exists(upstream, cwd=worktree_path):
+        if not git_ops.rebase(upstream, cwd=worktree_path):
+            _rollback(worktree_path, wt_branch, orig_sha)
+            return {**base, "error": (
+                f"Rebase onto {upstream} hit genuine conflicts between the "
+                f"worktree's new commits and {upstream} (commits already merged "
+                f"upstream are dropped automatically). The rebase was aborted "
+                f"and '{wt_branch}' was left unchanged -- there is nothing to "
+                f"resolve in place. Rebase manually (git rebase {upstream}), fix "
+                f"the conflicts, then re-run create-pr."
+            )}
+        base_sha = _rev(upstream, cwd=worktree_path)
+        # Recompute what remains ahead of upstream: the rebase may have dropped
+        # an already-merged commit, so the pre-rebase ``ahead`` is now stale.
+        ahead = git_ops.get_commits_ahead(wt_branch, upstream, cwd=worktree_path)
+        if not ahead:
+            _rollback(worktree_path, wt_branch, orig_sha)
+            return {**base, "error": (
+                f"All commits on {wt_branch} are already present on {upstream} "
+                f"(they were merged upstream) -- nothing new to open a PR for."
+            )}
+
+    # 2. Squash the surviving worktree commits into one. After the rebase the
+    #    survivors are exactly the new work (any already-merged commit is gone).
     if len(ahead) > 1:
         squashed, squash_reason = git_ops.squash_branch(
             upstream, squash_msg, cwd=worktree_path
@@ -421,18 +456,6 @@ def create_pr(
             _rollback(worktree_path, wt_branch, orig_sha)
             detail = f" {squash_reason}" if squash_reason else ""
             return {**base, "error": f"Failed to squash worktree commits.{detail}"}
-
-    # 2. Rebase the squashed commit onto the upstream default branch so the
-    #    feature branch is based on the latest master.
-    base_sha = ""
-    if git_ops.ref_exists(upstream, cwd=worktree_path):
-        if not git_ops.rebase(upstream, cwd=worktree_path):
-            _rollback(worktree_path, wt_branch, orig_sha)
-            return {**base, "error": (
-                f"Rebase onto {upstream} hit conflicts. Resolve them on "
-                f"'{wt_branch}' and retry create-pr."
-            )}
-        base_sha = _rev(upstream, cwd=worktree_path)
 
     head_sha = _rev("HEAD", cwd=worktree_path)
 
