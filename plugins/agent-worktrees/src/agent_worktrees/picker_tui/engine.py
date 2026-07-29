@@ -1494,31 +1494,6 @@ class PickerScreen(Widget):
         self._push_maint_menu(ids, acts, len(chosen))
 
     # ---- Profiles matrix helpers ----
-    def profile_col_widths(self):
-        return [max(len(f"{m} {e}"), 3) + 2 for _lbl, m, e in self.host_cols]
-
-    def _host_header_cell(self, j, colw):
-        """One Profiles host-column header: machine (config) name in the header
-        slot color + env in its per-env color, centered to the column width.
-        The active host (the column being edited) gets the SAME subtle shading
-        the machine tabs use for an active-but-unfocused tab -- never the
-        inversion cursor, since the real cursor lives in the grid cell."""
-        _lbl, m, e = self.host_cols[j]
-        active = j == self.pcol
-        unavail = j in self._prof_unavailable
-        name_base = C_DISABLED if unavail else ("bold white" if active else C_TABOFF)
-        env_base = C_DISABLED if unavail else C_ENV.get(e, name_base)
-        cell = Text()
-        cell.append(m, style=self._hl(name_base, active, False))
-        cell.append(" ", style=self._hl("", active, False))
-        cell.append(e, style=self._hl(env_base, active, False))
-        pad = max(0, colw - cell.cell_len)
-        left = pad // 2
-        out = Text(" " * left)
-        out.append_text(cell)
-        out.append(" " * (pad - left))
-        return out
-
     def profiles_present(self):
         return sum(1 for v in self.grid.values() if v)
 
@@ -2041,109 +2016,6 @@ class PickerScreen(Widget):
         else:
             self.profiles_view.build(add, width, sel)
         return vrows
-
-    def _visible_pcols(self, width, lblw):
-        """Which host columns are visible. Returns (lo, hi, more_left, more_right)
-        windowed around the cursor column; or None if not even one column fits
-        (caller switches to transposed mode)."""
-        colw = self.profile_col_widths()
-        n = len(colw)
-        if n == 0:
-            return None                # no host columns -- caller placeholders
-        if self.pcol >= n:
-            self.pcol = n - 1          # host set shrank; clamp the cursor column
-        avail = width - lblw - 4   # reserve for ‹ / › markers
-        if avail < colw[self.pcol]:
-            return None
-        lo = hi = self.pcol
-        used = colw[lo]
-        while True:
-            grew = False
-            if hi + 1 < n and used + 1 + colw[hi + 1] <= avail:
-                hi += 1
-                used += 1 + colw[hi]
-                grew = True
-            if lo - 1 >= 0 and used + 1 + colw[lo - 1] <= avail:
-                lo -= 1
-                used += 1 + colw[lo]
-                grew = True
-            if not grew:
-                break
-        return lo, hi, lo > 0, hi < n - 1
-
-    def _tlabel(self, t, w, base):
-        """Target label: 'machine env · agent', env token colored, padded to w."""
-        seg = Text()
-        seg.append(f"{t['machine']} ", style=base)
-        seg.append(t["env"], style=C_ENV.get(t["env"], base))
-        seg.append(f" · {'agent' if t['agent'] else 'shell'}", style=base)
-        if seg.cell_len < w:
-            seg.append(" " * (w - seg.cell_len))
-        return seg
-
-    def _cell_visual(self, ti, j, locked):
-        """(glyph_char, style) for a matrix cell, reflecting applied vs pending."""
-        if j in self._prof_unavailable:
-            # Column we couldn't load (unreachable / too-old remote): show an
-            # "unknown" marker, not a fabricated selection (#1370).
-            return "?", C_DISABLED
-        present = self.grid.get((ti, j), False)
-        applied = self.applied.get((ti, j), False)
-        agent = self.targets[ti]["agent"]
-        if locked:
-            return "✓", "grey50"
-        if present and applied:
-            return "✓", (C_PULSE[self.pulse] if agent else "#37b7ff")  # active
-        if present and not applied:
-            return "✓", "bold #ff9e3b"      # pending add (alternate highlight)
-        if applied and not present:
-            return "✗", "bold #ff5f5f"      # pending removal
-        return "·", C_DIM                   # inactive
-
-    def _profiles_button_row(self, width, focus, active_idx):
-        dirty = self.grid_dirty()
-        if not dirty:
-            active_idx = 0          # Reset is unavailable -> not selectable
-        n = self.pending_count()
-        t = Text("  ")
-        # Apply
-        if dirty:
-            alabel = f" ✓ Apply ({n}) "
-            astyle = C_BTN_SEL if (focus and active_idx == 0) else "bold black on #ff9e3b"
-        else:
-            alabel = " ✓ Applied "
-            astyle = C_BTN_SEL if (focus and active_idx == 0) else "bold black on green"
-        t.append(alabel, style=astyle)
-        t.append("   ")
-        # Reset (only meaningful when dirty)
-        if not dirty:
-            rstyle = "grey42 on grey15"
-        else:
-            rstyle = self._btn_style(focus, active_idx == 1)
-        t.append(" ↺ Reset ", style=rstyle)
-        suffix = ("proposed changes are NOT active yet" if dirty
-                  else "all profiles active · Enter applies from anywhere")
-        if t.cell_len + 4 + len(suffix) <= width:
-            t.append("    " + suffix, style=C_DIM)
-        t.append(" " * max(0, width - t.cell_len))
-        return t
-
-    def _profiles_legend(self, width):
-        """One dim line keying the grid's agent/shell rows (and any unreachable
-        column) to plain language, so a round-trip edit doesn't silently drop
-        the bare-SSH ``shell`` profiles (#1369)."""
-        t = Text("  ")
-        t.append("agent", style=C_LABEL)
-        t.append(" = launch worktree", style=C_DIM)
-        t.append("   ")
-        t.append("shell", style=C_MUTED)
-        t.append(" = plain SSH login shell", style=C_DIM)
-        if self._prof_unavailable:
-            t.append("   ")
-            t.append("?", style=C_DISABLED)
-            t.append(" = remote unavailable (needs upgrade)", style=C_DIM)
-        t.append(" " * max(0, width - t.cell_len))
-        return t
 
     def _hl(self, base, selected, focused):
         """Augment a base style with the selection highlight: the inversion
@@ -4784,7 +4656,7 @@ class MsgViewScreen(ModalScreen[None]):
 
 
 class ProfilesView:
-    """Encapsulated Profiles-configurator body (F5 slice 1).
+    """Encapsulated Profiles-configurator body (#88 F5, slices 1-2).
 
     The first sub-view carved out of the picker's monolithic
     ``PickerScreen.build_body`` into its own component, per the incremental
@@ -4792,13 +4664,18 @@ class ProfilesView:
     ``sel=(zone,index)`` focus model to widgets in one big-bang, we peel cohesive
     sub-views off the God-object one at a time and impose a **moratorium on new
     full-screen-at-once renders** -- every reworked piece renders through its own
-    component boundary. This slice owns the Profiles pivot's *body rendering*
-    (the grid + its narrow-terminal transposed fallback); the profiles *state*
-    (``grid`` / ``pcol`` / ``targets`` / ``host_cols`` / ``applied``) and its
-    behaviour (toggling, Apply plumbing) still live on the engine and are read
-    here through the back-reference, to be pulled into the component in a
-    follow-up slice. It is a plain component today; a later slice makes it a
-    focusable Textual widget.
+    component boundary.
+
+    This component now owns the Profiles pivot's **entire body rendering** -- the
+    grid + its narrow-terminal transposed fallback, plus every render helper
+    (column widths, the visible-column window, host-header / target-label /
+    grid-cell visuals, the Apply/Reset button row, and the legend). The profiles
+    *state* (``grid`` / ``pcol`` / ``targets`` / ``host_cols`` / ``applied`` /
+    ``_prof_unavailable``) and *behaviour* (toggling, Apply plumbing) still live
+    on the engine and are read here through the back-reference, along with the
+    genuinely shared helpers (``cell_locked``, ``grid_dirty``, ``pending_count``,
+    ``_btn_style``, ``_hl``); those move in a follow-up slice. It is a plain
+    component today; a later slice makes it a focusable Textual widget.
     """
 
     def __init__(self, eng) -> None:
@@ -4821,22 +4698,22 @@ class ProfilesView:
                 style=C_DIM,
             ))
             add(Text(""))
-            add(eng._profiles_button_row(width, sel == ("BTN", 0), eng.btn_idx),
+            add(self._profiles_button_row(width, sel == ("BTN", 0), eng.btn_idx),
                 stop=("BTN", 0))
             return
-        colw = eng.profile_col_widths()
+        colw = self._col_widths()
         lblw = 30
-        vis = eng._visible_pcols(width, lblw)
+        vis = self._visible_pcols(width, lblw)
         if vis is None:
             return self._transposed(add, width, sel)
         lo, hi, ml, mr = vis
-        add(eng._profiles_legend(width))
+        add(self._legend(width))
         hdr = Text(" " + "TARGET \\ HOST".ljust(lblw - 1), style=C_HEADER)
         hdr.append("‹" if ml else " ", style=C_HINT)
         for j in range(lo, hi + 1):
             if j > lo:
                 hdr.append(" ")
-            hdr.append_text(eng._host_header_cell(j, colw[j]))
+            hdr.append_text(self._host_header_cell(j, colw[j]))
         hdr.append("›" if mr else " ", style=C_HINT)
         hdr.append(" " * max(0, width - hdr.cell_len))
         add(hdr, kind="colhdr")
@@ -4847,7 +4724,7 @@ class ProfilesView:
             r = Text(" ")
             # The active target row label gets the same subtle active shading the
             # active host column header uses, so both cursor coordinates read.
-            lbl_text = eng._tlabel(t, lblw - 1, base)
+            lbl_text = self._tlabel(t, lblw - 1, base)
             if row_sel:
                 lbl_text.stylize("on grey23")
             r.append_text(lbl_text)
@@ -4856,14 +4733,14 @@ class ProfilesView:
                 if j > lo:
                     r.append(" ")
                 locked = eng.cell_locked(ti, j)
-                ch, style = eng._cell_visual(ti, j, locked)
+                ch, style = self._cell_visual(ti, j, locked)
                 if row_sel and j == eng.pcol:
                     style = "grey50 on grey23" if locked else C_SEL
                 r.append(ch.center(colw[j]), style=style)
             r.append(" " * max(0, width - r.cell_len))
             add(r, stop=("PR", ti), data=t)
         add(Text(""))
-        add(eng._profiles_button_row(width, sel == ("BTN", 0), eng.btn_idx),
+        add(self._profiles_button_row(width, sel == ("BTN", 0), eng.btn_idx),
             stop=("BTN", 0))
 
     def _transposed(self, add, width, sel):
@@ -4872,7 +4749,7 @@ class ProfilesView:
         Mirrors the former ``PickerScreen._build_profiles_transposed`` exactly."""
         eng = self._eng
         _lbl, hm, he = eng.host_cols[eng.pcol]
-        add(eng._profiles_legend(width))
+        add(self._legend(width))
         head = Text(" HOST  ", style=C_HEADER)
         head.append(hm, style=eng._hl(C_HEADER, True, False))
         head.append(" ", style=eng._hl("", True, False))
@@ -4887,16 +4764,150 @@ class ProfilesView:
             agent = t["agent"]
             base = "grey78" if agent else "grey54"
             locked = eng.cell_locked(ti, eng.pcol)
-            ch, cstyle = eng._cell_visual(ti, eng.pcol, locked)
+            ch, cstyle = self._cell_visual(ti, eng.pcol, locked)
             present = eng.grid.get((ti, eng.pcol), False)
             box = f"[{ch}]" if (present or ch == "✗") else "[ ]"
             r = Text(" ")
             r.append(" " + box + " ", style=cstyle)
-            r.append_text(eng._tlabel(t, width - 8, base))
+            r.append_text(self._tlabel(t, width - 8, base))
             if sel == ("PR", ti):
                 r.stylize("grey50 on grey23" if locked else C_SEL)
             r.append(" " * max(0, width - r.cell_len))
             add(r, stop=("PR", ti), data=t)
+
+    # ---- render helpers (owned by the component) ------------------------
+    def _col_widths(self):
+        return [max(len(f"{m} {e}"), 3) + 2
+                for _lbl, m, e in self._eng.host_cols]
+
+    def _host_header_cell(self, j, colw):
+        """One Profiles host-column header: machine (config) name in the header
+        slot color + env in its per-env color, centered to the column width.
+        The active host (the column being edited) gets the SAME subtle shading
+        the machine tabs use for an active-but-unfocused tab -- never the
+        inversion cursor, since the real cursor lives in the grid cell."""
+        eng = self._eng
+        _lbl, m, e = eng.host_cols[j]
+        active = j == eng.pcol
+        unavail = j in eng._prof_unavailable
+        name_base = C_DISABLED if unavail else ("bold white" if active else C_TABOFF)
+        env_base = C_DISABLED if unavail else C_ENV.get(e, name_base)
+        cell = Text()
+        cell.append(m, style=eng._hl(name_base, active, False))
+        cell.append(" ", style=eng._hl("", active, False))
+        cell.append(e, style=eng._hl(env_base, active, False))
+        pad = max(0, colw - cell.cell_len)
+        left = pad // 2
+        out = Text(" " * left)
+        out.append_text(cell)
+        out.append(" " * (pad - left))
+        return out
+
+    def _visible_pcols(self, width, lblw):
+        """Which host columns are visible. Returns (lo, hi, more_left, more_right)
+        windowed around the cursor column; or None if not even one column fits
+        (caller switches to transposed mode)."""
+        eng = self._eng
+        colw = self._col_widths()
+        n = len(colw)
+        if n == 0:
+            return None                # no host columns -- caller placeholders
+        if eng.pcol >= n:
+            eng.pcol = n - 1           # host set shrank; clamp the cursor column
+        avail = width - lblw - 4   # reserve for ‹ / › markers
+        if avail < colw[eng.pcol]:
+            return None
+        lo = hi = eng.pcol
+        used = colw[lo]
+        while True:
+            grew = False
+            if hi + 1 < n and used + 1 + colw[hi + 1] <= avail:
+                hi += 1
+                used += 1 + colw[hi]
+                grew = True
+            if lo - 1 >= 0 and used + 1 + colw[lo - 1] <= avail:
+                lo -= 1
+                used += 1 + colw[lo]
+                grew = True
+            if not grew:
+                break
+        return lo, hi, lo > 0, hi < n - 1
+
+    def _tlabel(self, t, w, base):
+        """Target label: 'machine env · agent', env token colored, padded to w."""
+        seg = Text()
+        seg.append(f"{t['machine']} ", style=base)
+        seg.append(t["env"], style=C_ENV.get(t["env"], base))
+        seg.append(f" · {'agent' if t['agent'] else 'shell'}", style=base)
+        if seg.cell_len < w:
+            seg.append(" " * (w - seg.cell_len))
+        return seg
+
+    def _cell_visual(self, ti, j, locked):
+        """(glyph_char, style) for a matrix cell, reflecting applied vs pending."""
+        eng = self._eng
+        if j in eng._prof_unavailable:
+            # Column we couldn't load (unreachable / too-old remote): show an
+            # "unknown" marker, not a fabricated selection (#1370).
+            return "?", C_DISABLED
+        present = eng.grid.get((ti, j), False)
+        applied = eng.applied.get((ti, j), False)
+        agent = eng.targets[ti]["agent"]
+        if locked:
+            return "✓", "grey50"
+        if present and applied:
+            return "✓", (C_PULSE[eng.pulse] if agent else "#37b7ff")  # active
+        if present and not applied:
+            return "✓", "bold #ff9e3b"      # pending add (alternate highlight)
+        if applied and not present:
+            return "✗", "bold #ff5f5f"      # pending removal
+        return "·", C_DIM                   # inactive
+
+    def _profiles_button_row(self, width, focus, active_idx):
+        eng = self._eng
+        dirty = eng.grid_dirty()
+        if not dirty:
+            active_idx = 0          # Reset is unavailable -> not selectable
+        n = eng.pending_count()
+        t = Text("  ")
+        # Apply
+        if dirty:
+            alabel = f" ✓ Apply ({n}) "
+            astyle = C_BTN_SEL if (focus and active_idx == 0) else "bold black on #ff9e3b"
+        else:
+            alabel = " ✓ Applied "
+            astyle = C_BTN_SEL if (focus and active_idx == 0) else "bold black on green"
+        t.append(alabel, style=astyle)
+        t.append("   ")
+        # Reset (only meaningful when dirty)
+        if not dirty:
+            rstyle = "grey42 on grey15"
+        else:
+            rstyle = eng._btn_style(focus, active_idx == 1)
+        t.append(" ↺ Reset ", style=rstyle)
+        suffix = ("proposed changes are NOT active yet" if dirty
+                  else "all profiles active · Enter applies from anywhere")
+        if t.cell_len + 4 + len(suffix) <= width:
+            t.append("    " + suffix, style=C_DIM)
+        t.append(" " * max(0, width - t.cell_len))
+        return t
+
+    def _legend(self, width):
+        """One dim line keying the grid's agent/shell rows (and any unreachable
+        column) to plain language, so a round-trip edit doesn't silently drop
+        the bare-SSH ``shell`` profiles (#1369)."""
+        t = Text("  ")
+        t.append("agent", style=C_LABEL)
+        t.append(" = launch worktree", style=C_DIM)
+        t.append("   ")
+        t.append("shell", style=C_MUTED)
+        t.append(" = plain SSH login shell", style=C_DIM)
+        if self._eng._prof_unavailable:
+            t.append("   ")
+            t.append("?", style=C_DISABLED)
+            t.append(" = remote unavailable (needs upgrade)", style=C_DIM)
+        t.append(" " * max(0, width - t.cell_len))
+        return t
 
 
 class PickerApp(App):
