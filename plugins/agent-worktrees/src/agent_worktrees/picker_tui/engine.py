@@ -493,6 +493,10 @@ class PickerScreen(Widget):
         self._prof_apply = None       # src.apply_profile_column (real sources)
         self._prof_loading = False    # columns are streaming in
         self._prof_loaded = False
+        # Profiles configurator body -- encapsulated sub-view component
+        # (F5 slice 1: componentize cohesive sub-views out of the monolithic
+        # build_body; the moratorium on new full-screen renders starts here).
+        self.profiles_view = ProfilesView(self)
         self.debug = "ready"
         self.data = []
         self.machines = []
@@ -2035,7 +2039,7 @@ class PickerScreen(Widget):
                             stop=("T", li), data=rec)
                         li += 1
         else:
-            self._build_profiles(add, width, sel)
+            self.profiles_view.build(add, width, sel)
         return vrows
 
     def _visible_pcols(self, width, lblw):
@@ -2140,96 +2144,6 @@ class PickerScreen(Widget):
             t.append(" = remote unavailable (needs upgrade)", style=C_DIM)
         t.append(" " * max(0, width - t.cell_len))
         return t
-
-    def _build_profiles(self, add, width, sel):
-        if not self.host_cols:
-            # No Profiles host columns -- no ``copilot`` machine in
-            # machines.yaml exposes a native-terminal (windows/linux) env, so
-            # ``_DEFAULT_HOST_COLS`` ([]) is the only fallback. Render a
-            # placeholder instead of indexing the empty column list, which used
-            # to raise IndexError in ``_visible_pcols`` when the operator
-            # arrowed into the Profiles pivot (issue #149).
-            add(Text(
-                "  No profile hosts configured -- add a copilot machine with a "
-                "windows/linux env to machines.yaml.",
-                style=C_DIM,
-            ))
-            add(Text(""))
-            add(self._profiles_button_row(width, sel == ("BTN", 0), self.btn_idx),
-                stop=("BTN", 0))
-            return
-        colw = self.profile_col_widths()
-        lblw = 30
-        vis = self._visible_pcols(width, lblw)
-        if vis is None:
-            return self._build_profiles_transposed(add, width, sel)
-        lo, hi, ml, mr = vis
-        add(self._profiles_legend(width))
-        hdr = Text(" " + "TARGET \\ HOST".ljust(lblw - 1), style=C_HEADER)
-        hdr.append("‹" if ml else " ", style=C_HINT)
-        for j in range(lo, hi + 1):
-            if j > lo:
-                hdr.append(" ")
-            hdr.append_text(self._host_header_cell(j, colw[j]))
-        hdr.append("›" if mr else " ", style=C_HINT)
-        hdr.append(" " * max(0, width - hdr.cell_len))
-        add(hdr, kind="colhdr")
-        for ti, t in enumerate(self.targets):
-            row_sel = sel == ("PR", ti)
-            agent = t["agent"]
-            base = "grey78" if agent else "grey54"
-            r = Text(" ")
-            # The active target row label gets the same subtle active shading the
-            # active host column header uses, so both cursor coordinates read.
-            lbl_text = self._tlabel(t, lblw - 1, base)
-            if row_sel:
-                lbl_text.stylize("on grey23")
-            r.append_text(lbl_text)
-            r.append(" ")
-            for j in range(lo, hi + 1):
-                if j > lo:
-                    r.append(" ")
-                locked = self.cell_locked(ti, j)
-                ch, style = self._cell_visual(ti, j, locked)
-                if row_sel and j == self.pcol:
-                    style = "grey50 on grey23" if locked else C_SEL
-                r.append(ch.center(colw[j]), style=style)
-            r.append(" " * max(0, width - r.cell_len))
-            add(r, stop=("PR", ti), data=t)
-        add(Text(""))
-        add(self._profiles_button_row(width, sel == ("BTN", 0), self.btn_idx), stop=("BTN", 0))
-
-    def _build_profiles_transposed(self, add, width, sel):
-        """Too narrow for a grid: one host is the header, each target a
-        space-toggleable checkbox row. ◀▶ switches which host you're editing."""
-        _lbl, hm, he = self.host_cols[self.pcol]
-        add(self._profiles_legend(width))
-        head = Text(" HOST  ", style=C_HEADER)
-        head.append(hm, style=self._hl(C_HEADER, True, False))
-        head.append(" ", style=self._hl("", True, False))
-        head.append(he, style=self._hl(C_ENV.get(he, C_HEADER), True, False))
-        head.append(f"   ‹ {self.pcol + 1}/{len(self.host_cols)} ›  ◀▶ host",
-                    style=C_HINT)
-        if self.pcol in self._prof_unavailable:
-            head.append("  · unavailable (needs upgrade)", style=C_DISABLED)
-        head.append(" " * max(0, width - head.cell_len))
-        add(head, kind="colhdr")
-        for ti, t in enumerate(self.targets):
-            agent = t["agent"]
-            base = "grey78" if agent else "grey54"
-            locked = self.cell_locked(ti, self.pcol)
-            ch, cstyle = self._cell_visual(ti, self.pcol, locked)
-            present = self.grid.get((ti, self.pcol), False)
-            box = f"[{ch}]" if (present or ch == "✗") else "[ ]"
-            r = Text(" ")
-            r.append(" " + box + " ", style=cstyle)
-            r.append_text(self._tlabel(t, width - 8, base))
-            if sel == ("PR", ti):
-                r.stylize("grey50 on grey23" if locked else C_SEL)
-            r.append(" " * max(0, width - r.cell_len))
-            add(r, stop=("PR", ti), data=t)
-        add(Text(""))
-        add(self._profiles_button_row(width, sel == ("BTN", 0), self.btn_idx), stop=("BTN", 0))
 
     def _hl(self, base, selected, focused):
         """Augment a base style with the selection highlight: the inversion
@@ -4867,6 +4781,122 @@ class MsgViewScreen(ModalScreen[None]):
             self.dismiss(None)
         else:
             self._refresh()
+
+
+class ProfilesView:
+    """Encapsulated Profiles-configurator body (F5 slice 1).
+
+    The first sub-view carved out of the picker's monolithic
+    ``PickerScreen.build_body`` into its own component, per the incremental
+    componentization strategy (#88 F5): rather than convert the whole
+    ``sel=(zone,index)`` focus model to widgets in one big-bang, we peel cohesive
+    sub-views off the God-object one at a time and impose a **moratorium on new
+    full-screen-at-once renders** -- every reworked piece renders through its own
+    component boundary. This slice owns the Profiles pivot's *body rendering*
+    (the grid + its narrow-terminal transposed fallback); the profiles *state*
+    (``grid`` / ``pcol`` / ``targets`` / ``host_cols`` / ``applied``) and its
+    behaviour (toggling, Apply plumbing) still live on the engine and are read
+    here through the back-reference, to be pulled into the component in a
+    follow-up slice. It is a plain component today; a later slice makes it a
+    focusable Textual widget.
+    """
+
+    def __init__(self, eng) -> None:
+        self._eng = eng
+
+    def build(self, add, width, sel):
+        """Emit the Profiles pivot body into ``add`` (the ``build_body`` VRow
+        sink). Mirrors the former ``PickerScreen._build_profiles`` exactly."""
+        eng = self._eng
+        if not eng.host_cols:
+            # No Profiles host columns -- no ``copilot`` machine in
+            # machines.yaml exposes a native-terminal (windows/linux) env, so
+            # ``_DEFAULT_HOST_COLS`` ([]) is the only fallback. Render a
+            # placeholder instead of indexing the empty column list, which used
+            # to raise IndexError in ``_visible_pcols`` when the operator
+            # arrowed into the Profiles pivot (issue #149).
+            add(Text(
+                "  No profile hosts configured -- add a copilot machine with a "
+                "windows/linux env to machines.yaml.",
+                style=C_DIM,
+            ))
+            add(Text(""))
+            add(eng._profiles_button_row(width, sel == ("BTN", 0), eng.btn_idx),
+                stop=("BTN", 0))
+            return
+        colw = eng.profile_col_widths()
+        lblw = 30
+        vis = eng._visible_pcols(width, lblw)
+        if vis is None:
+            return self._transposed(add, width, sel)
+        lo, hi, ml, mr = vis
+        add(eng._profiles_legend(width))
+        hdr = Text(" " + "TARGET \\ HOST".ljust(lblw - 1), style=C_HEADER)
+        hdr.append("‹" if ml else " ", style=C_HINT)
+        for j in range(lo, hi + 1):
+            if j > lo:
+                hdr.append(" ")
+            hdr.append_text(eng._host_header_cell(j, colw[j]))
+        hdr.append("›" if mr else " ", style=C_HINT)
+        hdr.append(" " * max(0, width - hdr.cell_len))
+        add(hdr, kind="colhdr")
+        for ti, t in enumerate(eng.targets):
+            row_sel = sel == ("PR", ti)
+            agent = t["agent"]
+            base = "grey78" if agent else "grey54"
+            r = Text(" ")
+            # The active target row label gets the same subtle active shading the
+            # active host column header uses, so both cursor coordinates read.
+            lbl_text = eng._tlabel(t, lblw - 1, base)
+            if row_sel:
+                lbl_text.stylize("on grey23")
+            r.append_text(lbl_text)
+            r.append(" ")
+            for j in range(lo, hi + 1):
+                if j > lo:
+                    r.append(" ")
+                locked = eng.cell_locked(ti, j)
+                ch, style = eng._cell_visual(ti, j, locked)
+                if row_sel and j == eng.pcol:
+                    style = "grey50 on grey23" if locked else C_SEL
+                r.append(ch.center(colw[j]), style=style)
+            r.append(" " * max(0, width - r.cell_len))
+            add(r, stop=("PR", ti), data=t)
+        add(Text(""))
+        add(eng._profiles_button_row(width, sel == ("BTN", 0), eng.btn_idx),
+            stop=("BTN", 0))
+
+    def _transposed(self, add, width, sel):
+        """Too narrow for a grid: one host is the header, each target a
+        space-toggleable checkbox row. ◀▶ switches which host you're editing.
+        Mirrors the former ``PickerScreen._build_profiles_transposed`` exactly."""
+        eng = self._eng
+        _lbl, hm, he = eng.host_cols[eng.pcol]
+        add(eng._profiles_legend(width))
+        head = Text(" HOST  ", style=C_HEADER)
+        head.append(hm, style=eng._hl(C_HEADER, True, False))
+        head.append(" ", style=eng._hl("", True, False))
+        head.append(he, style=eng._hl(C_ENV.get(he, C_HEADER), True, False))
+        head.append(f"   ‹ {eng.pcol + 1}/{len(eng.host_cols)} ›  ◀▶ host",
+                    style=C_HINT)
+        if eng.pcol in eng._prof_unavailable:
+            head.append("  · unavailable (needs upgrade)", style=C_DISABLED)
+        head.append(" " * max(0, width - head.cell_len))
+        add(head, kind="colhdr")
+        for ti, t in enumerate(eng.targets):
+            agent = t["agent"]
+            base = "grey78" if agent else "grey54"
+            locked = eng.cell_locked(ti, eng.pcol)
+            ch, cstyle = eng._cell_visual(ti, eng.pcol, locked)
+            present = eng.grid.get((ti, eng.pcol), False)
+            box = f"[{ch}]" if (present or ch == "✗") else "[ ]"
+            r = Text(" ")
+            r.append(" " + box + " ", style=cstyle)
+            r.append_text(eng._tlabel(t, width - 8, base))
+            if sel == ("PR", ti):
+                r.stylize("grey50 on grey23" if locked else C_SEL)
+            r.append(" " * max(0, width - r.cell_len))
+            add(r, stop=("PR", ti), data=t)
 
 
 class PickerApp(App):
