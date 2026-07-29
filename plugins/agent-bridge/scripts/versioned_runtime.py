@@ -55,8 +55,8 @@ def version_dir(root: Path, version: str) -> Path:
     return versions_root(root) / version
 
 
-def current_link(root: Path) -> Path:
-    return root / CURRENT_LINK
+def current_link(root: Path, link_name: str = CURRENT_LINK) -> Path:
+    return root / link_name
 
 
 def list_versions(root: Path) -> list[str]:
@@ -85,6 +85,32 @@ def _version_key(v: str):
 # current link: read
 # --------------------------------------------------------------------------
 
+def _is_link(link: Path) -> bool:
+    """Whether ``link`` is a symlink (POSIX) or a directory junction (Windows).
+
+    A POSIX symlink is caught by ``is_symlink``. A Windows junction is a reparse
+    point that reports ``is_symlink() == False`` but carries the
+    ``FILE_ATTRIBUTE_REPARSE_POINT`` flag; detect it via ``st_reparse_tag`` /
+    the reparse attribute so a *real* directory (a legacy venv) is never mistaken
+    for a link.
+    """
+    try:
+        if link.is_symlink():
+            return True
+    except OSError:
+        return False
+    if os.name != "nt":
+        return False
+    try:
+        st = os.lstat(link)
+    except OSError:
+        return False
+    FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+    tag = getattr(st, "st_reparse_tag", 0)
+    attrs = getattr(st, "st_file_attributes", 0)
+    return bool(tag) or bool(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
+
+
 def _link_target(link: Path) -> Path | None:
     """Resolve the ``current`` link's target dir, whether symlink or junction.
 
@@ -106,9 +132,9 @@ def _link_target(link: Path) -> Path | None:
         return None
 
 
-def current_version(root: Path) -> str | None:
+def current_version(root: Path, link_name: str = CURRENT_LINK) -> str | None:
     """The active version name (the basename of the ``current`` link target)."""
-    target = _link_target(current_link(root))
+    target = _link_target(current_link(root, link_name))
     if target is None:
         return None
     name = target.name
@@ -172,21 +198,43 @@ def _remove_link(link: Path) -> None:
         link.unlink()
 
 
-def activate(root: Path, version: str) -> Path:
-    """Point ``current`` at ``versions/<version>`` atomically where possible.
+def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
+             replace_nonlink: bool = False) -> Path:
+    """Point the ``link_name`` link at ``versions/<version>``.
 
-    POSIX: create a temp symlink and ``os.replace`` it over ``current`` -- an
+    POSIX: create a temp symlink and ``os.replace`` it over the link -- an
     atomic rename, so a concurrent reader sees either the old or the new target,
     never a missing link. Windows: junctions can't be atomically replaced, so
     remove + recreate; the window only affects a *new* resolution (the running
     daemon holds its own immutable files), and callers retry. Returns the version
     dir. Raises if the version isn't installed.
+
+    ``link_name`` lets a runtime keep its historical path name as the selector
+    (agent-bridge uses ``venv`` so its scheduled task/binstubs/cutover resolve
+    through the junction unchanged). If the link path is currently a **real
+    directory** (a legacy, pre-versioned venv), this refuses unless
+    ``replace_nonlink`` is set, in which case the real dir is moved aside to
+    ``<name>.legacy-<ts>`` first (the caller must ensure no process holds it open
+    -- e.g. the daemon is stopped or already cut over to the new version).
     """
     vdir = version_dir(root, version)
     if not vdir.is_dir():
         raise FileNotFoundError(f"version not installed: {vdir}")
-    link = current_link(root)
+    link = current_link(root, link_name)
     root.mkdir(parents=True, exist_ok=True)
+
+    # Legacy real dir occupying the link path (first migration to the versioned
+    # layout). Never recurse-delete it implicitly; move it aside on request.
+    if (link.exists() or link.is_symlink()) and not _is_link(link):
+        if not replace_nonlink:
+            raise FileExistsError(
+                f"{link} is a real directory, not a link; pass replace_nonlink "
+                f"to move it aside and lay the versioned link"
+            )
+        import time as _t
+
+        aside = link.with_name(f"{link.name}.legacy-{int(_t.time())}")
+        os.replace(link, aside)
 
     if os.name != "nt":
         tmp = link.with_name(link.name + ".tmp")
@@ -263,7 +311,7 @@ def _pid_alive(pid: int) -> bool:
 
 
 def gc(root: Path, keep: list[str] | None = None,
-       protect_pids: bool = False) -> list[str]:
+       protect_pids: bool = False, link_name: str = CURRENT_LINK) -> list[str]:
     """Remove version dirs that are not protected. Returns the removed names.
 
     Never removes: the ``current`` version, any name in ``keep`` (e.g. the
@@ -274,7 +322,7 @@ def gc(root: Path, keep: list[str] | None = None,
     of the most recent non-current version too, leaving a safe rollback target.
     """
     keep_set = set(keep or [])
-    cur = current_version(root)
+    cur = current_version(root, link_name)
     if cur:
         keep_set.add(cur)
 
@@ -315,6 +363,10 @@ def _emit(data, json_mode: bool) -> None:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="versioned_runtime", description=__doc__)
     p.add_argument("--root", required=True, type=Path, help="runtime root dir")
+    p.add_argument("--link-name", default=CURRENT_LINK,
+                   help=f"name of the active-version link (default {CURRENT_LINK!r}; "
+                        f"agent-bridge uses 'venv' so its task/binstubs resolve "
+                        f"through the junction unchanged)")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -322,6 +374,9 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("version")
     ap = sub.add_parser("activate", help="point current -> versions/<version>")
     ap.add_argument("version")
+    ap.add_argument("--replace-nonlink", action="store_true",
+                    help="if the link path is a real dir (legacy venv), move it "
+                         "aside to <name>.legacy-<ts> before laying the link")
     sub.add_parser("current", help="print the active version")
     rp = sub.add_parser("resolve", help="print current/<subpath>")
     rp.add_argument("--subpath", default="")
@@ -334,34 +389,37 @@ def main(argv: list[str] | None = None) -> int:
 
     args = p.parse_args(argv)
     root: Path = args.root
+    link_name: str = args.link_name
 
     try:
         if args.cmd == "slot":
             _emit(str(slot(root, args.version)), args.json)
         elif args.cmd == "activate":
-            vdir = activate(root, args.version)
+            vdir = activate(root, args.version, link_name=link_name,
+                            replace_nonlink=args.replace_nonlink)
             _emit({"activated": args.version, "path": str(vdir)}
                   if args.json else str(vdir), args.json)
         elif args.cmd == "current":
-            cur = current_version(root)
+            cur = current_version(root, link_name)
             if cur is None and not args.json:
                 print("", end="")
                 return 1
             _emit({"current": cur} if args.json else (cur or ""), args.json)
         elif args.cmd == "resolve":
-            link = current_link(root)
+            link = current_link(root, link_name)
             out = link / args.subpath if args.subpath else link
             _emit(str(out), args.json)
         elif args.cmd == "list":
             vs = list_versions(root)
-            cur = current_version(root)
+            cur = current_version(root, link_name)
             if args.json:
                 _emit({"versions": vs, "current": cur}, True)
             else:
                 for v in vs:
                     print(f"{'*' if v == cur else ' '} {v}")
         elif args.cmd == "gc":
-            removed = gc(root, keep=args.keep, protect_pids=args.protect_pids)
+            removed = gc(root, keep=args.keep, protect_pids=args.protect_pids,
+                         link_name=link_name)
             _emit({"removed": removed} if args.json else removed, args.json)
         else:  # pragma: no cover
             p.error(f"unknown command {args.cmd}")
