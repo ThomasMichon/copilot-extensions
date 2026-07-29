@@ -10471,6 +10471,19 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     #    only *surfaces* it and points at the `reclaim` verb.
     bare_orphans = reclaim.find_bare_orphans()
 
+    # 7. Runtime version lag (#533 Part C, report-only): a live daemon/coordinator
+    #    still serving an older version than the installed payload. The launch
+    #    path heals this (running-aware reconcile + zero-downtime cutover), but a
+    #    running session can't restart its own daemon mid-turn -- surface it so the
+    #    operator can `service restart` sooner instead of lagging silently.
+    try:
+        from . import reconcile as _reconcile
+
+        repo_dir = _find_repo_dir()
+        runtime_lag = _reconcile.running_version_lag(Path(repo_dir)) if repo_dir else []
+    except Exception:
+        runtime_lag = []
+
     try:
         proj_name = cfg.project_name()
     except Exception:
@@ -10495,6 +10508,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "empty_sessions": gc_result,
         "misaligned": {"count": len(misaligned), "worktrees": misaligned},
         "bare_orphans": {"count": len(bare_orphans), "items": bare_orphans},
+        "runtime_lag": runtime_lag,
     }
 
     if json_mode:
@@ -10569,6 +10583,19 @@ def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> N
               "--bare-only  (or --all)")
     else:
         print("  \u2713 No bare (un-muxed) Copilot orphans")
+
+    lag = report.get("runtime_lag") or []
+    if lag:
+        print(f"  ! Runtime version lag: {len(lag)} service(s) serving older "
+              f"code than installed")
+        for entry in lag:
+            print(f"      - {entry['service']}: running {entry['running']} but "
+                  f"{entry['payload']} installed -> "
+                  f"{entry['service']} service restart")
+        print("      (a new launch heals this automatically; restart to "
+              "converge this running session sooner)")
+    else:
+        print("  \u2713 Runtime services match installed payload")
 
 
 def cmd_list_sessions(args: argparse.Namespace) -> int:

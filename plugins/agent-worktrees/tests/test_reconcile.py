@@ -450,3 +450,47 @@ def test_zero_downtime_appends_flag(tmp_path, monkeypatch):
     _, argv = reconcile.runtime_installer_argv(pdir)
     assert argv[-2:] == ["update", "-ZeroDowntime"]
 
+
+
+# ---------------------------------------------------------------------------
+# Part C (#533): running_version_lag -- read-only mid-session lag diagnostic.
+# ---------------------------------------------------------------------------
+
+def test_running_version_lag_reports_live_laggard(env, monkeypatch):
+    """A live daemon serving older code than the installed payload is reported."""
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"agent-bridge@{MKT}": True, f"agent-mcp@{MKT}": True})
+    env.install_payload("agent-bridge", "0.4.0-dev10", scope="universal")
+    env.install_payload("agent-mcp", "1.0.0", scope="universal")
+    env.deploy_running("agent-bridge", "0.4.0-dev7")   # lagging
+    env.deploy_running("agent-mcp", "1.0.0")           # current -> no lag
+    lags = reconcile.running_version_lag(env.repo)
+    assert len(lags) == 1
+    assert lags[0]["service"] == "agent-bridge"
+    assert lags[0]["running"] == "0.4.0-dev7"
+    assert lags[0]["payload"] == "0.4.0-dev10"
+
+
+def test_running_version_lag_ignores_dead_and_absent(env, monkeypatch):
+    """No live process (dead pid or no marker) -> nothing to nudge about."""
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: False)
+    env.write_settings({f"agent-bridge@{MKT}": True, f"agent-mcp@{MKT}": True})
+    env.install_payload("agent-bridge", "0.4.0-dev10", scope="universal")
+    env.install_payload("agent-mcp", "1.0.0", scope="universal")
+    env.deploy_running("agent-bridge", "0.4.0-dev7")   # dead pid -> ignored
+    # agent-mcp has no running-version.json at all -> ignored
+    assert reconcile.running_version_lag(env.repo) == []
+
+
+def test_running_version_lag_no_false_drift_on_pep440(env, monkeypatch):
+    """importlib `0.4.0.dev9` vs payload `0.4.0-dev9` is not a lag (PEP 440)."""
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    env.install_payload("agent-bridge", "0.4.0-dev9", scope="universal")
+    env.deploy_running("agent-bridge", "0.4.0.dev9")   # importlib spelling
+    assert reconcile.running_version_lag(env.repo) == []
+
+
+def test_running_version_lag_empty_without_settings(env):
+    """No enabled plugins -> empty, never raises."""
+    assert reconcile.running_version_lag(env.repo) == []
