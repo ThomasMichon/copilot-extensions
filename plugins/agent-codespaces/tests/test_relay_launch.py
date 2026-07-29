@@ -5,7 +5,6 @@ from __future__ import annotations
 from agent_codespaces.relay_launch import (
     SCRUB_ENV_VARS,
     build_relay_env,
-    build_relay_launch_env,
 )
 
 
@@ -27,7 +26,7 @@ def test_build_relay_env_no_relay_still_scrubs():
     assert "LC_GIT_CREDENTIAL_RELAY" not in env
 
 
-def test_build_relay_launch_env(monkeypatch):
+def test_build_relay_launch_env(monkeypatch, tmp_path):
     import agent_codespaces.relay_launch as rl
 
     class _Creds:
@@ -36,6 +35,8 @@ def test_build_relay_launch_env(monkeypatch):
     class _Cfg:
         credentials = _Creds()
 
+    # Empty config dir -> no published live port, so the config port is used.
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr("agent_codespaces.config.load_merged_config",
                         lambda: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
@@ -67,8 +68,9 @@ def test_build_relay_launch_env_live_port_override(monkeypatch):
     assert "9999" not in env
 
 
-def test_build_relay_launch_env_none_falls_back_to_config(monkeypatch):
-    """``relay_port=None`` falls back to the configured relay port."""
+def test_build_relay_launch_env_none_falls_back_to_config(monkeypatch, tmp_path):
+    """``relay_port=None`` falls back to the configured relay port when no live
+    port has been published."""
     import agent_codespaces.relay_launch as rl
 
     class _Creds:
@@ -77,6 +79,8 @@ def test_build_relay_launch_env_none_falls_back_to_config(monkeypatch):
     class _Cfg:
         credentials = _Creds()
 
+    # Empty config dir -> no published live port -> config fallback.
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr("agent_codespaces.config.load_merged_config",
                         lambda: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
@@ -84,6 +88,44 @@ def test_build_relay_launch_env_none_falls_back_to_config(monkeypatch):
     env, port = rl.build_relay_launch_env("cs-foo", relay_port=None)
     assert port == 9999
     assert "export LC_GIT_CREDENTIAL_RELAY=9999;" in env
+
+
+def test_build_relay_launch_env_none_uses_published_live_port(monkeypatch, tmp_path):
+    """``relay_port=None`` prefers the daemon's published live port (#540 pt3)
+    over the static config port, so an ephemeral relay bind is honored even on
+    the standalone agent-codespaces path."""
+    import agent_codespaces.relay_launch as rl
+
+    class _Creds:
+        relay_port = 9999
+
+    class _Cfg:
+        credentials = _Creds()
+
+    # A daemon published an ephemeral port to its config dir.
+    (tmp_path / "relay-port").write_text("52001", encoding="utf-8")
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr("agent_codespaces.config.load_merged_config",
+                        lambda: _Cfg())
+    monkeypatch.setattr("agent_codespaces.relay_token.token_for",
+                        lambda name: "minted-tok")
+    env, port = rl.build_relay_launch_env("cs-foo", relay_port=None)
+    assert port == 52001
+    assert "export LC_GIT_CREDENTIAL_RELAY=52001;" in env
+    # the static config port must not be consulted
+    assert "9999" not in env
+
+
+def test_build_relay_launch_env_resolves_elevated_config_dir(monkeypatch, tmp_path):
+    """An elevated sub-daemon's config dir (``<primary>/elevated``) resolves to
+    the primary parent when reading the published live port (#540 pt3)."""
+    import agent_codespaces.relay_launch as rl
+
+    (tmp_path / "relay-port").write_text("52002", encoding="utf-8")
+    elevated = tmp_path / "elevated"
+    elevated.mkdir()
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(elevated))
+    assert rl._published_live_relay_port() == 52002
 
 
 def test_prelude_publishes_port_mapping_file():
