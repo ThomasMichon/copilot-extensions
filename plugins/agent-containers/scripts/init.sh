@@ -35,6 +35,26 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-containers}"
 VENV_DIR="$INSTALL_DIR/.venv"
 LOCAL_BIN="$HOME/.local/bin"
 VENV_PYTHON="$VENV_DIR/bin/python"
+
+# === install-contract:v3 versioned-venv -- keep byte-identical across plugins ===
+# Immutable per-version runtime (#581): build the venv into versions/<version>
+# and make the historical .venv path a symlink (POSIX) / junction (Windows) into
+# it, so the binstub + deploy-manifest (which reference .venv) resolve through the
+# link unchanged. .venv stays the stable reference; a version bump builds a new
+# slot beside the old one and atomically swaps the link (never mutates a live
+# venv). Opt out with COPILOT_EXT_NO_VERSIONED=1. scripts/versioned_runtime.py
+# owns the swap + migration.
+LINK_DIR="$VENV_DIR"                        # stable path the binstub/manifest reference
+VERSIONED_RUNTIME=1
+[[ "${COPILOT_EXT_NO_VERSIONED:-}" == "1" ]] && VERSIONED_RUNTIME=0
+SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || true)"
+if [[ "$VERSIONED_RUNTIME" -eq 1 && -n "$SRC_VERSION" ]]; then
+    VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+    VENV_PYTHON="$VENV_DIR/bin/python"
+else
+    VERSIONED_RUNTIME=0
+fi
+# === end install-contract:v3 versioned-venv ===
 # credential-relay dir (vendored): plugin-vendored or repo-root. Force-reinstalled
 # below so a local code change propagates even without a version bump.
 CRED_RELAY_DIR="$PLUGIN_DIR/libs/credential-relay"
@@ -138,6 +158,21 @@ else
 fi
 _ok 'Package installed: agent-containers'
 
+# === install-contract:v3 versioned-venv activate -- keep byte-identical across plugins ===
+if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
+    # Point the stable .venv link at this version's freshly-built slot, moving a
+    # legacy real .venv aside on the first migration. Run via the slot's own
+    # python (stdlib-only helper); a CLI plugin has no daemon holding the link.
+    VR_SCRIPT="$SCRIPT_DIR/versioned_runtime.py"
+    if ! "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' \
+            activate "$SRC_VERSION" --replace-nonlink >/dev/null 2>&1; then
+        _fail "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
+        exit 1
+    fi
+    _ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+fi
+# === end install-contract:v3 versioned-venv activate ===
+
 # -- 4. Binstub --------------------------------------------------------
 STUB="$LOCAL_BIN/agent-containers"
 cat > "$STUB" << 'STUBEOF'
@@ -194,7 +229,7 @@ cat > "$TMP" << EOF
     "branch": $BRANCH,
     "dirty": $DIRTY
   },
-  "venv": "$VENV_DIR",
+  "venv": "$LINK_DIR",
   "runtime": "python"
 }
 EOF
