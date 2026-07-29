@@ -68,6 +68,36 @@ $Binstub     = $BinstubPs1
 $TaskName    = 'AgentVault'
 $utf8NoBom   = New-Object System.Text.UTF8Encoding $false
 
+# === install-contract:v3 versioned-venv (agent-vault: .venv-as-junction) ===
+# Immutable per-version runtime (#581). Build the venv into versions/<version>
+# and make the historical `.venv` path a junction (Windows) / symlink (POSIX)
+# into it, so the binstubs, scheduled task, and deploy-manifest -- all of which
+# reference `.venv` -- resolve through the link unchanged. LinkDir/LinkPython is
+# the stable `.venv` path (runtime-facing, never a versions/<v> absolute a `gc`
+# could remove); VenvDir/VenvPython is redirected to the versions/<v> slot
+# (build + health-gate). Legacy mode: Link == Venv (byte-for-byte old behavior).
+# Gated behind AGENT_VAULT_VERSIONED=1 (default off) until validated;
+# COPILOT_EXT_NO_VERSIONED=1 force-disables. scripts/versioned_runtime.py owns
+# the swap + legacy migration + gc.
+$LinkDir          = $VenvDir
+$LinkPython       = $VenvPython
+$VersionedRuntime = $false
+$SrcVersion       = $null
+if (($env:AGENT_VAULT_VERSIONED -in @('1', 'true', 'yes', 'on')) -and
+    ($env:COPILOT_EXT_NO_VERSIONED -ne '1')) {
+    $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
+    if (Test-Path $pyprojForVer) {
+        $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
+        if ($vl) { $SrcVersion = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
+    }
+    if ($SrcVersion) {
+        $VersionedRuntime = $true
+        $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+        $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+    }
+}
+# === end install-contract:v3 versioned-venv ===
+
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
 function Remove-ConsoleTrampolines {
     <# Strip the uv-regenerated Scripts\<name>.exe console-script trampolines from
@@ -92,6 +122,68 @@ function Remove-ConsoleTrampolines {
         ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
 }
 # === end install-contract:v3 strip-trampolines ===
+
+# === install-contract:v3 versioned-venv helpers (agent-vault) ===
+function Test-VenvIsLink {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return $false }
+    try { return [bool]((Get-Item $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) }
+    catch { return $false }
+}
+
+function Invoke-VersionedActivate {
+    <# Swap the stable `.venv` link to this version's freshly-built slot. No-op in
+       legacy mode. First migration: the `.venv` path is still a REAL dir the
+       running daemon may hold open -- Windows can't rename it aside while a
+       loaded python.exe locks it, so stop the daemon first to release it (the
+       task re-registers + restarts on the new slot). A later version-bump swaps
+       only the link (the daemon runs from its own immutable slot), so no stop is
+       needed and the in-memory unlock survives. #>
+    if (-not $VersionedRuntime) { return $true }
+    if ((Test-Path $LinkDir) -and -not (Test-VenvIsLink $LinkDir)) {
+        Write-Step 'Releasing legacy .venv for versioned migration (stopping daemon)...'
+        Invoke-Stop | Out-Null
+    }
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
+    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --replace-nonlink 2>&1 |
+        ForEach-Object { Write-Step $_ }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
+        return $false
+    }
+    Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
+    return $true
+}
+
+function Get-VersionedCurrent {
+    <# The version the `.venv` link currently points at (empty for a legacy real
+       venv or a fresh box). Used as the gc keep + rollback target. #>
+    if (-not $VersionedRuntime) { return '' }
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = if (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
+    if (-not $py) { return '' }
+    $out = & $py $vr --root $InstallDir --link-name '.venv' current 2>$null
+    return ("$out").Trim()
+}
+
+function Invoke-VersionedGc {
+    <# Prune old version slots, keeping current + the given previous-good (the
+       slot a not-yet-restarted daemon may still run from) + any live-pid-pinned
+       slot. Best-effort. No-op in legacy mode. #>
+    param([string]$KeepPrev)
+    if (-not $VersionedRuntime) { return }
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = if (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
+    if (-not $py) { return }
+    $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids')
+    if ($KeepPrev) { $gcArgs += @('--keep', $KeepPrev) }
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $py @gcArgs 2>&1 | ForEach-Object { Write-Step "gc: $_" }
+    $ErrorActionPreference = $prevEAP
+}
+# === end install-contract:v3 versioned-venv helpers ===
 
 function Get-SignedBasePython {
     <# Return a SAC-trusted (Authenticode-signed) base Python (>=3.10), or $null.
@@ -182,9 +274,9 @@ function Get-GitInfo {
 }
 
 function Get-InstalledVersion {
-    if (-not (Test-Path $VenvPython)) { return $null }
+    if (-not (Test-Path $LinkPython)) { return $null }
     try {
-        $v = & $VenvPython -c 'from importlib.metadata import version; print(version("agent-vault"))' 2>$null
+        $v = & $LinkPython -c 'from importlib.metadata import version; print(version("agent-vault"))' 2>$null
         if ($LASTEXITCODE -eq 0 -and $v) { return $v.Trim() }
     } catch {}
     return $null
@@ -306,7 +398,7 @@ function Write-Manifest {
             branch  = $branch
             dirty   = $dirty
         }
-        venv           = ($VenvDir -replace '\\', '/')
+        venv           = ($LinkDir -replace '\\', '/')
         runtime        = 'python'
     }
     $tmp = "$manifestPath.tmp"
@@ -365,16 +457,41 @@ function Install-Runtime {
     Remove-ConsoleTrampolines -VenvDir $VenvDir
     Write-Ok 'Package installed: agent-vault'
 
-    Write-Binstubs -PythonExe $VenvPython
+    # Versioned layout (#581): health-gate the freshly-built slot in isolation,
+    # then swap the stable `.venv` link onto it. Everything below resolves through
+    # `.venv` (the link). No-op in legacy mode. Remember the previously-active
+    # version as the gc keep target (a not-yet-restarted daemon may still run it).
+    $prevVersion = ''
+    if ($VersionedRuntime) {
+        $prevVersion = Get-VersionedCurrent
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & $VenvPython -c 'import agent_vault' 2>$null
+        $slotOk = ($LASTEXITCODE -eq 0)
+        $ErrorActionPreference = $prevEAP
+        if (-not $slotOk) {
+            Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
+            exit 1
+        }
+        if (-not (Invoke-VersionedActivate)) { exit 1 }
+    }
+
+    # Binstub + manifest resolve through the stable `.venv` link ($LinkPython /
+    # $LinkDir), never a versions/<v> absolute a later `gc` could remove.
+    Write-Binstubs -PythonExe $LinkPython
     Write-Manifest
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & $VenvPython -c 'import agent_vault' 2>$null
+    & $LinkPython -c 'import agent_vault' 2>$null
     $importOk = ($LASTEXITCODE -eq 0)
     $ErrorActionPreference = $prevEAP
     if ($importOk) { Write-Ok 'Verification: module imports successfully' }
     else { Write-Fail 'Verification: module import failed'; exit 1 }
+
+    # Versioned layout: prune old slots, keeping current + the previous-good (the
+    # slot a not-yet-restarted daemon may still run from) + live-pid-pinned.
+    if ($VersionedRuntime) { Invoke-VersionedGc -KeepPrev $prevVersion }
 
     if (Test-KeePassXCCli) {
         Write-Ok 'Prerequisite: keepassxc-cli found'
@@ -399,14 +516,17 @@ function Register-AgentVaultTask {
         Write-Skip 'ScheduledTasks module unavailable -- skipping service'
         return
     }
-    if (-not (Test-Path $VenvPython)) {
+    if (-not (Test-Path $LinkPython)) {
         Write-Warn 'agent-vault venv not found -- skipping scheduled task'
         return
     }
 
+    # Launch the daemon through the stable `.venv` link ($LinkPython) -- in the
+    # versioned layout a junction to the active versions/<v> slot -- never a
+    # versions/<v> absolute a `gc` could remove.
     $action = New-ScheduledTaskAction `
         -Execute 'conhost.exe' `
-        -Argument "--headless `"$VenvPython`" -m agent_vault.service --foreground --persistent" `
+        -Argument "--headless `"$LinkPython`" -m agent_vault.service --foreground --persistent" `
         -WorkingDirectory $InstallDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
     $trigger.Delay = 'PT15S'
@@ -459,10 +579,10 @@ function Invoke-Start {
 }
 
 function Invoke-Stop {
-    if (Test-Path $VenvPython) {
+    if (Test-Path $LinkPython) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        & $VenvPython -m agent_vault.service --stop 2>$null | Out-Null
+        & $LinkPython -m agent_vault.service --stop 2>$null | Out-Null
         $ErrorActionPreference = $prevEAP
     }
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
@@ -491,10 +611,10 @@ function Invoke-Status {
     if (Test-KeePassXCCli) { Write-Ok 'Prerequisite: keepassxc-cli found' }
     else { Write-Warn 'Prerequisite missing: keepassxc-cli (KeePassXC)' }
 
-    if (Test-Path $VenvPython) {
+    if (Test-Path $LinkPython) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        $ping = & $VenvPython -m agent_vault.service --ping 2>$null
+        $ping = & $LinkPython -m agent_vault.service --ping 2>$null
         $pingCode = $LASTEXITCODE
         $ErrorActionPreference = $prevEAP
         if ($pingCode -eq 0 -and $ping) { Write-Ok ($ping | Out-String).Trim() }
@@ -525,7 +645,16 @@ function Invoke-Uninstall {
         if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
         Write-Ok "Runtime purged: $InstallDir"
     } else {
-        if (Test-Path $VenvDir) { Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue }
+        # Remove the runtime venv. In the versioned layout this is the `.venv`
+        # link AND the whole versions/ tree; otherwise the single real venv dir.
+        if ($VersionedRuntime) {
+            if (Test-VenvIsLink $LinkDir) { & cmd /c rmdir "$LinkDir" 2>$null }
+            elseif (Test-Path $LinkDir) { Remove-Item -Recurse -Force $LinkDir -ErrorAction SilentlyContinue }
+            $verRoot = Join-Path $InstallDir 'versions'
+            if (Test-Path $verRoot) { Remove-Item -Recurse -Force $verRoot -ErrorAction SilentlyContinue }
+        } elseif (Test-Path $VenvDir) {
+            Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue
+        }
         Write-Ok 'Venv removed (state kept; -Purge to delete)'
     }
 }
