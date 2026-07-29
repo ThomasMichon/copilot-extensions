@@ -149,6 +149,60 @@ VENV_DIR="$INSTALL_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
 VENV_BIN="$VENV_DIR/bin/agent-worktrees"
 
+# === install-contract:v3 versioned-venv (agent-worktrees: .venv-as-symlink) ===
+# Immutable per-version runtime (#581): build the venv into versions/<version>
+# and make the historical `.venv` path a symlink into it, so the binstub,
+# wrappers, and deploy-manifest resolve through the link unchanged. agent-worktrees
+# is a CLI (no daemon), so no process to drain. LINK_DIR is the stable `.venv` path;
+# VENV_DIR is the versions/<v> slot (build + health-gate). Legacy mode: LINK_DIR ==
+# VENV_DIR. Gated behind AGENT_WORKTREES_VERSIONED=1 (default off);
+# scripts/versioned_runtime.py owns the swap + migration + gc.
+LINK_DIR="$VENV_DIR"
+LINK_PYTHON="$VENV_PYTHON"
+VERSIONED_RUNTIME=0
+SRC_VERSION=""
+if [[ "${AGENT_WORKTREES_VERSIONED:-}" =~ ^(1|true|yes|on)$ && "${COPILOT_EXT_NO_VERSIONED:-}" != "1" ]]; then
+    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+        SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
+    fi
+    if [[ -n "$SRC_VERSION" ]]; then
+        VERSIONED_RUNTIME=1
+        VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+        VENV_PYTHON="$VENV_DIR/bin/python"
+        VENV_BIN="$VENV_DIR/bin/agent-worktrees"
+    fi
+fi
+
+_versioned_activate() {
+    # CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
+    # symlink onto it (first migration moves a legacy real `.venv` aside), then gc
+    # old slots keeping current + previous-good. Returns non-zero on failure. No-op
+    # in legacy mode.
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
+    [[ -x "$py" ]] || return 0
+    if ! PYTHONPATH= "$VENV_PYTHON" -c 'import agent_worktrees' 2>/dev/null; then
+        err "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
+        return 1
+    fi
+    local prev
+    prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink; then
+        err "Failed to activate versioned venv (.venv -> versions/$SRC_VERSION)"
+        return 1
+    fi
+    ok "Runtime version $SRC_VERSION active (.venv -> versions/$SRC_VERSION)"
+    if [[ -n "$prev" ]]; then
+        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  → gc: /' || true
+    else
+        "$LINK_DIR/bin/python" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  → gc: /' || true
+    fi
+    return 0
+}
+# === end install-contract:v3 versioned-venv ===
+
 # ── Status output helpers ────────────────────────────────────────────────
 
 ok()      { echo "  ✓ $*"; }
@@ -633,7 +687,7 @@ write_deploy_manifest() {
     "branch": $branch,
     "dirty": $dirty
   },
-  "venv": "$VENV_DIR",
+  "venv": "$LINK_DIR",
   "runtime": "python"
 }
 EOF
@@ -1187,6 +1241,7 @@ case "$ACTION" in
         # -- Shared runtime (venv first: package install targets the venv) --
         deploy_venv || exit 1
         deploy_package || exit 1
+        _versioned_activate || exit 1
         deploy_wrappers || exit 1
         remove_legacy_scripts
         remove_legacy_binstubs
@@ -1261,8 +1316,14 @@ case "$ACTION" in
         # Sweep any lingering legacy alias binstubs
         remove_legacy_binstubs
 
-        # Remove Python runtime (venv + package)
-        if [[ -d "$VENV_DIR" ]]; then
+        # Remove Python runtime (venv + package). Versioned: the `.venv` link +
+        # the versions/ tree; otherwise the single real venv dir.
+        if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+            [[ -L "$LINK_DIR" ]] && rm -f "$LINK_DIR"
+            [[ -d "$LINK_DIR" && ! -L "$LINK_DIR" ]] && rm -rf "$LINK_DIR"
+            [[ -d "$INSTALL_DIR/versions" ]] && rm -rf "$INSTALL_DIR/versions"
+            changed "Removed versioned venv (.venv link + versions/)"
+        elif [[ -d "$VENV_DIR" ]]; then
             rm -rf "$VENV_DIR"
             changed "Removed venv: $VENV_DIR"
         fi
@@ -1437,6 +1498,7 @@ case "$ACTION" in
         # -- Shared runtime (venv first: package install targets the venv) --
         deploy_venv || exit 1
         deploy_package || exit 1
+        _versioned_activate || exit 1
         deploy_wrappers || exit 1
         remove_legacy_scripts
         remove_legacy_binstubs

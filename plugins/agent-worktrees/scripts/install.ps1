@@ -118,6 +118,68 @@ $LibDir   = Join-Path $InstallDir 'lib'
 $VenvDir  = Join-Path $InstallDir '.venv'
 $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
 
+# === install-contract:v3 versioned-venv (agent-worktrees: .venv-as-junction) ===
+# Immutable per-version runtime (#581). Build the venv into versions/<version>
+# and make the historical `.venv` path a junction into it, so the binstubs,
+# wrappers, and deploy-manifest -- all of which reference `.venv` -- resolve
+# through the link unchanged. agent-worktrees is a CLI (no daemon), so there is no
+# running process to drain: a version bump builds a fresh slot and swaps the link.
+# LinkDir/LinkPython is the stable `.venv` path; VenvDir/VenvPython is the
+# versions/<v> slot (build + health-gate). Legacy mode: Link == Venv. Gated behind
+# AGENT_WORKTREES_VERSIONED=1 (default off); COPILOT_EXT_NO_VERSIONED=1
+# force-disables. scripts/versioned_runtime.py owns the swap + migration + gc.
+$LinkDir          = $VenvDir
+$LinkPython       = $VenvPython
+$VersionedRuntime = $false
+$SrcVersion       = $null
+if (($env:AGENT_WORKTREES_VERSIONED -in @('1', 'true', 'yes', 'on')) -and
+    ($env:COPILOT_EXT_NO_VERSIONED -ne '1')) {
+    $pyprojForVer = if ($PluginDir) { Join-Path $PluginDir 'pyproject.toml' } else { $null }
+    if ($pyprojForVer -and (Test-Path $pyprojForVer)) {
+        $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
+        if ($vl) { $SrcVersion = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
+    }
+    if ($SrcVersion) {
+        $VersionedRuntime = $true
+        $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+        $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+    }
+}
+
+function Invoke-VersionedActivate {
+    <# CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
+       junction onto it (first migration moves a legacy real `.venv` aside), then
+       gc old slots keeping current + the previous-good. Returns $false on failure
+       so the caller can abort. No-op ($true) in legacy mode. #>
+    if (-not $VersionedRuntime) { return $true }
+    $vr = Join-Path $ScriptDir 'versioned_runtime.py'
+    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
+    if (-not (Test-Path $py)) { return $true }
+    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    & $VenvPython -c 'import agent_worktrees' 2>$null
+    $slotOk = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prevEAP
+    if (-not $slotOk) {
+        Write-ServiceErr "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
+        return $false
+    }
+    $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
+    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --replace-nonlink 2>&1 |
+        ForEach-Object { Write-ServiceChanged $_ }
+    if ($LASTEXITCODE -ne 0) {
+        Write-ServiceErr "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
+        return $false
+    }
+    Write-ServiceOk "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
+    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids')
+    if ($prev) { $gcArgs += @('--keep', $prev) }
+    & $LinkPython @gcArgs 2>&1 | ForEach-Object { Write-ServiceChanged "gc: $_" }
+    $ErrorActionPreference = $prevEAP
+    return $true
+}
+# === end install-contract:v3 versioned-venv ===
+
 # -- Projects registry ----------------------------------------------------
 
 $ProjectsYamlPath = Join-Path $InstallDir 'projects.yaml'
@@ -454,7 +516,7 @@ function Write-V3Manifest {
             branch  = $branch
             dirty   = $dirty
         }
-        venv           = ($VenvDir -replace '\\', '/')
+        venv           = ($LinkDir -replace '\\', '/')
         runtime        = 'python'
     }
     $tmp = "$manifestPath.tmp"
@@ -2240,6 +2302,7 @@ switch ($Action) {
         # -- Shared runtime (venv first: package install targets the venv) --
         if (-not (Deploy-Venv)) { exit 1 }
         if (-not (Deploy-Package)) { exit 1 }
+        if (-not (Invoke-VersionedActivate)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
         Deploy-CopilotPlugin
         Deploy-GlobalBinstub
@@ -2333,8 +2396,18 @@ switch ($Action) {
         Get-ChildItem -Path $LocalBin -Filter "$displayName (WSL: *).lnk" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
         Write-ServiceChanged "Removed shortcuts"
 
-        # Remove Python runtime (venv + package)
-        if (Test-Path $VenvDir) {
+        # Remove Python runtime (venv + package). Versioned: the `.venv` link +
+        # the whole versions/ tree; otherwise the single real venv dir.
+        if ($VersionedRuntime) {
+            if ((Test-Path $LinkDir) -and ((Get-Item $LinkDir -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                & cmd /c rmdir "$LinkDir" 2>$null
+            } elseif (Test-Path $LinkDir) {
+                Remove-Item $LinkDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            $verRoot = Join-Path $InstallDir 'versions'
+            if (Test-Path $verRoot) { Remove-Item $verRoot -Recurse -Force -ErrorAction SilentlyContinue }
+            Write-ServiceChanged "Removed versioned venv (.venv link + versions/)"
+        } elseif (Test-Path $VenvDir) {
             Remove-Item $VenvDir -Recurse -Force
             Write-ServiceChanged "Removed venv: $VenvDir"
         }
@@ -2557,6 +2630,7 @@ switch ($Action) {
         # -- Shared runtime (venv first: package install targets the venv) --
         if (-not (Deploy-Venv)) { exit 1 }
         if (-not (Deploy-Package)) { exit 1 }
+        if (-not (Invoke-VersionedActivate)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
         Deploy-CopilotPlugin
         Deploy-GlobalBinstub
