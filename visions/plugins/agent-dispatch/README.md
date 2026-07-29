@@ -230,6 +230,9 @@ this layer.)
   *agent-dispatch — the delegation layer*.
 - Sibling leaf: [agent-ssh](../agent-ssh/README.md) — the connectivity layer this
   layer's cross-machine reach rides on.
+- Consumer: [agent-logger](../agent-logger/README.md) — the **chronicler**, a
+  scheduled-production consumer whose per-session units are ordinary claimable
+  tasks on this layer's mesh.
 - Reality docs: [`docs/architecture.md`](../../../docs/architecture.md) · the
   `plugins/agent-dispatch/` skills (`agent-dispatch`, `pick-and-claim`).
 
