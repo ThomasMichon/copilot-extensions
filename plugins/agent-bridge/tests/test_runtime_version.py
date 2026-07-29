@@ -23,6 +23,16 @@ def test_write_running_version_creates_dir(tmp_path):
     assert (d / RUNNING_VERSION_FILE).is_file()
 
 
+def test_write_running_version_explicit_pid_and_version(tmp_path):
+    # The cutover reconciler records the *new* daemon's pid + version, not the
+    # deploy process's (dotfiles #533 caveat #1).
+    write_running_version(tmp_path, pid=98765, version="9.9.9")
+    data = json.loads((tmp_path / RUNNING_VERSION_FILE).read_text(encoding="utf-8"))
+    assert data["pid"] == 98765
+    assert data["version"] == "9.9.9"
+    assert data["pid"] != os.getpid()
+
+
 def test_write_running_version_never_raises(tmp_path):
     # A directory path that cannot be created (a file sits where a parent dir is
     # expected) must be swallowed -- the marker is best-effort, never fatal.
