@@ -2957,8 +2957,10 @@ def build_parser() -> argparse.ArgumentParser:
              "--no-wait.",
     )
     send_p.add_argument(
+        # Retained (hidden) so the removal handler can emit a friendly redirect
+        # when someone still passes it; not advertised in `send --help` (#468).
         "--new", action="store_true",
-        help="(removed) use `agent-bridge create` for a fresh session",
+        help=argparse.SUPPRESS,
     )
     send_p.add_argument(
         "--full-history", action="store_true",
