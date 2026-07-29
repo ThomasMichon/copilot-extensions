@@ -183,6 +183,13 @@ Open **⚙ Configuration → Profiles** to Tab-cycle the Copilot backend profile
 declared in `copilot_profiles`, toggle a host→target mapping, and **Apply** (or
 **Reset**) the grid. These are user-local settings, never repo-managed.
 
+A host that has never been curated (no persisted `terminal_profiles` column) is
+shown with the **default column**: minimal per-agent + bare cross-machine — the
+host's own launcher (self·agent diagonal) plus a plain `ssh <machine>` shell for
+every other machine. No remote agent-launch combos and no local shells are
+emitted by default; the operator adds those explicitly in the grid. (This
+replaces the retired "an uncurated host emits every possible profile" default.)
+
 ### Contributed Configuration sections
 Beyond Profiles, installed plugins can add their own entries to the **⚙
 Configuration** menu via a `config_sections` entry in their pivot manifest —

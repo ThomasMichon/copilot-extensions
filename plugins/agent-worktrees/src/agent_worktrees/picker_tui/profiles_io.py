@@ -27,7 +27,7 @@ TargetSel = profiles_mod.TargetSel
 # Sentinel for a host column that could NOT be loaded -- an unreachable remote,
 # or a remote on an agent-worktrees too old to have the ``profiles`` subcommand.
 # This is distinct from ``None`` (a reachable, compatible host that simply has
-# no explicit selection yet -> legacy "all-on"): UNAVAILABLE means "we cannot
+# no explicit selection yet -> the default column): UNAVAILABLE means "we cannot
 # know this host's real selection", so the Picker must render the column
 # read-only and never write a fabricated selection back over SSH (#1370).
 UNAVAILABLE = object()
@@ -48,10 +48,9 @@ def load_column(machine, env, *, runner=_default_runner):
 
     - a set of :class:`TargetSel` -- a **managed** host's real selection.
     - ``None`` -- a reachable, compatible host that carries **no explicit
-      selection yet** (legacy/unmanaged). The caller treats every target as
-      selected, matching the installer mirror's historical emit-everything
-      behavior, and the column stays editable (a modern remote can accept an
-      Apply).
+      selection yet** (unmanaged). The caller renders the **default column**
+      (minimal per-agent + bare cross-machine; see ``profiles.is_default_on``),
+      and the column stays editable (a modern remote can accept an Apply).
     - ``UNAVAILABLE`` -- the host's column could **not be loaded**: an
       unreachable/not-ready remote, an SSH error/timeout, or a remote running an
       agent-worktrees too old to have the ``profiles`` subcommand. The caller
@@ -74,13 +73,13 @@ def load_column(machine, env, *, runner=_default_runner):
     argv = data_ssh.profiles_argv(machine, env, action="get")
     if not argv:
         # No SSH argv -> the host is not reachable/ready; we cannot read or write
-        # its column, so it is unavailable (not legacy all-on).
+        # its column, so it is unavailable (not unmanaged/default).
         return UNAVAILABLE
     try:
         proc = runner(argv, 20)
     except Exception:
         # A transient/hard SSH failure: we can't know the remote's selection, so
-        # mark the column unavailable rather than fabricate an all-on selection
+        # mark the column unavailable rather than fabricate a selection
         # we'd then try (and fail) to write back.
         return UNAVAILABLE
     if proc.returncode != 0:
@@ -92,7 +91,7 @@ def load_column(machine, env, *, runner=_default_runner):
     except Exception:
         return UNAVAILABLE
     if not data.get("managed", False):
-        # Reachable + compatible, but no selection yet -> legacy all-on.
+        # Reachable + compatible, but no selection yet -> unmanaged (default).
         return None
     out = {profiles_mod.self_diagonal(machine, env)}
     for t in data.get("targets", []):

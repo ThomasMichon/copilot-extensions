@@ -29,8 +29,9 @@ def test_load_local_column_reads_config(monkeypatch, tmp_path):
     assert TargetSel("Borealis", "Win", "shell") in col
 
 
-def test_load_local_legacy_returns_none(monkeypatch, tmp_path):
-    """A config with no terminal_profiles key is legacy -> None (all-on)."""
+def test_load_local_unmanaged_returns_none(monkeypatch, tmp_path):
+    """A config with no terminal_profiles key is unmanaged -> None (the caller
+    renders the default column)."""
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text("machine: lambda-core\n", encoding="utf-8")
     monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
@@ -85,7 +86,7 @@ def test_load_remote_failure_marks_unavailable(monkeypatch):
         raise OSError("ssh down")
 
     # An SSH failure means we can't read the remote's real column, so the column
-    # is UNAVAILABLE (read-only) -- never a fabricated legacy all-on we'd try to
+    # is UNAVAILABLE (read-only) -- never a fabricated selection we'd try to
     # write back and fail (#1370).
     assert profiles_io.load_column("Borealis", "Win", runner=boom) \
         is profiles_io.UNAVAILABLE
@@ -93,7 +94,7 @@ def test_load_remote_failure_marks_unavailable(monkeypatch):
 
 def test_load_remote_nonzero_marks_unavailable(monkeypatch):
     """An older remote without the ``profiles`` subcommand exits nonzero -> the
-    column is unavailable/read-only, not legacy all-on (#1370)."""
+    column is unavailable/read-only, not a fabricated selection (#1370)."""
     monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Lambda-Core", "Win"))
     monkeypatch.setattr(
         profiles_io.data_ssh, "profiles_argv",
