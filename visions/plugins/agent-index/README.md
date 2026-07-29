@@ -1,0 +1,262 @@
+# agent-index — Vision
+
+- **Subject:** The portable **indexing & semantic-search engine** — a plugin that
+  gives a harness repo and its immediate ecosystem a self-hosted, meaning-based
+  retrieval layer over its *own* corpus (code, docs, issues, pull requests,
+  commits), ingested as a **good citizen** of the source systems it reads.
+- **Scope:** leaf (per-plugin, under the [visions index](../../README.md); honors
+  the [plugin-services](../../plugin-services/README.md) service model)
+- **Status:** Draft
+- **Last revised:** 2026-07-29
+- **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
+  the plugin's future `plugins/agent-index/docs/`
+
+## Purpose & Intent
+
+Agents working in a repo constantly need to answer *"has this come up before?"* —
+was this bug already filed, was this decision already made, does a similar change
+already exist. Answering it well needs **retrieval by meaning**, not just exact
+string match, across the repo's own history: its code and docs, its issues and
+pull requests, its commit trail. Standing that up today means either grepping
+blind or hand-building a bespoke indexing service — and, worse, hammering the
+hosted systems that own that history until they throttle or block you.
+
+**agent-index** is the **reusable engine** that makes a repo findable by meaning,
+packaged as a single installable plugin. It embeds a repo's corpus into a hybrid
+semantic + full-text index, keeps that index fresh as the repo changes, and
+answers meaning-scoped queries through a stable surface any agent or tool on the
+machine can call. It is deliberately **tightly scoped** to a harness repo and its
+close ecosystem — one repo's code/docs/issues/PRs/commits, plus optional
+connectors to the **hosted work-tracking and code-review feeds** that repo's work
+flows through — not a facility-wide, everything-source aggregator.
+
+The load-bearing constraint is **good citizenship**. The systems agent-index
+reads from are frequently **managed services with rate limits and abuse
+controls** — a hosted git forge, an issue tracker, an enterprise backlog and
+pull-request feed. An indexer that crawls them naively gets throttled, degraded,
+or cut off, which poisons the very freshness it exists to provide. So agent-index
+treats *not getting throttled* as a first-class design goal: it ingests
+incrementally, prefers change events over re-scans, backs off under pressure, and
+keeps its footprint on every upstream small and polite.
+
+The north star: an agent in a harness repo can ask a meaning question about that
+repo's own work and get a ranked set of confirmable leads — from a plugin it
+simply installed, that stays welcome on every upstream it reads, and that a
+richer, branded search **product can be built on top of** without forking the
+engine.
+
+## Concepts & Components
+
+### The index & store
+A single retrieval index that fuses **vector similarity** with **full-text
+search**, so a query is answered by *meaning and lexical match together* rather
+than forcing a choice between concept and exact term. The index is a
+**materialized view** — derived from, and rebuildable from, the source systems it
+mirrors.
+
+### The embedding engine
+The component that turns text into vectors, at both index time and query time.
+It is **acceleration-optional**: it exploits a local accelerator (GPU) when one
+is present for bulk indexing throughput, and falls back to a slower CPU path
+otherwise — but it **never holds search hostage**, so a query is answerable
+whether or not an accelerator is warm.
+
+### Source connectors & ingest
+The pluggable adapters that pull a repo's corpus into the index:
+
+- **First-class, built-in:** the repo's own **files** (code + docs), **commit
+  history**, **issues**, and **pull requests** from its hosting forge.
+- **Optional, first-class connector class:** **hosted work-tracking and
+  code-review feeds** — an enterprise backlog of work items and its associated
+  pull-request/review stream — for teams whose real backlog lives in a managed
+  system alongside the forge. Scoped narrowly (a declared project/area, a bounded
+  window), never a firehose of an entire organization.
+
+Every connector shares one **good-citizen ingest discipline** (see Behaviors):
+incremental by default, event-driven where the source offers it, and rate-aware
+everywhere.
+
+### Metadata facets
+The meaning-bearing structured attributes (source, repo, path, language, item
+type, labels, state) that let a semantic query be **scoped precisely** rather
+than searching the whole corpus by default.
+
+### Similarity & clusters
+Retrieval beyond one-off search: **find-similar** pivots from any indexed item to
+its nearest neighbors, and clustered views surface near-duplicates — the
+substrate for "is this already tracked?" and prior-art discovery.
+
+### The query surface
+A **stable retrieval API** — meaning + lexical, with source/facet scoping and
+find-similar — that agents, tools, and other local services call directly. It is
+the plugin's public contract; presentation on top of it is a consumer's concern,
+not the engine's.
+
+### The engine and product seam
+agent-index is intentionally an **engine, not an end-user product**. Its index
+model, connector interface, and query API are the **reusable core** that a
+larger, richer, possibly branded search deployment consumes and **extends** —
+adding more source domains, a human-facing web experience, and house styling —
+**without forking or re-implementing** the indexing and retrieval core. The
+engine stays generic and unopinionated about presentation so the product layer
+can be opinionated freely.
+
+## Features
+
+### meaning-search-over-the-repo-ecosystem
+One query answers by meaning across a repo's own code, docs, issues, pull
+requests, and commits — the "where was this discussed / has this come up before?"
+retrieval an agent needs, scoped to the repo it is actually working in.
+
+### hybrid-vector-and-lexical-retrieval
+Vector similarity and full-text search are fused so results are strong on both
+concept and exact term — an issue number, a symbol, a filename, or a phrase still
+lands precisely, while a conceptual query still finds related prior work.
+
+### good-citizen-ingestion
+Ingestion is designed to **stay welcome** on managed upstreams: incremental and
+delta-driven by default, event/webhook-driven where the source offers it,
+rate-limit-aware with polite backoff, and small-footprint per upstream. Not
+getting throttled or blocked is treated as correctness, not a nicety.
+
+### pluggable-source-connectors
+Sources join through a **uniform connector interface** — the built-in repo
+files/commits/issues/PRs, plus an optional **hosted work-tracking + pull-request
+feed** connector — so a deployment adds a source domain without changing the
+index or query core. Connectors are added, not forked in.
+
+### source-and-facet-scoping
+Queries scope by source and by meaning-bearing metadata facets (repo, path,
+language, item type, label, state) to return the right slice of the corpus rather
+than a coincidental match across everything.
+
+### find-similar-and-clusters
+From any indexed item, retrieve its nearest neighbors; browse clusters of
+near-duplicates to spot redundancy and surface prior art before work is
+duplicated or a bug is filed twice.
+
+### continuous-delta-freshness
+The index tracks the repo closely through **change-driven, incremental** updates
+— new commits, edited issues, merged PRs — rather than periodic full re-crawls,
+so hits stay current without repeatedly re-reading unchanged history.
+
+### self-contained-service
+agent-index is a complete, standalone plugin: a user installs it and it works on
+its own, with no sibling plugin, shared broker, or hand-wired infrastructure
+assumed. It honors the suite's [plugin-services](../../plugin-services/README.md)
+model — self-contained runtime, discoverable local endpoint, platform-native
+lifecycle, à-la-carte install.
+
+### reusable-engine-extension-seam
+The connector interface and query API are a **stable extension surface**: a
+downstream product layers additional sources, a human search experience, and
+branding **on top of** the engine, consuming it rather than re-implementing it.
+
+### recoverable-rebuildable-index
+The index and any processing state are **derived** and reconstructable from the
+source systems (the repo, the forge, the tracked feeds). Fast snapshots are
+welcome; source-backed rebuildability is the safety net, so a corrupt or lost
+index is a rebuild, never lost data.
+
+## Behaviors
+
+### good-citizen-under-managed-services
+This is the behavior the plugin is built around. Against any upstream — a hosted
+forge, an issue API, an enterprise backlog/PR feed — agent-index:
+
+- **ingests incrementally**, reading only what changed since last time rather than
+  re-scanning whole corpora;
+- **prefers change events** (webhooks / delta APIs) over polling, and polls
+  **gently** with a bounded cadence when events aren't available;
+- **respects the server's own signals** — rate-limit headers, retry-after,
+  quota — and **backs off exponentially** under pressure instead of retrying into
+  a wall;
+- **keeps its footprint small and bounded** (batched, concurrency-capped, scoped
+  to declared areas) so it never looks like abuse.
+
+A managed upstream should barely notice the indexer is there. Getting throttled,
+degraded, or blocked is treated as a **defect**, not an acceptable cost.
+
+### responsive-when-cold
+Search stays usable when the embedding accelerator is cold or absent: query-time
+embedding never depends on an always-warm GPU, and the surface degrades
+progressively (fast lexical first, full semantic as the engine warms) rather than
+hanging.
+
+### research-aid-not-authority
+An agent-index hit is a **lead to confirm**, not a verdict. The index can lag the
+very latest change, so a result points back at the source of truth — the working
+tree, the forge, the tracker API — which the caller confirms against before
+acting. The engine points at truth; it is not truth.
+
+### fresh-and-recoverable
+Indexing preserves freshness through incremental updates and can be **rebuilt from
+source** without data loss; similarity and cluster artifacts refresh as part of
+indexing rather than drifting into staleness.
+
+### observable-durable-indexing
+Indexing work is **durable across restarts**, **deduplicated** against repeated
+triggers (a redelivered webhook does not re-embed the world), and **visible
+enough** that an agent or operator can tell what is queued, running, failed,
+current, or stale — without spelunking logs.
+
+### local-first-standalone
+The service is machine-local by default and reachable using only what its own
+installer deployed — no external proxy, mesh, or registry required. Exposing it
+beyond the local machine, or fronting it with shared routing, is an explicit,
+opt-in **consumer** choice, never a prerequisite the plugin bakes in. (The
+[plugin-services](../../plugin-services/README.md) posture, applied here.)
+
+### engine-stays-generic
+The engine does not grow product opinions. Branding, a house web experience,
+organization-specific source domains, and editorial presentation belong to the
+**consumer** that builds on the seam — not to agent-index. Keeping the core
+generic is what lets many different products reuse it.
+
+## Non-Goals / Boundaries
+
+- **Not the source of truth.** agent-index indexes and points; the working tree,
+  the forge, and the trackers own the canonical content. It is a materialized
+  view, never the record.
+- **Not a general database.** It is a semantic-retrieval layer, not a
+  transactional store other services write their state into.
+- **Not keyword-only search.** Exact-symbol / known-string lookup in a checked-out
+  tree is a grep / code-intelligence job; agent-index's value is *meaning* and
+  cross-corpus prior art.
+- **Not a facility-wide, all-source aggregator.** The engine is scoped to a
+  harness repo and its close ecosystem. A comprehensive, many-source, branded
+  search deployment is a **separate product built on this engine** (via the
+  extension seam), not a responsibility of the engine itself.
+- **Not an end-user product.** No mandated web UI, no house styling, no editorial
+  voice live in the engine; those are the consuming product's concern.
+- **Not a shared-infrastructure dependency.** It requires no external reverse
+  proxy, tunnel broker, service mesh, or central registry to be installed or
+  reached; a downstream may layer such routing on top, but the plugin never
+  assumes it.
+- **Not a cross-model blender.** Results within one embedding space are coherent;
+  the engine does not silently mix incompatible vector spaces into one ranking.
+- **Not spec-level here.** Embedding model choices, store engines, endpoint
+  shapes, connector wire formats, batch sizes, and rate-limit constants live in
+  the reality docs or a future `specifications` layer, not in this vision.
+
+## See Also
+
+- Parent: [visions index](../../README.md)
+- Honors: [plugin-services](../../plugin-services/README.md) — the service model
+  every service-bearing plugin obeys (self-contained runtime, discoverable local
+  endpoint, à-la-carte, platform-native lifecycle, minimal network exposure).
+- Reality docs: [`docs/architecture.md`](../../../docs/architecture.md) · the
+  plugin's future `plugins/agent-index/docs/`.
+
+## Provenance
+
+- **2026-07-29** — Initial authoring as a per-plugin leaf. Intent mined from
+  extracting the reusable **indexing and semantic-search core** out of a larger,
+  comprehensive semantic-search deployment into a standalone, portable plugin —
+  scoped tightly to a harness repo's own code, docs, issues, pull requests, and
+  commits, with an optional first-class connector for **hosted work-tracking and
+  pull-request feeds**. The load-bearing constraint, crystallized from the risk of
+  being throttled by managed upstream services, is **good-citizen ingestion**
+  (incremental, event-driven, rate-aware, small-footprint). The engine is framed
+  as a reusable core a richer downstream product **consumes and extends** via a
+  stable connector/query seam, rather than a product that replaces it.

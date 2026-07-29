@@ -32,6 +32,7 @@ never edited to record that cycle; it changes only when the **intent** changes.
 | [plugin-services](plugin-services/README.md) | branch | The plugin **service model** — how installer-deployed plugin runtimes expose, coordinate, and are reached as local services, à la carte and without shared infrastructure. |
 | [agent-fabric](agent-fabric/README.md) | branch | The layered **agent coordination fabric** — how many Copilot agents across worktrees, machines, CodeSpaces, and containers are spun up, discovered, delegated to, communicated with, and recovered as one legible whole. |
 | [picker](picker/README.md) | leaf | The **Worktree Picker** — the interactive terminal *front door* for viewing, joining, and creating a project's worktree-backed agents, and the fabric's unified presentation surface (child of agent-fabric). |
+| [agent-index](plugins/agent-index/README.md) | leaf | The portable **indexing & semantic-search engine** — meaning-based retrieval over a harness repo's own code, docs, issues, PRs, and commits, ingested as a *good citizen* of managed upstreams; the reusable core a richer search product builds on. |
 
 <!-- Add rows as visions are authored. A per-plugin vision lives at
      visions/plugins/<name>/; a cross-cutting capability vision at
