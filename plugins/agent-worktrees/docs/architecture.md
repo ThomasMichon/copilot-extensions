@@ -576,6 +576,34 @@ native, the overlay-registry guard's routing proof moved to the still-manual
 (open on Enter, Space toggles No-mux, arrow + Enter runs a verb, Esc/q/Tab
 cancel).
 
+**Seventh migration -- the Clean/Sync + New-worktree scope dialog (`scopedlg`) →
+native `ModalScreen`, and a *redesign* (F4).** The `ScopeDlgScreen(ModalScreen
+[bool])` replaces the manual `scopedlg` overlay that both `cleanup` (Clean/Sync)
+and `optmenu` (New-worktree options) shared. It renders the option toggles, a
+`[Confirm] [Cancel]` button row, and -- for Clean/Sync -- a **read-only impact
+list** naming exactly which worktrees the current toggle selection will act on
+(the count also rides the Confirm label). The option toggles are mutated in place
+on the passed `dlg` dict; the screen returns `dismiss(True|False)` and the opener's
+callback runs `_confirm_cleanup(dlg)` / `_confirm_new_worktree(dlg)` on confirm.
+This slice is more than a port: the old dialog was a **live filter** that dimmed
+the main worktree list in place, docked its toggles at the bottom, and carried a
+third focus section for **per-row exclusion** (#2179). That model existed because
+the dialog's bucket toggles *were* the scope mechanism; now that scope comes from
+the **main-list selection before the dialog opens**, the dialog is a normal
+centered modal whose nested impact list is *more* legible (self-contained -- it
+advances `visions/picker` §Features/decision-support-before-cost and
+consequential-vs-browsing-clarity). Retired with the live-filter model:
+`self.cleanup`/`self.optmenu`, `_key_scopedlg`, `_overlay_scopedlg`,
+`_enter_cleanup_list`, `_key_cleanup_list`, `_toggle_cleanup_exclude`,
+`_cleanup_raw_union`, per-row exclusion (`excluded`), the main-list preview
+dimming, the `dock_bottom` render path, and the footer branch; `_cleanup_union`
+became `_scope_union(dlg)` (plain bucket union). With `cleanup`/`optmenu` gone the
+overlay registry holds only the two remaining live overlays -- `progress` and
+`msgview` -- and the overlay-registry guard's routing proof now uses `msgview`.
+The `pilot.press` harness drives the modal end-to-end (open, Space toggles a
+bucket and the impact list/count narrow live, Tab to Confirm runs the scoped
+maintenance progress; Esc cancels).
+
 **Global shortcuts are Textual `BINDINGS` (F3).** The truly-global pivot/machine
 shortcuts (`ctrl+shift+left/right`, `ctrl+left/right`) are owned by the
 framework's binding system, not the manual dispatcher: `PickerScreen.BINDINGS`

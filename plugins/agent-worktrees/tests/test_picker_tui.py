@@ -104,6 +104,20 @@ def _sub_menu_open(scr):
     return _sub_menu(scr) is not None
 
 
+def _scope_dlg(scr):
+    """The F4 ScopeDlgScreen instance on the app's screen stack, or None."""
+    from agent_worktrees.picker_tui.engine import ScopeDlgScreen
+    for s in scr.app.screen_stack:
+        if isinstance(s, ScopeDlgScreen):
+            return s
+    return None
+
+
+def _scope_dlg_open(scr):
+    """True when the F4 ScopeDlgScreen (Clean/Sync or New-worktree options) is stacked."""
+    return _scope_dlg(scr) is not None
+
+
 def _fixture_source():
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
     local = ("lambda-core", "Win")
@@ -169,9 +183,11 @@ def test_worktrees_clean_button_opens_dialog():
             scr.sel = ("BTN", 0)
             scr.btn_idx = scr.button_set().index("K")
             scr._activate()
-            assert scr.cleanup is not None            # cleanup mini-picker open
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None                     # cleanup modal open
             # Its options are the state buckets (select all merged, unused, …).
-            labels = [o["label"] for o in scr.cleanup["opts"]]
+            labels = [o["label"] for o in dlg._dlg["opts"]]
             assert any("Merged" in x for x in labels)
 
     asyncio.run(run())
@@ -229,25 +245,16 @@ def test_submenu_cleanup_opens_scoped_dialog():
             await pilot.press("enter")
             await pilot.pause()
             assert not _sub_menu_open(scr)
-            assert scr.cleanup is not None            # real scoped dialog opened
+            assert _scope_dlg_open(scr)              # real scoped dialog opened
 
     asyncio.run(run())
 
 
-def test_clean_dialog_live_filter_preview():
-    """While the Clean dialog is open, the worktree list dims rows outside the
-    selected bucket union and keeps selected rows bright; toggling a bucket
-    updates the preview live (#2179)."""
+def test_clean_modal_impact_list_reflects_buckets():
+    """The Clean/Sync dialog is a native ScopeDlgScreen (#88 F4). Its read-only
+    impact list names exactly the worktrees the enabled buckets select, and
+    toggling a bucket OFF (via the real key pipeline) narrows that set live."""
     src = _maint_source()
-
-    def dim_map(scr):
-        rows = {}
-        for v in scr.build_body(118):
-            stop = getattr(v, "stop", None)
-            if stop and stop[0] == "L":
-                dim = any("grey35" in str(sp.style) for sp in v.text.spans)
-                rows[v.data["id4"]] = dim
-        return rows
 
     async def run():
         app = PickerApp(src, live=False)
@@ -257,169 +264,79 @@ def test_clean_dialog_live_filter_preview():
             await pilot.pause()
             scr.sel = ("BTN", 0)
             scr.btn_idx = scr.button_set().index("K")
-            scr._activate()                       # open the Clean dialog
-            assert scr.cleanup is not None
-            sel_ids = scr._cleanup_union()
-            assert sel_ids                        # bulk default: safe buckets on
-            dm = dim_map(scr)
-            for id4, dim in dm.items():
-                assert dim == (id4 not in sel_ids)   # in-set bright, rest dimmed
-            # The bulk Clean button defaults to the full safe cleanable set
-            # (merged + unused + conversation), so toggling a bucket OFF narrows
-            # the previewed set live.
-            before = set(scr._cleanup_union())
-            ui = next(i for i, o in enumerate(scr.cleanup["opts"])
+            scr._activate()                       # open the Clean modal
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            # The impact list matches the enabled-bucket union exactly.
+            union = dlg._union()
+            assert union                          # bulk default: safe buckets on
+            rows = dlg._impact_fn(union)
+            assert {r[0] for r in rows} == union
+            # Toggle the "Unused" bucket OFF through the real pipeline; the union
+            # (and thus the impact list) narrows.
+            ui = next(i for i, o in enumerate(dlg._dlg["opts"])
                       if o["label"] == "Unused")
-            assert scr.cleanup["opts"][ui]["on"]  # on by default in the bulk path
-            scr.cleanup["idx"] = ui
-            scr._key_scopedlg("space")            # toggle Unused OFF
-            after = set(scr._cleanup_union())
-            assert after < before
-            dm2 = dim_map(scr)
-            for id4, dim in dm2.items():
-                assert dim == (id4 not in after)
+            assert dlg._dlg["opts"][ui]["on"]     # on by default in the bulk path
+            for _ in range(ui):
+                await pilot.press("down")
+            await pilot.press("space")            # toggle Unused OFF
+            await pilot.pause()
+            after = dlg._union()
+            assert after < union
+            assert {r[0] for r in dlg._impact_fn(after)} == after
 
     asyncio.run(run())
 
 
-def _dim_map(scr):
-    """id4 -> is the row dimmed (grey35) in the current build_body render."""
-    rows = {}
-    for v in scr.build_body(118):
-        stop = getattr(v, "stop", None)
-        if stop and stop[0] == "L":
-            rows[v.data["id4"]] = any("grey35" in str(sp.style) for sp in v.text.spans)
-    return rows
-
-
-def _open_clean_live(scr):
-    """Open the Clean live filter on the local machine tab; return the screen."""
-    scr.machine_idx = scr.local_index()
-    scr.sel = ("BTN", 0)
-    scr.btn_idx = scr.button_set().index("K")
-    scr._activate()
-    assert scr.cleanup is not None
-    return scr
-
-
-def _focus_worktree_row(scr, id4):
-    """Point self.sel at the ("L", i) stop whose record is id4."""
-    recs = scr.list_records()
-    li = next(i for i, r in enumerate(recs) if r["id4"] == id4)
-    scr.sel = ("L", li)
-    return li
-
-
-def test_clean_per_row_unselect_drops_from_net_set():
-    """Space on a focused worktree row inside the Clean live filter drops just
-    that worktree from the net set (bucket stays on); the row then previews as
-    dimmed, and toggling again puts it back (#2179 second increment)."""
+def test_clean_modal_confirm_runs_on_union():
+    """Tabbing to Confirm and pressing Enter dismisses the modal and starts the
+    maintenance progress run over the enabled-bucket union."""
     src = _maint_source()
 
     async def run():
         app = PickerApp(src, live=False)
         async with app.run_test(size=(118, 40)) as pilot:
             scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
             await pilot.pause()
-            _open_clean_live(scr)
-            union = set(scr._cleanup_union())
-            assert len(union) >= 1
-            victim = next(iter(union))
-
-            scr._key_scopedlg("tab")                 # buckets -> rows
-            assert scr.cleanup["section"] == 2
-            assert scr.sel[0] == "L"                 # focus landed on a row
-
-            _focus_worktree_row(scr, victim)
-            scr._key_scopedlg("space")               # drop the focused worktree
-            net = set(scr._cleanup_union())
-            assert victim not in net
-            assert net == union - {victim}
-
-            # It previews dimmed once focus moves off it.
-            recs = scr.list_records()
-            other_li = next((i for i, r in enumerate(recs)
-                             if r["id4"] != victim), None)
-            if other_li is not None:
-                scr.sel = ("L", other_li)
-                assert _dim_map(scr).get(victim) is True
-
-            # Toggle back in -> restored.
-            _focus_worktree_row(scr, victim)
-            scr._key_scopedlg("space")
-            assert victim in set(scr._cleanup_union())
+            scr.sel = ("BTN", 0)
+            scr.btn_idx = scr.button_set().index("K")
+            scr._activate()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            union = set(dlg._union())
+            assert union
+            await pilot.press("tab")              # section 0 -> buttons (Confirm)
+            await pilot.press("enter")            # Confirm
+            await pilot.pause()
+            assert not _scope_dlg_open(scr)       # modal dismissed
+            assert scr.progress is not None       # run built
+            assert {it["id4"] for it in scr.progress["items"]} == union
 
     asyncio.run(run())
 
 
-def test_clean_per_row_unselect_ignores_rows_outside_union():
-    """Dropping a worktree that isn't in the enabled-bucket union is a no-op --
-    you can't exclude what isn't selected."""
+def test_clean_modal_cancel_is_noop():
+    """Esc on the Clean modal dismisses it without starting any run."""
     src = _maint_source()
 
     async def run():
         app = PickerApp(src, live=False)
         async with app.run_test(size=(118, 40)) as pilot:
             scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
             await pilot.pause()
-            _open_clean_live(scr)
-            union = set(scr._cleanup_union())
-            outside = next((r["id4"] for r in scr.list_records()
-                            if r["id4"] not in union), None)
-            if outside is None:
-                return  # every row is in the union here; nothing to assert
-            _focus_worktree_row(scr, outside)
-            scr._key_scopedlg("tab")                 # into the rows section
-            _focus_worktree_row(scr, outside)
-            scr._key_scopedlg("space")               # no-op
-            assert not scr.cleanup["excluded"]
-            assert set(scr._cleanup_union()) == union
-
-    asyncio.run(run())
-
-
-def test_clean_dialog_tab_cycles_buckets_rows_confirm():
-    """Tab in the Clean live filter cycles buckets(0) -> rows(2) -> confirm(1)."""
-    src = _maint_source()
-
-    async def run():
-        app = PickerApp(src, live=False)
-        async with app.run_test(size=(118, 40)) as pilot:
-            scr = app.query_one(PickerScreen)
+            scr.sel = ("BTN", 0)
+            scr.btn_idx = scr.button_set().index("K")
+            scr._activate()
             await pilot.pause()
-            _open_clean_live(scr)
-            assert scr.cleanup["section"] == 0
-            scr._key_scopedlg("tab")
-            assert scr.cleanup["section"] == 2       # rows
-            scr._key_scopedlg("tab")
-            assert scr.cleanup["section"] == 1       # confirm
-            scr._key_scopedlg("tab")
-            assert scr.cleanup["section"] == 0       # back to buckets
-
-    asyncio.run(run())
-
-
-def test_clean_confirm_acts_on_net_after_unselect():
-    """The set Confirm acts on (`_cleanup_union`) reflects a per-row drop."""
-    src = _maint_source()
-
-    async def run():
-        app = PickerApp(src, live=False)
-        async with app.run_test(size=(118, 40)) as pilot:
-            scr = app.query_one(PickerScreen)
+            assert _scope_dlg_open(scr)
+            await pilot.press("escape")
             await pilot.pause()
-            _open_clean_live(scr)
-            union = set(scr._cleanup_union())
-            if not union:
-                return
-            victim = next(iter(union))
-            scr._key_scopedlg("tab")
-            _focus_worktree_row(scr, victim)
-            scr._key_scopedlg("space")
-            # Enter -> confirm row; the net set the executor will use excludes it.
-            scr._key_scopedlg("enter")
-            assert scr.cleanup["section"] == 1
-            assert victim not in set(scr._cleanup_union())
+            assert not _scope_dlg_open(scr)
+            assert scr.progress is None
 
     asyncio.run(run())
 
@@ -553,8 +470,9 @@ def test_worktrees_bulk_menu_routes_to_scoped_cleanup():
             await pilot.press("enter")            # route to scoped cleanup
             await pilot.pause()
             assert not _maint_menu_open(scr)
-            assert scr.cleanup is not None
-            assert "selected" in scr.cleanup["scope"]
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            assert "selected" in dlg._dlg["scope"]
 
     asyncio.run(run())
 
@@ -1528,12 +1446,16 @@ def test_cleanup_dialog_buckets_and_sync_eligibility():
 
     async def run():
         app = PickerApp(src, live=False)
-        async with app.run_test(size=(118, 36)) as pilot:  # noqa: F841
+        async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             scr.machine_idx = scr.local_index()
+            await pilot.pause()
 
             scr._open_cleanup()
-            opts = {o["label"]: o["ids"] for o in scr.cleanup["opts"]}
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            opts = {o["label"]: o["ids"] for o in dlg._dlg["opts"]}
             assert len(opts["Merged & finalized"]) == 2   # cl00 + el00
             assert len(opts["Unused"]) == 1               # un00
             assert len(opts["Conversation-only"]) == 1    # cv00
@@ -1541,10 +1463,14 @@ def test_cleanup_dialog_buckets_and_sync_eligibility():
             # Unsafe buckets are never offered.
             for unsafe in ("dr00", "op00", "ac00"):
                 assert unsafe not in opts["All eligible"]
+            await pilot.press("escape")
+            await pilot.pause()
 
-            scr.cleanup = None
             scr._open_sync()
-            sopts = {o["label"]: o["ids"] for o in scr.cleanup["opts"]}
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            sopts = {o["label"]: o["ids"] for o in dlg._dlg["opts"]}
             assert sopts["Eligible"] == {"el00"}          # only the FF-eligible
 
             # Disposition chips reflect the buckets.
@@ -1565,24 +1491,32 @@ def test_bulk_clean_defaults_to_safe_set_selection_stays_conservative():
 
     async def run():
         app = PickerApp(src, live=False)
-        async with app.run_test(size=(118, 36)) as pilot:  # noqa: F841
+        async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             scr.machine_idx = scr.local_index()
+            await pilot.pause()
 
             # Bulk path (ids=None): the safe buckets default ON, so the
             # pre-checked union is the whole safe cleanable set.
             scr._open_cleanup()
-            on = {o["label"] for o in scr.cleanup["opts"] if o["on"]}
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            on = {o["label"] for o in dlg._dlg["opts"] if o["on"]}
             assert on == {"Merged & finalized", "Unused", "Conversation-only"}
-            assert scr._cleanup_union() == {"cl00", "el00", "un00", "cv00"}
+            assert dlg._union() == {"cl00", "el00", "un00", "cv00"}
+            await pilot.press("escape")
+            await pilot.pause()
 
             # Explicit selection: only the already-merged bucket is pre-checked
             # (the operator already hand-picked the scope).
-            scr.cleanup = None
             scr._open_cleanup(ids={"cl00", "un00", "cv00"})
-            on2 = {o["label"] for o in scr.cleanup["opts"] if o["on"]}
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            on2 = {o["label"] for o in dlg._dlg["opts"] if o["on"]}
             assert on2 == {"Merged & finalized"}
-            assert scr._cleanup_union() == {"cl00"}
+            assert dlg._union() == {"cl00"}
 
     asyncio.run(run())
 
@@ -1645,8 +1579,9 @@ def test_maintenance_multiselect_and_actions_menu():
                     await pilot.press("down")
                 await pilot.press("enter")
                 await pilot.pause()
-                assert scr.cleanup is not None
-                assert "selected" in scr.cleanup["scope"]
+                dlg = _scope_dlg(scr)
+                assert dlg is not None
+                assert "selected" in dlg._dlg["scope"]
 
     asyncio.run(run())
 
@@ -2789,10 +2724,11 @@ def test_new_worktree_decision_exits():
             assert scr.active_button() == "N"
             scr._activate()                 # opens the options dialog (#1346)
             await pilot.pause()
-            assert scr.optmenu is not None
-            assert scr.optmenu["section"] == 1   # Create default-selected
-            assert all(not o["on"] for o in scr.optmenu["opts"])
-            scr._dlg_confirm(om=True)       # confirm Create, no options
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            assert dlg.section == 1              # Create default-selected
+            assert all(not o["on"] for o in dlg._dlg["opts"])
+            await pilot.press("enter")      # confirm Create, no options
             await pilot.pause()
         assert app.result is not None
         assert app.result["action"] == "new"
@@ -2820,18 +2756,19 @@ def test_new_worktree_no_mux_option():
             scr.sel = ("BTN", 0)
             scr._activate()                     # opens the options dialog
             await pilot.pause()
-            assert scr.optmenu is not None
-            labels = [o["label"] for o in scr.optmenu["opts"]]
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            labels = [o["label"] for o in dlg._dlg["opts"]]
             assert "No Mux" in labels
             nm = labels.index("No Mux")
-            scr._key_scopedlg("up", om=True)    # Create button -> options
-            assert scr.optmenu["section"] == 0
-            while scr.optmenu["idx"] < nm:
-                scr._key_scopedlg("down", om=True)
-            scr._key_scopedlg("space", om=True)  # toggle No Mux on
-            assert scr.optmenu["opts"][nm]["on"] is True
-            scr._key_scopedlg("enter", om=True)  # options -> button row
-            scr._key_scopedlg("enter", om=True)  # confirm Create
+            await pilot.press("up")             # Create button -> options
+            assert dlg.section == 0
+            while dlg.idx < nm:
+                await pilot.press("down")
+            await pilot.press("space")          # toggle No Mux on
+            assert dlg._dlg["opts"][nm]["on"] is True
+            await pilot.press("enter")          # options -> button row
+            await pilot.press("enter")          # confirm Create
             await pilot.pause()
         assert app.result["action"] == "new"
         assert app.result["options"]["no_mux"] is True
@@ -2966,10 +2903,16 @@ def test_cleanup_extra_confirm_gate_and_real_executor(monkeypatch):
             assert scr.real_ops is True
             scr.machine_idx = scr.local_index()
             scr._open_cleanup()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
             # Select a beyond-clean scope (Unused) -> extra confirm required.
-            for o in scr.cleanup["opts"]:
+            for o in dlg._dlg["opts"]:
                 o["on"] = o["label"] in ("Merged & finalized", "Unused")
-            scr._dlg_confirm(False)
+            await pilot.press("tab")             # section 0 -> Confirm button
+            await pilot.press("enter")           # confirm -> _confirm_cleanup
+            await pilot.pause()
+            assert not _scope_dlg_open(scr)
             assert scr.progress is not None
             assert scr.progress["armed"] is False   # gated
             assert scr.executor is None              # not started yet
@@ -4135,10 +4078,11 @@ def test_overlay_registry_drives_dispatch_and_precedence():
 
             # (b') _dispatch_key actually ROUTES through the active overlay's
             # handler rather than the main nav: with a still-manual overlay open
-            # (the Clean/Sync scope dialog), a nav key is consumed by the overlay
-            # (it stays open) and never moves the main-view selection. (The menu
-            # overlays are native ModalScreens now (#88 F4); `cleanup` remains a
-            # manual registry overlay, so it proves the seam.)
+            # (the recent-messages viewer), a nav key is consumed by the overlay
+            # (it scrolls the viewer) and never moves the main-view selection.
+            # (The menu/confirm AND the Clean/Sync scope overlays are native
+            # ModalScreens now (#88 F4); `msgview` remains a manual registry
+            # overlay, so it proves the seam.)
             for a2 in attrs:
                 setattr(scr, a2, None)
             scr.machine_idx = scr.local_index()
@@ -4147,18 +4091,23 @@ def test_overlay_registry_drives_dispatch_and_precedence():
             scr.wt_sel.clear()
             scr.sel = ("L", 0)
             sel_before = scr.sel
-            scr._open_cleanup()
-            assert scr.cleanup is not None
+            scr.msgview = {"scroll": 0}
             scr._dispatch_key("down")                  # consumed by the overlay
-            assert scr.cleanup is not None             # overlay still has the keyboard
+            assert scr.msgview is not None             # overlay still has the keyboard
+            assert scr.msgview["scroll"] == 1          # routed to _key_msgview
             assert scr.sel == sel_before               # main nav untouched
-            scr.cleanup = None
+            scr.msgview = None
 
             # (c) Precedence: with the first two overlays both set, the earlier
             # one in registry order wins.
             setattr(scr, attrs[0], {"x": 1})
             setattr(scr, attrs[1], {"x": 1})
             assert scr._active_overlay()[0] == attrs[0]
+
+            # Reset the fake overlay state so the app teardown tick doesn't read
+            # a malformed overlay dict (e.g. progress without its "done" key).
+            for a in attrs:
+                setattr(scr, a, None)
 
     asyncio.run(run())
 
