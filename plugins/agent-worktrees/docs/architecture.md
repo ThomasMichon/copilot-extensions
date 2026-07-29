@@ -604,6 +604,27 @@ The `pilot.press` harness drives the modal end-to-end (open, Space toggles a
 bucket and the impact list/count narrow live, Tab to Confirm runs the scoped
 maintenance progress; Esc cancels).
 
+**Eighth migration -- the live maintenance/profiles progress run (`progress`) →
+native `ModalScreen` (F4).** The `ProgressScreen(ModalScreen[None])` replaces the
+manual `progress` overlay -- the last *live* one. Unlike the other (static)
+migrated overlays it ticks: an `on_mount` interval advances the run (the mock
+walker, or a real `MaintenanceExecutor` poll) and repaints, so the background
+`_tick` no longer drives it (that would double-step the walker). The run's state
+stays on the engine (`self.progress` / `self.executor`) because several entry
+points build it -- `_confirm_cleanup` (Clean/Sync), `_run_op_progress` (Stop /
+Reclaim / Finalize) and `_start_profiles_run` (Apply) -- and its
+state-transition core (`_advance_progress` / `_key_progress`) stays unit-tested
+there; each entry point now ends with `_open_progress()`, which
+`push_screen`s the `ProgressScreen`. The screen delegates keys to
+`_key_progress` (mirroring the old handler exactly -- an unarmed beyond-clean run
+shows a confirm gate where Enter proceeds/arms and Esc cancels; a done run closes
+on Enter/Esc) and dismisses itself once the engine clears `progress`. With
+`progress` gone the overlay registry holds only `msgview`; the overlay-registry
+guard's precedence proof (two overlays needed) is skipped while the table is down
+to one, and its routing proof still exercises `msgview`. The `pilot.press`
+harness drives the modal end-to-end (a gated run's Esc cancels without executing;
+an armed run advances to done and Enter closes it).
+
 **Global shortcuts are Textual `BINDINGS` (F3).** The truly-global pivot/machine
 shortcuts (`ctrl+shift+left/right`, `ctrl+left/right`) are owned by the
 framework's binding system, not the manual dispatcher: `PickerScreen.BINDINGS`

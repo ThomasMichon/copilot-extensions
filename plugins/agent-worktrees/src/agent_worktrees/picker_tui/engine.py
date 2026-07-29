@@ -734,10 +734,10 @@ class PickerScreen(Widget):
             self._poll_update_state()
         if self.update_state == "checking":
             busy = True
-        # Drive the mock cleanup/sync progress dialog forward.
-        if self.progress and not self.progress["done"]:
-            self._advance_progress()
-            busy = True
+        # The cleanup/sync/profiles progress run drives itself now: it is a
+        # native Textual ``ModalScreen`` (``ProgressScreen``, #88 F4) that ticks
+        # its own advancement on an interval, so the background tick no longer
+        # advances it (that would double-step the mock walker).
         # Keep the tick lively while the recent-messages viewer is still loading
         # so its result appears promptly (the load runs on a daemon thread).
         if self.msgview and self.msgview.get("loading"):
@@ -1663,6 +1663,7 @@ class PickerScreen(Widget):
             "n_add": n_add, "n_rem": n_rem,
         }
         self.executor.start()
+        self._open_progress()
 
     def _make_apply_task(self, machine, env, hi):
         """A progress task that writes one host column; ``ok`` drives ✓/✗."""
@@ -2875,94 +2876,6 @@ class PickerScreen(Widget):
                 out.append(cur)
         return out or [""]
 
-    def _overlay_progress(self, lines, W, top_off, body_h):
-        """Per-worktree progress for a cleanup/sync run: each selected worktree
-        as a row that advances pending(·) -> running(spinner) -> done(✓)/✗."""
-        p = self.progress
-        items = p["items"]
-        pw = min(W - 8, 66)
-        done = sum(1 for it in items if it["state"] in ("done", "failed"))
-        failed = sum(1 for it in items if it["state"] == "failed")
-        verb = p["verb"]
-        header = f"─ {verb} · {p['scope']} "
-        panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
-                      style=C_BAND)]
-        if not p.get("armed", True):
-            n = len(items)
-            extra = []
-            if p.get("include_unused"):
-                extra.append("unused")
-            if p.get("include_conversations"):
-                extra.append("conversation")
-            tail = f" incl. {'/'.join(extra)}" if extra else ""
-            sub = (f" ⚠ {verb.lower()} {n} worktree(s){tail}? "
-                   "Enter=proceed Esc=cancel")
-            substyle = "bold yellow"
-        elif p["done"]:
-            sub = f" done · {done}/{len(items)}" + (f" · {failed} failed" if failed else "")
-            substyle = C_HEADER
-        else:
-            sub = f" {self.spin()} working… {done}/{len(items)}"
-            substyle = C_HEADER
-        panel.append(self._prow(sub, pw, style=substyle))
-        panel.append(self._prow("", pw))
-        # Window the list around the currently-running item if it's long.
-        maxr = max(3, body_h - 8)
-        run = next((j for j, it in enumerate(items) if it["state"] == "running"),
-                   len(items) - 1)
-        lo = max(0, min(run - maxr // 2, max(0, len(items) - maxr)))
-        for it in items[lo:lo + maxr]:
-            st = it["state"]
-            if st == "done":
-                g, gc = "✓", C_READY
-            elif st == "failed":
-                g, gc = "✗", C_WARN
-            elif st == "running":
-                g, gc = self.spin(), C_LOAD
-            else:
-                g, gc = "·", C_DIM
-            row = Text("│", style=C_DIM)
-            inner = Text("  ")
-            inner.append(g, style=gc)
-            inner.append(f" {it['id4']} ", style=C_META)
-            inner.append(it["title"], style="white" if st != "pending" else C_MUTED)
-            s = inner.plain
-            if len(s) > pw - 2:
-                inner = Text(s[:pw - 3] + "…", style="white")
-            inner.append(" " * max(0, pw - 2 - inner.cell_len))
-            row.append_text(inner)
-            row.append("│", style=C_DIM)
-            panel.append(row)
-        if len(items) > maxr:
-            panel.append(self._prow(f" … {len(items)} total", pw, style=C_MUTED))
-        if p.get("op") == "profiles" and p["done"]:
-            # #1368: after Apply the fragment is regenerated, but the terminal
-            # app only re-reads it on a FULL restart -- spell out what changed
-            # and that a restart is required so a "no visible change" reads as
-            # expected, not as a silent failure.
-            na, nr = p.get("n_add", 0), p.get("n_rem", 0)
-            panel.append(self._prow(
-                f" +{na} added · -{nr} removed", pw, style=C_LABEL))
-            panel.append(self._prow(
-                " ⚠ Fully restart the terminal app (close all its windows) to "
-                "see the changes.", pw, style=C_CAUTION))
-        panel.append(self._prow("", pw))
-        brow = Text("│", style=C_DIM)
-        inner = Text("   ")
-        if not p.get("armed", True):
-            inner.append(" Confirm ", style=C_BTN_SEL)
-            inner.append("  Cancel ", style=C_BTN)
-        elif p["done"]:
-            inner.append(" Close ", style=C_BTN_SEL)
-        else:
-            inner.append(" Working… ", style=C_BTN)
-        inner.append(" " * max(0, pw - 2 - inner.cell_len))
-        brow.append_text(inner)
-        brow.append("│", style=C_DIM)
-        panel.append(brow)
-        panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
-        self._blit_panel(lines, W, panel, top_off, body_h)
-
     # ---- modal-overlay registry (single source of truth) --------------------
     def _overlay_registry(self):
         """The modal overlays, in dispatch-precedence order. Each entry is
@@ -2976,10 +2889,10 @@ class PickerScreen(Widget):
         render dispatch chain -- which had to be kept in sync by hand and could
         silently drift when an overlay was added (#85 F1, the first
         native-focus-migration slice: consolidate before converting individual
-        overlays to Textual ``ModalScreen``s)."""
+        overlays to Textual ``ModalScreen``s). As overlays migrate to native
+        ``ModalScreen``s they leave this table; ``progress`` was the latest to go
+        (#88 F4), so only the still-manual ``msgview`` remains."""
         return [
-            ("progress", self._key_progress,
-             lambda ln, W, o, b: self._overlay_progress(ln, W, o, b)),
             ("msgview", self._key_msgview,
              lambda ln, W, o, b: self._overlay_msgview(ln, W, o, b)),
         ]
@@ -3335,6 +3248,20 @@ class PickerScreen(Widget):
         }
         if self.progress["armed"]:
             self._start_progress()
+        self._open_progress()
+
+    def _open_progress(self):
+        """Show the live maintenance/profiles progress run as a native Textual
+        ``ModalScreen`` (#88 F4).
+
+        The entry points (``_confirm_cleanup``, ``_run_op_progress``,
+        ``_start_profiles_run``) build ``self.progress`` first; this pushes the
+        ``ProgressScreen`` that renders it, ticks it forward (mock walker or
+        real-executor poll) on its own interval, and mirrors the old
+        ``_key_progress`` confirm gate. The screen mutates engine state directly
+        (``self.progress`` / ``self.executor`` / ``self.debug``) and needs no
+        callback."""
+        self.app.push_screen(ProgressScreen(self))
 
     def _start_stop(self, recs):
         """Stop the Mux/Copilot wrapper of one or more worktrees (the 'Stop'
@@ -3397,7 +3324,7 @@ class PickerScreen(Widget):
     def _run_op_progress(self, verb, op, recs, *, armed):
         """Build (and, when ``armed``, start) a maintenance progress run over
         ``recs`` for a single ``op`` (restart / finalize). An unarmed run shows
-        the confirm gate first (see ``_key_progress`` / ``_overlay_progress``)."""
+        the confirm gate first (see ``_key_progress`` / ``ProgressScreen``)."""
         items = [{"id4": r.get("id4"), "title": r.get("title", ""),
                   "machine_env": r.get("machine_env", ""), "state": "pending"}
                  for r in recs]
@@ -3411,6 +3338,7 @@ class PickerScreen(Widget):
         }
         if armed:
             self._start_progress()
+        self._open_progress()
 
     def _start_progress(self):
         """Begin executing the armed progress run (real executor or mock walk)."""
@@ -4796,6 +4724,157 @@ class MaintMenuScreen(ModalScreen[int]):
         elif key in ("escape", "q", "tab"):
             event.stop()
             self.dismiss(None)
+
+
+class ProgressScreen(ModalScreen[None]):
+    """Native modal maintenance/profiles progress run (#88 F4).
+
+    The last live overlay migrated off the manual render/dispatch model onto a
+    Textual ``ModalScreen``. It renders the engine's ``progress`` sub-dialog --
+    each selected worktree (or profiles host column) as a row that advances
+    pending(·) -> running(spinner) -> done(✓)/failed(✗) -- and, unlike the other
+    (static) migrated overlays, it is **live**: an ``on_mount`` interval ticks
+    the run forward (the mock walker, or a real ``MaintenanceExecutor`` poll) and
+    repaints. It mirrors the former ``_key_progress`` exactly: an unarmed run
+    shows the beyond-clean confirm gate (Enter proceeds/arms, Esc cancels), a
+    done run closes on Enter/Esc.
+
+    The run's state lives on the engine (``eng.progress`` / ``eng.executor``),
+    because several entry points build it (``_confirm_cleanup``,
+    ``_run_op_progress``, ``_start_profiles_run``) and the state-transition core
+    (``_advance_progress`` / ``_key_progress``) stays unit-tested there. This
+    screen is the native shell that drives and renders that state, dismissing
+    itself once the engine clears ``progress``.
+    """
+
+    CSS = """
+    ProgressScreen { align: center middle; background: $background 55%; }
+    ProgressScreen > #progress { width: auto; height: auto; max-height: 90%; }
+    """
+
+    def __init__(self, eng) -> None:
+        super().__init__()
+        self._eng = eng
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._panel(), id="progress")
+
+    def on_mount(self) -> None:
+        # Drive the run forward on our own interval (~10 fps), matching the pace
+        # the background tick used to advance the mock walker.
+        self.set_interval(0.1, self._on_tick)
+
+    def _on_tick(self) -> None:
+        eng = self._eng
+        if eng.progress is None:
+            # A direct engine poke (e.g. a unit test) cleared the run out from
+            # under us -- close if we're still the top screen.
+            if self.app.screen is self:
+                self.dismiss(None)
+            return
+        if not eng.progress["done"]:
+            eng._advance_progress()
+        self._refresh()
+
+    def _panel(self) -> Panel:
+        eng = self._eng
+        p = eng.progress
+        if p is None:
+            # The run was cleared before this screen finished mounting (e.g. a
+            # direct engine poke in a unit test). Render empty; the interval
+            # dismisses us on its next tick.
+            return Panel(Text(""), border_style=C_DIM, width=68)
+        items = p["items"]
+        done = sum(1 for it in items if it["state"] in ("done", "failed"))
+        failed = sum(1 for it in items if it["state"] == "failed")
+        verb = p["verb"]
+        body = Text()
+        # Status sub-line: confirm gate / done / working.
+        if not p.get("armed", True):
+            n = len(items)
+            extra = []
+            if p.get("include_unused"):
+                extra.append("unused")
+            if p.get("include_conversations"):
+                extra.append("conversation")
+            tail = f" incl. {'/'.join(extra)}" if extra else ""
+            sub = (f" ⚠ {verb.lower()} {n} worktree(s){tail}? "
+                   "Enter=proceed Esc=cancel")
+            substyle = "bold yellow"
+        elif p["done"]:
+            sub = f" done · {done}/{len(items)}" + (
+                f" · {failed} failed" if failed else "")
+            substyle = C_HEADER
+        else:
+            sub = f" {eng.spin()} working… {done}/{len(items)}"
+            substyle = C_HEADER
+        body.append(sub + "\n\n", style=substyle)
+        # Item rows, windowed around the running item when the list is long.
+        maxr = 12
+        run = next((j for j, it in enumerate(items)
+                    if it["state"] == "running"), len(items) - 1)
+        lo = max(0, min(run - maxr // 2, max(0, len(items) - maxr)))
+        for it in items[lo:lo + maxr]:
+            st = it["state"]
+            if st == "done":
+                g, gc = "✓", C_READY
+            elif st == "failed":
+                g, gc = "✗", C_WARN
+            elif st == "running":
+                g, gc = eng.spin(), C_LOAD
+            else:
+                g, gc = "·", C_DIM
+            row = Text("  ")
+            row.append(g, style=gc)
+            row.append(f" {it['id4']} ", style=C_META)
+            title = it["title"]
+            if len(title) > 46:
+                title = title[:45] + "…"
+            row.append(title, style="white" if st != "pending" else C_MUTED)
+            body.append_text(row)
+            body.append("\n")
+        if len(items) > maxr:
+            body.append(f" … {len(items)} total\n", style=C_MUTED)
+        if p.get("op") == "profiles" and p["done"]:
+            # #1368: after Apply the fragment is regenerated, but the terminal
+            # app only re-reads it on a FULL restart -- spell out what changed
+            # and that a restart is required so a "no visible change" reads as
+            # expected, not as a silent failure.
+            na, nr = p.get("n_add", 0), p.get("n_rem", 0)
+            body.append(f"\n +{na} added · -{nr} removed\n", style=C_LABEL)
+            body.append(
+                " ⚠ Fully restart the terminal app (close all its windows) to "
+                "see the changes.\n", style=C_CAUTION)
+        # Button row.
+        body.append("\n")
+        btns = Text(" ")
+        if not p.get("armed", True):
+            btns.append(" Confirm ", style=C_BTN_SEL)
+            btns.append("  ")
+            btns.append(" Cancel ", style=C_BTN)
+        elif p["done"]:
+            btns.append(" Close ", style=C_BTN_SEL)
+        else:
+            btns.append(" Working… ", style=C_BTN)
+        body.append_text(btns)
+        return Panel(body, title=f"{verb} · {p['scope']}",
+                     border_style=C_BAND, width=68)
+
+    def _refresh(self) -> None:
+        if self._eng.progress is not None:
+            self.query_one("#progress", Static).update(self._panel())
+
+    def on_key(self, event) -> None:
+        event.stop()
+        eng = self._eng
+        # Delegate the state transition to the engine's tested core, then close
+        # once it clears the run (unarmed-cancel / done-close) or refresh in
+        # place (unarmed-arm keeps the dialog up, now working).
+        eng._key_progress(canonical_key(event.key))
+        if eng.progress is None:
+            self.dismiss(None)
+        else:
+            self._refresh()
 
 
 class PickerApp(App):
