@@ -455,8 +455,9 @@ class PickerScreen(Widget):
         # _open_submenu. (The overlay left the manual registry entirely.)
         self.msgview = None           # recent-messages viewer overlay (#session-viewer)
         self._msgview_lock = threading.Lock()
-        self.cleanup = None           # cleanup-scope modal (Maintenance)
-        self.optmenu = None           # "More options…" create modal
+        # Clean/Sync scope + New-worktree options are native ModalScreens now
+        # (#88 F4): no self.cleanup / self.optmenu state attrs -- see
+        # ScopeDlgScreen and _open_cleanup / _open_sync / _open_optmenu.
         self.maint_sel = ListSelection()   # Maintenance multi-select (#1345)
         self.wt_sel = ListSelection()      # Worktrees list multi-select (#2228 2b)
         self.wt_anchor = None         # Worktrees range-select anchor index (#2258 P3)
@@ -1920,16 +1921,14 @@ class PickerScreen(Widget):
             ms = self._wt_multiselect_active()
             lcols = fit(cols, width - 2, "title", 14)
             add(header_text(lcols, width, indent=2), kind="colhdr")
-            # Preview which worktrees an action targets, directly on the list
-            # (#2179): while the Clean/Sync dialog is open, dim every row outside
-            # the currently-selected bucket union (updates live as buckets
-            # toggle); otherwise, when the Clean/Sync button is merely focused,
-            # dim the rows that action can't touch.
+            # Preview which worktrees an action targets, directly on the list:
+            # when the Clean/Sync button is merely focused, dim the rows that
+            # action can't touch. (The old live-filter preview driven by an open
+            # Clean/Sync dialog was retired with #88 F4 -- that dialog is now a
+            # centered ScopeDlgScreen carrying its own impact list.)
             preview = None
             preview_ids = None
-            if self.cleanup is not None:
-                preview_ids = self._cleanup_union()
-            elif btn_focus:
+            if btn_focus:
                 ab = self.active_button()
                 preview = {"K": "clean", "SY": "sync"}.get(ab)
             li = 0
@@ -2426,16 +2425,13 @@ class PickerScreen(Widget):
         # body offset = title+htabs+header_border+stats = len(top)+2
         ov = self._active_overlay()
         modal = ov is not None
-        # The Clean/Sync dialog is a LIVE FILTER over the worktree list (#2179):
-        # keep the list visible (build_body dims rows outside the selected set)
-        # and dock the bucket toggles at the bottom, instead of graying the whole
-        # screen and centering a modal over the very list it filters.
-        live_filter = self.cleanup is not None and self._kind() == "worktrees"
         if modal:
-            if not live_filter:
-                # Gray out ALL background content behind the dialog.
-                lines = [Text((ln if isinstance(ln, Text) else Text(str(ln))).plain,
-                              style="grey35") for ln in lines]
+            # Gray out ALL background content behind the dialog. (The Clean/Sync
+            # live-filter-over-the-list model was retired with #88 F4 -- that
+            # dialog is a native centered ScopeDlgScreen now, with its own
+            # impact list, so no manual overlay dims the list in place.)
+            lines = [Text((ln if isinstance(ln, Text) else Text(str(ln))).plain,
+                          style="grey35") for ln in lines]
             off, bh = len(top) + 2, body_h
             ov[2](lines, W, off, bh)
         out = Text()
@@ -2665,28 +2661,9 @@ class PickerScreen(Widget):
         return ""
 
     def footer(self, W):
-        dlg = self.cleanup or self.optmenu
         if self.progress:
             hints = ("Esc cancel" if not self.progress["done"]
                      else "Enter/Esc close")
-        elif dlg:
-            live = self.cleanup is not None and self._kind() == "worktrees"
-            n = len(self._cleanup_union()) if self.cleanup is not None else 0
-            sec = dlg.get("section", 0)
-            if sec == 0:
-                if live:
-                    hints = (f"↑↓ bucket · Space toggle (previews {n} live)"
-                             f" · Tab → rows · Esc cancel")
-                else:
-                    hints = ("↑↓ move · Space toggle option · Tab → buttons"
-                             " · Enter next · Esc cancel")
-            elif live and sec == 2:
-                hints = (f"↑↓ row · Space keep/drop this worktree "
-                         f"(previews {n} live) · Enter → confirm · Esc cancel")
-            else:
-                clabel = dlg.get("confirm", "Confirm")
-                hints = (f"◀▶ button · Enter: {clabel} · ↑ back to options"
-                         f" · Esc cancel")
         else:
             hints = self._focus_hint()
         f = Text(" " + hints, style=C_META)
@@ -2898,63 +2875,6 @@ class PickerScreen(Widget):
                 out.append(cur)
         return out or [""]
 
-    def _overlay_scopedlg(self, dlg, lines, W, top_off, body_h, om=False,
-                          dock_bottom=False):
-        opts = dlg["opts"]
-        idx = dlg["idx"]
-        section = dlg.get("section", 0)
-        bidx = dlg.get("bidx", 0)
-        verb = dlg.get("verb", "Clean up")
-        if om:
-            tm, te = dlg["target"]
-            scope = f"{tm} {te}"
-        else:
-            scope = dlg["scope"]
-        pw = min(W - 8, 66)
-        header = f"─ {verb} · {scope} "
-        panel = [Text("╭" + header + "─" * max(0, pw - 2 - len(header)) + "╮",
-                      style=C_BAND)]
-        panel.append(self._prow(f" {dlg.get('prompt', 'Select:')}", pw,
-                                style=C_HEADER))
-        panel.append(self._prow("", pw))
-        opt_focus = section == 0
-        for i, o in enumerate(opts):
-            box = "[x]" if o["on"] else "[ ]"
-            mark = " ▸ " if (opt_focus and idx == i) else "   "
-            boxc = "green" if o["on"] else "grey50"
-            row = Text("│", style=C_DIM)
-            inner = Text(mark)
-            inner.append(box, style=boxc)
-            inner.append(f" {o['label']:<12} ", style="white")
-            inner.append(o["hint"], style=C_META)
-            s = inner.plain
-            if len(s) > pw - 2:
-                inner = Text(s[:pw - 3] + "…", style="white")
-            inner.append(" " * max(0, pw - 2 - inner.cell_len))
-            if opt_focus and idx == i:
-                inner.stylize(C_SEL)
-            row.append_text(inner)
-            row.append("│", style=C_DIM)
-            panel.append(row)
-        panel.append(self._prow("", pw))
-        # button row: [Confirm/Create] [Cancel]
-        clabel = dlg.get("confirm", "Confirm")
-        if not om:
-            clabel = f"{clabel} ({len(self._cleanup_union())})"
-        brow = Text("│", style=C_DIM)
-        inner = Text("   ")
-        inner.append(f" {clabel} ",
-                     style=C_BTN_SEL if (section == 1 and bidx == 0) else C_BTN)
-        inner.append("   ")
-        inner.append(" Cancel ",
-                     style=C_BTN_SEL if (section == 1 and bidx == 1) else C_BTN)
-        inner.append(" " * max(0, pw - 2 - inner.cell_len))
-        brow.append_text(inner)
-        brow.append("│", style=C_DIM)
-        panel.append(brow)
-        panel.append(Text("╰" + "─" * (pw - 2) + "╯", style=C_DIM))
-        self._blit_panel(lines, W, panel, top_off, body_h, dock_bottom=dock_bottom)
-
     def _overlay_progress(self, lines, W, top_off, body_h):
         """Per-worktree progress for a cleanup/sync run: each selected worktree
         as a row that advances pending(·) -> running(spinner) -> done(✓)/✗."""
@@ -3062,13 +2982,6 @@ class PickerScreen(Widget):
              lambda ln, W, o, b: self._overlay_progress(ln, W, o, b)),
             ("msgview", self._key_msgview,
              lambda ln, W, o, b: self._overlay_msgview(ln, W, o, b)),
-            ("cleanup", self._key_scopedlg,
-             lambda ln, W, o, b: self._overlay_scopedlg(
-                 self.cleanup, ln, W, o, b, om=False,
-                 dock_bottom=(self._kind() == "worktrees"))),
-            ("optmenu", lambda key: self._key_scopedlg(key, om=True),
-             lambda ln, W, o, b: self._overlay_scopedlg(
-                 self.optmenu, ln, W, o, b, om=True)),
         ]
 
     def _active_overlay(self):
@@ -3307,104 +3220,6 @@ class PickerScreen(Widget):
                        positions[0] if positions else idx)
         self.sel = stops[nxt]
 
-    def _key_scopedlg(self, key, om=False):
-        dlg = self.optmenu if om else self.cleanup
-        opts = dlg["opts"]
-        n = len(opts)
-        # The Clean/Sync live filter (worktrees) adds a third focus section --
-        # the worktree list itself -- where Space keeps/drops an individual row
-        # from the bucket set (#2179 second increment). The optmenu (new-worktree
-        # options) has no list, so it keeps the two-section buckets<->confirm flow.
-        live = (not om) and self._kind() == "worktrees"
-        if key in ("escape", "q"):
-            self._close_dlg(om)
-            return
-        if key in ("tab", "shift+tab"):
-            if live:
-                order = [0, 2, 1]        # buckets -> rows -> confirm
-                d = 1 if key == "tab" else -1
-                cur = order.index(dlg["section"]) if dlg["section"] in order else 0
-                dlg["section"] = order[(cur + d) % len(order)]
-            else:
-                dlg["section"] = 1 - dlg["section"]
-            dlg["bidx"] = 0
-            if dlg["section"] == 2:
-                self._enter_cleanup_list()
-            return
-        if dlg["section"] == 0:           # the bucket multi-choice menu
-            if key == "down":
-                dlg["idx"] = min(dlg["idx"] + 1, n - 1)
-            elif key == "up":
-                dlg["idx"] = max(dlg["idx"] - 1, 0)
-            elif key == "space":
-                opts[dlg["idx"]]["on"] = not opts[dlg["idx"]]["on"]
-            elif key == "enter":
-                dlg["section"] = 1        # progress to the button row
-                dlg["bidx"] = 0
-        elif live and dlg["section"] == 2:   # the worktree list: per-row unselect
-            self._key_cleanup_list(key)
-        else:                              # the [Confirm] [Cancel] button row
-            if key in ("left", "right"):
-                dlg["bidx"] = 1 - dlg["bidx"]
-            elif key == "up":
-                dlg["section"] = 0
-            elif key == "enter":
-                if dlg["bidx"] == 0:
-                    self._dlg_confirm(om)
-                else:
-                    self._close_dlg(om)
-
-    def _enter_cleanup_list(self):
-        """Focus the first worktree row when entering the cleanup list section;
-        bounce back to the buckets if the list is empty (nothing to drop)."""
-        ls = [s for s in self.stops() if s[0] == "L"]
-        if not ls:
-            self.cleanup["section"] = 0
-            return
-        if self.sel not in ls:
-            self.sel = ls[0]
-
-    def _key_cleanup_list(self, key):
-        """Row focus inside the Clean/Sync live filter: Up/Down move the row
-        cursor, Space keeps/drops the focused worktree, Enter advances to the
-        Confirm row. Scroll follows ``self.sel`` via the normal render path."""
-        ls = [s for s in self.stops() if s[0] == "L"]
-        if not ls:
-            self.cleanup["section"] = 0
-            return
-        if self.sel not in ls:
-            self.sel = ls[0]
-        i = ls.index(self.sel)
-        if key == "down":
-            self.sel = ls[min(i + 1, len(ls) - 1)]
-        elif key == "up":
-            self.sel = ls[max(i - 1, 0)]
-        elif key == "space":
-            self._toggle_cleanup_exclude()
-        elif key == "enter":
-            self.cleanup["section"] = 1
-            self.cleanup["bidx"] = 0
-
-    def _toggle_cleanup_exclude(self):
-        """Keep/drop the focused worktree from the Clean/Sync net set (#2179).
-
-        Only a row currently in the enabled-bucket union can be dropped (you
-        can't exclude what isn't selected); toggling a row back in removes it
-        from the exclusion set. Idempotent per keypress."""
-        rec = self._selected_record()
-        if rec is None:
-            return
-        wid = rec.get("id4")
-        if wid is None or wid not in self._cleanup_raw_union():
-            return
-        self.cleanup.setdefault("excluded", ListSelection()).toggle(wid)
-
-    def _close_dlg(self, om):
-        if om:
-            self.optmenu = None
-        else:
-            self.cleanup = None
-
     def _key_progress(self, key):
         p = self.progress
         # Unarmed: the extra confirm gate (beyond-clean cleanup). Enter proceeds,
@@ -3471,56 +3286,55 @@ class PickerScreen(Widget):
             self._reconcile_wt_sel()
             self._rehome_l_focus()
 
-    def _dlg_confirm(self, om):
-        if om:
-            dlg = self.optmenu
-            on = {o["label"] for o in dlg["opts"] if o["on"]}
-            tm, te = dlg["target"]
-            self.optmenu = None
-            self._decide({
-                "action": "new", "machine": tm, "env": te,
-                "is_local": (tm, te) == self.src.LOCAL,
-                "options": {
-                    "anchor": "Anchor repo" in on,
-                    "bare": "Bare" in on,
-                    "no_mux": "No Mux" in on,
-                    "local_model": "Local model" in on,
-                },
-            })
-        else:
-            dlg = self.cleanup
-            picked = [o["label"] for o in dlg["opts"] if o["on"]]
-            verb = dlg.get("verb", "Clean up")
-            op = "sync" if verb.lower().startswith("sync") else "cleanup"
-            ids = self._cleanup_union()
-            recs = [w for w in self.data if w["id4"] in ids]
-            self.cleanup = None
-            if not recs:
-                self.debug = (f"{verb.lower()} {dlg['scope']}: "
-                              f"{', '.join(picked) or 'nothing'} → 0 worktrees")
-                return
-            # Extra confirm when a cleanup scope reaches past 'clean'
-            # (Unused / Conversation-only / All) -- removing idle/empty trees
-            # or trees that held conversation is a bigger commitment.
-            include_unused = any(
-                p in ("Unused", "All eligible") for p in picked)
-            include_conversations = any(
-                p in ("Conversation-only", "All eligible") for p in picked)
-            beyond_clean = op == "cleanup" and (
-                include_unused or include_conversations)
-            items = [{"id4": w["id4"], "title": w["title"],
-                      "machine_env": w["machine_env"], "state": "pending"}
-                     for w in recs]
-            self.progress = {
-                "verb": verb, "op": op, "scope": dlg["scope"], "items": items,
-                "recs": recs, "picked": picked,
-                "ticks": 0, "steps": 3, "done": False,
-                "armed": not beyond_clean,
-                "include_unused": include_unused,
-                "include_conversations": include_conversations,
-            }
-            if self.progress["armed"]:
-                self._start_progress()
+    def _confirm_new_worktree(self, dlg):
+        """Confirmed New-worktree options -> the launch decision (#88 F4)."""
+        on = {o["label"] for o in dlg["opts"] if o["on"]}
+        tm, te = dlg["target"]
+        self._decide({
+            "action": "new", "machine": tm, "env": te,
+            "is_local": (tm, te) == self.src.LOCAL,
+            "options": {
+                "anchor": "Anchor repo" in on,
+                "bare": "Bare" in on,
+                "no_mux": "No Mux" in on,
+                "local_model": "Local model" in on,
+            },
+        })
+
+    def _confirm_cleanup(self, dlg):
+        """Confirmed Clean/Sync scope -> build (and, when armed, start) the
+        per-worktree maintenance progress run (#88 F4)."""
+        picked = [o["label"] for o in dlg["opts"] if o["on"]]
+        verb = dlg.get("verb", "Clean up")
+        op = "sync" if verb.lower().startswith("sync") else "cleanup"
+        ids = self._scope_union(dlg)
+        recs = [w for w in self.data if w["id4"] in ids]
+        if not recs:
+            self.debug = (f"{verb.lower()} {dlg['scope']}: "
+                          f"{', '.join(picked) or 'nothing'} → 0 worktrees")
+            return
+        # Extra confirm when a cleanup scope reaches past 'clean'
+        # (Unused / Conversation-only / All) -- removing idle/empty trees
+        # or trees that held conversation is a bigger commitment.
+        include_unused = any(
+            p in ("Unused", "All eligible") for p in picked)
+        include_conversations = any(
+            p in ("Conversation-only", "All eligible") for p in picked)
+        beyond_clean = op == "cleanup" and (
+            include_unused or include_conversations)
+        items = [{"id4": w["id4"], "title": w["title"],
+                  "machine_env": w["machine_env"], "state": "pending"}
+                 for w in recs]
+        self.progress = {
+            "verb": verb, "op": op, "scope": dlg["scope"], "items": items,
+            "recs": recs, "picked": picked,
+            "ticks": 0, "steps": 3, "done": False,
+            "armed": not beyond_clean,
+            "include_unused": include_unused,
+            "include_conversations": include_conversations,
+        }
+        if self.progress["armed"]:
+            self._start_progress()
 
     def _start_stop(self, recs):
         """Stop the Mux/Copilot wrapper of one or more worktrees (the 'Stop'
@@ -3621,25 +3435,15 @@ class PickerScreen(Widget):
         if ex.is_done():
             p["done"] = True
 
-    def _cleanup_union(self):
-        """The net acted-on set for the Clean/Sync live filter: the union of the
-        enabled buckets, minus any worktrees the operator individually dropped
-        via per-row unselect (#2179 second increment). The preview dim, the
-        footer count, and the executor all read this one method, so the "N
-        selected" the operator sees is exactly what Confirm acts on."""
+    def _scope_union(self, dlg):
+        """The net acted-on set for a Clean/Sync scope dialog: the union of the
+        enabled buckets. (Per-row exclusion was retired with the live-filter
+        model in #88 F4 -- scope now comes from the main-list selection before
+        the dialog opens, and the modal's impact list shows this exact set.)"""
         s = set()
-        for o in self.cleanup["opts"]:
+        for o in dlg["opts"]:
             if o["on"]:
-                s |= o["ids"]
-        return s - set(self.cleanup.get("excluded", ()))
-
-    def _cleanup_raw_union(self):
-        """The bucket union *before* per-row exclusions -- the set a row must be
-        in for a per-row drop to mean anything."""
-        s = set()
-        for o in self.cleanup["opts"]:
-            if o["on"]:
-                s |= o["ids"]
+                s |= set(o.get("ids", ()))
         return s
 
     def _selected_record(self):
@@ -3776,10 +3580,15 @@ class PickerScreen(Widget):
                          "hint": f"run the agent on {tm}'s GPU"})
         # Open straight onto the Create button (section 1) with no options
         # checked, and confirm the target machine in the prompt (#1346).
-        self.optmenu = {"target": (tm, te), "idx": 0, "section": 1, "bidx": 0,
-                        "verb": "New worktree", "confirm": "Create",
-                        "prompt": f"Creates on {tm} {te} · options (none required):",
-                        "opts": opts}
+        dlg = {"target": (tm, te), "section": 1, "bidx": 0,
+               "verb": "New worktree", "confirm": "Create",
+               "prompt": f"Creates on {tm} {te} · options (none required):",
+               "opts": opts}
+
+        def _after(confirmed):
+            if confirmed:
+                self._confirm_new_worktree(dlg)
+        self.app.push_screen(ScopeDlgScreen(dlg), _after)
 
     @staticmethod
     def _cleanable(rec):
@@ -4294,6 +4103,13 @@ class PickerScreen(Widget):
         return "All machines" if self.is_all() else \
             "{} {}".format(*self.cur_machine()[:2])
 
+    def _impact_rows(self, ids):
+        """Display rows ``(id4, machine_env, title)`` for the worktrees in
+        ``ids`` -- the read-only impact list the Clean/Sync modal shows so the
+        operator sees exactly what Confirm will act on."""
+        return [(w["id4"], w.get("machine_env", ""), w.get("title", ""))
+                for w in self.data if w["id4"] in ids]
+
     def _open_cleanup(self, ids=None):
         # With no explicit selection (the bulk "Clean" button), default the
         # checkboxes to the full *safe* cleanable set -- Merged & finalized +
@@ -4314,10 +4130,9 @@ class PickerScreen(Widget):
         convo = {w["id4"] for w in rows if w["cleanup_bucket"] == "conversation"}
         gone = {w["id4"] for w in rows if w["cleanup_bucket"] == "gone"}
         all_eligible = clean | unused | convo | gone
-        self.cleanup = {
+        dlg = {
             "verb": "Clean up", "prompt": "Select what to prune:",
-            "confirm": "Confirm", "scope": scope, "idx": 0, "section": 0, "bidx": 0,
-            "excluded": ListSelection(),
+            "confirm": "Confirm", "scope": scope, "section": 0, "bidx": 0,
             "opts": [
                 {"label": "Merged & finalized", "on": True, "ids": clean,
                  "hint": f"work is on the default branch · {len(clean)}"},
@@ -4331,6 +4146,11 @@ class PickerScreen(Widget):
             ],
         }
 
+        def _after(confirmed):
+            if confirmed:
+                self._confirm_cleanup(dlg)
+        self.app.push_screen(ScopeDlgScreen(dlg, self._impact_rows), _after)
+
     def _open_sync(self, ids=None):
         scope = self._scope_label() if ids is None else f"{len(ids)} selected"
         if ids is not None:
@@ -4342,11 +4162,10 @@ class PickerScreen(Widget):
             rows = [w for w in self.data if w["machine"] == m and w["env"] == e]
         eligible = {w["id4"] for w in rows if w.get("ff_eligible")}
         skipped = len(rows) - len(eligible)
-        self.cleanup = {
+        dlg = {
             "verb": "Sync", "prompt": "Fast-forward worktrees onto the default "
             "branch (FF-only):",
-            "confirm": "Confirm", "scope": scope, "idx": 0, "section": 0, "bidx": 0,
-            "excluded": ListSelection(),
+            "confirm": "Confirm", "scope": scope, "section": 0, "bidx": 0,
             "opts": [
                 {"label": "Eligible", "on": True, "ids": eligible,
                  "hint": f"clean · behind · no local commits · {len(eligible)}"
@@ -4354,6 +4173,11 @@ class PickerScreen(Widget):
                             if skipped else "")},
             ],
         }
+
+        def _after(confirmed):
+            if confirmed:
+                self._confirm_cleanup(dlg)
+        self.app.push_screen(ScopeDlgScreen(dlg, self._impact_rows), _after)
 
     # ---- Textual BINDINGS actions (truly-global shortcuts, #88 F3) ----
     # These fire only when on_key passed the event through to the framework,
@@ -4715,6 +4539,145 @@ class SubMenuScreen(ModalScreen[tuple]):
         elif key in ("escape", "q", "tab"):
             event.stop()
             self.dismiss(None)
+
+
+class ScopeDlgScreen(ModalScreen[bool]):
+    """Native modal scope dialog for Clean/Sync and New-worktree options (#88 F4).
+
+    Replaces the manual ``scopedlg`` overlay shared by ``cleanup`` (Clean/Sync)
+    and ``optmenu`` (New-worktree options). It renders the option toggles and a
+    ``[Confirm] [Cancel]`` button row, and -- for the Clean/Sync variant -- a
+    **read-only impact list** naming exactly which worktrees the current toggle
+    selection will act on (the count also rides the Confirm label). Returns
+    ``dismiss(True)`` on Confirm / ``dismiss(False)`` on Cancel or Esc; the option
+    toggles are mutated in place on the passed ``dlg`` dict, so the caller reads
+    the confirmed selection straight off it.
+
+    Two focus sections (toggles <-> buttons) mirror the former *non-live*
+    ``_key_scopedlg`` exactly. The old third section -- the live filter over the
+    main worktree list with per-row exclusion (#2179) -- is gone: scope now comes
+    from the main-list selection *before* the dialog opens, so the impact is shown
+    here (self-contained) rather than by dimming the list behind a docked panel.
+    """
+
+    CSS = """
+    ScopeDlgScreen { align: center middle; background: $background 55%; }
+    ScopeDlgScreen > #scope-dlg { width: auto; height: auto; max-height: 90%; }
+    """
+
+    def __init__(self, dlg, impact_fn=None) -> None:
+        super().__init__()
+        self._dlg = dlg
+        self._impact_fn = impact_fn      # (ids:set) -> list[(id4, machine_env, title)]
+        self.idx = 0                     # toggle cursor
+        self.section = dlg.get("section", 0)   # 0 = toggles, 1 = buttons
+        self.bidx = dlg.get("bidx", 0)         # 0 = Confirm, 1 = Cancel
+
+    def _union(self) -> set:
+        s: set = set()
+        for o in self._dlg["opts"]:
+            if o["on"]:
+                s |= set(o.get("ids", ()))
+        return s
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._panel(), id="scope-dlg")
+
+    def _panel(self) -> Panel:
+        dlg = self._dlg
+        opts = dlg["opts"]
+        verb = dlg.get("verb", "Clean up")
+        scope = ("{} {}".format(*dlg["target"]) if "target" in dlg
+                 else dlg.get("scope", ""))
+        body = Text()
+        body.append(f" {dlg.get('prompt', 'Select:')}\n\n", style=C_HEADER)
+        for i, o in enumerate(opts):
+            mark = " ▸ " if (self.section == 0 and self.idx == i) else "   "
+            box = "[x]" if o["on"] else "[ ]"
+            line = Text(mark)
+            line.append(box, style="green" if o["on"] else "grey50")
+            line.append(f" {o['label']:<14} ", style="white")
+            line.append(o.get("hint", ""), style=C_META)
+            if self.section == 0 and self.idx == i:
+                line.stylize(C_SEL)
+            body.append_text(line)
+            body.append("\n")
+        # Read-only impact list (Clean/Sync only): exactly what Confirm will act
+        # on, recomputed from the live toggle state.
+        if self._impact_fn is not None:
+            ids = self._union()
+            rows = self._impact_fn(ids)
+            body.append(f"\n {verb}s {len(rows)} worktree(s):\n",
+                        style=C_HEADER)
+            maxr = 10
+            for id4, machine_env, title in rows[:maxr]:
+                body.append(f"   {id4} · {machine_env} · {title}\n",
+                            style=C_FAINT)
+            if len(rows) > maxr:
+                body.append(f"   … +{len(rows) - maxr} more\n", style=C_MUTED)
+            if not rows:
+                body.append("   (nothing selected)\n", style=C_MUTED)
+        # Button row.
+        clabel = dlg.get("confirm", "Confirm")
+        if self._impact_fn is not None:
+            clabel = f"{clabel} ({len(self._union())})"
+        btns = Text("\n   ")
+        btns.append(f" {clabel} ",
+                    style=C_BTN_SEL if (self.section == 1 and self.bidx == 0)
+                    else C_BTN)
+        btns.append("   ")
+        btns.append(" Cancel ",
+                    style=C_BTN_SEL if (self.section == 1 and self.bidx == 1)
+                    else C_BTN)
+        body.append_text(btns)
+        body.append("\n\n Tab section · Space toggle · Enter confirm · Esc cancel",
+                    style=C_MUTED)
+        return Panel(body, title=f"{verb} · {scope}", border_style=C_BAND,
+                     width=68)
+
+    def _refresh(self) -> None:
+        self.query_one("#scope-dlg", Static).update(self._panel())
+
+    def on_key(self, event) -> None:
+        key = event.key
+        dlg = self._dlg
+        opts = dlg["opts"]
+        n = len(opts)
+        if key in ("escape", "q"):
+            event.stop()
+            self.dismiss(False)
+            return
+        if key in ("tab", "shift+tab"):
+            self.section = 1 - self.section
+            self.bidx = 0
+            self._refresh()
+            event.stop()
+            return
+        if self.section == 0:            # the option toggles
+            if key == "down":
+                self.idx = min(self.idx + 1, n - 1)
+                self._refresh()
+            elif key == "up":
+                self.idx = max(self.idx - 1, 0)
+                self._refresh()
+            elif key == "space":
+                opts[self.idx]["on"] = not opts[self.idx]["on"]
+                self._refresh()
+            elif key == "enter":
+                self.section = 1
+                self.bidx = 0
+                self._refresh()
+            event.stop()
+        else:                            # the [Confirm] [Cancel] button row
+            if key in ("left", "right"):
+                self.bidx = 1 - self.bidx
+                self._refresh()
+            elif key == "up":
+                self.section = 0
+                self._refresh()
+            elif key == "enter":
+                self.dismiss(self.bidx == 0)
+            event.stop()
 
 
 class CfgMenuScreen(ModalScreen[int]):
