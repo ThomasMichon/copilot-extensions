@@ -118,6 +118,20 @@ def _scope_dlg_open(scr):
     return _scope_dlg(scr) is not None
 
 
+def _progress_screen(scr):
+    """The F4 ProgressScreen instance on the app's screen stack, or None."""
+    from agent_worktrees.picker_tui.engine import ProgressScreen
+    for s in scr.app.screen_stack:
+        if isinstance(s, ProgressScreen):
+            return s
+    return None
+
+
+def _progress_open(scr):
+    """True when the F4 ProgressScreen (live maintenance/profiles run) is stacked."""
+    return _progress_screen(scr) is not None
+
+
 def _fixture_source():
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
     local = ("lambda-core", "Win")
@@ -336,6 +350,74 @@ def test_clean_modal_cancel_is_noop():
             await pilot.press("escape")
             await pilot.pause()
             assert not _scope_dlg_open(scr)
+            assert scr.progress is None
+
+    asyncio.run(run())
+
+
+def test_progress_screen_confirm_gate_cancel_via_keyboard():
+    """#88 F4: the maintenance progress run is a native ProgressScreen. A
+    beyond-clean (gated) run opens the modal in its confirm-gate state; Esc
+    through the real keyboard pipeline cancels it -- the screen dismisses and the
+    engine clears the run without touching anything."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False, mock_mode=True)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            scr._open_cleanup()                   # bulk -> unused/convo -> gated
+            await pilot.pause()
+            assert _scope_dlg(scr) is not None
+            await pilot.press("tab")              # section 0 -> Confirm button
+            await pilot.press("enter")            # confirm scope -> gated run
+            await pilot.pause()
+            assert not _scope_dlg_open(scr)
+            assert _progress_open(scr)            # native progress modal is up
+            assert scr.progress["armed"] is False  # confirm gate, not started
+            await pilot.press("escape")           # cancel the gate
+            await pilot.pause()
+            assert not _progress_open(scr)        # dismissed
+            assert scr.progress is None
+            assert "cancelled" in scr.debug
+
+    asyncio.run(run())
+
+
+def test_progress_screen_armed_run_advances_and_closes():
+    """#88 F4: an armed (clean-only) run opens the native ProgressScreen live,
+    advances the mock walker to done, and Enter through the real keyboard closes
+    it -- the screen dismisses and the engine clears the run."""
+    src = _maint_source()
+
+    async def run():
+        app = PickerApp(src, live=False, mock_mode=True)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            scr._open_cleanup(ids={"cl00"})       # clean bucket only -> armed
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            await pilot.press("tab")              # section 0 -> Confirm button
+            await pilot.press("enter")            # confirm scope -> armed run
+            await pilot.pause()
+            assert not _scope_dlg_open(scr)
+            assert _progress_open(scr)            # native progress modal is up
+            assert scr.progress["armed"] is True
+            # The screen's interval drives the mock walker; step it
+            # deterministically here so the test doesn't depend on wall-clock.
+            for _ in range(200):
+                if scr.progress["done"]:
+                    break
+                scr._advance_progress()
+            assert scr.progress["done"] is True
+            await pilot.press("enter")            # close the done run
+            await pilot.pause()
+            assert not _progress_open(scr)
             assert scr.progress is None
 
     asyncio.run(run())
@@ -2916,13 +2998,23 @@ def test_cleanup_extra_confirm_gate_and_real_executor(monkeypatch):
             assert scr.progress is not None
             assert scr.progress["armed"] is False   # gated
             assert scr.executor is None              # not started yet
-            # Confirm -> arm -> executor starts.
-            scr._key_progress("enter")
+            # The gate is a native ProgressScreen now (#88 F4): Enter through the
+            # real keyboard pipeline arms it and starts the executor, and the
+            # dialog stays up (working), not dismissed.
+            assert _progress_open(scr)
+            await pilot.press("enter")               # confirm gate -> arm
+            await pilot.pause()
             assert scr.progress["armed"] is True
             assert started.get("started") is True
+            assert _progress_open(scr)               # still up, now working
             scr._poll_executor()
             assert scr.progress["done"] is True
+            # Enter on the done run closes it: the screen dismisses and the
+            # engine clears the run.
+            await pilot.press("enter")
             await pilot.pause()
+            assert not _progress_open(scr)
+            assert scr.progress is None
 
     asyncio.run(run())
 
@@ -4099,10 +4191,16 @@ def test_overlay_registry_drives_dispatch_and_precedence():
             scr.msgview = None
 
             # (c) Precedence: with the first two overlays both set, the earlier
-            # one in registry order wins.
-            setattr(scr, attrs[0], {"x": 1})
-            setattr(scr, attrs[1], {"x": 1})
-            assert scr._active_overlay()[0] == attrs[0]
+            # one in registry order wins. As overlays migrate to native
+            # ModalScreens the registry shrinks; ``progress`` left in #88 F4, so
+            # only ``msgview`` remains and there is no longer a second manual
+            # overlay to order against. Keep the ordering proof exercised while
+            # ever there are two, and skip it cleanly once the table is down to
+            # one (the (b')/(b) checks above still prove per-overlay routing).
+            if len(attrs) >= 2:
+                setattr(scr, attrs[0], {"x": 1})
+                setattr(scr, attrs[1], {"x": 1})
+                assert scr._active_overlay()[0] == attrs[0]
 
             # Reset the fake overlay state so the app teardown tick doesn't read
             # a malformed overlay dict (e.g. progress without its "done" key).
