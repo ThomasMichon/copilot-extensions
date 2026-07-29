@@ -76,7 +76,12 @@ serving its own immutable files until it is cut over or retired, and two live
 versions are reconciled by drain-and-cutover + shared routing/port state rather
 than by racing to overwrite one install. This makes a concurrent-update
 corruption (two installers mutating one venv → duplicate/broken daemons)
-impossible by construction, and rollback a swap rather than a rebuild.
+impossible by construction, and rollback a swap rather than a rebuild. The
+immutable, versioned, junction-selected install is the service's **executable
+logic**; its **durable state** (databases, indexes, queues, anything the service
+must not lose) lives in a **separate location that a version swap never touches**,
+so cutting over or rolling back the runtime is safe by construction. Replacing a
+running version is governed by *zero-downtime-cutover* below.
 
 ### discoverable-local-endpoint
 A client reaches a service by **resolving the service's current endpoint from
@@ -170,6 +175,20 @@ committed config, no git-hook injection. At most it migrates machine-local confi
 schema and *warns* about a stale or deprecated repo convention it observes. Any
 repo-altering effect appears only after an explicit adopt / re-adopt.
 
+### zero-downtime-cutover
+Replacing a running service with a new version is **zero-downtime** for both the
+**requests** it is serving and the **scheduled or background work** it owns. A
+cutover **health-gates** the new version on a fresh endpoint, flips a
+client-followed **routing record atomically**, then **drains** the old version —
+letting in-flight requests finish and **handing off queued/scheduled work** to the
+new version rather than dropping it or running it twice — before the old version
+retires. The switch is **reversible up to a commit point**: roll back to the old
+version, or commit forward to the healthy new one if the old endpoint is already
+gone, rather than stranding clients. A version swap therefore never drops a
+request, double-runs a scheduled job, or opens a window with no live service.
+*How* the routing record and drain are implemented (a shared cutover primitive) is
+spec-level, not fixed here.
+
 ## Non-Goals / Boundaries
 
 - **No shared-infrastructure dependency.** The suite does **not** assume — and a
@@ -232,3 +251,16 @@ repo-altering effect appears only after an explicit adopt / re-adopt.
   lagging its installed version. Realized by the versioned-runtime primitive
   (`versioned_runtime.py`); tracked in dotfiles #581 (structural successor to the
   #533 incremental lag fixes, root-cause fix for #123).
+
+- **2026-07-29** — Added the **zero-downtime-cutover** behavior and sharpened
+  **immutable-versioned-runtime** to separate the immutable, junction-selected
+  *executable logic* from *durable state* that a version swap never touches.
+  Generalizes the service model so replacing a running version is zero-downtime
+  for both in-flight **requests** and the **scheduled/background work** a service
+  owns — health-gate the new version, flip a client-followed routing record
+  atomically, drain and hand off queued/scheduled work, then retire the old
+  version; reversible up to a commit point. Mined from an operator directive to
+  give service-bearing plugins ZDD/cutover for scheduled tasks and requests, with
+  durable data (e.g. a search index) living outside the swappable runtime.
+  Realized at intent level by the shared `zdd` cutover library (routing table +
+  `CutoverOrchestrator`).

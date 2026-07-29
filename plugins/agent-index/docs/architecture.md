@@ -22,6 +22,37 @@ The standing intent lives in `visions/plugins/agent-index/README.md` and honors
 endpoint, platform-native lifecycle, à-la-carte installability, and minimal
 network exposure.
 
+## Runtime vs. durable data (immutable, versioned + ZDD)
+
+The plugin follows the service model's **immutable-versioned-runtime** and
+**zero-downtime-cutover** behaviors:
+
+- **Executable logic** installs as an **immutable, versioned runtime** selected by
+  an atomic `current` junction swap (`scripts/versioned_runtime.py`). A version is
+  never mutated in place; a new version installs beside the old and is selected
+  atomically.
+- **Durable data** — the index/store, embeddings, and indexing work-state — lives
+  in a **separate durable location** (`~/.agent-index/data/`, outside the swapped
+  runtime) so a version cutover or rollback never touches it. It stays
+  rebuildable from source as the safety net.
+- **Zero-downtime cutover** — deploying a new version health-gates the new slot on
+  a fresh endpoint, flips the client-followed routing record atomically, drains
+  in-flight searches, and **hands off scheduled/queued indexing work** to the new
+  version before retiring the old one (reversible up to a commit point). Realized
+  with the shared **`zdd`** library (`zdd.routing` table + `zdd.cutover.CutoverOrchestrator`).
+  *(Phase 2 wires the drain/handoff of the indexing scheduler; Phase 1 ships the
+  versioned-runtime + rendezvous substrate.)*
+
+## Cross-host reach (SSH)
+
+The service is machine-local and opens no new inbound port. A client on **another
+host** reaches it over an opt-in **SSH port-forward** of the service's own local
+endpoint (service-transport rung 4) — the service's endpoint stays bound to
+loopback/rendezvous on its own host; only the SSH session crosses the boundary. A
+multi-machine deployment (e.g. a single GPU-backed indexer serving a fleet) is
+therefore a fan-in of SSH forwards to one host-resident service, never a fleet of
+network listeners.
+
 ## Later slices
 
 Phase 2 will introduce the indexing engine core, source connectors, durable work
