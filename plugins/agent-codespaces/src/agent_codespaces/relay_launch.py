@@ -12,6 +12,9 @@ stay in lockstep.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 # Static PATs a CodeSpace injects that must be neutralized so a dispatched agent
 # never relies on a stale/expired token instead of the credential relay.
 SCRUB_ENV_VARS: tuple[str, ...] = ("MS_ADO_PAT",)
@@ -84,7 +87,11 @@ def build_relay_launch_env(
     + ``-R`` follow the live relay rather than the statically declared config
     port (dotfiles #489/#540 pt3). When ``None`` (e.g. the standalone
     ``agent-codespaces`` path, which cannot see the daemon's process-local live
-    port) it falls back to the configured ``credentials.relay_port``.
+    port) it first tries the port the daemon **publishes** to its config dir
+    (``relay_state``'s cross-daemon rendezvous, discovered here without importing
+    ``agent_bridge``), so an ephemeral/dynamic bind is honored on this path too;
+    only if that is absent does it fall back to the configured
+    ``credentials.relay_port``.
     """
     from .config import load_merged_config
     from .relay_token import token_for
@@ -92,7 +99,34 @@ def build_relay_launch_env(
     if relay_port is not None:
         port = int(relay_port)
     else:
-        cfg = load_merged_config()
-        port = int(cfg.credentials.relay_port)
+        published = _published_live_relay_port()
+        if published is not None:
+            port = published
+        else:
+            cfg = load_merged_config()
+            port = int(cfg.credentials.relay_port)
     token = token_for(codespace_name)
     return build_relay_env(port, token, use_relay=True), port
+
+
+def _published_live_relay_port() -> int | None:
+    """Best-effort read of the live relay port the agent-bridge daemon publishes.
+
+    Mirrors agent-bridge ``relay_state``'s cross-daemon publish
+    (``<primary-config-dir>/relay-port``) **without importing ``agent_bridge``** --
+    the standalone agent-codespaces venv does not contain it. Honors
+    ``AGENT_BRIDGE_CONFIG_DIR`` (default ``~/.agent-bridge``) and resolves an
+    ``/elevated`` sub-daemon dir to its primary parent, so an ephemeral/dynamic
+    relay port is discovered even on the standalone path (#540 pt3). Returns
+    ``None`` when the file is absent/unparseable.
+    """
+    base = Path(
+        os.environ.get("AGENT_BRIDGE_CONFIG_DIR", "~/.agent-bridge")
+    ).expanduser()
+    if base.name == "elevated":
+        base = base.parent
+    try:
+        txt = (base / "relay-port").read_text(encoding="utf-8").strip()
+        return int(txt) if txt else None
+    except (OSError, ValueError):
+        return None

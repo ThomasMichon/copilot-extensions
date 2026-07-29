@@ -8,9 +8,6 @@ import os
 import socket
 import subprocess
 import sys
-import time
-
-import pytest
 
 from credential_relay.server import (
     CredentialRelayServer,
@@ -123,3 +120,27 @@ class TestReclaim:
         finally:
             holder.kill()
             holder.wait(timeout=5)
+
+    def test_start_binds_ephemeral_when_port_held_by_live_occupant(self):
+        # Hold the preferred port in THIS process so _reclaim_port refuses to
+        # evict it (never self-evicts). start() must fall back to an OS-assigned
+        # ephemeral port and record it on self.port, rather than raising (#540).
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(("127.0.0.1", 0))
+        s.listen(5)
+        port = s.getsockname()[1]
+        try:
+            server = CredentialRelayServer(port=port)
+
+            async def _run() -> tuple[bool, int]:
+                await server.start()  # must bind ephemeral, not raise
+                running = server.running
+                bound = server.port
+                await server.stop()
+                return running, bound
+
+            running, bound = asyncio.run(_run())
+            assert running is True
+            assert bound not in (0, port)  # fell back to a distinct ephemeral port
+        finally:
+            s.close()

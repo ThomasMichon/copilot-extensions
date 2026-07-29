@@ -262,6 +262,13 @@ class CredentialRelayServer:
         relay port, the first bind fails with "address already in use"; we evict
         the stale owner (#19) and retry once so the relay -- and therefore ADO
         auth over the tunnel -- comes up instead of being silently disabled.
+
+        If the preferred port is held by a *live* occupant that cannot be
+        reclaimed (a sibling/elevated daemon, or eviction failed), we fall back
+        to an OS-assigned **ephemeral** port and update ``self.port`` to it,
+        rather than raising (#540). Consumers discover the actually-bound port
+        via ``relay_state`` (which reads ``server.port`` after start), so auth
+        still works even when the declared port is occupied.
         """
         try:
             self._server = await asyncio.start_server(
@@ -272,14 +279,28 @@ class CredentialRelayServer:
         except OSError as exc:
             if not self.port or not _addr_in_use(exc):
                 raise
-            if not _reclaim_port(self.port):
-                raise
-            await asyncio.sleep(0.5)
-            self._server = await asyncio.start_server(
-                self._handle_client,
-                host="127.0.0.1",
-                port=self.port,
-            )
+            if _reclaim_port(self.port):
+                await asyncio.sleep(0.5)
+                self._server = await asyncio.start_server(
+                    self._handle_client,
+                    host="127.0.0.1",
+                    port=self.port,
+                )
+            else:
+                # A live occupant holds the preferred port and can't be evicted
+                # (e.g. a sibling/elevated daemon, or the current process). Bind
+                # an OS-assigned ephemeral port instead of failing, and record
+                # it so relay_state publishes the real port to consumers (#540).
+                log.warning(
+                    "Relay port %d held by a live occupant -- binding an "
+                    "ephemeral port instead", self.port,
+                )
+                self._server = await asyncio.start_server(
+                    self._handle_client,
+                    host="127.0.0.1",
+                    port=0,
+                )
+                self.port = self._server.sockets[0].getsockname()[1]
         self.stats.start_time = time.time()
         log.info(
             "Credential relay started on 127.0.0.1:%d (%d sources, %d allowed hosts)",
