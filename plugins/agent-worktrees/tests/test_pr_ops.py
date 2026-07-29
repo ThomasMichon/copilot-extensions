@@ -244,6 +244,66 @@ class TestCreatePRRefspec:
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert len(rec.prs) == 1
 
+    def test_reused_worktree_after_squash_merge_opens_clean_pr(self, pr_repo):
+        """#546: a reused worktree whose prior PR was **squash-merged** must
+        open a fresh PR without a spurious rebase conflict.
+
+        Reproduces the real failure: PR #1's single squashed commit lands on
+        origin/master as a NEW commit (a squash-merge), then new work is added
+        on the same worktree. create-pr must rebase-drop the already-merged
+        commit (by patch-id) and squash only the new work -- not fuse the two
+        into one patch that re-conflicts with master.
+        """
+        config, wid, wt_path, remote = pr_repo
+        config = self._refspec_config(config)
+        wt_branch = f"worktree/{wid}"
+
+        # PR #1: squashes work1+work2 into one commit on the PR head ref.
+        r1 = pr_ops.create_pr(wid, config, title="Add feature")
+        assert r1["success"], r1
+        pr1_head = _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path)
+
+        # Simulate GitHub's **squash-merge** of PR #1 onto master: apply the PR
+        # head's patch as a brand-new commit on master (new SHA, same patch).
+        anchor = config.repos["ext"].anchor
+        _git("fetch", "origin", cwd=Path(anchor))
+        _git("checkout", "master", cwd=Path(anchor))
+        _git("merge", "--squash", pr1_head, cwd=Path(anchor))
+        _git("commit", "-m", "Add feature (squash-merged) (#1)", cwd=Path(anchor))
+        _git("push", "origin", "master", cwd=Path(anchor))
+        merged_sha = _git("rev-parse", "origin/master", cwd=Path(anchor))
+        pr_ops.set_pr(wid, number=1, state="merged")
+
+        # New work for PR #2 on the SAME (reused) worktree branch: modify a file
+        # that PR #1 introduced (now already on master). The squash-first order
+        # fuses PR #1's create-a.txt with this modify-a.txt into one patch that
+        # re-adds a.txt over master's copy -> add/add conflict. Rebase-first
+        # drops PR #1's commit (patch-id) so only this modify applies, cleanly.
+        _git("fetch", "origin", cwd=wt_path)
+        _git("checkout", wt_branch, cwd=wt_path)
+        (wt_path / "a.txt").write_text("one\nmodified for pr2\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "new work for PR2", cwd=wt_path)
+
+        # With the squash-first order this returned an error ("Rebase onto
+        # origin/master hit conflicts"); rebase-first drops the merged commit.
+        r2 = pr_ops.create_pr(wid, config, title="Second feature")
+        assert r2["success"], r2
+        assert r2["branch"] == "pr/second-feature-aaaa"
+
+        # The new PR is based on the post-merge master and carries ONLY the new
+        # work -- exactly one commit ahead, touching only a.txt (PR #1's create
+        # of a.txt/b.txt is not re-introduced by it).
+        ahead = git_ops.get_commits_ahead(wt_branch, "origin/master", cwd=str(wt_path))
+        assert len(ahead) == 1, ahead
+        assert _git("merge-base", wt_branch, "origin/master", cwd=wt_path) == merged_sha
+        pr2_files = _git(
+            "diff", "--name-only", "origin/master", wt_branch, cwd=wt_path
+        ).split()
+        assert pr2_files == ["a.txt"], pr2_files
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert [p.state for p in rec.prs] == ["merged", "open"]
+
     def test_custom_head_pattern(self, pr_repo):
         config, wid, wt_path, _ = pr_repo
         config = self._refspec_config(config, head_pattern="submit/{slug}-{suffix}")
