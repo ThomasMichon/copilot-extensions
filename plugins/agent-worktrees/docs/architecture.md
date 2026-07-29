@@ -706,13 +706,20 @@ most self-contained sub-view (its confirm dialog was already a native
 `ProfConfirmScreen`), so it goes first. `PickerScreen.build_body`'s profiles branch
 now calls `self.profiles_view.build(add, width, sel)` on a `ProfilesView` component
 (instantiated in `__init__`) instead of the inline `_build_profiles` /
-`_build_profiles_transposed` (both deleted). This slice moves the *body rendering*
-behind the component boundary; the profiles *state* (`grid` / `pcol` / `targets` /
-`host_cols` / `applied`) and behaviour (toggle, Apply plumbing) still live on the
-engine and are read through the component's back-reference, to be pulled in by a
-follow-up slice (and a later slice makes `ProfilesView` a focusable Textual
-widget). Behaviour is unchanged -- the same VRows with the same `("PR", i)` /
-`("BTN", 0)` stops are emitted; a guard test (`test_profiles_view_component_renders_body`)
-asserts the component renders the body and the inline methods are gone.
+`_build_profiles_transposed` (both deleted). Slice 1 moved the two body-render
+*entry* methods behind the component boundary; **slice 2 moved every Profiles
+render *helper* too** -- column widths, the visible-column window
+(`_visible_pcols`), the host-header / target-label / grid-cell visuals
+(`_host_header_cell` / `_tlabel` / `_cell_visual`), the Apply/Reset button row, and
+the legend -- so the component now owns the Profiles pivot's **entire rendering**.
+The profiles *state* (`grid` / `pcol` / `targets` / `host_cols` / `applied` /
+`_prof_unavailable`) and *behaviour* (toggle, Apply plumbing) still live on the
+engine and are read through the component's back-reference, along with the
+genuinely shared helpers (`cell_locked`, `grid_dirty`, `pending_count`,
+`_btn_style`, `_hl`); those move in a follow-up slice (and a later slice makes
+`ProfilesView` a focusable Textual widget). Behaviour is unchanged -- the same
+VRows with the same `("PR", i)` / `("BTN", 0)` stops are emitted; a guard test
+(`test_profiles_view_component_renders_body`) asserts the component renders the
+body and that the render methods/helpers are gone from the engine.
 
 

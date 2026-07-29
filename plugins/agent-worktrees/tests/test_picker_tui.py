@@ -1854,7 +1854,7 @@ def test_profiles_unavailable_column_is_readonly():
             # Cells in the unavailable column render the "unknown" marker.
             ti = next(t for t in range(len(scr.targets))
                       if not scr.cell_locked(t, 1))
-            ch, _st = scr._cell_visual(ti, 1, scr.cell_locked(ti, 1))
+            ch, _st = scr.profiles_view._cell_visual(ti, 1, scr.cell_locked(ti, 1))
             assert ch == "?"
             # Toggling that column is a read-only no-op.
             scr.sel = ("PR", ti)
@@ -1891,10 +1891,15 @@ def test_profiles_view_component_renders_body():
             scr.htab = 2                          # Profiles pivot
             await pilot.pause()
 
-            # (a) The component exists; the inline render methods are gone.
+            # (a) The component exists; the inline render methods + helpers are
+            # gone from the engine and now live on the component (slices 1-2).
             assert isinstance(scr.profiles_view, ProfilesView)
             assert not hasattr(scr, "_build_profiles")
             assert not hasattr(scr, "_build_profiles_transposed")
+            assert not hasattr(scr, "_cell_visual")
+            assert not hasattr(scr, "_visible_pcols")
+            assert not hasattr(scr, "profile_col_widths")
+            assert hasattr(scr.profiles_view, "_cell_visual")
 
             # (b) build_body routes the Profiles body through the component,
             # which emits the target rows + the Apply button row.
