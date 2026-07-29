@@ -77,15 +77,26 @@ function Install-OpenSSHBinaries {
     Add-UserPath (Split-Path $sshd -Parent)
 }
 
+function Get-DevTunnelExe {
+    <#
+      Resolve the devtunnel CLI. dtssh does NOT bundle devtunnel next to
+      dtssh.exe (it downloads it to the WinGet package path), so never assume
+      it sits in the dtssh bin dir. Prefer a sibling devtunnel.exe if present,
+      else fall back to PATH. Returns $null if it cannot be found.
+    #>
+    param([string]$DtsshPath = $DtsshExe)
+    $sibling = Join-Path (Split-Path $DtsshPath -Parent) 'devtunnel.exe'
+    if (Test-Path $sibling) { return $sibling }
+    $cmd = Get-Command devtunnel -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+
 function Test-DevTunnelLogin {
     # dtssh has no `login --status` subcommand; query the bundled devtunnel CLI.
     param([Parameter(Mandatory)][string]$DtsshPath)
-    $devtunnel = Join-Path (Split-Path $DtsshPath -Parent) 'devtunnel.exe'
-    if (-not (Test-Path $devtunnel)) {
-        $cmd = Get-Command devtunnel -ErrorAction SilentlyContinue
-        if (-not $cmd) { return $false }
-        $devtunnel = $cmd.Source
-    }
+    $devtunnel = Get-DevTunnelExe -DtsshPath $DtsshPath
+    if (-not $devtunnel) { return $false }
     try {
         $json = & $devtunnel user show --json 2>$null | Out-String
         return ($json -match '"status"\s*:\s*"Logged in"')
@@ -207,8 +218,13 @@ switch ($Action) {
         if (Test-Path $rec) {
             $tid = (Get-Content $rec -Raw -ErrorAction SilentlyContinue).Trim()
             if ($tid) {
-                $show = & $DtsshExe.Replace('dtssh.exe', 'devtunnel.exe') show $tid 2>&1 | Out-String
-                if ($show -match 'Host connections\s*:\s*(\d+)') { Write-Host "tunnel ${tid}: $($Matches[1]) host connection(s)" } else { Write-Host "tunnel: $tid" }
+                $devtunnel = Get-DevTunnelExe
+                if ($devtunnel) {
+                    $show = & $devtunnel show $tid 2>&1 | Out-String
+                    if ($show -match 'Host connections\s*:\s*(\d+)') { Write-Host "tunnel ${tid}: $($Matches[1]) host connection(s)" } else { Write-Host "tunnel: $tid" }
+                } else {
+                    Write-Host "tunnel: $tid (devtunnel CLI not found; cannot report host connections)"
+                }
             }
         }
         if (Test-Path $StartupLnk) { Write-Host "startup shortcut: $StartupLnk" } else { Write-Warning 'startup shortcut missing' }
