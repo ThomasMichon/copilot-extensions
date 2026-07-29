@@ -149,6 +149,50 @@ class TestResolveBoundCopilots:
         monkeypatch.setattr(reclaim, "build_process_table", lambda: table)
         assert reclaim.resolve_bound_copilots() == []
 
+    def test_no_lock_dir_skips_yaml_read(self, monkeypatch, tmp_path):
+        # Hot-path guard: a historical session dir with no live lock must be
+        # skipped WITHOUT the expensive workspace.yaml read + worktree lookup.
+        d = tmp_path / "old-session"
+        d.mkdir()
+        (d / "workspace.yaml").write_text("cwd: /w/x\n", encoding="utf-8")
+        # no inuse.*.lock files at all
+        monkeypatch.setattr(reclaim.sessions, "_session_state_dir",
+                            lambda: tmp_path)
+        monkeypatch.setattr(reclaim.sessions, "_is_detached_session",
+                            lambda e: False)
+        monkeypatch.setattr(reclaim, "build_process_table", lambda: {})
+        calls = {"cwd": 0}
+        real = reclaim._session_cwd
+        monkeypatch.setattr(
+            reclaim, "_session_cwd",
+            lambda e: (calls.__setitem__("cwd", calls["cwd"] + 1), real(e))[1])
+        assert reclaim.resolve_bound_copilots() == []
+        assert calls["cwd"] == 0
+
+    def test_stale_dead_lock_skips_yaml_read(self, monkeypatch, tmp_path):
+        # A crashed session leaves a lock whose pid is dead -> still skipped
+        # before the yaml read (only *live* bound Copilots pay the full path).
+        d = tmp_path / "crashed"
+        d.mkdir()
+        (d / "workspace.yaml").write_text("cwd: /w/x\n", encoding="utf-8")
+        (d / "inuse.99999.lock").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(reclaim.sessions, "_session_state_dir",
+                            lambda: tmp_path)
+        monkeypatch.setattr(reclaim.sessions, "_is_process_alive",
+                            lambda p: False)
+        monkeypatch.setattr(reclaim.sessions, "_is_copilot_process",
+                            lambda p: True)
+        monkeypatch.setattr(reclaim.sessions, "_is_detached_session",
+                            lambda e: False)
+        monkeypatch.setattr(reclaim, "build_process_table", lambda: {})
+        calls = {"cwd": 0}
+        real = reclaim._session_cwd
+        monkeypatch.setattr(
+            reclaim, "_session_cwd",
+            lambda e: (calls.__setitem__("cwd", calls["cwd"] + 1), real(e))[1])
+        assert reclaim.resolve_bound_copilots() == []
+        assert calls["cwd"] == 0
+
 
 # ── reap_bound_copilots (termination boundary mocked) ──────────────────────
 class TestReapBoundCopilots:
