@@ -15,7 +15,17 @@ the check is a no-op (exit 0) -- so it is safe to ship in the public repo. On
 your own machine, populate either source and wire this up as a git ``pre-push``
 hook; it then blocks a push that would leak any of your identifiers.
 
-Run manually:  python tools/check-no-internal-identifiers.py
+Scope: by default the guard only scans the files your push actually **changes**
+(``git diff --name-only <base>...HEAD``, base ``origin/main`` -- override via
+``--base`` or ``COPILOT_EXTENSIONS_GUARD_BASE``). This keeps a pre-existing
+identifier in an *untouched* file from blocking every unrelated push, while
+still catching anything a push introduces. Pass ``--all`` to audit the whole
+tracked tree instead (useful for a one-off full sweep). If the base ref can't
+be resolved (no ``origin/main`` in a fresh clone), the guard falls back to a
+full-tree scan.
+
+Run manually:  python tools/check-no-internal-identifiers.py          # push diff
+               python tools/check-no-internal-identifiers.py --all    # whole tree
 Exit code 0 = clean (or nothing configured), 1 = a forbidden identifier was
 found (suitable for a pre-push hook).
 
@@ -24,6 +34,7 @@ The same two private sources drive the agent-codespaces scaffold guard
 """
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -89,7 +100,73 @@ def _tracked_files() -> list[str]:
     return [line for line in out.stdout.splitlines() if line]
 
 
-def main() -> int:
+DEFAULT_BASE = os.environ.get("COPILOT_EXTENSIONS_GUARD_BASE", "origin/main")
+
+
+def _ref_exists(ref: str) -> bool:
+    return (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", ref],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+        ).returncode
+        == 0
+    )
+
+
+def _changed_files(base: str) -> list[str] | None:
+    """Files this branch changed vs *base* (``git diff --name-only base...HEAD``).
+
+    Returns the changed paths, or ``None`` when *base* can't be resolved (e.g. a
+    fresh clone with no ``origin/main``) so the caller can fall back to a
+    full-tree scan.
+    """
+    if not _ref_exists(base):
+        return None
+    out = subprocess.run(
+        ["git", "diff", "--name-only", f"{base}...HEAD"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [line for line in out.stdout.splitlines() if line]
+
+
+def _files_to_scan(scan_all: bool, base: str) -> list[str]:
+    """Resolve the set of repo-relative files the guard should scan."""
+    if scan_all:
+        return _tracked_files()
+    changed = _changed_files(base)
+    if changed is None:
+        print(
+            f"base ref '{base}' not found -- scanning the whole tracked tree.",
+        )
+        return _tracked_files()
+    print(f"scanning {len(changed)} file(s) changed vs {base}.")
+    return changed
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Fail if a forbidden internal identifier appears in the "
+        "push diff (or the whole tree with --all).",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Scan every tracked file instead of just the push diff.",
+    )
+    parser.add_argument(
+        "--base",
+        default=DEFAULT_BASE,
+        metavar="REF",
+        help=f"Base ref for the push-diff scope (default {DEFAULT_BASE!r}; "
+        "override via COPILOT_EXTENSIONS_GUARD_BASE).",
+    )
+    args = parser.parse_args(argv)
+
     identifiers = _load_identifiers()
     if not identifiers:
         print(
@@ -100,14 +177,14 @@ def main() -> int:
         return 0
 
     violations: list[str] = []
-    for rel in _tracked_files():
+    for rel in _files_to_scan(args.all, args.base):
         if rel in SELF:
             continue
         path = REPO / rel
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
-            continue  # binary or unreadable -- skip
+            continue  # binary, deleted, or unreadable -- skip
         lower = text.lower()
         if not any(ident in lower for ident in identifiers
                    if not _allowed(ident, rel)):
@@ -123,7 +200,7 @@ def main() -> int:
         print("Internal-identifier guard FAILED -- remove these before pushing:")
         for v in violations:
             print(f"  {v}")
-        print(f"\n{len(violations)} occurrence(s) across the tree.")
+        print(f"\n{len(violations)} occurrence(s) in the scanned files.")
         return 1
 
     print(f"Internal-identifier guard OK ({len(identifiers)} identifier(s) checked).")
