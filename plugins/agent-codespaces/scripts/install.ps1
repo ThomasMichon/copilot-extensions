@@ -59,6 +59,68 @@ $RepoRoot        = (Resolve-Path (Join-Path $PluginDir '..\..')).Path
 
 $VenvDir         = Join-Path $InstallDir '.venv'
 $VenvPython      = Join-Path $VenvDir 'Scripts\python.exe'
+
+# === install-contract:v3 versioned-venv (agent-codespaces: .venv-as-junction) ===
+# Immutable per-version runtime (#581). Build the venv into versions/<version>
+# and make the historical `.venv` path a junction into it, so the binstubs and
+# deploy-manifest resolve through the link unchanged. agent-codespaces is a CLI
+# (its SSH ControlMasters are ssh.exe, not python -- they don't lock the venv), so
+# no process to drain. LinkDir/LinkPython is the stable `.venv` path;
+# VenvDir/VenvPython is the versions/<v> slot (build + health-gate). Legacy mode:
+# Link == Venv. Gated behind AGENT_CODESPACES_VERSIONED=1 (default off);
+# COPILOT_EXT_NO_VERSIONED=1 force-disables. scripts/versioned_runtime.py owns the
+# swap + migration + gc.
+$LinkDir          = $VenvDir
+$LinkPython       = $VenvPython
+$VersionedRuntime = $false
+$SrcVersion       = $null
+if (($env:AGENT_CODESPACES_VERSIONED -in @('1', 'true', 'yes', 'on')) -and
+    ($env:COPILOT_EXT_NO_VERSIONED -ne '1')) {
+    $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
+    if (Test-Path $pyprojForVer) {
+        $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
+        if ($vl) { $SrcVersion = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
+    }
+    if ($SrcVersion) {
+        $VersionedRuntime = $true
+        $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+        $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+    }
+}
+
+function Invoke-VersionedActivate {
+    <# CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
+       junction onto it (first migration moves a legacy real `.venv` aside), then
+       gc old slots keeping current + the previous-good. Returns $false on failure.
+       No-op ($true) in legacy mode. #>
+    if (-not $VersionedRuntime) { return $true }
+    $vr = Join-Path $ScriptDir 'versioned_runtime.py'
+    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
+    if (-not (Test-Path $py)) { return $true }
+    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    & $VenvPython -c 'import agent_codespaces' 2>$null
+    $slotOk = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prevEAP
+    if (-not $slotOk) {
+        Write-ServiceErr "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
+        return $false
+    }
+    $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
+    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --replace-nonlink 2>&1 |
+        ForEach-Object { Write-ServiceChanged $_ }
+    if ($LASTEXITCODE -ne 0) {
+        Write-ServiceErr "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
+        return $false
+    }
+    Write-ServiceOk "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
+    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids')
+    if ($prev) { $gcArgs += @('--keep', $prev) }
+    & $LinkPython @gcArgs 2>&1 | ForEach-Object { Write-ServiceChanged "gc: $_" }
+    $ErrorActionPreference = $prevEAP
+    return $true
+}
+# === end install-contract:v3 versioned-venv ===
 # Note: the Windows console-script exe (Scripts\agent-codespaces.exe) is
 # deliberately stripped post-install (SAC-blocked); all invocation goes through
 # "$VenvPython -m agent_codespaces". Do not reintroduce an exe-path dependency.
@@ -383,7 +445,7 @@ function Write-DeployManifest {
             branch  = $branch
             dirty   = $dirty
         }
-        venv           = ($VenvDir -replace '\\', '/')
+        venv           = ($LinkDir -replace '\\', '/')
         runtime        = 'python'
     }
     $tmp = "$manifestPath.tmp"
@@ -410,6 +472,9 @@ function Invoke-Install {
     # Deploy package
     if (-not (Deploy-Package)) { return }
 
+    # Versioned layout (#581): health-gate the slot + swap the `.venv` link.
+    if (-not (Invoke-VersionedActivate)) { return }
+
     # Deploy binstub
     Deploy-Binstub
 
@@ -431,7 +496,7 @@ function Invoke-Install {
     $ErrorActionPreference = 'Continue'
     $importOk = $false
     for ($i = 0; $i -lt 3; $i++) {
-        & $VenvPython -c 'import agent_codespaces' 2>$null
+        & $LinkPython -c 'import agent_codespaces' 2>$null
         if ($LASTEXITCODE -eq 0) { $importOk = $true; break }
         Start-Sleep -Seconds 1
     }
@@ -514,8 +579,8 @@ function Invoke-Status {
     }
 
     # Venv
-    if (Test-Path $VenvPython) {
-        Write-ServiceOk "Venv: $VenvDir"
+    if (Test-Path $LinkPython) {
+        Write-ServiceOk "Venv: $LinkDir"
     } else {
         Write-ServiceErr "Venv missing"
     }
@@ -523,7 +588,7 @@ function Invoke-Status {
     # Package (installed into the venv)
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & $VenvPython -c 'import agent_codespaces' 2>$null
+    & $LinkPython -c 'import agent_codespaces' 2>$null
     if ($LASTEXITCODE -eq 0) {
         Write-ServiceOk "Package: agent_codespaces importable in venv"
     } else {
@@ -629,6 +694,9 @@ function Invoke-Update {
 
     # Re-deploy package
     Deploy-Package | Out-Null
+
+    # Versioned layout (#581): health-gate the slot + swap the `.venv` link.
+    if (-not (Invoke-VersionedActivate)) { return }
 
     # Re-deploy binstub
     Deploy-Binstub
