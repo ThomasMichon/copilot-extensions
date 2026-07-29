@@ -4381,11 +4381,22 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
     if getattr(args, "mux_details", False):
         mux_map = sessions.mux_status_many([r.worktree_id for r in records])
     session_ctx = sessions.scan_sessions_fast(records)
+    # #93: the Picker's SSH consumer always requests --mux-details; derive the
+    # bare (un-muxed) orphan worktrees in the same enriched pass so a *remote*
+    # row carries the orphan marker. Gated on mux_details so a plain streaming
+    # list never pays for the machine-wide process scan.
+    bare_orphan_wts: set[str] | None = None
+    if getattr(args, "mux_details", False):
+        try:
+            bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
+        except Exception:
+            bare_orphan_wts = None
 
     def to_dict(rec, state_info):
         wt = _worktree_to_dict(
             rec, mux_info=mux_map.get(rec.worktree_id),
-            session_ctx=session_ctx, state_info=state_info)
+            session_ctx=session_ctx, state_info=state_info,
+            bare_orphan_wts=bare_orphan_wts)
         title = wt.get("title")
         if not title or title == "null":
             wt["title"] = session_ctx.latest_summary.get(
@@ -4456,11 +4467,22 @@ def cmd_list(args: argparse.Namespace) -> int:
         state_map: dict[str, git_ops.WorktreeStateInfo] = {}
         if getattr(args, "classify", False):
             state_map = _classify_records(records, session_ctx)
+        # #93: same enriched pass as the streaming path -- mark worktrees hosting
+        # a bare (un-muxed) bound Copilot so the Picker (local or over SSH) can
+        # annotate the row. Gated on --mux-details (the Picker's flag) so a plain
+        # list --json stays cheap.
+        bare_orphan_wts: set[str] | None = None
+        if getattr(args, "mux_details", False):
+            try:
+                bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
+            except Exception:
+                bare_orphan_wts = None
         worktrees = [
             _worktree_to_dict(
                 rec, mux_info=mux_map.get(rec.worktree_id),
                 session_ctx=session_ctx,
                 state_info=state_map.get(rec.worktree_id),
+                bare_orphan_wts=bare_orphan_wts,
             )
             for rec in records
         ]

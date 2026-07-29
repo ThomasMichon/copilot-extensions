@@ -106,6 +106,27 @@ def test_worktree_to_dict_title_none_without_summary():
 
 
 # ---------------------------------------------------------------------------
+# #93: bare (un-muxed) orphan flag exposure (list --json / streaming path -> the
+# Picker marks the row, including over SSH).
+# ---------------------------------------------------------------------------
+
+def test_worktree_to_dict_flags_bare_orphan_when_in_set():
+    rec = _record(worktree_id="wtA", worktree_path="/w/wtA")
+    d = m._worktree_to_dict(rec, bare_orphan_wts={"wtA"})
+    assert d.get("session_bare_orphan") is True
+
+
+def test_worktree_to_dict_omits_bare_orphan_when_not_orphan():
+    rec = _record(worktree_id="wtA", worktree_path="/w/wtA")
+    # Lean dict: the field is absent (not False) when the worktree is not an
+    # orphan, so a stale remote/list consumer sees nothing new.
+    assert "session_bare_orphan" not in m._worktree_to_dict(
+        rec, bare_orphan_wts={"other"})
+    assert "session_bare_orphan" not in m._worktree_to_dict(
+        rec, bare_orphan_wts=None)
+
+
+# ---------------------------------------------------------------------------
 # status-updater title persistence: the daemon that already resolves the
 # title each tick lands it in rec.title (the Picker's slot).
 # ---------------------------------------------------------------------------
