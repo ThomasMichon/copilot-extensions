@@ -49,12 +49,12 @@ ENV_FILE="$INSTALL_DIR/service.env"
 # === install-contract:v3 versioned-venv (agent-index: .venv-as-symlink) ===
 # Build each version into versions/<version> and make the historical `.venv`
 # path a symlink into the active slot. Disabled by default until callers opt in
-# with AGENT_INDEX_VERSIONED=1; COPILOT_EXT_NO_VERSIONED=1 force-disables.
+# by default (set AGENT_INDEX_VERSIONED=0 or COPILOT_EXT_NO_VERSIONED=1 to opt out); COPILOT_EXT_NO_VERSIONED=1 force-disables.
 LINK_DIR="$VENV_DIR"
 LINK_PYTHON="$VENV_PYTHON"
 VERSIONED_RUNTIME=0
 SRC_VERSION=""
-if [[ "${AGENT_INDEX_VERSIONED:-}" =~ ^(1|true|yes|on)$ && "${COPILOT_EXT_NO_VERSIONED:-}" != "1" ]]; then
+if [[ "${COPILOT_EXT_NO_VERSIONED:-}" != "1" && ! "${AGENT_INDEX_VERSIONED:-}" =~ ^(0|false|no|off)$ ]]; then
     if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
         SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
     fi

@@ -96,15 +96,14 @@ if ($env:OS -eq 'Windows_NT') {
 # $VenvDir / $VenvPython   -> the build+health-gate target (the versions/<v> slot).
 #
 # In legacy mode Link == Venv, so every reference is byte-for-byte the old
-# behavior. Gated behind AGENT_BRIDGE_VERSIONED=1 (default off) until validated on
-# an idle box; COPILOT_EXT_NO_VERSIONED=1 force-disables. The stdlib-only
+# behavior. Gated behind AGENT_BRIDGE_VERSIONED (default ON); COPILOT_EXT_NO_VERSIONED=1 force-disables. The stdlib-only
 # scripts/versioned_runtime.py primitive owns the swap + legacy migration + gc.
 $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false
 $SrcVersion       = $null
-$vrGateOn = ($env:AGENT_BRIDGE_VERSIONED -in @('1', 'true', 'yes', 'on')) -and
-            ($env:COPILOT_EXT_NO_VERSIONED -ne '1')
+$vrGateOn = ($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
+            ($env:AGENT_BRIDGE_VERSIONED -notin @('0', 'false', 'no', 'off'))
 if ($vrGateOn) {
     $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyprojForVer) {

@@ -140,16 +140,21 @@ binstub  ~/.local/bin/<name>.ps1 (+ .cmd fallback)  →  signed venv python -m
 write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 ```
 
-> **Immutable-versioned target (dotfiles #581, rolling out).** The single
-> `~/.<runtime>/.venv` above is evolving into an **immutable, versioned** layout:
-> each version is built into `~/.<runtime>/versions/<version>/` and the runtime
-> path is a `current` junction (Windows) / symlink (POSIX) into the active one, so
-> `update` builds a new version dir and **atomically swaps** `current` instead of
-> mutating a live venv (binding invariant *Runtime installs are immutable and
-> versioned* — see [`patterns/README.md`](patterns/README.md)). The venv is still
-> `uv pip install`ed exactly as below; only *where* it lives and *how* it is
-> activated change. The `versioned_runtime.py` primitive owns the layout; the
-> per-plugin installer points its venv/binstub/manifest at the slot it returns.
+> **Immutable-versioned layout (dotfiles #581 — the default; enforced).** The
+> single `~/.<runtime>/.venv` above is an **immutable, versioned** layout: each
+> version is built into `~/.<runtime>/versions/<version>/` and the runtime path is
+> a `.venv`/`venv`/`current` junction (Windows) / symlink (POSIX) into the active
+> one, so `update` builds a new version dir and **atomically swaps** the link
+> instead of mutating a live venv (binding invariant *Runtime installs are
+> immutable and versioned* — see [`patterns/README.md`](patterns/README.md)). This
+> is the **default** for every Python runtime plugin (opt out per-plugin with
+> `AGENT_<NAME>_VERSIONED=0`, or globally with `COPILOT_EXT_NO_VERSIONED=1`, which
+> falls back to a plain in-place venv). `tools/check-install-contract.py` (run in
+> CI) **enforces** it: every runtime ships the byte-identical
+> `versioned_runtime.py` primitive and wires the `install-contract:v3
+> versioned-venv` block. The venv is still `uv pip install`ed exactly as below;
+> only *where* it lives and *how* it is activated change. The per-plugin installer
+> points its venv/binstub/manifest at the slot the primitive returns.
 
 ### Hard rules
 

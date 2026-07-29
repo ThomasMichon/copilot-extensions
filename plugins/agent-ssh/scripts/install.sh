@@ -35,13 +35,13 @@ MANIFEST_PATH="$INSTALL_DIR/deploy-manifest.json"
 # Immutable per-version runtime (#581): build into versions/<version> and make the
 # `.venv` path a symlink into it, so the binstub + manifest resolve through the
 # link. CLI (no daemon). LINK_DIR = stable `.venv`; VENV_DIR = the versions/<v>
-# slot. Legacy mode: LINK_DIR == VENV_DIR. Gated behind AGENT_SSH_VERSIONED=1
-# (default off); scripts/versioned_runtime.py owns the swap + migration + gc.
+# slot. Legacy mode: LINK_DIR == VENV_DIR. Gated behind AGENT_SSH_VERSIONED
+# (default ON); scripts/versioned_runtime.py owns the swap + migration + gc.
 LINK_DIR="$VENV_DIR"
 LINK_PYTHON="$VENV_PYTHON"
 VERSIONED_RUNTIME=0
 SRC_VERSION=""
-if [[ "${AGENT_SSH_VERSIONED:-}" =~ ^(1|true|yes|on)$ && "${COPILOT_EXT_NO_VERSIONED:-}" != "1" ]]; then
+if [[ "${COPILOT_EXT_NO_VERSIONED:-}" != "1" && ! "${AGENT_SSH_VERSIONED:-}" =~ ^(0|false|no|off)$ ]]; then
     if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
         SRC_VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" | head -n1)"
     fi

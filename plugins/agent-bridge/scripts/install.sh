@@ -66,12 +66,12 @@ SYSTEMD_UNIT="agent-bridge.service"
 # `venv` path (runtime-facing, never a versions/<v> absolute a `gc` could
 # remove); VENV_DIR is redirected to the versions/<v> slot (build + health-gate).
 # In legacy mode LINK_DIR == VENV_DIR (byte-for-byte the old behavior). Gated
-# behind AGENT_BRIDGE_VERSIONED=1 (default off) until validated; the stdlib-only
+# behind AGENT_BRIDGE_VERSIONED=0 (default ON) until validated; the stdlib-only
 # scripts/versioned_runtime.py owns the swap + legacy migration + gc.
 LINK_DIR="$VENV_DIR"
 VERSIONED_RUNTIME=0
 SRC_VERSION=""
-if [[ "${AGENT_BRIDGE_VERSIONED:-}" =~ ^(1|true|yes|on)$ && "${COPILOT_EXT_NO_VERSIONED:-}" != "1" ]]; then
+if [[ "${COPILOT_EXT_NO_VERSIONED:-}" != "1" && ! "${AGENT_BRIDGE_VERSIONED:-}" =~ ^(0|false|no|off)$ ]]; then
     if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
         SRC_VERSION="$(grep -m1 '^version' "$PLUGIN_DIR/pyproject.toml" | sed 's/.*"\(.*\)".*/\1/')"
     fi

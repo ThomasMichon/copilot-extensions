@@ -99,7 +99,11 @@ core of the principles above; a reviewer checks a change against these.
   not a rebuild. Concurrent live versions are reconciled by drain-and-cutover +
   shared routing/port state, never by racing to overwrite one install — so a
   concurrent-update corruption (duplicate/broken daemons) cannot happen by
-  construction. Realized by the versioned-runtime primitive (`versioned_runtime.py`).
+  construction. Realized by the versioned-runtime primitive (`versioned_runtime.py`),
+  it is the **default** for every Python runtime and **enforced** by
+  `tools/check-install-contract.py` in CI (a runtime that skips the layout fails);
+  opt out per-plugin with `AGENT_<NAME>_VERSIONED=0` or globally with
+  `COPILOT_EXT_NO_VERSIONED=1`.
   (Serves *Vision plugin-services §Behaviors/immutable-versioned-runtime*; tracked
   in dotfiles #581.)
 - **A version bump ships the change.** Every plugin change bumps its version in the

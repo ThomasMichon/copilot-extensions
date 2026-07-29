@@ -67,15 +67,15 @@ $VenvPython      = Join-Path $VenvDir 'Scripts\python.exe'
 # (its SSH ControlMasters are ssh.exe, not python -- they don't lock the venv), so
 # no process to drain. LinkDir/LinkPython is the stable `.venv` path;
 # VenvDir/VenvPython is the versions/<v> slot (build + health-gate). Legacy mode:
-# Link == Venv. Gated behind AGENT_CODESPACES_VERSIONED=1 (default off);
+# Link == Venv. Gated behind AGENT_CODESPACES_VERSIONED=0 (default ON);
 # COPILOT_EXT_NO_VERSIONED=1 force-disables. scripts/versioned_runtime.py owns the
 # swap + migration + gc.
 $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false
 $SrcVersion       = $null
-if (($env:AGENT_CODESPACES_VERSIONED -in @('1', 'true', 'yes', 'on')) -and
-    ($env:COPILOT_EXT_NO_VERSIONED -ne '1')) {
+if (($env:COPILOT_EXT_NO_VERSIONED -ne '1') -and
+    ($env:AGENT_CODESPACES_VERSIONED -notin @('0', 'false', 'no', 'off'))) {
     $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyprojForVer) {
         $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
