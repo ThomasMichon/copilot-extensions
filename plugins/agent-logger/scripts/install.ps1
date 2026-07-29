@@ -58,6 +58,73 @@ $BinstubCmd = Join-Path $LocalBin 'session-sync.cmd'
 # (SAC/CodeIntegrity-3077) and never replaces.
 $BinstubNames = @('session-sync', 'agent-logger', 'collate-session', 'read-session-digest', 'prepare-session-log', 'ramp-up-session')
 
+# === install-contract:v3 versioned-venv (agent-logger: .venv-as-junction) ===
+# Immutable per-version runtime (#581). Build the venv into versions/<version> and
+# make the historical `.venv` path a junction into it, so the binstubs and the
+# scheduled sync task (which launches the windowless pythonw.exe) resolve through
+# the link unchanged. LinkDir/LinkPython/LinkPythonw are the stable `.venv` paths;
+# VenvDir/VenvPython(w) are the versions/<v> slot (build + health-gate). Legacy
+# mode: Link == Venv. Gated behind AGENT_LOGGER_VERSIONED=1 (default off);
+# COPILOT_EXT_NO_VERSIONED=1 force-disables. scripts/versioned_runtime.py owns the
+# swap + migration + gc.
+$LinkDir          = $VenvDir
+$LinkPython       = $VenvPython
+$LinkPythonw      = $VenvPythonw
+$VersionedRuntime = $false
+$SrcVersion       = $null
+if (($env:AGENT_LOGGER_VERSIONED -in @('1', 'true', 'yes', 'on')) -and
+    ($env:COPILOT_EXT_NO_VERSIONED -ne '1')) {
+    $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
+    if (Test-Path $pyprojForVer) {
+        $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
+        if ($vl) { $SrcVersion = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
+    }
+    if ($SrcVersion) {
+        $VersionedRuntime = $true
+        $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+        $VenvPython  = Join-Path $VenvDir 'Scripts\python.exe'
+        $VenvPythonw = Join-Path $VenvDir 'Scripts\pythonw.exe'
+    }
+}
+
+function Invoke-VersionedActivate {
+    <# Health-gate the freshly-built slot, swap the stable `.venv` junction onto it,
+       then gc old slots keeping current + previous-good. First migration: the
+       periodic sync task's pythonw may briefly hold a legacy real `.venv`, so stop
+       the task before the rename-aside (best-effort). Returns $false on failure.
+       No-op ($true) in legacy mode. #>
+    if (-not $VersionedRuntime) { return $true }
+    if ((Test-Path $LinkDir) -and -not ((Get-Item $LinkDir -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null } catch {}
+    }
+    $vr = Join-Path $ScriptDir 'versioned_runtime.py'
+    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
+    if (-not (Test-Path $py)) { return $true }
+    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    & $VenvPython -c 'import agent_logger' 2>$null
+    $slotOk = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prevEAP
+    if (-not $slotOk) {
+        Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
+        return $false
+    }
+    $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
+    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --replace-nonlink 2>&1 |
+        ForEach-Object { Write-Step $_ }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
+        return $false
+    }
+    Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
+    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids')
+    if ($prev) { $gcArgs += @('--keep', $prev) }
+    & $LinkPython @gcArgs 2>&1 | ForEach-Object { Write-Step "gc: $_" }
+    $ErrorActionPreference = $prevEAP
+    return $true
+}
+# === end install-contract:v3 versioned-venv ===
+
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
 function Remove-ConsoleTrampolines {
     <# Strip the uv-regenerated Scripts\<name>.exe console-script trampolines from
@@ -248,7 +315,7 @@ function Write-DeployManifestFor {
 
 function Write-DeployManifest {
     Write-DeployManifestFor -Service 'agent-logger' -Plugin 'agent-logger' `
-        -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $VenvDir
+        -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir
 }
 
 function Write-Binstubs {
@@ -334,9 +401,14 @@ function Install-Package {
     Remove-ConsoleTrampolines -VenvDir $VenvDir
     Remove-LoggerTrampolines -VenvDir $VenvDir
 
+    # Versioned layout (#581): health-gate the slot + swap the `.venv` junction.
+    # Everything below (binstubs, task, manifest) resolves through the link.
+    if (-not (Invoke-VersionedActivate)) { exit 1 }
+
     # Binstubs: .ps1 primary + .cmd fallback that invoke `python -m`
-    # (never the SAC-blocked console-script trampolines).
-    Write-Binstubs -PythonExe $VenvPython
+    # (never the SAC-blocked console-script trampolines). Point at the stable
+    # `.venv` link ($LinkPython), never a versions/<v> absolute a `gc` could remove.
+    Write-Binstubs -PythonExe $LinkPython
 
     # Machine-local config schema migration (idempotent + atomic). Non-fatal.
     try {
@@ -352,8 +424,10 @@ function Install-Package {
 
 function Register-SyncTask {
     # Prefer the windowless host so the task never flashes a console; fall back
-    # to console python.exe only if pythonw.exe is somehow absent.
-    $runHost = if (Test-Path $VenvPythonw) { $VenvPythonw } else { $VenvPython }
+    # to console python.exe only if pythonw.exe is somehow absent. Resolve through
+    # the stable `.venv` link ($LinkPythonw), never a versions/<v> absolute a `gc`
+    # could remove.
+    $runHost = if (Test-Path $LinkPythonw) { $LinkPythonw } else { $LinkPython }
     $action = New-ScheduledTaskAction -Execute $runHost `
         -Argument '-m agent_logger.sync.engine run --prune'
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(5) `
@@ -408,9 +482,9 @@ switch ($Action) {
         Write-Changed "binstubs removed from $LocalBin"
     }
     'status' {
-        if (Test-Path $VenvPython) {
-            Write-Ok ("installed: " + (& $VenvPython -m agent_logger version))
-            & $VenvPython -m agent_logger.sync.engine status
+        if (Test-Path $LinkPython) {
+            Write-Ok ("installed: " + (& $LinkPython -m agent_logger version))
+            & $LinkPython -m agent_logger.sync.engine status
         } else {
             Write-Warn2 "not installed (run: install.ps1 install)"
         }
