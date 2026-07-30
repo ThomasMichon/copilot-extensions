@@ -573,6 +573,21 @@ class TestProviderRegistration:
         assert provider.name == "codespaces"
         assert len(provider.agents) == 1
 
+    def test_register_provider_records_protocol_version(self):
+        # dotfiles #632: the provider's declared HTTP protocol version is stored
+        # for skew-aware capability gating and surfaced via list_providers.
+        resolver = _make_resolver_with_agents()
+        resolver.register_provider("codespaces", {}, ttl=300, protocol_version=3)
+        assert resolver._providers["codespaces"].protocol_version == 3
+        assert resolver.list_providers()[0]["protocol_version"] == 3
+
+    def test_register_provider_protocol_version_defaults_none(self):
+        # A provider predating negotiation omits it -> recorded as unversioned.
+        resolver = _make_resolver_with_agents()
+        resolver.register_provider("codespaces", {}, ttl=300)
+        assert resolver._providers["codespaces"].protocol_version is None
+        assert resolver.list_providers()[0]["protocol_version"] is None
+
     def test_unregister_provider(self):
         resolver = _make_resolver_with_agents()
         resolver.register_provider("codespaces", {}, ttl=300)

@@ -146,6 +146,11 @@ class AgentProvider:
     agents: dict[str, AgentConfig] = field(default_factory=dict)
     registered_at: float = 0.0  # time.monotonic()
     ttl: float = 300.0  # seconds before agents expire (0 = no expiry)
+    # The provider's declared HTTP wire-contract protocol version (dotfiles
+    # #632), or None when the provider predates protocol negotiation. Recorded
+    # so a skewed provider (newer/older than the bridge) can be gated by
+    # capability rather than assumed to match.
+    protocol_version: int | None = None
 
 
 @dataclass
@@ -1169,23 +1174,26 @@ class AgentResolver:
         name: str,
         agents: dict[str, AgentConfig],
         ttl: float = 300.0,
+        protocol_version: int | None = None,
     ) -> AgentProvider:
         """Register or refresh an agent provider.
 
         Provider agents are merged into the resolver with lowest
         precedence -- static and auto-discovered agents always win
-        on name conflicts.
+        on name conflicts. ``protocol_version`` records the provider's declared
+        HTTP wire-contract version for skew-aware capability gating (#632).
         """
         provider = AgentProvider(
             name=name,
             agents=agents,
             registered_at=time.monotonic(),
             ttl=ttl,
+            protocol_version=protocol_version,
         )
         self._providers[name] = provider
         log.info(
-            "Registered provider '%s' with %d agents (ttl=%.0fs)",
-            name, len(agents), ttl,
+            "Registered provider '%s' with %d agents (ttl=%.0fs, protocol=%s)",
+            name, len(agents), ttl, protocol_version,
         )
         return provider
 
@@ -1246,6 +1254,7 @@ class AgentResolver:
                 "ttl": provider.ttl,
                 "age": time.monotonic() - provider.registered_at,
                 "expired": expired,
+                "protocol_version": provider.protocol_version,
             })
         return result
 
