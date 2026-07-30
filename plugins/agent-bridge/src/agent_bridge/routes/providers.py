@@ -101,10 +101,14 @@ async def register_provider(
 
     resolver = getattr(request.app.state, "resolver", None)
     if not resolver:
-        raise HTTPException(
-            status_code=503,
-            detail="Resolver not initialized -- no topology loaded",
-        )
+        # A daemon with no static topology (empty machines.yaml/projects) still
+        # accepts DYNAMIC provider registrations -- that is the whole point of a
+        # provider. build_resolver() returns None when nothing was derived, so
+        # lazily stand up an empty resolver to hold the registration (#668).
+        from ..agent_registry import AgentResolver
+
+        resolver = AgentResolver({}, {})
+        request.app.state.resolver = resolver
 
     from ..agent_registry import AgentConfig
 

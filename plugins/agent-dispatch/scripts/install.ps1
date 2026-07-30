@@ -1296,78 +1296,23 @@ function Test-Elevated {
 
 # -- Coordinator firewall (Windows, NAT mode only) --------------------------
 
-function Add-CoordinatorFirewallRule {
-    # In NAT mode the coordinator binds the vEthernet(WSL) IP, so inbound WSL
-    # traffic arrives on the vEthernet(WSL) interface. Add an inbound allow rule
-    # SCOPED to that interface (never profile-wide, never the LAN) so a WSL client
-    # can reach the coordinator while the LAN stays isolated. Mirrored mode needs
-    # no rule (shared loopback). Idempotent; needs elevation -- degrades to a
-    # logged SKIP with the one-time command when not admin.
+function Remove-CoordinatorFirewallRule {
+    # #640: agent-dispatch exposes NO firewall ports. Machines reach a remote
+    # coordinator over SSH or a central tunnel-broker, and the coordinator binds
+    # loopback; even the local WSL guest reaches the host over loopback/SSH. So no
+    # inbound rule is ever added. Proactively sweep any rule a prior version left
+    # (idempotent; needs elevation to remove -- degrades to a logged skip).
     if ($env:OS -ne 'Windows_NT') { return }
-    if (-not (Test-Path $VenvPython)) { return }
-
-    # Determine the WSL networking mode from the single source of truth (the
-    # Python detector). Only NAT needs a firewall rule.
-    $mode = ''
-    try {
-        $mode = (& $VenvPython -c "from agent_dispatch.netinfo import get_wsl_networking_mode; print(get_wsl_networking_mode())" 2>$null).Trim()
-    } catch { $mode = '' }
-    if ($mode -ne 'nat') {
-        Write-Skip "Coordinator firewall rule not needed (WSL networking mode: $(if ($mode) { $mode } else { 'unknown' }); rule is NAT-only)"
-        return
-    }
-
+    if (-not (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue)) { return }
     $ruleName = 'agent-dispatch coordinator (WSL)'
-
-    if (-not (Get-Command New-NetFirewallRule -ErrorAction SilentlyContinue)) {
-        Write-Skip 'NetSecurity module unavailable -- cannot add coordinator firewall rule'
-        return
-    }
-
-    # Resolve the vEthernet(WSL) interface alias (exact, else the (WSL*) match).
-    $alias = $null
-    try {
-        $ipObj = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-            Where-Object { $_.InterfaceAlias -like 'vEthernet (WSL*' } |
-            Select-Object -First 1
-        if ($ipObj) { $alias = $ipObj.InterfaceAlias }
-    } catch { $alias = $null }
-    if (-not $alias) {
-        Write-Skip 'Coordinator firewall rule skipped -- no vEthernet(WSL) interface found (WSL networking not up?)'
-        return
-    }
-
-    # Stage C/D: the coordinator binds a DYNAMIC (OS-assigned) port, so the rule is
-    # PROGRAM-scoped (the venv python), not port-scoped -- a fixed -LocalPort would
-    # miss the dynamic port (#3499). Interface + program scoped keeps it WSL-only.
     $existing = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
-    if ($existing) {
-        $appFilter = $existing | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue
-        if ($appFilter -and $appFilter.Program -and ($appFilter.Program -ieq $VenvPython)) {
-            Write-Skip "Coordinator firewall rule already present + program-scoped ('$ruleName')"
-            return
-        }
-        # Legacy port-pinned rule -- migrate it to program-scoped (#3499).
-        if (-not (Test-Elevated)) {
-            Write-Skip "Coordinator firewall rule needs migration to program-scoped (#3499) -- needs elevation"
-            return
-        }
-        $existing | Remove-NetFirewallRule -ErrorAction SilentlyContinue
-        Write-Step "Removed legacy port-pinned coordinator firewall rule (migrating to program-scoped, #3499)"
-    }
+    if (-not $existing) { return }
     if (-not (Test-Elevated)) {
-        Write-Skip "Coordinator firewall rule not added -- needs elevation (run once, elevated: New-NetFirewallRule -DisplayName '$ruleName' -Direction Inbound -Action Allow -Program '$VenvPython' -InterfaceAlias '$alias')"
+        Write-Skip "Legacy coordinator firewall rule present -- needs elevation to remove (agent-dispatch no longer uses firewall ports; #640)"
         return
     }
-    try {
-        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow `
-            -Program $VenvPython -InterfaceAlias $alias -Profile Any `
-            -Description 'agent-dispatch coordinator -- WSL-only, interface + program scoped (issues #2818, #3499)' `
-            -ErrorAction Stop | Out-Null
-        Write-Ok "Coordinator firewall rule added ('$ruleName' on '$alias', program-scoped, WSL-only)"
-    } catch {
-        Write-Warn "Could not add coordinator firewall rule: $_"
-    }
+    $existing | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    Write-Step "Removed legacy coordinator firewall rule (agent-dispatch uses no exposed ports; #640)"
 }
 
 # -- Actions ----------------------------------------------------------------
@@ -1376,7 +1321,7 @@ function Invoke-Install {
     Write-Host ''; Write-Host '=== agent-dispatch install ===' -ForegroundColor Cyan; Write-Host ''
     Install-Runtime
     Install-CoordinatorTask
-    if (-not $NoService) { Add-CoordinatorFirewallRule }
+    Remove-CoordinatorFirewallRule
     Install-SupervisorTask
     if (-not $NoService) { Confirm-CoordinatorRunning }
     Write-Host ''; Write-Host '=== agent-dispatch install complete ===' -ForegroundColor Cyan
@@ -1404,7 +1349,7 @@ function Invoke-Update {
         Write-Step "Stopped $stoppedSup stale supervisor process(es) before restart"
     }
     Install-CoordinatorTask
-    if (-not $NoService) { Add-CoordinatorFirewallRule }
+    Remove-CoordinatorFirewallRule
     Install-SupervisorTask
     if (-not $NoService) { Confirm-CoordinatorRunning }
     Write-Host ''; Write-Host '=== agent-dispatch update complete ===' -ForegroundColor Cyan
