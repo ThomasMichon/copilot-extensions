@@ -73,6 +73,17 @@ class RegisterProviderRequest(BaseModel):
         ge=0,
         le=86400,
     )
+    protocol_version: int | None = Field(
+        None,
+        description=(
+            "The provider's HTTP wire-contract protocol version (dotfiles "
+            "#632). Optional: a provider predating protocol negotiation omits "
+            "it and is recorded as unversioned. The bridge echoes its own "
+            "protocol_version + min_protocol_version in the response so the two "
+            "can negotiate capability across version skew instead of assuming a "
+            "matched build."
+        ),
+    )
 
 
 @router.post("/api/v1/providers/{provider_name}")
@@ -111,13 +122,21 @@ async def register_provider(
 
     provider = resolver.register_provider(
         provider_name, agents, ttl=body.ttl,
+        protocol_version=body.protocol_version,
     )
+
+    # Advertise the bridge's own HTTP wire-contract version + supported range so
+    # the provider learns which capabilities this daemon speaks (dotfiles #632).
+    # Additive: a provider predating these fields ignores them.
+    from ..protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
 
     return {
         "status": "registered",
         "provider": provider_name,
         "agents": len(provider.agents),
         "ttl": provider.ttl,
+        "protocol_version": HTTP_PROTOCOL_VERSION,
+        "min_protocol_version": HTTP_PROTOCOL_MIN_SUPPORTED,
     }
 
 
