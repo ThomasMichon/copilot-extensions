@@ -321,7 +321,10 @@ if ($env:OS -eq 'Windows_NT') {
     $ps1Path = Join-Path $LocalBin "$stubName.ps1"
     $ps1Content = @'
 $env:PYTHONUTF8 = '1'
-& "$env:USERPROFILE\.agent-containers\.venv\Scripts\python.exe" -m agent_containers @args
+$_venv = "$env:USERPROFILE\.agent-containers\.venv"
+$_py = Join-Path $_venv 'Scripts\python.exe'
+try { $_t = (Get-Item -LiteralPath $_venv -Force -ErrorAction Stop).Target; if ($_t) { $_py = Join-Path (@($_t)[0]) 'Scripts\python.exe' } } catch {}
+& $_py -m agent_containers @args
 exit $LASTEXITCODE
 '@
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
@@ -330,7 +333,9 @@ exit $LASTEXITCODE
     $stubContent = @"
 @echo off
 set "PYTHONUTF8=1"
-"%USERPROFILE%\.agent-containers\.venv\Scripts\python.exe" -m agent_containers %*
+set "_PY=%USERPROFILE%\.agent-containers\.venv\Scripts\python.exe"
+for /f "tokens=2 delims=[]" %%i in ('dir /a:l "%USERPROFILE%\.agent-containers" 2^>nul ^| findstr /i /c:".venv"') do set "_PY=%%i\Scripts\python.exe"
+"%_PY%" -m agent_containers %*
 "@
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
     $stubPath = "$ps1Path (+ .cmd fallback)"

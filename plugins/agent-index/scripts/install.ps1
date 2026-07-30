@@ -262,7 +262,12 @@ function Install-Runtime {
     $ps1Path = Join-Path $LocalBin 'agent-index.ps1'
     $ps1Content = @"
 `$env:PYTHONUTF8 = '1'
-& "`$env:USERPROFILE\.agent-index\.venv\Scripts\python.exe" -m agent_index @args
+`$_venv = "`$env:USERPROFILE\.agent-index\.venv"
+# Resolve the .venv junction's target and launch the slot python DIRECTLY, never
+# traversing the junction (reading its target is allowed) -- RedirectionGuard #637.
+`$_py = Join-Path `$_venv 'Scripts\python.exe'
+try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_py = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}
+& `$_py -m agent_index @args
 exit `$LASTEXITCODE
 "@
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
@@ -270,7 +275,9 @@ exit `$LASTEXITCODE
     $cmdContent = @"
 @echo off
 set "PYTHONUTF8=1"
-"%USERPROFILE%\.agent-index\.venv\Scripts\python.exe" -m agent_index %*
+set "_PY=%USERPROFILE%\.agent-index\.venv\Scripts\python.exe"
+for /f "tokens=2 delims=[]" %%i in ('dir /a:l "%USERPROFILE%\.agent-index" 2^>nul ^| findstr /i /c:".venv"') do set "_PY=%%i\Scripts\python.exe"
+"%_PY%" -m agent_index %*
 "@
     [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
     Write-Ok "Binstub: $ps1Path"
@@ -359,7 +366,12 @@ if (Test-Path `$envFile) {
         }
     }
 }
-& '$LinkPython' -m agent_index start
+`$_venv = '$($LinkDir -replace "'","''")'
+`$_py = '$($LinkPython -replace "'","''")'
+# Resolve the .venv junction's target and launch the slot python DIRECTLY (never
+# traverse the junction; reading its target is allowed) -- RedirectionGuard #637.
+try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_py = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}
+& `$_py -m agent_index start
 exit `$LASTEXITCODE
 "@
     [System.IO.File]::WriteAllText($Launcher, $launcherContent, $utf8NoBom)

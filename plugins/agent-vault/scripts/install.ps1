@@ -355,10 +355,30 @@ function Test-KeePassXCCli {
 function Write-Binstubs {
     param([Parameter(Mandatory)][string]$PythonExe)
 
-    $ps1 = "`$env:PYTHONUTF8 = '1'`r`n& `"$PythonExe`" -m agent_vault @args`r`nexit `$LASTEXITCODE`r`n"
+    # Resolve the .venv link's reparse target and launch the slot python DIRECTLY,
+    # never *traversing* the junction (a RedirectionGuard-enforcing process is
+    # blocked from that but may still *read* the target) -- dotfiles #637. The .ps1
+    # reads (Get-Item .venv).Target; the .cmd parses `dir /a:l`. Plain-dir falls back.
+    $stubVenv = Split-Path (Split-Path $PythonExe)
+    $stubRoot = Split-Path $stubVenv
+
+    $ps1 = @(
+        "`$env:PYTHONUTF8 = '1'",
+        "`$_venv = '$stubVenv'",
+        "`$_py = Join-Path `$_venv 'Scripts\python.exe'",
+        "try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_py = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}",
+        "& `$_py -m agent_vault @args",
+        "exit `$LASTEXITCODE"
+    ) -join "`r`n"
     [System.IO.File]::WriteAllText($BinstubPs1, $ps1, $utf8NoBom)
 
-    $cmd = "@echo off`r`nset `"PYTHONUTF8=1`"`r`n`"$PythonExe`" -m agent_vault %*`r`n"
+    $cmd = @(
+        "@echo off",
+        "set `"PYTHONUTF8=1`"",
+        "set `"_PY=$stubVenv\Scripts\python.exe`"",
+        "for /f `"tokens=2 delims=[]`" %%i in ('dir /a:l `"$stubRoot`" 2^>nul ^| findstr /i /c:`".venv`"') do set `"_PY=%%i\Scripts\python.exe`"",
+        "`"%_PY%`" -m agent_vault %*"
+    ) -join "`r`n"
     [System.IO.File]::WriteAllText($BinstubCmd, $cmd, $utf8NoBom)
 
     Write-Ok "Binstub: $BinstubPs1 (+ .cmd fallback)"
@@ -521,12 +541,18 @@ function Register-AgentVaultTask {
         return
     }
 
-    # Launch the daemon through the stable `.venv` link ($LinkPython) -- in the
-    # versioned layout a junction to the active versions/<v> slot -- never a
-    # versions/<v> absolute a `gc` could remove.
+    # Launch the daemon through the RESOLVED versions/<v> slot python, not the
+    # `.venv` junction: a RedirectionGuard-enforcing task context would be blocked
+    # from *traversing* the junction (dotfiles #637), and conhost execs the target
+    # directly with no launcher script to resolve it at runtime -- so resolve the
+    # junction's target here (reading it is allowed) and bake the slot path. The
+    # task is re-registered every install/update and `gc` keeps the current slot,
+    # so this tracks the active version. Plain-dir `.venv` keeps $LinkPython.
+    $taskPy = $LinkPython
+    try { $_t = (Get-Item -LiteralPath $LinkDir -Force -ErrorAction Stop).Target; if ($_t) { $taskPy = Join-Path (@($_t)[0]) 'Scripts\python.exe' } } catch {}
     $action = New-ScheduledTaskAction `
         -Execute 'conhost.exe' `
-        -Argument "--headless `"$LinkPython`" -m agent_vault.service --foreground --persistent" `
+        -Argument "--headless `"$taskPy`" -m agent_vault.service --foreground --persistent" `
         -WorkingDirectory $InstallDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
     $trigger.Delay = 'PT15S'

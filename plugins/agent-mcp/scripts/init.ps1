@@ -298,7 +298,9 @@ if ($env:OS -eq 'Windows_NT') {
     $stubContent = @"
 @echo off
 set "PYTHONUTF8=1"
-"%USERPROFILE%\.agent-mcp\.venv\Scripts\python.exe" -m agent_mcp %*
+set "_PY=%USERPROFILE%\.agent-mcp\.venv\Scripts\python.exe"
+for /f "tokens=2 delims=[]" %%i in ('dir /a:l "%USERPROFILE%\.agent-mcp" 2^>nul ^| findstr /i /c:".venv"') do set "_PY=%%i\Scripts\python.exe"
+"%_PY%" -m agent_mcp %*
 "@
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
 } else {
