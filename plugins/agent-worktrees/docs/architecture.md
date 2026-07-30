@@ -744,21 +744,27 @@ the *rendering***: `PickerScreen.build_body`'s maintenance branch now calls
 (instantiated in `__init__` right after `profiles_view`) instead of the inline
 branch, and the four Maintenance row helpers (`_maint_selectall_row` / `_maint_header`
 / `_maint_group_row` / `_maint_row`) move onto the component as `_selectall_row` /
-`_header` / `_group_row` / `_row` (all deleted from `PickerScreen`). The selection
-*state* (`maint_sel`) and the grouping/multi-select *behaviour* (`maint_groups` /
-`maint_records` / `_maint_ids` / `_toggle_maint` / `_toggle_maint_all` /
-`_toggle_group`) still live on `PickerScreen` for now and are read from the component
-via `self._eng`; a follow-up slice (5b) moves them onto the component behind
-delegating shims the way `ProfilesView` did. The shared `_checkbox` glyph helper
-stays on the engine (the Worktrees multi-select gutter uses it too) and is likewise
-reached via `self._eng`. One small enabling change: the `build_body` `add` closure
-gained an optional `new_section=` argument so an extracted component can open a
-grouped section (pinning the section label + the vrow index the row will occupy)
-without reaching into the closure's `cur_section` / `vrows` -- exactly reproducing
-the inline `cur_section = (label, len(vrows))` the branch used. Behaviour is
-unchanged -- the same VRows with the same `("SA", 0)` / `("GH", gi)` / `("C", i)`
-stops and pinned group sections are emitted; a guard test
-(`test_maintenance_view_component_renders_body`) asserts the component exists, the
-inline row helpers are gone from the engine, and `build_body` routes the Maintenance
-body through the component with its group sections still pinned.
+`_header` / `_group_row` / `_row` (all deleted from `PickerScreen`). One small
+enabling change: the `build_body` `add` closure gained an optional `new_section=`
+argument so an extracted component can open a grouped section (pinning the section
+label + the vrow index the row will occupy) without reaching into the closure's
+`cur_section` / `vrows` -- exactly reproducing the inline
+`cur_section = (label, len(vrows))` the branch used. **Slice 5b then moves the
+selection *model*** -- the state (`maint_sel`) and the grouping / multi-select
+*behaviour* (`maint_groups` / `maint_records` / `_maint_ids` / `_toggle_maint` /
+`_toggle_maint_all` / `_toggle_group`) -- onto the component. `PickerScreen` keeps a
+`maint_sel` `@property` shim (get+set, so `scr.maint_sel = ListSelection(...)` still
+resolves) and one-line delegating methods, so its call sites (`_open_maint_menu`,
+`_dispatch_key`, `_activate`, the executor poll) and the test suite address them
+unchanged. The component reaches back through `self._eng` only for genuinely
+engine-level shared infrastructure: the scoped `cleanup_rows` data layer (used by
+non-Maintenance code too), the `_checkbox` glyph helper (shared with the Worktrees
+multi-select gutter), and the status line (`debug`) -- a clean boundary, Maintenance
+selection logic on the component, generic data-scoping + chrome on the engine.
+Behaviour is unchanged -- the same VRows with the same `("SA", 0)` / `("GH", gi)` /
+`("C", i)` stops and pinned group sections, and the same toggle/select-all/group
+semantics; the guard test (`test_maintenance_view_component_renders_body`) asserts
+the component renders the body, the inline row helpers are gone from the engine, and
+the component owns the selection state (`scr.maint_sel is
+scr.maintenance_view.maint_sel`; `maint_sel` is not a plain engine attribute).
 

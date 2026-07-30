@@ -1946,8 +1946,9 @@ def test_maintenance_view_component_renders_body():
             await pilot.pause()
 
             # (a) The component exists; the inline row-render helpers moved off
-            # the engine onto it (slice 5a). Selection state/behaviour still
-            # lives on the engine for now (moved in a follow-up slice).
+            # the engine onto it (slice 5a), and it now OWNS the selection state
+            # + grouping behaviour (slice 5b), reached through a @property /
+            # method shim on the engine.
             assert isinstance(scr.maintenance_view, MaintenanceView)
             assert not hasattr(scr, "_maint_selectall_row")
             assert not hasattr(scr, "_maint_header")
@@ -1955,6 +1956,17 @@ def test_maintenance_view_component_renders_body():
             assert not hasattr(scr, "_maint_row")
             assert hasattr(scr.maintenance_view, "build")
             assert hasattr(scr.maintenance_view, "_selectall_row")
+            # Selection state + behaviour live on the component (slice 5b); the
+            # engine shim returns the same object, and ``maint_sel`` is not a
+            # plain engine attribute.
+            assert scr.maint_sel is scr.maintenance_view.maint_sel
+            assert "maint_sel" not in vars(scr)
+            assert "maint_sel" in vars(scr.maintenance_view)
+            assert hasattr(scr.maintenance_view, "maint_groups")
+            assert hasattr(scr.maintenance_view, "maint_records")
+            assert hasattr(scr.maintenance_view, "_toggle_maint")
+            # The engine method shims still resolve for existing call sites.
+            assert scr.maint_records() == scr.maintenance_view.maint_records()
 
             # (b) build_body routes the Maintenance body through the component,
             # which emits the button row + select-all / group-header / data-row
