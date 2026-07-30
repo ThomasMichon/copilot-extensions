@@ -12,6 +12,7 @@ from agent_bridge.agent_registry import (
     AgentResolver,
     discover_local_agents,
     load_agent_registry,
+    load_elevated_projects,
     parse_agent_registry,
 )
 from agent_bridge.topology import MachineConfig, SshEnvironment, parse_machines_yaml
@@ -1106,6 +1107,63 @@ class TestElevatedRelayRouting:
 
         assert target.type == "local"
 
+    # -- Explicit <repo>@<venue> entries (derived elevated agents) -----------
+
+    def _venue_resolver(self):
+        """A derived ``<repo>@<machine>`` roster: the elevated one is born
+        ``requires_admin`` (as :func:`derive_topology_agents` now stamps it)."""
+        agents = {
+            "SPO.Core@dev6": AgentConfig(
+                name="SPO.Core@dev6",
+                project="SPO.Core",
+                description="Derived elevated enlistment agent",
+                requires_admin=True,
+                derived=True,
+            ),
+            "web-app@dev6": AgentConfig(
+                name="web-app@dev6",
+                project="web-app",
+                description="Derived plain agent",
+                derived=True,
+            ),
+        }
+        return AgentResolver(agents, {})
+
+    @pytest.mark.asyncio
+    async def test_explicit_venue_elevated_agent_routes_to_relay(self, monkeypatch):
+        """``SPO.Core@dev6`` (an explicit derived elevated entry) must relay to
+        the sub-daemon, exactly like bare ``SPO.Core`` -- not resolve locally."""
+        from agent_bridge import elevated
+
+        monkeypatch.setattr(elevated, "relay_applicable", lambda req: bool(req))
+        monkeypatch.setattr(elevated, "ensure_running", lambda: "subtok")
+
+        target = await self._venue_resolver().resolve_async("SPO.Core@dev6")
+
+        assert target.type == "command"
+        assert target.project == "SPO.Core"
+        assert target.spawn_command[1:] == [
+            "-m", "agent_bridge", "acp-connect",
+            "ws://127.0.0.1:9281/acp/SPO.Core@dev6", "--token", "subtok",
+            "--stdio",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_explicit_venue_non_elevated_agent_local(self, monkeypatch):
+        from agent_bridge import elevated
+
+        monkeypatch.setattr(elevated, "relay_applicable", lambda req: True)
+
+        def _boom():
+            raise AssertionError("ensure_running must not be called")
+
+        monkeypatch.setattr(elevated, "ensure_running", _boom)
+
+        target = await self._venue_resolver().resolve_async("web-app@dev6")
+
+        assert target.type == "local"
+        assert target.project == "web-app"
+
 
 class TestElevatedDiscovery:
     """projects.yaml `elevated: true` (what register --elevated writes) maps
@@ -1127,6 +1185,27 @@ class TestElevatedDiscovery:
         discovered = discover_local_agents()
         assert discovered["SPO.Core"].requires_admin is True
         assert discovered["Plain"].requires_admin is False
+
+    def test_load_elevated_projects(self, tmp_path, monkeypatch):
+        projects = tmp_path / "projects.yaml"
+        projects.write_text(
+            "projects:\n"
+            "  SPO.Core:\n"
+            "    elevated: true\n"
+            "  Legacy:\n"
+            "    requires_admin: true\n"
+            "  Plain:\n"
+            "    anchor: 'D:/Git/Plain'\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("AGENT_WORKTREES_PROJECTS_YAML", str(projects))
+        assert load_elevated_projects() == {"SPO.Core", "Legacy"}
+
+    def test_load_elevated_projects_missing_file(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(
+            "AGENT_WORKTREES_PROJECTS_YAML", str(tmp_path / "nope.yaml")
+        )
+        assert load_elevated_projects() == set()
 
 
 # -- Plugin injection contract (related-repo plugins) -------------------------
@@ -1528,7 +1607,26 @@ class TestReposRegistryAgents:
         assert "web-app@dev6" in agents
         assert "api-svc@dev6" in agents
 
-    def test_no_local_machine_no_repo_agents(self):
+    def test_elevated_repo_agent_born_requires_admin(self):
+        """A repo in the elevated set yields a derived agent that is born
+        ``requires_admin`` -- elevation is intrinsic to the repo, so the
+        ``<repo>@<machine>`` agent routes elevated without a post-hoc patch."""
+        ms = _topo_machines()
+        local = ms["host-dev6"]
+        agents = derive_topology_agents(
+            ms, None, [], local, "windows", self.REPOS, {"web-app"},
+        )
+        assert agents["web-app@dev6"].requires_admin is True
+        # api-svc is not elevated -> stays non-admin.
+        assert agents["api-svc@dev6"].requires_admin is False
+
+    def test_no_elevated_projects_defaults_non_admin(self):
+        ms = _topo_machines()
+        local = ms["host-dev6"]
+        agents = derive_topology_agents(
+            ms, None, [], local, "windows", self.REPOS,
+        )
+        assert agents["web-app@dev6"].requires_admin is False
         ms = _topo_machines()
         agents = derive_topology_agents(ms, None, [], None, "", self.REPOS)
         assert agents == {}
