@@ -437,7 +437,9 @@ function Install-Runtime {
         $stubContent = @"
 @echo off
 set "PYTHONUTF8=1"
-"%USERPROFILE%\.agent-dispatch\.venv\Scripts\python.exe" -m agent_dispatch %*
+set "_PY=%USERPROFILE%\.agent-dispatch\.venv\Scripts\python.exe"
+for /f "tokens=2 delims=[]" %%i in ('dir /a:l "%USERPROFILE%\.agent-dispatch" 2^>nul ^| findstr /i /c:".venv"') do set "_PY=%%i\Scripts\python.exe"
+"%_PY%" -m agent_dispatch %*
 "@
         [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
     } else {
@@ -911,11 +913,13 @@ try {
 # on Lambda-Core: task launched, banner written, no listener). Drop to
 # 'Continue' for the serve invocation so stderr is captured, never fatal.
 `$ErrorActionPreference = 'Continue'
-# NB (Windows/venv): the venv python.exe is a launcher stub that re-execs the base
-# interpreter, so the coordinator runs as a base-python.exe child of this (idle)
-# venv-launcher process -- with the venv environment. Expected/benign, not a
-# duplicate coordinator.
-& '$LinkPython' -m agent_dispatch serve 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+`$_venv = '$($LinkDir -replace "'","''")'
+`$_py = '$($LinkPython -replace "'","''")'
+# Resolve the .venv junction's target and launch the slot python DIRECTLY -- never
+# *traverse* the junction (a RedirectionGuard task context is blocked from that,
+# though it may still *read* the target) -- dotfiles #637. Plain-dir keeps `$_py.
+try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_py = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}
+& `$_py -m agent_dispatch serve 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
 
@@ -1182,7 +1186,12 @@ try {
 "[`$(Get-Date -Format o)] agent-dispatch supervisor launch (labels=`$labels interval=`$interval)" |
     Out-File -FilePath `$logFile -Append -Encoding utf8
 `$ErrorActionPreference = 'Continue'
-& '$LinkPython' -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+`$_venv = '$($LinkDir -replace "'","''")'
+`$_py = '$($LinkPython -replace "'","''")'
+# Resolve the .venv junction's target and launch the slot python DIRECTLY (never
+# traverse the junction; reading its target is allowed) -- RedirectionGuard #637.
+try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_py = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}
+& `$_py -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
 

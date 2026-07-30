@@ -685,6 +685,11 @@ function Register-ScheduledTask_ {
 # the immutable-versioned layout), never a versions/<v> absolute a `gc` could
 # remove.
 `$launchPy = '$($LinkPython -replace "'", "''")'
+# Resolve the `venv` junction's target and launch the slot python DIRECTLY, so a
+# RedirectionGuard-enforcing task context never *traverses* the junction (it may
+# still *read* its target) -- dotfiles #637. Plain-dir venv keeps `$launchPy as-is.
+`$_venv = '$($LinkDir -replace "'", "''")'
+try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$launchPy = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}
 `$pidFile = '$($PidFile -replace "'", "''")'
 `$logFile = Join-Path (Split-Path `$pidFile) 'agent-bridge.log'
 `$errFile = Join-Path (Split-Path `$pidFile) 'agent-bridge-err.log'
@@ -865,10 +870,31 @@ function Write-Binstubs {
        console-script trampoline .exe that Smart App Control blocks (3077). #>
     param([Parameter(Mandatory)][string]$PythonExe)
 
-    $ps1 = "`$env:PYTHONUTF8 = '1'`r`n& `"$PythonExe`" -m agent_bridge @args`r`nexit `$LASTEXITCODE"
+    # Resolve the venv link's reparse target and launch the slot python DIRECTLY,
+    # never *traversing* the `venv` junction: a RedirectionGuard-enforcing process
+    # is blocked from traversing an unprivileged junction but may still *read* its
+    # target (dotfiles #637). The .ps1 reads (Get-Item venv).Target; the .cmd parses
+    # `dir /a:l`. A plain-dir venv falls through to the default.
+    $stubVenv = Split-Path (Split-Path $PythonExe)
+    $stubRoot = Split-Path $stubVenv
+
+    $ps1 = @(
+        "`$env:PYTHONUTF8 = '1'",
+        "`$_venv = '$stubVenv'",
+        "`$_py = Join-Path `$_venv 'Scripts\python.exe'",
+        "try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_py = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}",
+        "& `$_py -m agent_bridge @args",
+        "exit `$LASTEXITCODE"
+    ) -join "`r`n"
     [System.IO.File]::WriteAllText($BinstubPs1, $ps1, (New-Object System.Text.UTF8Encoding($false)))
 
-    $cmd = "@echo off`r`nset `"PYTHONUTF8=1`"`r`n`"$PythonExe`" -m agent_bridge %*"
+    $cmd = @(
+        "@echo off",
+        "set `"PYTHONUTF8=1`"",
+        "set `"_PY=$stubVenv\Scripts\python.exe`"",
+        "for /f `"tokens=2 delims=[]`" %%i in ('dir /a:l `"$stubRoot`" 2^>nul ^| findstr /i /c:`"venv`"') do set `"_PY=%%i\Scripts\python.exe`"",
+        "`"%_PY%`" -m agent_bridge %*"
+    ) -join "`r`n"
     [System.IO.File]::WriteAllText($BinstubCmd, $cmd)
 
     Write-Ok "Binstub: $BinstubPs1 (+ .cmd fallback)"

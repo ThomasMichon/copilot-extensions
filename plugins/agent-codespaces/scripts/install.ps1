@@ -391,7 +391,10 @@ function Deploy-Binstub {
     $ps1Path = Join-Path $LocalBin 'agent-codespaces.ps1'
     $ps1Content = @'
 $env:PYTHONUTF8 = '1'
-& "$env:USERPROFILE\.agent-codespaces\.venv\Scripts\python.exe" -m agent_codespaces @args
+$_venv = "$env:USERPROFILE\.agent-codespaces\.venv"
+$_py = Join-Path $_venv 'Scripts\python.exe'
+try { $_t = (Get-Item -LiteralPath $_venv -Force -ErrorAction Stop).Target; if ($_t) { $_py = Join-Path (@($_t)[0]) 'Scripts\python.exe' } } catch {}
+& $_py -m agent_codespaces @args
 exit $LASTEXITCODE
 '@
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
@@ -400,7 +403,9 @@ exit $LASTEXITCODE
     $stubContent = @"
 @echo off
 set "PYTHONUTF8=1"
-"%USERPROFILE%\.agent-codespaces\.venv\Scripts\python.exe" -m agent_codespaces %*
+set "_PY=%USERPROFILE%\.agent-codespaces\.venv\Scripts\python.exe"
+for /f "tokens=2 delims=[]" %%i in ('dir /a:l "%USERPROFILE%\.agent-codespaces" 2^>nul ^| findstr /i /c:".venv"') do set "_PY=%%i\Scripts\python.exe"
+"%_PY%" -m agent_codespaces %*
 "@
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
     Write-ServiceOk "Binstub: $ps1Path (+ .cmd fallback)"

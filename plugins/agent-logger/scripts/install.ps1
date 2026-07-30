@@ -329,6 +329,13 @@ function Write-Binstubs {
        prepare-session-log). #>
     param([Parameter(Mandatory)][string]$PythonExe)
 
+    # Resolve the .venv link's reparse target and launch the slot python DIRECTLY,
+    # never *traversing* the junction (a RedirectionGuard-enforcing process is
+    # blocked from that but may still *read* the target) -- dotfiles #637. The .ps1
+    # reads (Get-Item .venv).Target; the .cmd parses `dir /a:l`. Plain-dir falls back.
+    $stubVenv = Split-Path (Split-Path $PythonExe)
+    $stubRoot = Split-Path $stubVenv
+
     $stubs = [ordered]@{
         'session-sync'        = 'agent_logger.sync.engine'
         'agent-logger'        = 'agent_logger'
@@ -341,9 +348,22 @@ function Write-Binstubs {
         $mod = $stubs[$name]
         $ps1Path = Join-Path $LocalBin "$name.ps1"
         $cmdPath = Join-Path $LocalBin "$name.cmd"
-        $ps1 = "`$env:PYTHONUTF8 = '1'`r`n& `"$PythonExe`" -m $mod @args`r`nexit `$LASTEXITCODE"
+        $ps1 = @(
+            "`$env:PYTHONUTF8 = '1'",
+            "`$_venv = '$stubVenv'",
+            "`$_py = Join-Path `$_venv 'Scripts\python.exe'",
+            "try { `$_t = (Get-Item -LiteralPath `$_venv -Force -ErrorAction Stop).Target; if (`$_t) { `$_py = Join-Path (@(`$_t)[0]) 'Scripts\python.exe' } } catch {}",
+            "& `$_py -m $mod @args",
+            "exit `$LASTEXITCODE"
+        ) -join "`r`n"
         [System.IO.File]::WriteAllText($ps1Path, $ps1, (New-Object System.Text.UTF8Encoding($false)))
-        $cmd = "@echo off`r`nset `"PYTHONUTF8=1`"`r`n`"$PythonExe`" -m $mod %*"
+        $cmd = @(
+            "@echo off",
+            "set `"PYTHONUTF8=1`"",
+            "set `"_PY=$stubVenv\Scripts\python.exe`"",
+            "for /f `"tokens=2 delims=[]`" %%i in ('dir /a:l `"$stubRoot`" 2^>nul ^| findstr /i /c:`".venv`"') do set `"_PY=%%i\Scripts\python.exe`"",
+            "`"%_PY%`" -m $mod %*"
+        ) -join "`r`n"
         [System.IO.File]::WriteAllText($cmdPath, $cmd)
     }
     Write-Ok "wrote binstubs to $LocalBin (.ps1 + .cmd)"
@@ -428,6 +448,11 @@ function Register-SyncTask {
     # the stable `.venv` link ($LinkPythonw), never a versions/<v> absolute a `gc`
     # could remove.
     $runHost = if (Test-Path $LinkPythonw) { $LinkPythonw } else { $LinkPython }
+    # Resolve the .venv junction's target and point -Execute at the slot host
+    # DIRECTLY: the task execs it with no launcher to resolve at runtime, and a
+    # RedirectionGuard task context can't *traverse* the junction (only *read* it)
+    # -- dotfiles #637. Re-registered each update; `gc` keeps the current slot.
+    try { $_t = (Get-Item -LiteralPath $LinkDir -Force -ErrorAction Stop).Target; if ($_t) { $slot = @($_t)[0]; $cand = Join-Path $slot 'Scripts\pythonw.exe'; $runHost = if (Test-Path $cand) { $cand } else { Join-Path $slot 'Scripts\python.exe' } } } catch {}
     $action = New-ScheduledTaskAction -Execute $runHost `
         -Argument '-m agent_logger.sync.engine run --prune'
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(5) `
