@@ -8,23 +8,22 @@ import pytest
 
 from agent_mcp.config import parse_config
 from agent_mcp.serve import (
+    _HAS_AF_UNIX,
     Server,
     WarmPool,
+    _read_endpoint,
     call_via_socket,
+    request_via_socket,
     serve_socket_if_available,
 )
 
-# The serve daemon and its client (`call_via_socket`) speak over an AF_UNIX
-# socket via ``asyncio.start_unix_server`` / ``asyncio.open_unix_connection``,
-# which are POSIX-only (absent on Windows' event loops). The warm-pool and
-# socket-detection tests below are transport-agnostic and run everywhere; the
-# three that actually bind/dial the socket are guarded so the suite is green on
-# every platform instead of erroring where AF_UNIX is unavailable.
-unix_socket_only = pytest.mark.skipif(
-    not hasattr(asyncio, "start_unix_server"),
-    reason="serve daemon uses AF_UNIX sockets (asyncio.start_unix_server), "
-           "unavailable on this platform (e.g. Windows)",
-)
+# The serve daemon is cross-platform: an AF_UNIX socket on POSIX, a loopback-TCP
+# listener + token on Windows (where asyncio has no AF_UNIX). Every test drives
+# it through the transport-agnostic helpers (``serve_socket_if_available``,
+# ``request_via_socket``, ``call_via_socket``), so the suite runs on both. The
+# token-enforcement test is loopback-TCP specific (no token on AF_UNIX).
+tcp_transport_only = pytest.mark.skipif(
+    _HAS_AF_UNIX, reason="loopback-TCP transport only (no AF_UNIX, e.g. Windows)")
 
 # A minimal stdio MCP child: answers initialize, tools/list, and tools/call.
 # tools/call echoes its arguments back as text so we can assert round-trips.
@@ -86,7 +85,6 @@ async def test_warmpool_list():
         await pool.close_all()
 
 
-@unix_socket_only
 async def test_server_roundtrip_over_socket(tmp_path):
     sock = tmp_path / "serve.sock"
     # Write a bridge config to a file so the server can load_config(bridge).
@@ -101,7 +99,7 @@ async def test_server_roundtrip_over_socket(tmp_path):
     server = Server(sock)
     task = asyncio.create_task(server.serve_forever())
     try:
-        # Wait for the socket to appear.
+        # Wait for the daemon handle to appear.
         for _ in range(50):
             if serve_socket_if_available(str(sock)):
                 break
@@ -109,12 +107,8 @@ async def test_server_roundtrip_over_socket(tmp_path):
         assert serve_socket_if_available(str(sock)) == sock
 
         # ping
-        reader, writer = await asyncio.open_unix_connection(str(sock))
-        writer.write(b'{"op":"ping"}\n')
-        await writer.drain()
-        pong = json.loads(await reader.readline())
+        pong = await request_via_socket(sock, {"op": "ping"})
         assert pong["ok"] and pong["pong"]
-        writer.close()
 
         # call via helper
         resp = await call_via_socket(sock, str(bridge), "echo", {"hello": "world"})
@@ -123,17 +117,12 @@ async def test_server_roundtrip_over_socket(tmp_path):
         assert resp["isError"] is False
     finally:
         # shutdown op stops the server
-        reader, writer = await asyncio.open_unix_connection(str(sock))
-        writer.write(b'{"op":"shutdown"}\n')
-        await writer.drain()
-        await reader.readline()
-        writer.close()
+        await request_via_socket(sock, {"op": "shutdown"})
         await asyncio.wait_for(task, timeout=5)
-    # socket cleaned up on shutdown
-    assert not sock.exists()
+    # handle cleaned up on shutdown (socket file on POSIX / endpoint on Windows)
+    assert serve_socket_if_available(str(sock)) is None
 
 
-@unix_socket_only
 async def test_server_reports_config_error(tmp_path):
     sock = tmp_path / "serve.sock"
     server = Server(sock)
@@ -147,11 +136,7 @@ async def test_server_reports_config_error(tmp_path):
         assert resp["ok"] is False
         assert "config" in resp["error"]
     finally:
-        r, w = await asyncio.open_unix_connection(str(sock))
-        w.write(b'{"op":"shutdown"}\n')
-        await w.drain()
-        await r.readline()
-        w.close()
+        await request_via_socket(sock, {"op": "shutdown"})
         await asyncio.wait_for(task, timeout=5)
 
 
@@ -180,7 +165,6 @@ def _bridge_file(tmp_path):
     return bridge
 
 
-@unix_socket_only
 def test_call_verb_uses_serve_daemon(tmp_path, monkeypatch, capsys):
     """The `call` verb routes through a running daemon (fast-path integration)."""
     import threading
@@ -225,13 +209,44 @@ def test_call_verb_uses_serve_daemon(tmp_path, monkeypatch, capsys):
         loop2 = asyncio.new_event_loop()
 
         async def _shutdown():
-            r, w = await asyncio.open_unix_connection(str(sock))
-            w.write(b'{"op":"shutdown"}\n')
-            await w.drain()
-            await r.readline()
-            w.close()
+            await request_via_socket(sock, {"op": "shutdown"})
 
         loop2.run_until_complete(_shutdown())
         loop2.close()
         thread.join(timeout=5)
+
+
+@tcp_transport_only
+async def test_tcp_endpoint_published_and_token_enforced(tmp_path):
+    """On the loopback-TCP transport the endpoint sidecar carries port+token, an
+    unauthenticated connection is rejected, and the token grants access."""
+    sock = tmp_path / "serve.sock"
+    server = Server(sock)
+    task = asyncio.create_task(server.serve_forever())
+    try:
+        for _ in range(50):
+            if serve_socket_if_available(str(sock)):
+                break
+            await asyncio.sleep(0.05)
+        ep = _read_endpoint(sock)
+        assert isinstance(ep["port"], int) and ep["port"] > 0
+        assert ep["token"]
+
+        # A raw connection that omits the token is rejected as unauthorized.
+        reader, writer = await asyncio.open_connection("127.0.0.1", ep["port"])
+        writer.write(b'{"op":"ping"}\n')
+        await writer.drain()
+        resp = json.loads(await reader.readline())
+        assert resp["ok"] is False and "unauthorized" in resp["error"]
+        writer.close()
+
+        # request_via_socket presents the token -> authorized.
+        pong = await request_via_socket(sock, {"op": "ping"})
+        assert pong["ok"] and pong["pong"]
+    finally:
+        await request_via_socket(sock, {"op": "shutdown"})
+        await asyncio.wait_for(task, timeout=5)
+    # Endpoint sidecar cleaned up on shutdown.
+    assert serve_socket_if_available(str(sock)) is None
+    assert _read_endpoint(sock) is None
 
