@@ -4,12 +4,26 @@ import asyncio
 import json
 import sys
 
+import pytest
+
 from agent_mcp.config import parse_config
 from agent_mcp.serve import (
     Server,
     WarmPool,
     call_via_socket,
     serve_socket_if_available,
+)
+
+# The serve daemon and its client (`call_via_socket`) speak over an AF_UNIX
+# socket via ``asyncio.start_unix_server`` / ``asyncio.open_unix_connection``,
+# which are POSIX-only (absent on Windows' event loops). The warm-pool and
+# socket-detection tests below are transport-agnostic and run everywhere; the
+# three that actually bind/dial the socket are guarded so the suite is green on
+# every platform instead of erroring where AF_UNIX is unavailable.
+unix_socket_only = pytest.mark.skipif(
+    not hasattr(asyncio, "start_unix_server"),
+    reason="serve daemon uses AF_UNIX sockets (asyncio.start_unix_server), "
+           "unavailable on this platform (e.g. Windows)",
 )
 
 # A minimal stdio MCP child: answers initialize, tools/list, and tools/call.
@@ -72,6 +86,7 @@ async def test_warmpool_list():
         await pool.close_all()
 
 
+@unix_socket_only
 async def test_server_roundtrip_over_socket(tmp_path):
     sock = tmp_path / "serve.sock"
     # Write a bridge config to a file so the server can load_config(bridge).
@@ -118,6 +133,7 @@ async def test_server_roundtrip_over_socket(tmp_path):
     assert not sock.exists()
 
 
+@unix_socket_only
 async def test_server_reports_config_error(tmp_path):
     sock = tmp_path / "serve.sock"
     server = Server(sock)
@@ -164,6 +180,7 @@ def _bridge_file(tmp_path):
     return bridge
 
 
+@unix_socket_only
 def test_call_verb_uses_serve_daemon(tmp_path, monkeypatch, capsys):
     """The `call` verb routes through a running daemon (fast-path integration)."""
     import threading
