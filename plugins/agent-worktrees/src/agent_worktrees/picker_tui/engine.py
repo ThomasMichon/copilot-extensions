@@ -433,6 +433,12 @@ class PickerScreen(Widget):
 
     def __init__(self, source, live=False, mock_mode=None):
         super().__init__()
+        # Profiles configurator -- an encapsulated sub-view component that OWNS
+        # the Profiles grid-editing state (grid / applied / pcol / targets /
+        # host_cols / _prof_unavailable) and behaviour; PickerScreen exposes
+        # thin @property + method shims onto it (#88 F5 slices 1-3). Created
+        # first, before any shim can be touched during construction.
+        self.profiles_view = ProfilesView(self)
         self.htab = 0                 # index into self.pivots (built-ins + registered)
         # Cross-plugin pivot registry (Worktrees/Maintenance/Profiles + any
         # pivot a sibling plugin contributed via a manifest). Built here so the
@@ -479,24 +485,17 @@ class PickerScreen(Widget):
         # AGENT_WORKTREES_PICKER_REAL_OPS=0.
         self.mock_mode = _resolve_mock_mode(mock_mode)
         self.real_ops = not self.mock_mode
-        self.pcol = 0                 # Profiles matrix column cursor
         self.last_pr = 0              # remembered Profiles grid row (Tab in/out)
-        self.grid = {}                # (target_idx, host_idx) -> bool present
-        self.applied = {}             # last-applied snapshot of the grid
         self.btn_idx = 0              # active button within the current group
         self.show_hidden = False      # reveal bridge/system worktrees (#1422)
-        self.targets = []
-        self.host_cols = list(_DEFAULT_HOST_COLS)   # config-bound in setup()
-        self._prof_unavailable = set()  # host-col idxs that couldn't load (#1370)
+        # (Profiles grid state -- pcol / grid / applied / targets / host_cols /
+        # _prof_unavailable -- lives on self.profiles_view now, reached via the
+        # @property shims below; #88 F5 slice 3.)
         self._prof_lock = threading.Lock()
         self._prof_load = None        # src.load_profile_column (real sources)
         self._prof_apply = None       # src.apply_profile_column (real sources)
         self._prof_loading = False    # columns are streaming in
         self._prof_loaded = False
-        # Profiles configurator body -- encapsulated sub-view component
-        # (F5 slice 1: componentize cohesive sub-views out of the monolithic
-        # build_body; the moratorium on new full-screen renders starts here).
-        self.profiles_view = ProfilesView(self)
         self.debug = "ready"
         self.data = []
         self.machines = []
@@ -509,6 +508,59 @@ class PickerScreen(Widget):
         self.src = source
         self.live = live
         self.loader = None            # async loader (live/multi-machine only)
+
+    # ---- Profiles grid-editing state: shims onto the ProfilesView component --
+    # The state lives on ``self.profiles_view`` now (#88 F5 slice 3); these
+    # ``@property`` pass-throughs keep every existing engine call site
+    # (``setup``, ``_dispatch_key``, the Apply/progress plumbing) and the test
+    # suite addressing ``self.grid`` / ``self.pcol`` / ... unchanged.
+    @property
+    def grid(self):
+        return self.profiles_view.grid
+
+    @grid.setter
+    def grid(self, value):
+        self.profiles_view.grid = value
+
+    @property
+    def applied(self):
+        return self.profiles_view.applied
+
+    @applied.setter
+    def applied(self, value):
+        self.profiles_view.applied = value
+
+    @property
+    def pcol(self):
+        return self.profiles_view.pcol
+
+    @pcol.setter
+    def pcol(self, value):
+        self.profiles_view.pcol = value
+
+    @property
+    def targets(self):
+        return self.profiles_view.targets
+
+    @targets.setter
+    def targets(self, value):
+        self.profiles_view.targets = value
+
+    @property
+    def host_cols(self):
+        return self.profiles_view.host_cols
+
+    @host_cols.setter
+    def host_cols(self, value):
+        self.profiles_view.host_cols = value
+
+    @property
+    def _prof_unavailable(self):
+        return self.profiles_view._prof_unavailable
+
+    @_prof_unavailable.setter
+    def _prof_unavailable(self, value):
+        self.profiles_view._prof_unavailable = value
 
     # ---- pivot registry (built-ins + cross-plugin registered pivots) ----
     def _load_pivots(self):
@@ -916,17 +968,13 @@ class PickerScreen(Widget):
         return bset[self.btn_idx % len(bset)]
 
     def grid_dirty(self):
-        return any(self.grid.get(k) != self.applied.get(k) for k in self.grid)
+        return self.profiles_view.grid_dirty()
 
     def pending_count(self):
-        return sum(1 for k in self.grid if self.grid.get(k) != self.applied.get(k))
+        return self.profiles_view.pending_count()
 
     def cell_locked(self, ti, hi):
-        """A machine always has a profile for THIS repo with itself as host
-        (self · agent) -- force-checked, not editable."""
-        t = self.targets[ti]
-        _lbl, hm, he = self.host_cols[hi]
-        return t["machine"] == hm and t["env"] == he and t["agent"]
+        return self.profiles_view.cell_locked(ti, hi)
 
     def machine_state(self, i):
         label, m, e, ok = self.machines[i]
@@ -1495,7 +1543,7 @@ class PickerScreen(Widget):
 
     # ---- Profiles matrix helpers ----
     def profiles_present(self):
-        return sum(1 for v in self.grid.values() if v)
+        return self.profiles_view.profiles_present()
 
     # ---- Profiles: real per-host column load + Apply (own-column model) ----
     def _target_sel(self, ti):
@@ -1563,12 +1611,7 @@ class PickerScreen(Widget):
         threading.Thread(target=work, name="profiles-load", daemon=True).start()
 
     def _column_sels(self, hi):
-        """Build the TargetSel list for host column ``hi`` from the grid."""
-        out = []
-        for ti in range(len(self.targets)):
-            if self.grid.get((ti, hi)):
-                out.append(self._target_sel(ti))
-        return out
+        return self.profiles_view._column_sels(hi)
 
     def _apply_profiles(self):
         """Open the Apply confirmation: list exactly which terminal profiles
@@ -2725,24 +2768,7 @@ class PickerScreen(Widget):
             self.sel = ("V", 0)
 
     def _toggle_cell(self):
-        if not self.host_cols:
-            return                       # no profile hosts -> nothing to toggle
-        if self.pcol in self._prof_unavailable:
-            _lbl, hm, he = self.host_cols[self.pcol]
-            self.debug = (f"{hm} {he}: profiles unavailable "
-                          "(remote unreachable or needs upgrade) · read-only")
-            return
-        ti = self.sel[1]
-        if self.cell_locked(ti, self.pcol):
-            self.debug = "self · agent profile is mandatory (locked)"
-            return
-        key = (ti, self.pcol)
-        self.grid[key] = not self.grid.get(key, False)
-        t = self.targets[ti]
-        _lbl, hm, he = self.host_cols[self.pcol]
-        host = f"{hm} {he}"
-        self.debug = (f"{'+' if self.grid[key] else '-'} {host} → {t['label']}"
-                      " (pending Apply)")
+        self.profiles_view.toggle_cell()
 
     def _page(self, stops, idx, forward):
         anchors = [a for a in self.anchors() if a in stops]
@@ -4662,36 +4688,92 @@ class MsgViewScreen(ModalScreen[None]):
 
 
 class ProfilesView:
-    """Encapsulated Profiles-configurator body (#88 F5, slices 1-2).
+    """Encapsulated Profiles-configurator sub-view (#88 F5, slices 1-3).
 
-    The first sub-view carved out of the picker's monolithic
+    A cohesive sub-view carved out of the picker's monolithic
     ``PickerScreen.build_body`` into its own component, per the incremental
     componentization strategy (#88 F5): rather than convert the whole
     ``sel=(zone,index)`` focus model to widgets in one big-bang, we peel cohesive
     sub-views off the God-object one at a time and impose a **moratorium on new
-    full-screen-at-once renders** -- every reworked piece renders through its own
-    component boundary.
+    full-screen-at-once renders**.
 
-    This component now owns the Profiles pivot's **entire body rendering** -- the
-    grid + its narrow-terminal transposed fallback, plus every render helper
-    (column widths, the visible-column window, host-header / target-label /
-    grid-cell visuals, the Apply/Reset button row, and the legend). The profiles
-    *state* (``grid`` / ``pcol`` / ``targets`` / ``host_cols`` / ``applied`` /
-    ``_prof_unavailable``) and *behaviour* (toggling, Apply plumbing) still live
-    on the engine and are read here through the back-reference, along with the
-    genuinely shared helpers (``cell_locked``, ``grid_dirty``, ``pending_count``,
-    ``_btn_style``, ``_hl``); those move in a follow-up slice. It is a plain
-    component today; a later slice makes it a focusable Textual widget.
+    This component owns the Profiles pivot's **entire rendering** (slices 1-2) and
+    now its **grid-editing model** (slice 3): the state -- ``grid`` (pending
+    edits), ``applied`` (last-applied snapshot), ``pcol`` (cursor column),
+    ``targets`` / ``host_cols`` (the matrix axes), ``_prof_unavailable`` -- plus
+    the pure grid behaviour (``grid_dirty`` / ``pending_count`` / ``cell_locked``
+    / ``profiles_present`` / ``_column_sels`` / ``toggle_cell``). ``PickerScreen``
+    exposes thin ``@property`` / method **shims** onto these so its existing call
+    sites (``setup``, ``_dispatch_key``, the Apply/progress path) and the test
+    suite address them unchanged. The Apply/load *plumbing* (``_apply_profiles``,
+    ``_start_profiles_run``, ``_commit_applied_profiles``, the background column
+    loader) still lives on the engine and reads this state through the shims, to
+    be pulled in by a follow-up slice. A later slice makes this a focusable
+    Textual widget.
     """
 
     def __init__(self, eng) -> None:
         self._eng = eng
+        self.pcol = 0                 # Profiles matrix column cursor
+        self.grid = {}                # (target_idx, host_idx) -> bool present
+        self.applied = {}             # last-applied snapshot of the grid
+        self.targets = []
+        self.host_cols = list(_DEFAULT_HOST_COLS)   # config-bound in setup()
+        self._prof_unavailable = set()  # host-col idxs that couldn't load (#1370)
+
+    # ---- grid-editing model (state owned here; PickerScreen shims delegate) --
+    def grid_dirty(self):
+        return any(self.grid.get(k) != self.applied.get(k) for k in self.grid)
+
+    def pending_count(self):
+        return sum(1 for k in self.grid if self.grid.get(k) != self.applied.get(k))
+
+    def profiles_present(self):
+        return sum(1 for v in self.grid.values() if v)
+
+    def cell_locked(self, ti, hi):
+        """A machine always has a profile for THIS repo with itself as host
+        (self · agent) -- force-checked, not editable."""
+        t = self.targets[ti]
+        _lbl, hm, he = self.host_cols[hi]
+        return t["machine"] == hm and t["env"] == he and t["agent"]
+
+    def _column_sels(self, hi):
+        """Build the TargetSel list for host column ``hi`` from the grid."""
+        out = []
+        for ti in range(len(self.targets)):
+            if self.grid.get((ti, hi)):
+                out.append(self._eng._target_sel(ti))
+        return out
+
+    def toggle_cell(self):
+        """Toggle the focused grid cell (Space on a Profiles row). Reads the
+        focused row from the engine's ``sel``; reports via the engine's status
+        line. Locked / unavailable cells are read-only no-ops."""
+        eng = self._eng
+        if not self.host_cols:
+            return                       # no profile hosts -> nothing to toggle
+        if self.pcol in self._prof_unavailable:
+            _lbl, hm, he = self.host_cols[self.pcol]
+            eng.debug = (f"{hm} {he}: profiles unavailable "
+                         "(remote unreachable or needs upgrade) · read-only")
+            return
+        ti = eng.sel[1]
+        if self.cell_locked(ti, self.pcol):
+            eng.debug = "self · agent profile is mandatory (locked)"
+            return
+        key = (ti, self.pcol)
+        self.grid[key] = not self.grid.get(key, False)
+        t = self.targets[ti]
+        _lbl, hm, he = self.host_cols[self.pcol]
+        host = f"{hm} {he}"
+        eng.debug = (f"{'+' if self.grid[key] else '-'} {host} → {t['label']}"
+                     " (pending Apply)")
 
     def build(self, add, width, sel):
         """Emit the Profiles pivot body into ``add`` (the ``build_body`` VRow
         sink). Mirrors the former ``PickerScreen._build_profiles`` exactly."""
-        eng = self._eng
-        if not eng.host_cols:
+        if not self.host_cols:
             # No Profiles host columns -- no ``copilot`` machine in
             # machines.yaml exposes a native-terminal (windows/linux) env, so
             # ``_DEFAULT_HOST_COLS`` ([]) is the only fallback. Render a
@@ -4704,7 +4786,8 @@ class ProfilesView:
                 style=C_DIM,
             ))
             add(Text(""))
-            add(self._profiles_button_row(width, sel == ("BTN", 0), eng.btn_idx),
+            add(self._profiles_button_row(width, sel == ("BTN", 0),
+                                          self._eng.btn_idx),
                 stop=("BTN", 0))
             return
         colw = self._col_widths()
@@ -4723,7 +4806,7 @@ class ProfilesView:
         hdr.append("›" if mr else " ", style=C_HINT)
         hdr.append(" " * max(0, width - hdr.cell_len))
         add(hdr, kind="colhdr")
-        for ti, t in enumerate(eng.targets):
+        for ti, t in enumerate(self.targets):
             row_sel = sel == ("PR", ti)
             agent = t["agent"]
             base = "grey78" if agent else "grey54"
@@ -4738,15 +4821,16 @@ class ProfilesView:
             for j in range(lo, hi + 1):
                 if j > lo:
                     r.append(" ")
-                locked = eng.cell_locked(ti, j)
+                locked = self.cell_locked(ti, j)
                 ch, style = self._cell_visual(ti, j, locked)
-                if row_sel and j == eng.pcol:
+                if row_sel and j == self.pcol:
                     style = "grey50 on grey23" if locked else C_SEL
                 r.append(ch.center(colw[j]), style=style)
             r.append(" " * max(0, width - r.cell_len))
             add(r, stop=("PR", ti), data=t)
         add(Text(""))
-        add(self._profiles_button_row(width, sel == ("BTN", 0), eng.btn_idx),
+        add(self._profiles_button_row(width, sel == ("BTN", 0),
+                                      self._eng.btn_idx),
             stop=("BTN", 0))
 
     def _transposed(self, add, width, sel):
@@ -4754,24 +4838,24 @@ class ProfilesView:
         space-toggleable checkbox row. ◀▶ switches which host you're editing.
         Mirrors the former ``PickerScreen._build_profiles_transposed`` exactly."""
         eng = self._eng
-        _lbl, hm, he = eng.host_cols[eng.pcol]
+        _lbl, hm, he = self.host_cols[self.pcol]
         add(self._legend(width))
         head = Text(" HOST  ", style=C_HEADER)
         head.append(hm, style=eng._hl(C_HEADER, True, False))
         head.append(" ", style=eng._hl("", True, False))
         head.append(he, style=eng._hl(C_ENV.get(he, C_HEADER), True, False))
-        head.append(f"   ‹ {eng.pcol + 1}/{len(eng.host_cols)} ›  ◀▶ host",
+        head.append(f"   ‹ {self.pcol + 1}/{len(self.host_cols)} ›  ◀▶ host",
                     style=C_HINT)
-        if eng.pcol in eng._prof_unavailable:
+        if self.pcol in self._prof_unavailable:
             head.append("  · unavailable (needs upgrade)", style=C_DISABLED)
         head.append(" " * max(0, width - head.cell_len))
         add(head, kind="colhdr")
-        for ti, t in enumerate(eng.targets):
+        for ti, t in enumerate(self.targets):
             agent = t["agent"]
             base = "grey78" if agent else "grey54"
-            locked = eng.cell_locked(ti, eng.pcol)
-            ch, cstyle = self._cell_visual(ti, eng.pcol, locked)
-            present = eng.grid.get((ti, eng.pcol), False)
+            locked = self.cell_locked(ti, self.pcol)
+            ch, cstyle = self._cell_visual(ti, self.pcol, locked)
+            present = self.grid.get((ti, self.pcol), False)
             box = f"[{ch}]" if (present or ch == "✗") else "[ ]"
             r = Text(" ")
             r.append(" " + box + " ", style=cstyle)
@@ -4783,8 +4867,7 @@ class ProfilesView:
 
     # ---- render helpers (owned by the component) ------------------------
     def _col_widths(self):
-        return [max(len(f"{m} {e}"), 3) + 2
-                for _lbl, m, e in self._eng.host_cols]
+        return [max(len(f"{m} {e}"), 3) + 2 for _lbl, m, e in self.host_cols]
 
     def _host_header_cell(self, j, colw):
         """One Profiles host-column header: machine (config) name in the header
@@ -4792,16 +4875,15 @@ class ProfilesView:
         The active host (the column being edited) gets the SAME subtle shading
         the machine tabs use for an active-but-unfocused tab -- never the
         inversion cursor, since the real cursor lives in the grid cell."""
-        eng = self._eng
-        _lbl, m, e = eng.host_cols[j]
-        active = j == eng.pcol
-        unavail = j in eng._prof_unavailable
+        _lbl, m, e = self.host_cols[j]
+        active = j == self.pcol
+        unavail = j in self._prof_unavailable
         name_base = C_DISABLED if unavail else ("bold white" if active else C_TABOFF)
         env_base = C_DISABLED if unavail else C_ENV.get(e, name_base)
         cell = Text()
-        cell.append(m, style=eng._hl(name_base, active, False))
-        cell.append(" ", style=eng._hl("", active, False))
-        cell.append(e, style=eng._hl(env_base, active, False))
+        cell.append(m, style=self._eng._hl(name_base, active, False))
+        cell.append(" ", style=self._eng._hl("", active, False))
+        cell.append(e, style=self._eng._hl(env_base, active, False))
         pad = max(0, colw - cell.cell_len)
         left = pad // 2
         out = Text(" " * left)
@@ -4813,17 +4895,16 @@ class ProfilesView:
         """Which host columns are visible. Returns (lo, hi, more_left, more_right)
         windowed around the cursor column; or None if not even one column fits
         (caller switches to transposed mode)."""
-        eng = self._eng
         colw = self._col_widths()
         n = len(colw)
         if n == 0:
             return None                # no host columns -- caller placeholders
-        if eng.pcol >= n:
-            eng.pcol = n - 1           # host set shrank; clamp the cursor column
+        if self.pcol >= n:
+            self.pcol = n - 1          # host set shrank; clamp the cursor column
         avail = width - lblw - 4   # reserve for ‹ / › markers
-        if avail < colw[eng.pcol]:
+        if avail < colw[self.pcol]:
             return None
-        lo = hi = eng.pcol
+        lo = hi = self.pcol
         used = colw[lo]
         while True:
             grew = False
@@ -4851,18 +4932,17 @@ class ProfilesView:
 
     def _cell_visual(self, ti, j, locked):
         """(glyph_char, style) for a matrix cell, reflecting applied vs pending."""
-        eng = self._eng
-        if j in eng._prof_unavailable:
+        if j in self._prof_unavailable:
             # Column we couldn't load (unreachable / too-old remote): show an
             # "unknown" marker, not a fabricated selection (#1370).
             return "?", C_DISABLED
-        present = eng.grid.get((ti, j), False)
-        applied = eng.applied.get((ti, j), False)
-        agent = eng.targets[ti]["agent"]
+        present = self.grid.get((ti, j), False)
+        applied = self.applied.get((ti, j), False)
+        agent = self.targets[ti]["agent"]
         if locked:
             return "✓", "grey50"
         if present and applied:
-            return "✓", (C_PULSE[eng.pulse] if agent else "#37b7ff")  # active
+            return "✓", (C_PULSE[self._eng.pulse] if agent else "#37b7ff")  # active
         if present and not applied:
             return "✓", "bold #ff9e3b"      # pending add (alternate highlight)
         if applied and not present:
@@ -4871,10 +4951,10 @@ class ProfilesView:
 
     def _profiles_button_row(self, width, focus, active_idx):
         eng = self._eng
-        dirty = eng.grid_dirty()
+        dirty = self.grid_dirty()
         if not dirty:
             active_idx = 0          # Reset is unavailable -> not selectable
-        n = eng.pending_count()
+        n = self.pending_count()
         t = Text("  ")
         # Apply
         if dirty:
@@ -4908,7 +4988,7 @@ class ProfilesView:
         t.append("   ")
         t.append("shell", style=C_MUTED)
         t.append(" = plain SSH login shell", style=C_DIM)
-        if self._eng._prof_unavailable:
+        if self._prof_unavailable:
             t.append("   ")
             t.append("?", style=C_DISABLED)
             t.append(" = remote unavailable (needs upgrade)", style=C_DIM)

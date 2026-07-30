@@ -1892,14 +1892,20 @@ def test_profiles_view_component_renders_body():
             await pilot.pause()
 
             # (a) The component exists; the inline render methods + helpers are
-            # gone from the engine and now live on the component (slices 1-2).
+            # gone from the engine and now live on the component (slices 1-2),
+            # and the component OWNS the grid-editing state (slice 3), reached
+            # through transparent @property shims on the engine.
             assert isinstance(scr.profiles_view, ProfilesView)
             assert not hasattr(scr, "_build_profiles")
             assert not hasattr(scr, "_build_profiles_transposed")
-            assert not hasattr(scr, "_cell_visual")
-            assert not hasattr(scr, "_visible_pcols")
-            assert not hasattr(scr, "profile_col_widths")
             assert hasattr(scr.profiles_view, "_cell_visual")
+            assert hasattr(scr.profiles_view, "toggle_cell")
+            # State is the component's; the engine property shim returns the
+            # same object.
+            assert scr.grid is scr.profiles_view.grid
+            assert scr.host_cols is scr.profiles_view.host_cols
+            assert "grid" not in vars(scr)      # not a plain engine attribute
+            assert "grid" in vars(scr.profiles_view)
 
             # (b) build_body routes the Profiles body through the component,
             # which emits the target rows + the Apply button row.
