@@ -134,3 +134,69 @@ class TestRegisterSessionProjectResolution:
         rc = m.cmd_register_session(_args(stdin=True))
 
         assert rc == 0
+
+
+class TestBareResumeSessionBinding:
+    def _set_binding(self, monkeypatch, session_id="target-session"):
+        monkeypatch.setenv(m._SESSION_BIND_PROJECT, "test-project")
+        monkeypatch.setenv(m._SESSION_BIND_WORKTREE, "wt-bound")
+        monkeypatch.setenv(m._SESSION_BIND_SESSION, session_id)
+        monkeypatch.setattr(
+            m, "_resolve_active_project",
+            lambda project: (project, Path("/tmp/project")),
+        )
+
+    def test_target_resume_binds_even_when_payload_cwd_is_home(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-bound", "/tmp/src/wt-bound")
+        self._set_binding(monkeypatch)
+        monkeypatch.setattr(
+            m.sys, "stdin",
+            io.StringIO('{"sessionId":"target-session","cwd":"/home/user"}'),
+        )
+
+        rc = m.cmd_register_session(_args(stdin=True))
+
+        assert rc == 0
+        rec = load_record(tmp_tracking_dir / "wt-bound.yaml")
+        assert [s.session_id for s in rec.sessions] == ["target-session"]
+
+    def test_temporary_home_session_does_not_consume_binding(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-bound", "/tmp/src/wt-bound")
+        self._set_binding(monkeypatch)
+        monkeypatch.setattr(
+            m.sys, "stdin",
+            io.StringIO('{"sessionId":"temporary-session","cwd":"/home/user"}'),
+        )
+
+        rc = m.cmd_register_session(_args(stdin=True))
+
+        assert rc == 0
+        rec = load_record(tmp_tracking_dir / "wt-bound.yaml")
+        assert rec.sessions == []
+
+    def test_session_end_uses_matching_binding(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-bound", "/tmp/src/wt-bound")
+        self._set_binding(monkeypatch)
+        m.tracking.register_session("wt-bound", "target-session")
+        monkeypatch.setattr(m, "_capture_session_title", lambda *_: True)
+
+        rc = m.cmd_deregister_session(
+            argparse.Namespace(worktree_id=None, session_id="target-session")
+        )
+
+        assert rc == 0
+        rec = load_record(tmp_tracking_dir / "wt-bound.yaml")
+        assert rec.sessions[0].ended_at is not None
+
+
+def test_deregister_session_worktree_is_optional_for_hook_inference():
+    args = m.build_parser().parse_args(
+        ["deregister-session", "--session-id", "session-1"]
+    )
+    assert args.worktree_id is None

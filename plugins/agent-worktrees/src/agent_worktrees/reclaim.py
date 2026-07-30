@@ -330,6 +330,11 @@ def resolve_bound_copilots(
 
         cwd = _session_cwd(entry)
         wt_id = _resolve_worktree_id_for_cwd(cwd) if cwd else None
+        if wt_id is None:
+            try:
+                wt_id = tracking.find_worktree_id_by_session(sid)
+            except Exception:
+                wt_id = None
 
         if worktree_id and wt_id != worktree_id:
             continue

@@ -11,6 +11,7 @@ from agent_worktrees.tracking import (
     create_new_record,
     deregister_session,
     find_worktree_id_by_cwd,
+    find_worktree_id_by_session,
     list_records,
     load_record,
     mark_resumed,
@@ -810,6 +811,51 @@ class TestFindWorktreeIdByCwd:
 
     def test_empty_cwd_returns_none(self, tmp_tracking_dir: Path, monkeypatch_config):
         assert find_worktree_id_by_cwd("") is None
+
+
+class TestFindWorktreeIdBySession:
+    """find_worktree_id_by_session -- resolve an explicitly registered session."""
+
+    def _save(
+        self, tracking_dir: Path, wt_id: str, session_ids: list[str]
+    ) -> None:
+        rec = WorktreeRecord(
+            worktree_id=wt_id,
+            branch=f"worktree/{wt_id}",
+            worktree_path=f"/tmp/src/{wt_id}",
+            repo="test-repo",
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[
+                SessionEntry(sid, "2026-06-01T10:00:00")
+                for sid in session_ids
+            ],
+        )
+        save_record(rec, tracking_dir / f"{wt_id}.yaml")
+
+    def test_unique_match(self, tmp_tracking_dir: Path, monkeypatch_config):
+        self._save(tmp_tracking_dir, "wt-a", ["resumed-session"])
+        assert find_worktree_id_by_session("resumed-session") == "wt-a"
+
+    def test_ambiguous_match_returns_none(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        self._save(tmp_tracking_dir, "wt-a", ["duplicate"])
+        self._save(tmp_tracking_dir, "wt-b", ["duplicate"])
+        assert find_worktree_id_by_session("duplicate") is None
+
+    def test_missing_or_empty_session_returns_none(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        self._save(tmp_tracking_dir, "wt-a", ["other"])
+        assert find_worktree_id_by_session("missing") is None
+        assert find_worktree_id_by_session("") is None
 
 
 # ---------------------------------------------------------------------------

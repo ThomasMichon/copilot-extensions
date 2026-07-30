@@ -156,6 +156,25 @@ class TestResolveBoundCopilots:
         rows = reclaim.resolve_bound_copilots(worktree_id="wtB")
         assert [r["pid"] for r in rows] == [2]
 
+    def test_session_registry_binds_bare_resume_with_home_cwd(
+            self, monkeypatch, tmp_path):
+        _mk_session(tmp_path, "resumed-session", "/home/user", [7])
+        table = {7: {"ppid": 1, "name": "copilot"}}
+        self._patch(
+            monkeypatch, tmp_path, alive={7}, copilots={7},
+            wt_map={"/home/user": None}, table=table,
+        )
+        monkeypatch.setattr(
+            reclaim.tracking, "find_worktree_id_by_session",
+            lambda sid: "wtA" if sid == "resumed-session" else None,
+        )
+
+        rows = reclaim.resolve_bound_copilots(worktree_id="wtA")
+
+        assert [(r["session_id"], r["worktree_id"]) for r in rows] == [
+            ("resumed-session", "wtA")
+        ]
+
     def test_detached_sessions_excluded(self, monkeypatch, tmp_path):
         _mk_session(tmp_path, "sdet", "/w/a", [1])
         table = {1: {"ppid": 0, "name": "copilot"}}

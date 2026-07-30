@@ -15,6 +15,7 @@
 # parameter binding rejecting unknown flags like --acp, --stdio, --no-mux
 # when called via 'pwsh -File'.
 $CopilotArgs = $args
+$script:LaunchProject = $env:WORKTREE_PROJECT
 
 $ErrorActionPreference = 'Stop'
 
@@ -176,6 +177,17 @@ if (Test-Path $VenvPython) {
 
 $env:PYTHONPATH = Join-Path $RuntimeDir 'lib'
 $env:PYTHONHOME = $null
+
+function Invoke-AwPostExit {
+    param([string]$WorktreeId)
+    $postArgs = @('-m', 'agent_worktrees')
+    if ($script:LaunchProject) {
+        $postArgs += @('--project', $script:LaunchProject)
+    }
+    $postArgs += @('post-exit', $WorktreeId)
+    & $VenvPython @postArgs
+    return $LASTEXITCODE
+}
 
 # ── Plugin auto-update ────────────────────────────────────────────────────
 # If installed from the copilot-extensions marketplace plugin, check for
@@ -736,10 +748,10 @@ if (-not $noMux -and $psmuxCmd) {
             # Post-exit finalization
             if ($plan.post_exit -and $plan.worktree_id) {
                 Write-SetupLog "Running post-exit finalization"
-                & $VenvPython -m agent_worktrees post-exit $plan.worktree_id
-                if ($LASTEXITCODE -ne 0) {
-                    Write-SetupLog "Post-exit finalization failed (exit=$LASTEXITCODE)" 'ERROR'
-                    Write-Warning "Post-exit finalization failed (exit code $LASTEXITCODE). Run 'agent-worktrees finalize' to retry."
+                $postExitCode = Invoke-AwPostExit $plan.worktree_id
+                if ($postExitCode -ne 0) {
+                    Write-SetupLog "Post-exit finalization failed (exit=$postExitCode)" 'ERROR'
+                    Write-Warning "Post-exit finalization failed (exit code $postExitCode). Run 'agent-worktrees finalize' to retry."
                     Write-Host "Exiting in 10 seconds..." -ForegroundColor Yellow
                     Start-Sleep -Seconds 10
                 }
@@ -772,9 +784,9 @@ try {
 } finally {
     # ── Post-exit finalization ───────────────────────────────────────────
     if ($plan.post_exit -and $plan.worktree_id) {
-        & $VenvPython -m agent_worktrees post-exit $plan.worktree_id
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Post-exit finalization failed (exit code $LASTEXITCODE). Run 'agent-worktrees finalize' to retry."
+        $postExitCode = Invoke-AwPostExit $plan.worktree_id
+        if ($postExitCode -ne 0) {
+            Write-Warning "Post-exit finalization failed (exit code $postExitCode). Run 'agent-worktrees finalize' to retry."
         }
     }
 }
