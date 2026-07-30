@@ -1,8 +1,4 @@
-"""Generic source connector registry for agent-index.
-
-Concrete connectors are intentionally not bundled in this Phase 2 core port.
-Downstream packages can register connector factories at runtime.
-"""
+"""Generic source connector registry for agent-index."""
 
 from __future__ import annotations
 
@@ -10,6 +6,8 @@ from collections.abc import Callable
 from typing import Any
 
 from agent_index.sources.base import FileEntry, SourceConnector
+from agent_index.sources.git_repo import GitRepoConnector
+from agent_index.sources.github import GitHubConnector
 
 ConnectorFactory = Callable[..., SourceConnector]
 _CONNECTORS: dict[str, ConnectorFactory] = {}
@@ -43,5 +41,6 @@ def get_connector(source: str, **kwargs: Any) -> SourceConnector:
         if source.startswith(f"{prefix}:"):
             return _CONNECTORS[prefix](source=source, **kwargs)
 
-    # Phase 2b: built-in forge connectors (files/commits/issues/PRs).
     raise ValueError(f"Unknown source: {source!r}. No connector is registered.")
+register_connector("git", GitRepoConnector)
+register_connector("github", GitHubConnector)
