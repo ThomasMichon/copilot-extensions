@@ -453,7 +453,10 @@ def _project_binstub_specs(project: str) -> list[tuple[Path, str]]:
             'set "PYTHONUTF8=1"',
             "rem Context resolves from CWD / --project (git-like); the binstub names its",
             "rem project via --project, not an ambient env var.",
+            "rem Resolve the .venv reparse target and launch the slot python directly, never",
+            "rem traversing the junction (blocked under RedirectionGuard) -- dotfiles #637.",
             'set "_PY=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe"',
+            "for /f \"tokens=2 delims=[]\" %%i in ('dir /a:l \"%USERPROFILE%\\.agent-worktrees\" 2^>nul ^| findstr /i /c:\".venv\"') do set \"_PY=%%i\\Scripts\\python.exe\"",
             'if not exist "%_PY%" goto :_aw_fallback',
             f'"%_PY%" -m agent_worktrees --project {project} %*',
             "exit /b %ERRORLEVEL%",
@@ -469,7 +472,11 @@ def _project_binstub_specs(project: str) -> list[tuple[Path, str]]:
             "# the caller's session, so it names its project via --project (not an ambient",
             "# env var), leaving the live session env untouched. Recovery (venv missing)",
             "# passes the project to launch-session via a scoped, restored WORKTREE_PROJECT.",
-            '$_py = "$env:USERPROFILE\\.agent-worktrees\\.venv\\Scripts\\python.exe"',
+            '$_venv = "$env:USERPROFILE\\.agent-worktrees\\.venv"',
+            "# Resolve the .venv reparse target and launch the slot python directly, never",
+            "# traversing the junction (blocked under RedirectionGuard) -- dotfiles #637.",
+            '$_py = "$_venv\\Scripts\\python.exe"',
+            "try { $_t = (Get-Item -LiteralPath $_venv -Force -ErrorAction Stop).Target; if ($_t) { $_py = Join-Path (@($_t)[0]) 'Scripts\\python.exe' } } catch {}",
             "if (Test-Path $_py) {",
             f"    & $_py -m agent_worktrees --project '{project}' @args",
             "    exit $LASTEXITCODE",
@@ -638,7 +645,11 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
         wm_content = (
             "@echo off\r\n"
             'set "PYTHONUTF8=1"\r\n'
-            '"%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe" -m agent_worktrees %*\r\n'
+            "rem Resolve the .venv reparse target and launch the slot python directly, never\r\n"
+            "rem traversing the junction (blocked under RedirectionGuard) -- dotfiles #637.\r\n"
+            'set "_PY=%USERPROFILE%\\.agent-worktrees\\.venv\\Scripts\\python.exe"\r\n'
+            "for /f \"tokens=2 delims=[]\" %%i in ('dir /a:l \"%USERPROFILE%\\.agent-worktrees\" 2^>nul ^| findstr /i /c:\".venv\"') do set \"_PY=%%i\\Scripts\\python.exe\"\r\n"
+            '"%_PY%" -m agent_worktrees %*\r\n'
             "exit /b %ERRORLEVEL%\r\n"
         )
         dst = lb / "agent-worktrees.cmd"

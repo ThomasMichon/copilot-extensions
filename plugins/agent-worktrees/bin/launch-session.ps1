@@ -156,10 +156,17 @@ if ($RecoveryMode) {
     exit $LASTEXITCODE
 }
 
-# Runtime resolution
+# Runtime resolution. Resolve the venv python WITHOUT traversing the .venv
+# junction: read its reparse target and use the slot python directly. A
+# RedirectionGuard-enforcing process is blocked from *traversing* an unprivileged
+# junction but may still *read* its target (dotfiles #637). Falls back to
+# .venv\Scripts\python.exe (real dir).
 $RuntimeDir = Join-Path $env:USERPROFILE '.agent-worktrees'
+$_venv = Join-Path $RuntimeDir '.venv'
+$VenvPython = Join-Path $_venv 'Scripts\python.exe'
+try { $_t = (Get-Item -LiteralPath $_venv -Force -ErrorAction Stop).Target; if ($_t) { $VenvPython = Join-Path (@($_t)[0]) 'Scripts\python.exe' } } catch {}
 
-if (Test-Path (Join-Path $RuntimeDir '.venv\Scripts\python.exe')) {
+if (Test-Path $VenvPython) {
     Write-SetupLog "Venv resolved: $RuntimeDir"
 } else {
     Write-SetupLog 'Venv not found - aborting' 'ERROR'
@@ -167,7 +174,6 @@ if (Test-Path (Join-Path $RuntimeDir '.venv\Scripts\python.exe')) {
     exit 1
 }
 
-$VenvPython = Join-Path $RuntimeDir '.venv\Scripts\python.exe'
 $env:PYTHONPATH = Join-Path $RuntimeDir 'lib'
 $env:PYTHONHOME = $null
 

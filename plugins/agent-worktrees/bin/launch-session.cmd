@@ -6,12 +6,15 @@ set "PYTHONHOME="
 rem Runtime resolution
 set "RUNTIME_DIR=%USERPROFILE%\.agent-worktrees"
 
-if not exist "%RUNTIME_DIR%\.venv\Scripts\python.exe" (
+if not exist "%RUNTIME_DIR%\.venv" (
     echo ERROR: Venv not found. Run the installer first. >&2
     exit /b 1
 )
 
+rem Resolve the .venv reparse target and use the slot python directly, never
+rem traversing the junction (blocked under RedirectionGuard) -- dotfiles #637.
 set "PYTHON=%RUNTIME_DIR%\.venv\Scripts\python.exe"
+for /f "tokens=2 delims=[]" %%i in ('dir /a:l "%RUNTIME_DIR%" 2^>nul ^| findstr /i /c:".venv"') do set "PYTHON=%%i\Scripts\python.exe"
 
 rem Recovery escape hatch: if Python is broken, fall back to native
 if /i "%~1"=="recovery" if not exist "%PYTHON%" goto :native_recovery
