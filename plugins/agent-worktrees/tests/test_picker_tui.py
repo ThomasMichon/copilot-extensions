@@ -463,6 +463,47 @@ def test_worktrees_space_toggles_selection():
     asyncio.run(run())
 
 
+def test_worktrees_view_component_renders_body():
+    """F5 slice 7: the Worktrees-list body is rendered by an encapsulated
+    ``WorktreesView`` component, not inlined in ``build_body``. Assert (a) the
+    engine exposes a ``worktrees_view`` component; (b) build_body routes the
+    Worktrees body through the component, which emits the New-worktree button row
+    (``("BTN", 0)``) and one ``("L", i)`` stop per worktree with grouped sections
+    pinned. The multi-select state (``wt_sel`` / ``wt_anchor``) deliberately
+    stays on the engine (threads through the shared focus/dispatch machinery)."""
+    from agent_worktrees.picker_tui.engine import WorktreesView
+    src = _maint_source()
+
+    async def run():
+            app = PickerApp(src, live=False)
+            async with app.run_test(size=(118, 40)) as pilot:
+                scr = app.query_one(PickerScreen)
+                scr.machine_idx = scr.local_index()
+                await pilot.pause()
+
+                # (a) The component exists and owns the body render.
+                assert isinstance(scr.worktrees_view, WorktreesView)
+                assert hasattr(scr.worktrees_view, "build")
+                # Multi-select state stays on the engine (not moved to the component).
+                assert "wt_sel" in vars(scr)
+
+                # (b) build_body routes the Worktrees body through the component,
+                # emitting the button row + one ("L", i) stop per worktree, with
+                # group sections pinned.
+                vrows = scr.build_body(118)
+                stops = [getattr(v, "stop", None) for v in vrows]
+                assert ("BTN", 0) in stops
+                n_rows = len(scr.list_records())
+                assert n_rows > 0
+                assert sum(1 for s in stops if s and s[0] == "L") == n_rows
+                assert any(
+                    getattr(v, "stop", None) and v.stop[0] == "L"
+                    and getattr(v, "pin_section", None) is not None
+                    for v in vrows)
+
+    asyncio.run(run())
+
+
 def test_worktrees_enter_without_selection_opens_submenu():
     """Enter on a row with no multi-selection opens that row's sub-menu (which
     carries Open/Resume) -- the primary flow is preserved."""

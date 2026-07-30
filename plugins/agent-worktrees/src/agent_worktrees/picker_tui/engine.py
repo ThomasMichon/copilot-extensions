@@ -450,6 +450,12 @@ class PickerScreen(Widget):
         # + grouped task rows); the read-only task data + pivot-scoping context
         # stay on PickerScreen, reached from the component via ``self._eng``.
         self.tasks_view = TasksView(self)
+        # Worktrees list -- the picker's primary body, and the fourth/last body
+        # sub-view componentized (#88 F5 slice 7). Owns the list render; the
+        # multi-select state (wt_sel / wt_anchor) + its dispatch/range behaviour
+        # stay on PickerScreen (shared with the focus machinery), read from the
+        # component via ``self._eng``.
+        self.worktrees_view = WorktreesView(self)
         self.htab = 0                 # index into self.pivots (built-ins + registered)
         # Cross-plugin pivot registry (Worktrees/Maintenance/Profiles + any
         # pivot a sibling plugin contributed via a manifest). Built here so the
@@ -1711,85 +1717,8 @@ class PickerScreen(Widget):
             return vr
 
         sel = self.sel
-        btn_focus = sel == ("BTN", 0)
         if self._kind() == "worktrees":
-            add(self.tab_bar(width, sel == ("M", 0)))
-            add(Text(""))  # breathing room above the buttons
-            add(self.new_worktree_row(width, btn_focus, self.btn_idx),
-                stop=("BTN", 0))
-            add(Text(""))  # breathing room below the buttons
-            cols, sections = self.current_list()
-            # The checkbox gutter's two left cells (box + margin) are ALWAYS
-            # reserved so the table never shifts when multi-select mode toggles
-            # (#2258 follow-up); only the box GLYPH is withheld until a
-            # multi-select state is active -- until then the gutter renders blank.
-            ms = self._wt_multiselect_active()
-            lcols = fit(cols, width - 2, "title", 14)
-            add(header_text(lcols, width, indent=2), kind="colhdr")
-            # Preview which worktrees an action targets, directly on the list:
-            # when the Clean/Sync button is merely focused, dim the rows that
-            # action can't touch. (The old live-filter preview driven by an open
-            # Clean/Sync dialog was retired with #88 F4 -- that dialog is now a
-            # centered ScopeDlgScreen carrying its own impact list.)
-            preview = None
-            preview_ids = None
-            if btn_focus:
-                ab = self.active_button()
-                preview = {"K": "clean", "SY": "sync"}.get(ab)
-            li = 0
-            for label, rows in sections:
-                sec = Text(f"  ── {label} ", style=C_SECTION)
-                sec.append("─" * (width - sec.cell_len), style=C_DIM)
-                cur_section = (label, len(vrows))
-                add(sec, kind="section")
-                if not rows:
-                    add(Text("    (none)", style=C_DIM))
-                for rec in rows:
-                    focused = sel == ("L", li)
-                    is_sel = rec["id4"] in self.wt_sel
-                    # The box glyph renders only in multi-select mode; otherwise
-                    # a blank 2-cell gutter holds the column alignment steady
-                    # (#2258 follow-up).
-                    box = self._checkbox(is_sel) if ms else (" ", "")
-                    vr = add(row_text(rec, lcols, width, False,
-                                      pulse=self.pulse, mark=box),
-                             stop=("L", li), data=rec)
-                    if rec.get("hidden") and not focused:
-                        # Revealed bridge/system worktree -> dim it (#1422).
-                        vr.text.stylize("grey42")
-                    elif (preview_ids is not None and rec["id4"] not in preview_ids
-                          and not focused):
-                        vr.text.stylize("grey35")   # outside the net set
-                    elif preview and not focused and not (
-                        self._cleanable(rec) if preview == "clean"
-                        else rec.get("ff_eligible")
-                    ):
-                        vr.text.stylize("grey35")   # out of this action's scope
-                    # Focus / selection highlight, layered last so it reads as
-                    # one state (#2258 follow-up): green invert = focused AND
-                    # selected, plain invert = focused only, grey background =
-                    # selected but the cursor has moved off it.
-                    if focused and is_sel:
-                        vr.text.stylize(C_SEL_ON)
-                    elif focused:
-                        vr.text.stylize(C_SEL)
-                    elif is_sel:
-                        vr.text.stylize(C_SEL_BG)
-                    # worktree-status-core live pulse (#2917): a dim, expiring
-                    # sub-line carrying the agent's current intent, derived from
-                    # the assistant.intent stream. Decorative (no stop) so it is
-                    # never focusable and never affects selection; fresh renders
-                    # dim, stale renders dimmer, expired is dropped upstream.
-                    _pulse = rec.get("live_pulse")
-                    _intent = (rec.get("live_intent") or "").strip()
-                    if _pulse and _intent:
-                        _pstyle = C_DIM if _pulse == "fresh" else "grey30"
-                        pline = Text("      ", style=_pstyle)
-                        pline.append("⟳ ", style=_pstyle)
-                        pline.append(_clip(_intent, max(1, width - 9), "l"),
-                                     style=_pstyle)
-                        add(pline)
-                    li += 1
+            self.worktrees_view.build(add, width, sel)
         elif self._kind() == "maintenance":
             self.maintenance_view.build(add, width, sel)
         elif self._kind() == "registered":
@@ -4589,6 +4518,118 @@ class MaintenanceView:
                 add(self._row(d, ccols, width, sel == ("C", li),
                               checked, eng.pulse),
                     stop=("C", li), data=rec)
+                li += 1
+
+
+class WorktreesView:
+    """Encapsulated Worktrees-list body sub-view (#88 F5, slice 7).
+
+    The picker's **primary** body -- the machine's worktree list, grouped into
+    Active / Recent / Completed / Unowned sections, with the multi-select
+    checkbox gutter, per-row disposition/preview dimming, focus + selection
+    highlight layering, and the decorative live worktree-status-core pulse
+    sub-lines. It is the largest and most-coupled body, so it is carved out
+    **last**, once the componentization pattern was proven three times over
+    (Profiles / Maintenance / Tasks).
+
+    This slice moves the **rendering** -- the whole Worktrees branch of
+    ``build_body`` into ``build``. Because the list's multi-select **state**
+    (``wt_sel`` / ``wt_anchor``) and its range/toggle behaviour thread deeply
+    through the shared key-dispatch + focus machinery (``_dispatch_key``,
+    ``_reconcile_wt_sel``, range-select, focus tracking) -- which is exactly the
+    ``sel``/``stops`` chrome the *final* native-focus step addresses -- that
+    state stays on ``PickerScreen`` and is read here via ``self._eng``, along
+    with the list data (``current_list`` / ``list_records``), the multi-select
+    predicates (``_wt_multiselect_active`` / ``_cleanable``), the shared
+    ``_checkbox`` glyph, and the chrome rows (``tab_bar`` / ``new_worktree_row``
+    / ``active_button``). A later slice makes this a focusable Textual widget.
+    """
+
+    def __init__(self, eng) -> None:
+        self._eng = eng
+
+    def build(self, add, width, sel):
+        """Emit the Worktrees-list body into ``add`` (the ``build_body`` VRow
+        sink). Mirrors the former inline ``build_body`` worktrees branch exactly;
+        group sections are opened via ``add(..., new_section=...)`` so this
+        component never touches the closure's ``cur_section``/``vrows``."""
+        eng = self._eng
+        btn_focus = sel == ("BTN", 0)
+        add(eng.tab_bar(width, sel == ("M", 0)))
+        add(Text(""))  # breathing room above the buttons
+        add(eng.new_worktree_row(width, btn_focus, eng.btn_idx),
+            stop=("BTN", 0))
+        add(Text(""))  # breathing room below the buttons
+        cols, sections = eng.current_list()
+        # The checkbox gutter's two left cells (box + margin) are ALWAYS
+        # reserved so the table never shifts when multi-select mode toggles
+        # (#2258 follow-up); only the box GLYPH is withheld until a
+        # multi-select state is active -- until then the gutter renders blank.
+        ms = eng._wt_multiselect_active()
+        lcols = fit(cols, width - 2, "title", 14)
+        add(header_text(lcols, width, indent=2), kind="colhdr")
+        # Preview which worktrees an action targets, directly on the list:
+        # when the Clean/Sync button is merely focused, dim the rows that
+        # action can't touch. (The old live-filter preview driven by an open
+        # Clean/Sync dialog was retired with #88 F4 -- that dialog is now a
+        # centered ScopeDlgScreen carrying its own impact list.)
+        preview = None
+        preview_ids = None
+        if btn_focus:
+            ab = eng.active_button()
+            preview = {"K": "clean", "SY": "sync"}.get(ab)
+        li = 0
+        for label, rows in sections:
+            sec = Text(f"  ── {label} ", style=C_SECTION)
+            sec.append("─" * (width - sec.cell_len), style=C_DIM)
+            add(sec, kind="section", new_section=label)
+            if not rows:
+                add(Text("    (none)", style=C_DIM))
+            for rec in rows:
+                focused = sel == ("L", li)
+                is_sel = rec["id4"] in eng.wt_sel
+                # The box glyph renders only in multi-select mode; otherwise
+                # a blank 2-cell gutter holds the column alignment steady
+                # (#2258 follow-up).
+                box = eng._checkbox(is_sel) if ms else (" ", "")
+                vr = add(row_text(rec, lcols, width, False,
+                                  pulse=eng.pulse, mark=box),
+                         stop=("L", li), data=rec)
+                if rec.get("hidden") and not focused:
+                    # Revealed bridge/system worktree -> dim it (#1422).
+                    vr.text.stylize("grey42")
+                elif (preview_ids is not None and rec["id4"] not in preview_ids
+                      and not focused):
+                    vr.text.stylize("grey35")   # outside the net set
+                elif preview and not focused and not (
+                    eng._cleanable(rec) if preview == "clean"
+                    else rec.get("ff_eligible")
+                ):
+                    vr.text.stylize("grey35")   # out of this action's scope
+                # Focus / selection highlight, layered last so it reads as
+                # one state (#2258 follow-up): green invert = focused AND
+                # selected, plain invert = focused only, grey background =
+                # selected but the cursor has moved off it.
+                if focused and is_sel:
+                    vr.text.stylize(C_SEL_ON)
+                elif focused:
+                    vr.text.stylize(C_SEL)
+                elif is_sel:
+                    vr.text.stylize(C_SEL_BG)
+                # worktree-status-core live pulse (#2917): a dim, expiring
+                # sub-line carrying the agent's current intent, derived from
+                # the assistant.intent stream. Decorative (no stop) so it is
+                # never focusable and never affects selection; fresh renders
+                # dim, stale renders dimmer, expired is dropped upstream.
+                _pulse = rec.get("live_pulse")
+                _intent = (rec.get("live_intent") or "").strip()
+                if _pulse and _intent:
+                    _pstyle = C_DIM if _pulse == "fresh" else "grey30"
+                    pline = Text("      ", style=_pstyle)
+                    pline.append("⟳ ", style=_pstyle)
+                    pline.append(_clip(_intent, max(1, width - 9), "l"),
+                                 style=_pstyle)
+                    add(pline)
                 li += 1
 
 
