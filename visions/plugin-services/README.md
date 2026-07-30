@@ -104,6 +104,23 @@ When multiple services are present they discover and use one another's optional
 capabilities without a mandatory central broker and without user-authored wiring.
 Cooperation is opportunistic, not obligatory.
 
+### version-skew-tolerant-contracts
+Because every plugin updates on its **own schedule**, the parties to a live
+interaction may be at **different versions** at the same moment — a client newer
+than the service it calls, a service newer than a peer it discovers, a running
+daemon lagging its own installed payload. The model treats this **version skew as
+a normal steady state, not a fault**: every live communication contract between
+services — and between a service and its own clients — is **explicitly versioned
+and backwards-compatible within a declared tolerance**, so composition keeps
+working across a support window of versions without a lockstep upgrade. This is
+the runtime-communication counterpart to the install contract's **config-schema
+migration**: just as a newer runtime reads and migrates older on-disk config
+rather than demanding a matching writer, a newer endpoint understands older
+callers — and an older endpoint tolerates a newer caller's additive requests —
+rather than demanding a matched peer. Convergence (reconcile, drain-and-cutover)
+merely *reduces* skew when convenient; it is never a **precondition for
+correctness**. The suite is correct **while** skewed.
+
 ### uniform-deploy-contract
 All service-bearing plugins share one deploy/update/version footprint (the
 install contract), so a user — or an automated fleet — reasons about, audits, and
@@ -145,6 +162,20 @@ installed, configured, or running.
 Absent an optional peer or coordinator, a service still performs its own local
 function; optional cross-service features simply stay dark until the peer is
 present. A missing sibling degrades a feature, never the whole service.
+
+### interoperate-across-version-skew
+Two composed services at different versions still interoperate within their
+contract's declared tolerance: a newer caller reaches an older endpoint, and a
+newer endpoint serves an older caller, each **degrading a version-gated feature
+gracefully** — negotiating shared capability instead of assuming a matched build
+— rather than erroring. This extends *degrade-gracefully* from an **absent** peer
+to a **present-but-skewed** one. A contract evolves only by **tolerant, additive
+change**: unknown fields are ignored, existing fields keep their meaning, and a
+breaking change carries a **deprecation window** across which both the old and the
+new form are honored — so an endpoint, its discovery handshake, and its wire
+protocol each advertise a version and a supported range, never a single required
+match. A version mismatch that falls **outside** the tolerance
+*fail-loud-on-endpoint-error*'s the real version gap, never silently misbehaves.
 
 ### local-first-exposure
 A service is machine-local by default — reachable by processes on the same host
@@ -264,3 +295,22 @@ spec-level, not fixed here.
   durable data (e.g. a search index) living outside the swappable runtime.
   Realized at intent level by the shared `zdd` cutover library (routing table +
   `CutoverOrchestrator`).
+
+- **2026-07-29** — Added the **version-skew-tolerant-contracts** feature and the
+  **interoperate-across-version-skew** behavior. Mined from an operator directive
+  that plugin payloads now land **independently and asynchronously** — while one
+  host was being brought to latest, the marketplace/anchor advanced through
+  several dev builds within minutes from concurrent work, and a running daemon
+  routinely lags its own installed payload (the whole #533 lineage). The
+  conclusion: the service model must **allow** skew and be robust to it, not race
+  it away. The convergence machinery (running-aware reconcile + drain-and-cutover
+  from #533; immutable-versioned runtime from #581) is demoted from a correctness
+  *precondition* to a convenience that merely reduces skew — correctness itself is
+  moved into the **communication contracts**, extending the install contract's
+  existing config-schema-migration discipline to **live communication**: every
+  contract, endpoint, and protocol carries an explicit version and a
+  backwards-compatible tolerance window (tolerant reader, additive evolution,
+  deprecation windows, capability negotiation). Tracked in dotfiles #632 (the
+  vision→reality delta: inventory and version the live wire contracts — HTTP,
+  ACP-over-WS, the endpoint/rendezvous handshake, cross-plugin relay/provider
+  calls, and the fabric coordination contract).
