@@ -705,21 +705,27 @@ pivot body (the host×target grid + its narrow-terminal transposed fallback) is 
 most self-contained sub-view (its confirm dialog was already a native
 `ProfConfirmScreen`), so it goes first. `PickerScreen.build_body`'s profiles branch
 now calls `self.profiles_view.build(add, width, sel)` on a `ProfilesView` component
-(instantiated in `__init__`) instead of the inline `_build_profiles` /
+(instantiated first in `__init__`) instead of the inline `_build_profiles` /
 `_build_profiles_transposed` (both deleted). Slice 1 moved the two body-render
-*entry* methods behind the component boundary; **slice 2 moved every Profiles
-render *helper* too** -- column widths, the visible-column window
-(`_visible_pcols`), the host-header / target-label / grid-cell visuals
-(`_host_header_cell` / `_tlabel` / `_cell_visual`), the Apply/Reset button row, and
-the legend -- so the component now owns the Profiles pivot's **entire rendering**.
-The profiles *state* (`grid` / `pcol` / `targets` / `host_cols` / `applied` /
-`_prof_unavailable`) and *behaviour* (toggle, Apply plumbing) still live on the
-engine and are read through the component's back-reference, along with the
-genuinely shared helpers (`cell_locked`, `grid_dirty`, `pending_count`,
-`_btn_style`, `_hl`); those move in a follow-up slice (and a later slice makes
-`ProfilesView` a focusable Textual widget). Behaviour is unchanged -- the same
-VRows with the same `("PR", i)` / `("BTN", 0)` stops are emitted; a guard test
-(`test_profiles_view_component_renders_body`) asserts the component renders the
-body and that the render methods/helpers are gone from the engine.
+*entry* methods behind the component boundary; slice 2 moved every Profiles render
+*helper* too (column widths, the visible-column window, host-header / target-label
+/ grid-cell visuals, the Apply/Reset button row, the legend); **slice 3 moved the
+grid-editing *model* -- the state (`grid` / `applied` / `pcol` / `targets` /
+`host_cols` / `_prof_unavailable`) and the pure grid behaviour (`grid_dirty` /
+`pending_count` / `cell_locked` / `profiles_present` / `_column_sels` /
+`toggle_cell`) -- onto the component.** `PickerScreen` keeps every existing call
+site (`setup`, `_dispatch_key`, the Apply/progress plumbing) and the test suite
+working via thin **shims**: `@property` pass-throughs for the six state fields and
+one-line delegating methods for the behaviour (so `self.grid` / `self.pcol` /
+`self._toggle_cell()` still resolve, now against `self.profiles_view`). The
+Apply/load *plumbing* (`_apply_profiles`, `_start_profiles_run`,
+`_commit_applied_profiles`, the background column loader) still lives on the engine
+and reads the state through those shims -- the last piece, for a follow-up slice.
+A later slice makes `ProfilesView` a focusable Textual widget. Behaviour is
+unchanged -- the same VRows with the same `("PR", i)` / `("BTN", 0)` stops are
+emitted; a guard test (`test_profiles_view_component_renders_body`) asserts the
+component renders the body, owns the state (`scr.grid is scr.profiles_view.grid`,
+and `grid` is not a plain engine attribute), and that the render methods are gone
+from the engine.
 
 
