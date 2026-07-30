@@ -768,3 +768,24 @@ the component renders the body, the inline row helpers are gone from the engine,
 the component owns the selection state (`scr.maint_sel is
 scr.maintenance_view.maint_sel`; `maint_sel` is not a plain engine attribute).
 
+**Third component -- the registered-pivot (Tasks) body (`TasksView`).** The
+registered/Tasks pivot body is carved out next (#88 F5 slice 6). `build_body`'s
+`registered` branch now calls `self.tasks_view.build(add, width, sel)` on a
+`TasksView` component (instantiated in `__init__` after `maintenance_view`), and the
+two Tasks row helpers (`_task_status_row` for the load/count/empty header line,
+`_task_row` for one task entry) move onto the component as `_status_row` / `_row`
+(both deleted from `PickerScreen`). Unlike Profiles/Maintenance there is **no
+editable state to move**: the registered pivot is read-only, its task list
+background-loaded by a `RegisteredPivotRuntime`, and its "selection" is just the
+shared `sel` cursor. So the data helpers (`_task_state` / `_task_rows` /
+`_task_groups`) and the pivot-scoping context (`_reg_pivot` / `_pivot_machine` /
+`_pivot_machine_id` / `_pivot_runtime`) stay on the engine -- they are shared with
+`stops` / `region_heads`, the internal-navigation dispatch, and the task action
+sub-menu -- and the component reads them via `self._eng`. Group sections are opened
+with the same `add(new_section=...)` mechanism. Behaviour is unchanged -- the same
+VRows with the same `("T", i)` task stops and pinned worktree-group sections; a guard
+test (`test_tasks_view_component_renders_body`) asserts the component renders the
+body, the inline row helpers are gone from the engine, and `build_body` routes the
+Tasks body through the component with its group sections pinned and the task titles
+rendered.
+

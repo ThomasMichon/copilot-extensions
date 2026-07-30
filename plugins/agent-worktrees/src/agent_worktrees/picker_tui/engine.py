@@ -445,6 +445,11 @@ class PickerScreen(Widget):
         # live on PickerScreen for now, reached from the component via
         # ``self._eng`` (moved onto the component in a follow-up slice).
         self.maintenance_view = MaintenanceView(self)
+        # Registered/Tasks pivot -- a third encapsulated body sub-view (#88 F5
+        # slice 6). Owns the registered-pivot body render (the status/count line
+        # + grouped task rows); the read-only task data + pivot-scoping context
+        # stay on PickerScreen, reached from the component via ``self._eng``.
+        self.tasks_view = TasksView(self)
         self.htab = 0                 # index into self.pivots (built-ins + registered)
         # Cross-plugin pivot registry (Worktrees/Maintenance/Profiles + any
         # pivot a sibling plugin contributed via a manifest). Built here so the
@@ -1684,49 +1689,6 @@ class PickerScreen(Widget):
     def _checkbox(self, checked):
         return ("☑", "green") if checked else ("☐", "grey50")
 
-    # ---- Registered-pivot (Tasks) row rendering ----
-    def _task_status_row(self, reg, state, rows, err, width):
-        """The header line for a registered pivot: a count, a load spinner, or
-        the empty/error hint."""
-        machine = self._pivot_machine() or "this machine"
-        t = Text("  ")
-        if state == "loading":
-            t.append(f"{self.spin()} ", style=C_LOAD)
-            t.append(f"loading {reg.label.lower()} for {machine}…", style=C_LOAD)
-        elif state == "error":
-            t.append("✗ ", style=C_WARN)
-            t.append(f"{reg.label} unavailable: {err or 'command failed'}", style=C_META)
-        elif not rows:
-            t.append(reg.empty_hint, style=C_DIM)
-        else:
-            t.append("●", style=C_PULSE[self.pulse])
-            t.append(f" {len(rows)} on {machine}", style=C_LABEL)
-        t.append(" " * max(0, width - t.cell_len))
-        return t
-
-    def _task_row(self, reg, rec, width, selected):
-        """One task entry: title, then dim badges (labels) + subtitle."""
-        title = str(rec.get(reg.title_field) or rec.get(reg.id_field) or "(untitled)")
-        t = Text("    ")
-        t.append(title, style="grey85" if not selected else C_HEADER)
-        badges: list[str] = []
-        for f in reg.badge_fields:
-            v = rec.get(f)
-            if isinstance(v, (list, tuple)):
-                badges.extend(str(x) for x in v)
-            elif v:
-                badges.append(str(v))
-        for b in badges:
-            t.append(f"  [{b}]", style=C_ENV.get(b, "cyan"))
-        if reg.subtitle_field:
-            sub = rec.get(reg.subtitle_field)
-            if sub:
-                t.append(f"  · {sub}", style=C_DIM)
-        t.append(" " * max(0, width - t.cell_len))
-        if selected:
-            t.stylize(C_SEL)
-        return t
-
     # ---- build the scrollable body as VRows ----
     def build_body(self, width):
         vrows = []
@@ -1831,23 +1793,7 @@ class PickerScreen(Widget):
         elif self._kind() == "maintenance":
             self.maintenance_view.build(add, width, sel)
         elif self._kind() == "registered":
-            reg = self._reg_pivot()
-            add(self.tab_bar(width, sel == ("M", 0)))
-            add(Text(""))
-            state, rows, err = self._task_state()
-            add(self._task_status_row(reg, state, rows, err, width))
-            add(Text(""))
-            if state in ("ready", "idle") and rows:
-                li = 0
-                for grp, entries in self._task_groups():
-                    sec = Text(f"  ── {grp} ", style=C_SECTION)
-                    sec.append("─" * max(0, width - sec.cell_len), style=C_DIM)
-                    cur_section = (grp, len(vrows))
-                    add(sec, kind="section")
-                    for _idx, rec in entries:
-                        add(self._task_row(reg, rec, width, sel == ("T", li)),
-                            stop=("T", li), data=rec)
-                        li += 1
+            self.tasks_view.build(add, width, sel)
         else:
             self.profiles_view.build(add, width, sel)
         return vrows
@@ -4644,6 +4590,98 @@ class MaintenanceView:
                               checked, eng.pulse),
                     stop=("C", li), data=rec)
                 li += 1
+
+
+class TasksView:
+    """Encapsulated registered-pivot (Tasks) body sub-view (#88 F5, slice 6).
+
+    A cohesive sub-view carved out of the picker's monolithic
+    ``PickerScreen.build_body`` into its own component, mirroring
+    :class:`ProfilesView` / :class:`MaintenanceView` and per the incremental
+    componentization strategy (#88 F5).
+
+    This slice moves the registered pivot's **rendering** -- the body entry
+    (``build``) plus the two row helpers (``_status_row`` for the load/count/empty
+    header line, ``_row`` for one task entry). The registered pivot is
+    **read-only** (its task list is background-loaded by a
+    ``RegisteredPivotRuntime``), so there is no editable state to move: the data
+    helpers (``_task_state`` / ``_task_rows`` / ``_task_groups``) and the
+    pivot-scoping context (``_reg_pivot`` / ``_pivot_machine`` /
+    ``_pivot_machine_id`` / ``_pivot_runtime``, all shared with dispatch + the
+    task action sub-menu) stay on ``PickerScreen`` and are read here via
+    ``self._eng``. A later slice makes this a focusable Textual widget.
+    """
+
+    def __init__(self, eng) -> None:
+        self._eng = eng
+
+    # ---- Registered-pivot (Tasks) row rendering (moved here #88 F5 slice 6) --
+    def _status_row(self, reg, state, rows, err, width):
+        """The header line for a registered pivot: a count, a load spinner, or
+        the empty/error hint."""
+        eng = self._eng
+        machine = eng._pivot_machine() or "this machine"
+        t = Text("  ")
+        if state == "loading":
+            t.append(f"{eng.spin()} ", style=C_LOAD)
+            t.append(f"loading {reg.label.lower()} for {machine}…", style=C_LOAD)
+        elif state == "error":
+            t.append("✗ ", style=C_WARN)
+            t.append(f"{reg.label} unavailable: {err or 'command failed'}", style=C_META)
+        elif not rows:
+            t.append(reg.empty_hint, style=C_DIM)
+        else:
+            t.append("●", style=C_PULSE[eng.pulse])
+            t.append(f" {len(rows)} on {machine}", style=C_LABEL)
+        t.append(" " * max(0, width - t.cell_len))
+        return t
+
+    def _row(self, reg, rec, width, selected):
+        """One task entry: title, then dim badges (labels) + subtitle."""
+        title = str(rec.get(reg.title_field) or rec.get(reg.id_field) or "(untitled)")
+        t = Text("    ")
+        t.append(title, style="grey85" if not selected else C_HEADER)
+        badges: list[str] = []
+        for f in reg.badge_fields:
+            v = rec.get(f)
+            if isinstance(v, (list, tuple)):
+                badges.extend(str(x) for x in v)
+            elif v:
+                badges.append(str(v))
+        for b in badges:
+            t.append(f"  [{b}]", style=C_ENV.get(b, "cyan"))
+        if reg.subtitle_field:
+            sub = rec.get(reg.subtitle_field)
+            if sub:
+                t.append(f"  · {sub}", style=C_DIM)
+        t.append(" " * max(0, width - t.cell_len))
+        if selected:
+            t.stylize(C_SEL)
+        return t
+
+    def build(self, add, width, sel):
+        """Emit the registered-pivot (Tasks) body into ``add`` (the
+        ``build_body`` VRow sink). Mirrors the former inline ``build_body``
+        registered branch exactly; group sections are opened via
+        ``add(..., new_section=...)`` so this component never touches the
+        closure's ``cur_section``/``vrows``."""
+        eng = self._eng
+        reg = eng._reg_pivot()
+        add(eng.tab_bar(width, sel == ("M", 0)))
+        add(Text(""))
+        state, rows, err = eng._task_state()
+        add(self._status_row(reg, state, rows, err, width))
+        add(Text(""))
+        if state in ("ready", "idle") and rows:
+            li = 0
+            for grp, entries in eng._task_groups():
+                sec = Text(f"  ── {grp} ", style=C_SECTION)
+                sec.append("─" * max(0, width - sec.cell_len), style=C_DIM)
+                add(sec, kind="section", new_section=grp)
+                for _idx, rec in entries:
+                    add(self._row(reg, rec, width, sel == ("T", li)),
+                        stop=("T", li), data=rec)
+                    li += 1
 
 
 class ProfilesView:
