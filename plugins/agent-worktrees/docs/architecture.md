@@ -715,17 +715,26 @@ grid-editing *model* -- the state (`grid` / `applied` / `pcol` / `targets` /
 `pending_count` / `cell_locked` / `profiles_present` / `_column_sels` /
 `toggle_cell`) -- onto the component.** `PickerScreen` keeps every existing call
 site (`setup`, `_dispatch_key`, the Apply/progress plumbing) and the test suite
-working via thin **shims**: `@property` pass-throughs for the six state fields and
+working via thin **shims**: `@property` pass-throughs for the state fields and
 one-line delegating methods for the behaviour (so `self.grid` / `self.pcol` /
-`self._toggle_cell()` still resolve, now against `self.profiles_view`). The
-Apply/load *plumbing* (`_apply_profiles`, `_start_profiles_run`,
-`_commit_applied_profiles`, the background column loader) still lives on the engine
-and reads the state through those shims -- the last piece, for a follow-up slice.
-A later slice makes `ProfilesView` a focusable Textual widget. Behaviour is
+`self._toggle_cell()` still resolve, now against `self.profiles_view`). **Slice 4
+moved the last piece -- the Apply/load *plumbing*** (`start_load` + the background
+per-host column loader, `apply` → the `ProfConfirmScreen` confirm, `_start_run`,
+`_make_apply_task`, `commit_applied`, `_target_sel`, and the `_prof_load` /
+`_prof_apply` / `_prof_loading` / `_prof_loaded` handles) onto the component. The
+apply flow reaches back through `self._eng` only for the genuinely engine-level
+*shared* infrastructure it drives -- `mock_mode`, the status line, the screen
+stack (`ProfConfirmScreen`), and the maintenance `executor` / `progress` /
+`_open_progress` that every maintenance op uses (the same `ProgressScreen`). The
+engine keeps thin shims (`_apply_profiles` → `profiles_view.apply()`,
+`_prof_*` `@property`s) so `_activate`, `setup`, `_key_progress`'s profiles-commit
+branch, and the test suite address them unchanged. **`ProfilesView` is now a fully
+self-contained Profiles configurator** -- rendering, grid state, behaviour, and
+IO -- ready to become a focusable Textual widget in a later slice. Behaviour is
 unchanged -- the same VRows with the same `("PR", i)` / `("BTN", 0)` stops are
 emitted; a guard test (`test_profiles_view_component_renders_body`) asserts the
 component renders the body, owns the state (`scr.grid is scr.profiles_view.grid`,
-and `grid` is not a plain engine attribute), and that the render methods are gone
-from the engine.
+`grid` is not a plain engine attribute) and the plumbing (`apply` / `start_load` /
+`commit_applied` live on the component; `_prof_load` is not an engine attribute).
 
 

@@ -489,13 +489,10 @@ class PickerScreen(Widget):
         self.btn_idx = 0              # active button within the current group
         self.show_hidden = False      # reveal bridge/system worktrees (#1422)
         # (Profiles grid state -- pcol / grid / applied / targets / host_cols /
-        # _prof_unavailable -- lives on self.profiles_view now, reached via the
-        # @property shims below; #88 F5 slice 3.)
-        self._prof_lock = threading.Lock()
-        self._prof_load = None        # src.load_profile_column (real sources)
-        self._prof_apply = None       # src.apply_profile_column (real sources)
-        self._prof_loading = False    # columns are streaming in
-        self._prof_loaded = False
+        # _prof_unavailable -- AND the load/Apply plumbing -- _prof_load /
+        # _prof_apply / _prof_loading / _prof_loaded -- live on
+        # self.profiles_view now, reached via the @property + method shims
+        # below; #88 F5 slices 3-4.)
         self.debug = "ready"
         self.data = []
         self.machines = []
@@ -561,6 +558,38 @@ class PickerScreen(Widget):
     @_prof_unavailable.setter
     def _prof_unavailable(self, value):
         self.profiles_view._prof_unavailable = value
+
+    @property
+    def _prof_load(self):
+        return self.profiles_view._prof_load
+
+    @_prof_load.setter
+    def _prof_load(self, value):
+        self.profiles_view._prof_load = value
+
+    @property
+    def _prof_apply(self):
+        return self.profiles_view._prof_apply
+
+    @_prof_apply.setter
+    def _prof_apply(self, value):
+        self.profiles_view._prof_apply = value
+
+    @property
+    def _prof_loading(self):
+        return self.profiles_view._prof_loading
+
+    @_prof_loading.setter
+    def _prof_loading(self, value):
+        self.profiles_view._prof_loading = value
+
+    @property
+    def _prof_loaded(self):
+        return self.profiles_view._prof_loaded
+
+    @_prof_loaded.setter
+    def _prof_loaded(self, value):
+        self.profiles_view._prof_loaded = value
 
     # ---- pivot registry (built-ins + cross-plugin registered pivots) ----
     def _load_pivots(self):
@@ -895,7 +924,7 @@ class PickerScreen(Widget):
         self._prof_apply = getattr(self.src, "apply_profile_column", None)
         self._prof_loaded = False
         if callable(self._prof_load):
-            self._start_profile_load()
+            self.profiles_view.start_load()
         # Best-effort background PR-state reconcile (#1423): correct already-
         # merged-but-stale PRs in the tracking store, then re-render so the
         # Picker stops showing merged worktrees as having open PRs. Sources
@@ -1546,171 +1575,11 @@ class PickerScreen(Widget):
         return self.profiles_view.profiles_present()
 
     # ---- Profiles: real per-host column load + Apply (own-column model) ----
-    def _target_sel(self, ti):
-        """The TargetSel a target row represents (kind = agent|shell)."""
-        t = self.targets[ti]
-        return profiles_mod.TargetSel(
-            t["machine"], t["env"], "agent" if t["agent"] else "shell")
-
-    def _start_profile_load(self):
-        """Background-load every host's saved column into the grid.
-
-        Read-only: each host's column is fetched (local in-process, remote over
-        SSH) and projected onto the grid; ``applied`` is snapshotted to match so
-        the freshly-loaded state reads as 'no pending changes'.
-        """
-        self._prof_loading = True
-
-        def work():
-            from . import profiles_io
-            cols = {}
-            for hi, (_lbl, hm, he) in enumerate(self.host_cols):
-                try:
-                    cols[hi] = self._prof_load(hm, he)
-                except Exception:
-                    cols[hi] = None   # load failure -> unmanaged (default column)
-            with self._prof_lock:
-                # Don't clobber edits the user already started before the load
-                # resolved -- only project columns onto a pristine grid.
-                if not self.grid_dirty():
-                    unavail = set()
-                    for hi, sels in cols.items():
-                        if sels is profiles_io.UNAVAILABLE:
-                            # Unreachable / too-old remote: we can't know its
-                            # real column, so mark it read-only. Seed just the
-                            # locked self-diagonal so the grid stays consistent;
-                            # cells render as "?" and are never editable or
-                            # applied (#1370).
-                            unavail.add(hi)
-                            for ti in range(len(self.targets)):
-                                self.grid[(ti, hi)] = self.cell_locked(ti, hi)
-                            continue
-                        if sels is None:
-                            # Unmanaged host: render the DEFAULT column
-                            # (minimal per-agent + bare cross-machine; see
-                            # profiles.is_default_on), replacing the retired
-                            # emit-everything default. The user can still curate
-                            # from here and Apply.
-                            _hlbl, hm, he = self.host_cols[hi]
-                            for ti in range(len(self.targets)):
-                                self.grid[(ti, hi)] = (
-                                    profiles_mod.is_default_on(
-                                        self._target_sel(ti), hm, he)
-                                    or self.cell_locked(ti, hi))
-                            continue
-                        keys = {s.key for s in sels}
-                        for ti in range(len(self.targets)):
-                            on = self._target_sel(ti).key in keys or \
-                                self.cell_locked(ti, hi)
-                            self.grid[(ti, hi)] = on
-                    self._prof_unavailable = unavail
-                    self.applied = dict(self.grid)
-                self._prof_loading = False
-                self._prof_loaded = True
-
-        threading.Thread(target=work, name="profiles-load", daemon=True).start()
-
     def _column_sels(self, hi):
         return self.profiles_view._column_sels(hi)
 
     def _apply_profiles(self):
-        """Open the Apply confirmation: list exactly which terminal profiles
-        each changed host column will gain/lose, *before* touching anything.
-
-        Confirming runs the per-host progress dialog (local writes mirror to the
-        terminal profiles, remote writes go over SSH). This is destructive to
-        the terminal app's profile list, so the confirm step (and its explicit
-        add/remove diff) is mandatory -- the regeneration is not silent.
-        """
-        if self.mock_mode:
-            # Mock mode (explicit dev sandbox): simulate the apply, no writes.
-            self.applied = dict(self.grid)
-            self.debug = f"Applied · {self.profiles_present()} profiles (mock)"
-            return
-        if not callable(self._prof_apply):
-            # Real launch but the source exposes no apply hook -- surface it
-            # honestly instead of silently pretending success. The real data
-            # sources always provide it; this guards a misconfigured source.
-            self.debug = "Apply unavailable · source has no profiles IO hook"
-            return
-        changed = []
-        diffs = {}
-        for hi in range(len(self.host_cols)):
-            if hi in self._prof_unavailable:
-                continue             # read-only column: never diffed or applied
-            added, removed = [], []
-            for ti in range(len(self.targets)):
-                now = bool(self.grid.get((ti, hi)))
-                was = bool(self.applied.get((ti, hi)))
-                if now != was:
-                    (added if now else removed).append(self._target_sel(ti))
-            if added or removed:
-                changed.append(hi)
-                diffs[hi] = (added, removed)
-        if not changed:
-            self.debug = "Apply · nothing changed"
-            return
-        # Migrated to a native Textual ``ModalScreen`` (#88 F4): the confirm is a
-        # pushed screen that owns the stack, backdrop, focus, and key routing and
-        # returns its verdict via ``dismiss(True|False)``. Confirming runs the
-        # per-host progress dialog; cancelling is a no-op.
-        cf = {"changed": changed, "diffs": diffs}
-
-        def _after(confirmed):
-            if confirmed:
-                self._start_profiles_run(cf)
-            else:
-                self.debug = "Apply cancelled"
-        self.app.push_screen(ProfConfirmScreen(cf, list(self.host_cols)), _after)
-
-    def _start_profiles_run(self, cf):
-        """Execute the confirmed Apply: one progress item per changed host."""
-        from . import maintenance
-        changed = cf["changed"]
-        diffs = cf.get("diffs", {})
-        n_add = sum(len(diffs[hi][0]) for hi in changed if hi in diffs)
-        n_rem = sum(len(diffs[hi][1]) for hi in changed if hi in diffs)
-        items, tasks = [], []
-        for hi in changed:
-            _lbl, hm, he = self.host_cols[hi]
-            key = f"{hm}/{he}"
-            items.append({"id4": key, "title": f"{hm} {he}",
-                          "machine_env": f"{hm} {he}", "hi": hi,
-                          "state": "pending"})
-            tasks.append((key, self._make_apply_task(hm, he, hi)))
-
-        self.executor = maintenance.MaintenanceExecutor("profiles", tasks)
-        self.progress = {
-            "verb": "Apply profiles", "op": "profiles",
-            "scope": f"{len(changed)} host column(s)",
-            "items": items, "recs": [], "picked": [],
-            "ticks": 0, "steps": 3, "done": False, "armed": True,
-            "include_unused": False, "include_conversations": False,
-            "n_add": n_add, "n_rem": n_rem,
-        }
-        self.executor.start()
-        self._open_progress()
-
-    def _make_apply_task(self, machine, env, hi):
-        """A progress task that writes one host column; ``ok`` drives ✓/✗."""
-        sels = self._column_sels(hi)
-
-        def _run():
-            ok, detail = self._prof_apply(machine, env, sels)
-            return {"ok": bool(ok), "reason": detail, "detail": detail}
-        return _run
-
-    def _commit_applied_profiles(self):
-        """After an Apply run, advance ``applied`` for every host that succeeded
-        (matched by the executor's per-item DONE state)."""
-        p = self.progress
-        if not p or p.get("op") != "profiles":
-            return
-        for it in p["items"]:
-            if it.get("state") == "done":
-                hi = it["hi"]
-                for ti in range(len(self.targets)):
-                    self.applied[(ti, hi)] = self.grid.get((ti, hi), False)
+        return self.profiles_view.apply()
 
     def _btn_style(self, focus, is_active):
         """Focused active button glows; unfocused active button shows a subtle
@@ -2801,7 +2670,7 @@ class PickerScreen(Widget):
             sim = " (sim)" if self.mock_mode else ""
             # Profiles Apply: bank the succeeded host columns before clearing.
             if p.get("op") == "profiles":
-                self._commit_applied_profiles()
+                self.profiles_view.commit_applied()
                 self.progress = None
                 self.executor = None
                 tail = f" · {failed} failed" if failed else ""
@@ -4720,6 +4589,14 @@ class ProfilesView:
         self.targets = []
         self.host_cols = list(_DEFAULT_HOST_COLS)   # config-bound in setup()
         self._prof_unavailable = set()  # host-col idxs that couldn't load (#1370)
+        # Real per-host column load / Apply plumbing (own-column model). The
+        # source hooks are bound in PickerScreen.setup(); fixtures/tests leave
+        # them None and keep the seeded self·agent diagonal.
+        self._prof_lock = threading.Lock()
+        self._prof_load = None        # src.load_profile_column (real sources)
+        self._prof_apply = None       # src.apply_profile_column (real sources)
+        self._prof_loading = False    # columns are streaming in
+        self._prof_loaded = False
 
     # ---- grid-editing model (state owned here; PickerScreen shims delegate) --
     def grid_dirty(self):
@@ -4743,7 +4620,7 @@ class ProfilesView:
         out = []
         for ti in range(len(self.targets)):
             if self.grid.get((ti, hi)):
-                out.append(self._eng._target_sel(ti))
+                out.append(self._target_sel(ti))
         return out
 
     def toggle_cell(self):
@@ -4769,6 +4646,175 @@ class ProfilesView:
         host = f"{hm} {he}"
         eng.debug = (f"{'+' if self.grid[key] else '-'} {host} → {t['label']}"
                      " (pending Apply)")
+
+    # ---- real per-host column load + Apply plumbing (own-column model) -------
+    def _target_sel(self, ti):
+        """The TargetSel a target row represents (kind = agent|shell)."""
+        t = self.targets[ti]
+        return profiles_mod.TargetSel(
+            t["machine"], t["env"], "agent" if t["agent"] else "shell")
+
+    def start_load(self):
+        """Background-load every host's saved column into the grid.
+
+        Read-only: each host's column is fetched (local in-process, remote over
+        SSH) and projected onto the grid; ``applied`` is snapshotted to match so
+        the freshly-loaded state reads as 'no pending changes'.
+        """
+        self._prof_loading = True
+
+        def work():
+            from . import profiles_io
+            cols = {}
+            for hi, (_lbl, hm, he) in enumerate(self.host_cols):
+                try:
+                    cols[hi] = self._prof_load(hm, he)
+                except Exception:
+                    cols[hi] = None   # load failure -> unmanaged (default column)
+            with self._prof_lock:
+                # Don't clobber edits the user already started before the load
+                # resolved -- only project columns onto a pristine grid.
+                if not self.grid_dirty():
+                    unavail = set()
+                    for hi, sels in cols.items():
+                        if sels is profiles_io.UNAVAILABLE:
+                            # Unreachable / too-old remote: we can't know its
+                            # real column, so mark it read-only. Seed just the
+                            # locked self-diagonal so the grid stays consistent;
+                            # cells render as "?" and are never editable or
+                            # applied (#1370).
+                            unavail.add(hi)
+                            for ti in range(len(self.targets)):
+                                self.grid[(ti, hi)] = self.cell_locked(ti, hi)
+                            continue
+                        if sels is None:
+                            # Unmanaged host: render the DEFAULT column
+                            # (minimal per-agent + bare cross-machine; see
+                            # profiles.is_default_on), replacing the retired
+                            # emit-everything default. The user can still curate
+                            # from here and Apply.
+                            _hlbl, hm, he = self.host_cols[hi]
+                            for ti in range(len(self.targets)):
+                                self.grid[(ti, hi)] = (
+                                    profiles_mod.is_default_on(
+                                        self._target_sel(ti), hm, he)
+                                    or self.cell_locked(ti, hi))
+                            continue
+                        keys = {s.key for s in sels}
+                        for ti in range(len(self.targets)):
+                            on = self._target_sel(ti).key in keys or \
+                                self.cell_locked(ti, hi)
+                            self.grid[(ti, hi)] = on
+                    self._prof_unavailable = unavail
+                    self.applied = dict(self.grid)
+                self._prof_loading = False
+                self._prof_loaded = True
+
+        threading.Thread(target=work, name="profiles-load", daemon=True).start()
+
+    def apply(self):
+        """Open the Apply confirmation: list exactly which terminal profiles
+        each changed host column will gain/lose, *before* touching anything.
+
+        Confirming runs the per-host progress dialog (local writes mirror to the
+        terminal profiles, remote writes go over SSH). This is destructive to
+        the terminal app's profile list, so the confirm step (and its explicit
+        add/remove diff) is mandatory -- the regeneration is not silent.
+        """
+        eng = self._eng
+        if eng.mock_mode:
+            # Mock mode (explicit dev sandbox): simulate the apply, no writes.
+            self.applied = dict(self.grid)
+            eng.debug = f"Applied · {self.profiles_present()} profiles (mock)"
+            return
+        if not callable(self._prof_apply):
+            # Real launch but the source exposes no apply hook -- surface it
+            # honestly instead of silently pretending success. The real data
+            # sources always provide it; this guards a misconfigured source.
+            eng.debug = "Apply unavailable · source has no profiles IO hook"
+            return
+        changed = []
+        diffs = {}
+        for hi in range(len(self.host_cols)):
+            if hi in self._prof_unavailable:
+                continue             # read-only column: never diffed or applied
+            added, removed = [], []
+            for ti in range(len(self.targets)):
+                now = bool(self.grid.get((ti, hi)))
+                was = bool(self.applied.get((ti, hi)))
+                if now != was:
+                    (added if now else removed).append(self._target_sel(ti))
+            if added or removed:
+                changed.append(hi)
+                diffs[hi] = (added, removed)
+        if not changed:
+            eng.debug = "Apply · nothing changed"
+            return
+        # Migrated to a native Textual ``ModalScreen`` (#88 F4): the confirm is a
+        # pushed screen that owns the stack, backdrop, focus, and key routing and
+        # returns its verdict via ``dismiss(True|False)``. Confirming runs the
+        # per-host progress dialog; cancelling is a no-op.
+        cf = {"changed": changed, "diffs": diffs}
+
+        def _after(confirmed):
+            if confirmed:
+                self._start_run(cf)
+            else:
+                eng.debug = "Apply cancelled"
+        eng.app.push_screen(ProfConfirmScreen(cf, list(self.host_cols)), _after)
+
+    def _start_run(self, cf):
+        """Execute the confirmed Apply: one progress item per changed host.
+        Drives the engine's shared maintenance progress/executor infrastructure
+        (the same ``ProgressScreen`` all maintenance ops use)."""
+        from . import maintenance
+        eng = self._eng
+        changed = cf["changed"]
+        diffs = cf.get("diffs", {})
+        n_add = sum(len(diffs[hi][0]) for hi in changed if hi in diffs)
+        n_rem = sum(len(diffs[hi][1]) for hi in changed if hi in diffs)
+        items, tasks = [], []
+        for hi in changed:
+            _lbl, hm, he = self.host_cols[hi]
+            key = f"{hm}/{he}"
+            items.append({"id4": key, "title": f"{hm} {he}",
+                          "machine_env": f"{hm} {he}", "hi": hi,
+                          "state": "pending"})
+            tasks.append((key, self._make_apply_task(hm, he, hi)))
+
+        eng.executor = maintenance.MaintenanceExecutor("profiles", tasks)
+        eng.progress = {
+            "verb": "Apply profiles", "op": "profiles",
+            "scope": f"{len(changed)} host column(s)",
+            "items": items, "recs": [], "picked": [],
+            "ticks": 0, "steps": 3, "done": False, "armed": True,
+            "include_unused": False, "include_conversations": False,
+            "n_add": n_add, "n_rem": n_rem,
+        }
+        eng.executor.start()
+        eng._open_progress()
+
+    def _make_apply_task(self, machine, env, hi):
+        """A progress task that writes one host column; ``ok`` drives ✓/✗."""
+        sels = self._column_sels(hi)
+
+        def _run():
+            ok, detail = self._prof_apply(machine, env, sels)
+            return {"ok": bool(ok), "reason": detail, "detail": detail}
+        return _run
+
+    def commit_applied(self):
+        """After an Apply run, advance ``applied`` for every host that succeeded
+        (matched by the executor's per-item DONE state). Called from the engine's
+        progress-close path (``_key_progress``)."""
+        p = self._eng.progress
+        if not p or p.get("op") != "profiles":
+            return
+        for it in p["items"]:
+            if it.get("state") == "done":
+                hi = it["hi"]
+                for ti in range(len(self.targets)):
+                    self.applied[(ti, hi)] = self.grid.get((ti, hi), False)
 
     def build(self, add, width, sel):
         """Emit the Profiles pivot body into ``add`` (the ``build_body`` VRow
